@@ -23,7 +23,7 @@ pub use addr::{Mac, Prefix};
 pub use branch::{Alternative, Branch, FloodCopy, RateCondition};
 pub use context::{Attr, Context, ContextAttr, NeighbourTarget, NextHop, SessionMatch};
 pub use delay::{Delay, DelayGap};
-pub use describe::{EncapDesc, HeaderDesc, Member, Values};
+pub use describe::{EncapDesc, HEADER_FIELDS, HeaderDesc, Member, Values};
 pub use field::{FieldValue, Tri};
 pub use flow_state::{FlowState, Session};
 pub use function::{Dependency, FunctionKind, NetFunction};

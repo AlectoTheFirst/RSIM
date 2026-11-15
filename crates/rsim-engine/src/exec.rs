@@ -30,10 +30,9 @@ pub struct Query {
 
 impl Query {
     /// A path query for one packet. A field that the header does not state
-    /// is not known. The arena of the packets has the default node budget,
-    /// so the first run of the query can use it.
+    /// is not known.
     pub fn path(twin: &Twin, header: &Header) -> Query {
-        let arena = twin.arena(ExecOptions::default().node_budget);
+        let arena = twin.arena(None);
         Query {
             ingress: None,
             packets: PacketSet::single(&arena, header),
@@ -249,18 +248,9 @@ impl<'t> Executor<'t> {
         runs: &mut usize,
     ) -> Result<(), ExecError> {
         *runs += 1;
-        // The first run uses the arena of the input if it has the budget of
-        // the query. Each other run has a new arena.
-        let own = input.arena();
-        let reuse = *runs == 1
-            && own.budget() == self.opts.node_budget
-            && own.has_base(self.twin.set_base())
-            && own.fault().is_none();
-        let s = if reuse {
-            input.clone()
-        } else {
-            input.copy_to(&self.twin.arena(self.opts.node_budget))
-        };
+        // Each run has a new arena, so a query that runs again gives the
+        // same answer.
+        let s = input.copy_to(&self.twin.arena(self.opts.node_budget));
         let r = fault_of(&s).and_then(|()| self.try_run(&s, ingress, start, q, FlowState::new()));
         match r {
             Ok(out) => outs.push(out),

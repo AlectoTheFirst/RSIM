@@ -75,3 +75,13 @@ fn queries_in_parallel_threads_give_the_same_answers() {
         }
     });
 }
+
+#[test]
+fn a_query_that_runs_again_gives_the_same_answer() {
+    let twin = mini_enterprise(MiniOpts::default()).build().unwrap();
+    let q = Query::path(&twin, &udp("172.31.10.20", 40000, "10.20.0.53", 53));
+    let first = view(&Executor::new(&twin).run(&q).unwrap());
+    for _ in 0..10 {
+        assert_eq!(view(&Executor::new(&twin).run(&q).unwrap()), first);
+    }
+}

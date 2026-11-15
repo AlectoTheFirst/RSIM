@@ -13,6 +13,7 @@ use rsim_core::{
 };
 
 const ADDRS: [&str; 4] = ["10.0.0.1", "10.0.0.2", "10.0.1.7", "192.0.2.9"];
+const ADDRS6: [&str; 3] = ["2001:db8::1", "2001:db8::2", "2001:db8:1::7"];
 const PORTS: [u16; 4] = [22, 53, 1024, 40000];
 
 fn ip(s: &str) -> IpAddr {
@@ -28,6 +29,7 @@ fn unknown_or<T: Copy + std::fmt::Debug + 'static>(
 prop_compose! {
     /// A header that states each field.
     fn header()(
+        v6 in prop::bool::weighted(0.3),
         src in 0..ADDRS.len(),
         dst in 0..ADDRS.len(),
         proto in prop_oneof![Just(PROTO_TCP), Just(PROTO_UDP), Just(PROTO_ICMP)],
@@ -39,7 +41,12 @@ prop_compose! {
         later in prop::bool::weighted(0.1),
         mac in 0u8..3,
     ) -> Header {
-        let mut h = Header::request(ip(ADDRS[src]), ip(ADDRS[dst]), proto);
+        let (s, d) = if v6 {
+            (ADDRS6[src % ADDRS6.len()], ADDRS6[dst % ADDRS6.len()])
+        } else {
+            (ADDRS[src], ADDRS[dst])
+        };
+        let mut h = Header::request(ip(s), ip(d), proto);
         if h.src_port.is_present() {
             h.src_port = sport;
             h.dst_port = dport;
@@ -66,6 +73,22 @@ prop_compose! {
 
 fn headers() -> impl Strategy<Value = Vec<Header>> {
     prop::collection::vec(header(), 0..6)
+}
+
+/// True if each address that the rewrite sets has the family of each header.
+/// A rewrite does not change the address family.
+fn same_family(rw: &Rewrite, hs: &[Header]) -> bool {
+    let fam = |v: &Option<FieldValue<IpAddr>>| match v {
+        Some(FieldValue::Known(a)) => Some(a.is_ipv6()),
+        _ => None,
+    };
+    [fam(&rw.src_ip), fam(&rw.dst_ip)]
+        .into_iter()
+        .flatten()
+        .all(|v6| {
+            hs.iter()
+                .all(|h| h.src_ip.known().is_none_or(|a| a.is_ipv6() == v6))
+        })
 }
 
 /// An explicit set: sorted pairs without repeats.
@@ -226,7 +249,10 @@ proptest! {
     #[test]
     fn a_prefix_partition_agrees_with_the_longest_match(
         a in headers(),
-        ps in prop::sample::subsequence(vec!["10.0.0.0/8", "10.0.0.0/24", "10.0.0.2/32", "0.0.0.0/0"], 0..4),
+        ps in prop::sample::subsequence(
+            vec!["10.0.0.0/8", "10.0.0.0/24", "10.0.0.2/32", "0.0.0.0/0", "2001:db8::/48", "::/0"],
+            0..6
+        ),
         dst in any::<bool>(),
     ) {
         let ar = arena();
@@ -263,6 +289,7 @@ proptest! {
 
     #[test]
     fn a_rewrite_agrees_with_the_rewrite_of_each_header(a in headers(), rw in rewrite()) {
+        prop_assume!(same_family(&rw, &a));
         let ar = arena();
         let ea = explicit(&a);
         let mut want: Explicit = ea
@@ -280,6 +307,7 @@ proptest! {
 
     #[test]
     fn a_reply_agrees_with_the_reply_header(a in headers(), rw in rewrite()) {
+        prop_assume!(same_family(&rw, &a));
         let ar = arena();
         let ea = explicit(&a);
         let s = set(&ar, &ea).rewrite(&rw);
@@ -302,6 +330,7 @@ proptest! {
         rw in rewrite(),
         later in headers(),
     ) {
+        prop_assume!(same_family(&rw, &a));
         let ar = arena();
         let known = |h: &Header| [h.src_port, h.dst_port, h.src_ip.map(|_| 0), h.dst_ip.map(|_| 0)]
             .iter()
@@ -433,4 +462,99 @@ fn a_set_over_the_budget_gives_the_fault_node_budget() {
         a.fault(),
         Some(rsim_core::DdError::NodeBudget { budget: 100 })
     ));
+}
+
+// ------------------------------------------------------------ description
+
+use rsim_core::{HeaderField, Member, Values};
+
+fn field_value(h: &Header, f: HeaderField) -> FieldValue<u128> {
+    let ip = |v: FieldValue<IpAddr>| v.map(rsim_core::bits::ip_bits);
+    let n = |v: FieldValue<u16>| v.map(u128::from);
+    let b = |v: FieldValue<u8>| v.map(u128::from);
+    match f {
+        HeaderField::SrcMac => h.src_mac.map(rsim_core::bits::mac_bits),
+        HeaderField::DstMac => h.dst_mac.map(rsim_core::bits::mac_bits),
+        HeaderField::Vlan => n(h.vlan),
+        HeaderField::L2Priority => b(h.l2_priority),
+        HeaderField::SrcIp => ip(h.src_ip),
+        HeaderField::DstIp => ip(h.dst_ip),
+        HeaderField::Protocol => b(h.protocol),
+        HeaderField::Dscp => b(h.dscp),
+        HeaderField::Ecn => b(h.ecn),
+        HeaderField::Fragment => h.fragment.map(rsim_core::bits::fragment_code),
+        HeaderField::SrcPort => n(h.src_port),
+        HeaderField::DstPort => n(h.dst_port),
+        HeaderField::TcpFlags => b(h.tcp_flags),
+        HeaderField::IcmpType => b(h.icmp_type),
+        HeaderField::IcmpCode => b(h.icmp_code),
+        HeaderField::MplsTrafficClass => b(h.mpls_tc),
+    }
+}
+
+fn holds(v: &Values, x: FieldValue<u128>, addr: Option<IpAddr>, orig: FieldValue<u128>) -> bool {
+    match (v, x) {
+        (Values::Absent, FieldValue::Absent) => true,
+        (Values::Unknown, FieldValue::Unknown) => true,
+        (Values::Original, x) => x == orig,
+        (Values::Ranges(rs), FieldValue::Known(x)) => rs.iter().any(|&(lo, hi)| lo <= x && x <= hi),
+        (Values::Prefixes(ps), FieldValue::Known(_)) => {
+            addr.is_some_and(|a| ps.iter().any(|p| p.contains(a)))
+        }
+        _ => false,
+    }
+}
+
+/// True if the member holds the pair: each field of each header.
+fn member_contains(m: &Member, p: &PacketPair) -> bool {
+    use rsim_core::HEADER_FIELDS;
+    let addr = |h: &Header, f: HeaderField| match f {
+        HeaderField::SrcIp => h.src_ip.known(),
+        HeaderField::DstIp => h.dst_ip.known(),
+        _ => None,
+    };
+    HEADER_FIELDS.iter().all(|&f| {
+        let o = field_value(&p.original, f);
+        holds(m.original.get(f), o, addr(&p.original, f), o)
+            && holds(
+                m.current.get(f),
+                field_value(&p.current, f),
+                addr(&p.current, f),
+                o,
+            )
+    }) && m.original.encap.is_none()
+        && m.current.encap.is_none()
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+
+    /// Each pair of the set is in exactly 1 member of its description, and
+    /// the description has no member outside the set.
+    #[test]
+    fn the_members_of_a_description_are_disjoint_and_cover_the_set(a in headers(), rw in rewrite()) {
+        prop_assume!(same_family(&rw, &a));
+        let ar = arena();
+        let mut want: Explicit = explicit(&a)
+            .into_iter()
+            .map(|p| {
+                let mut c = p.current.clone();
+                rw.apply_to(&mut c);
+                PacketPair { original: p.original, current: c }
+            })
+            .collect();
+        want.sort();
+        want.dedup();
+        let s = set(&ar, &want);
+        let members = s.describe();
+        for p in &want {
+            let n = members.iter().filter(|m| member_contains(m, p)).count();
+            prop_assert_eq!(n, 1, "{:?} in {:?}", p, members);
+        }
+        // The set of the explicit pairs has as many pairs as the members
+        // hold: each member of these sets holds exactly the pairs in it.
+        for m in &members {
+            prop_assert!(want.iter().any(|p| member_contains(m, p)), "{:?}", m);
+        }
+    }
 }

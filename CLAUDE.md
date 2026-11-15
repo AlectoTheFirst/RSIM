@@ -135,7 +135,7 @@ Docs, code comments, docstrings, commit-tracked notes and test descriptions stat
 
 ## Other design constraints
 
-- Hide the `PacketSet` representation behind the interface in section 4. The representation is an in-house decision diagram engine. OxiDD is a development dependency for tests only, as the oracle for the set operations. Do not make it a dependency of the product. Until step 2, the only implementation is a set with one concrete packet.
+- Hide the `PacketSet` representation behind the interface in section 4. The representation is an in-house decision diagram engine. OxiDD is a development dependency for tests only, as the oracle for the set operations. Do not make it a dependency of the product.
 - The prefix table is in-house, behind a trait.
 - Only the `rsim-collect` crate talks to devices. It writes the append-only snapshot store, and the engine reads only the store.
 - Lowering changes vendor structures directly into function instances. There is no vendor-neutral config model between them. Refer to section 9.

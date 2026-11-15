@@ -1,5 +1,5 @@
 //! The library of `rsim` and `rsim-mcp`: the query input, the JSON output of
-//! version 1, the text output and the commands.
+//! version 2, the text output and the commands.
 
 #![deny(clippy::disallowed_methods, clippy::disallowed_types)]
 
