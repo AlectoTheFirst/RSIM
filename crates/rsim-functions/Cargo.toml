@@ -1,0 +1,14 @@
+[package]
+name = "rsim-functions"
+description = "Network function library of the rsim network digital twin."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rsim-core.workspace = true
+
+[lints]
+workspace = true

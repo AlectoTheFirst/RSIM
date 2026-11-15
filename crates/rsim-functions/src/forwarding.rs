@@ -1,0 +1,362 @@
+//! Ingress, VRF selection, zone lookup and egress.
+
+use std::collections::BTreeMap;
+
+use rsim_core::{
+    Attr, Branch, Context, ContextAttr, Delay, DelayGap, Dependency, Destination, FlowState,
+    FunctionId, FunctionKind, InterfaceId, NeighbourTarget, NetFunction, Outcome, PacketSet,
+    Reason, ReasonCode, SourceSpan, VrfId, ZoneId,
+};
+
+use crate::common::Meta;
+use crate::profile::UnzonedInterface;
+
+macro_rules! meta_methods {
+    ($kind:expr) => {
+        fn id(&self) -> &FunctionId {
+            &self.meta.id
+        }
+        fn kind(&self) -> FunctionKind {
+            $kind
+        }
+        fn device(&self) -> Option<&rsim_core::DeviceId> {
+            Some(&self.meta.device)
+        }
+        fn provenance(&self) -> &[rsim_core::SourceSpan] {
+            &self.meta.provenance
+        }
+        fn qos_reads(&self) -> Vec<rsim_core::HeaderField> {
+            Vec::new()
+        }
+        fn qos_writes(&self) -> Vec<rsim_core::HeaderField> {
+            Vec::new()
+        }
+    };
+}
+pub(crate) use meta_methods;
+
+/// Packets enter a device on an interface.
+#[derive(Clone, Debug)]
+pub struct Ingress {
+    pub meta: Meta,
+    pub interface: InterfaceId,
+    pub next: FunctionId,
+}
+
+impl NetFunction for Ingress {
+    meta_methods!(FunctionKind::Ingress);
+
+    fn requires(&self) -> Vec<ContextAttr> {
+        Vec::new()
+    }
+    fn provides(&self) -> Vec<ContextAttr> {
+        vec![ContextAttr::Device, ContextAttr::IngressInterface]
+    }
+    fn enters_device(&self) -> bool {
+        true
+    }
+    fn reads(&self) -> Vec<Dependency> {
+        vec![Dependency::Interface(
+            self.meta.device.clone(),
+            self.interface.clone(),
+        )]
+    }
+    fn successors(&self) -> Vec<FunctionId> {
+        vec![self.next.clone()]
+    }
+    fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
+        let c = ctx.enter_device(self.meta.device.clone(), self.interface.clone());
+        vec![self.meta.forward(
+            input.clone(),
+            &self.next,
+            ReasonCode::Passed,
+            format!("enter {} on {}", self.meta.device, self.interface),
+            c,
+            state,
+        )]
+    }
+}
+
+/// Selects the VRF from the ingress interface.
+#[derive(Clone, Debug)]
+pub struct VrfSelection {
+    pub meta: Meta,
+    pub by_interface: BTreeMap<InterfaceId, VrfId>,
+    /// From the vendor profile: the VRF of an interface with no VRF statement.
+    pub default_vrf: Option<VrfId>,
+    pub next: FunctionId,
+}
+
+impl NetFunction for VrfSelection {
+    meta_methods!(FunctionKind::VrfSelection);
+
+    fn requires(&self) -> Vec<ContextAttr> {
+        vec![ContextAttr::IngressInterface]
+    }
+    fn provides(&self) -> Vec<ContextAttr> {
+        vec![ContextAttr::Vrf]
+    }
+    fn reads(&self) -> Vec<Dependency> {
+        self.by_interface
+            .keys()
+            .map(|i| Dependency::Interface(self.meta.device.clone(), i.clone()))
+            .collect()
+    }
+    fn successors(&self) -> Vec<FunctionId> {
+        vec![self.next.clone()]
+    }
+    fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
+        let Some(iface) = ctx.ingress_interface.known() else {
+            return vec![self.meta.indeterminate(
+                input.clone(),
+                ReasonCode::UnknownAttribute,
+                "the ingress interface is not known",
+                ctx,
+                state,
+            )];
+        };
+        let vrf = self.by_interface.get(iface).or(self.default_vrf.as_ref());
+        match vrf {
+            Some(v) => {
+                let mut c = ctx.clone();
+                c.vrf = Attr::Known(v.clone());
+                vec![self.meta.forward(
+                    input.clone(),
+                    &self.next,
+                    ReasonCode::Classified,
+                    format!("interface {iface} is in VRF {v}"),
+                    c,
+                    state,
+                )]
+            }
+            None => vec![self.meta.indeterminate(
+                input.clone(),
+                ReasonCode::IncompleteTable,
+                format!("no VRF is known for interface {iface}"),
+                ctx,
+                state,
+            )],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoneRole {
+    /// The zone of the ingress interface.
+    Source,
+    /// The zone of the egress interface.
+    Destination,
+}
+
+/// Finds the firewall zone of an interface.
+#[derive(Clone, Debug)]
+pub struct ZoneLookup {
+    pub meta: Meta,
+    pub role: ZoneRole,
+    pub by_interface: BTreeMap<InterfaceId, ZoneId>,
+    /// From the vendor profile.
+    pub unzoned: UnzonedInterface,
+    pub next: FunctionId,
+}
+
+impl NetFunction for ZoneLookup {
+    meta_methods!(FunctionKind::ZoneLookup);
+
+    fn requires(&self) -> Vec<ContextAttr> {
+        match self.role {
+            ZoneRole::Source => vec![ContextAttr::IngressInterface],
+            ZoneRole::Destination => vec![ContextAttr::EgressInterface],
+        }
+    }
+    fn provides(&self) -> Vec<ContextAttr> {
+        match self.role {
+            ZoneRole::Source => vec![ContextAttr::SrcZone],
+            ZoneRole::Destination => vec![ContextAttr::DstZone],
+        }
+    }
+    fn reads(&self) -> Vec<Dependency> {
+        self.by_interface
+            .keys()
+            .map(|i| Dependency::Interface(self.meta.device.clone(), i.clone()))
+            .collect()
+    }
+    fn successors(&self) -> Vec<FunctionId> {
+        vec![self.next.clone()]
+    }
+    fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
+        let iface = match self.role {
+            ZoneRole::Source => &ctx.ingress_interface,
+            ZoneRole::Destination => &ctx.egress_interface,
+        };
+        let mut c = ctx.clone();
+        let slot = match self.role {
+            ZoneRole::Source => &mut c.src_zone,
+            ZoneRole::Destination => &mut c.dst_zone,
+        };
+        match iface {
+            Attr::Known(i) => match self.by_interface.get(i) {
+                Some(z) => {
+                    *slot = Attr::Known(z.clone());
+                    vec![self.meta.forward(
+                        input.clone(),
+                        &self.next,
+                        ReasonCode::Classified,
+                        format!("interface {i} is in zone {z}"),
+                        c,
+                        state,
+                    )]
+                }
+                None => match self.unzoned {
+                    UnzonedInterface::Drop => vec![self.meta.drop(
+                        input.clone(),
+                        ReasonCode::NotInZone,
+                        format!("interface {i} is in no zone"),
+                        ctx,
+                        state,
+                    )],
+                    UnzonedInterface::Indeterminate => vec![self.meta.indeterminate(
+                        input.clone(),
+                        ReasonCode::NotInZone,
+                        format!(
+                            "interface {i} is in no zone, and the profile does not give the behaviour"
+                        ),
+                        ctx,
+                        state,
+                    )],
+                },
+            },
+            _ => {
+                *slot = Attr::Unknown;
+                vec![self.meta.forward(
+                    input.clone(),
+                    &self.next,
+                    ReasonCode::Classified,
+                    "the interface is not known, so the zone is unknown",
+                    c,
+                    state,
+                )]
+            }
+        }
+    }
+}
+
+/// The physical or logical link after an egress interface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Link {
+    /// The ingress function at the other end. `None` for a link to an
+    /// endpoint, where the packets are delivered.
+    pub peer: Option<FunctionId>,
+    /// The link delay in nanoseconds. `None` if there is no data.
+    pub delay_ns: Option<u64>,
+    pub provenance: Vec<SourceSpan>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EgressMode {
+    /// The neighbour comes from next-hop resolution.
+    Routed,
+    /// An inline device: the packets always go to the link.
+    Transparent,
+}
+
+/// Packets leave a device on an interface.
+#[derive(Clone, Debug)]
+pub struct Egress {
+    pub meta: Meta,
+    pub interface: InterfaceId,
+    pub mode: EgressMode,
+    pub link: Option<Link>,
+}
+
+impl Egress {
+    fn link_delay(&self) -> Delay {
+        Delay::from_option(
+            self.link.as_ref().and_then(|l| l.delay_ns),
+            DelayGap::Link(self.meta.id.clone()),
+        )
+    }
+
+    fn to_link(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Branch {
+        match self
+            .link
+            .as_ref()
+            .and_then(|l| l.peer.as_ref().map(|p| (l, p)))
+        {
+            Some((l, peer)) => {
+                let mut b = self.meta.forward(
+                    input.clone(),
+                    peer,
+                    ReasonCode::LinkHandOff,
+                    format!("leave on {} to {peer}", self.interface),
+                    ctx.clone(),
+                    state,
+                );
+                b.delay = b.delay.add(&self.link_delay());
+                b.spans = l.provenance.clone();
+                b
+            }
+            None => self.meta.indeterminate(
+                input.clone(),
+                ReasonCode::NoLink,
+                format!(
+                    "no link to a device is known after interface {}",
+                    self.interface
+                ),
+                ctx,
+                state,
+            ),
+        }
+    }
+}
+
+impl NetFunction for Egress {
+    meta_methods!(FunctionKind::Egress);
+
+    fn requires(&self) -> Vec<ContextAttr> {
+        match self.mode {
+            EgressMode::Routed => vec![ContextAttr::NeighbourTarget],
+            EgressMode::Transparent => Vec::new(),
+        }
+    }
+    fn provides(&self) -> Vec<ContextAttr> {
+        Vec::new()
+    }
+    fn reads(&self) -> Vec<Dependency> {
+        vec![Dependency::Interface(
+            self.meta.device.clone(),
+            self.interface.clone(),
+        )]
+    }
+    fn successors(&self) -> Vec<FunctionId> {
+        self.link.iter().filter_map(|l| l.peer.clone()).collect()
+    }
+    fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
+        match self.mode {
+            EgressMode::Transparent => vec![self.to_link(input, ctx, state)],
+            EgressMode::Routed => match &ctx.neighbour {
+                Attr::Known(NeighbourTarget::Endpoint(e)) => {
+                    let mut b = self.meta.branch(
+                        input.clone(),
+                        Outcome::Deliver(Destination::Endpoint(e.clone())),
+                        Reason::new(
+                            ReasonCode::Delivered,
+                            format!("deliver to {e} on {}", self.interface),
+                        ),
+                        ctx.clone(),
+                        state,
+                    );
+                    b.delay = b.delay.add(&self.link_delay());
+                    vec![b]
+                }
+                Attr::Known(NeighbourTarget::Link) => vec![self.to_link(input, ctx, state)],
+                _ => vec![self.meta.indeterminate(
+                    input.clone(),
+                    ReasonCode::UnknownAttribute,
+                    "the neighbour is not known",
+                    ctx,
+                    state,
+                )],
+            },
+        }
+    }
+}

@@ -6,7 +6,7 @@ The engine compiles device configs into typed network functions. The functions s
 
 ## Status
 
-The project is at step 1. Step 1 contains the core types, the forwarding functions, the executor, the trace, the return path. Tests build the topologies by hand. No config parser exists yet.
+Step 1 is complete. Step 1 contains the core types, the forwarding functions, the concrete-mode executor, the trace and the return path. Tests build the topologies by hand. No config parser exists yet.
 
 ## Principles
 
@@ -31,12 +31,16 @@ The project is at step 1. Step 1 contains the core types, the forwarding functio
 
 You need Rust 1.99 or later.
 
-```sh
-cargo build --workspace
-cargo test --workspace
-cargo test -p rsim-engine <test_name>
-cargo bench -p rsim-engine --bench single_path
-```
+| Task | Command |
+|---|---|
+| Build | `cargo build --workspace` |
+| All tests | `cargo test --workspace` |
+| One test file | `cargo test -p rsim-engine --test forwarding` |
+| One test | `cargo test -p rsim-engine --test forwarding <test_name>` |
+| Lint | `cargo clippy --workspace --all-targets` |
+| Format check | `cargo fmt --all --check` |
+| Path query benchmark | `cargo bench -p rsim-engine --bench single_path` |
+| Memory per device | `cargo bench -p rsim-engine --bench memory` |
 
 ## License
 

@@ -1,0 +1,9 @@
+# Agent guidance: local only
+/CLAUDE.md
+
+# Local tool state
+/.claude/
+/.code-review-graph/
+
+# Rust build output
+/target/
