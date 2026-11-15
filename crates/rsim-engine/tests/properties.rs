@@ -2,9 +2,6 @@
 //! forwarding choice, the result is deterministic, and a function with no
 //! QoS write leaves the marking and the class unchanged.
 
-mod common;
-
-use common::*;
 use proptest::prelude::*;
 use rsim_core::{
     AddrCond, Context, EndpointId, FieldValue, FlowState, Header, Match, MatchClass, NetFunction,
@@ -13,6 +10,7 @@ use rsim_core::{
 };
 use rsim_engine::{Executor, Query, Twin, check_partition};
 use rsim_functions::{AclMatch, Meta, Rule, RuleAction, RuleBody};
+use rsim_topologies::*;
 
 const ADDRS: [&str; 13] = [
     "172.31.10.20",

@@ -4,14 +4,11 @@
 // The global allocator needs `unsafe`. It is only in this benchmark binary.
 #![allow(unsafe_code)]
 
-#[path = "../tests/common/mod.rs"]
-mod common;
-
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicIsize, Ordering};
 
-use common::*;
 use rsim_engine::{Twin, TwinBuilder};
+use rsim_topologies::*;
 
 struct Counting;
 
@@ -58,7 +55,7 @@ fn main() {
     });
     for n in [100, 1000, 10_000] {
         measure(
-            &format!("chain, 20 ACL rules, 102 routes ({n} routers)"),
+            &format!("chain, 21 ACL rules, 102 routes ({n} routers)"),
             || chain(n, 20, 100),
         );
     }

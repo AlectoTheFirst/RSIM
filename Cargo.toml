@@ -1,6 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["crates/rsim-core", "crates/rsim-functions", "crates/rsim-engine"]
+members = [
+    "crates/rsim-core",
+    "crates/rsim-functions",
+    "crates/rsim-engine",
+    "crates/rsim-topologies",
+    "crates/rsim-cli",
+    "crates/rsim-mcp",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +20,8 @@ repository = "https://github.com/AlectoTheFirst/RSIM"
 rsim-core = { path = "crates/rsim-core" }
 rsim-functions = { path = "crates/rsim-functions" }
 rsim-engine = { path = "crates/rsim-engine" }
+rsim-topologies = { path = "crates/rsim-topologies" }
+rsim-cli = { path = "crates/rsim-cli" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

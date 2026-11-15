@@ -1,0 +1,16 @@
+[package]
+name = "rsim-topologies"
+description = "Hand-built topologies of the rsim network digital twin for tests, benchmarks, rsim-cli and rsim-mcp."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rsim-core.workspace = true
+rsim-functions.workspace = true
+rsim-engine.workspace = true
+
+[lints]
+workspace = true

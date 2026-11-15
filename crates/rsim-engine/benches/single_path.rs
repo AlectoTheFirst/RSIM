@@ -1,12 +1,9 @@
 //! Single path query benchmark.
 
-#[path = "../tests/common/mod.rs"]
-mod common;
-
-use common::*;
 use criterion::{Criterion, criterion_group, criterion_main};
 use rsim_core::EndpointId;
 use rsim_engine::{ExecOptions, Executor, Query};
+use rsim_topologies::*;
 use std::hint::black_box;
 
 fn bench(c: &mut Criterion) {

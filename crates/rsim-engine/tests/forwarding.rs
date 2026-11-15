@@ -1,14 +1,12 @@
 //! Hand-built multi-device topologies with ACL, NAT and firewall session
 //! give correct verdicts and traces in the two directions.
 
-mod common;
-
-use common::*;
 use rsim_core::{
     Destination, EndpointId, FieldValue, Header, PROTO_TCP, PROTO_UDP, ReasonCode, SourceSpan,
     TraceStep, Verdict,
 };
 use rsim_engine::{Answer, BuildError, Executor, Query, Summary, Twin};
+use rsim_topologies::*;
 
 fn run(twin: &Twin, from: &str, h: Header) -> Answer {
     let q = Query::from_endpoint(twin, &EndpointId::new(from), h).expect("endpoint");
@@ -483,4 +481,18 @@ fn a_later_fragment_has_no_ports_and_does_not_match_a_port_rule() {
         ReasonCode::NotTranslated
     );
     assert_eq!(reason_code(a.verdict().unwrap()), Some(ReasonCode::Denied));
+}
+
+#[test]
+fn twin_lists_devices_and_endpoints_in_identifier_order() {
+    let twin = mini_enterprise(MiniOpts {
+        reverse_insertion: true,
+        ..MiniOpts::default()
+    })
+    .build()
+    .unwrap();
+    let devices: Vec<String> = twin.devices().iter().map(|d| d.to_string()).collect();
+    assert_eq!(devices, ["fra01-core-01", "fra01-fgt-01", "fra01-ips-01"]);
+    let endpoints: Vec<String> = twin.endpoints().map(|e| e.id.to_string()).collect();
+    assert_eq!(endpoints, ["fra01-dns", "guest-client"]);
 }

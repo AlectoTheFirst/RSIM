@@ -1,10 +1,8 @@
 //! Principle 2: the same input gives the same output.
 
-mod common;
-
-use common::*;
 use rsim_core::EndpointId;
 use rsim_engine::{Executor, Query};
+use rsim_topologies::*;
 
 #[test]
 fn the_same_query_gives_the_same_answer() {
