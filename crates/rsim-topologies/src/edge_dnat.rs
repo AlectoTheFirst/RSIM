@@ -110,12 +110,17 @@ pub fn edge_dnat(opts: EdgeOpts) -> TwinBuilder {
     b.add(edge.nexthop(&entries, &["eth0", "eth1"], 60));
     b.add(edge.egress("eth0", EgressMode::Routed, Some(("", Some(2_000_000))), 70));
     b.add(edge.egress("eth1", EgressMode::Routed, Some(("", Some(50_000))), 71));
-    b.endpoint(endpoint("client", "198.51.100.7", fid("edge-01/in/eth0")));
-    b.endpoint(endpoint("server", "10.20.0.11", fid("edge-01/in/eth1")));
-    b.endpoint(endpoint(
-        "server-clone",
-        "10.20.0.11",
-        fid("edge-01/in/eth1"),
-    ));
+    add_host(
+        &mut b,
+        endpoint("client", "198.51.100.7", fid("edge-01/in/eth0")),
+    );
+    add_host(
+        &mut b,
+        endpoint("server", "10.20.0.11", fid("edge-01/in/eth1")),
+    );
+    add_host(
+        &mut b,
+        endpoint("server-clone", "10.20.0.11", fid("edge-01/in/eth1")),
+    );
     b
 }

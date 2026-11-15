@@ -2,22 +2,12 @@
 //! state value, never in the function.
 
 use rsim_core::{
-    Attr, Branch, Context, ContextAttr, Dependency, FieldValue, FlowKey, FlowState, FunctionId,
-    FunctionKind, NetFunction, PacketSet, ReasonCode, Rewrite, Session, SessionMatch, Uniform,
+    Attr, Branch, Context, ContextAttr, Dependency, FlowState, FunctionId, FunctionKind,
+    NetFunction, PacketSet, ReasonCode, Session, SessionDirection, SessionMatch,
 };
 
 use crate::common::{Meta, push_nonempty};
 use crate::forwarding::meta_methods;
-
-fn rewrite_to(key: &FlowKey) -> Rewrite {
-    Rewrite {
-        src_ip: Some(key.src_ip),
-        dst_ip: Some(key.dst_ip),
-        src_port: Some(key.src_port),
-        dst_port: Some(key.dst_port),
-        ..Rewrite::default()
-    }
-}
 
 /// Looks up the sessions of the device. A match in the reply direction undoes
 /// the NAT binding of the session. A match in the forward direction applies
@@ -50,35 +40,38 @@ impl NetFunction for SessionLookup {
         let mut rest = input.clone();
         for (i, s) in state.sessions(dev).iter().enumerate() {
             let index = u32::try_from(i).expect("too many sessions");
-            for (dir, key, to) in [
-                ("reply", s.forward_out.reversed(), s.forward_in.reversed()),
-                ("forward", s.forward_in, s.forward_out),
-            ] {
+            for dir in [SessionDirection::Reply, SessionDirection::Forward] {
                 if rest.is_empty() {
                     break;
                 }
-                let split = rest.split_flow(&key);
+                let split = rest.session_lookup(&s.relation, dir);
+                let (name, m) = match dir {
+                    SessionDirection::Reply => (
+                        "reply",
+                        SessionMatch::Reply {
+                            device: dev.clone(),
+                            index,
+                        },
+                    ),
+                    SessionDirection::Forward => (
+                        "forward",
+                        SessionMatch::Forward {
+                            device: dev.clone(),
+                            index,
+                        },
+                    ),
+                };
                 let mut c = ctx.clone();
-                c.session = Attr::Known(if dir == "reply" {
-                    SessionMatch::Reply {
-                        device: dev.clone(),
-                        index,
-                    }
+                c.session = Attr::Known(m);
+                let detail = if s.translated {
+                    format!("{name} packets · session {index}, translated")
                 } else {
-                    SessionMatch::Forward {
-                        device: dev.clone(),
-                        index,
-                    }
-                });
-                let detail = if s.is_translated() {
-                    format!("{dir} packets · session {index}, translated")
-                } else {
-                    format!("{dir} packets · session {index}")
+                    format!("{name} packets · session {index}")
                 };
                 push_nonempty(
                     &mut out,
                     self.meta.forward(
-                        split.matched.rewrite(&rewrite_to(&to)),
+                        split.matched,
                         &self.next,
                         ReasonCode::SessionMatched,
                         detail,
@@ -91,7 +84,7 @@ impl NetFunction for SessionLookup {
                     self.meta.unknown(
                         split.uncertain,
                         ReasonCode::MatchUnknown,
-                        format!("flow fields not given · session {index}"),
+                        format!("port unknown · session {index}"),
                         ctx,
                         state,
                     ),
@@ -99,27 +92,19 @@ impl NetFunction for SessionLookup {
                 rest = split.unmatched;
             }
         }
-        match rest.flow_key() {
-            Uniform::None => {}
-            Uniform::Value(entry) => {
-                let mut c = ctx.clone();
-                c.session = Attr::Known(SessionMatch::New { entry });
-                out.push(self.meta.forward(
-                    rest,
-                    &self.next,
-                    ReasonCode::Passed,
-                    "no session matches; the packets are new",
-                    c,
-                    state,
-                ));
-            }
-            Uniform::Varies => out.push(self.meta.unknown(
+        if !rest.is_empty() {
+            let mut c = ctx.clone();
+            c.session = Attr::Known(SessionMatch::New {
+                entry: rest.clone(),
+            });
+            out.push(self.meta.forward(
                 rest,
-                ReasonCode::UnsupportedSet,
-                "a session holds one flow key, and the packets have more than one",
-                ctx,
+                &self.next,
+                ReasonCode::Passed,
+                "no session matches; the packets are new",
+                c,
                 state,
-            )),
+            ));
         }
         out
     }
@@ -158,50 +143,37 @@ impl NetFunction for SessionCommit {
                 state,
             )];
         };
-        match input.flow_key() {
-            Uniform::Value(out_key) => {
-                let has_unknown = [out_key.src_port, out_key.dst_port]
-                    .contains(&FieldValue::Unknown)
-                    || out_key.src_ip == FieldValue::Unknown
-                    || out_key.dst_ip == FieldValue::Unknown;
-                let (next_state, index) = state.with_session(
-                    &self.meta.device,
-                    Session {
-                        forward_in: *entry,
-                        forward_out: out_key,
-                        created_by: self.meta.id.clone(),
-                    },
-                );
-                let mut c = ctx.clone();
-                c.session = Attr::Known(SessionMatch::Forward {
-                    device: self.meta.device.clone(),
-                    index,
-                });
-                let mut detail = format!("session {index} created");
-                if has_unknown {
-                    detail.push_str(
-                        "; a translated field is unknown, so a reply cannot be matched exactly",
-                    );
-                }
-                let mut b = self.meta.forward(
-                    input.clone(),
-                    &self.next,
-                    ReasonCode::SessionCreated,
-                    detail,
-                    c,
-                    state,
-                );
-                b.state = next_state;
-                vec![b]
-            }
-            Uniform::Varies => vec![self.meta.unknown(
-                input.clone(),
-                ReasonCode::UnsupportedSet,
-                "a session holds one flow key, and the packets have more than one",
-                ctx,
-                state,
-            )],
-            Uniform::None => Vec::new(),
+        if input.is_empty() {
+            return Vec::new();
         }
+        let relation = entry.session_relation(input);
+        let translated = relation.changes_flow();
+        let (next_state, index) = state.with_session(
+            &self.meta.device,
+            Session {
+                relation,
+                translated,
+                created_by: self.meta.id.clone(),
+            },
+        );
+        let mut c = ctx.clone();
+        c.session = Attr::Known(SessionMatch::Forward {
+            device: self.meta.device.clone(),
+            index,
+        });
+        let mut detail = format!("session {index} created");
+        if input.has_unknown_flow_field() {
+            detail.push_str("; a translated field is unknown");
+        }
+        let mut b = self.meta.forward(
+            input.clone(),
+            &self.next,
+            ReasonCode::SessionCreated,
+            detail,
+            c,
+            state,
+        );
+        b.state = next_state;
+        vec![b]
     }
 }

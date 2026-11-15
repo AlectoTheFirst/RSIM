@@ -4,13 +4,13 @@ use std::collections::BTreeSet;
 
 use rsim_core::{
     Attr, Branch, Context, ContextAttr, Dependency, FlowState, FunctionId, FunctionKind,
-    HeaderField, NetFunction, ObjectId, PacketSet, ReasonCode, SessionMatch, SourceSpan, Tri,
-    ZoneId,
+    HeaderField, NetFunction, ObjectId, PacketSet, ReasonCode, RulePredicate, SessionMatch,
+    SourceSpan, Tri, ZoneId,
 };
 
 use crate::common::{Meta, push_nonempty};
 use crate::profile::RuleAction;
-use crate::rules::{Decision, Rule, describe_all, evaluate, explain, spans_of};
+use crate::rules::{Decision, Rule, describe_all, evaluate, explain, predicates_of, spans_of};
 
 fn qos_reads_of(rules: &[Rule<RuleAction>]) -> Vec<HeaderField> {
     let mut v: Vec<HeaderField> = rules
@@ -122,6 +122,9 @@ impl NetFunction for AclMatch {
     }
     fn successors(&self) -> Vec<FunctionId> {
         vec![self.next.clone()]
+    }
+    fn predicates(&self) -> Vec<&RulePredicate> {
+        predicates_of(&self.rules)
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
         let parts = evaluate(&self.rules, &self.default, input, &|_| Tri::True);
@@ -238,6 +241,9 @@ impl NetFunction for FirewallPolicy {
     }
     fn successors(&self) -> Vec<FunctionId> {
         vec![self.next.clone()]
+    }
+    fn predicates(&self) -> Vec<&RulePredicate> {
+        predicates_of(&self.rules)
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
         if let Attr::Known(

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-Steps 1 and 1b of the build are complete. Step 2 is in progress: the packet-set engine in `rsim-dd` and set-mode execution. Step 2 comes in 3 pull requests. Pull request 1 adds the crate `rsim-dd`. `../rsim-project/roadmap.md` gives the order. The Cargo workspace has 7 crates in `crates/`: `rsim-core`, `rsim-dd`, `rsim-functions`, `rsim-engine`, `rsim-topologies`, `rsim-cli` and `rsim-mcp`. The other crates of section 3 come with their steps.
+Steps 1 and 1b of the build are complete. Step 2 is in progress: the packet-set engine in `rsim-dd` and set-mode execution. Step 2 comes in 3 pull requests. Pull request 1 is the crate `rsim-dd`. Pull request 2 puts `PacketSet` on `rsim-dd`. `../rsim-project/roadmap.md` gives the order. The Cargo workspace has 7 crates in `crates/`: `rsim-core`, `rsim-dd`, `rsim-functions`, `rsim-engine`, `rsim-topologies`, `rsim-cli` and `rsim-mcp`. The other crates of section 3 come with their steps.
 
 The two design documents are in the adjacent folder `../rsim-project/`. This repository is public, so the design documents stay out of it. Do not commit the design documents, real configs or collected state to this repository.
 
@@ -44,9 +44,9 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | CLI tests | `cargo test -p rsim-cli --test cli` |
 | MCP stdio tests | `cargo test -p rsim-mcp --test stdio` |
 | List the built-in topologies | `cargo run -p rsim-cli -- topologies` |
-| Path query with its reply | `cargo run -p rsim-cli -- path mini-enterprise --from guest-client --dst 10.20.0.53 --protocol udp --src-port 40000 --dst-port 53` |
+| Path query with its reply | `cargo run -p rsim-cli -- path mini-enterprise --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --source.port 40000 --destination.port 53` |
 | Path query as JSON | Add `--format json` to the `path` command. Add `--pretty` for indented JSON. |
-| One trace step | `cargo run -p rsim-cli -- explain mini-enterprise --from guest-client --dst 10.20.0.53 --protocol udp --dst-port 53 --branch 0 --step 7` |
+| One trace step | `cargo run -p rsim-cli -- explain mini-enterprise --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --destination.port 53 --branch 0 --step 7` |
 | MCP server on stdio | `cargo run -p rsim-mcp` |
 | Decision diagram tests | `cargo test -p rsim-dd` |
 | Decision diagram tests, release build with the validator | `cargo test -p rsim-dd --release --features dd-check` |
@@ -55,6 +55,8 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 The hand-built topologies are in the crate `rsim-topologies`, with one module for each topology in `crates/rsim-topologies/src/`. The tests and the benchmarks of `rsim-engine` use it as a development dependency. `rsim-topologies::builtin(name)` gives the twin of a built-in topology.
 
 The stored JSON answers of the CLI tests are in `crates/rsim-cli/tests/golden/`. The CLI test and the MCP stdio test compare their outputs with these files. If an intended change alters the JSON output, make the files again with `rsim path <topology> <flags> --format json`. The flags of each file are in `QUERIES` in `crates/rsim-cli/tests/cli.rs`.
+
+`rsim-core` keeps the packet sets in `packet_set.rs`, the bit table in `bits.rs`, the arenas in `set.rs` and the description of a set as members in `describe.rs`. `crates/rsim-core/tests/explicit_oracle.rs` compares each set operation with an explicit list of packet pairs. A path query runs on the set of its packet; the design note gives the rule for an unstated field. The ingress of a query comes from `--ingress` or from the attachment records and edge interfaces of the twin.
 
 The tests of `rsim-dd` turn on the feature `dd-shadow` through a development dependency of the crate on itself. Each public operation then also runs in a plain BDD, and the 2 results must be the same set. A benchmark turns the shadow check off with `Dd::set_shadow(false)`. The OxiDD oracle in `crates/rsim-dd/tests/oracle.rs` compares the results with OxiDD on 2,289 levels. OxiDD is a development dependency only.
 
@@ -133,7 +135,7 @@ Docs, code comments, docstrings, commit-tracked notes and test descriptions stat
 
 ## Other design constraints
 
-- Hide the `PacketSet` representation behind the interface in section 4. The representation is an in-house decision diagram engine. OxiDD is a development dependency for tests only, as the oracle for the set operations. Do not make it a dependency of the product. Until step 2, the only implementation is a set with one concrete packet.
+- Hide the `PacketSet` representation behind the interface in section 4. The representation is an in-house decision diagram engine. OxiDD is a development dependency for tests only, as the oracle for the set operations. Do not make it a dependency of the product.
 - The prefix table is in-house, behind a trait.
 - Only the `rsim-collect` crate talks to devices. It writes the append-only snapshot store, and the engine reads only the store.
 - Lowering changes vendor structures directly into function instances. There is no vendor-neutral config model between them. Refer to section 9.
@@ -151,11 +153,11 @@ Section 13 of the brief gives the steps, each with a "Done when" condition. Do t
 - The JSON output is versioned and deterministic: the same query gives the same bytes.
 - `rsim-mcp` uses the stdio transport, has the tools `list_devices`, `path_query` and `explain_step`, and writes nothing. It keeps no answer between calls. `explain_step` takes the query, the branch index and the step index, and runs the query again.
 - The libraries are `serde` and `serde_json` for JSON and `clap` for the arguments. The MCP protocol code is in-house and has no async runtime.
-- The JSON shape of version 1 holds set mode: the summary is a list of parts, and each packet value is a set.
+- The JSON output is version 2. The summary is a list of parts, and each packet value is a set of members with field values. The field names are the names of the Elastic Common Schema where it has one, for example `source.ip`.
 
 `../rsim-project/design/step-1b-cli-mcp.md` gives the design of step 1b.
 
-Step 2 is the current step: the packet-set engine in `rsim-dd` and set-mode execution. Pull request 1 is the crate `rsim-dd`. Pull request 2 is `PacketSet` on `rsim-dd`, the sessions as relations, set-mode execution, the ingress resolver and JSON version 2. Pull request 3 is the JSON set form, `rsim set`, `set_query` and the set benchmark. `../rsim-project/design/step-2-packet-set.md` gives the design.
+Step 2 is the current step: the packet-set engine in `rsim-dd` and set-mode execution. Pull request 1 is the crate `rsim-dd`. Pull request 2 is `PacketSet` on `rsim-dd`, the sessions as relations, set-mode execution, the ingress resolver, JSON version 2 and the JSON set form. Pull request 3 is the set input of the query, `rsim set`, `set_query` and the set benchmark. `../rsim-project/design/step-2-packet-set.md` gives the design.
 
 Section 14 gives the test types. The property tests are: branches partition the input in each alternative of a forwarding choice and in each copy of a flood, the result is deterministic, and concrete mode agrees with set mode.
 

@@ -5,14 +5,16 @@ use std::net::IpAddr;
 
 use rsim_core::{
     Attr, Branch, Context, ContextAttr, Dependency, FieldValue, FlowState, FunctionId,
-    FunctionKind, InterfaceId, NetFunction, ObjectId, PacketSet, ReasonCode, Rewrite, SessionMatch,
-    Tri,
+    FunctionKind, InterfaceId, NetFunction, ObjectId, PacketSet, ReasonCode, Rewrite,
+    RulePredicate, SessionMatch, Tri,
 };
 
 use crate::common::{Meta, push_nonempty};
 use crate::forwarding::meta_methods;
 use crate::profile::PortTranslation;
-use crate::rules::{Decision, Rule, UnknownCause, describe_all, evaluate, explain, spans_of};
+use crate::rules::{
+    Decision, Rule, UnknownCause, describe_all, evaluate, explain, predicates_of, spans_of,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NatAction {
@@ -156,6 +158,9 @@ impl NetFunction for SourceNat {
     fn successors(&self) -> Vec<FunctionId> {
         vec![self.next.clone()]
     }
+    fn predicates(&self) -> Vec<&RulePredicate> {
+        predicates_of(&self.rules)
+    }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
         let scope = |i: usize| match &self.scopes[i] {
             None => Tri::True,
@@ -201,6 +206,9 @@ impl NetFunction for DestinationNat {
     }
     fn successors(&self) -> Vec<FunctionId> {
         vec![self.next.clone()]
+    }
+    fn predicates(&self) -> Vec<&RulePredicate> {
+        predicates_of(&self.rules)
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
         nat_apply(

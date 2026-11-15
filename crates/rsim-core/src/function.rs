@@ -8,6 +8,7 @@ use crate::flow_state::FlowState;
 use crate::header::HeaderField;
 use crate::id::{DeviceId, FunctionId, InterfaceId, ObjectId, VrfId};
 use crate::packet_set::PacketSet;
+use crate::predicate::RulePredicate;
 use crate::provenance::SourceSpan;
 
 /// The function types.
@@ -79,6 +80,16 @@ pub trait NetFunction: Debug + Send + Sync {
         false
     }
     fn reads(&self) -> Vec<Dependency>;
+    /// The predicates of the function. The twin build compiles them into
+    /// the frozen base of the packet sets.
+    fn predicates(&self) -> Vec<&RulePredicate> {
+        Vec::new()
+    }
+    /// The interface where packets enter the device, for an ingress
+    /// function.
+    fn ingress_interface(&self) -> Option<&InterfaceId> {
+        None
+    }
     fn qos_reads(&self) -> Vec<HeaderField>;
     fn qos_writes(&self) -> Vec<HeaderField>;
     fn provenance(&self) -> &[SourceSpan];

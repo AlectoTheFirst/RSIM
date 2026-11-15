@@ -72,7 +72,7 @@ pub fn hairpin() -> TwinBuilder {
     b.add(r2.session_commit("nexthop"));
     b.add(r2.nexthop(&[("10.0.12.1", "eth1", Target::Link("r1"))], &["eth1"], 20));
     b.add(r2.egress("eth1", EgressMode::Routed, Some(("r1/in/eth1", None)), 30));
-    b.endpoint(endpoint("client", "10.1.0.10", fid("r1/in/eth0")));
-    b.endpoint(endpoint("server", "10.1.0.20", fid("r1/in/eth0")));
+    add_host(&mut b, endpoint("client", "10.1.0.10", fid("r1/in/eth0")));
+    add_host(&mut b, endpoint("server", "10.1.0.20", fid("r1/in/eth0")));
     b
 }

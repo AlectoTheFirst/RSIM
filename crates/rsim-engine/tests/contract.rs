@@ -1,11 +1,12 @@
 //! Checks of the function contract and of edge cases of the functions.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use rsim_core::{
-    Alternative, Attr, Branch, Context, Delay, EndpointId, FieldValue, FlagsCond, FlowKey,
-    FlowState, Header, InterfaceId, Match, NetFunction, NextHop, Outcome, PROTO_ICMP, PacketSet,
-    Prefix, PrefixTable, Reason, ReasonCode, SourceSpan, Tri, TriePrefixTable, ValueCond, Verdict,
+    Alternative, Attr, Branch, Context, Delay, EndpointId, FieldValue, FlagsCond, FlowState,
+    Header, InterfaceId, Match, NetFunction, NextHop, Outcome, PROTO_ICMP, PacketSet, Prefix,
+    PrefixTable, Reason, ReasonCode, SetArena, SourceSpan, TriePrefixTable, ValueCond, Verdict,
     ZoneId,
 };
 use rsim_engine::{Executor, Query, Summary, check_partition};
@@ -14,6 +15,10 @@ use rsim_functions::{
     ZoneRole,
 };
 use rsim_topologies::*;
+
+fn single(arena: &Arc<SetArena>, h: Header) -> PacketSet {
+    PacketSet::single(arena, &h)
+}
 
 fn branch(p: PacketSet) -> Branch {
     Branch::new(
@@ -38,8 +43,9 @@ fn alt(b: Branch, i: u32) -> Branch {
 
 #[test]
 fn the_partition_check_finds_lost_duplicated_and_unequal_packets() {
-    let a = PacketSet::single(udp("10.0.0.1", 1, "10.0.0.2", 53));
-    let b = PacketSet::single(udp("10.0.0.1", 2, "10.0.0.2", 53));
+    let arena = SetArena::standalone();
+    let a = single(&arena, udp("10.0.0.1", 1, "10.0.0.2", 53));
+    let b = single(&arena, udp("10.0.0.1", 2, "10.0.0.2", 53));
     let input = a.union(&b);
     assert!(check_partition(&input, &[branch(a.clone()), branch(b.clone())]).is_ok());
     // A lost packet.
@@ -90,7 +96,7 @@ fn two_owners_behind_one_link_are_two_owners() {
         ..Context::default()
     };
     let out = f.apply(
-        &PacketSet::single(udp("10.0.0.1", 1, "10.5.0.1", 53)),
+        &single(&SetArena::standalone(), udp("10.0.0.1", 1, "10.5.0.1", 53)),
         &ctx,
         &FlowState::new(),
     );
@@ -98,18 +104,6 @@ fn two_owners_behind_one_link_are_two_owners() {
     assert_eq!(out[0].outcome, Outcome::Unknown);
     assert_eq!(out[0].reason.code, ReasonCode::AmbiguousOwner);
     assert!(out[0].reason.detail.contains("router-a, router-b"));
-}
-
-#[test]
-fn an_unstated_field_against_a_known_session_field_is_uncertain() {
-    let known = udp("10.0.0.1", 40000, "10.0.0.2", 53);
-    let key = FlowKey::of(&known);
-    let mut unstated = known.clone();
-    unstated.src_port = FieldValue::Unstated;
-    assert_eq!(key.matches(&known), Tri::True);
-    assert_eq!(key.matches(&unstated), Tri::Unknown);
-    assert_eq!(FlowKey::of(&unstated).matches(&known), Tri::Unknown);
-    assert_eq!(FlowKey::of(&unstated).matches(&unstated), Tri::True);
 }
 
 #[test]
@@ -126,7 +120,7 @@ fn an_interface_in_no_zone_follows_the_profile() {
         ingress_interface: Attr::Known(InterfaceId::new("port9")),
         ..Context::default()
     };
-    let p = PacketSet::single(udp("10.0.0.1", 1, "10.0.0.2", 53));
+    let p = single(&SetArena::standalone(), udp("10.0.0.1", 1, "10.0.0.2", 53));
     let drop = mk(UnzonedInterface::Drop).apply(&p, &ctx, &FlowState::new());
     assert_eq!(drop[0].outcome, Outcome::Drop);
     let ind = mk(UnzonedInterface::Unknown).apply(&p, &ctx, &FlowState::new());
@@ -138,20 +132,19 @@ fn a_long_path_does_not_exhaust_the_stack() {
     // 200 routers, 6 steps each: 1,200 nested function applications, run in
     // a thread with the default test stack of 2 MiB.
     let twin = chain(200, 2, 2).build().unwrap();
-    let q = Query::from_endpoint(
-        &twin,
-        &EndpointId::new("client"),
-        tcp("10.254.0.10", 40000, "10.255.0.10", 443),
-    )
+    let q = Query::path(&twin, &tcp("10.254.0.10", 40000, "10.255.0.10", 443));
+    let a = std::thread::spawn(move || {
+        Executor::new(&twin)
+            .run(&q)
+            .map(|a| a.single_summary().cloned())
+    })
+    .join()
+    .expect("no stack overflow")
     .unwrap();
-    let a = std::thread::spawn(move || Executor::new(&twin).run(&q).map(|a| a.summary))
-        .join()
-        .expect("no stack overflow")
-        .unwrap();
     assert_eq!(
         a,
-        Summary::Same(Verdict::Deliver(rsim_core::Destination::Endpoint(
-            EndpointId::new("server")
+        Some(Summary::Same(Verdict::Deliver(
+            rsim_core::Destination::Endpoint(EndpointId::new("server"))
         )))
     );
 }
@@ -182,19 +175,28 @@ fn the_reply_to_a_syn_passes_a_rule_for_packets_with_ack() {
         ..Match::any()
     });
     let request = tcp("10.0.0.1", 40000, "10.0.0.2", 22);
+    let arena = SetArena::standalone();
     let apply = |h: Header| {
         acl.apply(
-            &PacketSet::single(h).reply(),
+            &single(&arena, h).reply(),
             &Context::default(),
             &FlowState::new(),
         )
     };
     let syn = apply(request.clone().with_tcp_flags(0x02));
+    assert_eq!(syn.len(), 1);
     assert_eq!(syn[0].outcome, Outcome::Forward(fid("dev/next")));
-    // The flags of the reply to a packet with ACK are not known.
+    // The reply to a packet with ACK has all TCP flags: the flags with ACK
+    // are permitted, and the others are denied.
     let ack = apply(request.with_tcp_flags(0x10));
-    assert_eq!(ack[0].outcome, Outcome::Unknown);
-    assert_eq!(ack[0].reason.code, ReasonCode::MatchUnknown);
+    assert_eq!(ack.len(), 2);
+    assert_eq!(ack[0].outcome, Outcome::Forward(fid("dev/next")));
+    assert_eq!(ack[1].outcome, Outcome::Drop);
+    for b in &ack {
+        let w = b.packets.witness().unwrap();
+        let flags = w.current.tcp_flags.known().unwrap();
+        assert_eq!(flags & 0x10 != 0, b.outcome != Outcome::Drop);
+    }
 }
 
 #[test]
@@ -207,7 +209,7 @@ fn the_reply_to_an_echo_request_passes_a_rule_for_echo_replies() {
     echo.icmp_type = FieldValue::Known(8);
     echo.icmp_code = FieldValue::Known(0);
     let out = acl.apply(
-        &PacketSet::single(echo).reply(),
+        &single(&SetArena::standalone(), echo).reply(),
         &Context::default(),
         &FlowState::new(),
     );

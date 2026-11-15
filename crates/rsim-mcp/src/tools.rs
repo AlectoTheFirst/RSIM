@@ -75,32 +75,41 @@ pub fn definitions() -> Value {
         "description": "A built-in topology."
     });
     let mut query = Map::new();
+    let text = |d: &str| json!({"type": "string", "description": d});
     for (k, v) in [
         ("topology", topology.clone()),
         (
-            "from",
-            json!({"type": "string", "description": "The endpoint that sends the packet."}),
+            "ingress",
+            text(
+                "The ingress point as <device>/<interface>. Without it, the attachment records of the source address give the ingress.",
+            ),
         ),
+        ("source.ip", text("The source IP address.")),
+        ("destination.ip", text("The destination IP address.")),
+        ("network.iana_number", int(255, "The protocol number.")),
         (
-            "dst",
-            json!({"type": "string", "description": "The destination IP address."}),
-        ),
-        (
-            "protocol",
+            "network.transport",
             json!({
-                "description": "tcp, udp, icmp, icmpv6 or a number 0 to 255.",
-                "anyOf": [
-                    {"type": "string", "enum": ["tcp", "udp", "icmp", "icmpv6"]},
-                    {"type": "integer", "minimum": 0, "maximum": 255}
-                ]
+                "type": "string",
+                "enum": ["tcp", "udp", "icmp", "icmpv6"],
+                "description": "The protocol name. Give network.iana_number or network.transport."
             }),
         ),
+        ("source.port", int(65535, "The source port.")),
+        ("destination.port", int(65535, "The destination port.")),
         (
-            "src",
-            json!({"type": "string", "description": "The source IP address. The default is the first address of the endpoint."}),
+            "source.mac",
+            text("The source MAC address: 6 hexadecimal bytes with colons."),
         ),
-        ("src_port", int(65535, "The source port.")),
-        ("dst_port", int(65535, "The destination port.")),
+        (
+            "destination.mac",
+            text("The destination MAC address: 6 hexadecimal bytes with colons."),
+        ),
+        ("network.vlan.id", int(4095, "The VLAN tag.")),
+        (
+            "l2_priority",
+            int(7, "The layer 2 priority. It needs network.vlan.id."),
+        ),
         (
             "tcp_flags",
             json!({
@@ -123,8 +132,12 @@ pub fn definitions() -> Value {
         ("dscp", int(63, "The DSCP.")),
         ("ecn", int(3, "The ECN.")),
         (
-            "later_fragment",
-            json!({"type": "boolean", "description": "The packet is a later fragment."}),
+            "fragment",
+            json!({
+                "type": "string",
+                "enum": ["unfragmented", "first", "later"],
+                "description": "The fragment state."
+            }),
         ),
         (
             "reply",
@@ -133,7 +146,7 @@ pub fn definitions() -> Value {
     ] {
         query.insert(k.to_string(), v);
     }
-    let query_required = json!(["topology", "from", "dst", "protocol"]);
+    let query_required = json!(["topology", "source.ip", "destination.ip"]);
     let mut step = query.clone();
     step.insert(
         "branch".to_string(),
@@ -165,7 +178,7 @@ pub fn definitions() -> Value {
         },
         {
             "name": "path_query",
-            "description": "The answer for one packet from an endpoint: each branch with its verdict, its delay and its trace, and the reply of each delivered branch.",
+            "description": "The answer for one packet: the ingress, each branch with its verdict, its delay and its trace, and the reply of each delivered branch. A field that the query does not state is not known.",
             "inputSchema": {
                 "type": "object",
                 "properties": query,
@@ -180,7 +193,7 @@ pub fn definitions() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": step,
-                "required": ["topology", "from", "dst", "protocol", "branch", "step"],
+                "required": ["topology", "source.ip", "destination.ip", "branch", "step"],
                 "additionalProperties": false
             },
             "outputSchema": output_schema(
@@ -219,7 +232,7 @@ fn output_schema(kind: &str, fields: &[&str]) -> Value {
                         "type": "object",
                         "properties": {
                             "code": {"enum": [
-                                "unknown_topology", "unknown_endpoint", "invalid_query",
+                                "unknown_topology", "unknown_ingress", "invalid_query",
                                 "no_such_step", "start_requires_context",
                                 "contract_violation", "internal"
                             ]},

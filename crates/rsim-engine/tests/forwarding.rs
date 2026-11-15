@@ -8,9 +8,30 @@ use rsim_core::{
 use rsim_engine::{Answer, BuildError, Executor, Query, Summary, Twin};
 use rsim_topologies::*;
 
+/// A path query. The ingress comes from the attachment record of the
+/// source address of `from`.
 fn run(twin: &Twin, from: &str, h: Header) -> Answer {
-    let q = Query::from_endpoint(twin, &EndpointId::new(from), h).expect("endpoint");
-    Executor::new(twin).run(&q).expect("query runs")
+    let a = Executor::new(twin)
+        .run(&Query::path(twin, &h))
+        .expect("query runs");
+    let b = &a.branches()[0];
+    if let Some(first) = b.steps.first() {
+        assert_eq!(
+            first.device.as_ref().map(|d| d.to_string()),
+            twin.attachments()
+                .iter()
+                .find(|r| r.host == from)
+                .map(|r| r.device.to_string()),
+            "the ingress of {from}"
+        );
+    }
+    a
+}
+
+fn run_set(twin: &Twin, h: Header) -> Answer {
+    Executor::new(twin)
+        .run(&Query::set(Query::path(twin, &h).packets))
+        .expect("query runs")
 }
 
 fn path(steps: &[&TraceStep]) -> Vec<String> {
@@ -107,7 +128,7 @@ fn guest_to_dns_through_firewall_snat_ips_and_acl_and_back() {
     // The session holds the binding.
     assert_eq!(b.state.session_count(), 1);
     let s = &b.state.sessions(&FGT.into())[0];
-    assert!(s.is_translated());
+    assert!(s.translated);
 
     // The core ACL permits by rule dns-from-fgt.
     let acl = step(&b.steps, "fra01-core-01/acl");
@@ -253,12 +274,31 @@ fn an_unstated_source_port_against_a_rule_that_reads_it_is_unknown() {
     let twin = mini_enterprise(MiniOpts::default()).build().unwrap();
     // The request states no source port.
     let h = Header::request(ip("172.31.10.20"), ip("10.20.0.53"), PROTO_UDP).with_dst_port(53);
-    let a = run(&twin, "guest-client", h);
+    let a = run(&twin, "guest-client", h.clone());
     let Some(Verdict::Unknown(r)) = a.verdict() else {
         panic!("{:?}", a.summary)
     };
     assert_eq!(r.code, ReasonCode::MatchUnknown);
-    assert!(r.detail.contains("1b-block-low-source-port"), "{r:?}");
+    assert!(r.detail.contains("does not state"), "{r:?}");
+    // The branches are exact: the low source ports are denied by the rule
+    // that reads the port, and the other ports are delivered.
+    let denied = a
+        .branches()
+        .into_iter()
+        .find(|b| reason_code(b.verdict) == Some(ReasonCode::Denied))
+        .expect("a denied branch");
+    let Verdict::Drop(d) = denied.verdict else {
+        unreachable!()
+    };
+    assert!(d.detail.contains("1b-block-low-source-port"), "{d:?}");
+    // The set query gives the 2 parts.
+    let set = run_set(&twin, h);
+    assert_eq!(set.summary.len(), 2, "{:?}", set.summary);
+    assert!(
+        set.summary
+            .iter()
+            .any(|p| p.summary.verdict() == Some(&deliver("fra01-dns")))
+    );
     // A stated high port does not match the rule, and a stated low port does.
     let high = run(
         &twin,
@@ -404,7 +444,7 @@ fn equal_cost_paths_are_shown_one_by_one() {
     let twin = ecmp().build().unwrap();
     let ssh = tcp("10.1.0.10", 40000, "10.4.0.10", 22);
     let a = run(&twin, "client", ssh);
-    assert_eq!(a.summary, Summary::DependsOnPath);
+    assert_eq!(a.single_summary(), Some(&Summary::DependsOnPath));
 
     // The trace names each path with its result, in the fixed order.
     let br = a.branches();
@@ -425,8 +465,8 @@ fn equal_cost_paths_are_shown_one_by_one() {
     // Web traffic is delivered on both paths.
     let web = tcp("10.1.0.10", 40000, "10.4.0.10", 80);
     assert_eq!(
-        run(&twin, "client", web).summary,
-        Summary::Same(deliver("server"))
+        run(&twin, "client", web).single_summary(),
+        Some(&Summary::Same(deliver("server")))
     );
 }
 

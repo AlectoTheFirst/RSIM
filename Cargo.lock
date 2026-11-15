@@ -1009,6 +1009,10 @@ dependencies = [
 [[package]]
 name = "rsim-core"
 version = "0.1.0"
+dependencies = [
+ "proptest",
+ "rsim-dd",
+]
 
 [[package]]
 name = "rsim-dd"

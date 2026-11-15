@@ -303,3 +303,64 @@ fn a_chain_on_all_2289_levels_runs_on_a_default_thread() {
     .unwrap();
     assert_eq!(r.3, 2290);
 }
+
+/// The truth table over the levels below `M`.
+const M: u32 = 12;
+
+fn table(dd: &Dd, f: Edge) -> Vec<bool> {
+    (0..1usize << M)
+        .map(|i| dd.eval(f, |l| i >> l & 1 == 1).unwrap())
+        .collect()
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn an_import_gives_the_same_function(
+        twin in prop::collection::vec(step(), 1..20),
+        f in formula(M, 5),
+    ) {
+        let mut root = Dd::new(N);
+        let mut pool = vec![Edge::TRUE, Edge::FALSE];
+        run(&mut root, &mut pool, &twin).unwrap();
+        let frozen = root.freeze().unwrap();
+        let mut a = Dd::scratch(Arc::clone(&frozen), None);
+        let e = build(&mut a, &f).unwrap();
+        let want = table(&a, e);
+
+        // A scratch arena on the same frozen arena.
+        let mut b = Dd::scratch(Arc::clone(&frozen), None);
+        let eb = b.import(&a, e).unwrap();
+        prop_assert_eq!(table(&b, eb), want.clone());
+        b.validate().unwrap();
+        // The same function built in the target arena has the same edge.
+        let again = build(&mut b, &f).unwrap();
+        prop_assert_eq!(again, eb);
+
+        // A root arena with no frozen base.
+        let mut c = Dd::new(N);
+        let ec = c.import(&a, e).unwrap();
+        prop_assert_eq!(table(&c, ec), want);
+        c.validate().unwrap();
+    }
+
+    #[test]
+    fn literals_give_their_conjunction(lits in prop::collection::vec((0..M, any::<bool>()), 0..8)) {
+        let mut dd = Dd::new(N);
+        let e = dd.literals(&lits).unwrap();
+        let got = table(&dd, e);
+        for (i, g) in got.into_iter().enumerate() {
+            let want = lits.iter().all(|&(l, v)| (i >> l & 1 == 1) == v);
+            prop_assert_eq!(g, want);
+        }
+    }
+}
+
+#[test]
+fn an_import_needs_the_same_number_of_levels() {
+    let mut a = Dd::new(4);
+    let e = a.var(2).unwrap();
+    let mut b = Dd::new(5);
+    assert!(matches!(b.import(&a, e), Err(DdError::InvariantBroken(_))));
+}

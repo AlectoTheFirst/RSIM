@@ -2,10 +2,10 @@
 
 use std::net::IpAddr;
 
-use crate::header::FlowKey;
 use crate::id::{
     ApplicationId, BridgeDomainId, DeviceId, EndpointId, InterfaceId, PortId, VrfId, ZoneId,
 };
+use crate::packet_set::PacketSet;
 
 /// The value of one context attribute.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -85,9 +85,9 @@ pub enum NeighbourTarget {
 /// The firewall session state of the packets at this device.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SessionMatch {
-    /// No session matched. `entry` is the flow key at the session lookup,
+    /// No session matched. `entry` is the packet set at the session lookup,
     /// before any translation on this device.
-    New { entry: FlowKey },
+    New { entry: PacketSet },
     /// A session matched in the forward direction.
     Forward { device: DeviceId, index: u32 },
     /// A session matched in the reply direction.

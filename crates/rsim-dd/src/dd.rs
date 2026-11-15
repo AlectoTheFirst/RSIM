@@ -110,6 +110,7 @@ enum Op {
     Exists,
     AndExists,
     Rename,
+    Insert,
 }
 
 type Key = (Op, u32, u32, u32);
@@ -131,6 +132,11 @@ fn key(op: Op, a: Edge, b: Edge, c: u32) -> (Key, bool) {
         }
         Op::Exists => ((op, a.raw(), b.raw(), 0), false),
         Op::Rename => ((op, a.regular().raw(), c, 0), a.is_complement()),
+        Op::Insert => {
+            let neg = b.is_complement();
+            let (lo, hi) = (a.xor_complement(neg), b.xor_complement(neg));
+            ((op, lo.raw(), hi.raw(), c), neg)
+        }
     }
 }
 
@@ -230,6 +236,13 @@ impl Dd {
     /// on by default. Without the feature, there is no shadow check.
     pub fn set_shadow(&mut self, on: bool) {
         self.shadow_on = on;
+    }
+
+    /// Reserves room for `nodes` more nodes and their table entries.
+    pub fn reserve(&mut self, nodes: usize) {
+        self.nodes.reserve(nodes);
+        self.unique.reserve(nodes);
+        self.cache.reserve(nodes);
     }
 
     /// Turns the operation caches on or off.
@@ -438,6 +451,77 @@ impl Dd {
         self.post(ShadowOp::Cube(ls), acc)
     }
 
+    /// The conjunction of literals. Each pair is a level and the value of
+    /// its variable. Two pairs with one level and different values give
+    /// false.
+    pub fn literals(&mut self, lits: &[(u32, bool)]) -> Result<Edge, DdError> {
+        let mut ls = lits.to_vec();
+        ls.sort_unstable();
+        ls.dedup();
+        if ls.windows(2).any(|w| w[0].0 == w[1].0) {
+            return self.post(ShadowOp::Literals(ls), Edge::FALSE);
+        }
+        let mut acc = Edge::TRUE;
+        for &(l, v) in ls.iter().rev() {
+            self.check_level(l)?;
+            acc = if v {
+                self.mk(l, Edge::FALSE, acc)?
+            } else {
+                self.mk(l, acc, Edge::FALSE)?
+            };
+        }
+        self.post(ShadowOp::Literals(ls), acc)
+    }
+
+    /// The function of `e` in the arena `from`, made in this arena. The two
+    /// arenas must have the same number of levels. A node of a frozen arena
+    /// that both arenas read stays as it is.
+    pub fn import(&mut self, from: &Dd, e: Edge) -> Result<Edge, DdError> {
+        from.check_edges(&[e])?;
+        if from.levels != self.levels {
+            return Err(broken("the two arenas have different numbers of levels"));
+        }
+        let shared = match (&self.base, &from.base) {
+            (Some(a), Some(b)) if Arc::ptr_eq(a, b) => from.offset,
+            _ => 1,
+        };
+        let mut done: Map<u32, Edge> = Map::default();
+        let mut stack = vec![e.index()];
+        while let Some(&i) = stack.last() {
+            if i < shared || done.contains_key(&i) {
+                stack.pop();
+                continue;
+            }
+            let n = from.node(i);
+            let pending: Vec<u32> = [n.lo.index(), n.hi.index()]
+                .into_iter()
+                .filter(|c| *c >= shared && !done.contains_key(c))
+                .collect();
+            if !pending.is_empty() {
+                stack.extend(pending);
+                continue;
+            }
+            stack.pop();
+            let get = |c: Edge| -> Edge {
+                let r = if c.index() < shared {
+                    c.regular()
+                } else {
+                    done[&c.index()]
+                };
+                r.xor_complement(c.is_complement())
+            };
+            let (lo, hi) = (get(n.lo), get(n.hi));
+            let r = self.mk(n.level, lo, hi)?;
+            done.insert(i, r);
+        }
+        let r = if e.index() < shared {
+            e.regular()
+        } else {
+            done[&e.index()]
+        };
+        self.post(ShadowOp::Import, r.xor_complement(e.is_complement()))
+    }
+
     // ------------------------------------------------------------ boolean
 
     pub fn and(&mut self, a: Edge, b: Edge) -> Result<Edge, DdError> {
@@ -641,12 +725,8 @@ impl Dd {
                         let r = self.mk(level, lo, hi)?;
                         vals.push(self.finish(done, r));
                     } else {
-                        // If the variable then `hi` else `lo`.
-                        let v = self.mk(level, Edge::FALSE, Edge::TRUE)?;
                         tasks.push(Task::Store(done));
-                        tasks.push(Task::Or);
-                        tasks.push(Task::Call(Call::And(v.not(), lo)));
-                        tasks.push(Task::Call(Call::And(v, hi)));
+                        tasks.push(Task::Call(Call::Insert(level, lo, hi)));
                     }
                 }
             }
@@ -814,6 +894,41 @@ impl Dd {
                     tasks.push(Task::Call(Call::AndExists(f0, g0, c)));
                 }
             }
+            Call::Insert(level, lo, hi) => {
+                if lo == hi {
+                    vals.push(lo);
+                    return Ok(());
+                }
+                let (ll, lh) = (self.level(lo), self.level(hi));
+                if ll > level && lh > level {
+                    let r = self.mk(level, lo, hi)?;
+                    vals.push(r);
+                    return Ok(());
+                }
+                let (key, neg) = key(Op::Insert, lo, hi, level);
+                if let Some(r) = self.cached(&key, neg) {
+                    vals.push(r);
+                    return Ok(());
+                }
+                let top = ll.min(lh);
+                let done = Done {
+                    key,
+                    neg,
+                    regular: false,
+                };
+                if top == level {
+                    let lo0 = self.cofactors(lo, level).0;
+                    let hi1 = self.cofactors(hi, level).1;
+                    let r = self.mk(level, lo0, hi1)?;
+                    vals.push(self.finish(done, r));
+                    return Ok(());
+                }
+                let (l0, l1) = self.cofactors(lo, top);
+                let (h0, h1) = self.cofactors(hi, top);
+                tasks.push(Task::Node { level: top, done });
+                tasks.push(Task::Call(Call::Insert(level, l1, h1)));
+                tasks.push(Task::Call(Call::Insert(level, l0, h0)));
+            }
             Call::Rename(f, map) => {
                 if f.is_constant() {
                     vals.push(f);
@@ -948,6 +1063,9 @@ enum Call {
     Exists(Edge, Edge),
     AndExists(Edge, Edge, Edge),
     Rename(Edge, MapId),
+    /// If the variable at the level then the 1 function else the 0
+    /// function: `Insert(level, lo, hi)`.
+    Insert(u32, Edge, Edge),
 }
 
 /// How a finished result goes into the cache and to the caller.
@@ -1008,6 +1126,9 @@ pub(crate) enum ShadowOp {
     Exists(Edge, Edge),
     AndExists(Edge, Edge, Edge),
     Rename(Edge, MapId),
+    Literals(Vec<(u32, bool)>),
+    /// A copy from another arena. The shadow check does not apply.
+    Import,
 }
 
 #[cfg(test)]

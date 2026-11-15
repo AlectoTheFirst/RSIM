@@ -55,6 +55,9 @@ impl NetFunction for Ingress {
     fn enters_device(&self) -> bool {
         true
     }
+    fn ingress_interface(&self) -> Option<&InterfaceId> {
+        Some(&self.interface)
+    }
     fn reads(&self) -> Vec<Dependency> {
         vec![Dependency::Interface(
             self.meta.device.clone(),

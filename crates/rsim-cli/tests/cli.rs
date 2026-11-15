@@ -14,92 +14,92 @@ const QUERIES: [(&str, &[&str]); 6] = [
     (
         "mini-enterprise",
         &[
-            "--from",
-            "guest-client",
-            "--dst",
+            "--source.ip",
+            "172.31.10.20",
+            "--destination.ip",
             "10.20.0.53",
-            "--protocol",
+            "--network.transport",
             "udp",
-            "--src-port",
+            "--source.port",
             "40000",
-            "--dst-port",
+            "--destination.port",
             "53",
         ],
     ),
     (
         "edge-dnat",
         &[
-            "--from",
-            "client",
-            "--dst",
+            "--source.ip",
+            "198.51.100.7",
+            "--destination.ip",
             "203.0.113.10",
-            "--protocol",
+            "--network.transport",
             "tcp",
-            "--src-port",
+            "--source.port",
             "51000",
-            "--dst-port",
+            "--destination.port",
             "443",
-            "--tcp-flags",
+            "--tcp_flags",
             "syn",
         ],
     ),
     (
         "ecmp",
         &[
-            "--from",
-            "client",
-            "--dst",
+            "--source.ip",
+            "10.1.0.10",
+            "--destination.ip",
             "10.4.0.10",
-            "--protocol",
+            "--network.transport",
             "tcp",
-            "--src-port",
+            "--source.port",
             "40000",
-            "--dst-port",
+            "--destination.port",
             "22",
         ],
     ),
     (
         "routing-loop",
         &[
-            "--from",
-            "client",
-            "--dst",
+            "--source.ip",
+            "10.1.0.10",
+            "--destination.ip",
             "10.9.0.1",
-            "--protocol",
+            "--network.transport",
             "tcp",
-            "--src-port",
+            "--source.port",
             "40000",
-            "--dst-port",
+            "--destination.port",
             "80",
         ],
     ),
     (
         "hairpin",
         &[
-            "--from",
-            "client",
-            "--dst",
+            "--source.ip",
+            "10.1.0.10",
+            "--destination.ip",
             "10.9.0.10",
-            "--protocol",
+            "--network.transport",
             "tcp",
-            "--src-port",
+            "--source.port",
             "40000",
-            "--dst-port",
+            "--destination.port",
             "80",
         ],
     ),
     (
         "chain",
         &[
-            "--from",
-            "client",
-            "--dst",
+            "--source.ip",
+            "10.254.0.10",
+            "--destination.ip",
             "10.255.0.10",
-            "--protocol",
+            "--network.transport",
             "tcp",
-            "--src-port",
+            "--source.port",
             "40000",
-            "--dst-port",
+            "--destination.port",
             "443",
         ],
     ),
@@ -149,7 +149,7 @@ fn each_builtin_topology_loads_by_name() {
     let names: Vec<&str> = QUERIES.iter().map(|(n, _)| *n).collect();
     assert_eq!(
         json_of(&o),
-        serde_json::json!({"rsim_json": 1, "kind": "topologies", "topologies": names})
+        serde_json::json!({"rsim_json": 2, "kind": "topologies", "topologies": names})
     );
     for name in names {
         let o = rsim(&["devices", name, "--format", "json"]);
@@ -272,81 +272,81 @@ fn an_index_that_is_not_in_the_answer_is_no_such_step() {
 
 #[test]
 fn query_errors_give_the_error_object_and_exit_code_1() {
-    let base = ["--dst", "203.0.113.10"];
-    let cases: [(&str, &[&str], &str); 8] = [
+    let base = ["--destination.ip", "203.0.113.10"];
+    let src = ["--source.ip", "198.51.100.7"];
+    let cases: [(&str, &[&str], &str); 11] = [
         (
             "nowhere",
-            &["--from", "client", "--protocol", "tcp"],
+            &["--network.transport", "tcp"],
             "unknown_topology",
         ),
         (
             "edge-dnat",
-            &["--protocol", "tcp", "--from", "nobody"],
-            "unknown_endpoint",
+            &["--network.transport", "tcp", "--ingress", "nobody/eth0"],
+            "unknown_ingress",
+        ),
+        (
+            "edge-dnat",
+            &["--network.transport", "tcp", "--source.ip", "2001:db8::1"],
+            "invalid_query",
+        ),
+        (
+            "edge-dnat",
+            &["--network.transport", "icmp", "--destination.port", "1"],
+            "invalid_query",
+        ),
+        (
+            "edge-dnat",
+            &["--network.transport", "udp", "--tcp_flags", "syn"],
+            "invalid_query",
+        ),
+        (
+            "edge-dnat",
+            &["--network.transport", "tcp", "--icmp_code", "0"],
+            "invalid_query",
         ),
         (
             "edge-dnat",
             &[
-                "--from",
-                "client",
-                "--protocol",
+                "--network.transport",
                 "tcp",
-                "--src",
-                "2001:db8::1",
-            ],
-            "invalid_query",
-        ),
-        (
-            "edge-dnat",
-            &["--from", "client", "--protocol", "icmp", "--dst-port", "1"],
-            "invalid_query",
-        ),
-        (
-            "edge-dnat",
-            &[
-                "--from",
-                "client",
-                "--protocol",
-                "udp",
-                "--tcp-flags",
-                "syn",
-            ],
-            "invalid_query",
-        ),
-        (
-            "edge-dnat",
-            &["--from", "client", "--protocol", "tcp", "--icmp-code", "0"],
-            "invalid_query",
-        ),
-        (
-            "edge-dnat",
-            &[
-                "--from",
-                "client",
-                "--protocol",
-                "tcp",
-                "--dst-port",
+                "--destination.port",
                 "443",
-                "--later-fragment",
+                "--fragment",
+                "later",
             ],
             "invalid_query",
         ),
         (
             "edge-dnat",
-            &["--from", "client", "--protocol", "47", "--src-port", "1"],
+            &["--network.iana_number", "47", "--source.port", "1"],
+            "invalid_query",
+        ),
+        (
+            "edge-dnat",
+            &["--network.iana_number", "6", "--network.transport", "udp"],
+            "invalid_query",
+        ),
+        ("edge-dnat", &[], "invalid_query"),
+        (
+            "edge-dnat",
+            &["--network.transport", "tcp", "--l2_priority", "3"],
             "invalid_query",
         ),
     ];
     for (topology, extra, code) in cases {
         let mut args = vec!["path", topology];
         args.extend_from_slice(&base);
+        if !extra.contains(&"--source.ip") {
+            args.extend_from_slice(&src);
+        }
         args.extend_from_slice(extra);
         let mut json_args = args.clone();
         json_args.extend_from_slice(&["--format", "json"]);
         let o = rsim(&json_args);
         assert_eq!(o.status.code(), Some(1), "{extra:?}");
         let v = json_of(&o);
-        assert_eq!(v["rsim_json"], 1);
+        assert_eq!(v["rsim_json"], 2);
         assert_eq!(v["kind"], "error");
         assert_eq!(v["error"]["code"], code, "{extra:?}");
         let t = rsim(&args);
@@ -359,107 +359,88 @@ fn query_errors_give_the_error_object_and_exit_code_1() {
 
 #[test]
 fn usage_errors_give_exit_code_2() {
-    for args in [
-        &[
+    let q = |extra: &[&'static str]| -> Vec<&'static str> {
+        let mut v = vec![
             "path",
             "edge-dnat",
-            "--dst",
-            "203.0.113.10",
-            "--protocol",
-            "tcp",
-        ][..],
-        &[
-            "path",
-            "edge-dnat",
-            "--from",
-            "client",
-            "--dst",
-            "x",
-            "--protocol",
-            "tcp",
-        ],
-        &[
-            "path",
-            "edge-dnat",
-            "--from",
-            "client",
-            "--dst",
+            "--source.ip",
+            "198.51.100.7",
+            "--destination.ip",
             "1.2.3.4",
-            "--protocol",
+            "--network.transport",
+            "tcp",
+        ];
+        v.extend_from_slice(extra);
+        v
+    };
+    let missing_source = vec![
+        "path",
+        "edge-dnat",
+        "--destination.ip",
+        "203.0.113.10",
+        "--network.transport",
+        "tcp",
+    ];
+    for args in [
+        missing_source,
+        vec![
+            "path",
+            "edge-dnat",
+            "--source.ip",
+            "198.51.100.7",
+            "--destination.ip",
+            "x",
+        ],
+        vec![
+            "path",
+            "edge-dnat",
+            "--source.ip",
+            "198.51.100.7",
+            "--destination.ip",
+            "1.2.3.4",
+            "--network.transport",
             "xyz",
         ],
-        &[
-            "path",
-            "edge-dnat",
-            "--from",
-            "client",
-            "--dst",
-            "1.2.3.4",
-            "--protocol",
-            "tcp",
-            "--dst-port",
-            "70000",
-        ],
-        &[
-            "path",
-            "edge-dnat",
-            "--from",
-            "client",
-            "--dst",
-            "1.2.3.4",
-            "--protocol",
-            "tcp",
-            "--dscp",
-            "64",
-        ],
-        &["nothing"],
+        q(&["--destination.port", "70000"]),
+        q(&["--dscp", "64"]),
+        q(&["--fragment", "middle"]),
+        q(&["--network.vlan.id", "4096"]),
+        q(&["--source.mac", "00:11"]),
+        // The flags of the language of source and destination only.
+        q(&["--from", "client"]),
+        q(&["--dst", "1.2.3.4"]),
+        vec!["nothing"],
     ] {
-        assert_eq!(rsim(args).status.code(), Some(2), "{args:?}");
+        assert_eq!(rsim(&args).status.code(), Some(2), "{args:?}");
     }
 }
 
 #[test]
 fn the_query_echo_is_normalized_and_lists_each_field() {
-    let a = rsim_cli::args::query(
-        serde_json::json!({
-            "topology": "edge-dnat", "from": "client", "dst": "203.0.113.10",
-            "protocol": 6, "tcp_flags": ["ack", "syn", "ack"]
-        })
-        .as_object()
-        .unwrap(),
-        &[],
-    )
-    .unwrap();
-    let b = rsim_cli::args::query(
-        serde_json::json!({
-            "topology": "edge-dnat", "from": "client", "dst": "203.0.113.10",
-            "protocol": "tcp", "tcp_flags": ["syn", "ack"]
-        })
-        .as_object()
-        .unwrap(),
-        &[],
-    )
-    .unwrap();
+    let q = |extra: serde_json::Value| {
+        let mut v = serde_json::json!({
+            "topology": "edge-dnat", "source.ip": "198.51.100.7",
+            "destination.ip": "203.0.113.10"
+        });
+        v.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        rsim_cli::args::query(v.as_object().unwrap(), &[]).unwrap()
+    };
+    let a = q(serde_json::json!({"network.iana_number": 6, "tcp_flags": ["ack", "syn", "ack"]}));
+    let b = q(serde_json::json!({"network.transport": "tcp", "tcp_flags": ["syn", "ack"]}));
     assert_eq!(a.echo(), b.echo());
     let v = serde_json::to_value(a.echo()).unwrap();
     let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
     let mut want = rsim_cli::args::QUERY_FIELDS.to_vec();
     want.sort();
     assert_eq!(keys, want);
-    assert_eq!(v["protocol"], "tcp");
+    assert_eq!(v["network.iana_number"], 6);
+    assert_eq!(v["network.transport"], "tcp");
     assert_eq!(v["tcp_flags"], serde_json::json!(["syn", "ack"]));
     assert_eq!(v["reply"], Value::Null);
 
-    let icmp = rsim_cli::args::query(
-        serde_json::json!({
-            "topology": "edge-dnat", "from": "client", "dst": "203.0.113.10",
-            "protocol": "icmp", "icmp_type": "echo-request"
-        })
-        .as_object()
-        .unwrap(),
-        &[],
-    )
-    .unwrap();
+    let icmp = q(serde_json::json!({"network.transport": "icmp", "icmp_type": "echo-request"}));
     assert_eq!(serde_json::to_value(icmp.echo()).unwrap()["icmp_type"], 8);
 }
 
@@ -468,11 +449,11 @@ fn unknown_drop_and_a_reply_that_did_not_run_are_answers_with_exit_code_0() {
     let o = rsim(&[
         "path",
         "edge-dnat",
-        "--from",
-        "client",
-        "--dst",
+        "--source.ip",
+        "198.51.100.7",
+        "--destination.ip",
         "203.0.113.10",
-        "--protocol",
+        "--network.transport",
         "tcp",
         "--format",
         "json",
@@ -483,17 +464,21 @@ fn unknown_drop_and_a_reply_that_did_not_run_are_answers_with_exit_code_0() {
     assert_eq!(result["kind"], "same");
     assert_eq!(result["verdict_kind"], "unknown");
     assert_eq!(result["verdict"]["reason"]["code"], "match_unknown");
+    // The branches are exact: the destination port 443 is translated, and
+    // the other ports are not.
+    let branches = v["answer"]["branches"].as_array().unwrap();
+    assert!(branches.len() >= 2, "{branches:?}");
 
     let o = rsim(&[
         "path",
         "mini-enterprise",
-        "--from",
-        "guest-client",
-        "--dst",
+        "--source.ip",
+        "172.31.10.20",
+        "--destination.ip",
         "10.20.0.254",
-        "--protocol",
+        "--network.transport",
         "udp",
-        "--dst-port",
+        "--destination.port",
         "53",
         "--format",
         "json",
@@ -518,15 +503,15 @@ fn unknown_drop_and_a_reply_that_did_not_run_are_answers_with_exit_code_0() {
     let o = rsim(&[
         "path",
         "edge-dnat",
-        "--from",
-        "client",
-        "--dst",
+        "--source.ip",
+        "198.51.100.7",
+        "--destination.ip",
         "203.0.113.10",
-        "--protocol",
+        "--network.transport",
         "icmp",
-        "--icmp-type",
+        "--icmp_type",
         "echo-request",
-        "--icmp-code",
+        "--icmp_code",
         "0",
         "--format",
         "json",
@@ -534,9 +519,12 @@ fn unknown_drop_and_a_reply_that_did_not_run_are_answers_with_exit_code_0() {
     assert_eq!(o.status.code(), Some(0));
     let v = json_of(&o);
     let current = &v["answer"]["input"]["members"][0]["current"];
-    assert_eq!(current["protocol"], serde_json::json!({"known": 1}));
+    assert_eq!(
+        current["network.iana_number"],
+        serde_json::json!({"known": 1})
+    );
     assert_eq!(current["icmp_type"], serde_json::json!({"known": 8}));
-    assert_eq!(current["src_port"], "absent");
+    assert_eq!(current["source.port"], "absent");
     assert_eq!(v["answer"]["branches"][0]["verdict"]["kind"], "drop");
     assert_eq!(v["query"]["icmp_type"], 8);
 }
