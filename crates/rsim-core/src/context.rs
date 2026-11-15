@@ -32,7 +32,7 @@ impl<T> Attr<T> {
 }
 
 /// The names of the context attributes. Functions declare which attributes
-/// they require and which they provide (section 5, item 2).
+/// they require and which they provide.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ContextAttr {
     Device,
@@ -45,11 +45,11 @@ pub enum ContextAttr {
     NextHop,
     NeighbourTarget,
     Application,
-    // QoS (section 16).
+    // QoS.
     TrafficClass,
     DropPrecedence,
     Queue,
-    // Layer 2 (section 18).
+    // Layer 2.
     IngressPort,
     BridgeDomain,
 }

@@ -1,5 +1,5 @@
 //! Identifiers. Each identifier is an ordered, cheaply cloned string, so that
-//! ordered collections give a deterministic order (principle 2).
+//! ordered collections give a deterministic order.
 
 use std::fmt;
 use std::sync::Arc;
@@ -73,7 +73,7 @@ id_type!(
     ZoneId
 );
 id_type!(
-    /// A bridge domain: one flood domain (section 18). Not a VLAN number.
+    /// A bridge domain: one flood domain. Its identity is not a VLAN number.
     BridgeDomainId
 );
 id_type!(

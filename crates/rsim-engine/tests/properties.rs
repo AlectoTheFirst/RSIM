@@ -1,8 +1,6 @@
-//! Property tests (section 14): the branches partition the input in each
-//! alternative of a forwarding choice, the result is deterministic, and a
-//! function with no QoS write leaves the marking and the class unchanged.
-//!
-//! "Concrete mode agrees with set mode" needs set mode, which is step 2.
+//! Property tests: the branches partition the input in each alternative of a
+//! forwarding choice, the result is deterministic, and a function with no
+//! QoS write leaves the marking and the class unchanged.
 
 mod common;
 
@@ -105,7 +103,7 @@ proptest! {
         let a = a.unwrap();
         prop_assert_eq!(&a, &Executor::new(twin).run(&q).unwrap());
 
-        // No step 1 function writes QoS fields, so each step shows the
+        // No function of these twins writes QoS fields, so each step shows the
         // marking of the request.
         for b in a.branches() {
             for s in &b.steps {

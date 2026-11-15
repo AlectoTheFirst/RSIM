@@ -1,4 +1,4 @@
-//! The function contract (section 5).
+//! The function contract.
 
 use std::fmt::Debug;
 
@@ -10,11 +10,10 @@ use crate::id::{DeviceId, FunctionId, InterfaceId, ObjectId, VrfId};
 use crate::packet_set::PacketSet;
 use crate::provenance::SourceSpan;
 
-/// The function types. The list holds the types of all steps, so that the
-/// trace type does not change later. Step 1 implements the forwarding types.
+/// The function types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FunctionKind {
-    // Forwarding (step 1).
+    // Forwarding.
     Ingress,
     VrfSelection,
     ZoneLookup,
@@ -26,13 +25,13 @@ pub enum FunctionKind {
     RouteLookup,
     NextHopResolution,
     Egress,
-    // QoS (step 8).
+    // QoS.
     Classification,
     Marking,
     Policing,
     Shaping,
     QueueSelection,
-    // Layer 2 (step 3).
+    // Layer 2.
     PortIngress,
     BridgeDomainSelection,
     MacLookup,
@@ -42,7 +41,7 @@ pub enum FunctionKind {
     Layer3HandOff,
 }
 
-/// An object that a function reads. Delta recompilation (step 5) uses it.
+/// An object that a function reads. Delta recompilation uses it.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Dependency {
     Object(ObjectId),
@@ -54,7 +53,7 @@ pub enum Dependency {
 
 /// A network function.
 ///
-/// Invariants (section 5):
+/// Invariants:
 /// - The branches partition the input. No packet is lost and no packet is
 ///   duplicated. At a forwarding choice, the rule applies in each
 ///   alternative, and the alternatives of one choice carry the same packets.

@@ -1,5 +1,5 @@
-//! Step 1 "Done when": hand-built multi-device topologies with ACL, NAT and
-//! firewall session give correct verdicts and traces in the two directions.
+//! Hand-built multi-device topologies with ACL, NAT and firewall session
+//! give correct verdicts and traces in the two directions.
 
 mod common;
 
@@ -123,7 +123,7 @@ fn guest_to_dns_through_firewall_snat_ips_and_acl_and_back() {
             .contains(&SourceSpan::line("fra01-core-01.conf", 41))
     );
 
-    // The route lookup steps carry the RIB guard flag of step 1.
+    // A route lookup step carries the RIB guard flag `NotChecked`.
     assert_eq!(
         step(&b.steps, "fra01-core-01/route").rib_guard,
         rsim_core::RibGuardFlag::NotChecked

@@ -1,4 +1,4 @@
-//! The prefix table: self-written, behind a trait (section 15, item 4).
+//! A prefix table with longest-prefix match, behind a trait.
 
 use std::net::IpAddr;
 

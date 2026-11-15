@@ -1,12 +1,9 @@
-//! The packet set (section 4).
+//! The packet set.
 //!
 //! A packet set is a region of header space. It holds pairs of the original
-//! request header and the current header. The representation is private.
-//! Functions use only the operations of this interface, so that step 2 can
-//! add the decision diagram representation with no change to the functions.
-//!
-//! The step 1 representation is an explicit, sorted list of packet pairs.
-//! Concrete mode always uses a set with one packet.
+//! request header and the current header. The representation is private: an
+//! explicit, sorted list of packet pairs. Functions use only the operations
+//! of this interface. Concrete mode uses a set with one packet.
 
 use std::net::IpAddr;
 
@@ -277,15 +274,14 @@ impl PacketSet {
         )
     }
 
-    /// The reply packets: the current header with addresses and ports
-    /// swapped. The reply is a new request, so its original request is the
-    /// swapped header.
+    /// The reply packets, from [`Header::reply`] of the current header. The
+    /// reply is a new request, so its original request is the reply header.
     pub fn reply(&self) -> PacketSet {
         PacketSet::from_pairs(
             self.pairs
                 .iter()
                 .map(|p| {
-                    let h = p.current.swapped();
+                    let h = p.current.reply();
                     PacketPair {
                         original: h.clone(),
                         current: h,
@@ -296,9 +292,7 @@ impl PacketSet {
     }
 
     /// The flow key of the current header, if all members have the same key.
-    ///
-    /// Step 1 keeps firewall sessions per flow key. A set with more than one
-    /// key needs the relation form of step 2.
+    /// A firewall session holds one flow key.
     pub fn flow_key(&self) -> Uniform<FlowKey> {
         uniform(self.pairs.iter().map(|p| FlowKey::of(&p.current)))
     }

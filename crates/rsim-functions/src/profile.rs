@@ -1,5 +1,5 @@
-//! Vendor behaviour profiles (principle 4). Vendor defaults, tie-breakers and
-//! implicit rules are data here, not engine code.
+//! Vendor behaviour profiles: vendor defaults, tie-breakers and implicit
+//! rules as data.
 
 use rsim_core::{SourceSpan, VrfId};
 

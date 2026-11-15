@@ -1,4 +1,4 @@
-//! Header predicates and match bounds (section 5, item 7).
+//! Header predicates and match bounds.
 
 use std::collections::BTreeSet;
 

@@ -1,4 +1,4 @@
-//! The concrete-mode executor (section 7).
+//! The concrete-mode executor.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -83,7 +83,7 @@ impl fmt::Display for ExecError {
 impl std::error::Error for ExecError {}
 
 /// The full state of a branch at the input of a function. A return to the
-/// same full state is a loop (section 7).
+/// same full state is a loop.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct StateKey {
     function: FunctionId,

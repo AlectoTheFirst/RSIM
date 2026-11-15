@@ -1,4 +1,4 @@
-//! Memory per device (section 14). A counting allocator measures the heap
+//! Memory per device. A counting allocator measures the heap
 //! bytes that stay allocated after the twin build.
 
 // The global allocator needs `unsafe`. It is only in this benchmark binary.

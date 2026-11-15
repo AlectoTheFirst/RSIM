@@ -1,4 +1,4 @@
-//! Delay in virtual time (section 12). A function never sleeps.
+//! Delay in virtual time. A function never sleeps.
 
 use std::collections::BTreeSet;
 
@@ -11,10 +11,6 @@ pub enum DelayGap {
     Processing(FunctionId),
     /// The delay of the link after an egress function.
     Link(FunctionId),
-    /// The load-dependent queueing delay of the link after an egress function,
-    /// where the link has no load data. No function emits this kind before
-    /// step 7 (section 12).
-    Queueing(FunctionId),
 }
 
 /// A virtual-time duration in nanoseconds. If a component has no data, the

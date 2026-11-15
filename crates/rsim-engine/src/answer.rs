@@ -1,4 +1,4 @@
-//! The answer of a query (section 4) and the summary of its paths (section 7).
+//! The answer of a query and the summary of its paths.
 
 use std::collections::BTreeMap;
 
@@ -196,9 +196,9 @@ pub fn combine_flood(copies: &[Summary]) -> Summary {
 
 /// The summary of the answer, from the end of each path back to the start.
 ///
-/// Step 1 is concrete mode: the input of each node is one packet, so the
-/// edges of a node are one plain branch, the paths of one forwarding choice,
-/// or the copies of one flood. `Err` names a node where this is not true.
+/// The input of each node is one packet, so the edges of a node are one
+/// plain branch, the paths of one forwarding choice, or the copies of one
+/// flood. `Err` names a node where this is not true.
 pub fn aggregate(nodes: &[ExecNode]) -> Result<Summary, String> {
     // A child has a larger index than its parent, so the reverse order
     // handles each node after all of its children.
@@ -242,7 +242,7 @@ fn aggregate_node(node: &ExecNode, summaries: &[Option<Summary>]) -> Result<Summ
     match groups.as_slice() {
         [one] => Ok(one.clone()),
         _ => Err(format!(
-            "{} has {} parts for one packet; the aggregation of parts is step 2",
+            "{} has {} parts for one packet",
             node.function,
             groups.len()
         )),

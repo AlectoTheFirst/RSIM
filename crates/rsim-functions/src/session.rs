@@ -116,7 +116,7 @@ impl NetFunction for SessionLookup {
             Uniform::Varies => out.push(self.meta.unknown(
                 rest,
                 ReasonCode::UnsupportedSet,
-                "step 1 keeps sessions for one flow key only",
+                "a session holds one flow key, and the packets have more than one",
                 ctx,
                 state,
             )),
@@ -197,7 +197,7 @@ impl NetFunction for SessionCommit {
             Uniform::Varies => vec![self.meta.unknown(
                 input.clone(),
                 ReasonCode::UnsupportedSet,
-                "step 1 keeps sessions for one flow key only",
+                "a session holds one flow key, and the packets have more than one",
                 ctx,
                 state,
             )],

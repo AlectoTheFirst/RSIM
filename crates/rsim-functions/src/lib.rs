@@ -1,7 +1,6 @@
-//! The network function library of rsim. Step 1 holds the forwarding
-//! functions of section 6: ingress, VRF selection, zone lookup, ACL match,
-//! firewall policy, firewall session, source NAT, destination NAT, route
-//! lookup, next-hop resolution and egress.
+//! The network function library of rsim: ingress, VRF selection, zone lookup,
+//! ACL match, firewall policy, firewall session, source NAT, destination NAT,
+//! route lookup, next-hop resolution and egress.
 
 pub mod common;
 pub mod forwarding;

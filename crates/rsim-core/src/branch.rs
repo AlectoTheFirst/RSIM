@@ -1,4 +1,4 @@
-//! The branch: one part of the output of a function (section 5, item 1).
+//! The branch: one part of the output of a function.
 
 use crate::context::Context;
 use crate::delay::Delay;
@@ -22,7 +22,7 @@ pub struct Alternative {
     pub label: String,
 }
 
-/// The copy of a layer 2 flood to which a branch belongs (section 18).
+/// The copy of a layer 2 flood to which a branch belongs.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FloodCopy {
     pub flood: FunctionId,
@@ -31,9 +31,8 @@ pub struct FloodCopy {
     pub count: u32,
 }
 
-/// A condition that depends on the traffic rate (section 16). Headers cannot
-/// decide it. Its effect on the outcome is an open decision (section 15,
-/// item 9), so step 1 only carries it.
+/// A condition that depends on the traffic rate. Headers cannot decide it.
+/// The branch keeps its outcome and carries the condition.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RateCondition {
     pub function: FunctionId,

@@ -1,4 +1,4 @@
-//! Core types of the rsim network digital twin (section 4 of the build brief).
+//! Core types of the rsim network digital twin.
 
 pub mod addr;
 pub mod branch;
@@ -23,7 +23,9 @@ pub use delay::{Delay, DelayGap};
 pub use field::{FieldValue, Tri};
 pub use flow_state::{FlowState, Session};
 pub use function::{Dependency, FunctionKind, NetFunction};
-pub use header::{Encap, FlowKey, Fragment, Header, HeaderField, PROTO_ICMP, PROTO_TCP, PROTO_UDP};
+pub use header::{
+    Encap, FlowKey, Fragment, Header, HeaderField, PROTO_ICMP, PROTO_ICMPV6, PROTO_TCP, PROTO_UDP,
+};
 pub use id::{
     ApplicationId, BridgeDomainId, DeviceId, EndpointId, FunctionId, InterfaceId, ObjectId, PortId,
     VrfId, ZoneId,

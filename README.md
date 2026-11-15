@@ -6,7 +6,7 @@ The engine compiles device configs into typed network functions. The functions s
 
 ## Status
 
-Step 1 is complete. Step 1 contains the core types, the forwarding functions, the concrete-mode executor, the trace and the return path. Tests build the topologies by hand. No config parser exists yet.
+Initial phase contains the core types, the forwarding functions, the concrete-mode executor, the trace and the return path. Tests build the topologies by hand. No config parser exists yet.
 
 ## Principles
 

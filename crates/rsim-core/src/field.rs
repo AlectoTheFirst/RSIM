@@ -1,4 +1,4 @@
-//! Field values with the knowledge mask and header validity (section 4).
+//! Field values with the knowledge mask and header validity.
 
 /// The value of one header field in one packet.
 ///

@@ -1,5 +1,5 @@
 //! The compiled twin: function instances and endpoints, immutable after the
-//! build. The build validates the composition (section 5, item 2).
+//! build. The build validates the composition.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;

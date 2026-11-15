@@ -1,4 +1,4 @@
-//! Provenance: the source spans from which a function instance came (principle 3).
+//! Provenance: the source spans from which a function instance came.
 
 use std::fmt;
 use std::sync::Arc;

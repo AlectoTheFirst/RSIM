@@ -10,7 +10,7 @@ use crate::outcome::{Outcome, Reason};
 use crate::packet_set::{PacketSet, Uniform};
 use crate::provenance::SourceSpan;
 
-/// The QoS treatment at one step (section 16).
+/// The QoS treatment at one step.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QosView {
     pub dscp: Uniform<FieldValue<u8>>,
@@ -20,7 +20,8 @@ pub struct QosView {
     pub queue: Attr<u8>,
 }
 
-/// The RIB guard flag (section 11). Step 1 has no RIB guard.
+/// The result of the RIB guard for one step: the comparison of the simulated
+/// route with the collected route.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RibGuardFlag {
     NotApplicable,

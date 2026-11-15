@@ -1,4 +1,4 @@
-//! Ordered rules with match bounds (section 5, items 6 and 7).
+//! Ordered rules with match bounds.
 //!
 //! The evaluation follows the two continuations of an uncertain predicate:
 //! match and no match. Packets with the same action in all continuations get
@@ -11,7 +11,7 @@
 //! ```
 //!
 //! A rule from an unhandled stanza can change the action or the rule order,
-//! so every packet that can reach it gets `Unknown` (item 6).
+//! so every packet that can reach it gets `Unknown`.
 
 use rsim_core::{PacketSet, RulePredicate, SourceSpan, Tri};
 

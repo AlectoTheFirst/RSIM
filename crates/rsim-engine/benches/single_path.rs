@@ -1,4 +1,4 @@
-//! Single path query benchmark (section 14).
+//! Single path query benchmark.
 
 #[path = "../tests/common/mod.rs"]
 mod common;

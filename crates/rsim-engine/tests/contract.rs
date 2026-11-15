@@ -6,12 +6,16 @@ use std::collections::BTreeMap;
 
 use common::*;
 use rsim_core::{
-    Alternative, Attr, Branch, Context, Delay, EndpointId, FieldValue, FlowKey, FlowState,
-    InterfaceId, NetFunction, NextHop, Outcome, PacketSet, Prefix, PrefixTable, Reason, ReasonCode,
-    Tri, TriePrefixTable, Verdict, ZoneId,
+    Alternative, Attr, Branch, Context, Delay, EndpointId, FieldValue, FlagsCond, FlowKey,
+    FlowState, Header, InterfaceId, Match, NetFunction, NextHop, Outcome, PROTO_ICMP, PacketSet,
+    Prefix, PrefixTable, Reason, ReasonCode, SourceSpan, Tri, TriePrefixTable, ValueCond, Verdict,
+    ZoneId,
 };
 use rsim_engine::{Executor, Query, Summary, check_partition};
-use rsim_functions::{Neighbour, NextHopResolution, UnzonedInterface, ZoneLookup, ZoneRole};
+use rsim_functions::{
+    AclMatch, Meta, Neighbour, NextHopResolution, RuleAction, UnzonedInterface, ZoneLookup,
+    ZoneRole,
+};
 
 fn branch(p: PacketSet) -> Branch {
     Branch::new(
@@ -152,4 +156,62 @@ fn a_long_path_does_not_exhaust_the_stack() {
             EndpointId::new("server")
         )))
     );
+}
+
+/// An ACL that permits the packets that `m` matches and denies all others.
+fn permit_only(m: Match) -> AclMatch {
+    AclMatch {
+        meta: Meta::new("dev/acl", "dev", &nxos()),
+        acl: "return-in".into(),
+        rules: vec![rule(
+            "permit",
+            m,
+            RuleAction::Permit,
+            SourceSpan::line("dev.conf", 1),
+        )],
+        default: RuleAction::Deny,
+        next: fid("dev/next"),
+    }
+}
+
+#[test]
+fn the_reply_to_a_syn_passes_a_rule_for_packets_with_ack() {
+    let acl = permit_only(Match {
+        tcp_flags: FlagsCond::Bits {
+            mask: 0x10,
+            value: 0x10,
+        },
+        ..Match::any()
+    });
+    let request = tcp("10.0.0.1", 40000, "10.0.0.2", 22);
+    let apply = |h: Header| {
+        acl.apply(
+            &PacketSet::single(h).reply(),
+            &Context::default(),
+            &FlowState::new(),
+        )
+    };
+    let syn = apply(request.clone().with_tcp_flags(0x02));
+    assert_eq!(syn[0].outcome, Outcome::Forward(fid("dev/next")));
+    // The flags of the reply to a packet with ACK are not known.
+    let ack = apply(request.with_tcp_flags(0x10));
+    assert_eq!(ack[0].outcome, Outcome::Unknown);
+    assert_eq!(ack[0].reason.code, ReasonCode::MatchUnknown);
+}
+
+#[test]
+fn the_reply_to_an_echo_request_passes_a_rule_for_echo_replies() {
+    let acl = permit_only(Match {
+        icmp_type: ValueCond::one(0),
+        ..Match::any()
+    });
+    let mut echo = Header::request(ip("10.0.0.1"), ip("10.0.0.2"), PROTO_ICMP);
+    echo.icmp_type = FieldValue::Known(8);
+    echo.icmp_code = FieldValue::Known(0);
+    let out = acl.apply(
+        &PacketSet::single(echo).reply(),
+        &Context::default(),
+        &FlowState::new(),
+    );
+    assert_eq!(out[0].outcome, Outcome::Forward(fid("dev/next")));
 }

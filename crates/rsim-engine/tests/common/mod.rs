@@ -1,7 +1,7 @@
-//! Hand-built topologies for the step 1 tests and benchmarks.
+//! Hand-built topologies for the tests and benchmarks.
 //!
 //! All vendor profile values here are hand-built test data. They are not
-//! confirmed against a device (section 6).
+//! confirmed against a device.
 
 #![allow(dead_code, clippy::type_complexity)]
 
@@ -322,21 +322,17 @@ pub struct MiniOpts {
     pub reverse_insertion: bool,
 }
 
-/// The guest-to-DNS path of the baseline fixture
-/// `rsim-baseline-enterprise.yaml`:
+/// A guest client reaches a DNS server through a firewall, an inline IPS and
+/// a core switch:
 ///
 /// guest-client 172.31.10.20 -> fra01-fgt-01 port2 (zone guest) -> policy
 /// guest-to-dns, SNAT guest-snat to 10.20.0.254 -> port1 (zone corp) ->
 /// fra01-ips-01 1B -> 1A (inline) -> fra01-core-01 eth1-1 -> vlan100 ->
 /// fra01-dns 10.20.0.53.
 ///
-/// Differences from the fixture:
-/// - Step 1 has no layer 2 functions, so core-01 routes between eth1-1 and
-///   vlan100 with a host route to the FortiGate address. In the fixture,
-///   this hop is switched in VLAN 100.
-/// - The fixture has no ACL on core-01, no static route on core-01 and no
-///   rules in the IPS profile. The ACL "users-in", the static route to
-///   172.31.0.0/16 and the IPS filters are added here.
+/// core-01 routes between eth1-1 and vlan100 with a host route to the
+/// FortiGate address. It has the ACL "users-in" and a static route to
+/// 172.31.0.0/16. The IPS has filters.
 pub fn mini_enterprise(opts: MiniOpts) -> TwinBuilder {
     let fgt = Dev::new("fra01-fgt-01", fortios());
     let ips = Dev::new("fra01-ips-01", tippingpoint());
