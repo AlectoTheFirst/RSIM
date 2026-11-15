@@ -1,0 +1,27 @@
+[package]
+name = "rsim-engine"
+description = "Twin build, forwarding executor, verdict aggregation and return path of the rsim network digital twin."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rsim-core.workspace = true
+rsim-functions.workspace = true
+
+[dev-dependencies]
+criterion = "0.8"
+proptest = "1.12"
+
+[[bench]]
+name = "single_path"
+harness = false
+
+[[bench]]
+name = "memory"
+harness = false
+
+[lints]
+workspace = true
