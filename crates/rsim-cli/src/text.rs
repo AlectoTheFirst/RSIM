@@ -234,7 +234,7 @@ fn delay(d: &DelayJson) -> String {
 fn packets(p: &PacketSetJson) -> String {
     let mut parts: Vec<String> = Vec::new();
     for m in &p.members {
-        let h = header(&m.current);
+        let h = header(&m.current, &m.original);
         if !parts.contains(&h) {
             parts.push(h);
         }
@@ -264,17 +264,25 @@ fn field<T: std::fmt::Display>(f: &FieldJson<T>) -> String {
         }
         FieldJson::Unknown => "?".to_string(),
         FieldJson::Absent => "-".to_string(),
-        FieldJson::Original => "=".to_string(),
+        FieldJson::Original => "original".to_string(),
     }
 }
 
-fn header(h: &HeaderJson) -> String {
+/// The current header. A field with the value of the original request
+/// shows the original values.
+fn header(h: &HeaderJson, o: &HeaderJson) -> String {
+    fn pick<T: std::fmt::Display>(c: &FieldJson<T>, o: &FieldJson<T>) -> String {
+        match c {
+            FieldJson::Original => field(o),
+            c => field(c),
+        }
+    }
     format!(
         "{} {}:{} > {}:{}",
-        field(&h.iana_number),
-        field(&h.source_ip),
-        field(&h.source_port),
-        field(&h.destination_ip),
-        field(&h.destination_port)
+        pick(&h.iana_number, &o.iana_number),
+        pick(&h.source_ip, &o.source_ip),
+        pick(&h.source_port, &o.source_port),
+        pick(&h.destination_ip, &o.destination_ip),
+        pick(&h.destination_port, &o.destination_port)
     )
 }

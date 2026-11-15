@@ -20,6 +20,10 @@ use crate::predicate::RulePredicate;
 use crate::prefix_table::PrefixTable;
 use crate::set::{Builder, MapKind, Ops, SetArena, prefix_lits};
 
+const MEMO_ORIGINAL: u8 = 0;
+const MEMO_DSCP: u8 = 1;
+const MEMO_ECN: u8 = 2;
+
 /// One member of a packet set: the original request header and the current header.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PacketPair {
@@ -388,10 +392,13 @@ impl PacketSet {
     /// result has the original request as both headers.
     pub fn project_original(&self) -> PacketSet {
         self.op(&[], |ops| {
-            let cur: Vec<u32> = (0..bits::BITS).collect();
-            let cube = ops.cube(&cur, Bank::Current)?;
-            let o = ops.dd.exists(self.edge, cube)?;
-            ops.dd.and(o, ops.base.eq)
+            if let Some(&e) = ops.memo.get(&(MEMO_ORIGINAL, self.edge)) {
+                return Ok(e);
+            }
+            let o = ops.dd.exists(self.edge, ops.base.cur_cube)?;
+            let e = ops.dd.and(o, ops.base.eq)?;
+            ops.memo.insert((MEMO_ORIGINAL, self.edge), e);
+            Ok(e)
         })
     }
 
@@ -645,11 +652,30 @@ impl PacketSet {
     }
 
     pub fn dscp(&self) -> Uniform<FieldValue<u8>> {
-        self.uniform(bits::DSCP, |h| h.dscp)
+        self.uniform_memo(MEMO_DSCP, bits::DSCP, |h| h.dscp)
     }
 
     pub fn ecn(&self) -> Uniform<FieldValue<u8>> {
-        self.uniform(bits::ECN, |h| h.ecn)
+        self.uniform_memo(MEMO_ECN, bits::ECN, |h| h.ecn)
+    }
+
+    /// [`PacketSet::uniform`] with the result kept in the arena.
+    fn uniform_memo(
+        &self,
+        kind: u8,
+        f: FieldBits,
+        get: fn(&Header) -> FieldValue<u8>,
+    ) -> Uniform<FieldValue<u8>> {
+        let key = (kind, self.edge);
+        if let Some(Some(u)) = self.run(&[], |ops| Ok(ops.qos.get(&key).copied())) {
+            return u;
+        }
+        let u = self.uniform(f, get);
+        self.run(&[], |ops| {
+            ops.qos.insert(key, u);
+            Ok(())
+        });
+        u
     }
 
     /// The session relation of packets that a session lookup saw as this
@@ -660,18 +686,18 @@ impl PacketSet {
     /// commit. The other fields have all values.
     pub fn session_relation(&self, commit: &PacketSet) -> PacketSet {
         self.op(&[commit], |ops| {
-            let cw = ops.map(MapKind::CurrentWork)?;
-            let a = ops.dd.rename(self.edge, cw)?;
-            let orig = ops.base.orig_cube;
-            let t = ops.dd.and_exists(a, commit.edge, orig)?;
-            let wo = ops.map(MapKind::WorkOriginal)?;
-            let r = ops.dd.rename(t, wo)?;
             let flow = bits::flow_bits();
             let rest: Vec<u32> = (0..bits::BITS).filter(|b| !flow.contains(b)).collect();
-            let c1 = ops.cube(&rest, Bank::Original)?;
-            let c2 = ops.cube(&rest, Bank::Current)?;
-            let cube = ops.dd.and(c1, c2)?;
-            ops.dd.exists(r, cube)
+            let rest_cur = ops.cube(&rest, Bank::Current)?;
+            // The flows at the lookup and at the commit, with the original
+            // requests.
+            let at_lookup = ops.dd.exists(self.edge, rest_cur)?;
+            let at_commit = ops.dd.exists(commit.edge, rest_cur)?;
+            let cw = ops.map(MapKind::CurrentWorkFlow)?;
+            let a = ops.dd.rename(at_lookup, cw)?;
+            let t = ops.dd.and_exists(a, at_commit, ops.base.orig_cube)?;
+            let wo = ops.map(MapKind::OriginalWorkFlow)?;
+            ops.dd.rename(t, wo)
         })
     }
 
@@ -679,15 +705,8 @@ impl PacketSet {
     /// bank and the current bank. A session relation with such a pair has
     /// a NAT binding.
     pub fn changes_flow(&self) -> bool {
-        self.run(&[], |ops| {
-            let mut b = ops.builder();
-            let mut eq = Edge::TRUE;
-            for x in bits::flow_bits().into_iter().rev() {
-                eq = b.eq_bit(x, Bank::Original, Bank::Current, eq)?;
-            }
-            b.dd.diff(self.edge, eq)
-        })
-        .is_some_and(|e| e != Edge::FALSE)
+        self.run(&[], |ops| ops.dd.diff(self.edge, ops.base.eq_flow))
+            .is_some_and(|e| e != Edge::FALSE)
     }
 
     /// True if a flow field of the current bank is unknown in a part of the set.
@@ -721,9 +740,7 @@ impl PacketSet {
                 rel = ops.dd.rename(rel, m)?;
             }
             // The flows of the lookup side, on the current bank.
-            let all: Vec<u32> = (0..bits::BITS).collect();
-            let cur = ops.cube(&all, Bank::Current)?;
-            let dom = ops.dd.exists(rel, cur)?;
+            let dom = ops.dd.exists(rel, ops.base.cur_cube)?;
             let oc = ops.map(MapKind::OriginalCurrentFlow)?;
             let dom = ops.dd.rename(dom, oc)?;
             // An unknown port can be equal to each known port.

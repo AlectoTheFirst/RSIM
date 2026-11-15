@@ -8,8 +8,8 @@ use rsim_core::{
 };
 use rsim_engine::TwinBuilder;
 use rsim_functions::{
-    DestinationNat, EgressMode, FirewallPolicy, NatAction, RouteKind, Rule, RuleAction, SourceNat,
-    ZoneRole, ZoneScope,
+    DestinationNat, EgressMode, FirewallPolicy, NatAction, PortTranslation, RouteKind, Rule,
+    RuleAction, SourceNat, ZoneRole, ZoneScope,
 };
 
 use crate::builders::*;
@@ -25,6 +25,8 @@ pub struct MiniOpts {
     pub skip_dst_zone: bool,
     /// Build the functions in reverse order.
     pub reverse_insertion: bool,
+    /// The source NAT selects the source port.
+    pub snat_selects_port: bool,
 }
 
 /// A guest client reaches a DNS server through a firewall, an inline IPS and
@@ -140,7 +142,11 @@ pub fn mini_enterprise(opts: MiniOpts) -> TwinBuilder {
         RulePredicate::exact(m_src_dst(&["172.31.0.0/16"], &[])),
         NatAction::Translate {
             addr: ip("10.20.0.254"),
-            port: fgt.profile.snat_port,
+            port: if opts.snat_selects_port {
+                PortTranslation::Allocate
+            } else {
+                fgt.profile.snat_port
+            },
         },
     )
     .with_span(fgt.span(140, 146));

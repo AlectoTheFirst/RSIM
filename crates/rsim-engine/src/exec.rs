@@ -30,9 +30,10 @@ pub struct Query {
 
 impl Query {
     /// A path query for one packet. A field that the header does not state
-    /// is not known.
+    /// is not known. The arena of the packets has the default node budget,
+    /// so the first run of the query can use it.
     pub fn path(twin: &Twin, header: &Header) -> Query {
-        let arena = twin.arena(None);
+        let arena = twin.arena(ExecOptions::default().node_budget);
         Query {
             ingress: None,
             packets: PacketSet::single(&arena, header),
@@ -78,6 +79,9 @@ pub struct ExecOptions {
     /// The node budget of the packet sets of one run. A run over the budget
     /// splits its input. `None` is no budget.
     pub node_budget: Option<usize>,
+    /// The maximum number of runs of one query. When a query has this
+    /// number of runs, a part over the node budget does not split again.
+    pub max_runs: usize,
 }
 
 impl Default for ExecOptions {
@@ -86,6 +90,7 @@ impl Default for ExecOptions {
             check_contract: true,
             max_steps: 10_000,
             node_budget: Some(1_000_000),
+            max_runs: 256,
         }
     }
 }
@@ -171,6 +176,7 @@ impl<'t> Executor<'t> {
 
     pub fn run(&self, q: &Query) -> Result<Answer, ExecError> {
         let mut outs = Vec::new();
+        let mut runs = 0;
         for (set, ingress) in self.resolve(q)? {
             if set.is_empty() {
                 continue;
@@ -178,7 +184,7 @@ impl<'t> Executor<'t> {
             match &ingress {
                 Ingress::Found { function, .. } => {
                     let start = function.clone();
-                    self.run_part(&set, &ingress, &start, q, &mut outs)?;
+                    self.run_part(&set, &ingress, &start, q, &mut outs, &mut runs)?;
                 }
                 Ingress::NotFound(r) => {
                     outs.push(ended(&set, ingress.clone(), Verdict::Unknown(r.clone())));
@@ -230,8 +236,9 @@ impl<'t> Executor<'t> {
     }
 
     /// Runs one part in a new arena. A part over the node budget splits on
-    /// the first bit of its original requests. A part that cannot split
-    /// gets `Unknown` with the reason `SetBudget`.
+    /// the first bit of its original requests. A part that cannot split, or
+    /// a part over the budget when the query has [`ExecOptions::max_runs`]
+    /// runs, gets `Unknown` with the reason `SetBudget`.
     fn run_part(
         &self,
         input: &PacketSet,
@@ -239,26 +246,60 @@ impl<'t> Executor<'t> {
         start: &FunctionId,
         q: &Query,
         outs: &mut Vec<RunOut>,
+        runs: &mut usize,
     ) -> Result<(), ExecError> {
-        let arena = self.twin.arena(self.opts.node_budget);
-        let s = input.copy_to(&arena);
+        *runs += 1;
+        // The first run uses the arena of the input if it has the budget of
+        // the query. Each other run has a new arena.
+        let own = input.arena();
+        let reuse = *runs == 1
+            && own.budget() == self.opts.node_budget
+            && own.has_base(self.twin.set_base())
+            && own.fault().is_none();
+        let s = if reuse {
+            input.clone()
+        } else {
+            input.copy_to(&self.twin.arena(self.opts.node_budget))
+        };
         let r = fault_of(&s).and_then(|()| self.try_run(&s, ingress, start, q, FlowState::new()));
         match r {
             Ok(out) => outs.push(out),
-            Err(Stop::Fault(DdError::NodeBudget { budget })) => match input.split_on_first_bit() {
-                Some((a, b)) => {
-                    self.run_part(&a, ingress, start, q, outs)?;
-                    self.run_part(&b, ingress, start, q, outs)?;
+            Err(Stop::Fault(DdError::NodeBudget { budget })) => {
+                // The arena of the input can have the fault of a run, so
+                // the split then works on a copy in an arena with no budget.
+                let input = if input.arena().fault().is_some() {
+                    input.copy_to(&self.twin.arena(None))
+                } else {
+                    input.clone()
+                };
+                let input = &input;
+                let split = if *runs < self.opts.max_runs {
+                    input.split_on_first_bit()
+                } else {
+                    None
+                };
+                match split {
+                    Some((a, b)) => {
+                        self.run_part(&a, ingress, start, q, outs, runs)?;
+                        self.run_part(&b, ingress, start, q, outs, runs)?;
+                    }
+                    None => {
+                        let detail = if *runs < self.opts.max_runs {
+                            format!("one original request is over the node budget {budget}")
+                        } else {
+                            format!(
+                                "the part is over the node budget {budget}, and the query has {} runs",
+                                self.opts.max_runs
+                            )
+                        };
+                        outs.push(ended(
+                            input,
+                            ingress.clone(),
+                            Verdict::Unknown(Reason::new(ReasonCode::SetBudget, detail)),
+                        ));
+                    }
                 }
-                None => outs.push(ended(
-                    input,
-                    ingress.clone(),
-                    Verdict::Unknown(Reason::new(
-                        ReasonCode::SetBudget,
-                        format!("one original request is over the node budget {budget}"),
-                    )),
-                )),
-            },
+            }
             Err(Stop::Fault(e)) => return Err(ExecError::PacketSet(e)),
             Err(Stop::Error(e)) => return Err(e),
         }
@@ -286,8 +327,10 @@ impl<'t> Executor<'t> {
         let nodes = self.walk(start, s.clone(), state)?;
         let parts = aggregate(&nodes).map_err(ExecError::Aggregation)?;
         fault_of(s)?;
-        check_parts(&parts, s).map_err(ExecError::Aggregation)?;
-        fault_of(s)?;
+        if self.opts.check_contract {
+            check_parts(&parts, s).map_err(ExecError::Aggregation)?;
+            fault_of(s)?;
+        }
         let run = Run {
             ingress: ingress.clone(),
             input: s.clone(),

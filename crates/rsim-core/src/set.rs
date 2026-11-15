@@ -8,6 +8,8 @@ use rsim_dd::{Dd, DdError, Edge, Frozen, MapId};
 
 use crate::addr::Prefix;
 use crate::bits::{self, Bank, FieldBits, level};
+use crate::field::FieldValue;
+use crate::packet_set::Uniform;
 use crate::predicate::{AddrCond, FlagsCond, FragmentCond, MacCond, Match, PortCond, ValueCond};
 
 /// The frozen base of the packet sets of one twin: the relation "original
@@ -19,6 +21,10 @@ pub struct SetBase {
     pub(crate) eq: Edge,
     /// The cube of all levels of the original bank.
     pub(crate) orig_cube: Edge,
+    /// The cube of all levels of the current bank.
+    pub(crate) cur_cube: Edge,
+    /// The original bank equals the current bank on the flow bits.
+    pub(crate) eq_flow: Edge,
     pub(crate) definite: BTreeMap<Match, Edge>,
     pub(crate) upper: BTreeMap<Match, Edge>,
 }
@@ -35,6 +41,12 @@ impl SetBase {
         let eq = b.eq_banks(Bank::Original, Bank::Current, 0..bits::BITS)?;
         let orig: Vec<u32> = (0..bits::BITS).map(|x| level(x, Bank::Original)).collect();
         let orig_cube = b.dd.cube(&orig)?;
+        let cur: Vec<u32> = (0..bits::BITS).map(|x| level(x, Bank::Current)).collect();
+        let cur_cube = b.dd.cube(&cur)?;
+        let mut eq_flow = Edge::TRUE;
+        for x in bits::flow_bits().into_iter().rev() {
+            eq_flow = b.eq_bit(x, Bank::Original, Bank::Current, eq_flow)?;
+        }
         let mut definite = BTreeMap::new();
         let mut upper = BTreeMap::new();
         for p in predicates {
@@ -52,6 +64,8 @@ impl SetBase {
             frozen,
             eq,
             orig_cube,
+            cur_cube,
+            eq_flow,
             definite,
             upper,
         }))
@@ -71,10 +85,6 @@ impl SetBase {
 /// The level maps that the operations register once in each arena.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum MapKind {
-    /// The current bank and the work bank swap.
-    CurrentWork,
-    /// The work bank and the original bank swap.
-    WorkOriginal,
     /// The current and the work levels of the flow bits swap.
     CurrentWorkFlow,
     /// The original and the work levels of the flow bits swap.
@@ -94,6 +104,11 @@ pub(crate) struct Inner {
     pub(crate) definite: BTreeMap<Match, Edge>,
     pub(crate) upper: BTreeMap<Match, Edge>,
     maps: BTreeMap<MapKind, MapId>,
+    cubes: BTreeMap<(Vec<u32>, Bank), Edge>,
+    /// Results of unary operations by kind and edge.
+    pub(crate) memo: BTreeMap<(u8, Edge), Edge>,
+    /// The QoS field values of sets by field and edge.
+    pub(crate) qos: BTreeMap<(u8, Edge), Uniform<FieldValue<u8>>>,
 }
 
 /// The arena of the packet sets of one query: a scratch arena on the base
@@ -103,6 +118,7 @@ pub(crate) struct Inner {
 #[derive(Debug)]
 pub struct SetArena {
     pub(crate) base: Arc<SetBase>,
+    budget: Option<usize>,
     inner: Mutex<Inner>,
 }
 
@@ -119,14 +135,19 @@ impl SetArena {
     pub fn new(base: &Arc<SetBase>, budget: Option<usize>) -> Arc<SetArena> {
         let mut dd = Dd::scratch(Arc::clone(&base.frozen), budget);
         dd.set_shadow(false);
+        dd.reserve(budget.unwrap_or(1 << 16).min(1 << 16));
         Arc::new(SetArena {
             base: Arc::clone(base),
+            budget,
             inner: Mutex::new(Inner {
                 dd,
                 fault: None,
                 definite: BTreeMap::new(),
                 upper: BTreeMap::new(),
                 maps: BTreeMap::new(),
+                cubes: BTreeMap::new(),
+                memo: BTreeMap::new(),
+                qos: BTreeMap::new(),
             }),
         })
     }
@@ -145,6 +166,16 @@ impl SetArena {
 
     pub(crate) fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The node budget of the arena.
+    pub fn budget(&self) -> Option<usize> {
+        self.budget
+    }
+
+    /// True if the arena and `base` are the same base.
+    pub fn has_base(&self, base: &Arc<SetBase>) -> bool {
+        Arc::ptr_eq(&self.base, base)
     }
 
     /// The first fault of an operation, if there is one.
@@ -171,6 +202,9 @@ impl SetArena {
             definite: &mut inner.definite,
             upper: &mut inner.upper,
             maps: &mut inner.maps,
+            cubes: &mut inner.cubes,
+            memo: &mut inner.memo,
+            qos: &mut inner.qos,
         };
         match f(&mut ops) {
             Ok(r) => Some(r),
@@ -197,6 +231,9 @@ pub(crate) struct Ops<'a> {
     definite: &'a mut BTreeMap<Match, Edge>,
     upper: &'a mut BTreeMap<Match, Edge>,
     maps: &'a mut BTreeMap<MapKind, MapId>,
+    cubes: &'a mut BTreeMap<(Vec<u32>, Bank), Edge>,
+    pub(crate) memo: &'a mut BTreeMap<(u8, Edge), Edge>,
+    pub(crate) qos: &'a mut BTreeMap<(u8, Edge), Uniform<FieldValue<u8>>>,
 }
 
 impl Ops<'_> {
@@ -233,11 +270,8 @@ impl Ops<'_> {
                 .flat_map(|&x| [(level(x, a), level(x, b)), (level(x, b), level(x, a))])
                 .collect()
         };
-        let all: Vec<u32> = (0..bits::BITS).collect();
         let flow = bits::flow_bits();
         let pairs = match kind {
-            MapKind::CurrentWork => swap(Bank::Current, Bank::Work, &all),
-            MapKind::WorkOriginal => swap(Bank::Work, Bank::Original, &all),
             MapKind::CurrentWorkFlow => swap(Bank::Current, Bank::Work, &flow),
             MapKind::OriginalWorkFlow => swap(Bank::Original, Bank::Work, &flow),
             MapKind::OriginalCurrentFlow => swap(Bank::Original, Bank::Current, &flow),
@@ -269,8 +303,14 @@ impl Ops<'_> {
 
     /// The cube of the levels of `bits` in `bank`.
     pub(crate) fn cube(&mut self, bits: &[u32], bank: Bank) -> Result<Edge, DdError> {
+        let key = (bits.to_vec(), bank);
+        if let Some(&e) = self.cubes.get(&key) {
+            return Ok(e);
+        }
         let ls: Vec<u32> = bits.iter().map(|&b| level(b, bank)).collect();
-        self.dd.cube(&ls)
+        let e = self.dd.cube(&ls)?;
+        self.cubes.insert(key, e);
+        Ok(e)
     }
 }
 

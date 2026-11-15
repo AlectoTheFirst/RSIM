@@ -54,18 +54,22 @@ You need Rust 1.99 or later.
 | Task | Command |
 |---|---|
 | List the topologies | `cargo run -p rsim-cli -- topologies` |
-| List the devices, functions and endpoints | `cargo run -p rsim-cli -- devices mini-enterprise` |
-| Run a path query with its reply | `cargo run -p rsim-cli -- path mini-enterprise --from guest-client --dst 10.20.0.53 --protocol udp --src-port 40000 --dst-port 53` |
-| Show one trace step | `cargo run -p rsim-cli -- explain mini-enterprise --from guest-client --dst 10.20.0.53 --protocol udp --dst-port 53 --branch 0 --step 7` |
+| List the devices, functions, endpoints and attachment records | `cargo run -p rsim-cli -- devices mini-enterprise` |
+| Run a path query with its reply | `cargo run -p rsim-cli -- path mini-enterprise --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --source.port 40000 --destination.port 53` |
+| Show one trace step | `cargo run -p rsim-cli -- explain mini-enterprise --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --destination.port 53 --branch 0 --step 7` |
 | Show one trace step of the reply of branch 0 | Add `--reply-of 0` to the `explain` command |
 | Get JSON | Add `--format json`. Add `--pretty` for indented JSON. |
 | Show all flags | `cargo run -p rsim-cli -- path --help` |
 
-The query flags are `--from`, `--dst`, `--protocol`, `--src`, `--src-port`, `--dst-port`, `--tcp-flags`, `--icmp-type`, `--icmp-code`, `--dscp`, `--ecn`, `--later-fragment` and `--no-reply`. `--tcp-flags` takes a comma-separated list, for example `syn,ack`.
+The query flags use the names of the Elastic Common Schema where it has one: `--source.ip`, `--destination.ip`, `--network.iana_number`, `--network.transport`, `--source.port`, `--destination.port`, `--source.mac`, `--destination.mac` and `--network.vlan.id`. The other flags are `--l2_priority`, `--tcp_flags`, `--icmp_type`, `--icmp_code`, `--dscp`, `--ecn`, `--fragment`, `--ingress` and `--no-reply`. `--tcp_flags` takes a comma-separated list, for example `syn,ack`.
+
+- A path query needs `--source.ip`, `--destination.ip`, and `--network.iana_number` or `--network.transport`.
+- `--ingress <device>/<interface>` states where the packet enters. Without it, the attachment records of the source address give the ingress. A source address on a connected network of an edge interface gives an ingress with a host that is not confirmed.
+- A field that the query does not state is not known. If the result depends on such a field, the summary is `unknown`. The branches show each part exactly.
 
 The exit code is 0 if the engine gave an answer. `Drop` and `Unknown` are answers. The exit code is 1 for a query error and 2 for a usage error.
 
-The JSON output has the field `rsim_json` with the version number 1. The same query gives the same bytes.
+The JSON output has the field `rsim_json` with the version number 2. The same query gives the same bytes. A packet set is a list of members, and each member is a product of field values.
 
 ## MCP server
 
@@ -76,8 +80,8 @@ The JSON output has the field `rsim_json` with the version number 1. The same qu
 
 | Tool | Arguments | Result |
 |---|---|---|
-| `list_devices` | `topology` | The devices, functions and endpoints |
-| `path_query` | The query fields of `rsim path`, in snake case: `topology`, `from`, `dst`, `protocol` and the optional fields | The answer with the trace and the reply |
+| `list_devices` | `topology` | The devices, functions, endpoints, attachment records and edge interfaces |
+| `path_query` | The query fields of `rsim path` with the same names: `topology`, `source.ip`, `destination.ip`, the protocol and the optional fields | The answer with the ingress, the trace and the reply |
 | `explain_step` | The query fields, `branch`, `step` and the optional `reply_of` | One trace step. The tool runs the query again. |
 
 The JSON of a tool result is the same as the output of `rsim` with `--format json`.

@@ -238,6 +238,13 @@ impl Dd {
         self.shadow_on = on;
     }
 
+    /// Reserves room for `nodes` more nodes and their table entries.
+    pub fn reserve(&mut self, nodes: usize) {
+        self.nodes.reserve(nodes);
+        self.unique.reserve(nodes);
+        self.cache.reserve(nodes);
+    }
+
     /// Turns the operation caches on or off.
     pub fn set_caches(&mut self, on: bool) {
         self.caches = on;
