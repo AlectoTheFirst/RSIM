@@ -12,6 +12,7 @@ rsim-core.workspace = true
 rsim-functions.workspace = true
 
 [dev-dependencies]
+rsim-topologies.workspace = true
 criterion = "0.8"
 proptest = "1.12"
 

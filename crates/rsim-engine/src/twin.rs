@@ -6,7 +6,7 @@ use std::fmt;
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use rsim_core::{ContextAttr, EndpointId, FunctionId, NetFunction};
+use rsim_core::{ContextAttr, DeviceId, EndpointId, FunctionId, NetFunction};
 
 /// A host that sends and receives packets.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -269,6 +269,18 @@ impl Twin {
 
     pub fn functions(&self) -> impl Iterator<Item = &Arc<dyn NetFunction>> {
         self.functions.values()
+    }
+
+    /// The device identifiers, in identifier order.
+    pub fn devices(&self) -> Vec<DeviceId> {
+        let devices: BTreeSet<&DeviceId> =
+            self.functions.values().filter_map(|f| f.device()).collect();
+        devices.into_iter().cloned().collect()
+    }
+
+    /// The endpoints, in identifier order.
+    pub fn endpoints(&self) -> impl Iterator<Item = &Endpoint> {
+        self.endpoints.values()
     }
 
     pub fn function_count(&self) -> usize {

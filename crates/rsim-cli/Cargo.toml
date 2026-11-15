@@ -1,0 +1,23 @@
+[package]
+name = "rsim-cli"
+description = "Path queries on the rsim network digital twin, with text and versioned JSON output."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+rsim-core.workspace = true
+rsim-engine.workspace = true
+rsim-topologies.workspace = true
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "rsim"
+path = "src/main.rs"

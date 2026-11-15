@@ -1,0 +1,16 @@
+[package]
+name = "rsim-mcp"
+description = "Model Context Protocol server on stdio for path queries on the rsim network digital twin."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rsim-cli.workspace = true
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["raw_value"] }
+
+[lints]
+workspace = true

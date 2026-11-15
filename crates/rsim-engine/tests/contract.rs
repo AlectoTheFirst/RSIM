@@ -1,10 +1,7 @@
 //! Checks of the function contract and of edge cases of the functions.
 
-mod common;
-
 use std::collections::BTreeMap;
 
-use common::*;
 use rsim_core::{
     Alternative, Attr, Branch, Context, Delay, EndpointId, FieldValue, FlagsCond, FlowKey,
     FlowState, Header, InterfaceId, Match, NetFunction, NextHop, Outcome, PROTO_ICMP, PacketSet,
@@ -16,6 +13,7 @@ use rsim_functions::{
     AclMatch, Meta, Neighbour, NextHopResolution, RuleAction, UnzonedInterface, ZoneLookup,
     ZoneRole,
 };
+use rsim_topologies::*;
 
 fn branch(p: PacketSet) -> Branch {
     Branch::new(
