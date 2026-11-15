@@ -60,6 +60,28 @@ pub enum HeaderField {
 }
 
 impl HeaderField {
+    /// The name of the field in a reason text.
+    pub fn name(&self) -> &'static str {
+        match self {
+            HeaderField::SrcMac => "source MAC",
+            HeaderField::DstMac => "destination MAC",
+            HeaderField::Vlan => "VLAN",
+            HeaderField::L2Priority => "layer 2 priority",
+            HeaderField::SrcIp => "source IP",
+            HeaderField::DstIp => "destination IP",
+            HeaderField::Protocol => "protocol",
+            HeaderField::Dscp => "DSCP",
+            HeaderField::Ecn => "ECN",
+            HeaderField::Fragment => "fragment",
+            HeaderField::SrcPort => "source port",
+            HeaderField::DstPort => "destination port",
+            HeaderField::TcpFlags => "TCP flags",
+            HeaderField::IcmpType => "ICMP type",
+            HeaderField::IcmpCode => "ICMP code",
+            HeaderField::MplsTrafficClass => "MPLS traffic class",
+        }
+    }
+
     /// The QoS header fields (section 16).
     pub const QOS: [HeaderField; 4] = [
         HeaderField::Dscp,
@@ -73,8 +95,7 @@ impl HeaderField {
 ///
 /// The ingress device, the ingress interface and the VRF are not header
 /// fields here. They are context attributes ([`crate::context::Context`]) and
-/// the start point of a query. This follows the forwarding state of the HST
-/// model, where location and execution context are separate from the header.
+/// the start point of a query.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Header {
     // Layer 2.

@@ -11,8 +11,7 @@ use rsim_core::{
 };
 
 use crate::answer::{
-    Answer, Assumption, End, ExecEdge, ExecNode, Mode, Reply, ReplyResult, aggregate,
-    delivered_endpoint,
+    Answer, End, ExecEdge, ExecNode, Reply, ReplyResult, aggregate, delivered_endpoint,
 };
 use crate::twin::Twin;
 
@@ -20,7 +19,6 @@ use crate::twin::Twin;
 pub struct Query {
     pub start: FunctionId,
     pub packets: PacketSet,
-    pub mode: Mode,
     /// Run the return path for each delivered branch.
     pub reply: bool,
 }
@@ -31,7 +29,6 @@ impl Query {
         twin: &Twin,
         endpoint: &EndpointId,
         header: Header,
-        mode: Mode,
     ) -> Result<Query, ExecError> {
         let e = twin
             .endpoint(endpoint)
@@ -39,7 +36,6 @@ impl Query {
         Ok(Query {
             start: e.attachment.clone(),
             packets: PacketSet::single(header),
-            mode,
             reply: true,
         })
     }
@@ -51,7 +47,7 @@ pub struct ExecOptions {
     /// each step. A violation is an error of the query.
     pub check_contract: bool,
     /// The maximum number of steps of one branch. A branch that reaches it
-    /// ends as `Indeterminate` with the reason `StepBudget`. Loops are
+    /// ends as `Unknown` with the reason `StepBudget`. Loops are
     /// detected before this limit; see [`ReasonCode::Loop`].
     pub max_steps: usize,
 }
@@ -114,7 +110,7 @@ impl<'t> Executor<'t> {
     }
 
     pub fn run(&self, q: &Query) -> Result<Answer, ExecError> {
-        let mut answer = self.run_one(&q.start, &q.packets, q.mode, FlowState::new())?;
+        let mut answer = self.run_one(&q.start, &q.packets, FlowState::new())?;
         if q.reply {
             answer.replies = self.replies(&answer)?;
         }
@@ -125,7 +121,6 @@ impl<'t> Executor<'t> {
         &self,
         start: &FunctionId,
         packets: &PacketSet,
-        mode: Mode,
         state: FlowState,
     ) -> Result<Answer, ExecError> {
         let f = self
@@ -137,15 +132,12 @@ impl<'t> Executor<'t> {
             return Err(ExecError::StartRequiresContext(start.clone(), req));
         }
         let nodes = self.walk(start, packets.clone(), state)?;
-        let verdict = aggregate(&nodes, mode).map_err(ExecError::Aggregation)?;
+        let summary = aggregate(&nodes).map_err(ExecError::Aggregation)?;
         Ok(Answer {
-            mode,
             start: start.clone(),
             input: packets.clone(),
             nodes,
-            verdict,
-            // Each answer states the independence assumption (section 7).
-            assumptions: vec![Assumption::IndependentSelection],
+            summary,
             replies: Vec::new(),
         })
     }
@@ -161,21 +153,15 @@ impl<'t> Executor<'t> {
             let result = match delivered_endpoint(b.verdict) {
                 Some(e) => match self.twin.endpoint(e) {
                     Some(ep) => {
-                        let a = self.run_one(
-                            &ep.attachment,
-                            &b.packets.reply(),
-                            forward.mode,
-                            b.state.clone(),
-                        )?;
+                        let a =
+                            self.run_one(&ep.attachment, &b.packets.reply(), b.state.clone())?;
                         ReplyResult::Ran(Box::new(a))
                     }
                     None => ReplyResult::NotRun(format!("endpoint {e} is not in the twin")),
                 },
                 None => ReplyResult::NotRun(match b.verdict {
                     Verdict::Deliver(Destination::Device(d)) => {
-                        format!(
-                            "the packets were delivered to device {d}; step 1 has no origin function for a device"
-                        )
+                        format!("reply from device {d} not supported")
                     }
                     _ => unreachable!(),
                 }),
@@ -265,21 +251,15 @@ impl<'t> Executor<'t> {
                     if visited.contains(&next_key) {
                         terminal(
                             step,
-                            Verdict::Drop(Reason::new(
-                                ReasonCode::Loop,
-                                format!("the packets return to {next} in the same full state"),
-                            )),
+                            Verdict::Drop(Reason::new(ReasonCode::Loop, format!("loop · {next}"))),
                             b,
                         )
                     } else if depth >= self.opts.max_steps {
                         terminal(
                             step,
-                            Verdict::Indeterminate(Reason::new(
+                            Verdict::Unknown(Reason::new(
                                 ReasonCode::StepBudget,
-                                format!(
-                                    "the branch reached the budget of {} steps",
-                                    self.opts.max_steps
-                                ),
+                                format!("step limit {} reached", self.opts.max_steps),
                             )),
                             b,
                         )
@@ -304,8 +284,8 @@ impl<'t> Executor<'t> {
                     let v = Verdict::Drop(b.reason.clone());
                     terminal(step, v, b)
                 }
-                Outcome::Indeterminate => {
-                    let v = Verdict::Indeterminate(b.reason.clone());
+                Outcome::Unknown => {
+                    let v = Verdict::Unknown(b.reason.clone());
                     terminal(step, v, b)
                 }
             };

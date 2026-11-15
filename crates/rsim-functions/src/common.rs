@@ -95,7 +95,7 @@ impl Meta {
         )
     }
 
-    pub fn indeterminate(
+    pub fn unknown(
         &self,
         packets: PacketSet,
         code: ReasonCode,
@@ -105,7 +105,7 @@ impl Meta {
     ) -> Branch {
         self.branch(
             packets,
-            Outcome::Indeterminate,
+            Outcome::Unknown,
             Reason::new(code, detail),
             ctx.clone(),
             state,

@@ -330,10 +330,6 @@ pub struct MiniOpts {
 /// fra01-ips-01 1B -> 1A (inline) -> fra01-core-01 eth1-1 -> vlan100 ->
 /// fra01-dns 10.20.0.53.
 ///
-/// The baseline fixture is a copy of the HST fixture `mini-enterprise.yaml`.
-/// It adds the FortiGate connected routes, the guest client, the DNS server
-/// and the users segment of port1. It is not in this repository.
-///
 /// Differences from the fixture:
 /// - Step 1 has no layer 2 functions, so core-01 routes between eth1-1 and
 ///   vlan100 with a host route to the FortiGate address. In the fixture,
@@ -645,7 +641,7 @@ pub struct EdgeOpts {
     pub duplicate_owner: bool,
 }
 
-/// An edge router with destination NAT (example 4 of the HST model):
+/// An edge router with destination NAT:
 /// client 198.51.100.7 -> edge eth0 -> DNAT 203.0.113.10:443 to
 /// 10.20.0.11:8443 -> ACL -> eth1 -> server 10.20.0.11. The links to the
 /// two endpoints have known delays; the functions have no delay data.

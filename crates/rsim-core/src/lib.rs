@@ -31,7 +31,7 @@ pub use id::{
 pub use outcome::{Destination, Outcome, Reason, ReasonCode, Verdict, VerdictKind};
 pub use packet_set::{AddrField, PacketPair, PacketSet, PrefixPartition, Rewrite, Split, Uniform};
 pub use predicate::{
-    AddrCond, FlagsCond, FragmentCond, MacCond, Match, MatchClass, PortCond, RangeCond,
+    AddrCond, FlagsCond, FragmentCond, MacCond, Match, MatchClass, OpenField, PortCond, RangeCond,
     RulePredicate, ValueCond,
 };
 pub use prefix_table::{PrefixTable, TriePrefixTable};

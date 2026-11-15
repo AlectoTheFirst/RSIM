@@ -8,10 +8,10 @@ use rsim_core::{
     Destination, EndpointId, FieldValue, Header, PROTO_TCP, PROTO_UDP, ReasonCode, SourceSpan,
     TraceStep, Verdict,
 };
-use rsim_engine::{Answer, Assumption, BuildError, Executor, Mode, Query, Twin};
+use rsim_engine::{Answer, BuildError, Executor, Query, Summary, Twin};
 
-fn run(twin: &Twin, from: &str, h: Header, mode: Mode) -> Answer {
-    let q = Query::from_endpoint(twin, &EndpointId::new(from), h, mode).expect("endpoint");
+fn run(twin: &Twin, from: &str, h: Header) -> Answer {
+    let q = Query::from_endpoint(twin, &EndpointId::new(from), h).expect("endpoint");
     Executor::new(twin).run(&q).expect("query runs")
 }
 
@@ -32,7 +32,7 @@ fn deliver(e: &str) -> Verdict {
 
 fn reason_code(v: &Verdict) -> Option<ReasonCode> {
     match v {
-        Verdict::Drop(r) | Verdict::Indeterminate(r) => Some(r.code),
+        Verdict::Drop(r) | Verdict::Unknown(r) => Some(r.code),
         Verdict::Deliver(_) => None,
     }
 }
@@ -52,11 +52,9 @@ fn guest_to_dns_through_firewall_snat_ips_and_acl_and_back() {
         &twin,
         "guest-client",
         udp("172.31.10.20", 40000, "10.20.0.53", 53),
-        Mode::Possible,
     );
 
-    assert_eq!(a.verdict, deliver("fra01-dns"));
-    assert_eq!(a.assumptions, vec![Assumption::IndependentSelection]);
+    assert_eq!(*a.verdict().unwrap(), deliver("fra01-dns"));
     let branches = a.branches();
     assert_eq!(branches.len(), 1);
     let b = &branches[0];
@@ -134,7 +132,7 @@ fn guest_to_dns_through_firewall_snat_ips_and_acl_and_back() {
     // The reply runs from the DNS server with the flow state of the forward
     // branch, matches the session and undoes the translation.
     let r = a.reply_of(0).expect("reply ran");
-    assert_eq!(r.verdict, deliver("guest-client"));
+    assert_eq!(*r.verdict().unwrap(), deliver("guest-client"));
     let rb = r.branches();
     assert_eq!(rb.len(), 1);
     assert_eq!(
@@ -169,7 +167,7 @@ fn guest_to_dns_through_firewall_snat_ips_and_acl_and_back() {
         lookup
             .reason
             .detail
-            .starts_with("reply packets of session 0")
+            .starts_with("reply packets · session 0")
     );
     let pol = step(&rb[0].steps, &f(FGT, "policy"));
     assert_eq!(pol.reason.code, ReasonCode::SessionMatched);
@@ -189,13 +187,12 @@ fn guest_to_dns_on_tcp_80_is_denied_by_the_default_action() {
         &twin,
         "guest-client",
         tcp("172.31.10.20", 40000, "10.20.0.53", 80),
-        Mode::Possible,
     );
-    let Verdict::Drop(r) = &a.verdict else {
-        panic!("{:?}", a.verdict)
+    let Some(Verdict::Drop(r)) = a.verdict() else {
+        panic!("{:?}", a.summary)
     };
     assert_eq!(r.code, ReasonCode::Denied);
-    assert!(r.detail.contains("the default action"), "{r:?}");
+    assert!(r.detail.contains("default action"), "{r:?}");
     let b = &a.branches()[0];
     assert_eq!(
         b.steps.last().unwrap().function.as_str(),
@@ -211,10 +208,9 @@ fn corp_to_guest_on_telnet_is_blocked_by_the_inline_ips() {
         &twin,
         "fra01-dns",
         tcp("10.20.0.53", 50000, "172.31.10.20", 23),
-        Mode::Possible,
     );
-    let Verdict::Drop(r) = &a.verdict else {
-        panic!("{:?}", a.verdict)
+    let Some(Verdict::Drop(r)) = a.verdict() else {
+        panic!("{:?}", a.summary)
     };
     assert_eq!(r.code, ReasonCode::Denied);
     assert!(r.detail.contains("1a-block-telnet"), "{r:?}");
@@ -229,9 +225,8 @@ fn corp_to_guest_on_ssh_passes_and_the_reply_uses_the_session() {
         &twin,
         "fra01-dns",
         tcp("10.20.0.53", 50000, "172.31.10.20", 22),
-        Mode::Possible,
     );
-    assert_eq!(a.verdict, deliver("guest-client"));
+    assert_eq!(*a.verdict().unwrap(), deliver("guest-client"));
     let b = &a.branches()[0];
     let pol = step(&b.steps, &f(FGT, "policy"));
     assert!(pol.reason.detail.contains("corp-to-guest-mgmt"));
@@ -241,7 +236,7 @@ fn corp_to_guest_on_ssh_passes_and_the_reply_uses_the_session() {
     );
 
     let r = a.reply_of(0).expect("reply ran");
-    assert_eq!(r.verdict, deliver("fra01-dns"));
+    assert_eq!(*r.verdict().unwrap(), deliver("fra01-dns"));
     let rb = &r.branches()[0];
     assert_eq!(
         step(&rb.steps, &f(FGT, "session-lookup")).reason.code,
@@ -256,37 +251,36 @@ fn corp_to_guest_on_ssh_passes_and_the_reply_uses_the_session() {
 }
 
 #[test]
-fn an_unstated_source_port_against_a_rule_that_reads_it_is_indeterminate() {
+fn an_unstated_source_port_against_a_rule_that_reads_it_is_unknown() {
     let twin = mini_enterprise(MiniOpts::default()).build().unwrap();
     // The request states no source port.
     let h = Header::request(ip("172.31.10.20"), ip("10.20.0.53"), PROTO_UDP).with_dst_port(53);
-    for mode in [Mode::Possible, Mode::Guaranteed] {
-        let a = run(&twin, "guest-client", h.clone(), mode);
-        let Verdict::Indeterminate(r) = &a.verdict else {
-            panic!("{:?}", a.verdict)
-        };
-        assert_eq!(r.code, ReasonCode::UncertainMatch);
-        assert!(r.detail.contains("1b-block-low-source-port"), "{r:?}");
-    }
+    let a = run(&twin, "guest-client", h);
+    let Some(Verdict::Unknown(r)) = a.verdict() else {
+        panic!("{:?}", a.summary)
+    };
+    assert_eq!(r.code, ReasonCode::MatchUnknown);
+    assert!(r.detail.contains("1b-block-low-source-port"), "{r:?}");
     // A stated high port does not match the rule, and a stated low port does.
     let high = run(
         &twin,
         "guest-client",
         udp("172.31.10.20", 40000, "10.20.0.53", 53),
-        Mode::Possible,
     );
-    assert_eq!(high.verdict, deliver("fra01-dns"));
+    assert_eq!(*high.verdict().unwrap(), deliver("fra01-dns"));
     let low = run(
         &twin,
         "guest-client",
         udp("172.31.10.20", 123, "10.20.0.53", 53),
-        Mode::Possible,
     );
-    assert_eq!(reason_code(&low.verdict), Some(ReasonCode::Denied));
+    assert_eq!(
+        reason_code(low.verdict().unwrap()),
+        Some(ReasonCode::Denied)
+    );
 }
 
 #[test]
-fn an_unhandled_policy_rule_makes_only_the_affected_packets_indeterminate() {
+fn an_unhandled_policy_rule_makes_only_the_affected_packets_unknown() {
     let twin = mini_enterprise(MiniOpts {
         unhandled_policy_rule: true,
         ..MiniOpts::default()
@@ -298,18 +292,16 @@ fn an_unhandled_policy_rule_makes_only_the_affected_packets_indeterminate() {
         &twin,
         "guest-client",
         udp("172.31.10.20", 40000, "10.20.0.53", 53),
-        Mode::Possible,
     );
-    assert_eq!(dns.verdict, deliver("fra01-dns"));
-    // Packets that reach the unhandled rule are indeterminate, with its span.
+    assert_eq!(*dns.verdict().unwrap(), deliver("fra01-dns"));
+    // Packets that reach the unhandled rule are unknown, with its span.
     let web = run(
         &twin,
         "guest-client",
         tcp("172.31.10.20", 40000, "10.20.0.53", 80),
-        Mode::Possible,
     );
-    let Verdict::Indeterminate(r) = &web.verdict else {
-        panic!("{:?}", web.verdict)
+    let Some(Verdict::Unknown(r)) = web.verdict() else {
+        panic!("{:?}", web.summary)
     };
     assert_eq!(r.code, ReasonCode::UnhandledStanza);
     let last = *web.branches()[0].steps.last().unwrap();
@@ -344,9 +336,8 @@ fn destination_nat_at_the_edge_and_the_reply_restores_the_public_address() {
         &twin,
         "client",
         tcp("198.51.100.7", 51000, "203.0.113.10", 443),
-        Mode::Possible,
     );
-    assert_eq!(a.verdict, deliver("server"));
+    assert_eq!(*a.verdict().unwrap(), deliver("server"));
     let b = &a.branches()[0];
     let dnat = step(&b.steps, "edge-01/dnat");
     assert_eq!(dnat.reason.code, ReasonCode::Translated);
@@ -370,7 +361,7 @@ fn destination_nat_at_the_edge_and_the_reply_restores_the_public_address() {
     assert_eq!(b.delay.missing().len(), b.steps.len());
 
     let r = a.reply_of(0).expect("reply ran");
-    assert_eq!(r.verdict, deliver("client"));
+    assert_eq!(*r.verdict().unwrap(), deliver("client"));
     let rb = &r.branches()[0];
     let end = rb.packets.witness().unwrap();
     assert_eq!(end.current.src_ip, FieldValue::Known(ip("203.0.113.10")));
@@ -382,24 +373,17 @@ fn destination_nat_at_the_edge_and_the_reply_restores_the_public_address() {
 #[test]
 fn no_route_and_null_route_are_drops() {
     let twin = edge_dnat(EdgeOpts::default()).build().unwrap();
-    let a = run(
-        &twin,
-        "server",
-        tcp("10.20.0.11", 8443, "8.8.8.8", 443),
-        Mode::Possible,
+    let a = run(&twin, "server", tcp("10.20.0.11", 8443, "8.8.8.8", 443));
+    assert_eq!(reason_code(a.verdict().unwrap()), Some(ReasonCode::NoRoute));
+    let a = run(&twin, "server", tcp("10.20.0.11", 8443, "192.0.2.5", 443));
+    assert_eq!(
+        reason_code(a.verdict().unwrap()),
+        Some(ReasonCode::NullRoute)
     );
-    assert_eq!(reason_code(&a.verdict), Some(ReasonCode::NoRoute));
-    let a = run(
-        &twin,
-        "server",
-        tcp("10.20.0.11", 8443, "192.0.2.5", 443),
-        Mode::Possible,
-    );
-    assert_eq!(reason_code(&a.verdict), Some(ReasonCode::NullRoute));
 }
 
 #[test]
-fn two_owners_of_one_address_are_indeterminate_and_named() {
+fn two_owners_of_one_address_are_unknown_and_named() {
     let twin = edge_dnat(EdgeOpts {
         duplicate_owner: true,
     })
@@ -409,30 +393,23 @@ fn two_owners_of_one_address_are_indeterminate_and_named() {
         &twin,
         "client",
         tcp("198.51.100.7", 51000, "203.0.113.10", 443),
-        Mode::Possible,
     );
-    let Verdict::Indeterminate(r) = &a.verdict else {
-        panic!("{:?}", a.verdict)
+    let Some(Verdict::Unknown(r)) = a.verdict() else {
+        panic!("{:?}", a.summary)
     };
     assert_eq!(r.code, ReasonCode::AmbiguousOwner);
     assert!(r.detail.contains("server, server-clone"), "{r:?}");
 }
 
 #[test]
-fn equal_cost_paths_follow_the_mode_rule() {
+fn equal_cost_paths_are_shown_one_by_one() {
     let twin = ecmp().build().unwrap();
     let ssh = tcp("10.1.0.10", 40000, "10.4.0.10", 22);
-    let possible = run(&twin, "client", ssh.clone(), Mode::Possible);
-    let guaranteed = run(&twin, "client", ssh, Mode::Guaranteed);
-    assert_eq!(possible.verdict, deliver("server"));
-    assert_eq!(reason_code(&guaranteed.verdict), Some(ReasonCode::Denied));
-    assert_eq!(
-        guaranteed.assumptions,
-        vec![Assumption::IndependentSelection]
-    );
+    let a = run(&twin, "client", ssh);
+    assert_eq!(a.summary, Summary::DependsOnPath);
 
-    // The trace names each alternative with its outcome, in the fixed order.
-    let br = possible.branches();
+    // The trace names each path with its result, in the fixed order.
+    let br = a.branches();
     assert_eq!(br.len(), 2);
     let alt = |i: usize| {
         br[i]
@@ -447,27 +424,19 @@ fn equal_cost_paths_follow_the_mode_rule() {
     assert_eq!(br[0].verdict, &deliver("server"));
     assert_eq!(reason_code(br[1].verdict), Some(ReasonCode::Denied));
 
+    // Web traffic is delivered on both paths.
     let web = tcp("10.1.0.10", 40000, "10.4.0.10", 80);
     assert_eq!(
-        run(&twin, "client", web.clone(), Mode::Possible).verdict,
-        deliver("server")
-    );
-    assert_eq!(
-        run(&twin, "client", web, Mode::Guaranteed).verdict,
-        deliver("server")
+        run(&twin, "client", web).summary,
+        Summary::Same(deliver("server"))
     );
 }
 
 #[test]
 fn a_routing_loop_is_a_drop_with_reason_loop() {
     let twin = routing_loop().build().unwrap();
-    let a = run(
-        &twin,
-        "client",
-        tcp("10.1.0.10", 40000, "10.9.0.1", 80),
-        Mode::Possible,
-    );
-    assert_eq!(reason_code(&a.verdict), Some(ReasonCode::Loop));
+    let a = run(&twin, "client", tcp("10.1.0.10", 40000, "10.9.0.1", 80));
+    assert_eq!(reason_code(a.verdict().unwrap()), Some(ReasonCode::Loop));
     let b = &a.branches()[0];
     let ingresses: Vec<String> = b
         .steps
@@ -490,13 +459,8 @@ fn a_routing_loop_is_a_drop_with_reason_loop() {
 #[test]
 fn a_second_visit_with_a_different_header_is_not_a_loop() {
     let twin = hairpin().build().unwrap();
-    let a = run(
-        &twin,
-        "client",
-        tcp("10.1.0.10", 40000, "10.9.0.10", 80),
-        Mode::Possible,
-    );
-    assert_eq!(a.verdict, deliver("server"));
+    let a = run(&twin, "client", tcp("10.1.0.10", 40000, "10.9.0.10", 80));
+    assert_eq!(*a.verdict().unwrap(), deliver("server"));
     let b = &a.branches()[0];
     let r1_routes = b
         .steps
@@ -510,7 +474,7 @@ fn a_second_visit_with_a_different_header_is_not_a_loop() {
 fn a_later_fragment_has_no_ports_and_does_not_match_a_port_rule() {
     let twin = edge_dnat(EdgeOpts::default()).build().unwrap();
     let h = Header::request(ip("198.51.100.7"), ip("203.0.113.10"), PROTO_TCP).as_later_fragment();
-    let a = run(&twin, "client", h, Mode::Possible);
+    let a = run(&twin, "client", h);
     // The DNAT rule reads the destination port, which is absent, so the rule
     // does not match. The packet goes to the edge itself and the ACL denies it.
     let b = &a.branches()[0];
@@ -518,5 +482,5 @@ fn a_later_fragment_has_no_ports_and_does_not_match_a_port_rule() {
         step(&b.steps, "edge-01/dnat").reason.code,
         ReasonCode::NotTranslated
     );
-    assert_eq!(reason_code(&a.verdict), Some(ReasonCode::Denied));
+    assert_eq!(reason_code(a.verdict().unwrap()), Some(ReasonCode::Denied));
 }

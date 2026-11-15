@@ -10,7 +10,7 @@ use rsim_core::{
 
 use crate::common::{Meta, push_nonempty};
 use crate::profile::RuleAction;
-use crate::rules::{Decision, Rule, describe, evaluate, explain, spans_of};
+use crate::rules::{Decision, Rule, describe_all, evaluate, explain, spans_of};
 
 fn qos_reads_of(rules: &[Rule<RuleAction>]) -> Vec<HeaderField> {
     let mut v: Vec<HeaderField> = rules
@@ -40,7 +40,7 @@ fn branches_of(
     for (set, d) in parts {
         let b = match d {
             Decision::Action { action, decided_by } => {
-                let by: Vec<String> = decided_by.iter().map(|r| describe(rules, *r)).collect();
+                let by = describe_all(rules, what, &decided_by);
                 let spans = spans_of(rules, &decided_by);
                 match action {
                     RuleAction::Permit => meta
@@ -48,7 +48,7 @@ fn branches_of(
                             set,
                             next,
                             ReasonCode::Permitted,
-                            format!("{what}: permitted by {}", by.join(" or ")),
+                            format!("permitted · {by}"),
                             ctx.clone(),
                             state,
                         )
@@ -57,25 +57,20 @@ fn branches_of(
                         .drop(
                             set,
                             ReasonCode::Denied,
-                            format!("{what}: denied by {}", by.join(" or ")),
+                            format!("denied · {by}"),
                             ctx,
                             state,
                         )
                         .with_spans(spans),
                 }
             }
-            Decision::Indeterminate { cause } => {
-                let (text, spans) = explain(rules, &cause);
+            Decision::Unknown { cause } => {
+                let (text, spans) = explain(rules, what, &cause, &set);
                 let code = match cause {
-                    crate::rules::IndeterminateCause::Unhandled { .. } => {
-                        ReasonCode::UnhandledStanza
-                    }
-                    crate::rules::IndeterminateCause::Uncertain { .. } => {
-                        ReasonCode::UncertainMatch
-                    }
+                    crate::rules::UnknownCause::Unhandled { .. } => ReasonCode::UnhandledStanza,
+                    crate::rules::UnknownCause::Uncertain { .. } => ReasonCode::MatchUnknown,
                 };
-                meta.indeterminate(set, code, format!("{what}: {text}"), ctx, state)
-                    .with_spans(spans)
+                meta.unknown(set, code, text, ctx, state).with_spans(spans)
             }
         };
         push_nonempty(&mut out, b);

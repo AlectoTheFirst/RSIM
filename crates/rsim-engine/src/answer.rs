@@ -1,4 +1,4 @@
-//! The answer of a query (section 4) and the aggregation of verdicts (section 7).
+//! The answer of a query (section 4) and the summary of its paths (section 7).
 
 use std::collections::BTreeMap;
 
@@ -6,30 +6,34 @@ use rsim_core::{
     Context, Delay, Destination, FlowState, FunctionId, PacketSet, TraceStep, Verdict, VerdictKind,
 };
 
-/// The mode of a query (section 7).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Mode {
-    /// `Deliver` if a minimum of one alternative delivers.
-    Possible,
-    /// `Drop` if a minimum of one alternative drops.
-    Guaranteed,
+/// The result of a query over all of its paths. Each path and its own
+/// result are in [`Answer::branches`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Summary {
+    /// Every path ends with this verdict.
+    Same(Verdict),
+    /// Every path ends with this kind of verdict, with different details,
+    /// for example different drop reasons.
+    SameKind(VerdictKind),
+    /// The ECMP paths end differently.
+    DependsOnPath,
 }
 
-/// An assumption that an answer depends on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Assumption {
-    /// The snapshot does not record the hash that spreads flows over the
-    /// alternatives of a forwarding choice. The selection is independent for
-    /// each device and for each connection.
-    IndependentSelection,
-}
-
-impl Assumption {
-    pub fn text(&self) -> &'static str {
+impl Summary {
+    /// The verdict, if every path ends with the same verdict.
+    pub fn verdict(&self) -> Option<&Verdict> {
         match self {
-            Assumption::IndependentSelection => {
-                "the selection among the alternatives of a forwarding choice is independent for each device and for each connection"
-            }
+            Summary::Same(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// The kind of verdict, if every path ends with the same kind.
+    pub fn kind(&self) -> Option<VerdictKind> {
+        match self {
+            Summary::Same(v) => Some(v.kind()),
+            Summary::SameKind(k) => Some(*k),
+            Summary::DependsOnPath => None,
         }
     }
 }
@@ -92,14 +96,12 @@ pub enum ReplyResult {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Answer {
-    pub mode: Mode,
     pub start: FunctionId,
     pub input: PacketSet,
     /// The function applications. The root is at index 0.
     pub nodes: Vec<ExecNode>,
-    /// The aggregated verdict of the packet for the mode of the query.
-    pub verdict: Verdict,
-    pub assumptions: Vec<Assumption>,
+    /// The result over all paths.
+    pub summary: Summary,
     /// The replies, one for each delivered forward branch, in branch order.
     pub replies: Vec<Reply>,
 }
@@ -144,6 +146,11 @@ impl Answer {
         out
     }
 
+    /// The verdict, if every path ends with the same verdict.
+    pub fn verdict(&self) -> Option<&Verdict> {
+        self.summary.verdict()
+    }
+
     pub fn reply_of(&self, branch: usize) -> Option<&Answer> {
         self.replies.iter().find_map(|r| match &r.result {
             ReplyResult::Ran(a) if r.forward_branch == branch => Some(a.as_ref()),
@@ -152,81 +159,70 @@ impl Answer {
     }
 }
 
-/// Combines the verdicts of the alternatives of a forwarding choice with the
-/// mode rule. The first verdict of the selected kind, in the fixed order of
-/// the alternatives, gives the reason.
-pub fn combine_choice(mode: Mode, verdicts: &[Verdict]) -> Verdict {
-    let order = match mode {
-        Mode::Possible => [
-            VerdictKind::Deliver,
-            VerdictKind::Indeterminate,
-            VerdictKind::Drop,
-        ],
-        Mode::Guaranteed => [
-            VerdictKind::Drop,
-            VerdictKind::Indeterminate,
-            VerdictKind::Deliver,
-        ],
+/// Combines the results of the ECMP paths of one forwarding choice.
+pub fn combine_paths(paths: &[Summary]) -> Summary {
+    let Some(first) = paths.first() else {
+        unreachable!("a forwarding choice has at least one path")
     };
-    pick(&order, verdicts)
-}
-
-/// Combines the verdicts of the copies of a flood. The rule is the same in
-/// the two modes.
-pub fn combine_flood(verdicts: &[Verdict]) -> Verdict {
-    pick(
-        &[
-            VerdictKind::Deliver,
-            VerdictKind::Indeterminate,
-            VerdictKind::Drop,
-        ],
-        verdicts,
-    )
-}
-
-fn pick(order: &[VerdictKind; 3], verdicts: &[Verdict]) -> Verdict {
-    for k in order {
-        if let Some(v) = verdicts.iter().find(|v| v.kind() == *k) {
-            return v.clone();
-        }
+    if paths.iter().all(|p| p == first) {
+        return first.clone();
     }
-    unreachable!("a choice or a flood has at least one branch")
+    match first.kind() {
+        Some(k) if paths.iter().all(|p| p.kind() == Some(k)) => Summary::SameKind(k),
+        _ => Summary::DependsOnPath,
+    }
 }
 
-/// The aggregated verdict of a node for one packet, from the end of the path
-/// back to the start.
+/// Combines the results of the copies of a flood: delivered if a minimum of
+/// one copy delivers. If not, the result depends on the path if a minimum of
+/// one copy depends on the path. If not, `Unknown` if a minimum of one
+/// copy is `Unknown`. If not, dropped. The first copy of the selected
+/// kind, in the fixed order of the copies, gives the result.
+pub fn combine_flood(copies: &[Summary]) -> Summary {
+    let rank = |s: &Summary| match s.kind() {
+        Some(VerdictKind::Deliver) => 0,
+        None => 1,
+        Some(VerdictKind::Unknown) => 2,
+        Some(VerdictKind::Drop) => 3,
+    };
+    let Some(best) = copies.iter().map(rank).min() else {
+        unreachable!("a flood has at least one copy")
+    };
+    let Some(first) = copies.iter().find(|c| rank(c) == best) else {
+        unreachable!("the minimum comes from a copy")
+    };
+    first.clone()
+}
+
+/// The summary of the answer, from the end of each path back to the start.
 ///
 /// Step 1 is concrete mode: the input of each node is one packet, so the
-/// edges of a node are one plain branch, the alternatives of one choice, or
-/// the copies of one flood. `Err` names a node where this is not true.
-pub fn aggregate(nodes: &[ExecNode], mode: Mode) -> Result<Verdict, String> {
+/// edges of a node are one plain branch, the paths of one forwarding choice,
+/// or the copies of one flood. `Err` names a node where this is not true.
+pub fn aggregate(nodes: &[ExecNode]) -> Result<Summary, String> {
     // A child has a larger index than its parent, so the reverse order
-    // aggregates each node after all of its children.
-    let mut verdicts: Vec<Option<Verdict>> = vec![None; nodes.len()];
+    // handles each node after all of its children.
+    let mut summaries: Vec<Option<Summary>> = vec![None; nodes.len()];
     for i in (0..nodes.len()).rev() {
-        verdicts[i] = Some(aggregate_node(&nodes[i], &verdicts, mode)?);
+        summaries[i] = Some(aggregate_node(&nodes[i], &summaries)?);
     }
-    verdicts
+    summaries
         .into_iter()
         .next()
         .flatten()
         .ok_or_else(|| "the answer has no node".to_string())
 }
 
-fn aggregate_node(
-    node: &ExecNode,
-    verdicts: &[Option<Verdict>],
-    mode: Mode,
-) -> Result<Verdict, String> {
+fn aggregate_node(node: &ExecNode, summaries: &[Option<Summary>]) -> Result<Summary, String> {
     let mut plain = Vec::new();
-    let mut choices: BTreeMap<(FunctionId, String), Vec<Verdict>> = BTreeMap::new();
-    let mut floods: BTreeMap<FunctionId, Vec<Verdict>> = BTreeMap::new();
+    let mut choices: BTreeMap<(FunctionId, String), Vec<Summary>> = BTreeMap::new();
+    let mut floods: BTreeMap<FunctionId, Vec<Summary>> = BTreeMap::new();
     for e in &node.edges {
         let v = match (&e.end, e.next) {
-            (Some(end), _) => end.verdict.clone(),
-            (None, Some(n)) => verdicts[n]
+            (Some(end), _) => Summary::Same(end.verdict.clone()),
+            (None, Some(n)) => summaries[n]
                 .clone()
-                .ok_or_else(|| format!("the child of {} has no verdict", node.function))?,
+                .ok_or_else(|| format!("the child of {} has no summary", node.function))?,
             (None, None) => return Err(format!("an edge of {} has no end", node.function)),
         };
         if let Some(a) = &e.step.alternative {
@@ -240,8 +236,8 @@ fn aggregate_node(
             plain.push(v);
         }
     }
-    let mut groups: Vec<Verdict> = plain;
-    groups.extend(choices.values().map(|vs| combine_choice(mode, vs)));
+    let mut groups: Vec<Summary> = plain;
+    groups.extend(choices.values().map(|vs| combine_paths(vs)));
     groups.extend(floods.values().map(|vs| combine_flood(vs)));
     match groups.as_slice() {
         [one] => Ok(one.clone()),

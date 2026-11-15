@@ -20,7 +20,7 @@ pub enum Outcome {
     /// The packets reached their destination.
     Deliver(Destination),
     Drop,
-    Indeterminate,
+    Unknown,
 }
 
 impl Outcome {
@@ -52,9 +52,9 @@ pub enum ReasonCode {
     NoNeighbour,
     NotInZone,
     Loop,
-    // Indeterminate.
+    // Unknown.
     UnhandledStanza,
-    UncertainMatch,
+    MatchUnknown,
     UnknownAttribute,
     AmbiguousOwner,
     IncompleteTable,
@@ -91,7 +91,7 @@ impl fmt::Debug for Reason {
 pub enum Verdict {
     Deliver(Destination),
     Drop(Reason),
-    Indeterminate(Reason),
+    Unknown(Reason),
 }
 
 impl Verdict {
@@ -99,7 +99,7 @@ impl Verdict {
         match self {
             Verdict::Deliver(_) => VerdictKind::Deliver,
             Verdict::Drop(_) => VerdictKind::Drop,
-            Verdict::Indeterminate(_) => VerdictKind::Indeterminate,
+            Verdict::Unknown(_) => VerdictKind::Unknown,
         }
     }
 }
@@ -108,5 +108,5 @@ impl Verdict {
 pub enum VerdictKind {
     Deliver,
     Drop,
-    Indeterminate,
+    Unknown,
 }

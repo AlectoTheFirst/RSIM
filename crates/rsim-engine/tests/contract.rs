@@ -10,7 +10,7 @@ use rsim_core::{
     InterfaceId, NetFunction, NextHop, Outcome, PacketSet, Prefix, PrefixTable, Reason, ReasonCode,
     Tri, TriePrefixTable, Verdict, ZoneId,
 };
-use rsim_engine::{Executor, Mode, Query, check_partition};
+use rsim_engine::{Executor, Query, Summary, check_partition};
 use rsim_functions::{Neighbour, NextHopResolution, UnzonedInterface, ZoneLookup, ZoneRole};
 
 fn branch(p: PacketSet) -> Branch {
@@ -93,7 +93,7 @@ fn two_owners_behind_one_link_are_two_owners() {
         &FlowState::new(),
     );
     assert_eq!(out.len(), 1);
-    assert_eq!(out[0].outcome, Outcome::Indeterminate);
+    assert_eq!(out[0].outcome, Outcome::Unknown);
     assert_eq!(out[0].reason.code, ReasonCode::AmbiguousOwner);
     assert!(out[0].reason.detail.contains("router-a, router-b"));
 }
@@ -127,8 +127,8 @@ fn an_interface_in_no_zone_follows_the_profile() {
     let p = PacketSet::single(udp("10.0.0.1", 1, "10.0.0.2", 53));
     let drop = mk(UnzonedInterface::Drop).apply(&p, &ctx, &FlowState::new());
     assert_eq!(drop[0].outcome, Outcome::Drop);
-    let ind = mk(UnzonedInterface::Indeterminate).apply(&p, &ctx, &FlowState::new());
-    assert_eq!(ind[0].outcome, Outcome::Indeterminate);
+    let ind = mk(UnzonedInterface::Unknown).apply(&p, &ctx, &FlowState::new());
+    assert_eq!(ind[0].outcome, Outcome::Unknown);
 }
 
 #[test]
@@ -140,15 +140,16 @@ fn a_long_path_does_not_exhaust_the_stack() {
         &twin,
         &EndpointId::new("client"),
         tcp("10.254.0.10", 40000, "10.255.0.10", 443),
-        Mode::Possible,
     )
     .unwrap();
-    let a = std::thread::spawn(move || Executor::new(&twin).run(&q).map(|a| a.verdict))
+    let a = std::thread::spawn(move || Executor::new(&twin).run(&q).map(|a| a.summary))
         .join()
         .expect("no stack overflow")
         .unwrap();
     assert_eq!(
         a,
-        Verdict::Deliver(rsim_core::Destination::Endpoint(EndpointId::new("server")))
+        Summary::Same(Verdict::Deliver(rsim_core::Destination::Endpoint(
+            EndpointId::new("server")
+        )))
     );
 }

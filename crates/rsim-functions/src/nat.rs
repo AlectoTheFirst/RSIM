@@ -12,7 +12,7 @@ use rsim_core::{
 use crate::common::{Meta, push_nonempty};
 use crate::forwarding::meta_methods;
 use crate::profile::PortTranslation;
-use crate::rules::{Decision, IndeterminateCause, Rule, describe, evaluate, explain, spans_of};
+use crate::rules::{Decision, Rule, UnknownCause, describe_all, evaluate, explain, spans_of};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NatAction {
@@ -67,7 +67,7 @@ fn nat_apply(
             input.clone(),
             next,
             ReasonCode::NotTranslated,
-            format!("{what}: the session already applied its translation"),
+            format!("translated by session · {what}"),
             ctx.clone(),
             state,
         )];
@@ -76,14 +76,14 @@ fn nat_apply(
     for (set, d) in evaluate(rules, &NatAction::NoTranslate, input, scope) {
         let b = match d {
             Decision::Action { action, decided_by } => {
-                let by: Vec<String> = decided_by.iter().map(|r| describe(rules, *r)).collect();
+                let by = describe_all(rules, &what, &decided_by);
                 let spans = spans_of(rules, &decided_by);
                 match action {
                     NatAction::NoTranslate => meta.forward(
                         set,
                         next,
                         ReasonCode::NotTranslated,
-                        format!("{what}: no translation ({})", by.join(" or ")),
+                        format!("not translated · {by}"),
                         ctx.clone(),
                         state,
                     ),
@@ -91,21 +91,20 @@ fn nat_apply(
                         set.rewrite(&rewrite_for(side, addr, port)),
                         next,
                         ReasonCode::Translated,
-                        format!("{what}: translated to {addr} by {}", by.join(" or ")),
+                        format!("translated to {addr} · {by}"),
                         ctx.clone(),
                         state,
                     ),
                 }
                 .with_spans(spans)
             }
-            Decision::Indeterminate { cause } => {
-                let (text, spans) = explain(rules, &cause);
+            Decision::Unknown { cause } => {
+                let (text, spans) = explain(rules, &what, &cause, &set);
                 let code = match cause {
-                    IndeterminateCause::Unhandled { .. } => ReasonCode::UnhandledStanza,
-                    IndeterminateCause::Uncertain { .. } => ReasonCode::UncertainMatch,
+                    UnknownCause::Unhandled { .. } => ReasonCode::UnhandledStanza,
+                    UnknownCause::Uncertain { .. } => ReasonCode::MatchUnknown,
                 };
-                meta.indeterminate(set, code, format!("{what}: {text}"), ctx, state)
-                    .with_spans(spans)
+                meta.unknown(set, code, text, ctx, state).with_spans(spans)
             }
         };
         push_nonempty(&mut out, b);

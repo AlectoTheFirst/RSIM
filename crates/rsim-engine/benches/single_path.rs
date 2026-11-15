@@ -1,5 +1,4 @@
-//! Single path query benchmark (section 14). The baseline is the HST Neo4j
-//! path query on the same topology.
+//! Single path query benchmark (section 14).
 
 #[path = "../tests/common/mod.rs"]
 mod common;
@@ -7,7 +6,7 @@ mod common;
 use common::*;
 use criterion::{Criterion, criterion_group, criterion_main};
 use rsim_core::EndpointId;
-use rsim_engine::{ExecOptions, Executor, Mode, Query};
+use rsim_engine::{ExecOptions, Executor, Query};
 use std::hint::black_box;
 
 fn bench(c: &mut Criterion) {
@@ -21,7 +20,6 @@ fn bench(c: &mut Criterion) {
         &mini,
         &EndpointId::new("guest-client"),
         udp("172.31.10.20", 40000, "10.20.0.53", 53),
-        Mode::Possible,
     )
     .unwrap();
     q.reply = false;
@@ -44,7 +42,6 @@ fn bench(c: &mut Criterion) {
         &chain10,
         &EndpointId::new("client"),
         tcp("10.254.0.10", 40000, "10.255.0.10", 443),
-        Mode::Possible,
     )
     .unwrap();
     q.reply = false;

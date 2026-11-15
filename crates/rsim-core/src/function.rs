@@ -64,7 +64,7 @@ pub enum Dependency {
 /// - A function with no declared QoS write passes the marking and the class
 ///   unchanged.
 /// - If part of the function came from an unhandled stanza, the affected
-///   packets get `Indeterminate`.
+///   packets get `Unknown`.
 pub trait NetFunction: Debug + Send + Sync {
     fn id(&self) -> &FunctionId;
     fn kind(&self) -> FunctionKind;

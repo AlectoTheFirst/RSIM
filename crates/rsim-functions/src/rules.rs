@@ -2,8 +2,8 @@
 //!
 //! The evaluation follows the two continuations of an uncertain predicate:
 //! match and no match. Packets with the same action in all continuations get
-//! that action. All other packets get `Indeterminate`. This gives the
-//! first-match regions `F_i^-` and `F_i^+` of the HST model:
+//! that action. All other packets get `Unknown`. This gives the
+//! first-match regions `F_i^-` and `F_i^+`:
 //!
 //! ```text
 //! F_i^- = M_i^- minus the union of M_k^+ for all k < i
@@ -11,7 +11,7 @@
 //! ```
 //!
 //! A rule from an unhandled stanza can change the action or the rule order,
-//! so every packet that can reach it gets `Indeterminate` (item 6).
+//! so every packet that can reach it gets `Unknown` (item 6).
 
 use rsim_core::{PacketSet, RulePredicate, SourceSpan, Tri};
 
@@ -75,13 +75,13 @@ pub enum Decision<A> {
         action: A,
         decided_by: Vec<RuleRef>,
     },
-    Indeterminate {
-        cause: IndeterminateCause,
+    Unknown {
+        cause: UnknownCause,
     },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum IndeterminateCause {
+pub enum UnknownCause {
     /// Rule `rule` came from an unhandled stanza.
     Unhandled { rule: usize },
     /// Rule `rule` may match, and the continuations give different actions.
@@ -121,8 +121,8 @@ fn eval_from<A: Clone + Eq>(
             RuleBody::Unhandled => {
                 out.push((
                     rest,
-                    Decision::Indeterminate {
-                        cause: IndeterminateCause::Unhandled { rule: i },
+                    Decision::Unknown {
+                        cause: UnknownCause::Unhandled { rule: i },
                     },
                 ));
                 return;
@@ -165,8 +165,8 @@ fn eval_from<A: Clone + Eq>(
                             decided_by: by,
                         }
                     }
-                    _ => Decision::Indeterminate {
-                        cause: IndeterminateCause::Uncertain { rule: i },
+                    _ => Decision::Unknown {
+                        cause: UnknownCause::Uncertain { rule: i },
                     },
                 };
                 out.push((s, d));
@@ -185,12 +185,23 @@ fn eval_from<A: Clone + Eq>(
     }
 }
 
-/// Describes a rule reference for a reason text.
-pub fn describe<A>(rules: &[Rule<A>], r: RuleRef) -> String {
+/// The location of a rule for a reason text: `<what> rule <name>, line <n>`.
+pub fn describe<A>(rules: &[Rule<A>], what: &str, r: RuleRef) -> String {
     match r {
-        RuleRef::Rule(i) => format!("rule {} '{}'", i + 1, rules[i].name),
-        RuleRef::Default => "the default action".to_string(),
+        RuleRef::Rule(i) => match rules[i].spans.first() {
+            Some(span) => format!("{what} rule {}, line {}", rules[i].name, span.first_line),
+            None => format!("{what} rule {}", rules[i].name),
+        },
+        RuleRef::Default => format!("{what} default action"),
     }
+}
+
+/// The locations of the rules that decided, joined with " or ".
+pub fn describe_all<A>(rules: &[Rule<A>], what: &str, by: &[RuleRef]) -> String {
+    by.iter()
+        .map(|r| describe(rules, what, *r))
+        .collect::<Vec<_>>()
+        .join(" or ")
 }
 
 /// The spans of the rules that decided.
@@ -204,22 +215,39 @@ pub fn spans_of<A>(rules: &[Rule<A>], by: &[RuleRef]) -> Vec<SourceSpan> {
     v
 }
 
-/// The text and spans of an indeterminate cause.
-pub fn explain<A>(rules: &[Rule<A>], cause: &IndeterminateCause) -> (String, Vec<SourceSpan>) {
-    match cause {
-        IndeterminateCause::Unhandled { rule } => (
-            format!(
-                "{} comes from an unhandled stanza; the action for these packets is not known",
-                describe(rules, RuleRef::Rule(*rule))
-            ),
-            rules[*rule].spans.clone(),
-        ),
-        IndeterminateCause::Uncertain { rule } => (
-            format!(
-                "{} may match these packets, and a match and no match give different actions",
-                describe(rules, RuleRef::Rule(*rule))
-            ),
-            rules[*rule].spans.clone(),
-        ),
-    }
+/// The text and spans of an unknown cause: `<fact> · <location>`.
+pub fn explain<A>(
+    rules: &[Rule<A>],
+    what: &str,
+    cause: &UnknownCause,
+    input: &PacketSet,
+) -> (String, Vec<SourceSpan>) {
+    let (rule, fact) = match cause {
+        UnknownCause::Unhandled { rule } => (*rule, "config not supported".to_string()),
+        UnknownCause::Uncertain { rule } => {
+            let mut fields = Vec::new();
+            if let (RuleBody::Handled { predicate, .. }, Some(p)) =
+                (&rules[*rule].body, input.witness())
+            {
+                for m in [&predicate.definite, &predicate.upper] {
+                    for (f, o) in m.open_fields(&p.current) {
+                        let t = format!("{} {}", f.name(), o.text());
+                        if !fields.contains(&t) {
+                            fields.push(t);
+                        }
+                    }
+                }
+            }
+            let fact = if fields.is_empty() {
+                "rule members not known".to_string()
+            } else {
+                fields.join(", ")
+            };
+            (*rule, fact)
+        }
+    };
+    (
+        format!("{fact} · {}", describe(rules, what, RuleRef::Rule(rule))),
+        rules[rule].spans.clone(),
+    )
 }

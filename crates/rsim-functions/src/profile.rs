@@ -16,7 +16,7 @@ pub enum UnzonedInterface {
     /// The device drops the packets.
     Drop,
     /// The behaviour is not known for the platform.
-    Indeterminate,
+    Unknown,
 }
 
 /// What source NAT does with the source port.

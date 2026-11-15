@@ -103,7 +103,7 @@ impl NetFunction for RouteLookup {
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
         let Some(vrf) = ctx.vrf.known() else {
-            return vec![self.meta.indeterminate(
+            return vec![self.meta.unknown(
                 input.clone(),
                 ReasonCode::UnknownAttribute,
                 "the VRF is not known",
@@ -112,10 +112,10 @@ impl NetFunction for RouteLookup {
             )];
         };
         let Some(table) = self.tables.get(vrf) else {
-            return vec![self.meta.indeterminate(
+            return vec![self.meta.unknown(
                 input.clone(),
                 ReasonCode::IncompleteTable,
-                format!("no FIB is known for VRF {vrf}"),
+                format!("no FIB · VRF {vrf}"),
                 ctx,
                 state,
             )];
@@ -137,7 +137,7 @@ impl NetFunction for RouteLookup {
         );
         push_nonempty(
             &mut out,
-            self.meta.indeterminate(
+            self.meta.unknown(
                 part.uncertain,
                 ReasonCode::UnknownAttribute,
                 "the destination address is not known",
@@ -199,7 +199,7 @@ impl RouteLookup {
         if count == 0 {
             out.push(
                 self.meta
-                    .indeterminate(
+                    .unknown(
                         set,
                         ReasonCode::IncompleteTable,
                         format!("route {prefix} in VRF {vrf} has no next hop"),
@@ -300,10 +300,10 @@ impl NextHopResolution {
             ),
             [] => push_nonempty(
                 out,
-                self.meta.indeterminate(
+                self.meta.unknown(
                     set,
                     ReasonCode::IncompleteTable,
-                    format!("neighbour {addr} on {iface} is not in the collected table, and the table is incomplete"),
+                    format!("neighbour {addr} not in table, table incomplete · {iface}"),
                     ctx,
                     state,
                 ),
@@ -312,10 +312,10 @@ impl NextHopResolution {
                 let Some(next) = self.egress.get(iface) else {
                     push_nonempty(
                         out,
-                        self.meta.indeterminate(
+                        self.meta.unknown(
                             set,
                             ReasonCode::IncompleteTable,
-                            format!("no egress function is known for {iface}"),
+                            format!("no egress function · {iface}"),
                             ctx,
                             state,
                         ),
@@ -344,10 +344,14 @@ impl NextHopResolution {
                 push_nonempty(
                     out,
                     self.meta
-                        .indeterminate(
+                        .unknown(
                             set,
                             ReasonCode::AmbiguousOwner,
-                            format!("{addr} on {iface} has more than one owner: {}", names.join(", ")),
+                            format!(
+                                "{addr} has {} owners: {} · {iface}",
+                                names.len(),
+                                names.join(", ")
+                            ),
                             ctx,
                             state,
                         )
@@ -375,7 +379,7 @@ impl NetFunction for NextHopResolution {
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
         let (Some(iface), Some(nh)) = (ctx.egress_interface.known(), ctx.next_hop.known()) else {
-            return vec![self.meta.indeterminate(
+            return vec![self.meta.unknown(
                 input.clone(),
                 ReasonCode::UnknownAttribute,
                 "the egress interface or the next hop is not known",
@@ -425,7 +429,7 @@ impl NetFunction for NextHopResolution {
                 );
                 push_nonempty(
                     &mut out,
-                    self.meta.indeterminate(
+                    self.meta.unknown(
                         part.uncertain,
                         ReasonCode::UnknownAttribute,
                         "the destination address is not known",

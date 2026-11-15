@@ -71,9 +71,9 @@ impl NetFunction for SessionLookup {
                     }
                 });
                 let detail = if s.is_translated() {
-                    format!("{dir} packets of session {index}; the session translation applies")
+                    format!("{dir} packets · session {index}, translated")
                 } else {
-                    format!("{dir} packets of session {index}")
+                    format!("{dir} packets · session {index}")
                 };
                 push_nonempty(
                     &mut out,
@@ -88,10 +88,10 @@ impl NetFunction for SessionLookup {
                 );
                 push_nonempty(
                     &mut out,
-                    self.meta.indeterminate(
+                    self.meta.unknown(
                         split.uncertain,
-                        ReasonCode::UncertainMatch,
-                        format!("a field is unknown, so the packets may belong to session {index}"),
+                        ReasonCode::MatchUnknown,
+                        format!("flow fields not given · session {index}"),
                         ctx,
                         state,
                     ),
@@ -113,7 +113,7 @@ impl NetFunction for SessionLookup {
                     state,
                 ));
             }
-            Uniform::Varies => out.push(self.meta.indeterminate(
+            Uniform::Varies => out.push(self.meta.unknown(
                 rest,
                 ReasonCode::UnsupportedSet,
                 "step 1 keeps sessions for one flow key only",
@@ -194,7 +194,7 @@ impl NetFunction for SessionCommit {
                 b.state = next_state;
                 vec![b]
             }
-            Uniform::Varies => vec![self.meta.indeterminate(
+            Uniform::Varies => vec![self.meta.unknown(
                 input.clone(),
                 ReasonCode::UnsupportedSet,
                 "step 1 keeps sessions for one flow key only",

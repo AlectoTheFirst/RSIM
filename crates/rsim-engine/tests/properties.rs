@@ -13,7 +13,7 @@ use rsim_core::{
     Outcome, PROTO_ICMP, PROTO_TCP, PROTO_UDP, PacketSet, PortCond, RulePredicate, SourceSpan,
     Uniform, ValueCond,
 };
-use rsim_engine::{Executor, Mode, Query, Twin, check_partition};
+use rsim_engine::{Executor, Query, Twin, check_partition};
 use rsim_functions::{AclMatch, Meta, Rule, RuleAction, RuleBody};
 
 const ADDRS: [&str; 13] = [
@@ -94,14 +94,12 @@ proptest! {
         t in 0..5usize,
         start in 0..5usize,
         h in header(),
-        guaranteed in any::<bool>(),
     ) {
         let twins = twins();
         let twin = &twins[t];
         let ep = EndpointId::new(STARTS[start]);
         prop_assume!(twin.endpoint(&ep).is_some());
-        let mode = if guaranteed { Mode::Guaranteed } else { Mode::Possible };
-        let q = Query::from_endpoint(twin, &ep, h.clone(), mode).unwrap();
+        let q = Query::from_endpoint(twin, &ep, h.clone()).unwrap();
         let a = Executor::new(twin).run(&q);
         prop_assert!(a.is_ok(), "{:?}", a.err());
         let a = a.unwrap();
@@ -208,7 +206,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(2000))]
 
     /// The ACL partitions its input, is deterministic, and agrees with the
-    /// first-match regions of the HST model.
+    /// first-match regions of the ordered rules.
     #[test]
     fn ordered_rules_partition_and_agree_with_the_first_match_regions(
         rules in prop::collection::vec(a_rule(), 0..6),
@@ -230,7 +228,7 @@ proptest! {
         let got = match &out[0].outcome {
             Outcome::Forward(_) => Some(RuleAction::Permit),
             Outcome::Drop => Some(RuleAction::Deny),
-            Outcome::Indeterminate => None,
+            Outcome::Unknown => None,
             Outcome::Deliver(_) => unreachable!(),
         };
         prop_assert_eq!(got, oracle(&rules, default, &h));

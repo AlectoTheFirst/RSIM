@@ -192,6 +192,79 @@ impl Match {
             .and(self.mpls_tc.eval(h.mpls_tc))
     }
 
+    /// The fields of `h` for which the predicate has no definite result,
+    /// because the value is not given or not known.
+    pub fn open_fields(&self, h: &Header) -> Vec<(HeaderField, OpenField)> {
+        fn open<T>(t: Tri, v: FieldValue<T>) -> Option<OpenField> {
+            match (t, v) {
+                (Tri::Unknown, FieldValue::Unstated) => Some(OpenField::NotGiven),
+                (Tri::Unknown, FieldValue::Unknown) => Some(OpenField::Unknown),
+                _ => None,
+            }
+        }
+        let checks = [
+            (
+                HeaderField::SrcIp,
+                open(self.src_ip.eval(h.src_ip), h.src_ip),
+            ),
+            (
+                HeaderField::DstIp,
+                open(self.dst_ip.eval(h.dst_ip), h.dst_ip),
+            ),
+            (
+                HeaderField::Protocol,
+                open(self.protocol.eval(h.protocol), h.protocol),
+            ),
+            (
+                HeaderField::SrcPort,
+                open(self.src_port.eval(h.src_port), h.src_port),
+            ),
+            (
+                HeaderField::DstPort,
+                open(self.dst_port.eval(h.dst_port), h.dst_port),
+            ),
+            (HeaderField::Dscp, open(self.dscp.eval(h.dscp), h.dscp)),
+            (HeaderField::Ecn, open(self.ecn.eval(h.ecn), h.ecn)),
+            (
+                HeaderField::Fragment,
+                open(self.fragment.eval(h.fragment), h.fragment),
+            ),
+            (
+                HeaderField::TcpFlags,
+                open(self.tcp_flags.eval(h.tcp_flags), h.tcp_flags),
+            ),
+            (
+                HeaderField::IcmpType,
+                open(self.icmp_type.eval(h.icmp_type), h.icmp_type),
+            ),
+            (
+                HeaderField::IcmpCode,
+                open(self.icmp_code.eval(h.icmp_code), h.icmp_code),
+            ),
+            (
+                HeaderField::SrcMac,
+                open(self.src_mac.eval(h.src_mac), h.src_mac),
+            ),
+            (
+                HeaderField::DstMac,
+                open(self.dst_mac.eval(h.dst_mac), h.dst_mac),
+            ),
+            (HeaderField::Vlan, open(self.vlan.eval(h.vlan), h.vlan)),
+            (
+                HeaderField::L2Priority,
+                open(self.l2_priority.eval(h.l2_priority), h.l2_priority),
+            ),
+            (
+                HeaderField::MplsTrafficClass,
+                open(self.mpls_tc.eval(h.mpls_tc), h.mpls_tc),
+            ),
+        ];
+        checks
+            .into_iter()
+            .filter_map(|(f, o)| o.map(|o| (f, o)))
+            .collect()
+    }
+
     /// The header fields that the predicate reads.
     pub fn reads(&self) -> Vec<HeaderField> {
         let mut r = Vec::new();
@@ -287,6 +360,24 @@ impl RulePredicate {
         r.sort();
         r.dedup();
         r
+    }
+}
+
+/// Why a field gives no definite match result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum OpenField {
+    /// The query does not give the field.
+    NotGiven,
+    /// A function made the field unknown.
+    Unknown,
+}
+
+impl OpenField {
+    pub fn text(&self) -> &'static str {
+        match self {
+            OpenField::NotGiven => "not given",
+            OpenField::Unknown => "unknown",
+        }
     }
 }
 

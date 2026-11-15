@@ -107,7 +107,7 @@ impl NetFunction for VrfSelection {
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
         let Some(iface) = ctx.ingress_interface.known() else {
-            return vec![self.meta.indeterminate(
+            return vec![self.meta.unknown(
                 input.clone(),
                 ReasonCode::UnknownAttribute,
                 "the ingress interface is not known",
@@ -129,10 +129,10 @@ impl NetFunction for VrfSelection {
                     state,
                 )]
             }
-            None => vec![self.meta.indeterminate(
+            None => vec![self.meta.unknown(
                 input.clone(),
                 ReasonCode::IncompleteTable,
-                format!("no VRF is known for interface {iface}"),
+                format!("no VRF · interface {iface}"),
                 ctx,
                 state,
             )],
@@ -214,12 +214,10 @@ impl NetFunction for ZoneLookup {
                         ctx,
                         state,
                     )],
-                    UnzonedInterface::Indeterminate => vec![self.meta.indeterminate(
+                    UnzonedInterface::Unknown => vec![self.meta.unknown(
                         input.clone(),
                         ReasonCode::NotInZone,
-                        format!(
-                            "interface {i} is in no zone, and the profile does not give the behaviour"
-                        ),
+                        format!("no zone, not in vendor profile · interface {i}"),
                         ctx,
                         state,
                     )],
@@ -295,13 +293,10 @@ impl Egress {
                 b.spans = l.provenance.clone();
                 b
             }
-            None => self.meta.indeterminate(
+            None => self.meta.unknown(
                 input.clone(),
                 ReasonCode::NoLink,
-                format!(
-                    "no link to a device is known after interface {}",
-                    self.interface
-                ),
+                format!("no link · interface {}", self.interface),
                 ctx,
                 state,
             ),
@@ -349,7 +344,7 @@ impl NetFunction for Egress {
                     vec![b]
                 }
                 Attr::Known(NeighbourTarget::Link) => vec![self.to_link(input, ctx, state)],
-                _ => vec![self.meta.indeterminate(
+                _ => vec![self.meta.unknown(
                     input.clone(),
                     ReasonCode::UnknownAttribute,
                     "the neighbour is not known",

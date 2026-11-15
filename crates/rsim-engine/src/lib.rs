@@ -5,6 +5,6 @@ pub mod answer;
 pub mod exec;
 pub mod twin;
 
-pub use answer::{Answer, Assumption, BranchView, ExecEdge, ExecNode, Mode, Reply, ReplyResult};
+pub use answer::{Answer, BranchView, ExecEdge, ExecNode, Reply, ReplyResult, Summary};
 pub use exec::{ExecError, ExecOptions, Executor, Query, check_contract, check_partition};
 pub use twin::{BuildError, Endpoint, Twin, TwinBuilder};

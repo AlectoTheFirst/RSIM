@@ -10,7 +10,7 @@ Step 1 is complete. Step 1 contains the core types, the forwarding functions, th
 
 ## Principles
 
-- If the engine cannot be sure, it returns `Indeterminate` with a reason.
+- If the engine cannot be sure, it returns `Unknown` with a reason.
 - The same input gives the same output.
 - Each function keeps the source lines from which it came.
 - Vendor defaults are data in vendor profiles.

@@ -4,7 +4,7 @@ mod common;
 
 use common::*;
 use rsim_core::EndpointId;
-use rsim_engine::{Executor, Mode, Query};
+use rsim_engine::{Executor, Query};
 
 #[test]
 fn the_same_query_gives_the_same_answer() {
@@ -13,7 +13,6 @@ fn the_same_query_gives_the_same_answer() {
         &twin,
         &EndpointId::new("guest-client"),
         udp("172.31.10.20", 40000, "10.20.0.53", 53),
-        Mode::Possible,
     )
     .unwrap();
     let a = Executor::new(&twin).run(&q).unwrap();
@@ -37,8 +36,7 @@ fn the_insertion_order_of_the_build_does_not_change_the_answer() {
         ("fra01-dns", tcp("10.20.0.53", 50000, "172.31.10.20", 22)),
     ] {
         let run = |t| {
-            let q = Query::from_endpoint(t, &EndpointId::new(from), h.clone(), Mode::Guaranteed)
-                .unwrap();
+            let q = Query::from_endpoint(t, &EndpointId::new(from), h.clone()).unwrap();
             Executor::new(t).run(&q).unwrap()
         };
         assert_eq!(run(&fwd), run(&rev));
@@ -52,7 +50,6 @@ fn queries_in_parallel_threads_give_the_same_answers() {
         &twin,
         &EndpointId::new("client"),
         tcp("10.1.0.10", 40000, "10.4.0.10", 22),
-        Mode::Possible,
     )
     .unwrap();
     let expected = Executor::new(&twin).run(&q).unwrap();
