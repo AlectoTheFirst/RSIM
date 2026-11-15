@@ -4,23 +4,28 @@ use serde_json::{Map, Value};
 
 use crate::commands::StepRef;
 use crate::error::{ErrorCode, QueryError};
-use crate::query::{IcmpType, Protocol, QueryInput, TcpFlag};
+use crate::query::{IcmpType, IngressRef, Protocol, QueryInput, TcpFlag, parse_mac};
 
 /// The names of the query arguments, in the order of the query input.
-pub const QUERY_FIELDS: [&str; 14] = [
+pub const QUERY_FIELDS: [&str; 19] = [
     "topology",
-    "from",
-    "dst",
-    "protocol",
-    "src",
-    "src_port",
-    "dst_port",
+    "ingress",
+    "source.ip",
+    "destination.ip",
+    "network.iana_number",
+    "network.transport",
+    "source.port",
+    "destination.port",
+    "source.mac",
+    "destination.mac",
+    "network.vlan.id",
+    "l2_priority",
     "tcp_flags",
     "icmp_type",
     "icmp_code",
     "dscp",
     "ecn",
-    "later_fragment",
+    "fragment",
     "reply",
 ];
 
@@ -91,22 +96,37 @@ pub fn query(args: &Map<String, Value>, extra: &[&str]) -> Result<QueryInput, Qu
         s.parse()
             .map_err(|_| invalid(format!("{name} {s:?} is not an IP address")))
     };
-    let protocol = match required(args, "protocol")? {
-        Value::String(s) => s.parse::<Protocol>().map_err(invalid)?,
-        v => Protocol(number(v, "protocol", 255)? as u8),
+    let n8 = |name: &str, max: u64| opt(args, name, |v| Ok(number(v, name, max)? as u8));
+    let n16 = |name: &str, max: u64| opt(args, name, |v| Ok(number(v, name, max)? as u16));
+    let mac = |name: &str| {
+        opt(args, name, |v| {
+            let s = string(v, name)?;
+            parse_mac(&s).map_err(invalid)
+        })
     };
     Ok(QueryInput {
         topology: string(required(args, "topology")?, "topology")?,
-        from: string(required(args, "from")?, "from")?,
-        dst: addr(required(args, "dst")?, "dst")?,
-        protocol,
-        src: opt(args, "src", |v| addr(v, "src"))?,
-        src_port: opt(args, "src_port", |v| {
-            Ok(number(v, "src_port", 65535)? as u16)
+        ingress: opt(args, "ingress", |v| {
+            string(v, "ingress")?.parse::<IngressRef>().map_err(invalid)
         })?,
-        dst_port: opt(args, "dst_port", |v| {
-            Ok(number(v, "dst_port", 65535)? as u16)
+        source_ip: addr(required(args, "source.ip")?, "source.ip")?,
+        destination_ip: addr(required(args, "destination.ip")?, "destination.ip")?,
+        iana_number: n8("network.iana_number", 255)?,
+        transport: opt(args, "network.transport", |v| {
+            let s = string(v, "network.transport")?;
+            match s.parse::<Protocol>() {
+                Ok(p) if p.name().is_some() => Ok(p),
+                _ => Err(invalid(format!(
+                    "network.transport {s:?} is not tcp, udp, icmp or icmpv6"
+                ))),
+            }
         })?,
+        source_port: n16("source.port", 65535)?,
+        destination_port: n16("destination.port", 65535)?,
+        source_mac: mac("source.mac")?,
+        destination_mac: mac("destination.mac")?,
+        vlan_id: n16("network.vlan.id", 4095)?,
+        l2_priority: n8("l2_priority", 7)?,
         tcp_flags: opt(args, "tcp_flags", |v| {
             let list = v
                 .as_array()
@@ -119,14 +139,12 @@ pub fn query(args: &Map<String, Value>, extra: &[&str]) -> Result<QueryInput, Qu
             Value::String(s) => s.parse::<IcmpType>().map_err(invalid),
             v => Ok(IcmpType::Number(number(v, "icmp_type", 255)? as u8)),
         })?,
-        icmp_code: opt(
-            args,
-            "icmp_code",
-            |v| Ok(number(v, "icmp_code", 255)? as u8),
-        )?,
-        dscp: opt(args, "dscp", |v| Ok(number(v, "dscp", 63)? as u8))?,
-        ecn: opt(args, "ecn", |v| Ok(number(v, "ecn", 3)? as u8))?,
-        later_fragment: opt(args, "later_fragment", |v| boolean(v, "later_fragment"))?,
+        icmp_code: n8("icmp_code", 255)?,
+        dscp: n8("dscp", 63)?,
+        ecn: n8("ecn", 3)?,
+        fragment: opt(args, "fragment", |v| {
+            string(v, "fragment")?.parse().map_err(invalid)
+        })?,
         reply: opt(args, "reply", |v| boolean(v, "reply"))?,
     })
 }

@@ -32,6 +32,6 @@ pub fn routing_loop() -> TwinBuilder {
             30,
         ));
     }
-    b.endpoint(endpoint("client", "10.1.0.10", fid("r1/in/eth0")));
+    add_host(&mut b, endpoint("client", "10.1.0.10", fid("r1/in/eth0")));
     b
 }

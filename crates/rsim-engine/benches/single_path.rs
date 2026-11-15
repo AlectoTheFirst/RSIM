@@ -1,7 +1,6 @@
 //! Single path query benchmark.
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use rsim_core::EndpointId;
 use rsim_engine::{ExecOptions, Executor, Query};
 use rsim_topologies::*;
 use std::hint::black_box;
@@ -13,12 +12,7 @@ fn bench(c: &mut Criterion) {
     };
 
     let mini = mini_enterprise(MiniOpts::default()).build().unwrap();
-    let mut q = Query::from_endpoint(
-        &mini,
-        &EndpointId::new("guest-client"),
-        udp("172.31.10.20", 40000, "10.20.0.53", 53),
-    )
-    .unwrap();
+    let mut q = Query::path(&mini, &udp("172.31.10.20", 40000, "10.20.0.53", 53));
     q.reply = false;
     let ex = Executor::with_options(&mini, opts);
     c.bench_function("mini-enterprise guest->dns forward (21 steps)", |b| {
@@ -35,12 +29,7 @@ fn bench(c: &mut Criterion) {
     );
 
     let chain10 = chain(10, 20, 100).build().unwrap();
-    let mut q = Query::from_endpoint(
-        &chain10,
-        &EndpointId::new("client"),
-        tcp("10.254.0.10", 40000, "10.255.0.10", 443),
-    )
-    .unwrap();
+    let mut q = Query::path(&chain10, &tcp("10.254.0.10", 40000, "10.255.0.10", 443));
     q.reply = false;
     let ex = Executor::with_options(&chain10, opts);
     c.bench_function("chain of 10 routers forward (60 steps)", |b| {

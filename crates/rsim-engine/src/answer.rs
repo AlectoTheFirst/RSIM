@@ -3,11 +3,12 @@
 use std::collections::BTreeMap;
 
 use rsim_core::{
-    Context, Delay, Destination, FlowState, FunctionId, PacketSet, TraceStep, Verdict, VerdictKind,
+    Context, Delay, Destination, DeviceId, FlowState, FunctionId, InterfaceId, PacketSet, Reason,
+    SourceSpan, TraceStep, Verdict, VerdictKind,
 };
 
-/// The result of a query over all of its paths. Each path and its own
-/// result are in [`Answer::branches`].
+/// The result of a query over all of its paths for one part of the packets.
+/// Each path and its own result are in [`Answer::branches`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Summary {
     /// Every path ends with this verdict.
@@ -38,9 +39,19 @@ impl Summary {
     }
 }
 
-/// One function application and its branches. The nodes of an answer are
-/// in a list; the root is at index 0, and a child has a larger index than
-/// its parent.
+/// One part of the summary: a set of original requests and its summary.
+/// The parts of an answer are disjoint, and their union is the input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Part {
+    /// The original requests. Each member has the original request as both
+    /// headers.
+    pub packets: PacketSet,
+    pub summary: Summary,
+}
+
+/// One function application and its branches. The nodes of a run are in a
+/// list; the root is at index 0, and a child has a larger index than its
+/// parent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecNode {
     pub function: FunctionId,
@@ -66,10 +77,95 @@ pub struct End {
     pub state: FlowState,
 }
 
+/// How the ingress of a run was found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IngressBasis {
+    /// The query states the ingress.
+    Explicit,
+    /// An attachment record names the source address. The spans are those
+    /// of the records.
+    Attachment(Vec<SourceSpan>),
+    /// The source address is on a connected network of an edge interface.
+    /// No record confirms the host.
+    ConnectedNetwork {
+        network: rsim_core::Prefix,
+        spans: Vec<SourceSpan>,
+    },
+    /// The reply starts at the interface that delivered the forward packets.
+    Reply,
+}
+
+/// The ingress of a run: an interface and its ingress function, or the
+/// reason why the ingress is not known.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Ingress {
+    Found {
+        device: DeviceId,
+        interface: InterfaceId,
+        function: FunctionId,
+        basis: IngressBasis,
+    },
+    NotFound(Reason),
+}
+
+impl Ingress {
+    /// True if the ingress comes only from a connected network.
+    pub fn host_confirmed(&self) -> bool {
+        !matches!(
+            self,
+            Ingress::Found {
+                basis: IngressBasis::ConnectedNetwork { .. },
+                ..
+            }
+        )
+    }
+}
+
+/// One run of the executor: a part of the input with one ingress.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Run {
+    pub ingress: Ingress,
+    /// The packets of the run.
+    pub input: PacketSet,
+    pub body: RunBody,
+}
+
+impl Run {
+    /// The branches of the run in a fixed depth-first order. The index of a
+    /// branch counts in the run, and `run` is the index of the run.
+    pub fn branches(&self, run: usize) -> Vec<BranchView<'_>> {
+        let mut out = Vec::new();
+        match &self.body {
+            RunBody::Ended(end) => out.push(BranchView {
+                index: 0,
+                run,
+                steps: Vec::new(),
+                verdict: &end.verdict,
+                ctx: &end.ctx,
+                state: &end.state,
+                packets: &self.input,
+                delay: Delay::zero(),
+            }),
+            RunBody::Walked(nodes) => walk_branches(nodes, run, &mut out),
+        }
+        out
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RunBody {
+    /// The function applications of the run.
+    Walked(Vec<ExecNode>),
+    /// The run ended before a function: no ingress, or the set budget.
+    Ended(Box<End>),
+}
+
 /// One branch from the start to its end, in depth-first order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BranchView<'a> {
     pub index: usize,
+    /// The index of the run of the branch.
+    pub run: usize,
     pub steps: Vec<&'a TraceStep>,
     pub verdict: &'a Verdict,
     pub ctx: &'a Context,
@@ -94,61 +190,56 @@ pub enum ReplyResult {
     NotRun(String),
 }
 
+/// The mode of a query.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Mode {
+    /// A path query: one packet. A field that the query does not state is
+    /// not known. The summary has 1 part.
+    Path,
+    /// A set query: a field with no constraint has all values. The summary
+    /// has a part for each different result.
+    Set,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Answer {
-    pub start: FunctionId,
+    pub mode: Mode,
     pub input: PacketSet,
-    /// The function applications. The root is at index 0.
-    pub nodes: Vec<ExecNode>,
-    /// The result over all paths.
-    pub summary: Summary,
+    pub runs: Vec<Run>,
+    /// The result over all paths, for each part of the input.
+    pub summary: Vec<Part>,
     /// The replies, one for each delivered forward branch, in branch order.
     pub replies: Vec<Reply>,
 }
 
 impl Answer {
-    /// All branches in a fixed depth-first order.
+    /// All branches in a fixed depth-first order, run by run.
     pub fn branches(&self) -> Vec<BranchView<'_>> {
-        let mut out = Vec::new();
-        let mut path: Vec<&TraceStep> = Vec::new();
-        // (node, next edge). The path holds the step into each open node
-        // after the root.
-        let mut stack: Vec<(usize, usize)> = vec![(0, 0)];
-        while let Some(top) = stack.last_mut() {
-            let (n, e) = *top;
-            let Some(edge) = self.nodes[n].edges.get(e) else {
-                stack.pop();
-                if !stack.is_empty() {
-                    path.pop();
-                }
-                continue;
-            };
-            top.1 += 1;
-            path.push(&edge.step);
-            if let Some(child) = edge.next {
-                stack.push((child, 0));
-                continue;
+        let mut out: Vec<BranchView<'_>> = Vec::new();
+        for (r, run) in self.runs.iter().enumerate() {
+            for mut b in run.branches(r) {
+                b.index = out.len();
+                out.push(b);
             }
-            if let Some(end) = &edge.end {
-                let delay = path.iter().fold(Delay::zero(), |d, s| d.add(&s.delay));
-                out.push(BranchView {
-                    index: out.len(),
-                    steps: path.clone(),
-                    verdict: &end.verdict,
-                    ctx: &end.ctx,
-                    state: &end.state,
-                    packets: &edge.step.output,
-                    delay,
-                });
-            }
-            path.pop();
         }
         out
     }
 
-    /// The verdict, if every path ends with the same verdict.
+    /// The verdict, if every part has the same verdict on every path.
     pub fn verdict(&self) -> Option<&Verdict> {
-        self.summary.verdict()
+        let first = self.summary.first()?.summary.verdict()?;
+        self.summary
+            .iter()
+            .all(|p| p.summary.verdict() == Some(first))
+            .then_some(first)
+    }
+
+    /// The summary, if the answer has one part.
+    pub fn single_summary(&self) -> Option<&Summary> {
+        match self.summary.as_slice() {
+            [one] => Some(&one.summary),
+            _ => None,
+        }
     }
 
     pub fn reply_of(&self, branch: usize) -> Option<&Answer> {
@@ -156,6 +247,43 @@ impl Answer {
             ReplyResult::Ran(a) if r.forward_branch == branch => Some(a.as_ref()),
             _ => None,
         })
+    }
+}
+
+fn walk_branches<'a>(nodes: &'a [ExecNode], run: usize, out: &mut Vec<BranchView<'a>>) {
+    let mut path: Vec<&TraceStep> = Vec::new();
+    // (node, next edge). The path holds the step into each open node
+    // after the root.
+    let mut stack: Vec<(usize, usize)> = vec![(0, 0)];
+    while let Some(top) = stack.last_mut() {
+        let (n, e) = *top;
+        let Some(edge) = nodes[n].edges.get(e) else {
+            stack.pop();
+            if !stack.is_empty() {
+                path.pop();
+            }
+            continue;
+        };
+        top.1 += 1;
+        path.push(&edge.step);
+        if let Some(child) = edge.next {
+            stack.push((child, 0));
+            continue;
+        }
+        if let Some(end) = &edge.end {
+            let delay = path.iter().fold(Delay::zero(), |d, s| d.add(&s.delay));
+            out.push(BranchView {
+                index: out.len(),
+                run,
+                steps: path.clone(),
+                verdict: &end.verdict,
+                ctx: &end.ctx,
+                state: &end.state,
+                packets: &edge.step.output,
+                delay,
+            });
+        }
+        path.pop();
     }
 }
 
@@ -194,33 +322,79 @@ pub fn combine_flood(copies: &[Summary]) -> Summary {
     first.clone()
 }
 
-/// The summary of the answer, from the end of each path back to the start.
-///
-/// The input of each node is one packet, so the edges of a node are one
-/// plain branch, the paths of one forwarding choice, or the copies of one
-/// flood. `Err` names a node where this is not true.
-pub fn aggregate(nodes: &[ExecNode]) -> Result<Summary, String> {
+/// The summary parts of the nodes of one run, from the end of each path
+/// back to the start. Each part holds original requests.
+pub fn aggregate(nodes: &[ExecNode]) -> Result<Vec<Part>, String> {
     // A child has a larger index than its parent, so the reverse order
     // handles each node after all of its children.
-    let mut summaries: Vec<Option<Summary>> = vec![None; nodes.len()];
+    let mut parts: Vec<Option<Vec<Part>>> = vec![None; nodes.len()];
     for i in (0..nodes.len()).rev() {
-        summaries[i] = Some(aggregate_node(&nodes[i], &summaries)?);
+        parts[i] = Some(aggregate_node(&nodes[i], &parts)?);
     }
-    summaries
+    parts
         .into_iter()
         .next()
         .flatten()
-        .ok_or_else(|| "the answer has no node".to_string())
+        .ok_or_else(|| "the run has no node".to_string())
 }
 
-fn aggregate_node(node: &ExecNode, summaries: &[Option<Summary>]) -> Result<Summary, String> {
+/// The parts of one alternative or one copy, combined with the parts of the
+/// others by intersection.
+fn refine(groups: Vec<Vec<Part>>, combine: fn(&[Summary]) -> Summary) -> Vec<Part> {
+    let mut acc: Vec<(PacketSet, Vec<Summary>)> = Vec::new();
+    for (i, g) in groups.into_iter().enumerate() {
+        if i == 0 {
+            acc = g
+                .into_iter()
+                .map(|p| (p.packets, vec![p.summary]))
+                .collect();
+            continue;
+        }
+        let mut next = Vec::new();
+        for (s, sums) in &acc {
+            for p in &g {
+                let inter = s.intersect(&p.packets);
+                if !inter.is_empty() {
+                    let mut v = sums.clone();
+                    v.push(p.summary.clone());
+                    next.push((inter, v));
+                }
+            }
+        }
+        acc = next;
+    }
+    acc.into_iter()
+        .map(|(packets, sums)| Part {
+            packets,
+            summary: combine(&sums),
+        })
+        .collect()
+}
+
+/// Joins the parts with the same summary, in the order of the first part
+/// of each summary.
+pub fn merge(parts: Vec<Part>) -> Vec<Part> {
+    let mut out: Vec<Part> = Vec::new();
+    for p in parts {
+        match out.iter_mut().find(|q| q.summary == p.summary) {
+            Some(q) => q.packets = q.packets.union(&p.packets),
+            None => out.push(p),
+        }
+    }
+    out
+}
+
+fn aggregate_node(node: &ExecNode, done: &[Option<Vec<Part>>]) -> Result<Vec<Part>, String> {
     let mut plain = Vec::new();
-    let mut choices: BTreeMap<(FunctionId, String), Vec<Summary>> = BTreeMap::new();
-    let mut floods: BTreeMap<FunctionId, Vec<Summary>> = BTreeMap::new();
+    let mut choices: BTreeMap<(FunctionId, String), BTreeMap<u32, Vec<Part>>> = BTreeMap::new();
+    let mut floods: BTreeMap<FunctionId, BTreeMap<u32, Vec<Part>>> = BTreeMap::new();
     for e in &node.edges {
-        let v = match (&e.end, e.next) {
-            (Some(end), _) => Summary::Same(end.verdict.clone()),
-            (None, Some(n)) => summaries[n]
+        let ps = match (&e.end, e.next) {
+            (Some(end), _) => vec![Part {
+                packets: e.step.output.project_original(),
+                summary: Summary::Same(end.verdict.clone()),
+            }],
+            (None, Some(n)) => done[n]
                 .clone()
                 .ok_or_else(|| format!("the child of {} has no summary", node.function))?,
             (None, None) => return Err(format!("an edge of {} has no end", node.function)),
@@ -229,24 +403,28 @@ fn aggregate_node(node: &ExecNode, summaries: &[Option<Summary>]) -> Result<Summ
             choices
                 .entry((a.choice.clone(), a.key.clone()))
                 .or_default()
-                .push(v);
+                .entry(a.index)
+                .or_default()
+                .extend(ps);
         } else if let Some(fc) = &e.step.flood_copy {
-            floods.entry(fc.flood.clone()).or_default().push(v);
+            floods
+                .entry(fc.flood.clone())
+                .or_default()
+                .entry(fc.index)
+                .or_default()
+                .extend(ps);
         } else {
-            plain.push(v);
+            plain.extend(ps);
         }
     }
-    let mut groups: Vec<Summary> = plain;
-    groups.extend(choices.values().map(|vs| combine_paths(vs)));
-    groups.extend(floods.values().map(|vs| combine_flood(vs)));
-    match groups.as_slice() {
-        [one] => Ok(one.clone()),
-        _ => Err(format!(
-            "{} has {} parts for one packet",
-            node.function,
-            groups.len()
-        )),
+    let mut all = plain;
+    for alts in choices.into_values() {
+        all.extend(refine(alts.into_values().collect(), combine_paths));
     }
+    for copies in floods.into_values() {
+        all.extend(refine(copies.into_values().collect(), combine_flood));
+    }
+    Ok(merge(all))
 }
 
 /// True if a delivered branch reached an endpoint, with its id.

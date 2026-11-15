@@ -205,6 +205,24 @@ impl Shadow {
                 let a = s.bin(f, g, |x, y| x && y);
                 s.exists(a, &ls, &mut Map::default())
             }
+            ShadowOp::Literals(ls) => {
+                dd.shadow_mut().init();
+                let s = dd.shadow_mut();
+                let mut acc = TRUE;
+                if ls.windows(2).any(|w| w[0].0 == w[1].0) {
+                    acc = FALSE;
+                } else {
+                    for &(l, v) in ls.iter().rev() {
+                        acc = if v {
+                            s.mk(l, FALSE, acc)
+                        } else {
+                            s.mk(l, acc, FALSE)
+                        };
+                    }
+                }
+                acc
+            }
+            ShadowOp::Import => return Ok(()),
             ShadowOp::Rename(f, m) => {
                 let map = dd.map_levels(*m).to_vec();
                 let f = t(dd, *f);

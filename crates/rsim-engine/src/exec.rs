@@ -1,43 +1,68 @@
-//! The concrete-mode executor.
+//! The executor: ingress resolution, the walk of each branch, the node
+//! budget of the packet sets and the return path.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
 use rsim_core::{
-    Branch, Context, ContextAttr, Destination, EndpointId, FieldValue, FlowState, FunctionId,
-    FunctionKind, Header, NetFunction, Outcome, PacketSet, QosView, Reason, ReasonCode,
-    RibGuardFlag, TraceStep, Verdict,
+    AddrField, Branch, Context, ContextAttr, DdError, Destination, DeviceId, FlowState, FunctionId,
+    FunctionKind, Header, HeaderField, InterfaceId, NetFunction, Outcome, PacketSet, QosView,
+    Reason, ReasonCode, RibGuardFlag, TraceStep, Verdict,
 };
 
 use crate::answer::{
-    Answer, End, ExecEdge, ExecNode, Reply, ReplyResult, aggregate, delivered_endpoint,
+    Answer, End, ExecEdge, ExecNode, Ingress, IngressBasis, Mode, Part, Reply, ReplyResult, Run,
+    RunBody, Summary, aggregate,
 };
 use crate::twin::Twin;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Query {
-    pub start: FunctionId,
+    /// The ingress that the query states: a device and an interface. Without
+    /// it, the executor finds the ingress from the source address.
+    pub ingress: Option<(DeviceId, InterfaceId)>,
     pub packets: PacketSet,
     /// Run the return path for each delivered branch.
     pub reply: bool,
+    pub mode: Mode,
 }
 
 impl Query {
-    /// A query for one packet from an endpoint.
-    pub fn from_endpoint(
-        twin: &Twin,
-        endpoint: &EndpointId,
-        header: Header,
-    ) -> Result<Query, ExecError> {
-        let e = twin
-            .endpoint(endpoint)
-            .ok_or_else(|| ExecError::UnknownEndpoint(endpoint.clone()))?;
-        Ok(Query {
-            start: e.attachment.clone(),
-            packets: PacketSet::single(header),
+    /// A path query for one packet. A field that the header does not state
+    /// is not known.
+    pub fn path(twin: &Twin, header: &Header) -> Query {
+        let arena = twin.arena(None);
+        Query {
+            ingress: None,
+            packets: PacketSet::single(&arena, header),
             reply: true,
-        })
+            mode: Mode::Path,
+        }
+    }
+
+    /// A set query. A field with no constraint has all values.
+    pub fn set(packets: PacketSet) -> Query {
+        Query {
+            ingress: None,
+            packets,
+            reply: true,
+            mode: Mode::Set,
+        }
+    }
+
+    pub fn with_ingress(
+        mut self,
+        device: impl Into<DeviceId>,
+        interface: impl Into<InterfaceId>,
+    ) -> Self {
+        self.ingress = Some((device.into(), interface.into()));
+        self
+    }
+
+    pub fn without_reply(mut self) -> Self {
+        self.reply = false;
+        self
     }
 }
 
@@ -50,6 +75,9 @@ pub struct ExecOptions {
     /// ends as `Unknown` with the reason `StepBudget`. Loops are
     /// detected before this limit; see [`ReasonCode::Loop`].
     pub max_steps: usize,
+    /// The node budget of the packet sets of one run. A run over the budget
+    /// splits its input. `None` is no budget.
+    pub node_budget: Option<usize>,
 }
 
 impl Default for ExecOptions {
@@ -57,6 +85,7 @@ impl Default for ExecOptions {
         ExecOptions {
             check_contract: true,
             max_steps: 10_000,
+            node_budget: Some(1_000_000),
         }
     }
 }
@@ -64,7 +93,8 @@ impl Default for ExecOptions {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExecError {
     UnknownFunction(FunctionId),
-    UnknownEndpoint(EndpointId),
+    /// The query states an ingress that has no ingress function.
+    UnknownIngress(DeviceId, InterfaceId),
     /// The start function requires context that a query does not supply.
     StartRequiresContext(FunctionId, Vec<ContextAttr>),
     ContractViolation {
@@ -72,6 +102,8 @@ pub enum ExecError {
         detail: String,
     },
     Aggregation(String),
+    /// A fault of the packet sets other than the node budget.
+    PacketSet(DdError),
 }
 
 impl fmt::Display for ExecError {
@@ -82,6 +114,26 @@ impl fmt::Display for ExecError {
 
 impl std::error::Error for ExecError {}
 
+/// Why a run stops before its end.
+enum Stop {
+    Fault(DdError),
+    Error(ExecError),
+}
+
+impl From<ExecError> for Stop {
+    fn from(e: ExecError) -> Self {
+        Stop::Error(e)
+    }
+}
+
+/// The fault of the arena of a set, as a stop.
+fn fault_of(s: &PacketSet) -> Result<(), Stop> {
+    match s.arena().fault() {
+        Some(e) => Err(Stop::Fault(e)),
+        None => Ok(()),
+    }
+}
+
 /// The full state of a branch at the input of a function. A return to the
 /// same full state is a loop.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -90,6 +142,14 @@ struct StateKey {
     ctx: Context,
     packets: PacketSet,
     state: FlowState,
+}
+
+/// One finished run with its summary parts and its replies. A reply holds
+/// the index of its forward branch in the run.
+struct RunOut {
+    run: Run,
+    parts: Vec<Part>,
+    replies: Vec<(usize, ReplyResult)>,
 }
 
 pub struct Executor<'t> {
@@ -110,71 +170,195 @@ impl<'t> Executor<'t> {
     }
 
     pub fn run(&self, q: &Query) -> Result<Answer, ExecError> {
-        let mut answer = self.run_one(&q.start, &q.packets, FlowState::new())?;
-        if q.reply {
-            answer.replies = self.replies(&answer)?;
+        let mut outs = Vec::new();
+        for (set, ingress) in self.resolve(q)? {
+            if set.is_empty() {
+                continue;
+            }
+            match &ingress {
+                Ingress::Found { function, .. } => {
+                    let start = function.clone();
+                    self.run_part(&set, &ingress, &start, q, &mut outs)?;
+                }
+                Ingress::NotFound(r) => {
+                    outs.push(ended(&set, ingress.clone(), Verdict::Unknown(r.clone())));
+                }
+            }
         }
-        Ok(answer)
+        Ok(assemble(q.mode, &q.packets, outs))
     }
 
-    fn run_one(
+    /// The parts of the input with their ingress.
+    fn resolve(&self, q: &Query) -> Result<Vec<(PacketSet, Ingress)>, ExecError> {
+        if let Some((d, i)) = &q.ingress {
+            let f = self
+                .twin
+                .ingress(d, i)
+                .ok_or_else(|| ExecError::UnknownIngress(d.clone(), i.clone()))?;
+            return Ok(vec![(
+                q.packets.clone(),
+                Ingress::Found {
+                    device: d.clone(),
+                    interface: i.clone(),
+                    function: f.clone(),
+                    basis: IngressBasis::Explicit,
+                },
+            )]);
+        }
+        let part = q
+            .packets
+            .partition_by_prefix(AddrField::Src, self.twin.ingress_table());
+        let mut out = Vec::new();
+        for (p, cands, set) in part.matched {
+            out.push((set, crate::twin::ingress_of(&p, cands)));
+        }
+        out.push((
+            part.unmatched,
+            Ingress::NotFound(Reason::new(
+                ReasonCode::UnknownAttribute,
+                "no ingress: no attachment record and no edge network holds the source address",
+            )),
+        ));
+        out.push((
+            part.uncertain,
+            Ingress::NotFound(Reason::new(
+                ReasonCode::UnknownAttribute,
+                "no ingress: the source address is unknown",
+            )),
+        ));
+        Ok(out)
+    }
+
+    /// Runs one part in a new arena. A part over the node budget splits on
+    /// the first bit of its original requests. A part that cannot split
+    /// gets `Unknown` with the reason `SetBudget`.
+    fn run_part(
         &self,
+        input: &PacketSet,
+        ingress: &Ingress,
         start: &FunctionId,
-        packets: &PacketSet,
+        q: &Query,
+        outs: &mut Vec<RunOut>,
+    ) -> Result<(), ExecError> {
+        let arena = self.twin.arena(self.opts.node_budget);
+        let s = input.copy_to(&arena);
+        let r = fault_of(&s).and_then(|()| self.try_run(&s, ingress, start, q, FlowState::new()));
+        match r {
+            Ok(out) => outs.push(out),
+            Err(Stop::Fault(DdError::NodeBudget { budget })) => match input.split_on_first_bit() {
+                Some((a, b)) => {
+                    self.run_part(&a, ingress, start, q, outs)?;
+                    self.run_part(&b, ingress, start, q, outs)?;
+                }
+                None => outs.push(ended(
+                    input,
+                    ingress.clone(),
+                    Verdict::Unknown(Reason::new(
+                        ReasonCode::SetBudget,
+                        format!("one original request is over the node budget {budget}"),
+                    )),
+                )),
+            },
+            Err(Stop::Fault(e)) => return Err(ExecError::PacketSet(e)),
+            Err(Stop::Error(e)) => return Err(e),
+        }
+        Ok(())
+    }
+
+    /// Walks the packets of one run from the start function, and runs the
+    /// replies in the same arena.
+    fn try_run(
+        &self,
+        s: &PacketSet,
+        ingress: &Ingress,
+        start: &FunctionId,
+        q: &Query,
         state: FlowState,
-    ) -> Result<Answer, ExecError> {
+    ) -> Result<RunOut, Stop> {
         let f = self
             .twin
             .function(start)
             .ok_or_else(|| ExecError::UnknownFunction(start.clone()))?;
         let req = f.requires();
         if !req.is_empty() {
-            return Err(ExecError::StartRequiresContext(start.clone(), req));
+            return Err(ExecError::StartRequiresContext(start.clone(), req).into());
         }
-        let nodes = self.walk(start, packets.clone(), state)?;
-        let summary = aggregate(&nodes).map_err(ExecError::Aggregation)?;
-        Ok(Answer {
-            start: start.clone(),
-            input: packets.clone(),
-            nodes,
-            summary,
-            replies: Vec::new(),
+        let nodes = self.walk(start, s.clone(), state)?;
+        let parts = aggregate(&nodes).map_err(ExecError::Aggregation)?;
+        fault_of(s)?;
+        check_parts(&parts, s).map_err(ExecError::Aggregation)?;
+        fault_of(s)?;
+        let run = Run {
+            ingress: ingress.clone(),
+            input: s.clone(),
+            body: RunBody::Walked(nodes),
+        };
+        let replies = if q.reply {
+            self.replies(&run, q.mode)?
+        } else {
+            Vec::new()
+        };
+        Ok(RunOut {
+            run,
+            parts,
+            replies,
         })
     }
 
-    /// Builds the reply of each delivered branch and runs it from the
-    /// destination with the flow state of that branch.
-    fn replies(&self, forward: &Answer) -> Result<Vec<Reply>, ExecError> {
+    /// Builds the reply of each delivered branch of a run and runs it from
+    /// the interface that delivered the forward packets, with the flow state
+    /// of that branch.
+    fn replies(&self, run: &Run, mode: Mode) -> Result<Vec<(usize, ReplyResult)>, Stop> {
         let mut out = Vec::new();
-        for b in forward.branches() {
-            if !matches!(b.verdict, Verdict::Deliver(_)) {
+        for b in run.branches(0) {
+            let Verdict::Deliver(d) = b.verdict else {
                 continue;
-            }
-            let result = match delivered_endpoint(b.verdict) {
-                Some(e) => match self.twin.endpoint(e) {
-                    Some(ep) => {
-                        let a =
-                            self.run_one(&ep.attachment, &b.packets.reply(), b.state.clone())?;
-                        ReplyResult::Ran(Box::new(a))
-                    }
-                    None => ReplyResult::NotRun(format!("endpoint {e} is not in the twin")),
-                },
-                None => ReplyResult::NotRun(match b.verdict {
-                    Verdict::Deliver(Destination::Device(d)) => {
-                        format!("reply from device {d} not supported")
-                    }
-                    _ => unreachable!(),
-                }),
             };
-            out.push(Reply {
-                forward_branch: b.index,
-                result,
-            });
+            let result = match d {
+                Destination::Endpoint(_) => {
+                    match (b.ctx.device.known(), b.ctx.egress_interface.known()) {
+                        (Some(dev), Some(iface)) => match self.twin.ingress(dev, iface) {
+                            Some(f) => {
+                                let ing = Ingress::Found {
+                                    device: dev.clone(),
+                                    interface: iface.clone(),
+                                    function: f.clone(),
+                                    basis: IngressBasis::Reply,
+                                };
+                                let rs = b.packets.reply();
+                                fault_of(&rs)?;
+                                let q = Query {
+                                    ingress: None,
+                                    packets: rs.clone(),
+                                    reply: false,
+                                    mode,
+                                };
+                                let o = self.try_run(&rs, &ing, f, &q, b.state.clone())?;
+                                ReplyResult::Ran(Box::new(assemble(mode, &rs, vec![o])))
+                            }
+                            None => ReplyResult::NotRun(format!(
+                                "{dev}/{iface} delivered the packets and has no ingress function"
+                            )),
+                        },
+                        _ => ReplyResult::NotRun(
+                            "the interface that delivered the packets is not known".to_string(),
+                        ),
+                    }
+                }
+                Destination::Device(d) => {
+                    ReplyResult::NotRun(format!("reply from device {d} not supported"))
+                }
+            };
+            out.push((b.index, result));
         }
         Ok(out)
     }
 
     /// Applies one function and opens a frame for its branches.
+    #[allow(
+        clippy::mutable_key_type,
+        reason = "the order of a packet set uses its edge and its arena address, which do not change"
+    )]
     fn open(
         &self,
         id: &FunctionId,
@@ -183,15 +367,17 @@ impl<'t> Executor<'t> {
         state: FlowState,
         nodes: &mut Vec<ExecNode>,
         visited: &mut BTreeSet<StateKey>,
-    ) -> Result<Frame, ExecError> {
+    ) -> Result<Frame, Stop> {
         let f = self
             .twin
             .function(id)
             .ok_or_else(|| ExecError::UnknownFunction(id.clone()))?
             .clone();
         let branches = f.apply(&packets, &ctx, &state);
+        fault_of(&packets)?;
         if self.opts.check_contract {
             check_contract(f.as_ref(), &packets, &ctx, &branches)?;
+            fault_of(&packets)?;
         }
         let key = StateKey {
             function: id.clone(),
@@ -215,12 +401,16 @@ impl<'t> Executor<'t> {
     /// Follows every branch from the start function, depth first, in the
     /// order of the branches. The walk uses an explicit stack, so a long
     /// path does not use the call stack.
+    #[allow(
+        clippy::mutable_key_type,
+        reason = "the order of a packet set uses its edge and its arena address, which do not change"
+    )]
     fn walk(
         &self,
         start: &FunctionId,
         packets: PacketSet,
         state: FlowState,
-    ) -> Result<Vec<ExecNode>, ExecError> {
+    ) -> Result<Vec<ExecNode>, Stop> {
         let mut nodes = Vec::new();
         let mut visited = BTreeSet::new();
         let mut stack = vec![self.open(
@@ -239,6 +429,7 @@ impl<'t> Executor<'t> {
             };
             let parent = top.node;
             let step = trace_step(top.f.as_ref(), &top.key.packets, &b);
+            fault_of(&top.key.packets)?;
             let depth = stack.len();
             let edge = match &b.outcome {
                 Outcome::Forward(next) => {
@@ -303,6 +494,90 @@ struct Frame {
     pending: std::vec::IntoIter<Branch>,
 }
 
+/// A run that ended before a function.
+fn ended(input: &PacketSet, ingress: Ingress, verdict: Verdict) -> RunOut {
+    let summary = Summary::Same(verdict.clone());
+    RunOut {
+        run: Run {
+            ingress,
+            input: input.clone(),
+            body: RunBody::Ended(Box::new(End {
+                verdict,
+                ctx: Context::default(),
+                state: FlowState::new(),
+            })),
+        },
+        parts: vec![Part {
+            packets: input.project_original(),
+            summary,
+        }],
+        replies: Vec::new(),
+    }
+}
+
+/// The answer of the runs of one query. The branch indexes count over all
+/// runs. A path query has 1 summary part: if the parts have different
+/// results, the result depends on fields that the query does not state.
+fn assemble(mode: Mode, input: &PacketSet, outs: Vec<RunOut>) -> Answer {
+    let mut runs = Vec::new();
+    let mut parts = Vec::new();
+    let mut replies = Vec::new();
+    let mut offset = 0;
+    for (r, o) in outs.into_iter().enumerate() {
+        let n = o.run.branches(r).len();
+        for (i, result) in o.replies {
+            replies.push(Reply {
+                forward_branch: offset + i,
+                result,
+            });
+        }
+        offset += n;
+        parts.extend(o.parts);
+        runs.push(o.run);
+    }
+    let summary = match mode {
+        Mode::Set => parts,
+        Mode::Path => {
+            let s = match parts.first() {
+                Some(first) if parts.iter().all(|p| p.summary == first.summary) => {
+                    first.summary.clone()
+                }
+                _ => Summary::Same(Verdict::Unknown(Reason::new(
+                    ReasonCode::MatchUnknown,
+                    "the result depends on fields that the query does not state",
+                ))),
+            };
+            vec![Part {
+                packets: input.project_original(),
+                summary: s,
+            }]
+        }
+    };
+    Answer {
+        mode,
+        input: input.clone(),
+        runs,
+        summary,
+        replies,
+    }
+}
+
+/// Checks that the summary parts are disjoint and cover the input, by
+/// original request.
+fn check_parts(parts: &[Part], input: &PacketSet) -> Result<(), String> {
+    let mut covered = input.empty();
+    for p in parts {
+        if !covered.intersect(&p.packets).is_empty() {
+            return Err("two summary parts hold the same packets".into());
+        }
+        covered = covered.union(&p.packets);
+    }
+    if covered != input.project_original() {
+        return Err("the summary parts do not cover the input".into());
+    }
+    Ok(())
+}
+
 fn terminal(step: TraceStep, verdict: Verdict, b: Branch) -> ExecEdge {
     ExecEdge {
         step,
@@ -359,15 +634,10 @@ pub fn check_contract(
     };
     check_partition(input, branches).map_err(violation)?;
     if f.qos_writes().is_empty() {
-        let marks = |s: &PacketSet| -> BTreeSet<(FieldValue<u8>, FieldValue<u8>)> {
-            s.members()
-                .iter()
-                .map(|p| (p.current.dscp, p.current.ecn))
-                .collect()
-        };
-        let before = marks(input);
+        let marks = [HeaderField::Dscp, HeaderField::Ecn];
+        let before = input.project(&marks);
         for b in branches {
-            if !marks(&b.packets).is_subset(&before) {
+            if !b.packets.project(&marks).is_subset(&before) {
                 return Err(violation(
                     "the marking changed, and the function declares no QoS write".into(),
                 ));
@@ -404,7 +674,7 @@ pub fn check_partition(input: &PacketSet, branches: &[Branch]) -> Result<(), Str
                 .entry((0, a.choice.to_string(), a.key.clone()))
                 .or_default()
                 .entry(a.index)
-                .or_insert_with(PacketSet::empty);
+                .or_insert_with(|| input.empty());
             if !g.intersect(&orig(&b.packets)).is_empty() {
                 return Err(format!(
                     "alternative {} of {} duplicates packets",
@@ -417,7 +687,7 @@ pub fn check_partition(input: &PacketSet, branches: &[Branch]) -> Result<(), Str
                 .entry((1, fc.flood.to_string(), String::new()))
                 .or_default()
                 .entry(fc.index)
-                .or_insert_with(PacketSet::empty);
+                .or_insert_with(|| input.empty());
             if !g.intersect(&orig(&b.packets)).is_empty() {
                 return Err(format!("flood copy {} duplicates packets", fc.index));
             }
@@ -426,7 +696,7 @@ pub fn check_partition(input: &PacketSet, branches: &[Branch]) -> Result<(), Str
             plain.push(orig(&b.packets));
         }
     }
-    let mut covered = PacketSet::empty();
+    let mut covered = input.empty();
     for p in &plain {
         if !covered.intersect(p).is_empty() {
             return Err("two branches carry the same packets".into());

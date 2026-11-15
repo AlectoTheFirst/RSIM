@@ -58,7 +58,9 @@ pub enum ReasonCode {
     UnknownAttribute,
     AmbiguousOwner,
     IncompleteTable,
-    UnsupportedSet,
+    /// The set of a part of the query was over the node budget, and the
+    /// part has one original request.
+    SetBudget,
     NoLink,
     /// The branch used more steps than the budget of the query. The
     /// executor reports this; it is not a verdict on the packets.

@@ -88,7 +88,7 @@ pub fn ecmp() -> TwinBuilder {
         20,
     ));
     b.add(r4.egress("eth9", EgressMode::Routed, None, 30));
-    b.endpoint(endpoint("client", "10.1.0.10", fid("r1/in/eth0")));
-    b.endpoint(endpoint("server", "10.4.0.10", fid("r4/in/eth9")));
+    add_host(&mut b, endpoint("client", "10.1.0.10", fid("r1/in/eth0")));
+    add_host(&mut b, endpoint("server", "10.4.0.10", fid("r4/in/eth9")));
     b
 }

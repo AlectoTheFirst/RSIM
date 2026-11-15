@@ -4,7 +4,7 @@ use rsim_core::{
     AddrCond, EndpointId, FunctionId, InterfaceId, Match, NeighbourTarget, ObjectId, PortCond,
     Prefix, PrefixTable, RulePredicate, SourceSpan, TriePrefixTable, ValueCond, VrfId, ZoneId,
 };
-use rsim_engine::Endpoint;
+use rsim_engine::{AttachmentKind, AttachmentRecord, EdgeInterface, Endpoint, TwinBuilder};
 use rsim_functions::{
     AclMatch, Egress, EgressMode, Ingress, Link, Meta, Neighbour, NextHopResolution, Route,
     RouteKind, RouteLookup, RouteNextHop, Rule, RuleAction, SessionCommit, SessionLookup,
@@ -229,10 +229,53 @@ pub fn with_proto_dport(m: Match, proto: u8, dport: u16) -> Match {
     }
 }
 
-pub fn endpoint(id: &str, addr: &str, attachment: FunctionId) -> Endpoint {
-    Endpoint {
-        id: EndpointId::new(id),
-        addresses: vec![ip(addr)],
-        attachment,
+/// An endpoint with its client attachment record, and its interface as an
+/// edge interface with the connected network of the address.
+#[derive(Clone, Debug)]
+pub struct Host {
+    pub endpoint: Endpoint,
+    pub record: AttachmentRecord,
+    pub edge: EdgeInterface,
+}
+
+/// A host at the ingress function `attachment`, named `<device>/in/<interface>`.
+/// The connected network is the /24 network of the address.
+///
+/// # Panics
+///
+/// Panics if `attachment` is not of the form `<device>/in/<interface>`.
+pub fn endpoint(id: &str, addr: &str, attachment: FunctionId) -> Host {
+    let name = attachment.to_string();
+    let (device, interface) = name
+        .split_once("/in/")
+        .expect("an ingress function is named <device>/in/<interface>");
+    let a = ip(addr);
+    let span = SourceSpan::line(format!("{device}.clients"), 1);
+    Host {
+        endpoint: Endpoint {
+            id: EndpointId::new(id),
+            addresses: vec![a],
+        },
+        record: AttachmentRecord {
+            address: a,
+            device: device.into(),
+            interface: InterfaceId::new(interface),
+            kind: AttachmentKind::Client,
+            host: id.to_string(),
+            provenance: vec![span.clone()],
+        },
+        edge: EdgeInterface {
+            device: device.into(),
+            interface: InterfaceId::new(interface),
+            networks: vec![Prefix::new(a, 24)],
+            provenance: vec![span],
+        },
     }
+}
+
+/// Adds a host: the endpoint, the record and the edge interface.
+pub fn add_host(b: &mut TwinBuilder, h: Host) {
+    b.endpoint(h.endpoint);
+    b.attachment(h.record);
+    b.edge_interface(h.edge);
 }

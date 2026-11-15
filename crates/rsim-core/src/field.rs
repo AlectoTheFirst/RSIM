@@ -28,6 +28,16 @@ impl<T: Copy> FieldValue<T> {
         }
     }
 
+    /// The field with its known value changed by `f`.
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> FieldValue<U> {
+        match self {
+            FieldValue::Known(v) => FieldValue::Known(f(v)),
+            FieldValue::Unstated => FieldValue::Unstated,
+            FieldValue::Unknown => FieldValue::Unknown,
+            FieldValue::Absent => FieldValue::Absent,
+        }
+    }
+
     pub fn is_known(&self) -> bool {
         matches!(self, FieldValue::Known(_))
     }

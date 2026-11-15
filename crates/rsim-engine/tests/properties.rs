@@ -4,9 +4,9 @@
 
 use proptest::prelude::*;
 use rsim_core::{
-    AddrCond, Context, EndpointId, FieldValue, FlowState, Header, Match, MatchClass, NetFunction,
-    Outcome, PROTO_ICMP, PROTO_TCP, PROTO_UDP, PacketSet, PortCond, RulePredicate, SourceSpan,
-    Uniform, ValueCond,
+    AddrCond, Context, FieldValue, FlowState, Header, Match, MatchClass, NetFunction, Outcome,
+    PROTO_ICMP, PROTO_TCP, PROTO_UDP, PacketSet, PortCond, RulePredicate, SetArena, SetBase,
+    SourceSpan, Uniform, ValueCond,
 };
 use rsim_engine::{Executor, Query, Twin, check_partition};
 use rsim_functions::{AclMatch, Meta, Rule, RuleAction, RuleBody};
@@ -93,19 +93,32 @@ proptest! {
     ) {
         let twins = twins();
         let twin = &twins[t];
-        let ep = EndpointId::new(STARTS[start]);
-        prop_assume!(twin.endpoint(&ep).is_some());
-        let q = Query::from_endpoint(twin, &ep, h.clone()).unwrap();
+        let rec = twin.attachments().iter().find(|r| r.host == STARTS[start]);
+        prop_assume!(rec.is_some());
+        let rec = rec.unwrap();
+        let q = Query::path(twin, &h).with_ingress(rec.device.clone(), rec.interface.clone());
         let a = Executor::new(twin).run(&q);
         prop_assert!(a.is_ok(), "{:?}", a.err());
         let a = a.unwrap();
-        prop_assert_eq!(&a, &Executor::new(twin).run(&q).unwrap());
+        let again = Executor::new(twin).run(&q).unwrap();
+        let verdicts = |a: &rsim_engine::Answer| -> Vec<String> {
+            a.branches()
+                .iter()
+                .map(|b| format!("{:?} {:?}", b.verdict, b.packets.witness()))
+                .collect()
+        };
+        prop_assert_eq!(verdicts(&a), verdicts(&again));
 
         // No function of these twins writes QoS fields, so each step shows the
-        // marking of the request.
+        // marking of the request. A DSCP that the request does not state has
+        // all values.
+        let want = match h.dscp {
+            FieldValue::Unstated => Uniform::Varies,
+            v => Uniform::Value(v),
+        };
         for b in a.branches() {
             for s in &b.steps {
-                prop_assert_eq!(s.qos.dscp, Uniform::Value(h.dscp));
+                prop_assert_eq!(s.qos.dscp, want);
                 prop_assert!(s.function_qos_unset());
             }
         }
@@ -216,17 +229,33 @@ proptest! {
             default,
             next: fid("dev/next"),
         };
-        let input = PacketSet::single(h.clone());
+        let base = SetBase::build(acl.rules.iter().filter_map(|r| match &r.body {
+            RuleBody::Handled { predicate, .. } => Some(predicate),
+            RuleBody::Unhandled => None,
+        }))
+        .unwrap();
+        let arena = SetArena::new(&base, None);
+        let input = PacketSet::single(&arena, &h);
         let out = acl.apply(&input, &Context::default(), &FlowState::new());
         prop_assert!(check_partition(&input, &out).is_ok(), "{:?}", check_partition(&input, &out));
         prop_assert_eq!(&out, &acl.apply(&input, &Context::default(), &FlowState::new()));
-        prop_assert_eq!(out.len(), 1);
-        let got = match &out[0].outcome {
+        let action = |o: &Outcome| match o {
             Outcome::Forward(_) => Some(RuleAction::Permit),
             Outcome::Drop => Some(RuleAction::Deny),
             Outcome::Unknown => None,
             Outcome::Deliver(_) => unreachable!(),
         };
-        prop_assert_eq!(got, oracle(&rules, default, &h));
+        // A definite result of the concrete oracle holds for each member.
+        if let Some(a) = oracle(&rules, default, &h) {
+            for b in &out {
+                prop_assert_eq!(action(&b.outcome), Some(a));
+            }
+        }
+        // The witness of each branch has all fields stated, and the oracle
+        // gives the action of its branch.
+        for b in &out {
+            let w = b.packets.witness().unwrap();
+            prop_assert_eq!(action(&b.outcome), oracle(&rules, default, &w.current), "{:?}", w.current);
+        }
     }
 }

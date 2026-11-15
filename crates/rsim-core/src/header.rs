@@ -4,7 +4,7 @@
 use std::net::IpAddr;
 
 use crate::addr::Mac;
-use crate::field::{FieldValue, Tri};
+use crate::field::FieldValue;
 
 pub const PROTO_ICMP: u8 = 1;
 pub const PROTO_TCP: u8 = 6;
@@ -259,64 +259,6 @@ impl Header {
         unstated(&mut h.dscp);
         unstated(&mut h.ecn);
         h
-    }
-}
-
-/// The flow identity of a header: addresses, protocol and ports. Firewall
-/// sessions and NAT bindings use it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct FlowKey {
-    pub src_ip: FieldValue<IpAddr>,
-    pub dst_ip: FieldValue<IpAddr>,
-    pub protocol: FieldValue<u8>,
-    pub src_port: FieldValue<u16>,
-    pub dst_port: FieldValue<u16>,
-}
-
-impl FlowKey {
-    pub fn of(h: &Header) -> Self {
-        FlowKey {
-            src_ip: h.src_ip,
-            dst_ip: h.dst_ip,
-            protocol: h.protocol,
-            src_port: h.src_port,
-            dst_port: h.dst_port,
-        }
-    }
-
-    /// The key of the reply direction.
-    pub fn reversed(&self) -> Self {
-        FlowKey {
-            src_ip: self.dst_ip,
-            dst_ip: self.src_ip,
-            protocol: self.protocol,
-            src_port: self.dst_port,
-            dst_port: self.src_port,
-        }
-    }
-
-    /// Compares the key with a header.
-    ///
-    /// A key comes from a packet of the same query. An unstated field in the
-    /// key and an unstated field in the header at the same position are the
-    /// same unstated value of that one request, so they match. An unstated
-    /// field against a known field can be equal or not, and a field that a
-    /// function made unknown cannot be compared: both give `Tri::Unknown`.
-    pub fn matches(&self, h: &Header) -> Tri {
-        fn cmp<T: PartialEq + Copy>(k: FieldValue<T>, v: FieldValue<T>) -> Tri {
-            match (k, v) {
-                (FieldValue::Unknown, _) | (_, FieldValue::Unknown) => Tri::Unknown,
-                // An unstated value can be equal to the known value.
-                (FieldValue::Unstated, FieldValue::Known(_))
-                | (FieldValue::Known(_), FieldValue::Unstated) => Tri::Unknown,
-                (a, b) => Tri::from(a == b),
-            }
-        }
-        cmp(self.src_ip, h.src_ip)
-            .and(cmp(self.dst_ip, h.dst_ip))
-            .and(cmp(self.protocol, h.protocol))
-            .and(cmp(self.src_port, h.src_port))
-            .and(cmp(self.dst_port, h.dst_port))
     }
 }
 

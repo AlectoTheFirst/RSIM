@@ -152,7 +152,7 @@ fn tool_calls(modern: bool) -> Vec<Value> {
     step["step"] = json!(2);
     m.push(call(id + 1, "explain_step", step, modern));
     let mut bad = stored_args("edge-dnat");
-    bad["from"] = json!("nobody");
+    bad["ingress"] = json!("nobody/eth0");
     m.push(call(id + 2, "path_query", bad, modern));
     m
 }
@@ -214,7 +214,7 @@ fn check_tool_results(responses: &[Value], modern: bool) {
     let r = &by_id(responses, id + 2)["result"];
     assert_eq!(r["isError"], true);
     assert_eq!(r["structuredContent"]["kind"], "error");
-    assert_eq!(r["structuredContent"]["error"]["code"], "unknown_endpoint");
+    assert_eq!(r["structuredContent"]["error"]["code"], "unknown_ingress");
 }
 
 fn check_tools_list(r: &Value) {

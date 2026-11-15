@@ -7,8 +7,8 @@ use rsim_engine::{Answer, Executor, Twin};
 
 use crate::error::{ErrorCode, QueryError};
 use crate::json::{
-    AnswerJson, DeviceJson, DevicesOut, EndpointJson, FunctionJson, PathAnswerOut, StepOut,
-    TopologiesOut, TraceStepJson, VERSION, snake,
+    AnswerJson, AttachmentJson, DeviceJson, DevicesOut, EdgeInterfaceJson, EndpointJson,
+    FunctionJson, PathAnswerOut, SpanJson, StepOut, TopologiesOut, TraceStepJson, VERSION, snake,
 };
 use crate::query::QueryInput;
 
@@ -75,7 +75,28 @@ pub fn devices(topology: &str, twin: &Twin) -> DevicesOut {
             .map(|e| EndpointJson {
                 endpoint: e.id.to_string(),
                 addresses: e.addresses.iter().map(|a| a.to_string()).collect(),
-                attachment: e.attachment.to_string(),
+            })
+            .collect(),
+        attachments: twin
+            .attachments()
+            .iter()
+            .map(|a| AttachmentJson {
+                address: a.address.to_string(),
+                device: a.device.to_string(),
+                interface: a.interface.to_string(),
+                kind: snake(&a.kind),
+                host: a.host.clone(),
+                provenance: a.provenance.iter().map(SpanJson::new).collect(),
+            })
+            .collect(),
+        edge_interfaces: twin
+            .edge_interfaces()
+            .iter()
+            .map(|e| EdgeInterfaceJson {
+                device: e.device.to_string(),
+                interface: e.interface.to_string(),
+                networks: e.networks.iter().map(|n| n.to_string()).collect(),
+                provenance: e.provenance.iter().map(SpanJson::new).collect(),
             })
             .collect(),
     }

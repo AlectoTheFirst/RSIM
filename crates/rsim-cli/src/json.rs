@@ -1,25 +1,24 @@
-//! The JSON output, version 1.
+//! The JSON output, version 2.
 //!
 //! Each type serializes its fields in the order of declaration. An optional
 //! value that is not there is `null`, and no field is left out. Enumeration
 //! values are the Rust names in snake case.
 
 use std::fmt::Debug;
-use std::net::IpAddr;
 
 use rsim_core::{
-    Alternative, Attr, Delay, DelayGap, Destination, Encap, FieldValue, FloodCopy, Fragment,
-    Header, Mac, Outcome, PacketSet, QosView, RateCondition, Reason, SourceSpan, TraceStep,
-    Uniform, Verdict, VerdictKind,
+    Alternative, Attr, Delay, DelayGap, Destination, EncapDesc, FieldValue, FloodCopy, HeaderDesc,
+    HeaderField, Outcome, PacketSet, QosView, RateCondition, Reason, SourceSpan, TraceStep,
+    Uniform, Values, Verdict, VerdictKind, bits,
 };
-use rsim_engine::{Answer, BranchView, ReplyResult, Summary};
+use rsim_engine::{Answer, BranchView, Ingress, IngressBasis, Mode, ReplyResult, Summary};
 use serde::{Serialize, Serializer};
 
 use crate::error::QueryError;
 use crate::query::QueryEcho;
 
 /// The version number of the JSON output.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 /// The Rust name of an enumeration value in snake case.
 pub fn snake<T: Debug>(v: &T) -> String {
@@ -54,6 +53,8 @@ pub struct DevicesOut {
     pub topology: String,
     pub devices: Vec<DeviceJson>,
     pub endpoints: Vec<EndpointJson>,
+    pub attachments: Vec<AttachmentJson>,
+    pub edge_interfaces: Vec<EdgeInterfaceJson>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -72,7 +73,24 @@ pub struct FunctionJson {
 pub struct EndpointJson {
     pub endpoint: String,
     pub addresses: Vec<String>,
-    pub attachment: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AttachmentJson {
+    pub address: String,
+    pub device: String,
+    pub interface: String,
+    pub kind: String,
+    pub host: String,
+    pub provenance: Vec<SpanJson>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct EdgeInterfaceJson {
+    pub device: String,
+    pub interface: String,
+    pub networks: Vec<String>,
+    pub provenance: Vec<SpanJson>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -117,11 +135,71 @@ impl ErrorOut {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct AnswerJson {
-    pub start: String,
+    pub mode: &'static str,
     pub input: PacketSetJson,
+    pub ingress: Vec<IngressJson>,
     pub summary: Vec<PartJson>,
     pub branches: Vec<BranchJson>,
     pub replies: Vec<ReplyJson>,
+}
+
+/// The ingress of one run of the answer: the packets of the run and the
+/// interface where they enter, or the reason why the ingress is not known.
+#[derive(Clone, Debug, Serialize)]
+pub struct IngressJson {
+    pub packets: PacketSetJson,
+    pub found: bool,
+    pub device: Option<String>,
+    pub interface: Option<String>,
+    pub function: Option<String>,
+    pub resolved_by: Option<&'static str>,
+    pub network: Option<String>,
+    pub host_confirmed: bool,
+    pub provenance: Vec<SpanJson>,
+    pub reason: Option<ReasonJson>,
+}
+
+impl IngressJson {
+    pub fn new(packets: &PacketSet, i: &Ingress) -> Self {
+        let mut j = IngressJson {
+            packets: PacketSetJson::new(packets),
+            found: false,
+            device: None,
+            interface: None,
+            function: None,
+            resolved_by: None,
+            network: None,
+            host_confirmed: i.host_confirmed(),
+            provenance: Vec::new(),
+            reason: None,
+        };
+        match i {
+            Ingress::Found {
+                device,
+                interface,
+                function,
+                basis,
+            } => {
+                j.found = true;
+                j.device = Some(device.to_string());
+                j.interface = Some(interface.to_string());
+                j.function = Some(function.to_string());
+                let (by, spans) = match basis {
+                    IngressBasis::Explicit => ("explicit", &[][..]),
+                    IngressBasis::Attachment(s) => ("attachment", s.as_slice()),
+                    IngressBasis::ConnectedNetwork { network, spans } => {
+                        j.network = Some(network.to_string());
+                        ("connected_network", spans.as_slice())
+                    }
+                    IngressBasis::Reply => ("reply", &[][..]),
+                };
+                j.resolved_by = Some(by);
+                j.provenance = spans.iter().map(SpanJson::new).collect();
+            }
+            Ingress::NotFound(r) => j.reason = Some(ReasonJson::new(r)),
+        }
+        j
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -189,12 +267,24 @@ pub struct DelayGapJson {
 impl AnswerJson {
     pub fn new(a: &Answer) -> Self {
         AnswerJson {
-            start: a.start.to_string(),
+            mode: match a.mode {
+                Mode::Path => "path",
+                Mode::Set => "set",
+            },
             input: PacketSetJson::new(&a.input),
-            summary: vec![PartJson {
-                packets: PacketSetJson::new(&a.input),
-                result: SummaryResultJson::new(&a.summary),
-            }],
+            ingress: a
+                .runs
+                .iter()
+                .map(|r| IngressJson::new(&r.input, &r.ingress))
+                .collect(),
+            summary: a
+                .summary
+                .iter()
+                .map(|p| PartJson {
+                    packets: PacketSetJson::new(&p.packets),
+                    result: SummaryResultJson::new(&p.summary),
+                })
+                .collect(),
             branches: a.branches().iter().map(BranchJson::new).collect(),
             replies: a
                 .replies
@@ -538,8 +628,11 @@ impl QosJson {
 
 fn uniform(u: &Uniform<FieldValue<u8>>) -> UniformJson {
     match u {
-        Uniform::Value(v) => UniformJson::Value(FieldJson::new(v)),
-        Uniform::Varies => UniformJson::Varies,
+        Uniform::Value(FieldValue::Known(x)) => UniformJson::Value(FieldJson::Known(*x)),
+        Uniform::Value(FieldValue::Unknown) => UniformJson::Value(FieldJson::Unknown),
+        Uniform::Value(FieldValue::Absent) => UniformJson::Value(FieldJson::Absent),
+        // A field with no constraint has all values.
+        Uniform::Value(FieldValue::Unstated) | Uniform::Varies => UniformJson::Varies,
         Uniform::None => UniformJson::None,
     }
 }
@@ -565,6 +658,8 @@ impl RateConditionJson {
 
 // ------------------------------------------------------------ packet set
 
+/// A packet set: its members. A member is a product of field values. The
+/// members are disjoint and in the fixed order of the bit table.
 #[derive(Clone, Debug, Serialize)]
 pub struct PacketSetJson {
     pub members: Vec<MemberJson>,
@@ -576,58 +671,98 @@ pub struct MemberJson {
     pub current: HeaderJson,
 }
 
-/// A header field value: `{"known": value}`, `"unstated"`, `"unknown"` or
-/// `"absent"`.
+/// A header field value: `{"known": value}`, `{"in": [...]}`, `"unknown"`,
+/// `"absent"` or, in the current header, `"original"`.
 #[derive(Clone, Debug)]
 pub enum FieldJson<T> {
     Known(T),
-    Unstated,
+    In(Vec<serde_json::Value>),
     Unknown,
     Absent,
+    Original,
 }
 
-impl<T: Clone> FieldJson<T> {
-    fn new(v: &FieldValue<T>) -> Self {
-        Self::map(v, T::clone)
-    }
-}
-
-impl<T> FieldJson<T> {
-    fn map<U>(v: &FieldValue<U>, f: impl FnOnce(&U) -> T) -> Self {
-        match v {
-            FieldValue::Known(x) => FieldJson::Known(f(x)),
-            FieldValue::Unstated => FieldJson::Unstated,
-            FieldValue::Unknown => FieldJson::Unknown,
-            FieldValue::Absent => FieldJson::Absent,
-        }
-    }
+#[derive(Serialize)]
+struct InWrap<'a> {
+    #[serde(rename = "in")]
+    values: &'a [serde_json::Value],
 }
 
 impl<T: Serialize> Serialize for FieldJson<T> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
             FieldJson::Known(v) => KnownWrap { known: v }.serialize(s),
-            FieldJson::Unstated => s.serialize_str("unstated"),
+            FieldJson::In(v) => InWrap { values: v }.serialize(s),
             FieldJson::Unknown => s.serialize_str("unknown"),
             FieldJson::Absent => s.serialize_str("absent"),
+            FieldJson::Original => s.serialize_str("original"),
         }
+    }
+}
+
+impl<T> FieldJson<T> {
+    fn new(f: HeaderField, v: &Values, known: impl Fn(u128) -> T) -> Self {
+        match v {
+            Values::Absent => FieldJson::Absent,
+            Values::Unknown => FieldJson::Unknown,
+            Values::Original => FieldJson::Original,
+            Values::Prefixes(ps) => match ps.as_slice() {
+                [one] if one.len() == if one.is_ipv4() { 32 } else { 128 } => {
+                    FieldJson::Known(known(bits::ip_bits(one.addr())))
+                }
+                _ => FieldJson::In(
+                    ps.iter()
+                        .map(|p| serde_json::Value::String(p.to_string()))
+                        .collect(),
+                ),
+            },
+            Values::Ranges(rs) => match v.single() {
+                Some(x) => FieldJson::Known(known(x)),
+                None => FieldJson::In(rs.iter().map(|&(lo, hi)| range_json(f, lo, hi)).collect()),
+            },
+        }
+    }
+}
+
+/// One range of a field in the `in` form.
+fn range_json(f: HeaderField, lo: u128, hi: u128) -> serde_json::Value {
+    use serde_json::Value;
+    match f {
+        HeaderField::SrcMac | HeaderField::DstMac => Value::Array(vec![
+            Value::String(mac_text(lo)),
+            Value::String(mac_text(hi)),
+        ]),
+        HeaderField::Fragment => Value::Array(
+            (lo..=hi)
+                .map(|x| Value::String(fragment_text(x).to_string()))
+                .collect(),
+        ),
+        _ => Value::Array(vec![Value::from(lo as u64), Value::from(hi as u64)]),
     }
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct HeaderJson {
-    pub src_mac: FieldJson<String>,
-    pub dst_mac: FieldJson<String>,
-    pub vlan: FieldJson<u16>,
+    #[serde(rename = "source.mac")]
+    pub source_mac: FieldJson<String>,
+    #[serde(rename = "destination.mac")]
+    pub destination_mac: FieldJson<String>,
+    #[serde(rename = "network.vlan.id")]
+    pub vlan_id: FieldJson<u16>,
     pub l2_priority: FieldJson<u8>,
-    pub src_ip: FieldJson<String>,
-    pub dst_ip: FieldJson<String>,
-    pub protocol: FieldJson<u8>,
+    #[serde(rename = "source.ip")]
+    pub source_ip: FieldJson<String>,
+    #[serde(rename = "destination.ip")]
+    pub destination_ip: FieldJson<String>,
+    #[serde(rename = "network.iana_number")]
+    pub iana_number: FieldJson<u8>,
     pub dscp: FieldJson<u8>,
     pub ecn: FieldJson<u8>,
     pub fragment: FieldJson<&'static str>,
-    pub src_port: FieldJson<u16>,
-    pub dst_port: FieldJson<u16>,
+    #[serde(rename = "source.port")]
+    pub source_port: FieldJson<u16>,
+    #[serde(rename = "destination.port")]
+    pub destination_port: FieldJson<u16>,
     pub tcp_flags: FieldJson<u8>,
     pub icmp_type: FieldJson<u8>,
     pub icmp_code: FieldJson<u8>,
@@ -635,104 +770,115 @@ pub struct HeaderJson {
     pub encap: Vec<EncapJson>,
 }
 
+/// An encapsulation header. The values are field values.
 #[derive(Clone, Debug, Serialize)]
 pub struct EncapJson {
     pub kind: &'static str,
-    pub src: Option<String>,
-    pub dst: Option<String>,
-    pub vni: Option<u32>,
-    pub label: Option<u32>,
-    pub traffic_class: Option<FieldJson<u8>>,
+    pub src: Option<FieldJson<String>>,
+    pub dst: Option<FieldJson<String>>,
+    pub vni: Option<FieldJson<u32>>,
+    pub label: Option<FieldJson<u32>>,
 }
 
 impl PacketSetJson {
     pub fn new(p: &PacketSet) -> Self {
         PacketSetJson {
             members: p
-                .members()
+                .describe()
                 .iter()
                 .map(|m| MemberJson {
-                    original: HeaderJson::new(&m.original),
-                    current: HeaderJson::new(&m.current),
+                    original: HeaderJson::new(&m.original, m.original.encap.as_ref()),
+                    current: HeaderJson::new(&m.current, m.current.encap.as_ref()),
                 })
                 .collect(),
         }
     }
 }
 
-fn mac_text(m: &Mac) -> String {
-    let b = m.0;
-    format!(
-        "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-        b[0], b[1], b[2], b[3], b[4], b[5]
-    )
+fn mac_text(x: u128) -> String {
+    format!("{:?}", bits::bits_mac(x))
 }
 
-fn ip_text(a: &IpAddr) -> String {
-    a.to_string()
-}
-
-fn fragment_text(f: &Fragment) -> &'static str {
-    match f {
-        Fragment::Unfragmented => "unfragmented",
-        Fragment::First => "first",
-        Fragment::Later => "later",
+fn fragment_text(x: u128) -> &'static str {
+    match x {
+        bits::FRAGMENT_UNFRAGMENTED => "unfragmented",
+        bits::FRAGMENT_FIRST => "first",
+        bits::FRAGMENT_LATER => "later",
+        _ => "not_valid",
     }
 }
 
 impl HeaderJson {
-    pub fn new(h: &Header) -> Self {
+    pub fn new(h: &HeaderDesc, encap: Option<&EncapDesc>) -> Self {
+        let v6 = match h.get(HeaderField::SrcIp) {
+            Values::Prefixes(ps) => ps.first().is_some_and(|p| !p.is_ipv4()),
+            _ => match h.get(HeaderField::DstIp) {
+                Values::Prefixes(ps) => ps.first().is_some_and(|p| !p.is_ipv4()),
+                _ => false,
+            },
+        };
+        let ip = move |x: u128| bits::bits_ip(v6, x).to_string();
+        let f8 = |f: HeaderField| FieldJson::new(f, h.get(f), |x| x as u8);
+        let f16 = |f: HeaderField| FieldJson::new(f, h.get(f), |x| x as u16);
         HeaderJson {
-            src_mac: FieldJson::map(&h.src_mac, mac_text),
-            dst_mac: FieldJson::map(&h.dst_mac, mac_text),
-            vlan: FieldJson::new(&h.vlan),
-            l2_priority: FieldJson::new(&h.l2_priority),
-            src_ip: FieldJson::map(&h.src_ip, ip_text),
-            dst_ip: FieldJson::map(&h.dst_ip, ip_text),
-            protocol: FieldJson::new(&h.protocol),
-            dscp: FieldJson::new(&h.dscp),
-            ecn: FieldJson::new(&h.ecn),
-            fragment: FieldJson::map(&h.fragment, fragment_text),
-            src_port: FieldJson::new(&h.src_port),
-            dst_port: FieldJson::new(&h.dst_port),
-            tcp_flags: FieldJson::new(&h.tcp_flags),
-            icmp_type: FieldJson::new(&h.icmp_type),
-            icmp_code: FieldJson::new(&h.icmp_code),
-            mpls_tc: FieldJson::new(&h.mpls_tc),
-            encap: h.encap.iter().map(EncapJson::new).collect(),
+            source_mac: FieldJson::new(HeaderField::SrcMac, h.get(HeaderField::SrcMac), mac_text),
+            destination_mac: FieldJson::new(
+                HeaderField::DstMac,
+                h.get(HeaderField::DstMac),
+                mac_text,
+            ),
+            vlan_id: f16(HeaderField::Vlan),
+            l2_priority: f8(HeaderField::L2Priority),
+            source_ip: FieldJson::new(HeaderField::SrcIp, h.get(HeaderField::SrcIp), ip),
+            destination_ip: FieldJson::new(HeaderField::DstIp, h.get(HeaderField::DstIp), ip),
+            iana_number: f8(HeaderField::Protocol),
+            dscp: f8(HeaderField::Dscp),
+            ecn: f8(HeaderField::Ecn),
+            fragment: FieldJson::new(
+                HeaderField::Fragment,
+                h.get(HeaderField::Fragment),
+                fragment_text,
+            ),
+            source_port: f16(HeaderField::SrcPort),
+            destination_port: f16(HeaderField::DstPort),
+            tcp_flags: f8(HeaderField::TcpFlags),
+            icmp_type: f8(HeaderField::IcmpType),
+            icmp_code: f8(HeaderField::IcmpCode),
+            mpls_tc: f8(HeaderField::MplsTrafficClass),
+            encap: encap.map(EncapJson::new).into_iter().collect(),
         }
     }
 }
 
 impl EncapJson {
-    pub fn new(e: &Encap) -> Self {
-        match e {
-            Encap::Gre { src, dst } => EncapJson {
+    pub fn new(e: &EncapDesc) -> Self {
+        let addr = |v: &Values| {
+            FieldJson::new(HeaderField::SrcIp, v, |x| {
+                bits::bits_ip(false, x).to_string()
+            })
+        };
+        let num = |v: &Values| FieldJson::new(HeaderField::Protocol, v, |x| x as u32);
+        match e.kind {
+            bits::ENCAP_GRE => EncapJson {
                 kind: "gre",
-                src: Some(src.to_string()),
-                dst: Some(dst.to_string()),
+                src: Some(addr(&e.src)),
+                dst: Some(addr(&e.dst)),
                 vni: None,
                 label: None,
-                traffic_class: None,
             },
-            Encap::Vxlan { src, dst, vni } => EncapJson {
+            bits::ENCAP_VXLAN => EncapJson {
                 kind: "vxlan",
-                src: Some(src.to_string()),
-                dst: Some(dst.to_string()),
-                vni: Some(*vni),
+                src: Some(addr(&e.src)),
+                dst: Some(addr(&e.dst)),
+                vni: Some(num(&e.vni)),
                 label: None,
-                traffic_class: None,
             },
-            Encap::Mpls {
-                label,
-                traffic_class,
-            } => EncapJson {
+            _ => EncapJson {
                 kind: "mpls",
                 src: None,
                 dst: None,
                 vni: None,
-                label: Some(*label),
-                traffic_class: Some(FieldJson::new(traffic_class)),
+                label: Some(num(&e.label)),
             },
         }
     }

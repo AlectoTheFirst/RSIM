@@ -135,7 +135,7 @@ fn eval_from<A: Clone + Eq>(
         }
         let split = rest.split(predicate);
         let (matched, uncertain) = if applies == Tri::Unknown {
-            (PacketSet::empty(), split.matched.union(&split.uncertain))
+            (split.matched.empty(), split.matched.union(&split.uncertain))
         } else {
             (split.matched, split.uncertain)
         };
@@ -185,6 +185,17 @@ fn eval_from<A: Clone + Eq>(
     }
 }
 
+/// The predicates of the handled rules, in rule order.
+pub fn predicates_of<A>(rules: &[Rule<A>]) -> Vec<&RulePredicate> {
+    rules
+        .iter()
+        .filter_map(|r| match &r.body {
+            RuleBody::Handled { predicate, .. } => Some(predicate),
+            RuleBody::Unhandled => None,
+        })
+        .collect()
+}
+
 /// The location of a rule for a reason text: `<what> rule <name>, line <n>`.
 pub fn describe<A>(rules: &[Rule<A>], what: &str, r: RuleRef) -> String {
     match r {
@@ -226,16 +237,9 @@ pub fn explain<A>(
         UnknownCause::Unhandled { rule } => (*rule, "config not supported".to_string()),
         UnknownCause::Uncertain { rule } => {
             let mut fields = Vec::new();
-            if let (RuleBody::Handled { predicate, .. }, Some(p)) =
-                (&rules[*rule].body, input.witness())
-            {
-                for m in [&predicate.definite, &predicate.upper] {
-                    for (f, o) in m.open_fields(&p.current) {
-                        let t = format!("{} {}", f.name(), o.text());
-                        if !fields.contains(&t) {
-                            fields.push(t);
-                        }
-                    }
+            if let RuleBody::Handled { predicate, .. } = &rules[*rule].body {
+                for f in input.open_fields(predicate) {
+                    fields.push(format!("{} unknown", f.name()));
                 }
             }
             let fact = if fields.is_empty() {

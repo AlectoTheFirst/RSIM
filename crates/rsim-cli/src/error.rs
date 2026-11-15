@@ -8,7 +8,7 @@ use serde::Serialize;
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     UnknownTopology,
-    UnknownEndpoint,
+    UnknownIngress,
     InvalidQuery,
     NoSuchStep,
     StartRequiresContext,
@@ -20,7 +20,7 @@ impl ErrorCode {
     pub fn as_str(self) -> &'static str {
         match self {
             ErrorCode::UnknownTopology => "unknown_topology",
-            ErrorCode::UnknownEndpoint => "unknown_endpoint",
+            ErrorCode::UnknownIngress => "unknown_ingress",
             ErrorCode::InvalidQuery => "invalid_query",
             ErrorCode::NoSuchStep => "no_such_step",
             ErrorCode::StartRequiresContext => "start_requires_context",
@@ -47,10 +47,11 @@ impl QueryError {
 
     pub fn from_exec(e: &ExecError) -> Self {
         match e {
-            ExecError::UnknownEndpoint(id) => QueryError::new(
-                ErrorCode::UnknownEndpoint,
-                format!("endpoint {id} is not in the twin"),
+            ExecError::UnknownIngress(d, i) => QueryError::new(
+                ErrorCode::UnknownIngress,
+                format!("{d}/{i} is not an interface with an ingress function"),
             ),
+            ExecError::PacketSet(e) => QueryError::new(ErrorCode::Internal, e.to_string()),
             ExecError::StartRequiresContext(f, attrs) => QueryError::new(
                 ErrorCode::StartRequiresContext,
                 format!("start function {f} requires context {attrs:?}"),

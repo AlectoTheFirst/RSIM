@@ -125,11 +125,10 @@ pub fn chain(n: usize, acl_rules: usize, extra_routes: usize) -> TwinBuilder {
             3001,
         ));
     }
-    b.endpoint(endpoint("client", "10.254.0.10", fid("r0/in/west")));
-    b.endpoint(endpoint(
-        "server",
-        "10.255.0.10",
-        fid(&format!("r{}/in/east", n - 1)),
-    ));
+    add_host(&mut b, endpoint("client", "10.254.0.10", fid("r0/in/west")));
+    add_host(
+        &mut b,
+        endpoint("server", "10.255.0.10", fid(&format!("r{}/in/east", n - 1))),
+    );
     b
 }

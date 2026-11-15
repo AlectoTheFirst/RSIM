@@ -3,25 +3,21 @@
 
 use std::collections::BTreeMap;
 
-use crate::header::FlowKey;
 use crate::id::{DeviceId, FunctionId};
+use crate::packet_set::PacketSet;
 
 /// One firewall session with its NAT binding.
 ///
-/// `forward_in` is the flow key when the packets entered the session lookup
-/// of the device. `forward_out` is the key after all translations of the
-/// device. A difference between the two is the NAT binding.
+/// `relation` is a relation from the forward flow at the session lookup of
+/// the device to the forward flow after all translations of the device.
+/// See [`PacketSet::session_relation`]. The NAT binding is part of the
+/// relation.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Session {
-    pub forward_in: FlowKey,
-    pub forward_out: FlowKey,
+    pub relation: PacketSet,
+    /// True if the relation changes a flow field.
+    pub translated: bool,
     pub created_by: FunctionId,
-}
-
-impl Session {
-    pub fn is_translated(&self) -> bool {
-        self.forward_in != self.forward_out
-    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]

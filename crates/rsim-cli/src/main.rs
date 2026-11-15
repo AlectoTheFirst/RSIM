@@ -8,7 +8,9 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use rsim_cli::json::{self, ErrorOut};
+use rsim_cli::query::{FragmentName, IngressRef, parse_mac};
 use rsim_cli::{IcmpType, Protocol, QueryError, QueryInput, StepRef, TcpFlag, commands, text};
+use rsim_core::Mac;
 use serde::Serialize;
 
 /// Path queries on the built-in topologies of rsim.
@@ -40,7 +42,8 @@ enum Command {
         /// A built-in topology.
         topology: String,
     },
-    /// The answer for one packet, with the trace and the reply.
+    /// The answer for one packet, with the trace and the reply. A field
+    /// that the query does not state is not known.
     Path(QueryArgs),
     /// One trace step of the answer.
     Explain {
@@ -63,29 +66,45 @@ enum Command {
 struct QueryArgs {
     /// A built-in topology.
     topology: String,
-    /// The endpoint that sends the packet.
+    /// The ingress point as <device>/<interface>. Without it, the attachment
+    /// records of the source address give the ingress.
     #[arg(long)]
-    from: String,
+    ingress: Option<IngressRef>,
+    /// The source address.
+    #[arg(long = "source.ip")]
+    source_ip: IpAddr,
     /// The destination address.
-    #[arg(long)]
-    dst: IpAddr,
-    /// tcp, udp, icmp, icmpv6 or a number 0 to 255.
-    #[arg(long)]
-    protocol: Protocol,
-    /// The source address. The default is the first address of the endpoint.
-    #[arg(long)]
-    src: Option<IpAddr>,
-    #[arg(long)]
-    src_port: Option<u16>,
-    #[arg(long)]
-    dst_port: Option<u16>,
+    #[arg(long = "destination.ip")]
+    destination_ip: IpAddr,
+    /// The protocol number, 0 to 255.
+    #[arg(long = "network.iana_number")]
+    iana_number: Option<u8>,
+    /// tcp, udp, icmp or icmpv6.
+    #[arg(long = "network.transport", value_parser = transport)]
+    transport: Option<Protocol>,
+    #[arg(long = "source.port")]
+    source_port: Option<u16>,
+    #[arg(long = "destination.port")]
+    destination_port: Option<u16>,
+    /// Six hexadecimal bytes with colons.
+    #[arg(long = "source.mac", value_parser = parse_mac)]
+    source_mac: Option<Mac>,
+    /// Six hexadecimal bytes with colons.
+    #[arg(long = "destination.mac", value_parser = parse_mac)]
+    destination_mac: Option<Mac>,
+    /// 0 to 4095.
+    #[arg(long = "network.vlan.id", value_parser = clap::value_parser!(u16).range(0..=4095))]
+    vlan_id: Option<u16>,
+    /// 0 to 7. It needs network.vlan.id.
+    #[arg(long = "l2_priority", value_parser = clap::value_parser!(u8).range(0..=7))]
+    l2_priority: Option<u8>,
     /// A comma-separated list of fin, syn, rst, psh, ack, urg, ece, cwr.
-    #[arg(long, value_delimiter = ',')]
+    #[arg(long = "tcp_flags", value_delimiter = ',')]
     tcp_flags: Option<Vec<TcpFlag>>,
     /// 0 to 255, echo-request or echo-reply.
-    #[arg(long)]
+    #[arg(long = "icmp_type")]
     icmp_type: Option<IcmpType>,
-    #[arg(long)]
+    #[arg(long = "icmp_code")]
     icmp_code: Option<u8>,
     /// 0 to 63.
     #[arg(long, value_parser = clap::value_parser!(u8).range(0..=63))]
@@ -93,12 +112,22 @@ struct QueryArgs {
     /// 0 to 3.
     #[arg(long, value_parser = clap::value_parser!(u8).range(0..=3))]
     ecn: Option<u8>,
-    /// The packet is a later fragment.
+    /// unfragmented, first or later.
     #[arg(long)]
-    later_fragment: bool,
+    fragment: Option<FragmentName>,
     /// Do not run the reply.
     #[arg(long)]
     no_reply: bool,
+}
+
+/// A protocol name.
+fn transport(s: &str) -> Result<Protocol, String> {
+    match s.parse::<Protocol>() {
+        Ok(p) if p.name().is_some() => Ok(p),
+        _ => Err(format!(
+            "network.transport {s:?} is not tcp, udp, icmp or icmpv6"
+        )),
+    }
 }
 
 impl QueryArgs {
@@ -106,18 +135,23 @@ impl QueryArgs {
         let a = self.clone();
         QueryInput {
             topology: a.topology,
-            from: a.from,
-            dst: a.dst,
-            protocol: a.protocol,
-            src: a.src,
-            src_port: a.src_port,
-            dst_port: a.dst_port,
+            ingress: a.ingress,
+            source_ip: a.source_ip,
+            destination_ip: a.destination_ip,
+            iana_number: a.iana_number,
+            transport: a.transport,
+            source_port: a.source_port,
+            destination_port: a.destination_port,
+            source_mac: a.source_mac,
+            destination_mac: a.destination_mac,
+            vlan_id: a.vlan_id,
+            l2_priority: a.l2_priority,
             tcp_flags: a.tcp_flags,
             icmp_type: a.icmp_type,
             icmp_code: a.icmp_code,
             dscp: a.dscp,
             ecn: a.ecn,
-            later_fragment: a.later_fragment.then_some(true),
+            fragment: a.fragment,
             reply: a.no_reply.then_some(false),
         }
     }

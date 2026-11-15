@@ -329,7 +329,7 @@ pub fn mini_enterprise(opts: MiniOpts) -> TwinBuilder {
         eps.reverse();
     }
     for e in eps {
-        b.endpoint(e);
+        add_host(&mut b, e);
     }
     b
 }

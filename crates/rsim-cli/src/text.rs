@@ -26,12 +26,22 @@ pub fn devices(d: &DevicesOut) -> String {
         }
     }
     for e in &d.endpoints {
+        let _ = writeln!(s, "endpoint {} {}", e.endpoint, e.addresses.join(", "));
+    }
+    for a in &d.attachments {
         let _ = writeln!(
             s,
-            "endpoint {} {} at {}",
-            e.endpoint,
-            e.addresses.join(", "),
-            e.attachment
+            "attachment {} {} at {}/{} ({})",
+            a.address, a.host, a.device, a.interface, a.kind
+        );
+    }
+    for e in &d.edge_interfaces {
+        let _ = writeln!(
+            s,
+            "edge interface {}/{} {}",
+            e.device,
+            e.interface,
+            e.networks.join(", ")
         );
     }
     s
@@ -39,7 +49,11 @@ pub fn devices(d: &DevicesOut) -> String {
 
 pub fn path(p: &PathAnswerOut) -> String {
     let mut s = String::new();
-    let _ = writeln!(s, "topology {}, from {}", p.topology, p.query.from);
+    let _ = writeln!(
+        s,
+        "topology {}, source {}, destination {}",
+        p.topology, p.query.source_ip, p.query.destination_ip
+    );
     answer(&mut s, &p.answer, "");
     for r in &p.answer.replies {
         let _ = write!(s, "reply of branch {}:", r.forward_branch);
@@ -61,7 +75,11 @@ pub fn path(p: &PathAnswerOut) -> String {
 
 pub fn step(st: &StepOut) -> String {
     let mut s = String::new();
-    let _ = write!(s, "topology {}, from {}", st.topology, st.query.from);
+    let _ = write!(
+        s,
+        "topology {}, source {}, destination {}",
+        st.topology, st.query.source_ip, st.query.destination_ip
+    );
     if let Some(r) = st.reply_of {
         let _ = write!(s, ", reply of branch {r}");
     }
@@ -106,9 +124,37 @@ pub fn error(e: &QueryError) -> String {
 }
 
 fn answer(s: &mut String, a: &AnswerJson, ind: &str) {
-    let _ = writeln!(s, "{ind}packet {}", packets(&a.input));
+    let _ = writeln!(s, "{ind}input {}", packets(&a.input));
+    for i in &a.ingress {
+        match (&i.device, &i.interface, &i.reason) {
+            (Some(d), Some(f), _) => {
+                let _ = write!(
+                    s,
+                    "{ind}ingress {d}/{f} by {}",
+                    i.resolved_by.unwrap_or("-")
+                );
+                if !i.host_confirmed {
+                    let _ = write!(s, ", host not confirmed");
+                }
+                let _ = writeln!(s);
+            }
+            (_, _, Some(r)) => {
+                let _ = writeln!(s, "{ind}ingress not found ({}: {})", r.code, r.detail);
+            }
+            _ => {}
+        }
+    }
     for part in &a.summary {
-        let _ = writeln!(s, "{ind}summary {}", summary(&part.result));
+        if a.summary.len() == 1 {
+            let _ = writeln!(s, "{ind}summary {}", summary(&part.result));
+        } else {
+            let _ = writeln!(
+                s,
+                "{ind}summary for {}: {}",
+                packets(&part.packets),
+                summary(&part.result)
+            );
+        }
     }
     for b in &a.branches {
         branch(s, b, ind);
@@ -186,26 +232,49 @@ fn delay(d: &DelayJson) -> String {
 }
 
 fn packets(p: &PacketSetJson) -> String {
-    let parts: Vec<String> = p.members.iter().map(|m| header(&m.current)).collect();
+    let mut parts: Vec<String> = Vec::new();
+    for m in &p.members {
+        let h = header(&m.current);
+        if !parts.contains(&h) {
+            parts.push(h);
+        }
+    }
     parts.join("; ")
 }
 
 fn field<T: std::fmt::Display>(f: &FieldJson<T>) -> String {
     match f {
         FieldJson::Known(v) => v.to_string(),
-        FieldJson::Unstated => "*".to_string(),
+        FieldJson::In(vs) => {
+            let items: Vec<String> = vs
+                .iter()
+                .map(|v| match v {
+                    serde_json::Value::Array(a) if a.len() == 2 => {
+                        let t = |x: &serde_json::Value| match x {
+                            serde_json::Value::String(s) => s.clone(),
+                            x => x.to_string(),
+                        };
+                        format!("{}-{}", t(&a[0]), t(&a[1]))
+                    }
+                    serde_json::Value::String(s) => s.clone(),
+                    v => v.to_string(),
+                })
+                .collect();
+            format!("{{{}}}", items.join(","))
+        }
         FieldJson::Unknown => "?".to_string(),
         FieldJson::Absent => "-".to_string(),
+        FieldJson::Original => "=".to_string(),
     }
 }
 
 fn header(h: &HeaderJson) -> String {
     format!(
         "{} {}:{} > {}:{}",
-        field(&h.protocol),
-        field(&h.src_ip),
-        field(&h.src_port),
-        field(&h.dst_ip),
-        field(&h.dst_port)
+        field(&h.iana_number),
+        field(&h.source_ip),
+        field(&h.source_port),
+        field(&h.destination_ip),
+        field(&h.destination_port)
     )
 }
