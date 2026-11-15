@@ -539,3 +539,109 @@ fn pretty_json_is_the_same_object() {
     let compact: Value = serde_json::from_str(&stored(topology)).unwrap();
     assert_eq!(json_of(&o), compact);
 }
+
+/// The set query of the stored set answer.
+const SET_QUERY: [&str; 9] = [
+    "mini-enterprise",
+    "--source.ip",
+    "172.31.10.20",
+    "--destination.ip",
+    "10.20.0.53",
+    "--network.transport",
+    "udp",
+    "--destination.port",
+    "53,80",
+];
+
+fn set_args(extra: &[&'static str]) -> Vec<&'static str> {
+    let mut a = vec!["set"];
+    a.extend_from_slice(&SET_QUERY);
+    a.extend_from_slice(extra);
+    a
+}
+
+#[test]
+fn a_set_query_gives_the_stored_json_and_the_same_bytes() {
+    let want = stored("set-mini-enterprise");
+    for _ in 0..2 {
+        let o = rsim(&set_args(&["--format", "json"]));
+        assert_eq!(o.status.code(), Some(0));
+        assert_eq!(stdout(&o), want);
+    }
+    let v: Value = serde_json::from_str(&want).unwrap();
+    assert_eq!(v["kind"], "set_answer");
+    assert_eq!(v["answer"]["mode"], "set");
+    // The source ports 0 to 1023 are denied by the IPS, the other source
+    // ports to port 53 are delivered, and port 80 is denied by the policy.
+    let parts = v["answer"]["summary"].as_array().unwrap();
+    assert_eq!(parts.len(), 3, "{parts:?}");
+    assert!(rsim(&set_args(&[])).status.success());
+}
+
+#[test]
+fn explain_set_gives_the_step_of_the_set_answer() {
+    let answer: Value = serde_json::from_str(&stored("set-mini-enterprise")).unwrap();
+    let mut args = vec!["explain-set"];
+    args.extend_from_slice(&SET_QUERY);
+    args.extend_from_slice(&["--branch", "1", "--step", "7", "--format", "json"]);
+    let v = json_of(&rsim(&args));
+    assert_eq!(v["kind"], "step");
+    assert_eq!(v["query"], answer["query"]);
+    assert_eq!(v["trace_step"], answer["answer"]["branches"][1]["steps"][7]);
+}
+
+#[test]
+fn set_query_errors_and_the_source_of_an_ingress() {
+    // A set with no packet: ICMP with ports.
+    let o = rsim(&[
+        "set",
+        "mini-enterprise",
+        "--network.transport",
+        "icmp",
+        "--destination.port",
+        "53",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(json_of(&o)["error"]["code"], "invalid_query");
+    let o = rsim(&[
+        "set",
+        "mini-enterprise",
+        "--ingress",
+        "x/y",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(json_of(&o)["error"]["code"], "unknown_ingress");
+    for bad in [
+        &["set", "mini-enterprise", "--destination.port", "9-1"][..],
+        &["set", "mini-enterprise", "--source.ip", "10.0.0.0/33"],
+        &["set", "mini-enterprise", "--tcp_flags", "syn+nope"],
+    ] {
+        assert_eq!(rsim(bad).status.code(), Some(2), "{bad:?}");
+    }
+    // Without source.ip, the source addresses are the attached addresses of
+    // the ingress.
+    let o = rsim(&[
+        "set",
+        "mini-enterprise",
+        "--ingress",
+        "fra01-fgt-01/port2",
+        "--destination.ip",
+        "10.20.0.53",
+        "--network.transport",
+        "udp",
+        "--destination.port",
+        "53",
+        "--source.port",
+        "40000",
+        "--no-reply",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(o.status.code(), Some(0));
+    let v = json_of(&o);
+    let m = &v["answer"]["input"]["members"][0]["original"];
+    assert_eq!(m["source.ip"], serde_json::json!({"known": "172.31.10.20"}));
+}

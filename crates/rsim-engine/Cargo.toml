@@ -21,6 +21,10 @@ name = "single_path"
 harness = false
 
 [[bench]]
+name = "set_query"
+harness = false
+
+[[bench]]
 name = "memory"
 harness = false
 

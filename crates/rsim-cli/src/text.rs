@@ -5,7 +5,8 @@ use std::fmt::Write;
 use crate::error::QueryError;
 use crate::json::{
     AnswerJson, BranchJson, DelayJson, DevicesOut, FieldJson, HeaderJson, PacketSetJson,
-    PathAnswerOut, StepOut, SummaryResultJson, TopologiesOut, TraceStepJson, VerdictJson,
+    PathAnswerOut, QueryJson, SetAnswerOut, StepOut, SummaryResultJson, TopologiesOut,
+    TraceStepJson, VerdictJson,
 };
 
 pub fn topologies(t: &TopologiesOut) -> String {
@@ -55,12 +56,17 @@ pub fn path(p: &PathAnswerOut) -> String {
         p.topology, p.query.source_ip, p.query.destination_ip
     );
     answer(&mut s, &p.answer, "");
-    for r in &p.answer.replies {
+    replies(&mut s, &p.answer);
+    s
+}
+
+fn replies(s: &mut String, a: &AnswerJson) {
+    for r in &a.replies {
         let _ = write!(s, "reply of branch {}:", r.forward_branch);
         match (&r.answer, &r.not_run_reason) {
             (Some(a), _) => {
                 let _ = writeln!(s);
-                answer(&mut s, a, "  ");
+                answer(s, a, "  ");
             }
             (None, Some(why)) => {
                 let _ = writeln!(s, " not run, {why}");
@@ -70,15 +76,35 @@ pub fn path(p: &PathAnswerOut) -> String {
             }
         }
     }
+}
+
+pub fn set(p: &SetAnswerOut) -> String {
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "topology {}, set query, source {}, destination {}",
+        p.topology,
+        p.query.source_ip.as_deref().unwrap_or("all"),
+        p.query.destination_ip.as_deref().unwrap_or("all")
+    );
+    answer(&mut s, &p.answer, "");
+    replies(&mut s, &p.answer);
     s
 }
 
 pub fn step(st: &StepOut) -> String {
     let mut s = String::new();
+    let (src, dst) = match &st.query {
+        QueryJson::Path(q) => (q.source_ip.clone(), q.destination_ip.clone()),
+        QueryJson::Set(q) => (
+            q.source_ip.clone().unwrap_or_else(|| "all".into()),
+            q.destination_ip.clone().unwrap_or_else(|| "all".into()),
+        ),
+    };
     let _ = write!(
         s,
-        "topology {}, source {}, destination {}",
-        st.topology, st.query.source_ip, st.query.destination_ip
+        "topology {}, source {src}, destination {dst}",
+        st.topology
     );
     if let Some(r) = st.reply_of {
         let _ = write!(s, ", reply of branch {r}");
@@ -254,7 +280,11 @@ fn field<T: std::fmt::Display>(f: &FieldJson<T>) -> String {
                             serde_json::Value::String(s) => s.clone(),
                             x => x.to_string(),
                         };
-                        format!("{}-{}", t(&a[0]), t(&a[1]))
+                        if a[0] == a[1] {
+                            t(&a[0])
+                        } else {
+                            format!("{}-{}", t(&a[0]), t(&a[1]))
+                        }
                     }
                     serde_json::Value::String(s) => s.clone(),
                     v => v.to_string(),

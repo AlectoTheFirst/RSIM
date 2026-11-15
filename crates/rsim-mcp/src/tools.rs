@@ -42,12 +42,24 @@ impl Tools {
             "path_query" => args::query(arguments, &[])
                 .and_then(|q| self.twin(&q.topology).and_then(|t| commands::path(&q, t)))
                 .map(|o| text(&o)),
-            "explain_step" => args::step(arguments)
-                .and_then(|(q, at)| {
-                    self.twin(&q.topology)
-                        .and_then(|t| commands::explain(&q, at, t))
-                })
+            "set_query" => args::set_query(arguments, &[])
+                .and_then(|q| self.twin(&q.topology).and_then(|t| commands::set(&q, t)))
                 .map(|o| text(&o)),
+            "explain_step" => match args::mode(arguments) {
+                Ok(false) => args::step(arguments)
+                    .and_then(|(q, at)| {
+                        self.twin(&q.topology)
+                            .and_then(|t| commands::explain(&q, at, t))
+                    })
+                    .map(|o| text(&o)),
+                Ok(true) => args::set_step(arguments)
+                    .and_then(|(q, at)| {
+                        self.twin(&q.topology)
+                            .and_then(|t| commands::explain_set(&q, at, t))
+                    })
+                    .map(|o| text(&o)),
+                Err(e) => Err(e),
+            },
             _ => return None,
         };
         Some(match r {
@@ -67,7 +79,8 @@ fn text<T: Serialize>(v: &T) -> String {
     json::to_text(v, false)
 }
 
-/// The tool definitions: `list_devices`, `path_query` and `explain_step`.
+/// The tool definitions: `list_devices`, `path_query`, `set_query` and
+/// `explain_step`.
 pub fn definitions() -> Value {
     let topology = json!({
         "type": "string",
@@ -147,23 +160,32 @@ pub fn definitions() -> Value {
         query.insert(k.to_string(), v);
     }
     let query_required = json!(["topology", "source.ip", "destination.ip"]);
-    let mut step = query.clone();
+    // The set query takes the same fields. Each takes a set: a string with a
+    // comma list, a number or a list.
+    let mut set = Map::new();
+    for (k, v) in &query {
+        let v = if ["topology", "ingress", "reply"].contains(&k.as_str()) {
+            v.clone()
+        } else {
+            let d = v["description"].as_str().unwrap_or("");
+            json!({
+                "description": format!("{d} A set: an address, a prefix, a number, a range such as 1-1023, or a comma list. A field that is not given has all values."),
+                "anyOf": [
+                    {"type": "string"},
+                    {"type": "integer"},
+                    {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "integer"}]}}
+                ]
+            })
+        };
+        set.insert(k.clone(), v);
+    }
+    // The step tool takes the fields of both modes, so it has the wider
+    // set form.
+    let mut step = set.clone();
     step.insert(
-        "branch".to_string(),
-        int(u32::MAX as u64, "The branch index."),
+        "mode".to_string(),
+        json!({"type": "string", "enum": ["path", "set"], "description": "The kind of the query: path (the default) or set. In set mode, each field takes a set."}),
     );
-    step.insert(
-        "step".to_string(),
-        int(u32::MAX as u64, "The step index in the branch."),
-    );
-    step.insert(
-        "reply_of".to_string(),
-        int(
-            u32::MAX as u64,
-            "Select the reply of this forward branch. Then branch and step are indexes in the reply.",
-        ),
-    );
-
     json!([
         {
             "name": "list_devices",
@@ -188,12 +210,23 @@ pub fn definitions() -> Value {
             "outputSchema": output_schema("path_answer", &["topology", "query", "answer"])
         },
         {
+            "name": "set_query",
+            "description": "The answer for a set of packets: the parts of the set with their results, the ingress of each part, each branch with its trace, and the replies. A field that is not given has all values.",
+            "inputSchema": {
+                "type": "object",
+                "properties": set,
+                "required": ["topology"],
+                "additionalProperties": false
+            },
+            "outputSchema": output_schema("set_answer", &["topology", "query", "answer"])
+        },
+        {
             "name": "explain_step",
-            "description": "One trace step of a path query, with its function, its reason and its source spans. The tool runs the query again.",
+            "description": "One trace step of a path query or of a set query, with its function, its reason and its source spans. The tool runs the query again.",
             "inputSchema": {
                 "type": "object",
                 "properties": step,
-                "required": ["topology", "source.ip", "destination.ip", "branch", "step"],
+                "required": ["topology", "branch", "step"],
                 "additionalProperties": false
             },
             "outputSchema": output_schema(

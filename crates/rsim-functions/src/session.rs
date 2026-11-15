@@ -89,6 +89,16 @@ impl NetFunction for SessionLookup {
                         state,
                     ),
                 );
+                push_nonempty(
+                    &mut out,
+                    self.meta.unknown(
+                        split.ambiguous,
+                        ReasonCode::MatchUnknown,
+                        format!("the {name} flow has more than one binding · session {index}"),
+                        ctx,
+                        state,
+                    ),
+                );
                 rest = split.unmatched;
             }
         }

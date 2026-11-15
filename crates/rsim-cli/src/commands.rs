@@ -10,7 +10,9 @@ use crate::json::{
     AnswerJson, AttachmentJson, DeviceJson, DevicesOut, EdgeInterfaceJson, EndpointJson,
     FunctionJson, PathAnswerOut, SpanJson, StepOut, TopologiesOut, TraceStepJson, VERSION, snake,
 };
+use crate::json::{QueryJson, SetAnswerOut};
 use crate::query::QueryInput;
+use crate::set_query::SetInput;
 
 /// The twin of a built-in topology.
 pub fn load(topology: &str) -> Result<Twin, QueryError> {
@@ -130,12 +132,56 @@ pub struct StepRef {
     pub step: usize,
 }
 
+/// Runs the set query on the twin and gives the engine answer.
+pub fn run_set(input: &SetInput, twin: &Twin) -> Result<Answer, QueryError> {
+    let q = input.to_query(twin)?;
+    Executor::new(twin)
+        .run(&q)
+        .map_err(|e| QueryError::from_exec(&e))
+}
+
+pub fn set(input: &SetInput, twin: &Twin) -> Result<SetAnswerOut, QueryError> {
+    let answer = run_set(input, twin)?;
+    Ok(SetAnswerOut {
+        rsim_json: VERSION,
+        kind: "set_answer",
+        topology: input.topology.clone(),
+        query: input.echo(),
+        answer: AnswerJson::new(&answer),
+    })
+}
+
 /// Runs the query again and gives one trace step of the answer.
 pub fn explain(input: &QueryInput, at: StepRef, twin: &Twin) -> Result<StepOut, QueryError> {
     let forward = run(input, twin)?;
+    step_of(
+        &forward,
+        at,
+        &input.topology,
+        QueryJson::Path(Box::new(input.echo())),
+    )
+}
+
+/// Runs the set query again and gives one trace step of the answer.
+pub fn explain_set(input: &SetInput, at: StepRef, twin: &Twin) -> Result<StepOut, QueryError> {
+    let forward = run_set(input, twin)?;
+    step_of(
+        &forward,
+        at,
+        &input.topology,
+        QueryJson::Set(Box::new(input.echo())),
+    )
+}
+
+fn step_of(
+    forward: &Answer,
+    at: StepRef,
+    topology: &str,
+    query: QueryJson,
+) -> Result<StepOut, QueryError> {
     let no_such = |d: String| QueryError::new(ErrorCode::NoSuchStep, d);
     let answer: &Answer = match at.reply_of {
-        None => &forward,
+        None => forward,
         Some(n) => forward.reply_of(n).ok_or_else(|| {
             no_such(format!(
                 "forward branch {n} has no reply that ran; the answer has {} forward branches",
@@ -162,8 +208,8 @@ pub fn explain(input: &QueryInput, at: StepRef, twin: &Twin) -> Result<StepOut, 
     Ok(StepOut {
         rsim_json: VERSION,
         kind: "step",
-        topology: input.topology.clone(),
-        query: input.echo(),
+        topology: topology.to_string(),
+        query,
         reply_of: at.reply_of,
         branch: at.branch,
         step: at.step,
