@@ -1,0 +1,27 @@
+[package]
+name = "rsim-dd"
+description = "Reduced ordered binary decision diagrams with complement edges for the packet sets of rsim."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# Validate the new nodes after each operation also in release builds.
+dd-check = []
+# Run each operation also in a plain BDD and compare the results. Tests only.
+dd-shadow = []
+
+[dev-dependencies]
+criterion = "0.8"
+oxidd = "0.13.0"
+proptest = "1.12"
+rsim-dd = { path = ".", features = ["dd-shadow"] }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "ops"
+harness = false

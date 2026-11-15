@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/rsim-core",
+    "crates/rsim-dd",
     "crates/rsim-functions",
     "crates/rsim-engine",
     "crates/rsim-topologies",
@@ -18,6 +19,7 @@ repository = "https://github.com/AlectoTheFirst/RSIM"
 
 [workspace.dependencies]
 rsim-core = { path = "crates/rsim-core" }
+rsim-dd = { path = "crates/rsim-dd" }
 rsim-functions = { path = "crates/rsim-functions" }
 rsim-engine = { path = "crates/rsim-engine" }
 rsim-topologies = { path = "crates/rsim-topologies" }

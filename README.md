@@ -6,7 +6,7 @@ The engine compiles device configs into typed network functions. The functions s
 
 ## Status
 
-The engine has the core types, the forwarding functions, the concrete-mode executor, the trace and the return path. The topologies are built by hand in `rsim-topologies`. The command `rsim` and the MCP server `rsim-mcp` run path queries for one packet on these topologies. No config parser exists yet.
+The engine has the core types, the forwarding functions, the concrete-mode executor, the trace and the return path. The topologies are built by hand in `rsim-topologies`. The command `rsim` and the MCP server `rsim-mcp` run path queries for one packet on these topologies. The crate `rsim-dd` holds the decision diagram engine for packet sets. The engine does not use it yet. No config parser exists yet.
 
 ## Principles
 
@@ -24,6 +24,7 @@ The engine has the core types, the forwarding functions, the concrete-mode execu
 | Crate | Contents |
 |---|---|
 | `rsim-core` | Packets, packet sets, context, flow state, outcomes, traces |
+| `rsim-dd` | Reduced ordered binary decision diagrams with complement edges, for the packet sets |
 | `rsim-functions` | The network function library: forwarding, ACL, NAT, sessions |
 | `rsim-engine` | The twin, the executor, verdict aggregation, the return path |
 | `rsim-topologies` | The hand-built topologies for the tests, the benchmarks, `rsim` and `rsim-mcp` |
@@ -44,6 +45,7 @@ You need Rust 1.99 or later.
 | Format check | `cargo fmt --all --check` |
 | Path query benchmark | `cargo bench -p rsim-engine --bench single_path` |
 | Memory per device | `cargo bench -p rsim-engine --bench memory` |
+| Decision diagram operations | `cargo bench -p rsim-dd --bench ops` |
 
 ## Path queries with rsim
 
