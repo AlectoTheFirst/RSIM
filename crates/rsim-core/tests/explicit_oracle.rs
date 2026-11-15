@@ -366,26 +366,32 @@ proptest! {
             let r = s.session_lookup(&rel, dir);
             let mut matched = Vec::new();
             let mut unmatched = Vec::new();
+            let mut ambiguous = Vec::new();
             for p in &probe {
                 let f = flow(&p.current);
-                let images: Vec<Flow> = pairs
+                let mut images: Vec<Flow> = pairs
                     .iter()
                     .filter_map(|(l, c)| match dir {
                         SessionDirection::Forward => (*l == f).then_some(*c),
                         SessionDirection::Reply => (reverse(*c) == f).then_some(reverse(*l)),
                     })
                     .collect();
-                if images.is_empty() {
-                    unmatched.push(p.clone());
-                }
-                for img in images {
-                    matched.push(PacketPair { original: p.original.clone(), current: with_flow(&p.current, img) });
+                images.sort();
+                images.dedup();
+                match images.as_slice() {
+                    [] => unmatched.push(p.clone()),
+                    [img] => matched.push(PacketPair {
+                        original: p.original.clone(),
+                        current: with_flow(&p.current, *img),
+                    }),
+                    _ => ambiguous.push(p.clone()),
                 }
             }
             matched.sort();
             matched.dedup();
             prop_assert_eq!(&r.matched, &set(&ar, &matched), "{:?}", dir);
             prop_assert_eq!(&r.unmatched, &set(&ar, &unmatched), "{:?}", dir);
+            prop_assert_eq!(&r.ambiguous, &set(&ar, &ambiguous), "{:?}", dir);
             prop_assert!(r.uncertain.is_empty());
         }
     }

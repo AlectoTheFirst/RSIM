@@ -5,6 +5,10 @@ use serde_json::{Map, Value};
 use crate::commands::StepRef;
 use crate::error::{ErrorCode, QueryError};
 use crate::query::{IcmpType, IngressRef, Protocol, QueryInput, TcpFlag, parse_mac};
+use crate::set_query::{
+    Ranges, SetInput, parse_fragments, parse_macs, parse_prefixes, parse_tcp_flags,
+    parse_transports,
+};
 
 /// The names of the query arguments, in the order of the query input.
 pub const QUERY_FIELDS: [&str; 19] = [
@@ -151,7 +155,107 @@ pub fn query(args: &Map<String, Value>, extra: &[&str]) -> Result<QueryInput, Qu
 
 /// The query input and the indexes of a trace step.
 pub fn step(args: &Map<String, Value>) -> Result<(QueryInput, StepRef), QueryError> {
-    let input = query(args, &STEP_FIELDS)?;
+    let mut extra = STEP_FIELDS.to_vec();
+    extra.push("mode");
+    let input = query(args, &extra)?;
+    let index = |v: &Value, name: &str| Ok(number(v, name, u32::MAX as u64)? as usize);
+    let at = StepRef {
+        reply_of: opt(args, "reply_of", |v| index(v, "reply_of"))?,
+        branch: index(required(args, "branch")?, "branch")?,
+        step: index(required(args, "step")?, "step")?,
+    };
+    Ok((input, at))
+}
+
+/// The names of the set query arguments: the path query names without the
+/// required fields.
+pub const SET_FIELDS: [&str; 19] = QUERY_FIELDS;
+
+/// The text of a set argument: a string, a number, or a list of strings
+/// and numbers that joins with commas.
+fn set_text(v: &Value, name: &str) -> Result<String, QueryError> {
+    let one = |v: &Value| match v {
+        Value::String(s) => Ok(s.clone()),
+        Value::Number(n) => Ok(n.to_string()),
+        _ => Err(invalid(format!(
+            "{name} is not a string, a number or a list of them"
+        ))),
+    };
+    match v {
+        Value::Array(items) => Ok(items
+            .iter()
+            .map(one)
+            .collect::<Result<Vec<_>, _>>()?
+            .join(",")),
+        v => one(v),
+    }
+}
+
+/// The set query input from the arguments. Names in `extra` are allowed and
+/// are not read. Each field takes a set.
+pub fn set_query(args: &Map<String, Value>, extra: &[&str]) -> Result<SetInput, QueryError> {
+    let allowed: Vec<&str> = SET_FIELDS.iter().chain(extra).copied().collect();
+    check_names(args, &allowed)?;
+    let text = |name: &str| opt(args, name, |v| set_text(v, name));
+    let ranges = |name: &str, max: u32| -> Result<Option<Ranges>, QueryError> {
+        text(name)?
+            .map(|t| Ranges::parse(&t, name, max).map_err(invalid))
+            .transpose()
+    };
+    Ok(SetInput {
+        topology: string(required(args, "topology")?, "topology")?,
+        ingress: opt(args, "ingress", |v| {
+            string(v, "ingress")?.parse::<IngressRef>().map_err(invalid)
+        })?,
+        source_ip: text("source.ip")?
+            .map(|t| parse_prefixes(&t, "source.ip").map_err(invalid))
+            .transpose()?,
+        destination_ip: text("destination.ip")?
+            .map(|t| parse_prefixes(&t, "destination.ip").map_err(invalid))
+            .transpose()?,
+        iana_number: ranges("network.iana_number", 255)?,
+        transport: text("network.transport")?
+            .map(|t| parse_transports(&t).map_err(invalid))
+            .transpose()?,
+        source_port: ranges("source.port", 65535)?,
+        destination_port: ranges("destination.port", 65535)?,
+        source_mac: text("source.mac")?
+            .map(|t| parse_macs(&t).map_err(invalid))
+            .transpose()?,
+        destination_mac: text("destination.mac")?
+            .map(|t| parse_macs(&t).map_err(invalid))
+            .transpose()?,
+        vlan_id: ranges("network.vlan.id", 4095)?,
+        l2_priority: ranges("l2_priority", 7)?,
+        tcp_flags: text("tcp_flags")?
+            .map(|t| parse_tcp_flags(&t).map_err(invalid))
+            .transpose()?,
+        icmp_type: ranges("icmp_type", 255)?,
+        icmp_code: ranges("icmp_code", 255)?,
+        dscp: ranges("dscp", 63)?,
+        ecn: ranges("ecn", 3)?,
+        fragment: text("fragment")?
+            .map(|t| parse_fragments(&t).map_err(invalid))
+            .transpose()?,
+        reply: opt(args, "reply", |v| boolean(v, "reply"))?,
+    })
+}
+
+/// The mode of `explain_step`: `path` or `set`.
+pub fn mode(args: &Map<String, Value>) -> Result<bool, QueryError> {
+    match get(args, "mode") {
+        None => Ok(false),
+        Some(Value::String(s)) if s == "path" => Ok(false),
+        Some(Value::String(s)) if s == "set" => Ok(true),
+        Some(_) => Err(invalid("mode is not path or set".to_string())),
+    }
+}
+
+/// The set query input and the indexes of a trace step.
+pub fn set_step(args: &Map<String, Value>) -> Result<(SetInput, StepRef), QueryError> {
+    let mut extra = STEP_FIELDS.to_vec();
+    extra.push("mode");
+    let input = set_query(args, &extra)?;
     let index = |v: &Value, name: &str| Ok(number(v, name, u32::MAX as u64)? as usize);
     let at = StepRef {
         reply_of: opt(args, "reply_of", |v| index(v, "reply_of"))?,

@@ -17,6 +17,7 @@ pub mod predicate;
 pub mod prefix_table;
 pub mod provenance;
 pub mod set;
+pub mod spec;
 pub mod trace;
 
 pub use addr::{Mac, Prefix};
@@ -47,4 +48,5 @@ pub use prefix_table::{PrefixTable, TriePrefixTable};
 pub use provenance::SourceSpan;
 pub use rsim_dd::DdError;
 pub use set::{SetArena, SetBase};
+pub use spec::SetSpec;
 pub use trace::{QosView, RibGuardFlag, TraceStep};

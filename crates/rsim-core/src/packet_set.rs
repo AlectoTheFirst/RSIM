@@ -189,6 +189,48 @@ pub enum Uniform<T> {
     None,
 }
 
+/// A binary trie of prefixes of one address family, for the prefix
+/// partition of a set.
+struct Trie {
+    nodes: Vec<TrieNode>,
+}
+
+#[derive(Clone, Copy)]
+struct TrieNode {
+    child: [Option<usize>; 2],
+    /// The index of the prefix in the list that built the trie.
+    entry: Option<usize>,
+}
+
+impl Trie {
+    fn new(prefixes: impl Iterator<Item = Prefix>) -> Trie {
+        let mut nodes = vec![TrieNode {
+            child: [None, None],
+            entry: None,
+        }];
+        for (i, p) in prefixes.enumerate() {
+            let mut n = 0;
+            for d in 0..p.len() {
+                let b = usize::from(p.bit(d));
+                n = match nodes[n].child[b] {
+                    Some(c) => c,
+                    None => {
+                        nodes.push(TrieNode {
+                            child: [None, None],
+                            entry: None,
+                        });
+                        let c = nodes.len() - 1;
+                        nodes[n].child[b] = Some(c);
+                        c
+                    }
+                };
+            }
+            nodes[n].entry = Some(i);
+        }
+        Trie { nodes }
+    }
+}
+
 /// The direction of a session lookup.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SessionDirection {
@@ -206,6 +248,9 @@ pub struct SessionSplit {
     /// The packets that can match the session: an unknown port against a
     /// known port.
     pub uncertain: PacketSet,
+    /// The packets whose flow has more than one binding in the session.
+    /// Headers cannot decide which binding applies.
+    pub ambiguous: PacketSet,
     /// The packets that do not match the session.
     pub unmatched: PacketSet,
 }
@@ -503,25 +548,90 @@ impl PacketSet {
                 }
             }
         }
-        let mut entries = table.entries();
-        entries.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then(a.0.cmp(&b.0)));
-        let mut rest = known;
-        for (p, v) in entries {
-            if rest.is_empty() {
-                break;
+        // A walk along a binary trie of the entries. It visits only the
+        // trie nodes that hold packets of the set.
+        let entries = table.entries();
+        let mut parts: Vec<Option<PacketSet>> = vec![None; entries.len()];
+        let mut unmatched = self.empty();
+        for v6 in [false, true] {
+            let trie = Trie::new(
+                entries
+                    .iter()
+                    .map(|(p, _)| *p)
+                    .filter(|p| p.is_ipv4() != v6),
+            );
+            let ids: Vec<usize> = entries
+                .iter()
+                .enumerate()
+                .filter(|(_, (p, _))| p.is_ipv4() != v6)
+                .map(|(i, _)| i)
+                .collect();
+            let fam = known.in_family(v6);
+            if fam.is_empty() {
+                continue;
             }
-            let part = rest.in_prefix(f, &p);
-            if !part.is_empty() {
-                rest = rest.difference(&part);
-                matched.push((p, v, part));
+            let off = if v6 { 0 } else { 96 };
+            let width = if v6 { 128 } else { 32 };
+            // (trie node, depth, packets, best entry above)
+            let mut stack = vec![(0usize, 0u32, fam, None::<usize>)];
+            while let Some((n, depth, set, best)) = stack.pop() {
+                let node = &trie.nodes[n];
+                let best = node.entry.map(|e| ids[e]).or(best);
+                let mut give = |set: PacketSet, best: Option<usize>| match best {
+                    Some(e) => {
+                        parts[e] = Some(match parts[e].take() {
+                            Some(x) => x.union(&set),
+                            None => set,
+                        });
+                    }
+                    None => unmatched = unmatched.union(&set),
+                };
+                if depth == width || node.child == [None, None] {
+                    give(set, best);
+                    continue;
+                }
+                let (zero, one) = set.split_bit(f.start + off + depth);
+                for (b, part) in [(1usize, one), (0usize, zero)] {
+                    if part.is_empty() {
+                        continue;
+                    }
+                    match node.child[b] {
+                        Some(c) => stack.push((c, depth + 1, part, best)),
+                        None => give(part, best),
+                    }
+                }
+            }
+        }
+        for (i, part) in parts.into_iter().enumerate() {
+            if let Some(set) = part {
+                let (p, v) = entries[i];
+                matched.push((p, v, set));
             }
         }
         matched.sort_by_key(|(p, _, _)| *p);
         PrefixPartition {
             matched,
-            unmatched: rest,
+            unmatched,
             uncertain,
         }
+    }
+
+    /// The members with the address family `v6` in the current header.
+    fn in_family(&self, v6: bool) -> PacketSet {
+        self.op(&[], |ops| {
+            let e = ops.dd.literals(&[(level(bits::AF, Bank::Current), v6)])?;
+            ops.dd.and(self.edge, e)
+        })
+    }
+
+    /// The members with 0 and with 1 in a bit of the current header.
+    fn split_bit(&self, bit: u32) -> (PacketSet, PacketSet) {
+        let r = self.run(&[], |ops| {
+            let v = ops.dd.var(level(bit, Bank::Current))?;
+            Ok((ops.dd.diff(self.edge, v)?, ops.dd.and(self.edge, v)?))
+        });
+        let (z, o) = r.unwrap_or((Edge::FALSE, Edge::FALSE));
+        (self.with(z), self.with(o))
     }
 
     /// The members whose current address field `f` is in `p`.
@@ -761,24 +871,45 @@ impl PacketSet {
             let w2 = ops.dd.and(wide, unk)?;
             let up = ops.dd.or(dom, w1)?;
             let up = ops.dd.or(up, w2)?;
-            let matched = ops.dd.and(self.edge, dom)?;
+            // The flows of the lookup side with more than one flow on the
+            // other side.
+            let cw = ops.map(MapKind::CurrentWorkFlow)?;
+            let other = ops.dd.rename(rel, cw)?;
+            let both = ops.dd.and(rel, other)?;
+            let mut eq_cw = Edge::TRUE;
+            {
+                let mut b = ops.builder();
+                for x in bits::flow_bits().into_iter().rev() {
+                    eq_cw = b.eq_bit(x, Bank::Current, Bank::Work, eq_cw)?;
+                }
+            }
+            let two = ops.dd.diff(both, eq_cw)?;
+            let flow = bits::flow_bits();
+            let cur_flow = ops.cube(&flow, Bank::Current)?;
+            let work_flow = ops.cube(&flow, Bank::Work)?;
+            let cube2 = ops.dd.and(cur_flow, work_flow)?;
+            let many = ops.dd.exists(two, cube2)?;
+            let many = ops.dd.rename(many, oc)?;
+            let in_dom = ops.dd.and(self.edge, dom)?;
+            let ambiguous = ops.dd.and(in_dom, many)?;
+            let matched = ops.dd.diff(in_dom, many)?;
             let rest = ops.dd.diff(self.edge, dom)?;
             let uncertain = ops.dd.and(rest, up)?;
             let unmatched = ops.dd.diff(rest, up)?;
             // The image of the matched packets under the relation.
-            let cwf = ops.map(MapKind::CurrentWorkFlow)?;
-            let m2 = ops.dd.rename(matched, cwf)?;
+            let m2 = ops.dd.rename(matched, cw)?;
             let owf = ops.map(MapKind::OriginalWorkFlow)?;
             let r2 = ops.dd.rename(rel, owf)?;
             let flow = bits::flow_bits();
             let wc = ops.cube(&flow, Bank::Work)?;
             let image = ops.dd.and_exists(m2, r2, wc)?;
-            Ok((image, uncertain, unmatched))
+            Ok((image, uncertain, ambiguous, unmatched))
         });
-        let (m, u, n) = r.unwrap_or((Edge::FALSE, Edge::FALSE, Edge::FALSE));
+        let (m, u, a, n) = r.unwrap_or((Edge::FALSE, Edge::FALSE, Edge::FALSE, Edge::FALSE));
         SessionSplit {
             matched: self.with(m),
             uncertain: self.with(u),
+            ambiguous: self.with(a),
             unmatched: self.with(n),
         }
     }
@@ -812,6 +943,13 @@ impl PacketSet {
             }
         }
         None
+    }
+
+    pub(crate) fn from_edge(arena: &Arc<SetArena>, edge: Edge) -> PacketSet {
+        PacketSet {
+            arena: Arc::clone(arena),
+            edge,
+        }
     }
 
     /// The edge of the set, for the description of a set.

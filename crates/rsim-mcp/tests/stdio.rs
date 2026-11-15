@@ -154,6 +154,13 @@ fn tool_calls(modern: bool) -> Vec<Value> {
     let mut bad = stored_args("edge-dnat");
     bad["ingress"] = json!("nobody/eth0");
     m.push(call(id + 2, "path_query", bad, modern));
+    let set = stored_args("set-mini-enterprise");
+    m.push(call(id + 3, "set_query", set.clone(), modern));
+    let mut step = set;
+    step["mode"] = json!("set");
+    step["branch"] = json!(1);
+    step["step"] = json!(7);
+    m.push(call(id + 4, "explain_step", step, modern));
     m
 }
 
@@ -215,12 +222,23 @@ fn check_tool_results(responses: &[Value], modern: bool) {
     assert_eq!(r["isError"], true);
     assert_eq!(r["structuredContent"]["kind"], "error");
     assert_eq!(r["structuredContent"]["error"]["code"], "unknown_ingress");
+    let r = &by_id(responses, id + 3)["result"];
+    assert_eq!(r["isError"], false);
+    let text = r["content"][0]["text"].as_str().unwrap();
+    assert_eq!(format!("{text}\n"), stored("set-mini-enterprise"));
+    let set: Value = serde_json::from_str(&stored("set-mini-enterprise")).unwrap();
+    let r = &by_id(responses, id + 4)["result"]["structuredContent"];
+    assert_eq!(r["kind"], "step");
+    assert_eq!(r["trace_step"], set["answer"]["branches"][1]["steps"][7]);
 }
 
 fn check_tools_list(r: &Value) {
     let tools = r["tools"].as_array().unwrap();
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["list_devices", "path_query", "explain_step"]);
+    assert_eq!(
+        names,
+        ["list_devices", "path_query", "set_query", "explain_step"]
+    );
     for t in tools {
         assert!(t["description"].is_string());
         assert_eq!(t["inputSchema"]["type"], "object");

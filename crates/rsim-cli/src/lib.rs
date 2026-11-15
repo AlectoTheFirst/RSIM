@@ -8,9 +8,11 @@ pub mod commands;
 pub mod error;
 pub mod json;
 pub mod query;
+pub mod set_query;
 pub mod text;
 
 pub use commands::StepRef;
 pub use error::{ErrorCode, QueryError};
 pub use query::{IcmpType, Protocol, QueryInput, TcpFlag};
 pub use rsim_engine::Twin;
+pub use set_query::SetInput;

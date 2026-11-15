@@ -16,6 +16,15 @@ use serde::{Serialize, Serializer};
 
 use crate::error::QueryError;
 use crate::query::QueryEcho;
+use crate::set_query::SetEcho;
+
+/// The query input of an output: of a path query or of a set query.
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged)]
+pub enum QueryJson {
+    Path(Box<QueryEcho>),
+    Set(Box<SetEcho>),
+}
 
 /// The version number of the JSON output.
 pub const VERSION: u32 = 2;
@@ -103,11 +112,20 @@ pub struct PathAnswerOut {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct SetAnswerOut {
+    pub rsim_json: u32,
+    pub kind: &'static str,
+    pub topology: String,
+    pub query: SetEcho,
+    pub answer: AnswerJson,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct StepOut {
     pub rsim_json: u32,
     pub kind: &'static str,
     pub topology: String,
-    pub query: QueryEcho,
+    pub query: QueryJson,
     pub reply_of: Option<usize>,
     pub branch: usize,
     pub step: usize,

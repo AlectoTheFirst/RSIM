@@ -1,4 +1,5 @@
-//! The command `rsim`: path queries on the built-in topologies.
+//! The command `rsim`: path queries and set queries on the built-in
+//! topologies.
 
 #![deny(clippy::disallowed_methods, clippy::disallowed_types)]
 
@@ -9,11 +10,15 @@ use std::process::ExitCode;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use rsim_cli::json::{self, ErrorOut};
 use rsim_cli::query::{FragmentName, IngressRef, parse_mac};
+use rsim_cli::set_query::{
+    Ranges, SetInput, parse_fragments, parse_macs, parse_prefixes, parse_tcp_flags,
+    parse_transports,
+};
 use rsim_cli::{IcmpType, Protocol, QueryError, QueryInput, StepRef, TcpFlag, commands, text};
-use rsim_core::Mac;
+use rsim_core::{Mac, Prefix};
 use serde::Serialize;
 
-/// Path queries on the built-in topologies of rsim.
+/// Path queries and set queries on the built-in topologies of rsim.
 #[derive(Parser)]
 #[command(name = "rsim", version)]
 struct Cli {
@@ -45,6 +50,25 @@ enum Command {
     /// The answer for one packet, with the trace and the reply. A field
     /// that the query does not state is not known.
     Path(QueryArgs),
+    /// The answer for a set of packets: the parts of the set with their
+    /// results, the traces and the replies. A field that the query does not
+    /// give has all values.
+    Set(SetArgs),
+    /// One trace step of the answer of a set query.
+    ExplainSet {
+        #[command(flatten)]
+        query: SetArgs,
+        /// The branch index.
+        #[arg(long)]
+        branch: usize,
+        /// The step index in the branch.
+        #[arg(long)]
+        step: usize,
+        /// Select the reply of this forward branch. Then the branch index and
+        /// the step index are indexes in the reply.
+        #[arg(long)]
+        reply_of: Option<usize>,
+    },
     /// One trace step of the answer.
     Explain {
         #[command(flatten)]
@@ -120,6 +144,88 @@ struct QueryArgs {
     no_reply: bool,
 }
 
+/// The fields of a set query. Each field takes a set: an address, a
+/// prefix, a number, a range such as `1-1023`, or a comma list.
+#[derive(Args, Clone)]
+struct SetArgs {
+    /// A built-in topology.
+    topology: String,
+    /// The ingress point as <device>/<interface>.
+    #[arg(long)]
+    ingress: Option<IngressRef>,
+    /// Addresses and prefixes. Without it, the attached addresses of the
+    /// ingress, or all addresses.
+    #[arg(long = "source.ip", value_parser = |s: &str| parse_prefixes(s, "source.ip").map(List))]
+    source_ip: Option<List<Prefix>>,
+    #[arg(long = "destination.ip", value_parser = |s: &str| parse_prefixes(s, "destination.ip").map(List))]
+    destination_ip: Option<List<Prefix>>,
+    #[arg(long = "network.iana_number", value_parser = |s: &str| Ranges::parse(s, "network.iana_number", 255))]
+    iana_number: Option<Ranges>,
+    /// A comma list of tcp, udp, icmp and icmpv6.
+    #[arg(long = "network.transport", value_parser = |s: &str| parse_transports(s).map(List))]
+    transport: Option<List<Protocol>>,
+    #[arg(long = "source.port", value_parser = |s: &str| Ranges::parse(s, "source.port", 65535))]
+    source_port: Option<Ranges>,
+    #[arg(long = "destination.port", value_parser = |s: &str| Ranges::parse(s, "destination.port", 65535))]
+    destination_port: Option<Ranges>,
+    #[arg(long = "source.mac", value_parser = |s: &str| parse_macs(s).map(List))]
+    source_mac: Option<List<Mac>>,
+    #[arg(long = "destination.mac", value_parser = |s: &str| parse_macs(s).map(List))]
+    destination_mac: Option<List<Mac>>,
+    #[arg(long = "network.vlan.id", value_parser = |s: &str| Ranges::parse(s, "network.vlan.id", 4095))]
+    vlan_id: Option<Ranges>,
+    #[arg(long = "l2_priority", value_parser = |s: &str| Ranges::parse(s, "l2_priority", 7))]
+    l2_priority: Option<Ranges>,
+    /// Numbers, ranges, or flag names joined with +, for example syn+ack.
+    #[arg(long = "tcp_flags", value_parser = parse_tcp_flags)]
+    tcp_flags: Option<Ranges>,
+    #[arg(long = "icmp_type", value_parser = |s: &str| Ranges::parse(s, "icmp_type", 255))]
+    icmp_type: Option<Ranges>,
+    #[arg(long = "icmp_code", value_parser = |s: &str| Ranges::parse(s, "icmp_code", 255))]
+    icmp_code: Option<Ranges>,
+    #[arg(long, value_parser = |s: &str| Ranges::parse(s, "dscp", 63))]
+    dscp: Option<Ranges>,
+    #[arg(long, value_parser = |s: &str| Ranges::parse(s, "ecn", 3))]
+    ecn: Option<Ranges>,
+    /// A comma list of unfragmented, first and later.
+    #[arg(long, value_parser = |s: &str| parse_fragments(s).map(List))]
+    fragment: Option<List<FragmentName>>,
+    /// Do not run the replies.
+    #[arg(long)]
+    no_reply: bool,
+}
+
+impl SetArgs {
+    fn input(&self) -> SetInput {
+        let a = self.clone();
+        SetInput {
+            topology: a.topology,
+            ingress: a.ingress,
+            source_ip: a.source_ip.map(|l| l.0),
+            destination_ip: a.destination_ip.map(|l| l.0),
+            iana_number: a.iana_number,
+            transport: a.transport.map(|l| l.0),
+            source_port: a.source_port,
+            destination_port: a.destination_port,
+            source_mac: a.source_mac.map(|l| l.0),
+            destination_mac: a.destination_mac.map(|l| l.0),
+            vlan_id: a.vlan_id,
+            l2_priority: a.l2_priority,
+            tcp_flags: a.tcp_flags,
+            icmp_type: a.icmp_type,
+            icmp_code: a.icmp_code,
+            dscp: a.dscp,
+            ecn: a.ecn,
+            fragment: a.fragment.map(|l| l.0),
+            reply: a.no_reply.then_some(false),
+        }
+    }
+}
+
+/// A comma list of one CLI flag.
+#[derive(Clone, Debug)]
+struct List<T>(Vec<T>);
+
 /// A protocol name.
 fn transport(s: &str) -> Result<Protocol, String> {
     match s.parse::<Protocol>() {
@@ -190,6 +296,27 @@ fn main() -> ExitCode {
             let input = q.clone_input();
             let r = commands::load(&input.topology).and_then(|t| commands::path(&input, &t));
             emit(&cli, r, text::path)
+        }
+        Command::Set(q) => {
+            let input = q.input();
+            let r = commands::load(&input.topology).and_then(|t| commands::set(&input, &t));
+            emit(&cli, r, text::set)
+        }
+        Command::ExplainSet {
+            query,
+            branch,
+            step,
+            reply_of,
+        } => {
+            let input = query.input();
+            let at = StepRef {
+                reply_of: *reply_of,
+                branch: *branch,
+                step: *step,
+            };
+            let r =
+                commands::load(&input.topology).and_then(|t| commands::explain_set(&input, at, &t));
+            emit(&cli, r, text::step)
         }
         Command::Explain {
             query,

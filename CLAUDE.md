@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-Steps 1 and 1b of the build are complete. Step 2 is in progress: the packet-set engine in `rsim-dd` and set-mode execution. Step 2 comes in 3 pull requests. Pull request 1 is the crate `rsim-dd`. Pull request 2 puts `PacketSet` on `rsim-dd`. `../rsim-project/roadmap.md` gives the order. The Cargo workspace has 7 crates in `crates/`: `rsim-core`, `rsim-dd`, `rsim-functions`, `rsim-engine`, `rsim-topologies`, `rsim-cli` and `rsim-mcp`. The other crates of section 3 come with their steps.
+Steps 1 and 1b of the build are complete. Step 2 is in progress: the packet-set engine in `rsim-dd` and set-mode execution. Step 2 comes in 3 pull requests. Pull request 1 is the crate `rsim-dd`. Pull request 2 puts `PacketSet` on `rsim-dd`. Pull request 3 adds the set queries. `../rsim-project/roadmap.md` gives the order. The Cargo workspace has 7 crates in `crates/`: `rsim-core`, `rsim-dd`, `rsim-functions`, `rsim-engine`, `rsim-topologies`, `rsim-cli` and `rsim-mcp`. The other crates of section 3 come with their steps.
 
 The two design documents are in the adjacent folder `../rsim-project/`. This repository is public, so the design documents stay out of it. Do not commit the design documents, real configs or collected state to this repository.
 
@@ -46,6 +46,9 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | List the built-in topologies | `cargo run -p rsim-cli -- topologies` |
 | Path query with its reply | `cargo run -p rsim-cli -- path mini-enterprise --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --source.port 40000 --destination.port 53` |
 | Path query as JSON | Add `--format json` to the `path` command. Add `--pretty` for indented JSON. |
+| Set query | `cargo run -p rsim-cli -- set mini-enterprise --source.ip 172.31.10.0/24 --destination.ip 10.20.0.53 --network.transport udp,tcp` |
+| One trace step of a set query | `cargo run -p rsim-cli -- explain-set mini-enterprise --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --destination.port 53,80 --branch 1 --step 7` |
+| Set query benchmark | `cargo bench -p rsim-engine --bench set_query` |
 | One trace step | `cargo run -p rsim-cli -- explain mini-enterprise --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --destination.port 53 --branch 0 --step 7` |
 | MCP server on stdio | `cargo run -p rsim-mcp` |
 | Decision diagram tests | `cargo test -p rsim-dd` |
@@ -54,7 +57,7 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 
 The hand-built topologies are in the crate `rsim-topologies`, with one module for each topology in `crates/rsim-topologies/src/`. The tests and the benchmarks of `rsim-engine` use it as a development dependency. `rsim-topologies::builtin(name)` gives the twin of a built-in topology.
 
-The stored JSON answers of the CLI tests are in `crates/rsim-cli/tests/golden/`. The CLI test and the MCP stdio test compare their outputs with these files. If an intended change alters the JSON output, make the files again with `rsim path <topology> <flags> --format json`. The flags of each file are in `QUERIES` in `crates/rsim-cli/tests/cli.rs`.
+The stored JSON answers of the CLI tests are in `crates/rsim-cli/tests/golden/`. `set-mini-enterprise.json` is the answer of the set query `SET_QUERY` in `crates/rsim-cli/tests/cli.rs`; make it again with `rsim set` and these flags. The CLI test and the MCP stdio test compare their outputs with these files. If an intended change alters the JSON output, make the files again with `rsim path <topology> <flags> --format json`. The flags of each file are in `QUERIES` in `crates/rsim-cli/tests/cli.rs`.
 
 `rsim-core` keeps the packet sets in `packet_set.rs`, the bit table in `bits.rs`, the arenas in `set.rs` and the description of a set as members in `describe.rs`. `crates/rsim-core/tests/explicit_oracle.rs` compares each set operation with an explicit list of packet pairs. A path query runs on the set of its packet; the design note gives the rule for an unstated field. The ingress of a query comes from `--ingress` or from the attachment records and edge interfaces of the twin.
 
