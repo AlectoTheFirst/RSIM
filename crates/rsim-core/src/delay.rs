@@ -11,6 +11,9 @@ pub enum DelayGap {
     Processing(FunctionId),
     /// The delay of the link after an egress function.
     Link(FunctionId),
+    /// The load-dependent queueing delay of the link after an egress
+    /// function, where the link has no load data.
+    Queueing(FunctionId),
 }
 
 /// A virtual-time duration in nanoseconds. If a component has no data, the
