@@ -4,7 +4,9 @@
 
 pub mod collected;
 pub mod coverage;
+pub mod estate;
 pub mod stanza;
+pub mod unifi;
 pub mod vyos;
 
 pub use coverage::{Coverage, Entry, Reach, State, Table, classify};

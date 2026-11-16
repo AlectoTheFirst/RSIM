@@ -1,0 +1,3 @@
+{"data": [
+  {"_id": "pp-trunk", "name": "trunk", "forward": "all", "native_networkconf_id": "n-default", "autoneg": true, "isolation": false}
+], "meta": {"rc": "ok"}}

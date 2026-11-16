@@ -1,0 +1,18 @@
+{"data": [
+  {"mac": "00:00:5e:00:53:a1", "name": "sw1", "type": "usw", "gateway_mac": "00:00:5e:00:53:01",
+   "uplink": {"port_idx": 1, "type": "wire"},
+   "lldp_table": [],
+   "port_table": [
+     {"port_idx": 1, "up": true, "enable": true, "forward": "all", "native_networkconf_id": "n-default", "excluded_networkconf_ids": [], "stp_state": "forwarding"},
+     {"port_idx": 2, "up": true, "enable": true, "forward": "native", "native_networkconf_id": "n-lan", "stp_state": "forwarding"},
+     {"port_idx": 3, "up": true, "enable": true, "forward": "customize", "native_networkconf_id": "n-default", "excluded_networkconf_ids": ["n-lan"], "stp_state": "forwarding"},
+     {"port_idx": 4, "up": false, "enable": true, "forward": "native", "native_networkconf_id": "n-lan", "stp_state": "disabled"}
+   ]},
+  {"mac": "00:00:5e:00:53:b1", "name": "ap1", "type": "uap",
+   "uplink": {"port_idx": 1, "type": "wire", "uplink_mac": "00:00:5e:00:53:a1", "uplink_remote_port": 3},
+   "vap_table": [
+     {"essid": "guest", "wlanconf_id": "w-guest", "radio": "ng", "up": true},
+     {"essid": "guest", "wlanconf_id": "w-guest", "radio": "na", "up": true}
+   ]},
+  {"mac": "00:00:5e:00:53:c9", "name": "gw1", "type": "ugw"}
+], "meta": {"rc": "ok"}}

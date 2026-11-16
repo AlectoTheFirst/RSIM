@@ -43,7 +43,14 @@ fn main() {
         println!("  handled but not read: {p}");
     }
     let file = format!("{device}/config@{}", &blob.to_string()[..12]);
-    let low = vyos::lower(device, &file, &vyos::profile(), &cfg, &col);
+    let low = vyos::lower(
+        device,
+        &file,
+        &vyos::profile(),
+        &cfg,
+        &col,
+        &Default::default(),
+    );
     println!(
         "collected: {} addresses, {} routes, {} neighbours",
         col.addresses.len(),
