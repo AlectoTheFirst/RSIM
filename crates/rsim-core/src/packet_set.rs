@@ -643,6 +643,33 @@ impl PacketSet {
         })
     }
 
+    /// Sets the 802.1Q tag of the current header. `None` removes the tag:
+    /// the VLAN and the layer 2 priority become absent. `Some(v)` sets the
+    /// VLAN to `v` on each frame; a frame that had no tag gets an unknown
+    /// layer 2 priority.
+    pub fn set_vlan(&self, tag: Option<u16>) -> PacketSet {
+        self.op(&[], |ops| match tag {
+            None => {
+                let s = force_field(ops, self.edge, bits::VLAN, FieldValue::Absent)?;
+                force_field(ops, s, bits::L2_PRIORITY, FieldValue::Absent)
+            }
+            Some(v) => {
+                // The VLAN and the priority share one presence bit, so the
+                // set is split by the presence before the VLAN changes.
+                let p = bits::VLAN.presence.expect("the VLAN has a presence bit");
+                let mut b = ops.builder();
+                let pv = b.var(p, Bank::Current)?;
+                let had = ops.dd.and(self.edge, pv)?;
+                let none = ops.dd.diff(self.edge, pv)?;
+                let tag = FieldValue::Known(u128::from(v));
+                let had = force_field(ops, had, bits::VLAN, tag)?;
+                let none = force_field(ops, none, bits::VLAN, tag)?;
+                let none = force_field(ops, none, bits::L2_PRIORITY, FieldValue::Unknown)?;
+                ops.dd.or(had, none)
+            }
+        })
+    }
+
     /// Rewrites fields of the current header. The original request stays.
     /// A rewrite does not create a header that is absent.
     pub fn rewrite(&self, rw: &Rewrite) -> PacketSet {
@@ -959,6 +986,65 @@ impl PacketSet {
 }
 
 /// Rewrites one field of the current header of the set `s`.
+/// Sets a field of the current header on each member, with its presence:
+/// present with the value, or absent.
+fn force_field(
+    ops: &mut Ops<'_>,
+    s: Edge,
+    f: FieldBits,
+    v: FieldValue<u128>,
+) -> Result<Edge, DdError> {
+    let c = Bank::Current;
+    let p = f.presence.expect("the field has a presence bit");
+    let mut all: Vec<u32> = f.value_bits().collect();
+    all.extend(f.unknown);
+    all.push(p);
+    let cube = ops.cube(&all, c)?;
+    let e = ops.dd.exists(s, cube)?;
+    let mut b: Builder<'_> = ops.builder();
+    let pv = b.var(p, c)?;
+    let enc = match v {
+        FieldValue::Absent => {
+            let bits: Vec<u32> = f.value_bits().collect();
+            let z = b.zeros(&bits, c)?;
+            let z = match f.unknown {
+                Some(u) => {
+                    let uv = b.var(u, c)?;
+                    b.dd.and(z, uv.not())?
+                }
+                None => z,
+            };
+            b.dd.and(z, pv.not())?
+        }
+        FieldValue::Known(x) => {
+            let val = b.value(f, c, x)?;
+            let val = match f.unknown {
+                Some(u) => {
+                    let uv = b.var(u, c)?;
+                    b.dd.and(val, uv.not())?
+                }
+                None => val,
+            };
+            b.dd.and(val, pv)?
+        }
+        FieldValue::Unknown => {
+            let bits: Vec<u32> = f.value_bits().collect();
+            let z = b.zeros(&bits, c)?;
+            let u = b.var(f.unknown.expect("the field can be unknown"), c)?;
+            let z = b.dd.and(z, u)?;
+            b.dd.and(z, pv)?
+        }
+        FieldValue::Unstated => {
+            let z = match f.unknown {
+                Some(u) => b.var(u, c)?.not(),
+                None => Edge::TRUE,
+            };
+            b.dd.and(z, pv)?
+        }
+    };
+    ops.dd.and(e, enc)
+}
+
 fn rewrite_field(
     ops: &mut Ops<'_>,
     s: Edge,

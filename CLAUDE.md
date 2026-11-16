@@ -61,10 +61,11 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | HTTPS transport tests | `cargo test -p rsim-collect --test https` |
 | Collection benchmark | `cargo bench -p rsim-collect --bench cycle` |
 | Ingestion tests | `cargo test -p rsim-ingest` |
+| Layer 2 tests | `cargo test -p rsim-engine --test layer2` |
 | Coverage of a VyOS config | `cargo run -p rsim-ingest --example vyos_coverage < config.json` |
 | Twin of a VyOS device of a store | `cargo run -p rsim-ingest --example vyos_snapshot -- <data folder> <device>`. Add `<ingress interface> <source> <destination> tcp\|udp <port>` for a path query. |
 
-The hand-built topologies are in the crate `rsim-topologies`, with one module for each topology in `crates/rsim-topologies/src/`. The tests and the benchmarks of `rsim-engine` use it as a development dependency. `rsim-topologies::builtin(name)` gives the twin of a built-in topology.
+The hand-built topologies are in the crate `rsim-topologies`, with one module for each topology in `crates/rsim-topologies/src/`. `layer2_site()` is a switched site behind a router for the layer 2 tests; it is not a built-in topology. The tests and the benchmarks of `rsim-engine` use it as a development dependency. `rsim-topologies::builtin(name)` gives the twin of a built-in topology.
 
 The stored JSON answers of the CLI tests are in `crates/rsim-cli/tests/golden/`. `set-mini-enterprise.json` is the answer of the set query `SET_QUERY` in `crates/rsim-cli/tests/cli.rs`; make it again with `rsim set` and these flags. The CLI test and the MCP stdio test compare their outputs with these files. If an intended change alters the JSON output, make the files again with `rsim path <topology> <flags> --format json`. The flags of each file are in `QUERIES` in `crates/rsim-cli/tests/cli.rs`.
 

@@ -4,6 +4,7 @@
 
 pub mod common;
 pub mod forwarding;
+pub mod layer2;
 pub mod nat;
 pub mod policy;
 pub mod profile;
@@ -14,8 +15,12 @@ pub mod session;
 
 pub use common::Meta;
 pub use forwarding::{
-    DeviceDelivery, Egress, EgressMode, Ingress, Link, LocalInput, VrfSelection, ZoneLookup,
+    DeviceDelivery, Egress, EgressMode, Ingress, Link, LocalInput, Tag, VrfSelection, ZoneLookup,
     ZoneRole,
+};
+pub use layer2::{
+    BROADCAST, Flood, HostMac, HostResolution, Layer3HandOff, MacEntry, MacLookup, PortEgress,
+    PortIngress, WirelessAttachment,
 };
 pub use nat::{DestinationNat, NatAction, SourceNat};
 pub use policy::{AclMatch, FirewallPolicy, ZoneScope};

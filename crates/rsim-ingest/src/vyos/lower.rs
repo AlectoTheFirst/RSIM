@@ -385,6 +385,7 @@ pub fn lower(
             interface: InterfaceId::new(&n.interface),
             target: NeighbourTarget::Link,
             owner: n.mac.clone().unwrap_or_default(),
+            mac: n.mac.as_deref().and_then(|m| m.parse().ok()),
             spans: vec![n.span.clone()],
         });
         neighbours.insert(p, v);
@@ -434,6 +435,8 @@ pub fn lower(
             interface: InterfaceId::new(&i.name),
             mode: EgressMode::Routed,
             link: None,
+            rewrite: Default::default(),
+            tag: Default::default(),
         });
     }
 

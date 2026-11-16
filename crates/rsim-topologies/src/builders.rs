@@ -126,6 +126,8 @@ impl Dev {
                 delay_ns: delay,
                 provenance: vec![SourceSpan::line("topology/links.yaml", line)],
             }),
+            rewrite: Default::default(),
+            tag: Default::default(),
         }
     }
 
@@ -147,6 +149,7 @@ impl Dev {
                 owner: match target {
                     Target::Link(o) | Target::Endpoint(o) => o.to_string(),
                 },
+                mac: None,
                 spans: vec![SourceSpan::line(format!("{}.arp", self.name), i as u32 + 1)],
             };
             let mut v = table.get(&p).cloned().unwrap_or_default();
