@@ -408,7 +408,11 @@ impl Https for HttpsTransport {
                     (headers, generation) = self.login(&console, Some(generation)).await?;
                     continue;
                 }
-                return Err(TransportError::Command(format!("HTTP {status} for {path}")));
+                let text = format!("HTTP {status} for {path}");
+                if status == StatusCode::NOT_FOUND || status == StatusCode::BAD_REQUEST {
+                    return Err(TransportError::NotFound(text));
+                }
+                return Err(TransportError::Command(text));
             }
             Err(TransportError::Command(format!(
                 "HTTP 401 for {path} after a new login"

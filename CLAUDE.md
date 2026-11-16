@@ -56,6 +56,7 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | Decision diagram benchmark | `cargo bench -p rsim-dd --bench ops` |
 | Snapshot store tests | `cargo test -p rsim-store` |
 | Collection tests | `cargo test -p rsim-collect` |
+| One collection cycle of real devices | `cargo run -p rsim-collect --bin rsim-collect -- --env <env file> --data <data folder> run`. Add `--repeat` for a cycle every 60 s. The `status` command shows the sections of the newest snapshot, and `show <device> <section>` writes the raw bytes of a section. The env file and the data folder stay outside the repository. |
 | SSH transport tests | `cargo test -p rsim-collect --test ssh` |
 | HTTPS transport tests | `cargo test -p rsim-collect --test https` |
 | Collection benchmark | `cargo bench -p rsim-collect --bench cycle` |

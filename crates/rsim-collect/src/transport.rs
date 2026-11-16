@@ -16,6 +16,9 @@ pub enum TransportError {
     Command(String),
     /// The command did not finish in its time.
     Timeout,
+    /// The device does not have the command or the API path, for example an
+    /// HTTP 400 or 404 reply.
+    NotFound(String),
 }
 
 impl fmt::Display for TransportError {
@@ -24,6 +27,7 @@ impl fmt::Display for TransportError {
             TransportError::Connect(e) => write!(f, "connect: {e}"),
             TransportError::Command(e) => write!(f, "command: {e}"),
             TransportError::Timeout => f.write_str("timeout"),
+            TransportError::NotFound(e) => write!(f, "not found: {e}"),
         }
     }
 }

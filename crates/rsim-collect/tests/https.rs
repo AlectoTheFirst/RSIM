@@ -286,7 +286,7 @@ async fn an_error_status_and_a_large_body_are_command_errors() {
     let e = t.get(&d, "/missing").await.unwrap_err();
     assert_eq!(
         e,
-        TransportError::Command("HTTP 404 Not Found for /missing".into())
+        TransportError::NotFound("HTTP 404 Not Found for /missing".into())
     );
     let e = t.get(&d, "/big").await.unwrap_err();
     assert!(matches!(e, TransportError::Command(_)), "{e}");

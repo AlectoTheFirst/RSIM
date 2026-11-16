@@ -57,6 +57,34 @@ const DEVICE_VOLATILE: &[&str] = &[
     "/data/*/vap_table/*/*packets*",
     "/data/*/vap_table/*/satisfaction",
     "/data/*/vap_table/*/num_sta",
+    "/data/*/vap_table/*/*_tcp_stats",
+    "/data/*/vap_table/*/*bcast",
+    "/data/*/vap_table/*/*mcast",
+    "/data/*/vap_table/*/*retries",
+    "/data/*/vap_table/*/*errors",
+    "/data/*/vap_table/*/*dropped",
+    "/data/*/vap_table/*/wifi_tx_attempts",
+    "/data/*/vap_table/*/reasons_bar_chart*",
+    "/data/*/port_table/*/uptime",
+    "/data/*/port_table/*/last_connection",
+    "/data/*/last_successful_config_application_time",
+    "/data/*/pathmon/targets/*/jitter*",
+    "/data/*/pathmon/targets/*/latency*",
+    "/data/*/pathmon/targets/*/last_update_ts",
+    "/data/*/pathmon/targets/*/samples",
+    "/data/*/port_table/*/mac_table_count",
+    "/data/*/uplink/*dropped",
+    "/data/*/uplink/*multicast",
+    "/data/*/uplink/*broadcast",
+    "/data/*/vap_table/*/anomalies_bar_chart*",
+    "/data/*/vap_table/*/avg_client_signal",
+    "/data/*/vap_table/*/dns_avg_latency",
+    "/data/*/vap_table/*/num_sta_unique",
+    "/data/*/vap_table/*/rx_crypts",
+    "/data/*/vap_table/*/rx_nwids",
+    "/data/*/vap_table/*/tx_success",
+    "/data/*/vap_table/*/tx_total",
+    "/data/*/vap_table/*/wifi_tx_latency_mov",
 ];
 
 const CLIENT_VOLATILE: &[&str] = &[
@@ -77,6 +105,12 @@ const CLIENT_VOLATILE: &[&str] = &[
     "/data/*/latest_assoc_time",
     "/data/*/anomalies",
     "/data/*/disconnect_timestamp",
+    "/data/*/_last_seen_by_*",
+    "/data/*/powersave_enabled",
+    "/data/*/*_mcs",
+    "/data/*/wifi_tx_attempts",
+    "/data/*/_ipv6_addresses_reported_at_by_*",
+    "/data/*/dhcpend_time",
 ];
 
 const META_VOLATILE: &[&str] = &["/meta/count"];
@@ -95,12 +129,21 @@ fn spec(
         format: Format::Json,
         volatile,
         extract,
+        optional: false,
+    }
+}
+
+fn optional(spec: SectionSpec) -> SectionSpec {
+    SectionSpec {
+        optional: true,
+        ..spec
     }
 }
 
 /// The sections of a site. A console has either the classic firewall or the
-/// zone firewall, so the paths of the other model fail and their sections
-/// are missing.
+/// zone firewall, and a site with only a gateway can have no port profiles.
+/// These sections are optional, so the paths of a model that the console
+/// does not run give absent sections.
 pub fn sections(site: &str) -> Vec<SectionSpec> {
     use Class::{Configuration, Observation};
     let v1 = |p: &str| format!("/proxy/network/api/s/{site}/{p}");
@@ -120,13 +163,13 @@ pub fn sections(site: &str) -> Vec<SectionSpec> {
             META_VOLATILE,
             None,
         ),
-        spec(
+        optional(spec(
             "port_profiles",
             v1("rest/portconf"),
             Configuration,
             META_VOLATILE,
             None,
-        ),
+        )),
         spec(
             "wlans",
             v1("rest/wlanconf"),
@@ -141,34 +184,34 @@ pub fn sections(site: &str) -> Vec<SectionSpec> {
             CLIENT_VOLATILE,
             Some(&ClientExtract),
         ),
-        spec(
+        optional(spec(
             "firewall_rules",
             v1("rest/firewallrule"),
             Configuration,
             META_VOLATILE,
             None,
-        ),
-        spec(
+        )),
+        optional(spec(
             "firewall_groups",
             v1("rest/firewallgroup"),
             Configuration,
             META_VOLATILE,
             None,
-        ),
-        spec(
+        )),
+        optional(spec(
             "firewall_zones",
             v2("firewall/zones"),
             Configuration,
             &[],
             None,
-        ),
-        spec(
+        )),
+        optional(spec(
             "firewall_policies",
             v2("firewall-policies"),
             Configuration,
             &[],
             None,
-        ),
+        )),
     ]
 }
 

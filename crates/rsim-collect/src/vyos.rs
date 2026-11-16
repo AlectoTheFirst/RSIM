@@ -16,6 +16,10 @@ use crate::{
 /// different directories in different VyOS releases.
 pub const PATH: &str = "PATH=/usr/sbin:/sbin:/usr/bin:/bin";
 
+/// The wrapper that runs an operational mode command, such as `show`, in
+/// the shell of an SSH exec, which has no operational mode.
+pub const OP_MODE: &str = "/opt/vyatta/bin/vyatta-op-cmd-wrapper";
+
 /// The command that prints the name, the speed in Mbit/s and the duplex of
 /// each link, one link on each line. A value that the kernel does not give
 /// is `unknown`.
@@ -55,6 +59,7 @@ fn spec(
         format,
         volatile,
         extract,
+        optional: false,
     }
 }
 
@@ -66,7 +71,7 @@ pub fn sections() -> Vec<SectionSpec> {
     vec![
         spec(
             "config",
-            "show configuration json",
+            &format!("{OP_MODE} show configuration json"),
             Configuration,
             Json,
             &[],
@@ -74,7 +79,7 @@ pub fn sections() -> Vec<SectionSpec> {
         ),
         spec(
             "version",
-            "show version",
+            &format!("{OP_MODE} show version"),
             Configuration,
             Text,
             &["Uptime:"],

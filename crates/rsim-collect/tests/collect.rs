@@ -102,7 +102,7 @@ fn load(t: &FakeTransport, d: &Device) {
                 t.reply(
                     &d.id,
                     &command(d, s),
-                    Err(TransportError::Command("404".into())),
+                    Err(TransportError::NotFound("HTTP 404".into())),
                 );
             }
         }
@@ -242,7 +242,7 @@ async fn the_first_cycle_stores_all_devices_and_their_tables() {
     assert!(s.manifest.checkpoint);
     let site = &s.devices["site-a"];
     let zones = site.section("firewall_zones").unwrap();
-    assert!(matches!(zones.status, SectionStatus::Missing { .. }));
+    assert!(matches!(zones.status, SectionStatus::Absent { .. }));
     assert!(zones.blob.is_none());
     let cfg = s.devices["r1"].section("config").unwrap();
     let raw = e.c.store().read_blob(&cfg.blob.unwrap()).unwrap();
