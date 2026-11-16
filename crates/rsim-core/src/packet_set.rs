@@ -216,6 +216,27 @@ pub struct SessionSplit {
     pub unmatched: PacketSet,
 }
 
+/// The packets of a set by group of the entry of their longest-prefix
+/// match. Each group has its key, the entries that the walk reached, the
+/// trie nodes whose whole subtree went to the group, and its packets.
+#[derive(Clone, Debug)]
+pub struct GroupPartition<K> {
+    pub groups: Vec<GroupPart<K>>,
+    pub unmatched: PacketSet,
+    pub uncertain: PacketSet,
+}
+
+/// The packets of one group of a [`GroupPartition`].
+#[derive(Clone, Debug)]
+pub struct GroupPart<K> {
+    pub key: K,
+    /// The indexes of the entries that the walk reached, sorted.
+    pub entries: Vec<usize>,
+    /// The trie nodes whose whole subtree went to the group.
+    pub subtrees: Vec<u32>,
+    pub packets: PacketSet,
+}
+
 impl PacketSet {
     fn with(&self, edge: Edge) -> PacketSet {
         PacketSet {
@@ -585,6 +606,168 @@ impl PacketSet {
         matched.sort_by_key(|(p, _, _)| *p);
         PrefixPartition {
             matched,
+            unmatched,
+            uncertain,
+        }
+    }
+
+    /// Partitions the set by the group of the longest-prefix match of an
+    /// address field. `key` gives the group of an entry. `uniform` gives the
+    /// group of a trie node if each entry of its subtree has that group; the
+    /// walk then gives the packets of the subtree to the group without a
+    /// descent, if no packet of the subtree can fall back to another group.
+    /// A set with one address keeps the exact entry.
+    pub fn partition_by_group<V, T, K>(
+        &self,
+        field: AddrField,
+        table: &T,
+        key: &dyn Fn(&V) -> K,
+        uniform: &dyn Fn(u32) -> Option<K>,
+    ) -> GroupPartition<K>
+    where
+        T: PrefixTable<V> + ?Sized,
+        K: Ord + Clone,
+    {
+        let f = match field {
+            AddrField::Src => bits::SRC_IP,
+            AddrField::Dst => bits::DST_IP,
+        };
+        let Some(u) = f.unknown else {
+            unreachable!("an address field has an unknown bit")
+        };
+        let split = self.run(&[], |ops| {
+            let uv = ops.builder().var(u, Bank::Current)?;
+            Ok((ops.dd.and(self.edge, uv)?, ops.dd.diff(self.edge, uv)?))
+        });
+        let (unc, known) = split.unwrap_or((Edge::FALSE, Edge::FALSE));
+        let uncertain = self.with(unc);
+        let known = self.with(known);
+        // One address: one lookup in the table.
+        if let Some(w) = known.witness() {
+            let addr = match field {
+                AddrField::Src => w.current.src_ip,
+                AddrField::Dst => w.current.dst_ip,
+            };
+            if let FieldValue::Known(a) = addr
+                && known.in_prefix(f, &Prefix::host(a)) == known
+            {
+                let found = table.longest_match(a).and_then(|(p, v)| {
+                    let k = key(v);
+                    find_entry(table, p).map(|i| (k, i))
+                });
+                return match found {
+                    Some((k, i)) => GroupPartition {
+                        groups: vec![GroupPart {
+                            key: k,
+                            entries: vec![i],
+                            subtrees: Vec::new(),
+                            packets: known,
+                        }],
+                        unmatched: self.empty(),
+                        uncertain,
+                    },
+                    None => GroupPartition {
+                        groups: Vec::new(),
+                        unmatched: known,
+                        uncertain,
+                    },
+                };
+            }
+        }
+        let mut groups: BTreeMap<K, GroupPart<K>> = BTreeMap::new();
+        let mut unmatched = self.empty();
+        for v6 in [false, true] {
+            let fam = known.in_family(v6);
+            if fam.is_empty() {
+                continue;
+            }
+            let Some(root) = table.walk_root(v6) else {
+                unmatched = unmatched.union(&fam);
+                continue;
+            };
+            let off: u32 = if v6 { 0 } else { 96 };
+            let width: u8 = if v6 { 128 } else { 32 };
+            let bit = |i: u8| f.start + off + u32::from(i);
+            // (best entry above with its group)
+            type Best<K> = Option<(usize, K)>;
+            let mut give = |set: PacketSet, best: &Best<K>, subtree: Option<u32>| match best {
+                Some((e, k)) => {
+                    let g = groups.entry(k.clone()).or_insert_with(|| GroupPart {
+                        key: k.clone(),
+                        entries: Vec::new(),
+                        subtrees: Vec::new(),
+                        packets: set.empty(),
+                    });
+                    g.packets = g.packets.union(&set);
+                    match subtree {
+                        Some(n) => g.subtrees.push(n),
+                        None => g.entries.push(*e),
+                    }
+                }
+                None => unmatched = unmatched.union(&set),
+            };
+            let mut stack: Vec<(u32, PacketSet, Best<K>)> = vec![(root, fam, None)];
+            while let Some((n, set, best)) = stack.pop() {
+                let node = table.walk_node(n);
+                let best = match node.entry {
+                    Some((i, _, v)) => Some((i, key(v))),
+                    None => best,
+                };
+                if let Some(k) = uniform(n)
+                    && (node.entry.is_some() || best.as_ref().is_some_and(|b| b.1 == k))
+                {
+                    let e = best.as_ref().map_or(0, |b| b.0);
+                    give(set, &Some((e, k)), Some(n));
+                    continue;
+                }
+                if node.depth == width || node.children == [None, None] {
+                    give(set, &best, None);
+                    continue;
+                }
+                let (zero, one) = set.split_bit(bit(node.depth));
+                for (b, part) in [(1usize, one), (0usize, zero)] {
+                    if part.is_empty() {
+                        continue;
+                    }
+                    let Some(c) = node.children[b] else {
+                        give(part, &best, None);
+                        continue;
+                    };
+                    let child = table.walk_node(c);
+                    let mut part = part;
+                    for i in node.depth + 1..child.depth {
+                        let (z, o) = part.split_bit(bit(i));
+                        let (keep, other) = if addr_bit(child.key, i) {
+                            (o, z)
+                        } else {
+                            (z, o)
+                        };
+                        if !other.is_empty() {
+                            give(other, &best, None);
+                        }
+                        part = keep;
+                        if part.is_empty() {
+                            break;
+                        }
+                    }
+                    if !part.is_empty() {
+                        stack.push((c, part, best.clone()));
+                    }
+                }
+            }
+        }
+        let groups = groups
+            .into_values()
+            .map(|mut g| {
+                g.entries.sort_unstable();
+                g.entries.dedup();
+                g.subtrees.sort_unstable();
+                g.subtrees.dedup();
+                g
+            })
+            .collect();
+        GroupPartition {
+            groups,
             unmatched,
             uncertain,
         }
@@ -1066,4 +1249,20 @@ fn rewrite_field(
     let e = ops.dd.exists(present, cube)?;
     let e = ops.dd.and(e, enc)?;
     ops.dd.or(e, absent)
+}
+
+/// The index of the entry of exactly `p` in a table, through its walk.
+fn find_entry<V, T: PrefixTable<V> + ?Sized>(table: &T, p: Prefix) -> Option<usize> {
+    let mut n = table.walk_root(!p.is_ipv4())?;
+    loop {
+        let node = table.walk_node(n);
+        if node.depth == p.len() {
+            return node.entry.map(|e| e.0);
+        }
+        let c = node.children[usize::from(addr_bit(p.addr(), node.depth))]?;
+        if table.walk_node(c).depth > p.len() {
+            return None;
+        }
+        n = c;
+    }
 }

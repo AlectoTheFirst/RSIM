@@ -110,3 +110,85 @@ proptest! {
         }
     }
 }
+
+/// The uniform group of each trie node: the group of each entry of its
+/// subtree, or `None`.
+fn uniform_of(t: &TriePrefixTable<usize>, groups: usize) -> std::collections::BTreeMap<u32, usize> {
+    fn walk(
+        t: &TriePrefixTable<usize>,
+        n: u32,
+        g: usize,
+        out: &mut std::collections::BTreeMap<u32, usize>,
+    ) -> Option<Option<usize>> {
+        // None: mixed. Some(None): no entry. Some(Some(k)): all k.
+        let node = t.walk_node(n);
+        let mut acc: Option<usize> = node.entry.map(|e| *e.2 % g);
+        for c in node.children.into_iter().flatten() {
+            match walk(t, c, g, out)? {
+                None => {}
+                Some(k) => match acc {
+                    None => acc = Some(k),
+                    Some(a) if a == k => {}
+                    Some(_) => return None,
+                },
+            }
+        }
+        if let Some(k) = acc {
+            out.insert(n, k);
+        }
+        Some(acc)
+    }
+    let mut out = std::collections::BTreeMap::new();
+    for v6 in [false, true] {
+        if let Some(r) = t.walk_root(v6) {
+            walk(t, r, groups, &mut out);
+        }
+    }
+    out
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(400))]
+
+    #[test]
+    fn the_group_partition_agrees_with_brute_force(
+        prefixes in prop::collection::vec(prefix(), 0..40),
+        addrs in prop::collection::vec(address(), 2..12),
+        groups in 1usize..4,
+        shortcut in any::<bool>(),
+    ) {
+        let prefixes = unique(prefixes);
+        let t: TriePrefixTable<usize> =
+            prefixes.iter().enumerate().map(|(i, p)| (*p, i)).collect();
+        let uniform = uniform_of(&t, groups);
+        let arena = SetArena::standalone();
+        let one = |a: IpAddr| {
+            let src = if a.is_ipv4() { "192.0.2.1" } else { "2001:db8:ffff::1" };
+            PacketSet::single(&arena, &Header::request(src.parse().unwrap(), a, PROTO_TCP))
+        };
+        let mut all = one(addrs[0]);
+        for a in &addrs[1..] {
+            all = all.union(&one(*a));
+        }
+        let key = |v: &usize| *v % groups;
+        let uni = |n: u32| if shortcut { uniform.get(&n).copied() } else { None };
+        let part = all.partition_by_group(AddrField::Dst, &t, &key, &uni);
+        prop_assert!(part.uncertain.is_empty());
+        let mut keys: Vec<usize> = part.groups.iter().map(|g| g.key).collect();
+        keys.dedup();
+        prop_assert_eq!(keys.len(), part.groups.len());
+        for a in &addrs {
+            let s = one(*a);
+            let got: Vec<usize> = part
+                .groups
+                .iter()
+                .filter(|g| !s.intersect(&g.packets).is_empty())
+                .map(|g| g.key)
+                .collect();
+            match brute(&prefixes, *a) {
+                Some(i) => prop_assert_eq!(got, vec![i % groups], "{}", a),
+                None => prop_assert!(got.is_empty() && s.is_subset(&part.unmatched), "{}", a),
+            }
+        }
+    }
+}
