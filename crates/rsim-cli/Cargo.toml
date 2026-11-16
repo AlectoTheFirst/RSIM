@@ -11,9 +11,14 @@ repository.workspace = true
 clap = { version = "4.6.7", features = ["derive"] }
 rsim-core.workspace = true
 rsim-engine.workspace = true
+rsim-ingest.workspace = true
+rsim-store.workspace = true
 rsim-topologies.workspace = true
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+
+[dev-dependencies]
+rsim-store.workspace = true
 
 [lints]
 workspace = true

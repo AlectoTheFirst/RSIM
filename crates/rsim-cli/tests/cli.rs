@@ -645,3 +645,64 @@ fn set_query_errors_and_the_source_of_an_ingress() {
     let m = &v["answer"]["input"]["members"][0]["original"];
     assert_eq!(m["source.ip"], serde_json::json!({"known": "172.31.10.20"}));
 }
+
+#[path = "support/fixture_store.rs"]
+mod fixture_store;
+
+/// A path query on a store: a guest on an SSID reaches a LAN host through
+/// the access point, the switch and the router, and the JSON is the same in
+/// 2 runs.
+#[test]
+fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-cli-store");
+    fixture_store::write(&dir);
+    let topology = format!("store:{}", dir.display());
+    let args = path_args(
+        &topology,
+        &[
+            "--source.ip",
+            "192.0.2.70",
+            "--destination.ip",
+            "192.0.2.50",
+            "--network.transport",
+            "tcp",
+            "--source.port",
+            "40000",
+            "--destination.port",
+            "8123",
+        ],
+    );
+    let a = rsim(&args);
+    assert!(a.status.success(), "{}", String::from_utf8_lossy(&a.stderr));
+    let b = rsim(&args);
+    assert_eq!(a.stdout, b.stdout);
+    let v: Value = serde_json::from_slice(&a.stdout).unwrap();
+    let text = v.to_string();
+    for f in [
+        "ap1/wlan/guest/in",
+        "sw1/port/3/in",
+        "r1/handoff/eth0",
+        "r1/policy",
+        "sw1/port/2/out",
+    ] {
+        assert!(text.contains(f), "{f} not in the answer");
+    }
+    assert!(
+        text.contains("h1-005351"),
+        "the answer does not deliver to h1"
+    );
+
+    let bad = rsim(&path_args(
+        "store:/nonexistent-rsim-store",
+        &[
+            "--source.ip",
+            "192.0.2.70",
+            "--destination.ip",
+            "192.0.2.50",
+        ],
+    ));
+    assert!(!bad.status.success());
+    let e: Value = serde_json::from_slice(&bad.stdout).unwrap_or(Value::Null);
+    let shown = format!("{e}{}", String::from_utf8_lossy(&bad.stderr));
+    assert!(shown.contains("store"), "{shown}");
+}

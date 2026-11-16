@@ -14,17 +14,50 @@ pub struct Output {
     pub is_error: bool,
 }
 
+/// The topology name of the store of the server.
+pub const STORE: &str = "store";
+
 /// Runs tools. It keeps the twin of each topology that a call named, and no
-/// answer.
+/// answer. With a store, the topology `store` is the newest snapshot of the
+/// store when the first call names it.
 #[derive(Default)]
 pub struct Tools {
     twins: BTreeMap<String, Twin>,
+    store: Option<String>,
 }
 
 impl Tools {
+    /// Tools with the topology `store` for the store in a data folder.
+    pub fn with_store(folder: String) -> Tools {
+        Tools {
+            twins: BTreeMap::new(),
+            store: Some(folder),
+        }
+    }
+
+    /// The topology names: the built-in topologies, then `store` if the
+    /// server has a store.
+    pub fn names(&self) -> Vec<&'static str> {
+        let mut v = commands::topology_names();
+        if self.store.is_some() {
+            v.push(STORE);
+        }
+        v
+    }
+
     fn twin(&mut self, topology: &str) -> Result<&Twin, QueryError> {
         if !self.twins.contains_key(topology) {
-            let twin = commands::load(topology)?;
+            let source = match (&self.store, topology) {
+                (Some(folder), STORE) => format!("{}{folder}", commands::STORE_PREFIX),
+                (_, t) if t.starts_with(commands::STORE_PREFIX) => {
+                    return Err(QueryError::new(
+                        rsim_cli::ErrorCode::UnknownTopology,
+                        format!("{t}: a store is set only when the server starts"),
+                    ));
+                }
+                _ => topology.to_string(),
+            };
+            let twin = commands::load(&source)?;
             self.twins.insert(topology.to_string(), twin);
         }
         match self.twins.get(topology) {
@@ -80,12 +113,12 @@ fn text<T: Serialize>(v: &T) -> String {
 }
 
 /// The tool definitions: `list_devices`, `path_query`, `set_query` and
-/// `explain_step`.
-pub fn definitions() -> Value {
+/// `explain_step`. `names` are the topology names.
+pub fn definitions(names: &[&str]) -> Value {
     let topology = json!({
         "type": "string",
-        "enum": commands::topology_names(),
-        "description": "A built-in topology."
+        "enum": names,
+        "description": "A built-in topology, or `store` for the newest snapshot of the store of the server."
     });
     let mut query = Map::new();
     let text = |d: &str| json!({"type": "string", "description": d});

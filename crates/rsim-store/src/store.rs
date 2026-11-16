@@ -156,6 +156,19 @@ impl Store {
         Ok(Store { dir, keys })
     }
 
+    /// Opens an existing store in `dir` to read it. It writes nothing.
+    pub fn open_read(dir: impl Into<PathBuf>, keys: Keys) -> Result<Store, StoreError> {
+        let dir = dir.into();
+        let p = dir.join("snapshots");
+        if !p.is_dir() {
+            return Err(StoreError::NotFound(format!(
+                "{} is not a store",
+                dir.display()
+            )));
+        }
+        Ok(Store { dir, keys })
+    }
+
     pub fn dir(&self) -> &Path {
         &self.dir
     }

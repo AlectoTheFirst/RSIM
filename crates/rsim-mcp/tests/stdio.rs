@@ -36,7 +36,13 @@ fn remove_dir(dir: &Path) {
 /// Runs the server in `dir` with `dir` as the temporary folder, sends the
 /// messages and gives the response lines.
 fn session(dir: &Path, messages: &[Value]) -> Vec<Value> {
+    session_with(dir, &[], messages)
+}
+
+/// [`session`] with server arguments.
+fn session_with(dir: &Path, args: &[&str], messages: &[Value]) -> Vec<Value> {
     let mut child = Command::new(env!("CARGO_BIN_EXE_rsim-mcp"))
+        .args(args)
         .current_dir(dir)
         .env("TMPDIR", dir)
         .env("TMP", dir)
@@ -402,6 +408,50 @@ fn protocol_faults_give_json_rpc_errors() {
     assert_eq!(
         r[8]["error"]["code"], -32601,
         "ping is not a method of 2026-07-28"
+    );
+    remove_dir(&dir);
+}
+
+#[path = "../../rsim-cli/tests/support/fixture_store.rs"]
+mod fixture_store;
+
+#[test]
+fn the_store_topology_answers_a_path_query_and_writes_nothing() {
+    let data = Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-mcp-store-data");
+    fixture_store::write(&data);
+    let dir = empty_dir("store");
+    let folder = data.display().to_string();
+    let args = json!({
+        "topology": "store",
+        "source.ip": "192.0.2.70",
+        "destination.ip": "192.0.2.50",
+        "network.transport": "tcp",
+        "source.port": 40000,
+        "destination.port": 8123
+    });
+    let messages = vec![
+        request(1, "server/discover", json!({}), true),
+        request(2, "tools/list", json!({}), true),
+        call(3, "path_query", args, true),
+        call(
+            4,
+            "list_devices",
+            json!({"topology": "store:/elsewhere"}),
+            true,
+        ),
+    ];
+    let r = session_with(&dir, &["--store", &folder], &messages);
+    let tools = by_id(&r, 2)["result"]["tools"].as_array().unwrap();
+    let names = tools[1]["inputSchema"]["properties"]["topology"]["enum"].to_string();
+    assert!(names.contains("\"store\""), "{names}");
+    let answer = by_id(&r, 3)["result"].to_string();
+    assert!(answer.contains("r1/handoff/eth0"), "{answer}");
+    assert!(answer.contains("h1-005351"), "{answer}");
+    assert_eq!(by_id(&r, 4)["result"]["isError"], true);
+    assert_eq!(
+        std::fs::read_dir(&dir).unwrap().count(),
+        0,
+        "the server wrote a file"
     );
     remove_dir(&dir);
 }
