@@ -123,6 +123,19 @@ pub const ROUTES: TableSchema = TableSchema {
     ],
 };
 
+/// The MAC address table of a switch: the VLAN, the MAC address, the port
+/// and the kind of the entry, for example `dynamic` or `static`.
+pub const MAC_TABLE: TableSchema = TableSchema {
+    name: "mac_table",
+    version: 1,
+    columns: &[
+        col("vlan", U64, false),
+        col("mac", Str, false),
+        col("port", Str, true),
+        col("kind", Str, true),
+    ],
+};
+
 /// Client attachment: a client with its access point or switch port.
 pub const CLIENTS: TableSchema = TableSchema {
     name: "clients",
@@ -146,6 +159,7 @@ pub const TABLES: &[&TableSchema] = &[
     &CLIENTS,
     &LINK_SPEEDS,
     &LINKS,
+    &MAC_TABLE,
     &NEIGHBOURS,
     &ROUTES,
 ];

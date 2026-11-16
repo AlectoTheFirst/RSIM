@@ -331,7 +331,7 @@ pub(crate) async fn fetch_stage(
     clock: Arc<dyn Clock>,
 ) {
     let global = Arc::new(Semaphore::new(limits.devices));
-    let per: BTreeMap<Vendor, Arc<Semaphore>> = [Vendor::Vyos, Vendor::Unifi]
+    let per: BTreeMap<Vendor, Arc<Semaphore>> = Vendor::ALL
         .into_iter()
         .map(|v| (v, Arc::new(Semaphore::new(limits.per_vendor))))
         .collect();
@@ -489,7 +489,8 @@ mod tests {
                 class: Class::Configuration,
                 format: Format::Text,
                 volatile: &[],
-                extract: None,
+                extracts: &[],
+                keep: &[],
                 optional: false,
             }]
         }

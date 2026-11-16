@@ -12,6 +12,8 @@ mod device;
 pub mod fake;
 #[cfg(feature = "https")]
 pub mod https;
+#[cfg(feature = "nxos")]
+pub mod nxos;
 mod path;
 mod pipeline;
 mod schedule;

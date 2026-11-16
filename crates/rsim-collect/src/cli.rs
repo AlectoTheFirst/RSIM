@@ -22,17 +22,25 @@ const PROMPT_MAX: usize = 63;
 /// line feed. A carriage return becomes a line feed. Each line loses its
 /// trailing white space.
 pub fn sanitize(text: &str) -> String {
-    let text = csi(text);
-    let text = osc(&text);
-    let text = esc_other(&text);
+    let text = if text.contains('\x1b') {
+        esc_other(&osc(&csi(text)))
+    } else {
+        text.to_string()
+    };
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
-    let text: String = text.chars().filter(|&c| !is_control(c)).collect();
     let mut out = String::with_capacity(text.len());
     for (i, line) in text.split('\n').enumerate() {
         if i > 0 {
             out.push('\n');
         }
-        out.push_str(line.trim_end());
+        let line = line.trim_end();
+        if line.chars().any(is_control) {
+            out.extend(line.chars().filter(|&c| !is_control(c)));
+            let kept = out.trim_end().len();
+            out.truncate(kept);
+        } else {
+            out.push_str(line);
+        }
     }
     out
 }
@@ -427,7 +435,8 @@ mod tests {
                 class: Class::Observation,
                 format: Format::Text,
                 volatile: &[],
-                extract: None,
+                extracts: &[],
+                keep: &[],
                 optional: true,
             },
             result,

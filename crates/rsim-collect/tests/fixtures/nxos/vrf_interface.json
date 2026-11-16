@@ -1,0 +1,1 @@
+{"TABLE_if": {"ROW_if": [{"if_name": "Ethernet1/2", "vrf_name": "RED", "vrf_id": 3}, {"if_name": "Vlan10", "vrf_name": "default", "vrf_id": 1}]}}

@@ -7,13 +7,18 @@ use crate::path::Route;
 pub enum Vendor {
     Vyos,
     Unifi,
+    Nxos,
 }
 
 impl Vendor {
+    /// All vendors.
+    pub const ALL: [Vendor; 3] = [Vendor::Vyos, Vendor::Unifi, Vendor::Nxos];
+
     pub fn name(self) -> &'static str {
         match self {
             Vendor::Vyos => "vyos",
             Vendor::Unifi => "unifi",
+            Vendor::Nxos => "nxos",
         }
     }
 }

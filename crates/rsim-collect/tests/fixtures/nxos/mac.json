@@ -1,0 +1,4 @@
+{"TABLE_mac_address": {"ROW_mac_address": [
+ {"disp_mac_addr": "0000.5e00.5320", "disp_vlan": "10", "disp_port": "Ethernet1/1", "disp_type": "dynamic", "disp_age": "120"},
+ {"disp_mac_addr": "0000.5e00.5310", "disp_vlan": "-", "disp_port": "sup-eth1(R)", "disp_type": "static", "disp_age": "-"}
+]}}

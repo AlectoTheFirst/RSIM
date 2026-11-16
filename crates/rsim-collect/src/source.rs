@@ -22,8 +22,12 @@ pub struct SectionSpec {
     pub format: Format,
     /// The volatile parts. Refer to [`rsim_store::strip_volatile`].
     pub volatile: &'static [&'static str],
-    /// The extract of an observation section with a table.
-    pub extract: Option<&'static dyn Extract>,
+    /// The extracts of an observation section, each with its table.
+    pub extracts: &'static [&'static dyn Extract],
+    /// The members of a JSON section that the change detection covers. With
+    /// no pattern, it covers the whole section without the volatile parts.
+    /// Refer to [`rsim_store::keep_only`].
+    pub keep: &'static [&'static str],
     /// A device can lack the section. A [`TransportError::NotFound`] reply
     /// then gives the status `Absent`, which is not a failure.
     pub optional: bool,
@@ -36,7 +40,14 @@ impl std::fmt::Debug for SectionSpec {
             .field("command", &self.command)
             .field("class", &self.class)
             .field("format", &self.format)
-            .field("table", &self.extract.map(|e| e.table().name))
+            .field(
+                "tables",
+                &self
+                    .extracts
+                    .iter()
+                    .map(|e| e.table().name)
+                    .collect::<Vec<_>>(),
+            )
             .field("optional", &self.optional)
             .finish()
     }
@@ -90,7 +101,8 @@ pub trait Source: Send + Sync {
 /// Reads the sections through `read`, each with its timeout. The result has
 /// the order of `specs`. The reads run at the same time, or one after the
 /// other if `serial` is true, so that the time of a read starts when its
-/// command is sent.
+/// command is sent. One after the other, a connect error or 2 timeouts in
+/// sequence stop the fetch, and the sections after them are not sent.
 pub async fn fetch_sections<'a, F>(
     specs: Vec<SectionSpec>,
     timeout: Duration,
@@ -102,10 +114,29 @@ where
 {
     if serial {
         let mut out = Vec::with_capacity(specs.len());
+        let mut timeouts = 0;
+        let mut stop: Option<String> = None;
         for spec in specs {
+            if let Some(why) = &stop {
+                out.push(RawSection {
+                    spec,
+                    result: Err(TransportError::Connect(format!("not sent: {why}"))),
+                });
+                continue;
+            }
             let result = tokio::time::timeout(timeout, read(spec.command.clone()))
                 .await
                 .unwrap_or(Err(TransportError::Timeout));
+            match &result {
+                Err(TransportError::Connect(e)) => stop = Some(format!("the connect failed: {e}")),
+                Err(TransportError::Timeout) => {
+                    timeouts += 1;
+                    if timeouts == 2 {
+                        stop = Some("the 2 commands before it timed out".into());
+                    }
+                }
+                _ => timeouts = 0,
+            }
             out.push(RawSection { spec, result });
         }
         return out;

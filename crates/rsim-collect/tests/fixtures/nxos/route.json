@@ -1,0 +1,8 @@
+{"TABLE_vrf": {"ROW_vrf": [
+ {"vrf-name-out": "default", "TABLE_addrf": {"ROW_addrf": {"addrf": "ipv4", "TABLE_prefix": {"ROW_prefix": [
+   {"ipprefix": "192.0.2.0/24", "ucast-nhops": "1", "attached": "true", "TABLE_path": {"ROW_path": {"ifname": "Vlan10", "uptime": "P10DT1H", "pref": "0", "metric": "0", "clientname": "direct", "ubest": "true"}}},
+   {"ipprefix": "0.0.0.0/0", "ucast-nhops": "1", "TABLE_path": {"ROW_path": [
+     {"ipnexthop": "198.51.100.254%RED", "ifname": "Ethernet1/2", "uptime": "P1D", "pref": "1", "metric": "0", "clientname": "static", "ubest": "true"},
+     {"ipnexthop": "203.0.113.9", "uptime": "P2D", "pref": "20", "metric": "0", "clientname": "bgp-65001", "ubest": "false"}]}}]}}}},
+ {"vrf-name-out": "RED", "TABLE_addrf": {"ROW_addrf": {"addrf": "ipv4", "TABLE_prefix": {"ROW_prefix": {"ipprefix": "198.51.100.0/24", "TABLE_path": {"ROW_path": {"ifname": "Ethernet1/2", "uptime": "P10D", "pref": "0", "metric": "0", "clientname": "direct"}}}}}}}
+]}}

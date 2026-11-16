@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rsim_store::{
-    Class, DeviceManifest, Hash, Keys, Row, SectionEntry, SectionStatus, change_hash,
+    Class, DeviceManifest, Hash, Keys, Row, SectionEntry, SectionStatus, change_hash_kept,
 };
 
 use crate::{Capture, Device};
@@ -90,7 +90,7 @@ pub fn classify(
             .as_ref()
             .map_err(|e| e.to_string())
             .and_then(|b| {
-                change_hash(keys, spec.format, b, spec.volatile)
+                change_hash_kept(keys, spec.format, b, spec.volatile, spec.keep)
                     .map(|h| (b, h))
                     .map_err(|e| format!("the reply is not valid: {e}"))
             });
@@ -153,44 +153,41 @@ pub fn classify(
     let changed_tables: BTreeSet<&str> = out
         .blobs
         .iter()
-        .filter_map(|(i, _)| capture.sections[*i].spec.extract)
+        .flat_map(|(i, _)| capture.sections[*i].spec.extracts)
         .map(|e| e.table().name)
         .collect();
+    let mut failed_tables = BTreeSet::new();
     for (i, raw) in capture.sections.iter().enumerate() {
-        let Some(extract) = raw.spec.extract else {
-            continue;
-        };
-        let table = extract.table().name;
-        if !changed_tables.contains(table) {
-            continue;
-        }
-        let entry = &out.sections[i];
-        let bytes = match &raw.result {
-            Ok(b) if entry.status == SectionStatus::Fresh => Some(b.clone()),
-            _ => entry.blob.as_ref().and_then(old_bytes),
-        };
-        let Some(bytes) = bytes else {
-            continue;
-        };
-        match extract.rows(&bytes) {
-            Ok(rows) => out
-                .tables
-                .entry(table.to_string())
-                .or_default()
-                .push((i, rows)),
-            Err(e) => out.extract_errors.push((raw.spec.name.to_string(), e)),
+        for extract in raw.spec.extracts {
+            let table = extract.table().name;
+            if !changed_tables.contains(table) {
+                continue;
+            }
+            let entry = &out.sections[i];
+            let bytes = match &raw.result {
+                Ok(b) if entry.status == SectionStatus::Fresh => Some(b.clone()),
+                _ => entry.blob.as_ref().and_then(old_bytes),
+            };
+            let Some(bytes) = bytes else {
+                continue;
+            };
+            match extract.rows(&bytes) {
+                Ok(rows) => out
+                    .tables
+                    .entry(table.to_string())
+                    .or_default()
+                    .push((i, rows)),
+                Err(e) => {
+                    failed_tables.insert(table);
+                    out.extract_errors
+                        .push((raw.spec.name.to_string(), format!("{table}: {e}")));
+                }
+            }
         }
     }
     // A table with an extract error keeps all its previous rows.
-    for (name, _) in &out.extract_errors {
-        if let Some(t) = capture
-            .sections
-            .iter()
-            .find(|s| s.spec.name == name)
-            .and_then(|s| s.spec.extract)
-        {
-            out.tables.remove(t.table().name);
-        }
+    for t in failed_tables {
+        out.tables.remove(t);
     }
     out
 }
@@ -219,7 +216,8 @@ mod tests {
                     class: Class::Volatile,
                     format: Format::Text,
                     volatile: &[],
-                    extract: None,
+                    extracts: &[],
+                    keep: &[],
                     optional: false,
                 },
                 result: Ok(bytes.to_vec()),

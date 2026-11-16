@@ -560,7 +560,8 @@ async fn a_shell_reads_each_answer_up_to_the_prompt() {
         class: rsim_store::Class::Observation,
         format: rsim_store::Format::Text,
         volatile: &[],
-        extract: None,
+        extracts: &[],
+        keep: &[],
         optional: true,
     };
     let mut sections = vec![RawSection { spec, result: bad }];
@@ -837,7 +838,8 @@ async fn serial_commands_each_get_the_full_time_limit() {
             class: rsim_store::Class::Observation,
             format: rsim_store::Format::Text,
             volatile: &[],
-            extract: None,
+            extracts: &[],
+            keep: &[],
             optional: false,
         })
         .collect();
