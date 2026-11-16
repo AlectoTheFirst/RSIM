@@ -172,9 +172,10 @@ fn a_rule() -> impl Strategy<Value = Rule<RuleAction>> {
     prop_oneof![
         6 => (a_match(), action.clone()).prop_map(|(m, a)| Rule::new("r", RulePredicate::exact(m), a)),
         // An object with members that are not known: the definite set is
-        // narrower than the upper bound.
+        // narrower than the upper bound, and inside it. The upper bound never
+        // constrains the ECN.
         2 => (a_match(), action).prop_map(|(m, a)| {
-            Rule::new("bounded", RulePredicate::bounded(Match { dscp: ValueCond::one(1), ..m.clone() }, m), a)
+            Rule::new("bounded", RulePredicate::bounded(Match { ecn: ValueCond::one(1), ..m.clone() }, m), a)
         }),
         1 => Just(Rule::unhandled("unhandled", SourceSpan::line("x.conf", 1))),
     ]

@@ -273,4 +273,39 @@ mod twin {
             format!("{:?}", run(&b, "eth0.10", h).summary)
         );
     }
+
+    fn policy_step(a: &Answer) -> (String, ReasonCode) {
+        let b = &a.branches()[0];
+        let s = b
+            .steps
+            .iter()
+            .find(|s| s.function.as_str() == "r1/policy")
+            .expect("the path has the zone policy");
+        (s.reason.detail.clone(), s.reason.code)
+    }
+
+    #[test]
+    fn traffic_inside_a_zone_with_no_intra_zone_setting_is_permitted() {
+        let (t, notes) = build();
+        assert!(!notes.iter().any(|n| n.contains("intra-zone")), "{notes:?}");
+        let a = run(&t, "wg0", tcp("198.51.100.9", "203.0.113.99", 443));
+        let (detail, code) = policy_step(&a);
+        assert_eq!(code, ReasonCode::Permitted, "{detail}");
+        assert!(detail.contains("zone WAN intra-zone"), "{detail}");
+    }
+
+    #[test]
+    fn a_rule_with_an_outbound_interface_applies_only_to_that_interface() {
+        let (t, notes) = build();
+        assert!(!notes.iter().any(|n| n.contains("LAN-WAN/5")), "{notes:?}");
+        // A VPN client leaves on wg0: rule 5 drops port 25.
+        let a = run(&t, "eth0.10", tcp("192.0.2.10", "203.0.113.99", 25));
+        let (detail, code) = policy_step(&a);
+        assert_eq!(code, ReasonCode::Denied, "{detail}");
+        assert!(detail.contains("LAN-WAN/5"), "{detail}");
+        // Another client leaves on pppoe0: rule 5 does not apply.
+        let a = run(&t, "eth0.10", tcp("192.0.2.30", "203.0.113.99", 25));
+        let (detail, code) = policy_step(&a);
+        assert_eq!(code, ReasonCode::Permitted, "{detail}");
+    }
 }

@@ -7,11 +7,18 @@ use rsim_functions::{PortTranslation, RuleAction, UnzonedInterface, VendorProfil
 ///
 /// - `firewall_default`: the default action of a zone is `drop`.
 /// - `snat_port`: masquerade keeps the source port when it is free.
-/// - `unzoned_interface`: the traffic between a zone and an interface in no
-///   zone is not confirmed, so it is unknown.
+/// - `intra_zone_default`: traffic between 2 interfaces of one zone with no
+///   `intra-zone-filtering` is accepted. The documentation of 1.5 says
+///   "allowed by default", and the zone template of `vyos-1x` returns these
+///   packets to the forward hook, which accepts them.
+/// - `unzoned_interface`: unknown. The documentation says that traffic
+///   between a zone member and an interface in no zone cannot flow, and the
+///   zone template does not enforce this.
 ///
 /// The values come from the VyOS documentation of the zone-based firewall
-/// and of NAT. They are not confirmed against a device.
+/// and of NAT, and from the nftables zone template of `vyos-1x` on the
+/// branches `sagitta` and `circinus`. They are not confirmed against a
+/// device.
 pub fn profile() -> VendorProfile {
     VendorProfile {
         name: "vyos".to_string(),
@@ -19,11 +26,18 @@ pub fn profile() -> VendorProfile {
         firewall_default: RuleAction::Deny,
         unzoned_interface: UnzonedInterface::Unknown,
         snat_port: PortTranslation::Preserve,
+        intra_zone_default: Some(RuleAction::Permit),
         default_vrf: Some(VrfId::new("default")),
         processing_delay_ns: None,
-        source: vec![SourceSpan::line(
-            "profiles/vyos: VyOS documentation, zone-based firewall and NAT",
-            1,
-        )],
+        source: vec![
+            SourceSpan::line(
+                "https://docs.vyos.io/en/latest/configuration/firewall/zone.html",
+                1,
+            ),
+            SourceSpan::line(
+                "https://github.com/vyos/vyos-1x/blob/circinus/data/templates/firewall/nftables-zone.j2",
+                1,
+            ),
+        ],
     }
 }

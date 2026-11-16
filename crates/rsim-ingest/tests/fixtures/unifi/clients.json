@@ -1,5 +1,6 @@
 {"data": [
   {"mac": "00:00:5e:00:53:51", "name": "h1", "ip": "192.0.2.50", "network_id": "n-lan", "is_wired": true, "sw_mac": "00:00:5e:00:53:a1", "sw_port": 2},
   {"mac": "00:00:5e:00:53:52", "name": "g1", "ip": "192.0.2.70", "network_id": "n-guest", "is_wired": false, "ap_mac": "00:00:5e:00:53:b1", "essid": "guest"},
+  {"mac": "00:00:5e:00:53:54", "name": "g2", "ip": "192.0.2.71", "network_id": "n-guest", "is_wired": false, "ap_mac": "00:00:5e:00:53:b1", "essid": "guest"},
   {"mac": "00:00:5e:00:53:53", "name": "h9", "network_id": "n-lan", "is_wired": true, "sw_mac": "00:00:5e:00:53:a1", "sw_port": 2}
 ], "meta": {"rc": "ok"}}

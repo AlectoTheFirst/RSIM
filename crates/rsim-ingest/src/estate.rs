@@ -327,6 +327,7 @@ pub fn unifi_profile() -> rsim_functions::VendorProfile {
         firewall_default: rsim_functions::RuleAction::Deny,
         unzoned_interface: rsim_functions::UnzonedInterface::Unknown,
         snat_port: rsim_functions::PortTranslation::Preserve,
+        intra_zone_default: None,
         default_vrf: None,
         processing_delay_ns: None,
         source: vec![SourceSpan::line(

@@ -34,7 +34,12 @@
         },
         "LAN-GUEST": {"default-action": "accept"},
         "LAN-LOCAL": {"default-action": "accept"},
-        "LAN-WAN": {"default-action": "accept"},
+        "LAN-WAN": {
+          "default-action": "accept",
+          "rule": {
+            "5": {"action": "drop", "destination": {"port": "25"}, "outbound-interface": {"name": "wg0"}, "protocol": "tcp"}
+          }
+        },
         "LOCAL-GUEST": {"default-action": "accept"},
         "LOCAL-LAN": {"default-action": "accept"},
         "LOCAL-WAN": {"default-action": "accept"},

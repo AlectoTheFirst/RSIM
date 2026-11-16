@@ -196,6 +196,8 @@ pub fn layer2_site() -> TwinBuilder {
         ]),
         egress,
         flood: sw.id("flood"),
+        hairpin: BTreeSet::new(),
+        blocked: BTreeMap::new(),
     });
     add!(Flood {
         meta: sw.meta("flood", 51, 51),
@@ -257,6 +259,8 @@ pub fn layer2_site() -> TwinBuilder {
             (port("wlan/office"), ap.id("wlan/office/out")),
         ]),
         flood: ap.id("flood"),
+        hairpin: BTreeSet::from([port("wlan/office")]),
+        blocked: BTreeMap::new(),
     });
     add!(Flood {
         meta: ap.meta("flood", 65, 65),

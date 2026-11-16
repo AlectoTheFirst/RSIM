@@ -44,6 +44,10 @@ pub struct VendorProfile {
     pub unzoned_interface: UnzonedInterface,
     /// The port behaviour of source NAT.
     pub snat_port: PortTranslation,
+    /// The action for traffic between 2 interfaces of one zone when the
+    /// zone has no intra-zone setting. `None` if the platform has no
+    /// documented default.
+    pub intra_zone_default: Option<RuleAction>,
     /// The VRF of an interface with no VRF statement.
     pub default_vrf: Option<VrfId>,
     /// The processing delay of a function. `None` if there is no data.
