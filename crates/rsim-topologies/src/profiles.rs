@@ -13,6 +13,7 @@ fn profile(name: &str, acl_default: RuleAction, default_vrf: &str) -> VendorProf
         firewall_default: RuleAction::Deny,
         unzoned_interface: UnzonedInterface::Drop,
         snat_port: PortTranslation::Preserve,
+        intra_zone_default: None,
         default_vrf: Some(VrfId::new(default_vrf)),
         processing_delay_ns: None,
         source: vec![SourceSpan::line(format!("profiles/{name}.test-data"), 1)],

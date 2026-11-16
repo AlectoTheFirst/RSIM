@@ -43,6 +43,11 @@ fn link(iface: &str, parent: Option<&str>) -> LinkRow {
 }
 
 fn estate() -> Estate {
+    estate_with(|_, b| b)
+}
+
+/// The estate with each UniFi section changed by `change`.
+fn estate_with(change: impl Fn(&str, Vec<u8>) -> Vec<u8>) -> Estate {
     let collected = Collected {
         addresses: vec![AddressRow {
             interface: "pppoe0".into(),
@@ -66,6 +71,10 @@ fn estate() -> Estate {
         ["networks", "wlans", "devices", "clients", "port_profiles"]
             .into_iter()
             .map(section)
+            .map(|(n, (b, f))| {
+                let b = change(&n, b);
+                (n, (b, f))
+            })
             .collect();
     assemble(vec![
         Input::Vyos {
@@ -179,5 +188,43 @@ fn two_builds_give_the_same_answers() {
     assert_eq!(
         format!("{:?}", run(&a, "192.0.2.70", "192.0.2.50", 8123).summary),
         format!("{:?}", run(&b, "192.0.2.70", "192.0.2.50", 8123).summary)
+    );
+}
+
+#[test]
+fn two_clients_of_one_ssid_reach_each_other_unless_the_ssid_isolates_them() {
+    let t = twin();
+    let a = run(&t, "192.0.2.70", "192.0.2.71", 443);
+    assert_eq!(
+        a.verdict(),
+        Some(&Verdict::Deliver(Destination::Endpoint(EndpointId::new(
+            "g2-005354"
+        ))))
+    );
+    let isolated = estate_with(|n, b| {
+        if n == "wlans" {
+            String::from_utf8(b)
+                .unwrap()
+                .replace("\"l2_isolation\": false", "\"l2_isolation\": true")
+                .into_bytes()
+        } else {
+            b
+        }
+    });
+    let t = isolated.builder.build().unwrap();
+    let a = run(&t, "192.0.2.70", "192.0.2.71", 443);
+    match a.verdict() {
+        Some(Verdict::Drop(r)) => {
+            assert_eq!(r.code, ReasonCode::Denied);
+            assert!(r.detail.contains("isolated"), "{}", r.detail);
+        }
+        v => panic!("{v:?}"),
+    }
+    // The gateway and the wired hosts stay reachable.
+    let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
+    assert!(
+        matches!(a.verdict(), Some(Verdict::Deliver(_))),
+        "{:?}",
+        a.verdict()
     );
 }

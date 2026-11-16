@@ -24,8 +24,10 @@ pub struct Wlan {
     pub ssid: String,
     pub network: String,
     pub enabled: bool,
-    /// Client isolation or a guest policy is on.
-    pub restricted: bool,
+    /// Client isolation: the clients of the SSID cannot reach each other.
+    pub isolation: bool,
+    /// A guest policy is on.
+    pub guest: bool,
     pub index: usize,
 }
 
@@ -208,7 +210,8 @@ pub fn read(networks: &Value, wlans: &Value, devices: &Value, clients: &Value) -
                 ssid: s(x, "name")?,
                 network: s(x, "networkconf_id")?,
                 enabled: x.get("enabled").and_then(Value::as_bool).unwrap_or(true),
-                restricted: b(x, "l2_isolation") || b(x, "is_guest"),
+                isolation: b(x, "l2_isolation"),
+                guest: b(x, "is_guest"),
                 index,
             })
         })

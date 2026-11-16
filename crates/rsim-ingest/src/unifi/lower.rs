@@ -451,12 +451,36 @@ pub fn lower(
                 }
             }
         }
+        // An SSID port can send a frame back out to another client of the
+        // SSID, unless the SSID has client isolation. Then the frames of the
+        // SSID cannot reach the wireless clients of the SSID on any access
+        // point.
+        let mut hairpin = BTreeSet::new();
+        let mut blocked: BTreeMap<PortId, BTreeSet<Mac>> = BTreeMap::new();
+        for v in d.vaps.iter().filter(|v| v.up) {
+            let Some(w) = site.wlans.iter().find(|w| w.ssid == v.ssid && w.enabled) else {
+                continue;
+            };
+            let pid = PortId::new(format!("wlan/{}", v.ssid));
+            if w.isolation {
+                let macs = located
+                    .iter()
+                    .filter(|(_, loc, _)| loc.1 == pid.to_string())
+                    .filter_map(|(c, _, _)| mac(&c.mac))
+                    .collect();
+                blocked.insert(pid, macs);
+            } else {
+                hairpin.insert(pid);
+            }
+        }
         let meta = l.meta(d, "mac", vec![l.dev_span(d)]);
         l.out.functions.push(Arc::new(MacLookup {
             meta,
             tables: mac_tables,
             egress,
             flood: l.id(d, "flood"),
+            hairpin,
+            blocked,
         }));
         let meta = l.meta(d, "flood", vec![l.dev_span(d)]);
         l.out.functions.push(Arc::new(Flood { meta, ports: flood }));
@@ -495,14 +519,14 @@ pub fn lower(
         if !points.insert((d.mac.clone(), loc.1.clone())) {
             continue;
         }
-        let restricted = loc.1.starts_with("wlan/")
+        let guest = loc.1.starts_with("wlan/")
             && site
                 .wlans
                 .iter()
-                .any(|w| format!("wlan/{}", w.ssid) == loc.1 && w.restricted);
-        if restricted {
+                .any(|w| format!("wlan/{}", w.ssid) == loc.1 && w.guest);
+        if guest {
             l.out.notes.push(format!(
-                "{} {}: client isolation or a guest policy is not lowered",
+                "{} {}: the guest policy is not lowered",
                 d.name, loc.1
             ));
         }

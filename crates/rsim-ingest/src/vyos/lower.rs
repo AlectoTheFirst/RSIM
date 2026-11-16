@@ -739,11 +739,16 @@ impl L<'_> {
                 let scope = ZoneScope::between(&f.from, &to.name);
                 for (family, name) in [(Family::V4, &f.ipv4), (Family::V6, &f.ipv6)] {
                     match name {
-                        Some(n) => pairs.extend(
-                            self.rule_set(family, n)
-                                .into_iter()
-                                .map(|r| (scope.clone(), r)),
-                        ),
+                        Some(n) => pairs.extend(self.rule_set(family, n).into_iter().map(
+                            |(ingress, egress, r)| {
+                                let s = ZoneScope {
+                                    ingress,
+                                    egress,
+                                    ..scope.clone()
+                                };
+                                (s, r)
+                            },
+                        )),
                         None => {
                             // No rule set for this family: the zone default.
                             let name =
@@ -767,10 +772,19 @@ impl L<'_> {
                         FRule::new(name, RulePredicate::exact(Match::any()), RuleAction::Deny)
                             .with_span(span)
                     }
-                    _ => {
-                        self.note(format!("{name}: the action is not known"));
+                    Some(Action::Other(a)) => {
+                        self.note(format!("{name}: action {a} is not lowered"));
                         FRule::unhandled(name, span)
                     }
+                    None => match self.profile.intra_zone_default {
+                        Some(a) => {
+                            FRule::new(name, RulePredicate::exact(Match::any()), a).with_span(span)
+                        }
+                        None => {
+                            self.note(format!("{name}: the action is not known"));
+                            FRule::unhandled(name, span)
+                        }
+                    },
                 };
                 pairs.push((scope, r));
             }
@@ -778,6 +792,8 @@ impl L<'_> {
             let scope = ZoneScope {
                 from: None,
                 to: Some(BTreeSet::from([ZoneId::new(&to.name)])),
+                ingress: None,
+                egress: None,
             };
             let name = format!("zone {} default", to.name);
             let r = self.zone_default(to, &name, None);
@@ -812,11 +828,17 @@ impl L<'_> {
     }
 
     /// The rules of a rule set, with its default action as the last rule.
-    fn rule_set(&mut self, family: Family, name: &str) -> Vec<FRule<RuleAction>> {
+    /// Each rule has the ingress and the egress interfaces of its
+    /// `inbound-interface` and `outbound-interface` options.
+    fn rule_set(&mut self, family: Family, name: &str) -> Vec<ScopedRule> {
         let Some(rs) = self.cfg.rule_set(family, name).cloned() else {
             let msg = format!("rule set {name} does not exist");
             self.note(msg.clone());
-            return vec![FRule::unhandled(msg, SourceSpan::new(self.file, 1, 1))];
+            return vec![(
+                None,
+                None,
+                FRule::unhandled(msg, SourceSpan::new(self.file, 1, 1)),
+            )];
         };
         let mut out = Vec::new();
         for r in rs.rules.iter().filter(|r| !r.disabled) {
@@ -832,37 +854,34 @@ impl L<'_> {
                 Some(Action::Drop | Action::Reject) => RuleAction::Deny,
                 ref a => {
                     self.note(format!("{rname}: action {a:?} is not lowered"));
-                    out.push(FRule::unhandled(rname, span));
+                    out.push((None, None, FRule::unhandled(rname, span)));
                     continue;
                 }
             };
-            let p = self.predicate(&r.matches, &r.unhandled, Some(family), &rname);
-            out.push(FRule::new(rname, p, action).with_span(span));
+            let mut m = r.matches.clone();
+            let ingress = interface_scope(&mut m.inbound_interface);
+            let egress = interface_scope(&mut m.outbound_interface);
+            let p = self.predicate(&m, &r.unhandled, Some(family), &rname);
+            out.push((
+                ingress,
+                egress,
+                FRule::new(rname, p, action).with_span(span),
+            ));
         }
         let dname = format!("{name}/default");
         let span = self.span(rs.lines);
-        match rs.default_action {
-            Some(Action::Accept) => out.push(
-                FRule::new(
-                    dname,
-                    RulePredicate::exact(family_match(Some(family))),
-                    RuleAction::Permit,
-                )
-                .with_span(span),
-            ),
-            Some(Action::Drop | Action::Reject) => out.push(
-                FRule::new(
-                    dname,
-                    RulePredicate::exact(family_match(Some(family))),
-                    RuleAction::Deny,
-                )
-                .with_span(span),
-            ),
+        let all = RulePredicate::exact(family_match(Some(family)));
+        let rule = match rs.default_action {
+            Some(Action::Accept) => FRule::new(dname, all, RuleAction::Permit).with_span(span),
+            Some(Action::Drop | Action::Reject) => {
+                FRule::new(dname, all, RuleAction::Deny).with_span(span)
+            }
             _ => {
                 self.note(format!("{dname}: the default action is not known"));
-                out.push(FRule::unhandled(dname, span));
+                FRule::unhandled(dname, span)
             }
-        }
+        };
+        out.push((None, None, rule));
         out
     }
 
@@ -979,6 +998,26 @@ impl L<'_> {
         }
         Ok(PortCond::In(ranges))
     }
+}
+
+/// A rule with its ingress and egress interfaces.
+type ScopedRule = (
+    Option<BTreeSet<InterfaceId>>,
+    Option<BTreeSet<InterfaceId>>,
+    FRule<RuleAction>,
+);
+
+/// The interface set of an `inbound-interface` or `outbound-interface`
+/// option, which it takes from the match. A name with a wildcard stays in
+/// the match, where it gives match bounds.
+fn interface_scope(name: &mut Option<String>) -> Option<BTreeSet<InterfaceId>> {
+    let n = name.as_deref()?;
+    if n.contains(['*', '+', '!']) {
+        return None;
+    }
+    let set = BTreeSet::from([InterfaceId::new(n)]);
+    *name = None;
+    Some(set)
 }
 
 /// A match of all packets of a family, or of all packets.

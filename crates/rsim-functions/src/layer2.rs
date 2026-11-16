@@ -314,7 +314,9 @@ pub struct MacEntry {
 }
 
 /// Looks up the destination MAC in the bridge domain. A broadcast or an
-/// unknown MAC goes to the flood.
+/// unknown MAC goes to the flood. A frame to its own ingress port is
+/// dropped, except on a hairpin port such as an SSID, where the clients
+/// share one port.
 #[derive(Clone, Debug)]
 pub struct MacLookup {
     pub meta: Meta,
@@ -322,6 +324,11 @@ pub struct MacLookup {
     /// The egress function of each port.
     pub egress: BTreeMap<PortId, FunctionId>,
     pub flood: FunctionId,
+    /// The ports that can send a frame back out of the port it came in on.
+    pub hairpin: BTreeSet<PortId>,
+    /// The MACs that the frames of an ingress port cannot reach, for
+    /// example the clients of an SSID with client isolation.
+    pub blocked: BTreeMap<PortId, BTreeSet<Mac>>,
 }
 
 impl NetFunction for MacLookup {
@@ -367,7 +374,22 @@ impl NetFunction for MacLookup {
                 if s.matched.is_empty() {
                     continue;
                 }
-                let b = if ctx.ingress_port.known() == Some(&e.port) {
+                let inport = ctx.ingress_port.known();
+                let isolated = inport
+                    .and_then(|p| self.blocked.get(p))
+                    .is_some_and(|m| m.contains(mac));
+                let b = if isolated {
+                    self.meta.drop(
+                        s.matched,
+                        ReasonCode::Denied,
+                        format!(
+                            "{mac:?} is isolated from port {}",
+                            inport.expect("an isolated port is known")
+                        ),
+                        ctx,
+                        state,
+                    )
+                } else if inport == Some(&e.port) && !self.hairpin.contains(&e.port) {
                     self.meta.drop(
                         s.matched,
                         ReasonCode::Denied,

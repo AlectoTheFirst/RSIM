@@ -4,8 +4,8 @@ use std::collections::BTreeSet;
 
 use rsim_core::{
     Attr, Branch, Context, ContextAttr, Dependency, FlowState, FunctionId, FunctionKind,
-    HeaderField, NetFunction, ObjectId, PacketSet, ReasonCode, RulePredicate, SessionMatch,
-    SourceSpan, Tri, ZoneId,
+    HeaderField, InterfaceId, NetFunction, ObjectId, PacketSet, ReasonCode, RulePredicate,
+    SessionMatch, SourceSpan, Tri, ZoneId,
 };
 
 use crate::common::{Meta, push_nonempty};
@@ -140,11 +140,14 @@ impl NetFunction for AclMatch {
     }
 }
 
-/// The zones to which a firewall rule applies. `None` means any zone.
+/// The zones and the interfaces to which a firewall rule applies. `None`
+/// means any zone or any interface.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ZoneScope {
     pub from: Option<BTreeSet<ZoneId>>,
     pub to: Option<BTreeSet<ZoneId>>,
+    pub ingress: Option<BTreeSet<InterfaceId>>,
+    pub egress: Option<BTreeSet<InterfaceId>>,
 }
 
 impl ZoneScope {
@@ -152,11 +155,13 @@ impl ZoneScope {
         ZoneScope {
             from: Some([ZoneId::new(from)].into_iter().collect()),
             to: Some([ZoneId::new(to)].into_iter().collect()),
+            ingress: None,
+            egress: None,
         }
     }
 
     fn eval(&self, ctx: &Context) -> Tri {
-        fn one(scope: &Option<BTreeSet<ZoneId>>, z: &Attr<ZoneId>) -> Tri {
+        fn one<T: Ord>(scope: &Option<BTreeSet<T>>, z: &Attr<T>) -> Tri {
             match scope {
                 None => Tri::True,
                 Some(s) => match z {
@@ -165,7 +170,10 @@ impl ZoneScope {
                 },
             }
         }
-        one(&self.from, &ctx.src_zone).and(one(&self.to, &ctx.dst_zone))
+        one(&self.from, &ctx.src_zone)
+            .and(one(&self.to, &ctx.dst_zone))
+            .and(one(&self.ingress, &ctx.ingress_interface))
+            .and(one(&self.egress, &ctx.egress_interface))
     }
 }
 
