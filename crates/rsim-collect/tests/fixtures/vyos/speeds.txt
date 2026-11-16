@@ -1,0 +1,4 @@
+eth0 1000 full
+eth1 10000 full
+eth1.10 unknown unknown
+lo unknown unknown

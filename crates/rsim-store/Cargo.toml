@@ -1,0 +1,24 @@
+[package]
+name = "rsim-store"
+description = "The append-only snapshot store of rsim: format, writer and reader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+arrow-array = "60.1.0"
+arrow-schema = "60.1.0"
+arrow-select = "60.1.0"
+blake3 = { version = "1.8.7", features = ["pure"] }
+chacha20poly1305 = { version = "0.11.0", default-features = false, features = ["alloc"] }
+parquet = { version = "60.1.0", default-features = false, features = ["arrow", "snap"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

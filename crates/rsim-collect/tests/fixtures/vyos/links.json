@@ -1,0 +1,4 @@
+[{"ifindex":1,"ifname":"lo","flags":["LOOPBACK","UP","LOWER_UP"],"mtu":65536,"operstate":"UNKNOWN","address":"00:00:00:00:00:00"},
+ {"ifindex":2,"ifname":"eth0","flags":["BROADCAST","MULTICAST","UP","LOWER_UP"],"mtu":1500,"operstate":"UP","address":"00:00:5e:00:53:01"},
+ {"ifindex":3,"ifname":"eth1","flags":["BROADCAST","MULTICAST","UP","LOWER_UP"],"mtu":1500,"operstate":"UP","address":"00:00:5e:00:53:02"},
+ {"ifindex":4,"ifname":"eth1.10","link":"eth1","flags":["BROADCAST","MULTICAST","UP","LOWER_UP"],"mtu":1500,"operstate":"UP","address":"00:00:5e:00:53:02","linkinfo":{"info_kind":"vlan","info_data":{"protocol":"802.1Q","id":10}}}]

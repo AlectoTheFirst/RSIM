@@ -1,0 +1,1 @@
+{"meta":{"rc":"ok"},"data":[{"_id":"n1","name":"Default","purpose":"corporate","ip_subnet":"192.0.2.1/24","vlan_enabled":false},{"_id":"n2","name":"Guest","purpose":"guest","ip_subnet":"203.0.113.1/26","vlan_enabled":true,"vlan":10}]}

@@ -1,0 +1,4 @@
+{"meta":{"rc":"ok"},"data":[
+ {"mac":"00:00:5E:00:53:C1","ip":"192.0.2.50","hostname":"laptop-1","network":"Default","is_wired":false,"ap_mac":"00:00:5e:00:53:b1","uptime":100,"last_seen":1700000000,"tx_bytes":1,"rx_bytes":2,"signal":-50,"rssi":45,"tx_rate":100},
+ {"mac":"00:00:5e:00:53:c2","ip":"192.0.2.51","name":"printer","network":"Default","is_wired":true,"sw_mac":"00:00:5e:00:53:a1","sw_port":1,"uptime":5000,"wired-tx_bytes":9},
+ {"mac":"00:00:5e:00:53:c3","network":"Guest","vlan":10,"is_wired":false,"ap_mac":"00:00:5e:00:53:b1","uptime":3}]}
