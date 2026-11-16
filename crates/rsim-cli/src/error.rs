@@ -13,6 +13,8 @@ pub enum ErrorCode {
     NoSuchStep,
     StartRequiresContext,
     ContractViolation,
+    /// The store of a `store:` topology cannot be read.
+    Store,
     Internal,
 }
 
@@ -25,6 +27,7 @@ impl ErrorCode {
             ErrorCode::NoSuchStep => "no_such_step",
             ErrorCode::StartRequiresContext => "start_requires_context",
             ErrorCode::ContractViolation => "contract_violation",
+            ErrorCode::Store => "store",
             ErrorCode::Internal => "internal",
         }
     }

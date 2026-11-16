@@ -44,7 +44,7 @@ enum Command {
     Topologies,
     /// The devices, the functions and the endpoints of a topology.
     Devices {
-        /// A built-in topology.
+        /// A built-in topology, or `store:<data folder>` for the newest snapshot of a store. or `store:<data folder>` for the newest snapshot of a store.
         topology: String,
     },
     /// The answer for one packet, with the trace and the reply. A field
@@ -88,7 +88,7 @@ enum Command {
 
 #[derive(Args, Clone)]
 struct QueryArgs {
-    /// A built-in topology.
+    /// A built-in topology, or `store:<data folder>` for the newest snapshot of a store.
     topology: String,
     /// The ingress point as <device>/<interface>. Without it, the attachment
     /// records of the source address give the ingress.
@@ -148,7 +148,7 @@ struct QueryArgs {
 /// prefix, a number, a range such as `1-1023`, or a comma list.
 #[derive(Args, Clone)]
 struct SetArgs {
-    /// A built-in topology.
+    /// A built-in topology, or `store:<data folder>` for the newest snapshot of a store.
     topology: String,
     /// The ingress point as <device>/<interface>.
     #[arg(long)]

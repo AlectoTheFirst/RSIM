@@ -228,3 +228,19 @@ fn two_clients_of_one_ssid_reach_each_other_unless_the_ssid_isolates_them() {
         a.verdict()
     );
 }
+
+#[test]
+fn the_reply_starts_at_the_attachment_point_of_the_destination() {
+    let t = twin();
+    let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
+    let r = &a.replies[0];
+    match &r.result {
+        rsim_engine::ReplyResult::Ran(reply) => assert_eq!(
+            reply.verdict(),
+            Some(&Verdict::Deliver(Destination::Endpoint(EndpointId::new(
+                "g1-005352"
+            ))))
+        ),
+        other => panic!("{other:?}"),
+    }
+}

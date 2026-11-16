@@ -51,6 +51,8 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | Set query benchmark | `cargo bench -p rsim-engine --bench set_query` |
 | One trace step | `cargo run -p rsim-cli -- explain mini-enterprise --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --destination.port 53 --branch 0 --step 7` |
 | MCP server on stdio | `cargo run -p rsim-mcp` |
+| Path query on the newest snapshot of a store | `cargo run -p rsim-cli -- path store:<data folder> --source.ip <a> --destination.ip <b> ...`. The data folder is the folder of `rsim-collect` with `store` and `keys`. |
+| MCP server with a store | `cargo run -p rsim-mcp -- --store <data folder>`. The tools then accept the topology `store`. |
 | Decision diagram tests | `cargo test -p rsim-dd` |
 | Decision diagram tests, release build with the validator | `cargo test -p rsim-dd --release --features dd-check` |
 | Decision diagram benchmark | `cargo bench -p rsim-dd --bench ops` |
@@ -172,7 +174,8 @@ Section 13 of the brief gives the steps, each with a "Done when" condition. Do t
 - `rsim-topologies` holds the hand-built topologies. The tests, the benchmarks, `rsim-cli` and `rsim-mcp` use it.
 - `rsim-cli` and `rsim-mcp` load a built-in topology by name and run a path query for one packet with its reply.
 - The JSON output is versioned and deterministic: the same query gives the same bytes.
-- `rsim-mcp` uses the stdio transport, has the tools `list_devices`, `path_query` and `explain_step`, and writes nothing. It keeps no answer between calls. `explain_step` takes the query, the branch index and the step index, and runs the query again.
+- `rsim-mcp` uses the stdio transport, has the tools `list_devices`, `path_query` and `explain_step`, and writes nothing. With `--store <data folder>`, the topology `store` is the newest snapshot of that store when a call first names it. A tool call cannot name another store.
+- A topology name `store:<data folder>` loads the twin of the newest snapshot of a store through `rsim-ingest`. The store is opened with `Store::open_read`, which writes nothing. It keeps no answer between calls. `explain_step` takes the query, the branch index and the step index, and runs the query again.
 - The libraries are `serde` and `serde_json` for JSON and `clap` for the arguments. The MCP protocol code is in-house and has no async runtime.
 - The JSON output is version 2. The summary is a list of parts, and each packet value is a set of members with field values. The field names are the names of the Elastic Common Schema where it has one, for example `source.ip`.
 

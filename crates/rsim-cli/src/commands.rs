@@ -14,8 +14,16 @@ use crate::json::{QueryJson, SetAnswerOut};
 use crate::query::QueryInput;
 use crate::set_query::SetInput;
 
-/// The twin of a built-in topology.
+/// The prefix of a topology name that names the data folder of a store.
+pub const STORE_PREFIX: &str = "store:";
+
+/// The twin of a topology: a built-in topology, or `store:<folder>` for the
+/// newest snapshot of the store in the data folder of `rsim-collect`. The
+/// folder holds the store in `store` and the store keys in `keys`.
 pub fn load(topology: &str) -> Result<Twin, QueryError> {
+    if let Some(folder) = topology.strip_prefix(STORE_PREFIX) {
+        return load_store(folder);
+    }
     rsim_topologies::builtin(topology).ok_or_else(|| {
         QueryError::new(
             ErrorCode::UnknownTopology,
@@ -24,6 +32,30 @@ pub fn load(topology: &str) -> Result<Twin, QueryError> {
                 rsim_topologies::names().join(", ")
             ),
         )
+    })
+}
+
+/// The twin of the newest snapshot of a store. It reads the store and
+/// writes nothing.
+pub fn load_store(folder: &str) -> Result<Twin, QueryError> {
+    let err = |d: String| QueryError::new(ErrorCode::Store, d);
+    let folder = match (folder.strip_prefix("~/"), std::env::var("HOME")) {
+        (Some(rest), Ok(home)) => format!("{home}/{rest}"),
+        _ => folder.to_string(),
+    };
+    let keys = std::fs::read_to_string(format!("{folder}/keys"))
+        .map_err(|e| err(format!("{folder}/keys: {e}")))?;
+    let keys = rsim_store::Keys::from_hex(&keys).map_err(|e| err(e.to_string()))?;
+    let store = rsim_store::Store::open_read(format!("{folder}/store"), keys)
+        .map_err(|e| err(e.to_string()))?;
+    let snap = store
+        .latest()
+        .map_err(|e| err(e.to_string()))?
+        .ok_or_else(|| err(format!("{folder} has no snapshot")))?;
+    let estate = rsim_ingest::estate::build(&store, &snap).map_err(|e| err(e.to_string()))?;
+    estate.builder.build().map_err(|errors| {
+        let text: Vec<String> = errors.iter().map(ToString::to_string).collect();
+        err(format!("the twin does not build: {}", text.join("; ")))
     })
 }
 

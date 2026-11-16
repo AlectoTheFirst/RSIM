@@ -2396,6 +2396,8 @@ dependencies = [
  "clap",
  "rsim-core",
  "rsim-engine",
+ "rsim-ingest",
+ "rsim-store",
  "rsim-topologies",
  "serde",
  "serde_json",
@@ -2479,6 +2481,7 @@ name = "rsim-mcp"
 version = "0.1.0"
 dependencies = [
  "rsim-cli",
+ "rsim-store",
  "serde",
  "serde_json",
 ]

@@ -87,6 +87,16 @@ pub struct Server {
     tools: Tools,
 }
 
+impl Server {
+    /// A server with these tools.
+    pub fn new(tools: Tools) -> Server {
+        Server {
+            legacy: false,
+            tools,
+        }
+    }
+}
+
 fn server_info() -> Value {
     json!({"name": "rsim-mcp", "version": env!("CARGO_PKG_VERSION")})
 }
@@ -212,7 +222,7 @@ impl Server {
         if self.legacy {
             return match method {
                 "ping" => Ok("{}".to_string()),
-                "tools/list" => Ok(to_line(&json!({"tools": definitions()}))),
+                "tools/list" => Ok(to_line(&json!({"tools": definitions(&self.tools.names())}))),
                 "tools/call" => self.tools_call(params, None),
                 _ => Err(not_found(method)),
             };
@@ -232,7 +242,7 @@ impl Server {
             }))),
             "tools/list" => Ok(to_line(&json!({
                 "resultType": "complete",
-                "tools": definitions(),
+                "tools": definitions(&self.tools.names()),
                 "ttlMs": TTL_MS,
                 "cacheScope": "public"
             }))),

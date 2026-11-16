@@ -596,6 +596,11 @@ impl NetFunction for PortEgress {
                 state,
             )];
         }
+        // The reply of a host starts on the port, which is also the
+        // interface of the attachment point of the host.
+        let mut delivered = ctx.clone();
+        delivered.device = Attr::Known(self.meta.device.clone());
+        delivered.egress_interface = Attr::Known(InterfaceId::new(self.port.to_string()));
         let mut out = Vec::new();
         let mut rest = set;
         for (mac, e) in &self.hosts {
@@ -610,7 +615,7 @@ impl NetFunction for PortEgress {
                         ReasonCode::Delivered,
                         format!("deliver to {e} on port {} {shown}", self.port),
                     ),
-                    ctx.clone(),
+                    delivered.clone(),
                     state,
                 ),
             );
