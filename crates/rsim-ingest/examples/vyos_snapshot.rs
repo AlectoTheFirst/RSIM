@@ -14,9 +14,15 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let (data, device) = (&args[1], &args[2]);
     let keys = std::fs::read_to_string(format!("{data}/keys")).expect("the key file is readable");
-    let store = Store::open(format!("{data}/store"), Keys::from_hex(&keys).expect("valid keys"))
-        .expect("the store opens");
-    let snap = store.latest().expect("the store reads").expect("a snapshot exists");
+    let store = Store::open(
+        format!("{data}/store"),
+        Keys::from_hex(&keys).expect("valid keys"),
+    )
+    .expect("the store opens");
+    let snap = store
+        .latest()
+        .expect("the store reads")
+        .expect("a snapshot exists");
     let m = &snap.devices[device.as_str()];
     let cfg_entry = m.section("config").expect("a config section");
     let blob = cfg_entry.blob.expect("the config has a blob");
@@ -57,7 +63,11 @@ fn main() {
     }
     match b.build() {
         Ok(t) => {
-            println!("twin: {} functions, {} devices", functions, t.device_count());
+            println!(
+                "twin: {} functions, {} devices",
+                functions,
+                t.device_count()
+            );
             if args.len() == 8 {
                 let proto = if args[6] == "tcp" { 6 } else { 17 };
                 let h = rsim_core::Header::request(
@@ -67,8 +77,11 @@ fn main() {
                 )
                 .with_src_port(40000)
                 .with_dst_port(args[7].parse().expect("a port"));
-                let q = rsim_engine::Query::path(&t, &h).with_ingress(device.as_str(), args[3].as_str());
-                let a = rsim_engine::Executor::new(&t).run(&q).expect("the query runs");
+                let q = rsim_engine::Query::path(&t, &h)
+                    .with_ingress(device.as_str(), args[3].as_str());
+                let a = rsim_engine::Executor::new(&t)
+                    .run(&q)
+                    .expect("the query runs");
                 for b in a.branches() {
                     let path: Vec<String> = b
                         .steps
