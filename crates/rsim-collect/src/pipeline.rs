@@ -502,6 +502,7 @@ mod tests {
             Box::pin(crate::fetch_sections(
                 self.sections(device),
                 timeout,
+                false,
                 move |c| {
                     let t = t.clone();
                     let d = device.clone();
@@ -534,6 +535,7 @@ mod tests {
                         address: "192.0.2.1".into(),
                         credential: "lab".into(),
                         site: None,
+                        route: Default::default(),
                     },
                     forced: false,
                 })

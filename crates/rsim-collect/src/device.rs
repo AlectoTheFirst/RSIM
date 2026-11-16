@@ -1,5 +1,7 @@
 use std::fmt;
 
+use crate::path::Route;
+
 /// The vendor of a device. Each vendor has one source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Vendor {
@@ -36,6 +38,8 @@ pub struct Device {
     pub credential: String,
     /// The UniFi site. `None` for the other vendors.
     pub site: Option<String>,
+    /// The proxy and the jump hosts to the device.
+    pub route: Route,
 }
 
 /// The devices to collect.

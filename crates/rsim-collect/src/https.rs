@@ -1,5 +1,7 @@
-//! The HTTPS transport for UniFi OS consoles. It pins the certificate of
-//! each console, keeps the login session of each console, and reuses the
+//! The HTTPS transport for UniFi OS consoles. It reaches each console
+//! directly, through a proxy, or through a chain of SSH jump hosts. It
+//! checks the certificate of each console against a pin, a CA bundle, or
+//! not at all, keeps the login session of each console, and reuses the
 //! connections.
 
 use std::collections::HashMap;
@@ -11,21 +13,67 @@ use http_body_util::{BodyExt, Full, Limited};
 use hyper::client::conn::http1::SendRequest;
 use hyper::{Method, Request, StatusCode, header};
 use hyper_util::rt::TokioIo;
+use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature};
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{DigitallySignedStruct, SignatureScheme};
-use tokio::net::TcpStream;
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
+use rustls::{DigitallySignedStruct, RootCertStore, SignatureScheme};
 use tokio_rustls::TlsConnector;
 
+use crate::path::Route;
 use crate::trust::{Credential, Credentials, PinKind, Secret, TrustStore, host_port};
+use crate::tunnel::{HopLimits, Tunnel, stream};
 use crate::{BoxFuture, Device, Https, TransportError};
+
+/// How the transport checks the certificate of a console. The modes do not
+/// mix: a pin is not a fallback of a CA bundle, and the mode with no check
+/// writes no pin.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub enum TlsTrust {
+    /// The SHA-256 of the certificate must be the pin of the console in the
+    /// trust store.
+    #[default]
+    Pin,
+    /// The certificate must chain to a CA of the bundle, in PEM, and name
+    /// the host of the console.
+    CaBundle(String),
+    /// The certificate is not checked. The handshake signatures are still
+    /// checked with the key of the certificate.
+    NoVerify,
+}
+
+/// A client certificate for mutual TLS, in PEM: the chain and its private
+/// key.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct ClientCert {
+    pub chain: String,
+    pub key: String,
+}
+
+impl std::fmt::Debug for ClientCert {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ClientCert(..)")
+    }
+}
+
+/// The TLS settings of a console.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct HttpsProfile {
+    pub trust: TlsTrust,
+    pub client: Option<ClientCert>,
+}
 
 /// The limits of the HTTPS transport.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HttpsLimits {
-    /// The time for the TCP connection and the TLS handshake.
+    /// The time for the TCP connection and the TLS handshake. It is also
+    /// the time to open a channel through a jump host.
     pub connect_timeout: Duration,
+    /// The key exchange and the login of one jump host.
+    pub handshake_timeout: Duration,
+    /// The interval of the keepalive on the last jump host.
+    pub keepalive: Duration,
     /// The largest response body. A larger body is an error.
     pub max_body: usize,
     /// The largest number of connections to one console. A request waits
@@ -37,6 +85,8 @@ impl Default for HttpsLimits {
     fn default() -> HttpsLimits {
         HttpsLimits {
             connect_timeout: Duration::from_secs(15),
+            handshake_timeout: Duration::from_secs(30),
+            keepalive: Duration::from_secs(30),
             max_body: 256 << 20,
             max_connections: 4,
         }
@@ -111,6 +161,114 @@ impl ServerCertVerifier for PinVerifier {
     }
 }
 
+/// Accepts each server certificate. The handshake signatures are checked
+/// with the key of that certificate.
+#[derive(Debug)]
+struct NoVerifier {
+    provider: Arc<CryptoProvider>,
+}
+
+impl ServerCertVerifier for NoVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.provider
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
+/// The TLS client settings of a console.
+fn tls_config(
+    profile: &HttpsProfile,
+    trust: &Arc<TrustStore>,
+    pin: String,
+) -> Result<rustls::ClientConfig, String> {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let builder = rustls::ClientConfig::builder_with_provider(provider.clone())
+        .with_safe_default_protocol_versions()
+        .map_err(|e| e.to_string())?;
+    let builder = match &profile.trust {
+        TlsTrust::Pin => builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(PinVerifier {
+                trust: trust.clone(),
+                address: pin,
+                provider,
+            })),
+        TlsTrust::NoVerify => builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(NoVerifier { provider })),
+        TlsTrust::CaBundle(pem) => {
+            let mut roots = RootCertStore::empty();
+            for cert in CertificateDer::pem_slice_iter(pem.as_bytes()) {
+                let cert = cert.map_err(|e| format!("the CA bundle does not read: {e}"))?;
+                roots
+                    .add(cert)
+                    .map_err(|e| format!("a CA of the bundle is not valid: {e}"))?;
+            }
+            if roots.is_empty() {
+                return Err("the CA bundle has no certificate".into());
+            }
+            let verifier = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider)
+                .build()
+                .map_err(|e| e.to_string())?;
+            builder.with_webpki_verifier(verifier)
+        }
+    };
+    match &profile.client {
+        None => Ok(builder.with_no_client_auth()),
+        Some(c) => {
+            let chain: Vec<CertificateDer<'static>> =
+                CertificateDer::pem_slice_iter(c.chain.as_bytes())
+                    .collect::<Result<_, _>>()
+                    .map_err(|e| format!("the client certificate does not read: {e}"))?;
+            let key = PrivateKeyDer::from_pem_slice(c.key.as_bytes())
+                .map_err(|e| format!("the client key does not read: {e}"))?;
+            builder
+                .with_client_auth_cert(chain, key)
+                .map_err(|e| format!("the client certificate is not valid: {e}"))
+        }
+    }
+}
+
 /// The login state of a console. `generation` counts the logins.
 #[derive(Default)]
 struct Session {
@@ -121,6 +279,8 @@ struct Session {
 struct Console {
     host: String,
     port: u16,
+    route: Route,
+    tunnel: tokio::sync::Mutex<Option<Arc<Tunnel>>>,
     credential: Credential,
     tls: TlsConnector,
     session: tokio::sync::Mutex<Session>,
@@ -128,12 +288,18 @@ struct Console {
     permits: Arc<tokio::sync::Semaphore>,
 }
 
+/// A console is one address with one credential, one route and one TLS
+/// profile.
+type ConsoleKey = (String, String, Route, HttpsProfile);
+
 /// An HTTPS transport over `hyper` and `rustls` with the `ring` provider.
 pub struct HttpsTransport {
     credentials: Arc<dyn Credentials>,
     trust: Arc<TrustStore>,
     limits: HttpsLimits,
-    consoles: Mutex<HashMap<(String, String), Arc<Console>>>,
+    default_profile: HttpsProfile,
+    profiles: HashMap<String, HttpsProfile>,
+    consoles: Mutex<HashMap<ConsoleKey, Arc<Console>>>,
 }
 
 impl HttpsTransport {
@@ -146,13 +312,36 @@ impl HttpsTransport {
             credentials,
             trust,
             limits,
+            default_profile: HttpsProfile::default(),
+            profiles: HashMap::new(),
             consoles: Mutex::new(HashMap::new()),
         }
     }
 
+    /// Sets the profile of the consoles with no profile of their own.
+    pub fn with_default_profile(mut self, profile: HttpsProfile) -> HttpsTransport {
+        self.default_profile = profile;
+        self
+    }
+
+    /// Sets the profile of a device.
+    pub fn with_profile(mut self, device: &str, profile: HttpsProfile) -> HttpsTransport {
+        self.profiles.insert(device.to_string(), profile);
+        self
+    }
+
     fn console(&self, device: &Device) -> Result<Arc<Console>, TransportError> {
         let connect = |e: String| TransportError::Connect(e);
-        let key = (device.address.clone(), device.credential.clone());
+        let profile = self
+            .profiles
+            .get(&device.id)
+            .unwrap_or(&self.default_profile);
+        let key = (
+            device.address.clone(),
+            device.credential.clone(),
+            device.route.clone(),
+            profile.clone(),
+        );
         if let Some(c) = self
             .consoles
             .lock()
@@ -163,21 +352,15 @@ impl HttpsTransport {
         }
         let credential = self.credentials.get(&device.credential).map_err(connect)?;
         let (host, port) = host_port(&device.address, 443).map_err(connect)?;
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let verifier = PinVerifier {
-            trust: self.trust.clone(),
-            address: device.address.clone(),
-            provider: provider.clone(),
-        };
-        let config = rustls::ClientConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()
-            .map_err(|e| connect(e.to_string()))?
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(verifier))
-            .with_no_client_auth();
+        let route = &device.route;
+        let pin = route.pin_name(route.jumps.len(), &device.address);
+        let config = tls_config(profile, &self.trust, pin)
+            .map_err(|e| connect(format!("console {}: {e}", device.address)))?;
         let console = Arc::new(Console {
             host,
             port,
+            route: route.clone(),
+            tunnel: tokio::sync::Mutex::new(None),
             credential,
             tls: TlsConnector::from(Arc::new(config)),
             session: tokio::sync::Mutex::new(Session::default()),
@@ -212,11 +395,23 @@ impl HttpsTransport {
             }
         }
         let connect = |e: String| TransportError::Connect(e);
+        let tunnel = self.tunnel(console).await?;
         let open = async {
-            let tcp = TcpStream::connect((console.host.as_str(), console.port))
-                .await
-                .map_err(|e| connect(e.to_string()))?;
-            tcp.set_nodelay(true).map_err(|e| connect(e.to_string()))?;
+            let tcp = stream(
+                &console.route,
+                tunnel.as_deref(),
+                &console.host,
+                console.port,
+                self.limits.connect_timeout,
+            )
+            .await
+            .map_err(|e| {
+                connect(if tunnel.is_some() {
+                    e
+                } else {
+                    format!("console {}: {e}", console.host)
+                })
+            })?;
             let name =
                 ServerName::try_from(console.host.clone()).map_err(|e| connect(e.to_string()))?;
             let tls = console
@@ -230,9 +425,55 @@ impl HttpsTransport {
             tokio::spawn(conn);
             Ok((sender, false))
         };
-        tokio::time::timeout(self.limits.connect_timeout, open)
+        let r = tokio::time::timeout(self.limits.connect_timeout, open)
             .await
-            .map_err(|_| TransportError::Timeout)?
+            .map_err(|_| TransportError::Timeout)
+            .and_then(|r| r);
+        if r.is_err()
+            && let Some(t) = tunnel
+        {
+            let mut g = console.tunnel.lock().await;
+            if g.as_ref().is_some_and(|c| Arc::ptr_eq(c, &t)) {
+                *g = None;
+            }
+            drop(g);
+            t.close().await;
+        }
+        r
+    }
+
+    /// The logged-in jump hosts of a console, or `None` for a route with no
+    /// jump host. One tunnel serves all connections of the console.
+    async fn tunnel(&self, console: &Console) -> Result<Option<Arc<Tunnel>>, TransportError> {
+        if console.route.jumps.is_empty() {
+            return Ok(None);
+        }
+        let mut g = console.tunnel.lock().await;
+        if let Some(t) = g.as_ref()
+            && !t.is_closed()
+        {
+            return Ok(Some(t.clone()));
+        }
+        if let Some(old) = g.take() {
+            old.close().await;
+        }
+        let limits = HopLimits {
+            connect: self.limits.connect_timeout,
+            handshake: self.limits.handshake_timeout,
+            keepalive: self.limits.keepalive,
+        };
+        let t = Tunnel::connect(
+            &console.route,
+            self.credentials.as_ref(),
+            &self.trust,
+            limits,
+            true,
+        )
+        .await
+        .map_err(TransportError::Connect)?;
+        let t = Arc::new(t);
+        *g = Some(t.clone());
+        Ok(Some(t))
     }
 
     async fn send(
@@ -340,9 +581,9 @@ impl HttpsTransport {
                 }
                 session_headers(&headers)
             }
-            Secret::Key { .. } => {
+            Secret::Key { .. } | Secret::Agent { .. } => {
                 return Err(TransportError::Connect(
-                    "a private key is not an HTTPS credential".into(),
+                    "an SSH key is not an HTTPS credential".into(),
                 ));
             }
         };

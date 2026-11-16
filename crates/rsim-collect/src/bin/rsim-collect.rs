@@ -6,12 +6,26 @@
 //! |---|---|
 //! | `VYOS_<NAME>_IP` | The address of the VyOS router `<name>` |
 //! | `VYOS_<NAME>_PROFILE` | `legacy` for the legacy SSH algorithm set |
+//! | `VYOS_<NAME>_MODE` | `exec` (the default), `shell` or `connection` |
 //! | `VYOS_USER`, `VYOS_PASS` | The credential of the VyOS routers |
-//! | `VYOS_KEY_FILE` | A private key file, used in place of `VYOS_PASS` |
+//! | `VYOS_KEY_FILE`, `VYOS_KEY_PASS` | A private key file and its passphrase, used in place of `VYOS_PASS` |
+//! | `VYOS_AGENT` | The socket of an SSH agent, or `default` for `SSH_AUTH_SOCK`, used in place of `VYOS_PASS` |
+//! | `VYOS_VIA`, `VYOS_<NAME>_VIA` | The jump hosts to the routers, in order, separated by commas |
+//! | `VYOS_PROXY`, `VYOS_<NAME>_PROXY` | A proxy for the first connection: `http://host:port` or `socks5://host:port`, with an optional `user:password@` |
 //! | `UNIFI_CONTROLLER` | The addresses of the UniFi consoles, separated by commas |
 //! | `UNIFI_SITES` | The sites, separated by commas. The default is `default`. |
 //! | `UNIFI_USER`, `UNIFI_PASS` | The credential of the UniFi consoles |
 //! | `UNIFI_API_KEY` | An API key, used in place of the user and the password |
+//! | `UNIFI_VIA`, `UNIFI_PROXY` | The jump hosts and the proxy to the consoles |
+//! | `UNIFI_TLS` | `pin` (the default), `ca` with `UNIFI_CA_FILE`, or `none` for no check of the certificate |
+//! | `UNIFI_CLIENT_CERT`, `UNIFI_CLIENT_KEY` | PEM files of a client certificate for mutual TLS |
+//! | `JUMP_<NAME>_IP` | The address of the jump host `<name>` |
+//! | `JUMP_<NAME>_USER` | The user on the jump host |
+//! | `JUMP_<NAME>_PASS`, `JUMP_<NAME>_KEY_FILE`, `JUMP_<NAME>_KEY_PASS`, `JUMP_<NAME>_AGENT` | The secret of the jump host, as for VyOS |
+//! | `JUMP_<NAME>_PROFILE` | `legacy` for the legacy SSH algorithm set |
+//!
+//! A `<NAME>` of a device or a jump host is in upper case with `_`; the id
+//! is in lower case with `-`. A jump host gets only its own credential.
 //!
 //! The data folder holds the store, the store keys and the pin file. The
 //! keys are made at the first run.
@@ -23,13 +37,13 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
-use rsim_collect::https::{HttpsLimits, HttpsTransport};
-use rsim_collect::ssh::{Algorithms, SshLimits, SshProfile, SshTransport};
+use rsim_collect::https::{ClientCert, HttpsLimits, HttpsProfile, HttpsTransport, TlsTrust};
+use rsim_collect::ssh::{Algorithms, CommandMode, SshLimits, SshProfile, SshTransport};
 use rsim_collect::unifi::UnifiSource;
 use rsim_collect::vyos::VyosSource;
 use rsim_collect::{
-    Collector, Credential, Device, Limits, MemoryCredentials, PinPolicy, Schedule, Secret,
-    TokioClock, TrustStore, Vendor,
+    Collector, Credential, Device, Jump, Limits, MemoryCredentials, PinPolicy, Proxy, Route,
+    Schedule, Secret, TokioClock, TrustStore, Vendor,
 };
 use rsim_store::{Keys, SectionStatus, Store};
 
@@ -87,6 +101,87 @@ struct Setup {
     devices: Vec<Device>,
     credentials: MemoryCredentials,
     profiles: Vec<(String, SshProfile)>,
+    https: HttpsProfile,
+}
+
+fn read_file(path: &str) -> Result<String, String> {
+    std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))
+}
+
+/// The SSH secret of a prefix: `<P>_KEY_FILE`, `<P>_AGENT` or `<P>_PASS`.
+fn ssh_secret(env: &BTreeMap<String, String>, prefix: &str) -> Result<Secret, String> {
+    let get = |k: &str| env.get(&format!("{prefix}_{k}"));
+    if let Some(path) = get("KEY_FILE") {
+        return Ok(Secret::Key {
+            pem: read_file(path)?,
+            passphrase: get("KEY_PASS").cloned(),
+        });
+    }
+    if let Some(socket) = get("AGENT") {
+        let socket = (socket != "default").then(|| PathBuf::from(socket));
+        return Ok(Secret::Agent { socket });
+    }
+    match get("PASS") {
+        Some(p) => Ok(Secret::Password(p.clone())),
+        None => Err(format!(
+            "{prefix}_PASS, {prefix}_KEY_FILE or {prefix}_AGENT is not set"
+        )),
+    }
+}
+
+fn algorithms(env: &BTreeMap<String, String>, key: &str) -> Algorithms {
+    if env
+        .get(key)
+        .is_some_and(|p| p.eq_ignore_ascii_case("legacy"))
+    {
+        Algorithms::Legacy
+    } else {
+        Algorithms::Modern
+    }
+}
+
+/// The route of a device: `<P>_<NAME>_VIA` or `<P>_VIA`, and
+/// `<P>_<NAME>_PROXY` or `<P>_PROXY`. Each jump host gets its credential.
+fn route(
+    env: &BTreeMap<String, String>,
+    vendor: &str,
+    name: Option<&str>,
+    credentials: &mut MemoryCredentials,
+) -> Result<Route, String> {
+    let pick = |k: &str| {
+        name.and_then(|n| env.get(&format!("{vendor}_{n}_{k}")))
+            .or_else(|| env.get(&format!("{vendor}_{k}")))
+    };
+    let proxy = pick("PROXY").map(|p| Proxy::parse(p)).transpose()?;
+    let mut jumps = Vec::new();
+    for j in pick("VIA")
+        .map(|v| v.split(',').map(str::trim).filter(|x| !x.is_empty()))
+        .into_iter()
+        .flatten()
+    {
+        let key = j.to_uppercase().replace('-', "_");
+        let prefix = format!("JUMP_{key}");
+        let address = env
+            .get(&format!("{prefix}_IP"))
+            .ok_or_else(|| format!("{prefix}_IP is not set"))?;
+        let user = env
+            .get(&format!("{prefix}_USER"))
+            .ok_or_else(|| format!("{prefix}_USER is not set"))?;
+        let credential = format!("jump-{}", key.to_lowercase().replace('_', "-"));
+        credentials.insert(
+            &credential,
+            Credential {
+                user: user.clone(),
+                secret: ssh_secret(env, &prefix)?,
+            },
+        );
+        jumps.push(Jump {
+            address: address.clone(),
+            credential,
+            algorithms: algorithms(env, &format!("{prefix}_PROFILE")),
+        });
+    }
+    Ok(Route { proxy, jumps })
 }
 
 fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
@@ -94,6 +189,7 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
         devices: Vec::new(),
         credentials: MemoryCredentials::new(),
         profiles: Vec::new(),
+        https: HttpsProfile::default(),
     };
     let list = |key: &str| -> Vec<String> {
         env.get(key)
@@ -114,34 +210,37 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
             continue;
         };
         let id = name.to_lowercase().replace('_', "-");
+        let route = route(env, "VYOS", Some(name), &mut s.credentials)?;
         s.devices.push(Device {
             id: id.clone(),
             vendor: Vendor::Vyos,
             address: address.clone(),
             credential: "vyos".into(),
             site: None,
+            route,
         });
-        if env
-            .get(&format!("VYOS_{name}_PROFILE"))
-            .is_some_and(|p| p.eq_ignore_ascii_case("legacy"))
-        {
-            let profile = SshProfile {
-                algorithms: Algorithms::Legacy,
-                ..SshProfile::default()
-            };
+        let mode = match env.get(&format!("VYOS_{name}_MODE")).map(String::as_str) {
+            None | Some("exec") => CommandMode::Exec,
+            Some("shell") => CommandMode::Shell,
+            Some("connection") => CommandMode::Connection,
+            Some(m) => {
+                return Err(format!(
+                    "VYOS_{name}_MODE {m} is not exec, shell or connection"
+                ));
+            }
+        };
+        let profile = SshProfile {
+            algorithms: algorithms(env, &format!("VYOS_{name}_PROFILE")),
+            mode,
+            ..SshProfile::default()
+        };
+        if profile != SshProfile::default() {
             s.profiles.push((id, profile));
         }
     }
     if s.devices.iter().any(|d| d.vendor == Vendor::Vyos) {
         let user = env.get("VYOS_USER").ok_or("VYOS_USER is not set")?;
-        let secret = match (env.get("VYOS_KEY_FILE"), env.get("VYOS_PASS")) {
-            (Some(path), _) => Secret::Key {
-                pem: std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?,
-                passphrase: env.get("VYOS_KEY_PASS").cloned(),
-            },
-            (None, Some(p)) => Secret::Password(p.clone()),
-            (None, None) => return Err("VYOS_PASS or VYOS_KEY_FILE is not set".into()),
-        };
+        let secret = ssh_secret(env, "VYOS")?;
         s.credentials.insert(
             "vyos",
             Credential {
@@ -156,6 +255,24 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
         if sites.is_empty() {
             sites.push("default".into());
         }
+        let route = route(env, "UNIFI", None, &mut s.credentials)?;
+        s.https.trust = match env.get("UNIFI_TLS").map(String::as_str) {
+            None | Some("pin") => TlsTrust::Pin,
+            Some("ca") => TlsTrust::CaBundle(read_file(
+                env.get("UNIFI_CA_FILE")
+                    .ok_or("UNIFI_TLS=ca needs UNIFI_CA_FILE")?,
+            )?),
+            Some("none") => TlsTrust::NoVerify,
+            Some(t) => return Err(format!("UNIFI_TLS {t} is not pin, ca or none")),
+        };
+        s.https.client = match (env.get("UNIFI_CLIENT_CERT"), env.get("UNIFI_CLIENT_KEY")) {
+            (Some(c), Some(k)) => Some(ClientCert {
+                chain: read_file(c)?,
+                key: read_file(k)?,
+            }),
+            (None, None) => None,
+            _ => return Err("UNIFI_CLIENT_CERT and UNIFI_CLIENT_KEY go together".into()),
+        };
         for console in &consoles {
             for site in &sites {
                 let id = if consoles.len() == 1 {
@@ -169,6 +286,7 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
                     address: console.clone(),
                     credential: "unifi".into(),
                     site: Some(site.clone()),
+                    route: route.clone(),
                 });
             }
         }
@@ -303,10 +421,24 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
     for (id, p) in setup.profiles {
         ssh = ssh.with_profile(&id, p);
     }
-    let https = HttpsTransport::new(credentials, trust.clone(), HttpsLimits::default());
+    let https = HttpsTransport::new(credentials, trust.clone(), HttpsLimits::default())
+        .with_default_profile(setup.https);
     let devices = setup.devices;
     for d in &devices {
-        eprintln!("device {} ({}) at {}", d.id, d.vendor, d.address);
+        let via: Vec<&str> = d.route.jumps.iter().map(|j| j.address.as_str()).collect();
+        let proxy = d.route.proxy.as_ref().map(Proxy::address);
+        eprintln!(
+            "device {} ({}) at {}{}{}",
+            d.id,
+            d.vendor,
+            d.address,
+            if via.is_empty() {
+                String::new()
+            } else {
+                format!(" via {}", via.join(", "))
+            },
+            proxy.map_or(String::new(), |p| format!(" through proxy {p}"))
+        );
     }
     let mut collector = Collector::new(
         store,
@@ -392,5 +524,67 @@ mod tests {
             Secret::Password("p w".into())
         );
         assert!(setup(&parse_env("VYOS_CORE1_IP=192.0.2.1\n")).is_err());
+    }
+
+    #[test]
+    fn the_env_file_gives_routes() {
+        let env = parse_env(
+            "VYOS_CORE1_IP=10.0.0.1\nVYOS_CORE1_MODE=shell\nVYOS_EDGE_IP=10.0.0.2\n\
+             VYOS_EDGE_VIA=\nVYOS_VIA=bastion-a, inner\nVYOS_PROXY=socks5://p:q@192.0.2.9:1080\n\
+             VYOS_USER=ro\nVYOS_AGENT=default\n\
+             JUMP_BASTION_A_IP=192.0.2.20\nJUMP_BASTION_A_USER=hop\nJUMP_BASTION_A_PASS=h\n\
+             JUMP_INNER_IP=10.0.0.254:2222\nJUMP_INNER_USER=hop2\nJUMP_INNER_AGENT=/tmp/agent\n\
+             JUMP_INNER_PROFILE=legacy\nUNIFI_CONTROLLER=10.0.0.8\nUNIFI_USER=u\nUNIFI_PASS=p\n\
+             UNIFI_VIA=bastion-a\nUNIFI_TLS=none\n",
+        );
+        let s = setup(&env).unwrap();
+        let core = &s.devices[0];
+        let jumps: Vec<&str> = core
+            .route
+            .jumps
+            .iter()
+            .map(|j| j.address.as_str())
+            .collect();
+        assert_eq!(jumps, ["192.0.2.20", "10.0.0.254:2222"]);
+        assert_eq!(core.route.jumps[1].algorithms, Algorithms::Legacy);
+        assert_eq!(
+            core.route.proxy.as_ref().unwrap().address(),
+            "192.0.2.9:1080"
+        );
+        assert!(
+            s.devices[1].route.jumps.is_empty(),
+            "an empty VIA is a direct route"
+        );
+        assert_eq!(
+            s.profiles,
+            [(
+                "core1".to_string(),
+                SshProfile {
+                    mode: CommandMode::Shell,
+                    ..SshProfile::default()
+                }
+            )]
+        );
+        use rsim_collect::Credentials;
+        assert_eq!(
+            s.credentials.get("vyos").unwrap().secret,
+            Secret::Agent { socket: None }
+        );
+        let inner = s.credentials.get("jump-inner").unwrap();
+        assert_eq!(inner.user, "hop2");
+        assert_eq!(
+            inner.secret,
+            Secret::Agent {
+                socket: Some("/tmp/agent".into())
+            }
+        );
+        assert_eq!(s.devices[2].route.jumps.len(), 1);
+        assert_eq!(s.https.trust, TlsTrust::NoVerify);
+        assert!(
+            setup(&parse_env(
+                "VYOS_X_IP=10.0.0.1\nVYOS_X_VIA=nope\nVYOS_USER=u\nVYOS_PASS=p\n"
+            ))
+            .is_err()
+        );
     }
 }

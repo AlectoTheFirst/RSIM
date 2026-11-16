@@ -40,6 +40,19 @@ pub trait Ssh: Send + Sync {
         device: &'a Device,
         command: &'a str,
     ) -> BoxFuture<'a, Result<Vec<u8>, TransportError>>;
+
+    /// True if each command of the device runs in its own exec session, in
+    /// which the device can print its login banner in front of the answer.
+    fn banner_each_command(&self, _device: &Device) -> bool {
+        false
+    }
+
+    /// True if the commands of the device run one at a time. A source then
+    /// sends them one after the other, so that the time limit of a command
+    /// does not include the wait for the commands before it.
+    fn serial(&self, _device: &Device) -> bool {
+        false
+    }
 }
 
 /// Reads API paths of a console over HTTPS. The transport logs in and keeps

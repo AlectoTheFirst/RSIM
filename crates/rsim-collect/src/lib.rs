@@ -7,10 +7,12 @@
 //! a cycle with no change writes nothing.
 
 mod classify;
+pub mod cli;
 mod device;
 pub mod fake;
 #[cfg(feature = "https")]
 pub mod https;
+mod path;
 mod pipeline;
 mod schedule;
 mod source;
@@ -18,6 +20,8 @@ mod source;
 pub mod ssh;
 mod transport;
 mod trust;
+#[cfg(feature = "ssh")]
+mod tunnel;
 #[cfg(feature = "unifi")]
 pub mod unifi;
 #[cfg(feature = "vyos")]
@@ -25,6 +29,7 @@ pub mod vyos;
 
 pub use classify::{Classified, classify};
 pub use device::{Device, Inventory, Vendor};
+pub use path::{Algorithms, Jump, Proxy, ProxyLogin, Route};
 pub use pipeline::{
     Clock, CollectError, Collector, CycleReport, Limits, OsEntropy, Sink, TokioClock,
 };
