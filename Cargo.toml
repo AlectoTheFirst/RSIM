@@ -10,6 +10,7 @@ members = [
     "crates/rsim-mcp",
     "crates/rsim-store",
     "crates/rsim-collect",
+    "crates/rsim-ingest",
 ]
 
 [workspace.package]
@@ -28,6 +29,7 @@ rsim-topologies = { path = "crates/rsim-topologies" }
 rsim-cli = { path = "crates/rsim-cli" }
 rsim-store = { path = "crates/rsim-store" }
 rsim-collect = { path = "crates/rsim-collect" }
+rsim-ingest = { path = "crates/rsim-ingest" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

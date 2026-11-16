@@ -1,16 +1,18 @@
 //! Route lookup and next-hop resolution.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
 use rsim_core::{
     AddrField, Alternative, Attr, Branch, Context, ContextAttr, Dependency, Destination, FlowState,
-    FunctionId, FunctionKind, InterfaceId, NeighbourTarget, NetFunction, NextHop, Outcome,
-    PacketSet, Prefix, PrefixTable, Reason, ReasonCode, SourceSpan, TriePrefixTable, VrfId,
+    FunctionId, FunctionKind, InterfaceId, NeighbourTarget, NetFunction, NextHop, ObjectId,
+    Outcome, PacketSet, Prefix, PrefixTable, Reason, ReasonCode, RulePredicate, SourceSpan, Tri,
+    TriePrefixTable, VrfId,
 };
 
 use crate::common::{Meta, push_nonempty};
 use crate::forwarding::meta_methods;
+use crate::rules::{Decision, Rule, RuleBody, RuleRef, UnknownCause, evaluate};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RouteKind {
@@ -63,6 +65,13 @@ impl Route {
 pub struct RouteLookup {
     pub meta: Meta,
     pub tables: BTreeMap<VrfId, TriePrefixTable<Route>>,
+    /// The function that gets the packets with no route, for example the
+    /// lookup of the main table after a policy route table. `None` drops
+    /// them.
+    pub fallback: Option<FunctionId>,
+    /// The function that gets the packets of a local route, for example the
+    /// input policy of the device. `None` delivers them to the device.
+    pub local: Option<FunctionId>,
 }
 
 impl RouteLookup {
@@ -96,6 +105,8 @@ impl NetFunction for RouteLookup {
                     .flat_map(|(_, r)| r.next_hops.iter().map(|n| n.next.clone()))
                     .collect::<Vec<_>>()
             })
+            .chain(self.fallback.clone())
+            .chain(self.local.clone())
             .collect();
         v.sort();
         v.dedup();
@@ -125,16 +136,24 @@ impl NetFunction for RouteLookup {
         for (prefix, route, set) in part.matched {
             self.route_branches(&mut out, vrf, prefix, route, set, ctx, state);
         }
-        push_nonempty(
-            &mut out,
-            self.meta.drop(
+        let no_route = match &self.fallback {
+            Some(next) => self.meta.forward(
+                part.unmatched,
+                next,
+                ReasonCode::NoRoute,
+                format!("no route in VRF {vrf} · next table"),
+                ctx.clone(),
+                state,
+            ),
+            None => self.meta.drop(
                 part.unmatched,
                 ReasonCode::NoRoute,
                 format!("no route in VRF {vrf}"),
                 ctx,
                 state,
             ),
-        );
+        };
+        push_nonempty(&mut out, no_route);
         push_nonempty(
             &mut out,
             self.meta.unknown(
@@ -163,6 +182,21 @@ impl RouteLookup {
     ) {
         match route.kind {
             RouteKind::Local => {
+                if let Some(next) = &self.local {
+                    out.push(
+                        self.meta
+                            .forward(
+                                set,
+                                next,
+                                ReasonCode::Routed,
+                                format!("{prefix} is an address of {}", self.meta.device),
+                                ctx.clone(),
+                                state,
+                            )
+                            .with_spans(route.spans.clone()),
+                    );
+                    return;
+                }
                 out.push(
                     self.meta
                         .branch(
@@ -267,6 +301,10 @@ pub struct NextHopResolution {
     pub complete: bool,
     /// The egress function of each interface.
     pub egress: BTreeMap<InterfaceId, FunctionId>,
+    /// The point-to-point interfaces, for example PPPoE or a tunnel, with
+    /// the owner of the peer. The next hop on such an interface is always
+    /// the peer, so it needs no neighbour entry.
+    pub point_to_point: BTreeMap<InterfaceId, String>,
 }
 
 impl NextHopResolution {
@@ -388,6 +426,24 @@ impl NetFunction for NextHopResolution {
             )];
         };
         let mut out = Vec::new();
+        if let Some(owner) = self.point_to_point.get(iface) {
+            let peer = Neighbour {
+                interface: iface.clone(),
+                target: NeighbourTarget::Link,
+                owner: owner.clone(),
+                spans: self.meta.provenance.clone(),
+            };
+            self.resolve(
+                &mut out,
+                "the peer".to_string(),
+                &[peer],
+                iface,
+                input.clone(),
+                ctx,
+                state,
+            );
+            return out;
+        }
         match nh {
             NextHop::Gateway(g) => {
                 let entries = self
@@ -438,6 +494,132 @@ impl NetFunction for NextHopResolution {
                     ),
                 );
             }
+        }
+        out
+    }
+}
+
+/// Policy routing: ordered rules that select a route table for the packets
+/// that they match. The packets of no rule go to the main route lookup.
+///
+/// The action of a rule is the route lookup of its table. A rule applies
+/// only to the packets of its ingress interfaces, or to all packets if it
+/// has no interface set.
+#[derive(Clone, Debug)]
+pub struct PolicyRoute {
+    pub meta: Meta,
+    pub policy: ObjectId,
+    scopes: Vec<Option<BTreeSet<InterfaceId>>>,
+    rules: Vec<Rule<FunctionId>>,
+    main: FunctionId,
+}
+
+impl PolicyRoute {
+    pub fn new(
+        meta: Meta,
+        policy: ObjectId,
+        rules: Vec<(Option<BTreeSet<InterfaceId>>, Rule<FunctionId>)>,
+        main: FunctionId,
+    ) -> Self {
+        let (scopes, rules) = rules.into_iter().unzip();
+        PolicyRoute {
+            meta,
+            policy,
+            scopes,
+            rules,
+            main,
+        }
+    }
+
+    pub fn rules(&self) -> &[Rule<FunctionId>] {
+        &self.rules
+    }
+}
+
+impl NetFunction for PolicyRoute {
+    meta_methods!(FunctionKind::RouteLookup);
+
+    fn requires(&self) -> Vec<ContextAttr> {
+        vec![ContextAttr::IngressInterface]
+    }
+    fn provides(&self) -> Vec<ContextAttr> {
+        Vec::new()
+    }
+    fn reads(&self) -> Vec<Dependency> {
+        vec![Dependency::Object(self.policy.clone())]
+    }
+    fn successors(&self) -> Vec<FunctionId> {
+        let mut v: Vec<FunctionId> = self
+            .rules
+            .iter()
+            .filter_map(|r| match &r.body {
+                RuleBody::Handled { action, .. } => Some(action.clone()),
+                RuleBody::Unhandled => None,
+            })
+            .chain([self.main.clone()])
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    }
+    fn predicates(&self) -> Vec<&RulePredicate> {
+        self.rules
+            .iter()
+            .filter_map(|r| match &r.body {
+                RuleBody::Handled { predicate, .. } => Some(predicate),
+                RuleBody::Unhandled => None,
+            })
+            .collect()
+    }
+    fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
+        let scope = |i: usize| match &self.scopes[i] {
+            None => Tri::True,
+            Some(s) => match &ctx.ingress_interface {
+                Attr::Known(e) => Tri::from(s.contains(e)),
+                _ => Tri::Unknown,
+            },
+        };
+        let mut out = Vec::new();
+        for (set, decision) in evaluate(&self.rules, &self.main, input, &scope) {
+            let b = match decision {
+                Decision::Action { action, decided_by } => {
+                    let detail = match decided_by.first() {
+                        Some(RuleRef::Rule(i)) => format!(
+                            "policy {} rule {} · table {action}",
+                            self.policy, self.rules[*i].name
+                        ),
+                        _ => format!("policy {} · no rule · main table", self.policy),
+                    };
+                    self.meta.forward(
+                        set,
+                        &action,
+                        ReasonCode::Classified,
+                        detail,
+                        ctx.clone(),
+                        state,
+                    )
+                }
+                Decision::Unknown { cause } => {
+                    let (code, detail) = match cause {
+                        UnknownCause::Unhandled { rule } => (
+                            ReasonCode::UnhandledStanza,
+                            format!(
+                                "policy {} rule {} is not handled",
+                                self.policy, self.rules[rule].name
+                            ),
+                        ),
+                        UnknownCause::Uncertain { rule } => (
+                            ReasonCode::MatchUnknown,
+                            format!(
+                                "policy {} rule {} may match",
+                                self.policy, self.rules[rule].name
+                            ),
+                        ),
+                    };
+                    self.meta.unknown(set, code, detail, ctx, state)
+                }
+            };
+            push_nonempty(&mut out, b);
         }
         out
     }

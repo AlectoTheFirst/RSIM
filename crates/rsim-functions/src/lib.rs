@@ -7,15 +7,22 @@ pub mod forwarding;
 pub mod nat;
 pub mod policy;
 pub mod profile;
+pub mod qos;
 pub mod routing;
 pub mod rules;
 pub mod session;
 
 pub use common::Meta;
-pub use forwarding::{Egress, EgressMode, Ingress, Link, VrfSelection, ZoneLookup, ZoneRole};
+pub use forwarding::{
+    DeviceDelivery, Egress, EgressMode, Ingress, Link, LocalInput, VrfSelection, ZoneLookup,
+    ZoneRole,
+};
 pub use nat::{DestinationNat, NatAction, SourceNat};
 pub use policy::{AclMatch, FirewallPolicy, ZoneScope};
 pub use profile::{PortTranslation, RuleAction, UnzonedInterface, VendorProfile};
-pub use routing::{Neighbour, NextHopResolution, Route, RouteKind, RouteLookup, RouteNextHop};
+pub use qos::QosNotEvaluated;
+pub use routing::{
+    Neighbour, NextHopResolution, PolicyRoute, Route, RouteKind, RouteLookup, RouteNextHop,
+};
 pub use rules::{Rule, RuleBody};
 pub use session::{SessionCommit, SessionLookup};

@@ -89,6 +89,7 @@ fn two_owners_behind_one_link_are_two_owners() {
         neighbours: table,
         complete: true,
         egress: BTreeMap::from([(InterfaceId::new("eth1"), fid("r1/out/eth1"))]),
+        point_to_point: BTreeMap::new(),
     };
     let ctx = Context {
         egress_interface: Attr::Known(InterfaceId::new("eth1")),

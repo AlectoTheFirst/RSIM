@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-Steps 1, 1b and 2 of the build are complete. Step 3 is in progress: collection, the snapshot store, the snapshot view and ingestion. Step 3 comes in 5 pull requests. Pull request 1 is the crates `rsim-store` and `rsim-collect`, with the SSH and HTTPS transports. `../rsim-project/roadmap.md` gives the order. The Cargo workspace has 9 crates in `crates/`: `rsim-core`, `rsim-dd`, `rsim-functions`, `rsim-engine`, `rsim-topologies`, `rsim-cli`, `rsim-mcp`, `rsim-store` and `rsim-collect`. The other crates of section 3 come with their steps.
+Steps 1, 1b and 2 of the build are complete. Step 3 is in progress: collection, the snapshot store, the snapshot view and ingestion. Step 3 comes in 5 pull requests. Pull request 1 is the crates `rsim-store` and `rsim-collect`, with the SSH and HTTPS transports. Pull request 2 is `rsim-ingest` for VyOS. `../rsim-project/roadmap.md` gives the order. The Cargo workspace has 10 crates in `crates/`: `rsim-core`, `rsim-dd`, `rsim-functions`, `rsim-engine`, `rsim-topologies`, `rsim-cli`, `rsim-mcp`, `rsim-store`, `rsim-collect` and `rsim-ingest`. The other crates of section 3 come with their steps.
 
 The two design documents are in the adjacent folder `../rsim-project/`. This repository is public, so the design documents stay out of it. Do not commit the design documents, real configs or collected state to this repository.
 
@@ -60,6 +60,9 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | SSH transport tests | `cargo test -p rsim-collect --test ssh` |
 | HTTPS transport tests | `cargo test -p rsim-collect --test https` |
 | Collection benchmark | `cargo bench -p rsim-collect --bench cycle` |
+| Ingestion tests | `cargo test -p rsim-ingest` |
+| Coverage of a VyOS config | `cargo run -p rsim-ingest --example vyos_coverage < config.json` |
+| Twin of a VyOS device of a store | `cargo run -p rsim-ingest --example vyos_snapshot -- <data folder> <device>`. Add `<ingress interface> <source> <destination> tcp\|udp <port>` for a path query. |
 
 The hand-built topologies are in the crate `rsim-topologies`, with one module for each topology in `crates/rsim-topologies/src/`. The tests and the benchmarks of `rsim-engine` use it as a development dependency. `rsim-topologies::builtin(name)` gives the twin of a built-in topology.
 
@@ -72,6 +75,8 @@ The tests of `rsim-dd` turn on the feature `dd-shadow` through a development dep
 `crates/rsim-cli/clippy.toml` and `crates/rsim-mcp/clippy.toml` deny the file write functions and the network socket types. Only a test helper can allow them.
 
 `rsim-store` holds the format of the snapshot store, the writer and the reader. It has no network code. `rsim-collect` is the only crate that talks to devices. It runs a collection cycle as stages with bounded channels: schedule, fetch, classify and hash, extract, and store. The SSH transport is in `ssh.rs`, the HTTPS transport in `https.rs`, and the credentials and the pins of host keys and certificates in `trust.rs`. The features `ssh` and `https` turn on the transports, and `vyos` and `unifi` turn on the sources. The pipeline tests use the fake transport in `fake.rs` and the synthetic fixtures in `crates/rsim-collect/tests/fixtures/`. The fixtures use only documentation addresses and documentation MAC addresses. The transport tests in `tests/ssh.rs` and `tests/https.rs` run the real transports against servers on 127.0.0.1 in the test process. The test keys and certificates are made at test time. Do not commit private keys. The scheduler tests and the cycle tests use paused `tokio` time.
+
+`rsim-ingest` reads the snapshot store and gives function instances. It has no network code, no async runtime, no clock and no randomness. `stanza.rs` reads JSON into a tree of stanzas with the line ranges of the canonical form. `coverage.rs` classifies each stanza as handled, known-irrelevant or unhandled from a table of paths, and gives the coverage report. `collected.rs` reads the rows of the collected tables. The VyOS handlers are in `vyos/config.rs`, the table in `vyos/table.rs`, the lowering in `vyos/lower.rs` and the vendor profile in `vyos/profile.rs`. Each handler records the stanzas that it reads, and `vyos::unread` lists each handled stanza that no handler read. A new handled path needs a handler that reads it. The tests use the synthetic config in `crates/rsim-ingest/tests/fixtures/vyos/`.
 
 CI is in `.github/workflows/ci.yml`. For each pull request, it runs the format check, clippy, the build and the tests on Linux `amd64`.
 
@@ -173,7 +178,7 @@ Section 13 of the brief gives the steps, each with a "Done when" condition. Do t
 
 Step 2 is complete: the packet-set engine in `rsim-dd`, `PacketSet` on `rsim-dd`, the sessions as relations, set-mode execution, the ingress resolver, JSON version 2, the set input of the query, `rsim set`, `set_query` and the set benchmark. `../rsim-project/design/step-2-packet-set.md` gives the design.
 
-Step 3 is the current step. Pull request 1 is `rsim-store` and `rsim-collect` with the SSH and HTTPS transports. Pull requests 2 and 3 are `rsim-ingest` for VyOS and for UniFi. Pull request 4 is the snapshot view. Pull request 5 is the run on the real estate. `../rsim-project/design/step-3-collect.md` gives the design.
+Step 3 is the current step. Pull request 1 is `rsim-store` and `rsim-collect` with the SSH and HTTPS transports. Pull request 2 is `rsim-ingest` for VyOS. Pull request 3 is `rsim-ingest` for UniFi. Pull request 4 is the snapshot view. Pull request 5 is the run on the real estate. `../rsim-project/design/step-3-collect.md` gives the design.
 
 Section 14 gives the test types. The property tests are: branches partition the input in each alternative of a forwarding choice and in each copy of a flood, the result is deterministic, and concrete mode agrees with set mode.
 

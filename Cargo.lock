@@ -2463,6 +2463,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rsim-ingest"
+version = "0.1.0"
+dependencies = [
+ "arrow-array",
+ "rsim-core",
+ "rsim-engine",
+ "rsim-functions",
+ "rsim-store",
+ "serde_json",
+]
+
+[[package]]
 name = "rsim-mcp"
 version = "0.1.0"
 dependencies = [

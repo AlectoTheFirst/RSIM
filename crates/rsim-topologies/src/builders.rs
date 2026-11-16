@@ -161,6 +161,7 @@ impl Dev {
                 .iter()
                 .map(|i| (InterfaceId::new(*i), self.id(&format!("out/{i}"))))
                 .collect(),
+            point_to_point: Default::default(),
         }
     }
 
@@ -190,6 +191,8 @@ impl Dev {
         RouteLookup {
             meta: self.meta("route", line, line + routes.len() as u32),
             tables: [(VrfId::new(vrf), t)].into_iter().collect(),
+            fallback: None,
+            local: None,
         }
     }
 }
