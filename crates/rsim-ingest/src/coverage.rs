@@ -25,9 +25,20 @@ pub enum Reach {
     Node,
 }
 
-/// An entry of a classification table. The path is a list of keys, separated
-/// by `/`. The segment `*` matches each key, for example the name of an
-/// interface or the number of a rule.
+/// An entry of a classification table. The path is a list of segments,
+/// separated by `/`, one for each level. A segment matches a key:
+///
+/// - `*` matches each key, for example the name of an interface or the
+///   number of a rule.
+/// - A segment with a space, or that ends with `..`, is a word pattern for
+///   the line of an indented config. Its words match the words of the key in
+///   order: `*` matches 1 word, a literal matches the same word, and a final
+///   `..` matches the rest of the words, also none. Example:
+///   `interface */ip address ..`.
+/// - Each other segment matches the same key.
+///
+/// A segment cannot hold `/`. [`Table::push_levels`] takes the segments as
+/// a list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Entry {
     pub path: &'static str,
@@ -59,6 +70,15 @@ impl Table {
             .push((path.split('/').map(str::to_string).collect(), state, reach));
     }
 
+    /// Adds an entry with its segments as a list.
+    pub fn push_levels(&mut self, levels: &[&str], state: State, reach: Reach) {
+        self.entries.push((
+            levels.iter().map(|l| (*l).to_string()).collect(),
+            state,
+            reach,
+        ));
+    }
+
     /// The state of the stanza at `path`.
     pub fn state(&self, path: &[&str]) -> State {
         let mut best: Option<(usize, usize, State)> = None;
@@ -67,16 +87,56 @@ impl Table {
                 Reach::Node => pattern.len() == path.len(),
                 Reach::Subtree => pattern.len() <= path.len(),
             };
-            if !fits || !pattern.iter().zip(path).all(|(p, k)| p == "*" || p == k) {
+            if !fits || !pattern.iter().zip(path).all(|(p, k)| matches(p, k)) {
                 continue;
             }
-            let exact = pattern.iter().filter(|p| *p != "*").count();
+            let exact = pattern.iter().map(|p| literal_words(p)).sum();
             let rank = (pattern.len(), exact);
             if best.is_none_or(|(l, e, _)| rank > (l, e)) {
                 best = Some((rank.0, rank.1, *state));
             }
         }
         best.map_or(State::Unhandled, |b| b.2)
+    }
+}
+
+/// True if the segment of an entry matches a key.
+fn matches(segment: &str, key: &str) -> bool {
+    if segment == "*" || segment == key {
+        return true;
+    }
+    if !is_words(segment) {
+        return false;
+    }
+    let mut keys = key.split_whitespace();
+    let mut words = segment.split_whitespace().peekable();
+    while let Some(w) = words.next() {
+        if w == ".." && words.peek().is_none() {
+            return true;
+        }
+        match keys.next() {
+            Some(k) if w == "*" || w == k => {}
+            _ => return false,
+        }
+    }
+    keys.next().is_none()
+}
+
+/// True if a segment is a word pattern.
+fn is_words(segment: &str) -> bool {
+    segment.contains(' ') || segment.ends_with("..")
+}
+
+/// The number of literal words of a segment. A more literal entry wins over
+/// a less literal entry of the same length.
+fn literal_words(segment: &str) -> usize {
+    if is_words(segment) {
+        segment
+            .split_whitespace()
+            .filter(|w| *w != "*" && *w != "..")
+            .count()
+    } else {
+        usize::from(segment != "*")
     }
 }
 
@@ -155,34 +215,29 @@ fn walk<'a>(
     path.pop();
 }
 
-/// The path with `*` in place of each key that is a number or that only a
-/// `*` of the table can match.
+/// The path of an unhandled stanza for the report. At each level, the
+/// most literal segment of the table that matches the key with the same
+/// levels before it takes the place of the key, so that `*` stands for each
+/// name and number. A level that no segment matches keeps its key.
 fn generalize(path: &[&str], table: &Table) -> String {
-    let named: std::collections::BTreeSet<(usize, &str)> = table
-        .entries
-        .iter()
-        .flat_map(|(p, _, _)| p.iter().enumerate().map(|(i, k)| (i, k.as_str())))
-        .filter(|(_, k)| *k != "*")
-        .collect();
-    path.iter()
-        .enumerate()
-        .map(|(i, k)| {
-            if named.contains(&(i, k)) || !table_has_star_at(table, path, i) {
-                (*k).to_string()
-            } else {
-                "*".to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-/// True if an entry of the table with the same keys before `i` has `*` at
-/// `i`.
-fn table_has_star_at(table: &Table, path: &[&str], i: usize) -> bool {
-    table.entries.iter().any(|(p, _, _)| {
-        p.len() > i && p[i] == "*" && p[..i].iter().zip(path).all(|(a, b)| a == "*" || a == b)
-    })
+    let mut out: Vec<String> = Vec::with_capacity(path.len());
+    for (i, key) in path.iter().enumerate() {
+        let best = table
+            .entries
+            .iter()
+            .filter(|(p, _, _)| {
+                p.len() > i
+                    && matches(&p[i], key)
+                    && p[..i].iter().zip(path).all(|(a, b)| matches(a, b))
+            })
+            .map(|(p, _, _)| &p[i])
+            .max_by_key(|seg| (literal_words(seg), std::cmp::Reverse(seg.as_str())));
+        out.push(match best {
+            Some(seg) if seg == "*" || is_words(seg) => seg.clone(),
+            _ => (*key).to_string(),
+        });
+    }
+    out.join("/")
 }
 
 #[cfg(test)]
@@ -225,6 +280,59 @@ mod tests {
         assert_eq!(t.state(&opt), Handled);
         assert_eq!(t.state(&["service", "ssh", "port"]), Irrelevant);
         assert_eq!(t.state(&["system"]), Unhandled);
+    }
+
+    #[test]
+    fn word_patterns_match_the_lines_of_an_indented_config() {
+        assert!(matches("interface *", "interface Ethernet1/1"));
+        assert!(!matches("interface *", "interface Ethernet1/1 extra"));
+        assert!(matches(
+            "ip address ..",
+            "ip address 192.0.2.1/24 secondary"
+        ));
+        assert!(matches("shutdown ..", "shutdown"));
+        assert!(!matches("ip address ..", "ip route 0.0.0.0/0 192.0.2.9"));
+        assert!(matches("feature", "feature"));
+        let mut t = Table::new(&[
+            e("feature *", Handled, Node),
+            e("interface *", Handled, Node),
+            e("interface */description ..", Irrelevant, Node),
+            e("interface */ip ..", Unhandled, Subtree),
+            e("interface */ip address ..", Handled, Node),
+            e("line ..", Irrelevant, Subtree),
+        ]);
+        t.push_levels(
+            &["interface mgmt0", "vrf member management"],
+            Irrelevant,
+            Node,
+        );
+        let doc = crate::stanza::read_indented(
+            "feature ospf\nfeature bfd\ninterface Ethernet1/1\n  description up\n  ip address 192.0.2.1/24\n  ip ospf cost 10\n  service-policy input Q1\ninterface Ethernet1/2\n  service-policy input Q2\ninterface mgmt0\n  vrf member management\nline vty\n  exec-timeout 5\nhostname n1\n",
+        );
+        assert_eq!(
+            t.state(&["interface Ethernet1/1", "ip address 192.0.2.1/24"]),
+            Handled
+        );
+        assert_eq!(
+            t.state(&["interface Ethernet1/1", "ip ospf cost 10"]),
+            Unhandled
+        );
+        assert_eq!(
+            t.state(&["interface mgmt0", "vrf member management"]),
+            Irrelevant
+        );
+        let cov = classify(&doc, &t);
+        assert_eq!(
+            cov.ranked(),
+            [
+                ("hostname n1", 1, 1),
+                ("interface */ip ..", 1, 1),
+                ("interface */service-policy input Q1", 1, 1),
+                ("interface */service-policy input Q2", 1, 1),
+            ]
+        );
+        assert_eq!(cov.lines[&Irrelevant], 4);
+        assert_eq!(cov.lines.values().sum::<u32>(), doc.lines);
     }
 
     #[test]
