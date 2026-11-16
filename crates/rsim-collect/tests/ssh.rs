@@ -12,7 +12,7 @@ use rsim_collect::cli::CliRules;
 use rsim_collect::ssh::{Algorithms, CommandMode, SshLimits, SshProfile, SshTransport};
 use rsim_collect::{
     Credential, Device, Jump, MemoryCredentials, PinKind, PinPolicy, Proxy, RawSection, Route,
-    Secret, SectionSpec, Ssh, TransportError, TrustStore, Vendor,
+    Secret, SectionSpec, Ssh, TransportError, TrustStore, Vendor, fetch_sections,
 };
 use russh::keys::{Algorithm, PrivateKey, PublicKey};
 use russh::server::{Auth, Msg, Response, Session};
@@ -546,6 +546,7 @@ async fn a_shell_reads_each_answer_up_to_the_prompt() {
     assert!(!t.banner_each_command(&d));
     let color = t.run(&d, "show color").await.unwrap();
     assert_eq!(color, b"green\ndescription r1# here\n");
+    tokio::time::sleep(Duration::from_millis(100)).await;
     let runs = join_all((0..3).map(|_| t.run(&d, "show big"))).await;
     for big in runs {
         let big = String::from_utf8(big.unwrap()).unwrap();
@@ -811,4 +812,44 @@ async fn a_host_that_closes_before_the_login_gets_one_more_try() {
     );
     assert_eq!(t.run(&device(&flaky.address), "x").await.unwrap(), b"x");
     assert_eq!(flaky.forwards(), 1);
+}
+
+#[tokio::test]
+async fn serial_commands_each_get_the_full_time_limit() {
+    let f = serve(password_server(), Preferred::default()).await;
+    let profile = SshProfile {
+        mode: CommandMode::Connection,
+        ..SshProfile::default()
+    };
+    let t = SshTransport::new(
+        credentials(Secret::Password("s3cret".into())),
+        pinned(&f),
+        SshLimits::default(),
+    )
+    .with_profile("r1", profile);
+    let d = device(&f.address);
+    assert!(t.serial(&d));
+    let specs: Vec<SectionSpec> = ["a", "b", "c", "d"]
+        .into_iter()
+        .map(|n| SectionSpec {
+            name: n,
+            command: format!("sleep 400 {n}"),
+            class: rsim_store::Class::Observation,
+            format: rsim_store::Format::Text,
+            volatile: &[],
+            extract: None,
+            optional: false,
+        })
+        .collect();
+    let out = fetch_sections(specs, Duration::from_secs(1), t.serial(&d), |c| {
+        let t = &t;
+        let d = &d;
+        Box::pin(async move { t.run(d, &c).await })
+    })
+    .await;
+    let got: Vec<Vec<u8>> = out.into_iter().map(|s| s.result.unwrap()).collect();
+    assert_eq!(
+        got,
+        [b"a".to_vec(), b"b".to_vec(), b"c".to_vec(), b"d".to_vec()]
+    );
 }

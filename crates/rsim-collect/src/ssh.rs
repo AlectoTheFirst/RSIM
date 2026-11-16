@@ -11,7 +11,7 @@ use russh::{Channel, ChannelMsg, Disconnect};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
 
-use crate::cli::{SHELL_HEIGHT, SHELL_WIDTH, at_prompt, output_of, prompt_of, sanitize};
+use crate::cli::{SHELL_HEIGHT, SHELL_WIDTH, at_prompt, echo_line, output_of, prompt_of, sanitize};
 pub use crate::path::Algorithms;
 use crate::trust::{Credentials, TrustStore, host_port};
 use crate::tunnel::{Client, Hop, HopLimits, Tunnel, login, stream};
@@ -254,22 +254,31 @@ impl SshTransport {
         tokio::spawn(async move {
             loop {
                 let Some(conn) = weak.upgrade() else { return };
-                let used = *conn.used.lock().expect("the lock is not poisoned");
-                let free = conn.channels.available_permits() == conn.max_channels;
-                let shell_free = conn.shell.try_lock().is_ok();
-                if free && shell_free && used.elapsed() >= idle {
-                    if let Some(slot) = weak_slot.upgrade() {
-                        let mut g = slot.lock().await;
-                        if g.as_ref().is_some_and(|c| Arc::ptr_eq(c, &conn)) {
-                            *g = None;
-                        }
+                let idle_now = |c: &Conn| {
+                    let used = *c.used.lock().expect("the lock is not poisoned");
+                    c.channels.available_permits() == c.max_channels
+                        && c.shell.try_lock().is_ok()
+                        && used.elapsed() >= idle
+                };
+                if idle_now(&conn) {
+                    let Some(slot) = weak_slot.upgrade() else {
+                        return;
+                    };
+                    let mut g = slot.lock().await;
+                    if !idle_now(&conn) {
+                        continue;
                     }
+                    if g.as_ref().is_some_and(|c| Arc::ptr_eq(c, &conn)) {
+                        *g = None;
+                    }
+                    drop(g);
                     conn.close().await;
                     return;
                 }
                 if conn.closed() {
                     return;
                 }
+                let used = *conn.used.lock().expect("the lock is not poisoned");
                 let wait = idle
                     .saturating_sub(used.elapsed())
                     .max(Duration::from_secs(1));
@@ -280,14 +289,14 @@ impl SshTransport {
         Ok(conn)
     }
 
+    /// Removes a connection from its slot. The commands that still use it
+    /// keep it, and it closes when the last of them drops it.
     async fn forget(&self, device: &Device, conn: &Arc<Conn>) {
         let slot = self.slot(device);
         let mut guard = slot.lock().await;
         if guard.as_ref().is_some_and(|c| Arc::ptr_eq(c, conn)) {
             *guard = None;
         }
-        drop(guard);
-        conn.close().await;
     }
 
     /// Logs in to the jump hosts of the route and then to the device.
@@ -645,7 +654,8 @@ async fn shell_command(
         .await
         .map_err(|e| TransportError::Command(e.to_string()))?;
     let mut buf = Vec::new();
-    while !at_prompt(&tail(&buf), &shell.prompt) {
+    let mut echo = false;
+    while !(echo && at_prompt(&tail(&buf), &shell.prompt)) {
         let d = shell_read(&mut shell.channel, None)
             .await?
             .expect("a read with no quiet time gives data");
@@ -655,6 +665,15 @@ async fn shell_command(
             )));
         }
         buf.extend_from_slice(&d);
+        if !echo {
+            let head = &buf[..buf.len().min(PROMPT_TAIL)];
+            echo = echo_line(
+                &sanitize(&String::from_utf8_lossy(head)),
+                command,
+                &shell.prompt,
+            )
+            .is_some();
+        }
     }
     shell.busy = false;
     let text = sanitize(&String::from_utf8_lossy(&buf));
@@ -678,5 +697,9 @@ impl Ssh for SshTransport {
 
     fn banner_each_command(&self, device: &Device) -> bool {
         self.profile(device).mode != CommandMode::Shell
+    }
+
+    fn serial(&self, device: &Device) -> bool {
+        self.profile(device).mode != CommandMode::Exec
     }
 }

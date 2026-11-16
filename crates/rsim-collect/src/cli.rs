@@ -144,26 +144,34 @@ pub fn at_prompt(text: &str, prompt: &str) -> bool {
         .is_some_and(|l| l == prompt)
 }
 
-/// The answer to a command in clean shell text, with no echo and no
-/// prompt. The text up to and including the first line in the first 20
-/// lines that is the command goes. The prompt lines at the end go. A
-/// non-empty answer ends with one line feed.
-pub fn output_of(text: &str, command: &str, prompt: &str) -> String {
+/// The end of the echo of a command in clean shell text: the byte after
+/// the first line in the first 20 lines that is the command, alone or after
+/// the prompt. A prompt that the device sent before the command can be in
+/// front of the echo on the same line.
+pub fn echo_line(text: &str, command: &str, prompt: &str) -> Option<usize> {
     let wanted = command.trim();
-    let mut start = 0;
+    if wanted.is_empty() {
+        return None;
+    }
     let mut pos = 0;
     for _ in 0..ECHO_LINES {
         let end = text[pos..].find('\n').map(|e| pos + e);
-        let line = &text[pos..end.unwrap_or(text.len())];
-        if !wanted.is_empty() && line.trim() == wanted {
-            start = end.map_or(text.len(), |e| e + 1);
-            break;
+        let line = text[pos..end.unwrap_or(text.len())].trim();
+        let after_prompt = line.strip_prefix(prompt).map(str::trim);
+        if line == wanted || after_prompt == Some(wanted) {
+            return Some(end.map_or(text.len(), |e| e + 1));
         }
-        match end {
-            Some(e) => pos = e + 1,
-            None => break,
-        }
+        pos = end? + 1;
     }
+    None
+}
+
+/// The answer to a command in clean shell text, with no echo and no
+/// prompt. The text up to and including the echo goes (refer to
+/// [`echo_line`]). The prompt lines at the end go. A non-empty answer ends
+/// with one line feed.
+pub fn output_of(text: &str, command: &str, prompt: &str) -> String {
+    let start = echo_line(text, command, prompt).unwrap_or(0);
     let mut end = text.len();
     loop {
         end = start + text[start..end].trim_end().len();
@@ -308,22 +316,6 @@ impl CliRules {
                 }
             }
         }
-        if self.strip_banner && banner_each {
-            let head = common_head(
-                sections
-                    .iter()
-                    .filter_map(|s| s.result.as_ref().ok().map(Vec::as_slice)),
-            );
-            if !head.is_empty() {
-                for s in sections.iter_mut() {
-                    if let Ok(bytes) = &mut s.result
-                        && bytes.starts_with(&head)
-                    {
-                        bytes.drain(..head.len());
-                    }
-                }
-            }
-        }
         for s in sections.iter_mut() {
             let error = match &s.result {
                 Ok(bytes) => self
@@ -339,6 +331,22 @@ impl CliRules {
             };
             if let Some(e) = error {
                 s.result = Err(e);
+            }
+        }
+        if self.strip_banner && banner_each {
+            let head = common_head(
+                sections
+                    .iter()
+                    .filter_map(|s| s.result.as_ref().ok().map(Vec::as_slice)),
+            );
+            if !head.is_empty() {
+                for s in sections.iter_mut() {
+                    if let Ok(bytes) = &mut s.result
+                        && bytes.starts_with(&head)
+                    {
+                        bytes.drain(..head.len());
+                    }
+                }
             }
         }
     }
@@ -391,6 +399,11 @@ mod tests {
             output_of("banner\nshow x\nshow x\nr1#", "show x", "r1#"),
             "show x\n"
         );
+        assert_eq!(
+            output_of("r1#show x\nanswer\nr1#", "show x", "r1#"),
+            "answer\n"
+        );
+        assert_eq!(echo_line("r1#\nr1#", "show x", "r1#"), None);
     }
 
     #[test]
@@ -448,12 +461,33 @@ mod tests {
         );
         assert_eq!(
             s[3].result.as_deref().unwrap(),
-            b"C 192.0.2.0/24 % Invalid input\n"
+            b"MOTD\nC 192.0.2.0/24 % Invalid input\n",
+            "one accepted answer gives no banner"
         );
         assert!(matches!(&s[4].result, Err(TransportError::NotFound(_))));
         assert!(
             matches!(&s[5].result, Err(TransportError::Command(t)) if t == "exit status 1: other")
         );
+    }
+
+    #[test]
+    fn the_same_rejection_in_each_answer_is_not_a_banner() {
+        let line = b"% This command is not authorized\n".to_vec();
+        let mut s = vec![section(Ok(line.clone())), section(Ok(line))];
+        CliRules::CISCO.apply(&mut s, true);
+        for x in &s {
+            assert!(
+                matches!(&x.result, Err(TransportError::Command(t)) if t.starts_with("not authorized"))
+            );
+        }
+        let mut s = vec![
+            section(Ok(b"MOTD\na\n".to_vec())),
+            section(Ok(b"MOTD\nb\n".to_vec())),
+            section(Ok(b"MOTD\n% Invalid input\n".to_vec())),
+        ];
+        CliRules::CISCO.apply(&mut s, true);
+        assert_eq!(s[0].result.as_deref().unwrap(), b"a\n");
+        assert!(s[2].absent());
     }
 
     #[test]

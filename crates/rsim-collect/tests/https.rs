@@ -544,3 +544,22 @@ async fn a_client_certificate_gives_mutual_tls() {
         });
     assert!(with.get(&d, "/a").await.is_ok());
 }
+
+#[tokio::test]
+async fn each_site_of_a_console_keeps_its_tls_mode() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let t = HttpsTransport::new(
+        credentials(password()),
+        Arc::new(TrustStore::memory(PinPolicy::Strict)),
+        HttpsLimits::default(),
+    )
+    .with_profile(
+        "console/default",
+        HttpsProfile {
+            trust: TlsTrust::NoVerify,
+            client: None,
+        },
+    );
+    assert!(t.get(&device(&f.address, "default"), "/a").await.is_ok());
+    assert!(t.get(&device(&f.address, "branch"), "/a").await.is_err());
+}

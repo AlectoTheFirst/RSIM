@@ -502,6 +502,7 @@ mod tests {
             Box::pin(crate::fetch_sections(
                 self.sections(device),
                 timeout,
+                false,
                 move |c| {
                     let t = t.clone();
                     let d = device.clone();

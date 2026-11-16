@@ -87,16 +87,29 @@ pub trait Source: Send + Sync {
     -> BoxFuture<'a, Vec<RawSection>>;
 }
 
-/// Reads the sections at the same time through `read`, each with its
-/// timeout. The result has the order of `specs`.
+/// Reads the sections through `read`, each with its timeout. The result has
+/// the order of `specs`. The reads run at the same time, or one after the
+/// other if `serial` is true, so that the time of a read starts when its
+/// command is sent.
 pub async fn fetch_sections<'a, F>(
     specs: Vec<SectionSpec>,
     timeout: Duration,
+    serial: bool,
     read: F,
 ) -> Vec<RawSection>
 where
     F: Fn(String) -> BoxFuture<'a, Result<Vec<u8>, TransportError>>,
 {
+    if serial {
+        let mut out = Vec::with_capacity(specs.len());
+        for spec in specs {
+            let result = tokio::time::timeout(timeout, read(spec.command.clone()))
+                .await
+                .unwrap_or(Err(TransportError::Timeout));
+            out.push(RawSection { spec, result });
+        }
+        return out;
+    }
     let reads = specs.iter().map(|s| {
         let f = read(s.command.clone());
         async move {

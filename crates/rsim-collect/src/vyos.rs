@@ -153,10 +153,16 @@ impl Source for VyosSource {
         device: &'a Device,
         timeout: Duration,
     ) -> BoxFuture<'a, Vec<RawSection>> {
-        Box::pin(fetch_sections(sections(), timeout, move |command| {
-            let ssh = self.ssh.clone();
-            Box::pin(async move { ssh.run(device, &command).await })
-        }))
+        let serial = self.ssh.serial(device);
+        Box::pin(fetch_sections(
+            sections(),
+            timeout,
+            serial,
+            move |command| {
+                let ssh = self.ssh.clone();
+                Box::pin(async move { ssh.run(device, &command).await })
+            },
+        ))
     }
 }
 

@@ -29,7 +29,7 @@ use crate::{BoxFuture, Device, Https, TransportError};
 /// How the transport checks the certificate of a console. The modes do not
 /// mix: a pin is not a fallback of a CA bundle, and the mode with no check
 /// writes no pin.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub enum TlsTrust {
     /// The SHA-256 of the certificate must be the pin of the console in the
     /// trust store.
@@ -45,7 +45,7 @@ pub enum TlsTrust {
 
 /// A client certificate for mutual TLS, in PEM: the chain and its private
 /// key.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ClientCert {
     pub chain: String,
     pub key: String,
@@ -58,7 +58,7 @@ impl std::fmt::Debug for ClientCert {
 }
 
 /// The TLS settings of a console.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct HttpsProfile {
     pub trust: TlsTrust,
     pub client: Option<ClientCert>,
@@ -288,6 +288,10 @@ struct Console {
     permits: Arc<tokio::sync::Semaphore>,
 }
 
+/// A console is one address with one credential, one route and one TLS
+/// profile.
+type ConsoleKey = (String, String, Route, HttpsProfile);
+
 /// An HTTPS transport over `hyper` and `rustls` with the `ring` provider.
 pub struct HttpsTransport {
     credentials: Arc<dyn Credentials>,
@@ -295,7 +299,7 @@ pub struct HttpsTransport {
     limits: HttpsLimits,
     default_profile: HttpsProfile,
     profiles: HashMap<String, HttpsProfile>,
-    consoles: Mutex<HashMap<(String, String, Route), Arc<Console>>>,
+    consoles: Mutex<HashMap<ConsoleKey, Arc<Console>>>,
 }
 
 impl HttpsTransport {
@@ -328,10 +332,15 @@ impl HttpsTransport {
 
     fn console(&self, device: &Device) -> Result<Arc<Console>, TransportError> {
         let connect = |e: String| TransportError::Connect(e);
+        let profile = self
+            .profiles
+            .get(&device.id)
+            .unwrap_or(&self.default_profile);
         let key = (
             device.address.clone(),
             device.credential.clone(),
             device.route.clone(),
+            profile.clone(),
         );
         if let Some(c) = self
             .consoles
@@ -343,10 +352,6 @@ impl HttpsTransport {
         }
         let credential = self.credentials.get(&device.credential).map_err(connect)?;
         let (host, port) = host_port(&device.address, 443).map_err(connect)?;
-        let profile = self
-            .profiles
-            .get(&device.id)
-            .unwrap_or(&self.default_profile);
         let route = &device.route;
         let pin = route.pin_name(route.jumps.len(), &device.address);
         let config = tls_config(profile, &self.trust, pin)

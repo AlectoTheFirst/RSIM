@@ -232,6 +232,7 @@ impl Source for UnifiSource {
         Box::pin(fetch_sections(
             self.sections(device),
             timeout,
+            false,
             move |path| {
                 let https = self.https.clone();
                 Box::pin(async move { https.get(device, &path).await })
