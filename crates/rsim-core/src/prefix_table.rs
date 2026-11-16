@@ -106,6 +106,12 @@ impl<V> TriePrefixTable<V> {
         if ipv4 { 0 } else { 1 }
     }
 
+    /// The number of nodes of the trie. The node numbers of the walk are
+    /// below it.
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
     /// The bytes that the table holds, for the memory benchmark.
     pub fn heap_bytes(&self) -> usize {
         self.nodes.capacity() * std::mem::size_of::<Node>()

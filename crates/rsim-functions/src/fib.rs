@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use rsim_core::{
-    AddrField, GroupPartition, PacketSet, Prefix, PrefixTable, SourceSpan, TriePrefixTable,
+    AddrField, GroupPartition, PacketSet, Prefix, PrefixTable, SetSpec, SourceSpan, TriePrefixTable,
 };
 
 use crate::routing::{Route, RouteKind, RouteNextHop};
@@ -55,7 +55,7 @@ pub struct Fib {
     files: Vec<Arc<str>>,
     file_ids: BTreeMap<Arc<str>, u32>,
     extra_spans: BTreeMap<u32, Vec<SourceSpan>>,
-    summary: OnceLock<BTreeMap<u32, Summary>>,
+    summary: OnceLock<Vec<Summary>>,
 }
 
 impl Clone for Fib {
@@ -87,8 +87,11 @@ impl FromIterator<(Prefix, Route)> for Fib {
 #[derive(Clone, Debug)]
 pub struct GroupRoutes<'a> {
     pub group: &'a NextHopGroup,
-    /// The number of routes that the packets of the group matched.
+    /// The number of routes that the packets of the group matched. If
+    /// `exact` is false, it is an upper bound: the split gave a whole
+    /// subtree to the group, and the packets can touch fewer routes of it.
     pub count: usize,
+    pub exact: bool,
     /// The first routes, in prefix order, at most the asked number.
     pub sample: Vec<Prefix>,
     /// The provenance of the routes of the sample.
@@ -228,9 +231,17 @@ impl Fib {
                 .sum::<usize>()
     }
 
-    fn summary(&self) -> &BTreeMap<u32, Summary> {
+    /// The summary of each node, built at the first split of a set with
+    /// more than one destination. A path query does not build it.
+    fn summary(&self) -> &[Summary] {
         self.summary.get_or_init(|| {
-            let mut out = BTreeMap::new();
+            let mut out = vec![
+                Summary {
+                    count: 0,
+                    uniform: NONE
+                };
+                self.trie.node_count()
+            ];
             for v6 in [false, true] {
                 if let Some(r) = self.trie.walk_root(v6) {
                     self.summarize(r, &mut out);
@@ -242,7 +253,7 @@ impl Fib {
 
     /// The summary of a node, from its children. The walk is iterative, so
     /// a deep trie does not use the stack.
-    fn summarize(&self, root: u32, out: &mut BTreeMap<u32, Summary>) {
+    fn summarize(&self, root: u32, out: &mut [Summary]) {
         let mut stack = vec![(root, false)];
         while let Some((n, done)) = stack.pop() {
             let node = self.trie.walk_node(n);
@@ -262,7 +273,7 @@ impl Fib {
                 seen.push(self.entries[*id as usize].group);
             }
             for c in node.children.into_iter().flatten() {
-                let s = out[&c];
+                let s = out[c as usize];
                 count += s.count;
                 seen.push(s.uniform);
             }
@@ -272,7 +283,7 @@ impl Fib {
                 (false, Some(u)) => u,
                 _ => NONE,
             };
-            out.insert(n, Summary { count, uniform });
+            out[n as usize] = Summary { count, uniform };
         }
     }
 
@@ -301,12 +312,10 @@ impl Fib {
         input: &PacketSet,
         sample: usize,
     ) -> (Vec<GroupRoutes<'_>>, PacketSet, PacketSet) {
-        let summary = self.summary();
         let key = |id: &u32| self.entries[*id as usize].group;
         let uniform = |n: u32| {
-            summary
-                .get(&n)
-                .and_then(|s| (s.uniform != NONE).then_some(s.uniform))
+            let s = self.summary()[n as usize];
+            (s.uniform != NONE).then_some(s.uniform)
         };
         let part: GroupPartition<u32> =
             input.partition_by_group(AddrField::Dst, &self.trie, &key, &uniform);
@@ -322,17 +331,33 @@ impl Fib {
                         (p, *id)
                     })
                     .collect();
+                let exact = g.subtrees.is_empty();
                 let mut count = routes.len();
                 for n in &g.subtrees {
-                    count += summary.get(n).map_or(0, |s| s.count as usize);
-                    self.subtree_prefixes(*n, sample, &mut routes);
+                    count += self.summary()[*n as usize].count as usize;
+                    self.subtree_prefixes(*n, 4 * sample, &mut routes);
                 }
                 routes.sort_by_key(|(p, _)| *p);
                 routes.dedup_by_key(|(p, _)| *p);
+                if !exact {
+                    // A whole subtree went to the group: name only routes
+                    // that the packets touch.
+                    let arena = g.packets.arena().clone();
+                    routes.retain(|(p, _)| {
+                        let spec = SetSpec {
+                            dst_ip: Some(vec![*p]),
+                            ..SetSpec::default()
+                        };
+                        !PacketSet::from_spec(&arena, &spec)
+                            .intersect(&g.packets)
+                            .is_empty()
+                    });
+                }
                 routes.truncate(sample);
                 GroupRoutes {
                     group: &self.groups[g.key as usize],
                     count,
+                    exact,
                     spans: routes
                         .iter()
                         .flat_map(|(_, id)| self.spans_of(*id))
@@ -343,5 +368,74 @@ impl Fib {
             })
             .collect();
         (groups, part.unmatched, part.uncertain)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rsim_core::{FunctionId, InterfaceId, SetArena};
+
+    use super::*;
+
+    fn route(iface: &str) -> Route {
+        Route::new(
+            RouteKind::Static,
+            vec![RouteNextHop {
+                interface: InterfaceId::new(iface),
+                gateway: None,
+                next: FunctionId::new(format!("r1/out/{iface}")),
+            }],
+            vec![SourceSpan::line("r1/routes", 1)],
+        )
+    }
+
+    fn set(dst: &str) -> PacketSet {
+        let spec = SetSpec {
+            src_ip: Some(vec!["192.0.2.1/32".parse().unwrap()]),
+            dst_ip: Some(vec![dst.parse().unwrap()]),
+            ..SetSpec::default()
+        };
+        PacketSet::from_spec(&SetArena::standalone(), &spec)
+    }
+
+    #[test]
+    fn a_whole_subtree_gives_an_upper_bound_and_names_only_touched_routes() {
+        let f: Fib = [
+            ("10.0.0.0/8", "eth1"),
+            ("10.1.0.0/16", "eth1"),
+            ("10.2.0.0/16", "eth1"),
+            ("10.3.0.0/16", "eth2"),
+        ]
+        .into_iter()
+        .map(|(p, i)| (p.parse().unwrap(), route(i)))
+        .collect();
+        let (groups, _, _) = f.split(&set("10.1.0.0/16"), 5);
+        assert_eq!(groups.len(), 1);
+        let g = &groups[0];
+        let names: Vec<String> = g.sample.iter().map(ToString::to_string).collect();
+        assert!(!names.contains(&"10.2.0.0/16".to_string()), "{names:?}");
+        assert!(names.contains(&"10.1.0.0/16".to_string()), "{names:?}");
+        assert!(g.exact || g.count >= names.len());
+
+        // All of 10/8: both groups, each with its own routes.
+        let (groups, unmatched, _) = f.split(&set("10.0.0.0/8"), 5);
+        assert!(unmatched.is_empty());
+        assert_eq!(groups.len(), 2);
+        let total: usize = groups.iter().map(|g| g.count).sum();
+        assert!(total >= 4, "{total}");
+    }
+
+    #[test]
+    fn a_path_query_names_its_exact_route_without_the_summary() {
+        let f: Fib = [("0.0.0.0/0", "eth0"), ("10.0.0.0/8", "eth1")]
+            .into_iter()
+            .map(|(p, i)| (p.parse().unwrap(), route(i)))
+            .collect();
+        let (groups, _, _) = f.split(&set("10.9.9.9/32"), 5);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].count, 1);
+        assert!(groups[0].exact);
+        assert_eq!(groups[0].sample[0].to_string(), "10.0.0.0/8");
+        assert!(f.summary.get().is_none(), "a path query built the summary");
     }
 }

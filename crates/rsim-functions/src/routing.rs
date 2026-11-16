@@ -184,16 +184,18 @@ impl RouteLookup {
         ctx: &Context,
         state: &FlowState,
     ) {
-        let what = if g.count == 1 {
-            g.sample[0].to_string()
-        } else {
-            let list: Vec<String> = g.sample.iter().map(ToString::to_string).collect();
-            let more = g.count - g.sample.len();
+        let list: Vec<String> = g.sample.iter().map(ToString::to_string).collect();
+        let what = if g.count == 1 && g.exact && !list.is_empty() {
+            list[0].clone()
+        } else if g.exact {
+            let more = g.count.saturating_sub(list.len());
             if more > 0 {
                 format!("{} routes ({} and {more} more)", g.count, list.join(", "))
             } else {
                 format!("{} routes ({})", g.count, list.join(", "))
             }
+        } else {
+            format!("up to {} routes ({} and others)", g.count, list.join(", "))
         };
         let set = g.packets;
         let spans = g.spans;
@@ -255,7 +257,7 @@ impl RouteLookup {
         }
         // The key of the choice comes from the content of the group, so it
         // is the same in each run.
-        let key = if g.count == 1 {
+        let key = if g.count == 1 && g.exact {
             format!("{vrf} {what}")
         } else {
             let vias: Vec<String> = hops
