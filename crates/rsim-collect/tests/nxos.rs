@@ -79,13 +79,6 @@ fn load(t: &FakeTransport) {
             ),
         }
     }
-    t.reply(
-        "n1",
-        "show bgp sessions | json",
-        Err(TransportError::Command(
-            "exit status 16: Syntax error while parsing 'show bgp sessions | json'".into(),
-        )),
-    );
 }
 
 struct Env {
@@ -183,11 +176,7 @@ async fn the_first_cycle_fills_the_tables() {
     assert!(r.extract_errors.is_empty(), "{:?}", r.extract_errors);
     assert_eq!(status(&e, "config"), SectionStatus::Fresh);
     assert!(matches!(status(&e, "cdp"), SectionStatus::Absent { .. }));
-    assert!(matches!(status(&e, "ospf"), SectionStatus::Absent { .. }));
-    assert!(matches!(
-        status(&e, "bgp_sessions"),
-        SectionStatus::Absent { .. }
-    ));
+    assert!(matches!(status(&e, "hsrp"), SectionStatus::Absent { .. }));
     assert_eq!(status(&e, "acl"), SectionStatus::Fresh);
     assert_eq!(blob(&e, "acl").trim(), "{}");
     assert_eq!(
@@ -360,14 +349,43 @@ async fn a_text_answer_to_a_json_command_fails_alone() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn the_default_vrf_bgp_sessions_follow_a_refused_vrf_all() {
+async fn an_answer_of_another_shape_is_an_extract_error() {
     let mut e = env();
-    e.t.reply(
-        "n1",
-        "show bgp sessions | json",
-        Ok(br#"{"TABLE_vrf":{"ROW_vrf":{"vrf-name-out":"default"}}}"#.to_vec()),
+    set(&e.t, "interfaces", r#"{"unexpected": 1}"#);
+    set(&e.t, "rib", "{}");
+    let r = e.c.run_cycle().await.unwrap();
+    let errors: Vec<&str> = r.extract_errors.iter().map(|x| x.2.as_str()).collect();
+    assert_eq!(
+        errors,
+        [
+            "addresses: the answer has no TABLE_interface",
+            "link_speeds: the answer has no TABLE_interface",
+            "links: the answer has no TABLE_interface",
+        ]
     );
-    e.c.run_cycle().await.unwrap();
-    assert_eq!(status(&e, "bgp_sessions"), SectionStatus::Fresh);
-    assert!(blob(&e, "bgp_sessions").contains("\"ROW_vrf\":["));
+    assert!(rows(&e, &ROUTES).is_empty(), "{{}} is an empty route table");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_dead_switch_gets_no_more_commands() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let calls = AtomicUsize::new(0);
+    let n = sections(false).len();
+    let out = fetch_sections(sections(false), Duration::from_secs(5), true, |_c| {
+        calls.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Err(TransportError::Connect("device 192.0.2.10: refused".into())) })
+    })
+    .await;
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(out.len(), n);
+    assert!(matches!(&out[1].result, Err(TransportError::Connect(e)) if e.starts_with("not sent")));
+
+    let calls = AtomicUsize::new(0);
+    let out = fetch_sections(sections(false), Duration::from_secs(5), true, |_c| {
+        calls.fetch_add(1, Ordering::SeqCst);
+        Box::pin(std::future::pending())
+    })
+    .await;
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(matches!(&out[2].result, Err(TransportError::Connect(e)) if e.contains("timed out")));
 }

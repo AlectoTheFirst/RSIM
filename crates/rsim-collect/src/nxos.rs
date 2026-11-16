@@ -33,11 +33,6 @@ pub const RULES: CliRules = CliRules {
 /// 0.
 const CDP_OFF: &str = "Note: CDP not enabled";
 
-/// The BGP session command for all VRFs, and the command for the default
-/// VRF that a device gets if it does not have the first.
-const BGP_SESSIONS: &str = "show bgp sessions vrf all | json";
-const BGP_SESSIONS_DEFAULT: &str = "show bgp sessions | json";
-
 /// The setup commands of a shell on NX-OS.
 pub const SHELL_SETUP: [&str; 2] = ["terminal length 0", "terminal width 511"];
 
@@ -182,7 +177,7 @@ const CDP_KEEP: &[&str] = &[
 
 /// The sections of an NX-OS switch, in the order of the fetch.
 const SPECS: &[Spec] = {
-    use Class::{Configuration, Observation, Volatile};
+    use Class::{Configuration, Observation};
     use Format::{Json, Text};
     &[
         row("config", "show running-config", Configuration, Text, false).volatile(&["!"]),
@@ -252,71 +247,6 @@ const SPECS: &[Spec] = {
         row("hsrp", "show hsrp all | json", Observation, Json, true),
         row("vrrp", "show vrrp detail | json", Observation, Json, true),
         row("vpc", "show vpc | json", Observation, Json, true),
-        row("ospf", "show ip ospf vrf all | json", Volatile, Json, true),
-        row(
-            "ospf_interfaces",
-            "show ip ospf interface vrf all | json",
-            Volatile,
-            Json,
-            true,
-        ),
-        row(
-            "ospf_neighbors",
-            "show ip ospf neighbors vrf all | json",
-            Volatile,
-            Json,
-            true,
-        ),
-        row(
-            "ospf_lsdb_router",
-            "show ip ospf database router detail vrf all | json",
-            Volatile,
-            Json,
-            true,
-        ),
-        row(
-            "ospf_lsdb_network",
-            "show ip ospf database network detail vrf all | json",
-            Volatile,
-            Json,
-            true,
-        ),
-        row(
-            "ospf_lsdb_summary",
-            "show ip ospf database summary detail vrf all | json",
-            Volatile,
-            Json,
-            true,
-        ),
-        row(
-            "ospf_lsdb_external",
-            "show ip ospf database external detail vrf all | json",
-            Volatile,
-            Json,
-            true,
-        ),
-        row(
-            "ospf_lsdb_nssa_external",
-            "show ip ospf database nssa-external detail vrf all | json",
-            Volatile,
-            Json,
-            true,
-        ),
-        row(
-            "ospf_lsdb_asbr_summary",
-            "show ip ospf database asbr-summary detail vrf all | json",
-            Volatile,
-            Json,
-            true,
-        ),
-        row("bgp_sessions", BGP_SESSIONS, Volatile, Json, true),
-        row(
-            "bgp_neighbors",
-            "show bgp vrf all neighbors | json",
-            Volatile,
-            Json,
-            true,
-        ),
     ]
 };
 
@@ -417,20 +347,6 @@ impl Source for NxosSource {
             };
             let mut out = fetch_sections(self.sections(device), timeout, serial, read).await;
             RULES.apply(&mut out, self.ssh.banner_each_command(device));
-            let native = self.native.contains(&device.id);
-            if let Some(s) = out.iter_mut().find(|s| s.spec.name == "bgp_sessions")
-                && s.absent()
-            {
-                let mut spec = s.spec.clone();
-                spec.command = if native {
-                    self::native(BGP_SESSIONS_DEFAULT)
-                } else {
-                    BGP_SESSIONS_DEFAULT.to_string()
-                };
-                let mut again = fetch_sections(vec![spec], timeout, true, read).await;
-                RULES.apply(&mut again, self.ssh.banner_each_command(device));
-                *s = again.remove(0);
-            }
             out.iter_mut().for_each(shape);
             out
         })
@@ -439,6 +355,20 @@ impl Source for NxosSource {
 
 fn json(bytes: &[u8]) -> Result<Value, String> {
     serde_json::from_slice(bytes).map_err(|e| e.to_string())
+}
+
+/// The rows of the top table of an answer. `{}` is an empty table. An
+/// answer with other members and no `TABLE_t` has another shape, and the
+/// extract fails, so that an unknown answer is not read as an empty table.
+fn top_rows<'v>(v: &'v Value, table: &str) -> Result<&'v [Value], String> {
+    let m = v.as_object().ok_or("the answer is not a JSON object")?;
+    if m.is_empty() {
+        return Ok(&[]);
+    }
+    if !m.contains_key(&format!("TABLE_{table}")) {
+        return Err(format!("the answer has no TABLE_{table}"));
+    }
+    Ok(rows(v, table))
 }
 
 /// The rows of a table: `TABLE_t` then `ROW_t`, a list after [`shape`].
@@ -516,7 +446,7 @@ impl Extract for LinkExtract {
 
     fn rows(&self, bytes: &[u8]) -> Result<Vec<Row>, String> {
         let v = json(bytes)?;
-        rows(&v, "interface")
+        top_rows(&v, "interface")?
             .iter()
             .map(|r| {
                 let name = text(r, "interface").ok_or("an interface has no name")?;
@@ -551,7 +481,7 @@ impl Extract for AddrExtract {
     fn rows(&self, bytes: &[u8]) -> Result<Vec<Row>, String> {
         let v = json(bytes)?;
         let mut out = Vec::new();
-        for r in rows(&v, "interface") {
+        for r in top_rows(&v, "interface")? {
             let name = text(r, "interface").ok_or("an interface has no name")?;
             for (a, m) in [
                 ("eth_ip_addr", "eth_ip_mask"),
@@ -590,7 +520,7 @@ impl Extract for SpeedExtract {
 
     fn rows(&self, bytes: &[u8]) -> Result<Vec<Row>, String> {
         let v = json(bytes)?;
-        rows(&v, "interface")
+        top_rows(&v, "interface")?
             .iter()
             .filter(|r| r.get("eth_speed").is_some() || r.get("eth_duplex").is_some())
             .map(|r| {
@@ -626,7 +556,7 @@ impl Extract for RouteExtract {
     fn rows(&self, bytes: &[u8]) -> Result<Vec<Row>, String> {
         let v = json(bytes)?;
         let mut out = Vec::new();
-        for vr in rows(&v, "vrf") {
+        for vr in top_rows(&v, "vrf")? {
             let vrf = vrf(vr);
             for af in rows(vr, "addrf") {
                 for p in rows(af, "prefix") {
@@ -663,7 +593,7 @@ impl Extract for MacExtract {
     fn rows(&self, bytes: &[u8]) -> Result<Vec<Row>, String> {
         let v = json(bytes)?;
         let mut out = Vec::new();
-        for r in rows(&v, "mac_address") {
+        for r in top_rows(&v, "mac_address")? {
             let Some(vlan) = text(r, "disp_vlan").and_then(|x| x.trim().parse::<u64>().ok()) else {
                 continue;
             };
@@ -688,7 +618,7 @@ impl Extract for ArpExtract {
     fn rows(&self, bytes: &[u8]) -> Result<Vec<Row>, String> {
         let v = json(bytes)?;
         let mut out = Vec::new();
-        for vr in rows(&v, "vrf") {
+        for vr in top_rows(&v, "vrf")? {
             for r in rows(vr, "adj") {
                 let (Some(interface), Some(ip)) = (text(r, "intf-out"), text(r, "ip-addr-out"))
                 else {
