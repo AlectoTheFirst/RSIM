@@ -141,6 +141,27 @@ impl FromStr for Prefix {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Mac(pub [u8; 6]);
 
+impl FromStr for Mac {
+    type Err = ParsePrefixError;
+
+    /// Reads `00:00:5e:00:53:01` or `00-00-5e-00-53-01`.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let err = || ParsePrefixError(s.to_string());
+        let parts: Vec<&str> = s.split([':', '-']).collect();
+        if parts.len() != 6 {
+            return Err(err());
+        }
+        let mut m = [0u8; 6];
+        for (b, p) in m.iter_mut().zip(parts) {
+            if p.len() != 2 {
+                return Err(err());
+            }
+            *b = u8::from_str_radix(p, 16).map_err(|_| err())?;
+        }
+        Ok(Mac(m))
+    }
+}
+
 impl fmt::Debug for Mac {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let b = self.0;

@@ -78,6 +78,7 @@ fn two_owners_behind_one_link_are_two_owners() {
         interface: InterfaceId::new("eth1"),
         target: rsim_core::NeighbourTarget::Link,
         owner: owner.into(),
+        mac: None,
         spans: Vec::new(),
     };
     table.insert(

@@ -4,10 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
 use rsim_core::{
-    AddrField, Alternative, Attr, Branch, Context, ContextAttr, Dependency, Destination, FlowState,
-    FunctionId, FunctionKind, InterfaceId, NeighbourTarget, NetFunction, NextHop, ObjectId,
-    Outcome, PacketSet, Prefix, PrefixTable, Reason, ReasonCode, RulePredicate, SourceSpan, Tri,
-    TriePrefixTable, VrfId,
+    AddrField, Alternative, Attr, Branch, Context, ContextAttr, Dependency, Destination,
+    FieldValue, FlowState, FunctionId, FunctionKind, InterfaceId, Mac, NeighbourTarget,
+    NetFunction, NextHop, ObjectId, Outcome, PacketSet, Prefix, PrefixTable, Reason, ReasonCode,
+    Rewrite, RulePredicate, SourceSpan, Tri, TriePrefixTable, VrfId,
 };
 
 use crate::common::{Meta, push_nonempty};
@@ -287,6 +287,9 @@ pub struct Neighbour {
     pub target: NeighbourTarget,
     /// The owner, for the reason text when two owners exist.
     pub owner: String,
+    /// The MAC of the neighbour. The resolution sets it as the destination
+    /// MAC.
+    pub mac: Option<Mac>,
     pub spans: Vec<SourceSpan>,
 }
 
@@ -360,6 +363,13 @@ impl NextHopResolution {
                     );
                     return;
                 };
+                let set = match one.mac {
+                    Some(m) => set.rewrite(&Rewrite {
+                        dst_mac: Some(FieldValue::Known(m)),
+                        ..Rewrite::default()
+                    }),
+                    None => set,
+                };
                 let mut c = ctx.clone();
                 c.neighbour = Attr::Known(one.target.clone());
                 push_nonempty(
@@ -431,6 +441,7 @@ impl NetFunction for NextHopResolution {
                 interface: iface.clone(),
                 target: NeighbourTarget::Link,
                 owner: owner.clone(),
+                mac: None,
                 spans: self.meta.provenance.clone(),
             };
             self.resolve(

@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use rsim_core::{
     Attr, Branch, Context, ContextAttr, Delay, DelayGap, Dependency, Destination, FlowState,
     FunctionId, FunctionKind, InterfaceId, NeighbourTarget, NetFunction, Outcome, PacketSet,
-    Reason, ReasonCode, SourceSpan, VrfId, ZoneId,
+    Reason, ReasonCode, Rewrite, SourceSpan, VrfId, ZoneId,
 };
 
 use crate::common::Meta;
@@ -267,6 +267,23 @@ pub struct Egress {
     pub interface: InterfaceId,
     pub mode: EgressMode,
     pub link: Option<Link>,
+    /// The rewrite of the frames that leave on the link, for example the
+    /// source MAC of the interface.
+    pub rewrite: Rewrite,
+    /// The 802.1Q tag of the frames that leave on the link.
+    pub tag: Tag,
+}
+
+/// What an egress does with the 802.1Q tag.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tag {
+    /// The tag stays as it is.
+    #[default]
+    Keep,
+    /// The frames leave without a tag.
+    Untagged,
+    /// The frames leave with this VLAN.
+    Vlan(u16),
 }
 
 impl Egress {
@@ -285,7 +302,11 @@ impl Egress {
         {
             Some((l, peer)) => {
                 let mut b = self.meta.forward(
-                    input.clone(),
+                    match self.tag {
+                        Tag::Keep => input.rewrite(&self.rewrite),
+                        Tag::Untagged => input.rewrite(&self.rewrite).set_vlan(None),
+                        Tag::Vlan(v) => input.rewrite(&self.rewrite).set_vlan(Some(v)),
+                    },
                     peer,
                     ReasonCode::LinkHandOff,
                     format!("leave on {} to {peer}", self.interface),
