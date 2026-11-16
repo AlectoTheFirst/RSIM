@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use rsim_core::{InterfaceId, Match, PROTO_TCP, PrefixTable, TriePrefixTable, VrfId};
+use rsim_core::{InterfaceId, Match, PROTO_TCP, VrfId};
 use rsim_engine::TwinBuilder;
 use rsim_functions::{EgressMode, Route, RouteKind, RouteLookup, RouteNextHop, RuleAction};
 
@@ -78,7 +78,7 @@ pub fn chain(n: usize, acl_rules: usize, extra_routes: usize) -> TwinBuilder {
                 vec![("west", Some(west_gw.clone()), "nexthop")],
             ));
         }
-        let mut t = TriePrefixTable::new();
+        let mut t = rsim_functions::Fib::new();
         for (j, (p, kind, nhs)) in routes.iter().enumerate() {
             let nh = nhs
                 .iter()

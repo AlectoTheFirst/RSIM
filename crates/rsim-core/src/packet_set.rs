@@ -717,6 +717,11 @@ impl PacketSet {
                     && (node.entry.is_some() || best.as_ref().is_some_and(|b| b.1 == k))
                 {
                     let e = best.as_ref().map_or(0, |b| b.0);
+                    if node.entry.is_none() {
+                        // The packets between the entries of the subtree
+                        // match the entry above.
+                        give(set.empty(), &Some((e, k.clone())), None);
+                    }
                     give(set, &Some((e, k)), Some(n));
                     continue;
                 }

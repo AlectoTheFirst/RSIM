@@ -12,11 +12,11 @@ use rsim_core::{
 };
 use rsim_engine::EdgeInterface;
 use rsim_functions::{
-    DestinationNat, DeviceDelivery, Egress, EgressMode, FirewallPolicy, Ingress, Layer3HandOff,
-    Link, LinkEnd, LinkFacts, LocalInput, Meta, NatAction, Neighbour, NextHopResolution,
-    PolicyRoute, QosNotEvaluated, Route, RouteKind, RouteLookup, RouteNextHop, Rule as FRule,
-    RuleAction, SessionCommit, SessionLookup, SourceNat, Tag, VendorProfile, VrfSelection,
-    ZoneLookup, ZoneRole, ZoneScope,
+    DestinationNat, DeviceDelivery, Egress, EgressMode, Fib, FirewallPolicy, Ingress,
+    Layer3HandOff, Link, LinkEnd, LinkFacts, LocalInput, Meta, NatAction, Neighbour,
+    NextHopResolution, PolicyRoute, QosNotEvaluated, Route, RouteKind, RouteLookup, RouteNextHop,
+    Rule as FRule, RuleAction, SessionCommit, SessionLookup, SourceNat, Tag, VendorProfile,
+    VrfSelection, ZoneLookup, ZoneRole, ZoneScope,
 };
 
 use crate::collected::Collected;
@@ -584,7 +584,7 @@ impl L<'_> {
         }
     }
 
-    fn connected(&self, t: &mut TriePrefixTable<Route>, addrs: &Addrs) {
+    fn connected(&self, t: &mut Fib, addrs: &Addrs) {
         for (iface, list) in addrs {
             for (a, len, span) in list {
                 if *len < max_len(*a) {
@@ -603,13 +603,8 @@ impl L<'_> {
 
     /// The main FIB: the collected RIB, or else the connected and static
     /// routes of the config. The local routes are always in it.
-    fn main_fib(
-        &mut self,
-        col: &Collected,
-        addrs: &Addrs,
-        locals: &[(Prefix, Route)],
-    ) -> TriePrefixTable<Route> {
-        let mut t = TriePrefixTable::new();
+    fn main_fib(&mut self, col: &Collected, addrs: &Addrs, locals: &[(Prefix, Route)]) -> Fib {
+        let mut t = Fib::new();
         let rib: Vec<_> = col
             .routes
             .iter()
@@ -669,13 +664,8 @@ impl L<'_> {
 
     /// The FIB of a policy route table: its static routes and the local
     /// routes.
-    fn table_fib(
-        &mut self,
-        table: &str,
-        addrs: &Addrs,
-        locals: &[(Prefix, Route)],
-    ) -> TriePrefixTable<Route> {
-        let mut t = TriePrefixTable::new();
+    fn table_fib(&mut self, table: &str, addrs: &Addrs, locals: &[(Prefix, Route)]) -> Fib {
+        let mut t = Fib::new();
         let statics: Vec<_> = self
             .cfg
             .static_routes
@@ -692,12 +682,7 @@ impl L<'_> {
         t
     }
 
-    fn static_route(
-        &mut self,
-        t: &mut TriePrefixTable<Route>,
-        r: &crate::vyos::config::StaticRoute,
-        addrs: &Addrs,
-    ) {
+    fn static_route(&mut self, t: &mut Fib, r: &crate::vyos::config::StaticRoute, addrs: &Addrs) {
         let Ok(p) = r.prefix.parse::<Prefix>() else {
             self.note(format!(
                 "static route {}: the prefix is not valid",

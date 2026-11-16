@@ -11,6 +11,7 @@ use rsim_core::{
 };
 
 use crate::common::{Meta, push_nonempty};
+use crate::fib::{Fib, GroupRoutes};
 use crate::forwarding::meta_methods;
 use crate::rules::{Decision, Rule, RuleBody, RuleRef, UnknownCause, evaluate};
 
@@ -64,7 +65,7 @@ impl Route {
 #[derive(Clone, Debug)]
 pub struct RouteLookup {
     pub meta: Meta,
-    pub tables: BTreeMap<VrfId, TriePrefixTable<Route>>,
+    pub tables: BTreeMap<VrfId, Fib>,
     /// The function that gets the packets with no route, for example the
     /// lookup of the main table after a policy route table. `None` drops
     /// them.
@@ -76,7 +77,7 @@ pub struct RouteLookup {
 
 impl RouteLookup {
     pub fn heap_bytes(&self) -> usize {
-        self.tables.values().map(TriePrefixTable::heap_bytes).sum()
+        self.tables.values().map(Fib::heap_bytes).sum()
     }
 }
 
@@ -100,9 +101,9 @@ impl NetFunction for RouteLookup {
             .tables
             .values()
             .flat_map(|t| {
-                t.entries()
-                    .into_iter()
-                    .flat_map(|(_, r)| r.next_hops.iter().map(|n| n.next.clone()))
+                t.groups()
+                    .iter()
+                    .flat_map(|g| g.next_hops.iter().map(|n| n.next.clone()))
                     .collect::<Vec<_>>()
             })
             .chain(self.fallback.clone())
@@ -131,14 +132,14 @@ impl NetFunction for RouteLookup {
                 state,
             )];
         };
-        let part = input.partition_by_prefix(AddrField::Dst, table);
+        let (groups, unmatched, uncertain) = table.split(input, SAMPLE);
         let mut out = Vec::new();
-        for (prefix, route, set) in part.matched {
-            self.route_branches(&mut out, vrf, prefix, route, set, ctx, state);
+        for g in groups {
+            self.route_branches(&mut out, vrf, g, ctx, state);
         }
         let no_route = match &self.fallback {
             Some(next) => self.meta.forward(
-                part.unmatched,
+                unmatched.clone(),
                 next,
                 ReasonCode::NoRoute,
                 format!("no route in VRF {vrf} · next table"),
@@ -146,7 +147,7 @@ impl NetFunction for RouteLookup {
                 state,
             ),
             None => self.meta.drop(
-                part.unmatched,
+                unmatched,
                 ReasonCode::NoRoute,
                 format!("no route in VRF {vrf}"),
                 ctx,
@@ -157,7 +158,7 @@ impl NetFunction for RouteLookup {
         push_nonempty(
             &mut out,
             self.meta.unknown(
-                part.uncertain,
+                uncertain,
                 ReasonCode::UnknownAttribute,
                 "the destination address is not known",
                 ctx,
@@ -168,32 +169,42 @@ impl NetFunction for RouteLookup {
     }
 }
 
+/// The number of routes that a step names for a group of routes.
+const SAMPLE: usize = 5;
+
 impl RouteLookup {
-    #[allow(clippy::too_many_arguments)]
+    /// The branches of one next-hop group. A group with one route names its
+    /// prefix; a group with more routes names their number and the first of
+    /// them.
     fn route_branches(
         &self,
         out: &mut Vec<Branch>,
         vrf: &VrfId,
-        prefix: Prefix,
-        route: &Route,
-        set: PacketSet,
+        g: GroupRoutes<'_>,
         ctx: &Context,
         state: &FlowState,
     ) {
-        match route.kind {
+        let what = if g.count == 1 {
+            g.sample[0].to_string()
+        } else {
+            let list: Vec<String> = g.sample.iter().map(ToString::to_string).collect();
+            let more = g.count - g.sample.len();
+            if more > 0 {
+                format!("{} routes ({} and {more} more)", g.count, list.join(", "))
+            } else {
+                format!("{} routes ({})", g.count, list.join(", "))
+            }
+        };
+        let set = g.packets;
+        let spans = g.spans;
+        match g.group.kind {
             RouteKind::Local => {
+                let detail = format!("{what} is an address of {}", self.meta.device);
                 if let Some(next) = &self.local {
                     out.push(
                         self.meta
-                            .forward(
-                                set,
-                                next,
-                                ReasonCode::Routed,
-                                format!("{prefix} is an address of {}", self.meta.device),
-                                ctx.clone(),
-                                state,
-                            )
-                            .with_spans(route.spans.clone()),
+                            .forward(set, next, ReasonCode::Routed, detail, ctx.clone(), state)
+                            .with_spans(spans),
                     );
                     return;
                 }
@@ -202,14 +213,11 @@ impl RouteLookup {
                         .branch(
                             set,
                             Outcome::Deliver(Destination::Device(self.meta.device.clone())),
-                            Reason::new(
-                                ReasonCode::Delivered,
-                                format!("{prefix} is an address of {}", self.meta.device),
-                            ),
+                            Reason::new(ReasonCode::Delivered, detail),
                             ctx.clone(),
                             state,
                         )
-                        .with_spans(route.spans.clone()),
+                        .with_spans(spans),
                 );
                 return;
             }
@@ -219,40 +227,55 @@ impl RouteLookup {
                         .drop(
                             set,
                             ReasonCode::NullRoute,
-                            format!("discard route {prefix} in VRF {vrf}"),
+                            format!("discard route {what} in VRF {vrf}"),
                             ctx,
                             state,
                         )
-                        .with_spans(route.spans.clone()),
+                        .with_spans(spans),
                 );
                 return;
             }
             RouteKind::Connected | RouteKind::Static => {}
         }
-        let count = u32::try_from(route.next_hops.len()).expect("too many next hops");
+        let hops = &g.group.next_hops;
+        let count = u32::try_from(hops.len()).expect("too many next hops");
         if count == 0 {
             out.push(
                 self.meta
                     .unknown(
                         set,
                         ReasonCode::IncompleteTable,
-                        format!("route {prefix} in VRF {vrf} has no next hop"),
+                        format!("route {what} in VRF {vrf} has no next hop"),
                         ctx,
                         state,
                     )
-                    .with_spans(route.spans.clone()),
+                    .with_spans(spans),
             );
             return;
         }
-        for (i, nh) in route.next_hops.iter().enumerate() {
+        // The key of the choice comes from the content of the group, so it
+        // is the same in each run.
+        let key = if g.count == 1 {
+            format!("{vrf} {what}")
+        } else {
+            let vias: Vec<String> = hops
+                .iter()
+                .map(|nh| match nh.gateway {
+                    Some(gw) => format!("{gw}@{}", nh.interface),
+                    None => nh.interface.to_string(),
+                })
+                .collect();
+            format!("{vrf} group {}", vias.join(","))
+        };
+        for (i, nh) in hops.iter().enumerate() {
             let mut c = ctx.clone();
             c.egress_interface = Attr::Known(nh.interface.clone());
             c.next_hop = Attr::Known(match nh.gateway {
-                Some(g) => NextHop::Gateway(g),
+                Some(gw) => NextHop::Gateway(gw),
                 None => NextHop::Connected,
             });
             let via = match nh.gateway {
-                Some(g) => format!("via {g} on {}", nh.interface),
+                Some(gw) => format!("via {gw} on {}", nh.interface),
                 None => format!("connected on {}", nh.interface),
             };
             let mut b = self
@@ -261,15 +284,15 @@ impl RouteLookup {
                     set.clone(),
                     &nh.next,
                     ReasonCode::Routed,
-                    format!("{prefix} in VRF {vrf} {via}"),
+                    format!("{what} in VRF {vrf} {via}"),
                     c,
                     state,
                 )
-                .with_spans(route.spans.clone());
+                .with_spans(spans.clone());
             if count > 1 {
                 b = b.with_alternative(Alternative {
                     choice: self.meta.id.clone(),
-                    key: format!("{vrf} {prefix}"),
+                    key: key.clone(),
                     index: u32::try_from(i).expect("too many next hops"),
                     count,
                     label: via,

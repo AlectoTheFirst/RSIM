@@ -177,7 +177,7 @@ impl Dev {
         routes: &[(&str, RouteKind, &[(&str, Option<&str>, &str)])],
         line: u32,
     ) -> RouteLookup {
-        let mut t = TriePrefixTable::new();
+        let mut t = rsim_functions::Fib::new();
         for (i, (p, kind, nhs)) in routes.iter().enumerate() {
             let nh = nhs
                 .iter()
