@@ -5,6 +5,9 @@
 //! diagram in the arena of its query. Functions use only the operations of
 //! this interface. A field with no constraint has all values.
 
+use std::collections::BTreeMap;
+
+use crate::addr::addr_bit;
 use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -187,48 +190,6 @@ pub enum Uniform<T> {
     Varies,
     /// The set is empty.
     None,
-}
-
-/// A binary trie of prefixes of one address family, for the prefix
-/// partition of a set.
-struct Trie {
-    nodes: Vec<TrieNode>,
-}
-
-#[derive(Clone, Copy)]
-struct TrieNode {
-    child: [Option<usize>; 2],
-    /// The index of the prefix in the list that built the trie.
-    entry: Option<usize>,
-}
-
-impl Trie {
-    fn new(prefixes: impl Iterator<Item = Prefix>) -> Trie {
-        let mut nodes = vec![TrieNode {
-            child: [None, None],
-            entry: None,
-        }];
-        for (i, p) in prefixes.enumerate() {
-            let mut n = 0;
-            for d in 0..p.len() {
-                let b = usize::from(p.bit(d));
-                n = match nodes[n].child[b] {
-                    Some(c) => c,
-                    None => {
-                        nodes.push(TrieNode {
-                            child: [None, None],
-                            entry: None,
-                        });
-                        let c = nodes.len() - 1;
-                        nodes[n].child[b] = Some(c);
-                        c
-                    }
-                };
-            }
-            nodes[n].entry = Some(i);
-        }
-        Trie { nodes }
-    }
 }
 
 /// The direction of a session lookup.
@@ -548,65 +509,78 @@ impl PacketSet {
                 }
             }
         }
-        // A walk along a binary trie of the entries. It visits only the
-        // trie nodes that hold packets of the set.
-        let entries = table.entries();
-        let mut parts: Vec<Option<PacketSet>> = vec![None; entries.len()];
+        // A walk along the trie of the table. It visits only the trie nodes
+        // that hold packets of the set. The bits between the depths of 2
+        // nodes are the bits of the key of the lower node; the packets with
+        // another bit there get the best entry above.
+        let mut parts: BTreeMap<usize, PacketSet> = BTreeMap::new();
         let mut unmatched = self.empty();
         for v6 in [false, true] {
-            let trie = Trie::new(
-                entries
-                    .iter()
-                    .map(|(p, _)| *p)
-                    .filter(|p| p.is_ipv4() != v6),
-            );
-            let ids: Vec<usize> = entries
-                .iter()
-                .enumerate()
-                .filter(|(_, (p, _))| p.is_ipv4() != v6)
-                .map(|(i, _)| i)
-                .collect();
             let fam = known.in_family(v6);
             if fam.is_empty() {
                 continue;
             }
-            let off = if v6 { 0 } else { 96 };
-            let width = if v6 { 128 } else { 32 };
-            // (trie node, depth, packets, best entry above)
-            let mut stack = vec![(0usize, 0u32, fam, None::<usize>)];
-            while let Some((n, depth, set, best)) = stack.pop() {
-                let node = &trie.nodes[n];
-                let best = node.entry.map(|e| ids[e]).or(best);
-                let mut give = |set: PacketSet, best: Option<usize>| match best {
-                    Some(e) => {
-                        parts[e] = Some(match parts[e].take() {
-                            Some(x) => x.union(&set),
-                            None => set,
-                        });
-                    }
-                    None => unmatched = unmatched.union(&set),
-                };
-                if depth == width || node.child == [None, None] {
+            let Some(root) = table.walk_root(v6) else {
+                unmatched = unmatched.union(&fam);
+                continue;
+            };
+            let off: u32 = if v6 { 0 } else { 96 };
+            let width: u8 = if v6 { 128 } else { 32 };
+            let bit = |i: u8| f.start + off + u32::from(i);
+            let mut give = |set: PacketSet, best: Option<usize>| match best {
+                Some(e) => {
+                    let x = match parts.remove(&e) {
+                        Some(x) => x.union(&set),
+                        None => set,
+                    };
+                    parts.insert(e, x);
+                }
+                None => unmatched = unmatched.union(&set),
+            };
+            // (trie node, packets, best entry above)
+            let mut stack = vec![(root, fam, None::<usize>)];
+            while let Some((n, set, best)) = stack.pop() {
+                let node = table.walk_node(n);
+                let best = node.entry.map(|e| e.0).or(best);
+                if node.depth == width || node.children == [None, None] {
                     give(set, best);
                     continue;
                 }
-                let (zero, one) = set.split_bit(f.start + off + depth);
+                let (zero, one) = set.split_bit(bit(node.depth));
                 for (b, part) in [(1usize, one), (0usize, zero)] {
                     if part.is_empty() {
                         continue;
                     }
-                    match node.child[b] {
-                        Some(c) => stack.push((c, depth + 1, part, best)),
-                        None => give(part, best),
+                    let Some(c) = node.children[b] else {
+                        give(part, best);
+                        continue;
+                    };
+                    let child = table.walk_node(c);
+                    let mut part = part;
+                    for i in node.depth + 1..child.depth {
+                        let (z, o) = part.split_bit(bit(i));
+                        let (keep, other) = if addr_bit(child.key, i) {
+                            (o, z)
+                        } else {
+                            (z, o)
+                        };
+                        if !other.is_empty() {
+                            give(other, best);
+                        }
+                        part = keep;
+                        if part.is_empty() {
+                            break;
+                        }
+                    }
+                    if !part.is_empty() {
+                        stack.push((c, part, best));
                     }
                 }
             }
         }
-        for (i, part) in parts.into_iter().enumerate() {
-            if let Some(set) = part {
-                let (p, v) = entries[i];
-                matched.push((p, v, set));
-            }
+        for (i, set) in parts {
+            let (p, v) = table.entry(i);
+            matched.push((p, v, set));
         }
         matched.sort_by_key(|(p, _, _)| *p);
         PrefixPartition {
