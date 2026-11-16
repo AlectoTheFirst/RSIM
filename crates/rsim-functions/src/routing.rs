@@ -301,6 +301,10 @@ pub struct NextHopResolution {
     pub complete: bool,
     /// The egress function of each interface.
     pub egress: BTreeMap<InterfaceId, FunctionId>,
+    /// The point-to-point interfaces, for example PPPoE or a tunnel, with
+    /// the owner of the peer. The next hop on such an interface is always
+    /// the peer, so it needs no neighbour entry.
+    pub point_to_point: BTreeMap<InterfaceId, String>,
 }
 
 impl NextHopResolution {
@@ -422,6 +426,24 @@ impl NetFunction for NextHopResolution {
             )];
         };
         let mut out = Vec::new();
+        if let Some(owner) = self.point_to_point.get(iface) {
+            let peer = Neighbour {
+                interface: iface.clone(),
+                target: NeighbourTarget::Link,
+                owner: owner.clone(),
+                spans: self.meta.provenance.clone(),
+            };
+            self.resolve(
+                &mut out,
+                "the peer".to_string(),
+                &[peer],
+                iface,
+                input.clone(),
+                ctx,
+                state,
+            );
+            return out;
+        }
         match nh {
             NextHop::Gateway(g) => {
                 let entries = self

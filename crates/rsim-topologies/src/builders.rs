@@ -161,6 +161,7 @@ impl Dev {
                 .iter()
                 .map(|i| (InterfaceId::new(*i), self.id(&format!("out/{i}"))))
                 .collect(),
+            point_to_point: Default::default(),
         }
     }
 

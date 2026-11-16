@@ -1,15 +1,18 @@
 //! VyOS 1.4 and 1.5.
 
 pub mod config;
+pub mod lower;
+mod profile;
 mod table;
 
 use std::collections::BTreeSet;
 
-pub use config::{Config, read};
-pub use table::table;
-
 use crate::coverage::{State, Table};
 use crate::stanza::{Document, Stanza};
+pub use config::{Config, read};
+pub use lower::{Lowered, lower};
+pub use profile::profile;
+pub use table::table;
 
 /// The paths of the handled stanzas that no handler read. A correct handler
 /// set gives an empty list.

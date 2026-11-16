@@ -2,6 +2,7 @@
 //! instances of the twin. It has no network code, no async runtime, no
 //! clock and no randomness.
 
+pub mod collected;
 pub mod coverage;
 pub mod stanza;
 pub mod vyos;

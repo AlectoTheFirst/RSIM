@@ -2466,6 +2466,10 @@ dependencies = [
 name = "rsim-ingest"
 version = "0.1.0"
 dependencies = [
+ "arrow-array",
+ "rsim-core",
+ "rsim-engine",
+ "rsim-functions",
  "rsim-store",
  "serde_json",
 ]
