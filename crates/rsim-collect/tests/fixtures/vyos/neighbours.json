@@ -1,0 +1,4 @@
+[{"dst":"192.0.2.10","dev":"eth0","lladdr":"00:00:5e:00:53:10","state":["REACHABLE"]},
+ {"dst":"198.51.100.254","dev":"eth1","lladdr":"00:00:5e:00:53:fe","state":["STALE"]},
+ {"dst":"2001:db8:1::10","dev":"eth0","lladdr":"00:00:5e:00:53:10","router":null,"state":["DELAY"]},
+ {"dst":"192.0.2.99","dev":"eth0","state":["FAILED"]}]

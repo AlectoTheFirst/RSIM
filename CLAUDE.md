@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-Steps 1 and 1b of the build are complete. Step 2 is in progress: the packet-set engine in `rsim-dd` and set-mode execution. Step 2 comes in 3 pull requests. Pull request 1 is the crate `rsim-dd`. Pull request 2 puts `PacketSet` on `rsim-dd`. Pull request 3 adds the set queries. `../rsim-project/roadmap.md` gives the order. The Cargo workspace has 7 crates in `crates/`: `rsim-core`, `rsim-dd`, `rsim-functions`, `rsim-engine`, `rsim-topologies`, `rsim-cli` and `rsim-mcp`. The other crates of section 3 come with their steps.
+Steps 1, 1b and 2 of the build are complete. Step 3 is in progress: collection, the snapshot store, the snapshot view and ingestion. Step 3 comes in 5 pull requests. Pull request 1 is the crates `rsim-store` and `rsim-collect`, with the SSH and HTTPS transports. `../rsim-project/roadmap.md` gives the order. The Cargo workspace has 9 crates in `crates/`: `rsim-core`, `rsim-dd`, `rsim-functions`, `rsim-engine`, `rsim-topologies`, `rsim-cli`, `rsim-mcp`, `rsim-store` and `rsim-collect`. The other crates of section 3 come with their steps.
 
 The two design documents are in the adjacent folder `../rsim-project/`. This repository is public, so the design documents stay out of it. Do not commit the design documents, real configs or collected state to this repository.
 
@@ -54,6 +54,11 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | Decision diagram tests | `cargo test -p rsim-dd` |
 | Decision diagram tests, release build with the validator | `cargo test -p rsim-dd --release --features dd-check` |
 | Decision diagram benchmark | `cargo bench -p rsim-dd --bench ops` |
+| Snapshot store tests | `cargo test -p rsim-store` |
+| Collection tests | `cargo test -p rsim-collect` |
+| SSH transport tests | `cargo test -p rsim-collect --test ssh` |
+| HTTPS transport tests | `cargo test -p rsim-collect --test https` |
+| Collection benchmark | `cargo bench -p rsim-collect --bench cycle` |
 
 The hand-built topologies are in the crate `rsim-topologies`, with one module for each topology in `crates/rsim-topologies/src/`. The tests and the benchmarks of `rsim-engine` use it as a development dependency. `rsim-topologies::builtin(name)` gives the twin of a built-in topology.
 
@@ -64,6 +69,8 @@ The stored JSON answers of the CLI tests are in `crates/rsim-cli/tests/golden/`.
 The tests of `rsim-dd` turn on the feature `dd-shadow` through a development dependency of the crate on itself. Each public operation then also runs in a plain BDD, and the 2 results must be the same set. A benchmark turns the shadow check off with `Dd::set_shadow(false)`. The OxiDD oracle in `crates/rsim-dd/tests/oracle.rs` compares the results with OxiDD on 2,289 levels. OxiDD is a development dependency only.
 
 `crates/rsim-cli/clippy.toml` and `crates/rsim-mcp/clippy.toml` deny the file write functions and the network socket types. Only a test helper can allow them.
+
+`rsim-store` holds the format of the snapshot store, the writer and the reader. It has no network code. `rsim-collect` is the only crate that talks to devices. It runs a collection cycle as stages with bounded channels: schedule, fetch, classify and hash, extract, and store. The SSH transport is in `ssh.rs`, the HTTPS transport in `https.rs`, and the credentials and the pins of host keys and certificates in `trust.rs`. The features `ssh` and `https` turn on the transports, and `vyos` and `unifi` turn on the sources. The pipeline tests use the fake transport in `fake.rs` and the synthetic fixtures in `crates/rsim-collect/tests/fixtures/`. The fixtures use only documentation addresses and documentation MAC addresses. The transport tests in `tests/ssh.rs` and `tests/https.rs` run the real transports against servers on 127.0.0.1 in the test process. The test keys and certificates are made at test time. Do not commit private keys. The scheduler tests and the cycle tests use paused `tokio` time.
 
 CI is in `.github/workflows/ci.yml`. For each pull request, it runs the format check, clippy, the build and the tests on Linux `amd64`.
 
@@ -146,10 +153,13 @@ Docs, code comments, docstrings, commit-tracked notes and test descriptions stat
 - Routing convergence gives one of three results: `Converged`, `MultipleStableOutcomes` or `NoConvergence`. Detect the last two. Do not hide them behind an iteration limit.
 - The compiled twin is immutable for each version and is not persisted. The source snapshots are persisted append-only. Rebuild the twin from the sources.
 - Batfish is a test aid for oracle comparison only. Do not make it a dependency of the product.
+- The product is Rust. `ring` is the only dependency that builds C code, and only `rsim-collect` uses it, for SSH and TLS. Do not add another dependency that builds C or C++ code. Do not turn on `aws-lc-rs` in `russh`, `rustls` or `tokio-rustls`. `blake3` uses its `pure` feature, and `parquet` uses the pure Rust Snappy codec. On Linux, the dependency tree has no `-sys` crate. On macOS, `chrono` adds `core-foundation-sys`, a binding to a system framework.
+- `russh` is pinned to one exact version. Turn on the `Legacy` SSH algorithm set only for the devices that need it.
+- Only `rsim-collect` uses an async runtime. A clock and random bytes are used only in `rsim-collect` and in the writer of `rsim-store`. The reader of `rsim-store` uses neither.
 
 ## Build order
 
-Section 13 of the brief gives the steps, each with a "Done when" condition. Do the steps in sequence. Steps 1 and 1b are complete. Step 1b gives these rules for `rsim-cli` and `rsim-mcp`:
+Section 13 of the brief gives the steps, each with a "Done when" condition. Do the steps in sequence. Steps 1, 1b and 2 are complete. Step 1b gives these rules for `rsim-cli` and `rsim-mcp`:
 
 - `rsim-topologies` holds the hand-built topologies. The tests, the benchmarks, `rsim-cli` and `rsim-mcp` use it.
 - `rsim-cli` and `rsim-mcp` load a built-in topology by name and run a path query for one packet with its reply.
@@ -160,7 +170,9 @@ Section 13 of the brief gives the steps, each with a "Done when" condition. Do t
 
 `../rsim-project/design/step-1b-cli-mcp.md` gives the design of step 1b.
 
-Step 2 is the current step: the packet-set engine in `rsim-dd` and set-mode execution. Pull request 1 is the crate `rsim-dd`. Pull request 2 is `PacketSet` on `rsim-dd`, the sessions as relations, set-mode execution, the ingress resolver, JSON version 2 and the JSON set form. Pull request 3 is the set input of the query, `rsim set`, `set_query` and the set benchmark. `../rsim-project/design/step-2-packet-set.md` gives the design.
+Step 2 is complete: the packet-set engine in `rsim-dd`, `PacketSet` on `rsim-dd`, the sessions as relations, set-mode execution, the ingress resolver, JSON version 2, the set input of the query, `rsim set`, `set_query` and the set benchmark. `../rsim-project/design/step-2-packet-set.md` gives the design.
+
+Step 3 is the current step. Pull request 1 is `rsim-store` and `rsim-collect` with the SSH and HTTPS transports. Pull requests 2 and 3 are `rsim-ingest` for VyOS and for UniFi. Pull request 4 is the snapshot view. Pull request 5 is the run on the real estate. `../rsim-project/design/step-3-collect.md` gives the design.
 
 Section 14 gives the test types. The property tests are: branches partition the input in each alternative of a forwarding choice and in each copy of a flood, the result is deterministic, and concrete mode agrees with set mode.
 
@@ -174,4 +186,4 @@ Section 15 of the brief lists the decisions that belong to the owner. Each item 
 
 Do not make these decisions silently.
 
-`../rsim-project/design/step-1b-cli-mcp.md` gives the design of step 1b. `../rsim-project/design/step-2-packet-set.md` gives the design of step 2. If your work needs a decision that the brief and the design notes do not have, ask the owner.
+`../rsim-project/design/step-1b-cli-mcp.md` gives the design of step 1b. `../rsim-project/design/step-2-packet-set.md` gives the design of step 2. `../rsim-project/design/step-3-collect.md` gives the design of step 3. If your work needs a decision that the brief and the design notes do not have, ask the owner.

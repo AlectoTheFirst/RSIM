@@ -1,0 +1,3 @@
+[{"ifname":"eth0","addr_info":[{"family":"inet","local":"192.0.2.1","prefixlen":24,"valid_life_time":4294967295,"preferred_life_time":4294967295},{"family":"inet6","local":"2001:db8:1::1","prefixlen":64,"valid_life_time":86000,"preferred_life_time":14000}]},
+ {"ifname":"eth1","addr_info":[{"family":"inet","local":"198.51.100.1","prefixlen":24}]},
+ {"ifname":"eth1.10","addr_info":[{"family":"inet","local":"203.0.113.1","prefixlen":26}]}]

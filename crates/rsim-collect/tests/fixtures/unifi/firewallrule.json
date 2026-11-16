@@ -1,0 +1,1 @@
+{"meta":{"rc":"ok"},"data":[{"_id":"f1","ruleset":"LAN_IN","rule_index":2000,"action":"drop","name":"guest to lan","enabled":true}]}

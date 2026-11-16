@@ -1,0 +1,3 @@
+Version:          VyOS 1.4.0
+Release train:    sagitta
+Uptime:           1 day,  2:03
