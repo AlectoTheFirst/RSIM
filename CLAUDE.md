@@ -64,6 +64,7 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | Collection benchmark | `cargo bench -p rsim-collect --bench cycle` |
 | Ingestion tests | `cargo test -p rsim-ingest` |
 | Layer 2 tests | `cargo test -p rsim-engine --test layer2` |
+| Forwarding table benchmark at internet scale | `cargo bench -p rsim-functions --bench fib`. `RSIM_FIB_SKIP_ALL=1` leaves out the split of all destinations, which does not scale yet. |
 | Twin of the newest snapshot of a store | `cargo run -p rsim-ingest --example estate -- <data folder>`. Add `<source> <destination> tcp\|udp <port>` for a path query; the ingress comes from the attachment of the source. |
 | Coverage of a VyOS config | `cargo run -p rsim-ingest --example vyos_coverage < config.json` |
 | Twin of a VyOS device of a store | `cargo run -p rsim-ingest --example vyos_snapshot -- <data folder> <device>`. Add `<ingress interface> <source> <destination> tcp\|udp <port>` for a path query. |
@@ -71,6 +72,8 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 The hand-built topologies are in the crate `rsim-topologies`, with one module for each topology in `crates/rsim-topologies/src/`. `layer2_site()` is a switched site behind a router for the layer 2 tests; it is not a built-in topology. The tests and the benchmarks of `rsim-engine` use it as a development dependency. `rsim-topologies::builtin(name)` gives the twin of a built-in topology.
 
 The stored JSON answers of the CLI tests are in `crates/rsim-cli/tests/golden/`. `set-mini-enterprise.json` is the answer of the set query `SET_QUERY` in `crates/rsim-cli/tests/cli.rs`; make it again with `rsim set` and these flags. The CLI test and the MCP stdio test compare their outputs with these files. If an intended change alters the JSON output, make the files again with `rsim path <topology> <flags> --format json`. The flags of each file are in `QUERIES` in `crates/rsim-cli/tests/cli.rs`.
+
+The prefix table in `rsim-core/src/prefix_table.rs` is a path-compressed trie with a read-only walk; `PacketSet::partition_by_prefix` and `PacketSet::partition_by_group` use the walk. `rsim-functions/src/fib.rs` holds the forwarding table `Fib`: the trie, the interned next-hop groups and compact spans. `RouteLookup` splits a packet set by next-hop group, so a set query gives one branch for each forwarding result. `crates/rsim-core/tests/prefix_oracle.rs` compares the trie and both partitions with a brute-force longest-prefix match. `../rsim-project/design/rib-fib.md` gives the design.
 
 `rsim-core` keeps the packet sets in `packet_set.rs`, the bit table in `bits.rs`, the arenas in `set.rs` and the description of a set as members in `describe.rs`. `crates/rsim-core/tests/explicit_oracle.rs` compares each set operation with an explicit list of packet pairs. A path query runs on the set of its packet; the design note gives the rule for an unstated field. The ingress of a query comes from `--ingress` or from the attachment records and edge interfaces of the twin.
 

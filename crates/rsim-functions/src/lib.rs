@@ -3,6 +3,7 @@
 //! route lookup, next-hop resolution and egress.
 
 pub mod common;
+pub mod fib;
 pub mod forwarding;
 pub mod layer2;
 pub mod nat;
@@ -14,6 +15,7 @@ pub mod rules;
 pub mod session;
 
 pub use common::Meta;
+pub use fib::{Fib, GroupRoutes, NextHopGroup};
 pub use forwarding::{
     DeviceDelivery, Egress, EgressMode, Ingress, Link, LocalInput, Tag, VrfSelection, ZoneLookup,
     ZoneRole,

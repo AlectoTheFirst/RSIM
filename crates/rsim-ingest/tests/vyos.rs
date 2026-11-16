@@ -347,4 +347,38 @@ mod twin {
             first(&a).1
         );
     }
+
+    #[test]
+    fn a_route_with_no_usable_next_hop_is_unknown_and_hides_no_shorter_route() {
+        let cfg = vyos::read(&read_json(CONFIG).unwrap());
+        let mut col = collected();
+        col.routes.push(RouteRow {
+            vrf: "default".into(),
+            prefix: "198.18.0.0/15".into(),
+            protocol: "bgp".into(),
+            selected: true,
+            next_hop: Some("203.0.113.1".into()),
+            interface: None,
+            span: row_span("r1", "routes", "b1", 9),
+        });
+        let low = vyos::lower(
+            "r1",
+            "r1/config",
+            &vyos::profile(),
+            &cfg,
+            &col,
+            &Default::default(),
+        );
+        let mut b = TwinBuilder::new();
+        for f in low.functions {
+            b.add_arc(f);
+        }
+        for e in low.edges {
+            b.edge_interface(e);
+        }
+        let t = b.build().unwrap();
+        let a = run(&t, "eth0.10", tcp("192.0.2.30", "198.18.1.1", 443));
+        let (_, v) = first(&a);
+        assert_eq!(code(&v), Some(ReasonCode::IncompleteTable), "{v:?}");
+    }
 }

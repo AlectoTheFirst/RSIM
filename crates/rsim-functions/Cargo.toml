@@ -10,5 +10,9 @@ repository.workspace = true
 [dependencies]
 rsim-core.workspace = true
 
+[[bench]]
+name = "fib"
+harness = false
+
 [lints]
 workspace = true

@@ -37,14 +37,14 @@ pub use id::{
 };
 pub use outcome::{Destination, Outcome, Reason, ReasonCode, Verdict, VerdictKind};
 pub use packet_set::{
-    AddrField, PacketPair, PacketSet, PrefixPartition, Rewrite, SessionDirection, SessionSplit,
-    Split, Uniform,
+    AddrField, GroupPart, GroupPartition, PacketPair, PacketSet, PrefixPartition, Rewrite,
+    SessionDirection, SessionSplit, Split, Uniform,
 };
 pub use predicate::{
     AddrCond, FlagsCond, FragmentCond, MacCond, Match, MatchClass, OpenField, PortCond, RangeCond,
     RulePredicate, ValueCond,
 };
-pub use prefix_table::{PrefixTable, TriePrefixTable};
+pub use prefix_table::{PrefixTable, TriePrefixTable, WalkNode};
 pub use provenance::SourceSpan;
 pub use rsim_dd::DdError;
 pub use set::{SetArena, SetBase};
