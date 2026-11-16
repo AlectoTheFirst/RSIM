@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use crate::coverage::{State, Table};
 use crate::stanza::{Document, Stanza};
 pub use config::{Config, read};
-pub use lower::{Lowered, lower};
+pub use lower::{Layer2Links, Lowered, interface_addresses, interface_mac, lower, physical};
 pub use profile::profile;
 pub use table::table;
 

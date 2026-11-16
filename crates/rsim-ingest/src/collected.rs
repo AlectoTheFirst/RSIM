@@ -5,7 +5,7 @@ use arrow_array::cast::AsArray;
 use arrow_array::types::UInt64Type;
 use arrow_array::{Array, RecordBatch};
 use rsim_core::SourceSpan;
-use rsim_store::{ADDRESSES, NEIGHBOURS, ROUTES, Snapshot, Store, StoreError, TableSchema};
+use rsim_store::{ADDRESSES, LINKS, NEIGHBOURS, ROUTES, Snapshot, Store, StoreError, TableSchema};
 
 /// An address of an interface, for example `192.0.2.1/24`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,6 +37,16 @@ pub struct NeighbourRow {
     pub span: SourceSpan,
 }
 
+/// A link of the device: the interface, its MAC and its parent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkRow {
+    pub interface: String,
+    pub mac: Option<String>,
+    pub parent: Option<String>,
+    pub vlan: Option<u64>,
+    pub span: SourceSpan,
+}
+
 /// The collected state of one device.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Collected {
@@ -44,6 +54,7 @@ pub struct Collected {
     /// The routes. Empty if the device has no collected RIB.
     pub routes: Vec<RouteRow>,
     pub neighbours: Vec<NeighbourRow>,
+    pub links: Vec<LinkRow>,
 }
 
 /// The source span of a row: the device, the table, the blob of its section
@@ -129,6 +140,15 @@ pub fn read(store: &Store, snapshot: &Snapshot, device: &str) -> Result<Collecte
                 mac: c.s("mac", i),
                 state: c.s("state", i),
                 span: c.span(device, NEIGHBOURS.name, i),
+            })
+        })?,
+        links: rows(store, snapshot, &LINKS, device, |c, i| {
+            Some(LinkRow {
+                interface: c.s("interface", i)?,
+                mac: c.s("mac", i),
+                parent: c.s("parent", i),
+                vlan: c.u("vlan", i),
+                span: c.span(device, LINKS.name, i),
             })
         })?,
     })

@@ -1,0 +1,5 @@
+{"data": [
+  {"_id": "n-default", "name": "Default", "purpose": "corporate", "vlan_enabled": false, "ip_subnet": "192.0.2.193/27", "dhcpd_enabled": true},
+  {"_id": "n-lan", "name": "LAN", "purpose": "vlan-only", "vlan": 10, "vlan_enabled": true},
+  {"_id": "n-guest", "name": "GUEST", "purpose": "vlan-only", "vlan": 110, "vlan_enabled": true, "is_nat": true}
+], "meta": {"rc": "ok"}}

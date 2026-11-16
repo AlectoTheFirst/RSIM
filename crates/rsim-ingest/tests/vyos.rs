@@ -119,12 +119,20 @@ mod twin {
                 state: Some("REACHABLE".into()),
                 span: row_span("r1", "neighbours", "b3", 0),
             }],
+            links: Vec::new(),
         }
     }
 
     fn build() -> (Twin, Vec<String>) {
         let cfg = vyos::read(&read_json(CONFIG).unwrap());
-        let low = vyos::lower("r1", "r1/config", &vyos::profile(), &cfg, &collected());
+        let low = vyos::lower(
+            "r1",
+            "r1/config",
+            &vyos::profile(),
+            &cfg,
+            &collected(),
+            &Default::default(),
+        );
         let mut b = TwinBuilder::new();
         for f in low.functions {
             b.add_arc(f);

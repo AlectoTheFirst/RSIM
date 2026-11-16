@@ -6,15 +6,16 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use rsim_core::{
-    AddrCond, FunctionId, InterfaceId, Match, NeighbourTarget, NetFunction, ObjectId, PortCond,
-    Prefix, PrefixTable, RulePredicate, SourceSpan, TriePrefixTable, ValueCond, VrfId, ZoneId,
+    AddrCond, FieldValue, FunctionId, InterfaceId, Mac, Match, NeighbourTarget, NetFunction,
+    ObjectId, PortCond, Prefix, PrefixTable, Rewrite, RulePredicate, SourceSpan, TriePrefixTable,
+    ValueCond, VrfId, ZoneId,
 };
 use rsim_engine::EdgeInterface;
 use rsim_functions::{
-    DestinationNat, DeviceDelivery, Egress, EgressMode, FirewallPolicy, Ingress, LocalInput, Meta,
-    NatAction, Neighbour, NextHopResolution, PolicyRoute, QosNotEvaluated, Route, RouteKind,
-    RouteLookup, RouteNextHop, Rule as FRule, RuleAction, SessionCommit, SessionLookup, SourceNat,
-    VendorProfile, VrfSelection, ZoneLookup, ZoneRole, ZoneScope,
+    DestinationNat, DeviceDelivery, Egress, EgressMode, FirewallPolicy, Ingress, Layer3HandOff,
+    Link, LocalInput, Meta, NatAction, Neighbour, NextHopResolution, PolicyRoute, QosNotEvaluated,
+    Route, RouteKind, RouteLookup, RouteNextHop, Rule as FRule, RuleAction, SessionCommit,
+    SessionLookup, SourceNat, Tag, VendorProfile, VrfSelection, ZoneLookup, ZoneRole, ZoneScope,
 };
 
 use crate::collected::Collected;
@@ -97,13 +98,29 @@ fn addresses(cfg: &Config, col: &Collected) -> Addrs {
     m
 }
 
-/// Lowers one VyOS device.
+/// The layer 2 peer of each physical interface: the ingress function of
+/// the switch port on the other end of the link, and the provenance of the
+/// link.
+pub type Layer2Links = BTreeMap<String, (FunctionId, Vec<SourceSpan>)>;
+
+/// The physical interface and the VLAN of an interface name such as
+/// `eth0.10`.
+pub fn physical(name: &str) -> (&str, Option<u16>) {
+    match name.split_once('.') {
+        Some((p, v)) => (p, v.parse().ok()),
+        None => (name, None),
+    }
+}
+
+/// Lowers one VyOS device. `l2` gives the switch port of each physical
+/// interface with a layer 2 link.
 pub fn lower(
     device: &str,
     file: &str,
     profile: &VendorProfile,
     cfg: &Config,
     col: &Collected,
+    l2: &Layer2Links,
 ) -> Lowered {
     let mut l = L {
         dev: device,
@@ -430,13 +447,52 @@ pub fn lower(
         }
         let span = l.span(i.lines);
         let meta = l.meta(&format!("out/{}", i.name), vec![span]);
+        let (phys, vlan) = physical(&i.name);
+        let joined = l2.get(phys).zip(interface_mac(col, phys));
+        let (link, rewrite, tag) = match joined {
+            Some(((peer, prov), m)) => (
+                Some(Link {
+                    peer: Some(peer.clone()),
+                    delay_ns: None,
+                    provenance: prov.clone(),
+                }),
+                Rewrite {
+                    src_mac: Some(FieldValue::Known(m)),
+                    ..Rewrite::default()
+                },
+                vlan.map_or(Tag::Untagged, Tag::Vlan),
+            ),
+            None => (None, Rewrite::default(), Tag::Keep),
+        };
         l.add(Egress {
             meta,
             interface: InterfaceId::new(&i.name),
             mode: EgressMode::Routed,
-            link: None,
-            rewrite: Default::default(),
-            tag: Default::default(),
+            link,
+            rewrite,
+            tag,
+        });
+    }
+    for (phys, (_, prov)) in l2 {
+        let Some(m) = interface_mac(col, phys) else {
+            l.note(format!(
+                "{phys}: no collected MAC, so the layer 2 link is not lowered"
+            ));
+            continue;
+        };
+        let has = |n: &str| active.iter().any(|i| i.name == n);
+        let meta = l.meta(&format!("handoff/{phys}"), prov.clone());
+        l.add(Layer3HandOff {
+            meta,
+            macs: BTreeSet::from([m]),
+            untagged: has(phys).then(|| l.id(&format!("in/{phys}"))),
+            tagged: active
+                .iter()
+                .filter_map(|i| match physical(&i.name) {
+                    (p, Some(v)) if p == phys => Some((v, l.id(&format!("in/{}", i.name)))),
+                    _ => None,
+                })
+                .collect(),
         });
     }
 
@@ -461,6 +517,24 @@ pub fn lower(
         }
     }
     l.out
+}
+
+/// The addresses of each interface with their prefix length: the config,
+/// then the collected rows.
+pub fn interface_addresses(cfg: &Config, col: &Collected) -> BTreeMap<String, Vec<(IpAddr, u8)>> {
+    addresses(cfg, col)
+        .into_iter()
+        .map(|(k, v)| (k, v.into_iter().map(|(a, l, _)| (a, l)).collect()))
+        .collect()
+}
+
+/// The collected MAC of an interface.
+pub fn interface_mac(col: &Collected, iface: &str) -> Option<Mac> {
+    col.links
+        .iter()
+        .find(|r| r.interface == iface)
+        .and_then(|r| r.mac.as_deref())
+        .and_then(|m| m.parse().ok())
 }
 
 /// The local routes: one host route for each interface address.
