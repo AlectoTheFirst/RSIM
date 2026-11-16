@@ -650,8 +650,10 @@ impl L<'_> {
                     })
                     .collect();
                 if hops.is_empty() {
+                    // The route stays in the table with no next hop, so its
+                    // packets are unknown and do not fall to a shorter
+                    // prefix.
                     self.note(format!("route {prefix}: no next hop with an interface"));
-                    continue;
                 }
                 t.insert(p, Route::new(kind, hops, spans));
             }

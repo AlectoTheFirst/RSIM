@@ -202,6 +202,12 @@ impl Fib {
         Route::new(g.kind, g.next_hops.clone(), self.spans_of(id))
     }
 
+    /// The longest-prefix match of one address: the prefix and its group.
+    pub fn lookup(&self, addr: std::net::IpAddr) -> Option<(Prefix, &NextHopGroup)> {
+        let (p, id) = self.trie.longest_match(addr)?;
+        Some((p, &self.groups[self.entries[*id as usize].group as usize]))
+    }
+
     /// All routes in prefix order.
     pub fn entries(&self) -> Vec<(Prefix, Route)> {
         self.trie
