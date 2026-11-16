@@ -22,8 +22,12 @@ pub struct SectionSpec {
     pub format: Format,
     /// The volatile parts. Refer to [`rsim_store::strip_volatile`].
     pub volatile: &'static [&'static str],
-    /// The extract of an observation section with a table.
-    pub extract: Option<&'static dyn Extract>,
+    /// The extracts of an observation section, each with its table.
+    pub extracts: &'static [&'static dyn Extract],
+    /// The members of a JSON section that the change detection covers. With
+    /// no pattern, it covers the whole section without the volatile parts.
+    /// Refer to [`rsim_store::keep_only`].
+    pub keep: &'static [&'static str],
     /// A device can lack the section. A [`TransportError::NotFound`] reply
     /// then gives the status `Absent`, which is not a failure.
     pub optional: bool,
@@ -36,7 +40,14 @@ impl std::fmt::Debug for SectionSpec {
             .field("command", &self.command)
             .field("class", &self.class)
             .field("format", &self.format)
-            .field("table", &self.extract.map(|e| e.table().name))
+            .field(
+                "tables",
+                &self
+                    .extracts
+                    .iter()
+                    .map(|e| e.table().name)
+                    .collect::<Vec<_>>(),
+            )
             .field("optional", &self.optional)
             .finish()
     }

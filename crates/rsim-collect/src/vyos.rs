@@ -50,7 +50,7 @@ fn spec(
     class: Class,
     format: Format,
     volatile: &'static [&'static str],
-    extract: Option<&'static dyn Extract>,
+    extracts: &'static [&'static dyn Extract],
 ) -> SectionSpec {
     SectionSpec {
         name,
@@ -58,7 +58,8 @@ fn spec(
         class,
         format,
         volatile,
-        extract,
+        extracts,
+        keep: &[],
         optional: false,
     }
 }
@@ -75,7 +76,7 @@ pub fn sections() -> Vec<SectionSpec> {
             Configuration,
             Json,
             &[],
-            None,
+            &[],
         ),
         spec(
             "version",
@@ -83,7 +84,7 @@ pub fn sections() -> Vec<SectionSpec> {
             Configuration,
             Text,
             &["Uptime:"],
-            None,
+            &[],
         ),
         spec(
             "links",
@@ -91,7 +92,7 @@ pub fn sections() -> Vec<SectionSpec> {
             Observation,
             Json,
             &[],
-            Some(&LinkExtract),
+            &[&LinkExtract],
         ),
         spec(
             "addresses",
@@ -102,7 +103,7 @@ pub fn sections() -> Vec<SectionSpec> {
                 "/*/addr_info/*/valid_life_time",
                 "/*/addr_info/*/preferred_life_time",
             ],
-            Some(&AddrExtract),
+            &[&AddrExtract],
         ),
         spec(
             "neighbours",
@@ -110,7 +111,7 @@ pub fn sections() -> Vec<SectionSpec> {
             Observation,
             Json,
             &["/*/state"],
-            Some(&NeighExtract),
+            &[&NeighExtract],
         ),
         spec(
             "link_speeds",
@@ -118,7 +119,7 @@ pub fn sections() -> Vec<SectionSpec> {
             Observation,
             Text,
             &[],
-            Some(&SpeedExtract),
+            &[&SpeedExtract],
         ),
         spec(
             "routes_ipv4",
@@ -126,7 +127,7 @@ pub fn sections() -> Vec<SectionSpec> {
             Observation,
             Json,
             ROUTE_VOLATILE,
-            Some(&RouteExtract),
+            &[&RouteExtract],
         ),
         spec(
             "routes_ipv6",
@@ -134,7 +135,7 @@ pub fn sections() -> Vec<SectionSpec> {
             Observation,
             Json,
             ROUTE_VOLATILE,
-            Some(&RouteExtract),
+            &[&RouteExtract],
         ),
     ]
 }

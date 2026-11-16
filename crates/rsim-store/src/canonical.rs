@@ -78,6 +78,80 @@ pub fn change_hash(
     Ok(keys.hash(&strip_volatile(format, bytes, volatile)?))
 }
 
+/// The hash of the change detection over the kept members of a JSON
+/// section only. Refer to [`keep_only`]. With no keep pattern, it is
+/// [`change_hash`].
+pub fn change_hash_kept(
+    keys: &Keys,
+    format: Format,
+    bytes: &[u8],
+    volatile: &[&str],
+    keep: &[&str],
+) -> Result<Hash, StoreError> {
+    if keep.is_empty() || format != Format::Json {
+        return change_hash(keys, format, bytes, volatile);
+    }
+    let stripped = strip_volatile(format, bytes, volatile)?;
+    let v: Value = serde_json::from_slice(&stripped)?;
+    Ok(keys.hash(json_text(&keep_only(&v, keep)).as_bytes()))
+}
+
+/// The members of a JSON value that a keep pattern names, with the objects
+/// and arrays on their paths. A pattern is a path of keys separated by `/`,
+/// as in [`strip_volatile`]. A member that a pattern names is kept whole. An
+/// object or an array on the path of a pattern keeps only its parts on a
+/// path. Each other member goes.
+pub fn keep_only(v: &Value, keep: &[&str]) -> Value {
+    let pats: Vec<Vec<&str>> = keep
+        .iter()
+        .map(|p| p.split('/').filter(|s| !s.is_empty()).collect())
+        .collect();
+    let refs: Vec<&[&str]> = pats.iter().map(Vec::as_slice).collect();
+    keep_walk(v, &refs).unwrap_or(Value::Null)
+}
+
+fn keep_walk(v: &Value, pats: &[&[&str]]) -> Option<Value> {
+    if pats.iter().any(|p| p.is_empty()) {
+        return Some(v.clone());
+    }
+    match v {
+        Value::Object(m) => {
+            let mut out = serde_json::Map::new();
+            for (k, c) in m {
+                let rest: Vec<&[&str]> = pats
+                    .iter()
+                    .filter(|p| glob(p[0], k))
+                    .map(|p| &p[1..])
+                    .collect();
+                if !rest.is_empty()
+                    && let Some(x) = keep_walk(c, &rest)
+                {
+                    out.insert(k.clone(), x);
+                }
+            }
+            Some(Value::Object(out))
+        }
+        Value::Array(a) => {
+            let mut out = Vec::new();
+            for (i, c) in a.iter().enumerate() {
+                let idx = i.to_string();
+                let rest: Vec<&[&str]> = pats
+                    .iter()
+                    .filter(|p| p[0] == "*" || p[0] == idx)
+                    .map(|p| &p[1..])
+                    .collect();
+                if !rest.is_empty()
+                    && let Some(x) = keep_walk(c, &rest)
+                {
+                    out.push(x);
+                }
+            }
+            Some(Value::Array(out))
+        }
+        _ => None,
+    }
+}
+
 fn remove(v: &mut Value, segs: &[&str]) {
     let Some((first, rest)) = segs.split_first() else {
         return;
@@ -187,6 +261,29 @@ fn write_json(v: &Value, depth: usize, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_kept_members_decide_the_change_hash() {
+        let keys = Keys::from_hex(&format!("{}\n{}\n", "11".repeat(32), "22".repeat(32))).unwrap();
+        let a =
+            br#"{"T":{"R":[{"name":"e1","state":"up","in_pkts":5,"sub":{"x":1,"y":2}}]},"top":1}"#;
+        let b =
+            br#"{"T":{"R":[{"name":"e1","state":"up","in_pkts":9,"sub":{"x":1,"y":3}}]},"top":2}"#;
+        let c = br#"{"T":{"R":[{"name":"e1","state":"down","in_pkts":9}]}}"#;
+        let keep = ["/T/R/*/name", "/T/R/*/state", "/T/R/*/sub/x"];
+        let h = |x: &[u8]| change_hash_kept(&keys, Format::Json, x, &[], &keep).unwrap();
+        assert_eq!(h(a), h(b));
+        assert_ne!(h(a), h(c));
+        let v: Value = serde_json::from_slice(a).unwrap();
+        assert_eq!(
+            json_text(&keep_only(&v, &keep)),
+            json_text(&serde_json::json!({"T":{"R":[{"name":"e1","state":"up","sub":{"x":1}}]}}))
+        );
+        assert_eq!(
+            change_hash_kept(&keys, Format::Json, a, &[], &[]).unwrap(),
+            change_hash(&keys, Format::Json, a, &[]).unwrap()
+        );
+    }
 
     #[test]
     fn json_has_one_canonical_form() {

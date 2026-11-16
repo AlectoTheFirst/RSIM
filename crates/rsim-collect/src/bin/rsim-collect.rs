@@ -12,6 +12,9 @@
 //! | `VYOS_AGENT` | The socket of an SSH agent, or `default` for `SSH_AUTH_SOCK`, used in place of `VYOS_PASS` |
 //! | `VYOS_VIA`, `VYOS_<NAME>_VIA` | The jump hosts to the routers, in order, separated by commas |
 //! | `VYOS_PROXY`, `VYOS_<NAME>_PROXY` | A proxy for the first connection: `http://host:port` or `socks5://host:port`, with an optional `user:password@` |
+//! | `NXOS_<NAME>_IP`, `NXOS_USER`, `NXOS_PASS` | An NX-OS switch and the credential of the switches, with the same `KEY_FILE`, `AGENT`, `VIA`, `PROXY`, `MODE` and `PROFILE` keys as VyOS |
+//! | `NXOS_<NAME>_JSON` | `native` for `\| json native` (NX-OS 9.3 and later), needed for a large route table |
+//! | `NXOS_<NAME>_CHANNELS` | The exec channels at one time. The default is 1: one command after the other. |
 //! | `UNIFI_CONTROLLER` | The addresses of the UniFi consoles, separated by commas |
 //! | `UNIFI_SITES` | The sites, separated by commas. The default is `default`. |
 //! | `UNIFI_USER`, `UNIFI_PASS` | The credential of the UniFi consoles |
@@ -38,6 +41,7 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use rsim_collect::https::{ClientCert, HttpsLimits, HttpsProfile, HttpsTransport, TlsTrust};
+use rsim_collect::nxos::{NxosSource, SHELL_SETUP};
 use rsim_collect::ssh::{Algorithms, CommandMode, SshLimits, SshProfile, SshTransport};
 use rsim_collect::unifi::UnifiSource;
 use rsim_collect::vyos::VyosSource;
@@ -102,6 +106,86 @@ struct Setup {
     credentials: MemoryCredentials,
     profiles: Vec<(String, SshProfile)>,
     https: HttpsProfile,
+    /// The NX-OS switches that get `| json native`.
+    native_json: Vec<String>,
+}
+
+/// The SSH devices of one vendor: `<P>_<NAME>_IP` with the keys of the
+/// route, the mode, the algorithm set and, for NX-OS, the JSON form and the
+/// channel limit. The credential of the vendor is `<P>_USER` with its
+/// secret.
+fn ssh_devices(
+    env: &BTreeMap<String, String>,
+    prefix: &str,
+    vendor: Vendor,
+    s: &mut Setup,
+) -> Result<(), String> {
+    let credential = vendor.name().to_string();
+    for (key, address) in env {
+        let Some(name) = key
+            .strip_prefix(&format!("{prefix}_"))
+            .and_then(|k| k.strip_suffix("_IP"))
+        else {
+            continue;
+        };
+        let id = name.to_lowercase().replace('_', "-");
+        let route = route(env, prefix, Some(name), &mut s.credentials)?;
+        s.devices.push(Device {
+            id: id.clone(),
+            vendor,
+            address: address.clone(),
+            credential: credential.clone(),
+            site: None,
+            route,
+        });
+        let get = |k: &str| env.get(&format!("{prefix}_{name}_{k}")).map(String::as_str);
+        let mode = match get("MODE") {
+            None | Some("exec") => CommandMode::Exec,
+            Some("shell") => CommandMode::Shell,
+            Some("connection") => CommandMode::Connection,
+            Some(m) => {
+                return Err(format!(
+                    "{prefix}_{name}_MODE {m} is not exec, shell or connection"
+                ));
+            }
+        };
+        let mut profile = SshProfile {
+            algorithms: algorithms(env, &format!("{prefix}_{name}_PROFILE")),
+            mode,
+            ..SshProfile::default()
+        };
+        if vendor == Vendor::Nxos {
+            profile.max_channels = match get("CHANNELS") {
+                None => 1,
+                Some(n) => n
+                    .parse()
+                    .map_err(|_| format!("{prefix}_{name}_CHANNELS {n} is not a number"))?,
+            };
+            profile.shell_setup = SHELL_SETUP.iter().map(|c| (*c).to_string()).collect();
+            match get("JSON") {
+                None | Some("plain") => {}
+                Some("native") => s.native_json.push(id.clone()),
+                Some(j) => return Err(format!("{prefix}_{name}_JSON {j} is not plain or native")),
+            }
+        }
+        if profile != SshProfile::default() {
+            s.profiles.push((id, profile));
+        }
+    }
+    if s.devices.iter().any(|d| d.vendor == vendor) {
+        let user = env
+            .get(&format!("{prefix}_USER"))
+            .ok_or_else(|| format!("{prefix}_USER is not set"))?;
+        let secret = ssh_secret(env, prefix)?;
+        s.credentials.insert(
+            &credential,
+            Credential {
+                user: user.clone(),
+                secret,
+            },
+        );
+    }
+    Ok(())
 }
 
 fn read_file(path: &str) -> Result<String, String> {
@@ -190,6 +274,7 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
         credentials: MemoryCredentials::new(),
         profiles: Vec::new(),
         https: HttpsProfile::default(),
+        native_json: Vec::new(),
     };
     let list = |key: &str| -> Vec<String> {
         env.get(key)
@@ -202,52 +287,8 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
             })
             .unwrap_or_default()
     };
-    for (key, address) in env {
-        let Some(name) = key
-            .strip_prefix("VYOS_")
-            .and_then(|k| k.strip_suffix("_IP"))
-        else {
-            continue;
-        };
-        let id = name.to_lowercase().replace('_', "-");
-        let route = route(env, "VYOS", Some(name), &mut s.credentials)?;
-        s.devices.push(Device {
-            id: id.clone(),
-            vendor: Vendor::Vyos,
-            address: address.clone(),
-            credential: "vyos".into(),
-            site: None,
-            route,
-        });
-        let mode = match env.get(&format!("VYOS_{name}_MODE")).map(String::as_str) {
-            None | Some("exec") => CommandMode::Exec,
-            Some("shell") => CommandMode::Shell,
-            Some("connection") => CommandMode::Connection,
-            Some(m) => {
-                return Err(format!(
-                    "VYOS_{name}_MODE {m} is not exec, shell or connection"
-                ));
-            }
-        };
-        let profile = SshProfile {
-            algorithms: algorithms(env, &format!("VYOS_{name}_PROFILE")),
-            mode,
-            ..SshProfile::default()
-        };
-        if profile != SshProfile::default() {
-            s.profiles.push((id, profile));
-        }
-    }
-    if s.devices.iter().any(|d| d.vendor == Vendor::Vyos) {
-        let user = env.get("VYOS_USER").ok_or("VYOS_USER is not set")?;
-        let secret = ssh_secret(env, "VYOS")?;
-        s.credentials.insert(
-            "vyos",
-            Credential {
-                user: user.clone(),
-                secret,
-            },
-        );
+    for (prefix, vendor) in [("VYOS", Vendor::Vyos), ("NXOS", Vendor::Nxos)] {
+        ssh_devices(env, prefix, vendor, &mut s)?;
     }
     let consoles = list("UNIFI_CONTROLLER");
     if !consoles.is_empty() {
@@ -308,7 +349,9 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
         s.credentials.insert("unifi", credential);
     }
     if s.devices.is_empty() {
-        return Err("the env file has no VYOS_<NAME>_IP and no UNIFI_CONTROLLER".into());
+        return Err(
+            "the env file has no VYOS_<NAME>_IP, no NXOS_<NAME>_IP and no UNIFI_CONTROLLER".into(),
+        );
     }
     Ok(s)
 }
@@ -421,6 +464,11 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
     for (id, p) in setup.profiles {
         ssh = ssh.with_profile(&id, p);
     }
+    let ssh = Arc::new(ssh);
+    let mut nxos = NxosSource::new(ssh.clone());
+    for id in &setup.native_json {
+        nxos = nxos.with_native_json(id);
+    }
     let https = HttpsTransport::new(credentials, trust.clone(), HttpsLimits::default())
         .with_default_profile(setup.https);
     let devices = setup.devices;
@@ -448,7 +496,8 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
         Arc::new(TokioClock::system()),
     )
     .map_err(|e| e.to_string())?
-    .with_source(Arc::new(VyosSource::new(Arc::new(ssh))))
+    .with_source(Arc::new(VyosSource::new(ssh)))
+    .with_source(Arc::new(nxos))
     .with_source(Arc::new(UnifiSource::new(Arc::new(https))));
     if repeat {
         let stop = async {
@@ -524,6 +573,36 @@ mod tests {
             Secret::Password("p w".into())
         );
         assert!(setup(&parse_env("VYOS_CORE1_IP=192.0.2.1\n")).is_err());
+    }
+
+    #[test]
+    fn the_env_file_gives_nxos_switches() {
+        let env = parse_env(
+            "NXOS_LEAF_1_IP=192.0.2.31\nNXOS_LEAF_1_JSON=native\nNXOS_SPINE_IP=192.0.2.32\n\
+             NXOS_SPINE_CHANNELS=4\nNXOS_USER=ro\nNXOS_PASS=p\n",
+        );
+        let s = setup(&env).unwrap();
+        let ids: Vec<(&str, Vendor)> = s
+            .devices
+            .iter()
+            .map(|d| (d.id.as_str(), d.vendor))
+            .collect();
+        assert_eq!(ids, [("leaf-1", Vendor::Nxos), ("spine", Vendor::Nxos)]);
+        assert_eq!(s.native_json, ["leaf-1"]);
+        assert_eq!(s.profiles[0].1.max_channels, 1);
+        assert_eq!(
+            s.profiles[0].1.shell_setup,
+            ["terminal length 0", "terminal width 511"]
+        );
+        assert_eq!(s.profiles[1].1.max_channels, 4);
+        use rsim_collect::Credentials;
+        assert_eq!(s.credentials.get("nxos").unwrap().user, "ro");
+        assert!(
+            setup(&parse_env(
+                "NXOS_X_IP=192.0.2.1\nNXOS_USER=u\nNXOS_PASS=p\nNXOS_X_JSON=xml\n"
+            ))
+            .is_err()
+        );
     }
 
     #[test]

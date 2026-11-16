@@ -1,0 +1,373 @@
+//! Collection cycles of an NX-OS switch on the fake transport, with the
+//! synthetic answers in `tests/fixtures/nxos/`.
+
+#![cfg(feature = "nxos")]
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use arrow_array::{Array, BooleanArray, StringArray, UInt64Array};
+use rsim_collect::fake::FakeTransport;
+use rsim_collect::nxos::{NxosSource, sections};
+use rsim_collect::*;
+use rsim_store::{
+    Keys, LINK_SPEEDS, LINKS, MAC_TABLE, NEIGHBOURS, ROUTES, SectionStatus, Snapshot, Store,
+    TableSchema,
+};
+
+const T0: u64 = 1_700_000_000_000;
+
+fn fixture(name: &str) -> String {
+    let p = format!("{}/tests/fixtures/nxos/{name}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{p}: {e}"))
+}
+
+fn switch() -> Device {
+    Device {
+        id: "n1".into(),
+        vendor: Vendor::Nxos,
+        address: "192.0.2.10".into(),
+        credential: "lab".into(),
+        site: None,
+        route: Default::default(),
+    }
+}
+
+/// The fixture of each section that has one. The other commands are
+/// refused as on a switch with no such feature.
+fn file(section: &str) -> Option<&'static str> {
+    Some(match section {
+        "config" => "config.txt",
+        "version" => "version.json",
+        "interfaces" => "interface.json",
+        "lldp" => "lldp.json",
+        "vlans" => "vlan.json",
+        "vrfs" => "vrf.json",
+        "rib" => "route.json",
+        "mac_table" => "mac.json",
+        "arp" => "arp.json",
+        "vrf_interfaces" => "vrf_interface.json",
+        _ => return None,
+    })
+}
+
+fn command(section: &str) -> String {
+    sections(false)
+        .into_iter()
+        .find(|s| s.name == section)
+        .unwrap()
+        .command
+}
+
+fn set(t: &FakeTransport, section: &str, text: &str) {
+    t.reply("n1", &command(section), Ok(text.as_bytes().to_vec()));
+}
+
+fn load(t: &FakeTransport) {
+    for s in sections(false) {
+        match (s.name, file(s.name)) {
+            (_, Some(f)) => set(t, s.name, &fixture(f).replace("HOST", "n1")),
+            ("cdp", None) => set(t, "cdp", "Note: CDP not enabled\n"),
+            ("acl" | "trunks", None) => set(t, s.name, "\n"),
+            (_, None) => t.reply(
+                "n1",
+                &s.command,
+                Err(TransportError::Command(format!(
+                    "exit status 16: Syntax error while parsing '{}'",
+                    s.command
+                ))),
+            ),
+        }
+    }
+    t.reply(
+        "n1",
+        "show bgp sessions | json",
+        Err(TransportError::Command(
+            "exit status 16: Syntax error while parsing 'show bgp sessions | json'".into(),
+        )),
+    );
+}
+
+struct Env {
+    _dir: tempfile::TempDir,
+    t: Arc<FakeTransport>,
+    c: Collector,
+}
+
+fn env() -> Env {
+    let dir = tempfile::tempdir().unwrap();
+    let t = Arc::new(FakeTransport::new(Duration::from_millis(1)));
+    load(&t);
+    let store = Store::open(dir.path(), Keys::new([1; 32], [2; 32])).unwrap();
+    let c = Collector::new(
+        store,
+        Box::new(vec![switch()]),
+        Schedule {
+            spread: false,
+            ..Schedule::default()
+        },
+        Limits::default(),
+        Arc::new(TokioClock::new(T0)),
+    )
+    .unwrap()
+    .with_source(Arc::new(NxosSource::new(t.clone())));
+    Env { _dir: dir, t, c }
+}
+
+fn latest(e: &Env) -> Snapshot {
+    e.c.store().latest().unwrap().unwrap()
+}
+
+fn status(e: &Env, section: &str) -> SectionStatus {
+    latest(e).devices["n1"]
+        .sections
+        .iter()
+        .find(|s| s.name == section)
+        .unwrap()
+        .status
+        .clone()
+}
+
+fn rows(e: &Env, t: &TableSchema) -> Vec<Vec<String>> {
+    let s = latest(e);
+    let all = e.c.store().read_table(&s, t).unwrap();
+    let Some((_, b)) = all.into_iter().find(|(d, _)| d == "n1") else {
+        return Vec::new();
+    };
+    (0..b.num_rows())
+        .map(|i| {
+            t.columns
+                .iter()
+                .map(|c| {
+                    let a = b.column_by_name(c.name).unwrap();
+                    if a.is_null(i) {
+                        return "-".to_string();
+                    }
+                    let any = a.as_any();
+                    if let Some(x) = any.downcast_ref::<StringArray>() {
+                        x.value(i).to_string()
+                    } else if let Some(x) = any.downcast_ref::<UInt64Array>() {
+                        x.value(i).to_string()
+                    } else {
+                        any.downcast_ref::<BooleanArray>()
+                            .unwrap()
+                            .value(i)
+                            .to_string()
+                    }
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn blob(e: &Env, section: &str) -> String {
+    let s = latest(e);
+    let entry = s.devices["n1"]
+        .sections
+        .iter()
+        .find(|x| x.name == section)
+        .unwrap()
+        .clone();
+    String::from_utf8(e.c.store().read_blob(entry.blob.as_ref().unwrap()).unwrap()).unwrap()
+}
+
+fn v(row: &[&str]) -> Vec<String> {
+    row.iter().map(|x| (*x).to_string()).collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_first_cycle_fills_the_tables() {
+    let mut e = env();
+    let r = e.c.run_cycle().await.unwrap();
+    assert!(r.snapshot.is_some() && r.failed.is_empty(), "{r:?}");
+    assert!(r.extract_errors.is_empty(), "{:?}", r.extract_errors);
+    assert_eq!(status(&e, "config"), SectionStatus::Fresh);
+    assert!(matches!(status(&e, "cdp"), SectionStatus::Absent { .. }));
+    assert!(matches!(status(&e, "ospf"), SectionStatus::Absent { .. }));
+    assert!(matches!(
+        status(&e, "bgp_sessions"),
+        SectionStatus::Absent { .. }
+    ));
+    assert_eq!(status(&e, "acl"), SectionStatus::Fresh);
+    assert_eq!(blob(&e, "acl").trim(), "{}");
+    assert_eq!(
+        rows(&e, &LINKS),
+        [
+            v(&[
+                "Ethernet1/1",
+                "00:00:5e:00:53:01",
+                "9216",
+                "true",
+                "up",
+                "-",
+                "-"
+            ]),
+            v(&[
+                "Ethernet1/2",
+                "00:00:5e:00:53:02",
+                "1500",
+                "true",
+                "up",
+                "-",
+                "-"
+            ]),
+            v(&[
+                "Vlan10",
+                "00:00:5e:00:53:10",
+                "1500",
+                "true",
+                "up",
+                "-",
+                "10"
+            ]),
+        ]
+    );
+    assert_eq!(
+        rows(&e, &rsim_store::ADDRESSES),
+        [
+            v(&["Ethernet1/2", "198.51.100.1/24"]),
+            v(&["Vlan10", "192.0.2.1/24"])
+        ]
+    );
+    assert_eq!(
+        rows(&e, &LINK_SPEEDS),
+        [
+            v(&["Ethernet1/1", "10000", "full"]),
+            v(&["Ethernet1/2", "1000", "-"])
+        ]
+    );
+    assert_eq!(
+        rows(&e, &ROUTES),
+        [
+            v(&[
+                "default",
+                "192.0.2.0/24",
+                "direct",
+                "true",
+                "0",
+                "0",
+                "-",
+                "Vlan10"
+            ]),
+            v(&[
+                "default",
+                "0.0.0.0/0",
+                "static",
+                "true",
+                "1",
+                "0",
+                "198.51.100.254%RED",
+                "Ethernet1/2"
+            ]),
+            v(&[
+                "default",
+                "0.0.0.0/0",
+                "bgp-65001",
+                "false",
+                "20",
+                "0",
+                "203.0.113.9",
+                "-"
+            ]),
+            v(&[
+                "RED",
+                "198.51.100.0/24",
+                "direct",
+                "true",
+                "0",
+                "0",
+                "-",
+                "Ethernet1/2"
+            ]),
+        ]
+    );
+    assert_eq!(
+        rows(&e, &MAC_TABLE),
+        [v(&["10", "00:00:5e:00:53:20", "Ethernet1/1", "dynamic"])]
+    );
+    assert_eq!(
+        rows(&e, &NEIGHBOURS),
+        [v(&["Vlan10", "192.0.2.20", "00:00:5e:00:53:20", "-"])]
+    );
+    let rib = blob(&e, "rib");
+    assert!(rib.contains("\"ROW_addrf\":["), "{rib}");
+    assert!(!rib.contains("\"ROW_path\":{"), "{rib}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn counters_and_ages_make_no_snapshot() {
+    let mut e = env();
+    let first = e.c.run_cycle().await.unwrap().snapshot.unwrap();
+    let swap = |f: &str, a: &str, b: &str| fixture(f).replace("HOST", "n1").replace(a, b);
+    set(
+        &e.t,
+        "interfaces",
+        &swap(
+            "interface.json",
+            "\"eth_inpkts\": 1000",
+            "\"eth_inpkts\": 9999",
+        ),
+    );
+    set(
+        &e.t,
+        "version",
+        &swap(
+            "version.json",
+            "\"kern_uptm_secs\": 3",
+            "\"kern_uptm_secs\": 59",
+        ),
+    );
+    set(&e.t, "rib", &swap("route.json", "P1D", "P1DT1M"));
+    set(&e.t, "mac_table", &swap("mac.json", "\"120\"", "\"180\""));
+    set(&e.t, "arp", &swap("arp.json", "00:01:02", "00:02:02"));
+    set(&e.t, "lldp", &swap("lldp.json", "120", "90"));
+    set(&e.t, "config", &swap("config.txt", "10:01:00", "10:02:00"));
+    tokio::time::advance(Duration::from_secs(60)).await;
+    let r = e.c.run_cycle().await.unwrap();
+    assert_eq!(r.snapshot, None, "{r:?}");
+    assert_eq!(latest(&e).manifest.cycle, first);
+
+    set(
+        &e.t,
+        "interfaces",
+        &swap(
+            "interface.json",
+            "\"state\": \"up\", \"admin_state\": \"up\", \"eth_hw_addr\": \"0000.5e00.5301\"",
+            "\"state\": \"down\", \"admin_state\": \"up\", \"eth_hw_addr\": \"0000.5e00.5301\"",
+        ),
+    );
+    tokio::time::advance(Duration::from_secs(60)).await;
+    let r = e.c.run_cycle().await.unwrap();
+    assert!(r.snapshot.is_some());
+    assert_eq!(rows(&e, &LINKS)[0][4], "down");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_text_answer_to_a_json_command_fails_alone() {
+    let mut e = env();
+    set(&e.t, "vlans", "% Some text that is not JSON\nmore text\n");
+    set(&e.t, "vrfs", "Note: unexpected\n{}");
+    let r = e.c.run_cycle().await.unwrap();
+    assert!(r.snapshot.is_some());
+    assert!(
+        matches!(status(&e, "vlans"), SectionStatus::Missing { .. }),
+        "{:?}",
+        status(&e, "vlans")
+    );
+    assert!(matches!(status(&e, "vrfs"), SectionStatus::Missing { .. }));
+    assert_eq!(status(&e, "interfaces"), SectionStatus::Fresh);
+    assert_eq!(rows(&e, &LINKS).len(), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_default_vrf_bgp_sessions_follow_a_refused_vrf_all() {
+    let mut e = env();
+    e.t.reply(
+        "n1",
+        "show bgp sessions | json",
+        Ok(br#"{"TABLE_vrf":{"ROW_vrf":{"vrf-name-out":"default"}}}"#.to_vec()),
+    );
+    e.c.run_cycle().await.unwrap();
+    assert_eq!(status(&e, "bgp_sessions"), SectionStatus::Fresh);
+    assert!(blob(&e, "bgp_sessions").contains("\"ROW_vrf\":["));
+}

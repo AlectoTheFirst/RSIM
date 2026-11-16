@@ -8,8 +8,9 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = ["vyos", "unifi"]
+default = ["vyos", "unifi", "nxos"]
 vyos = ["ssh"]
+nxos = ["ssh"]
 unifi = ["https"]
 ssh = ["dep:russh"]
 https = ["ssh", "dep:ring", "dep:rustls", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:bytes"]
@@ -41,7 +42,7 @@ tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "sync", "time
 
 [[bin]]
 name = "rsim-collect"
-required-features = ["vyos", "unifi"]
+required-features = ["vyos", "unifi", "nxos"]
 
 [[bench]]
 name = "cycle"

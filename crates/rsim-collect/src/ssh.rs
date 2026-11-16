@@ -700,6 +700,7 @@ impl Ssh for SshTransport {
     }
 
     fn serial(&self, device: &Device) -> bool {
-        self.profile(device).mode != CommandMode::Exec
+        let p = self.profile(device);
+        p.mode != CommandMode::Exec || p.max_channels <= 1
     }
 }

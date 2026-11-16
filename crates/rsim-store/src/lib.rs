@@ -24,7 +24,7 @@ mod store;
 mod table;
 
 pub use blob::Entropy;
-pub use canonical::{Format, canonical, change_hash, strip_volatile};
+pub use canonical::{Format, canonical, change_hash, change_hash_kept, keep_only, strip_volatile};
 pub use error::StoreError;
 pub use hash::{Hash, Keys};
 pub use manifest::{
@@ -33,6 +33,6 @@ pub use manifest::{
 };
 pub use store::{Cycle, DeviceUpdate, Prepared, Snapshot, Store};
 pub use table::{
-    ADDRESSES, CLIENTS, Cell, ColType, Column, LINK_SPEEDS, LINKS, NEIGHBOURS, PREFIX_COLUMNS,
-    ROUTES, Row, TABLES, TableSchema, table,
+    ADDRESSES, CLIENTS, Cell, ColType, Column, LINK_SPEEDS, LINKS, MAC_TABLE, NEIGHBOURS,
+    PREFIX_COLUMNS, ROUTES, Row, TABLES, TableSchema, table,
 };
