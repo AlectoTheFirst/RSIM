@@ -8,15 +8,19 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use futures_util::future::join_all;
-use rsim_collect::ssh::{Algorithms, SshLimits, SshProfile, SshTransport};
+use rsim_collect::cli::CliRules;
+use rsim_collect::ssh::{Algorithms, CommandMode, SshLimits, SshProfile, SshTransport};
 use rsim_collect::{
-    Credential, Device, MemoryCredentials, PinKind, PinPolicy, Secret, Ssh, TransportError,
-    TrustStore, Vendor,
+    Credential, Device, Jump, MemoryCredentials, PinKind, PinPolicy, Proxy, RawSection, Route,
+    Secret, SectionSpec, Ssh, TransportError, TrustStore, Vendor,
 };
 use russh::keys::{Algorithm, PrivateKey, PublicKey};
 use russh::server::{Auth, Msg, Response, Session};
 use russh::{Channel, ChannelId, MethodKind, MethodSet, Preferred, cipher, kex, mac};
 use tokio::net::TcpListener;
+
+#[path = "support/route.rs"]
+mod route;
 
 #[derive(Default)]
 struct Stats {
@@ -31,6 +35,8 @@ struct Server {
     client_key: Option<PublicKey>,
     password: Option<String>,
     password_method: bool,
+    /// The bytes of the shell since the last line end.
+    line: Vec<u8>,
 }
 
 impl russh::server::Handler for Server {
@@ -79,6 +85,65 @@ impl russh::server::Handler for Server {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         reply.accept().await;
+        Ok(())
+    }
+
+    async fn pty_request(
+        &mut self,
+        channel: ChannelId,
+        _term: &str,
+        _col_width: u32,
+        _row_height: u32,
+        _pix_width: u32,
+        _pix_height: u32,
+        _modes: &[(russh::Pty, u32)],
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        session.channel_success(channel)?;
+        Ok(())
+    }
+
+    /// The shell prints a banner that ends with a line of `#`, which has
+    /// the form of a prompt, and the prompt `r1#` a moment later.
+    async fn shell_request(
+        &mut self,
+        channel: ChannelId,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        session.channel_success(channel)?;
+        session.data(
+            channel,
+            &b"\x1b[2JAuthorized use only\r\nr1# is in the banner\r\n#####\r\n"[..],
+        )?;
+        let handle = session.handle();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let _ = handle.data(channel, &b"r1#"[..]).await;
+        });
+        Ok(())
+    }
+
+    /// Each line of the shell gets its echo, its answer and the prompt.
+    async fn data(
+        &mut self,
+        channel: ChannelId,
+        data: &[u8],
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        for &b in data {
+            if b != b'\n' && b != b'\r' {
+                self.line.push(b);
+                continue;
+            }
+            let line = String::from_utf8_lossy(&std::mem::take(&mut self.line)).to_string();
+            let mut out = Vec::new();
+            if !line.is_empty() {
+                out.extend_from_slice(format!("{line}\r\n").as_bytes());
+                out.extend_from_slice(&shell_answer(&line));
+            }
+            out.extend_from_slice(b"\r\nr1#");
+            session.data(channel, out)?;
+        }
         Ok(())
     }
 
@@ -131,6 +196,20 @@ async fn respond(command: &str) -> (Vec<u8>, Vec<u8>, u32) {
         }
         Some("fail") => (vec![], b"bad command\n".to_vec(), 3),
         _ => (command.as_bytes().to_vec(), vec![], 0),
+    }
+}
+
+/// The answer of the shell to a command.
+fn shell_answer(command: &str) -> Vec<u8> {
+    match command {
+        "terminal length 0" => Vec::new(),
+        "show color" => b"\x1b[1;32mgreen\x1b[0m\r\ndescription r1# here\r\n".to_vec(),
+        "show big" => (0..3000)
+            .map(|i| format!("line {i}\r\n"))
+            .collect::<String>()
+            .into_bytes(),
+        "bad" => b"% Invalid input detected at '^' marker.\r\n".to_vec(),
+        c => format!("{c}\r\n").into_bytes(),
     }
 }
 
@@ -193,6 +272,45 @@ fn device(address: &str) -> Device {
         address: address.into(),
         credential: "lab".into(),
         site: None,
+        route: Default::default(),
+    }
+}
+
+fn password_server() -> Server {
+    Server {
+        stats: Arc::default(),
+        client_key: None,
+        password: Some("s3cret".into()),
+        password_method: true,
+        line: Vec::new(),
+    }
+}
+
+/// The device credential `lab` and the jump host credential `hop`.
+fn route_credentials() -> Arc<MemoryCredentials> {
+    let mut c = MemoryCredentials::new();
+    c.insert(
+        "lab",
+        Credential {
+            user: "collector".into(),
+            secret: Secret::Password("s3cret".into()),
+        },
+    );
+    c.insert(
+        "hop",
+        Credential {
+            user: "hop".into(),
+            secret: Secret::Password("hop-pass".into()),
+        },
+    );
+    Arc::new(c)
+}
+
+fn jump(address: &str) -> Jump {
+    Jump {
+        address: address.into(),
+        credential: "hop".into(),
+        algorithms: Algorithms::Modern,
     }
 }
 
@@ -224,6 +342,7 @@ fn key_server() -> (Server, Secret) {
         client_key: Some(client.public_key().clone()),
         password: None,
         password_method: true,
+        line: Vec::new(),
     };
     (
         server,
@@ -276,6 +395,7 @@ async fn a_password_works_with_the_password_and_keyboard_interactive_methods() {
             client_key: None,
             password: Some("s3cret".into()),
             password_method,
+            line: Vec::new(),
         };
         let f = serve(server, Preferred::default()).await;
         let t = SshTransport::new(
@@ -406,4 +526,289 @@ async fn a_large_output_arrives_intact() {
     let out = t.run(&device(&f.address), "big 3000000").await.unwrap();
     assert_eq!(out.len(), 3_000_000);
     assert!(out.iter().all(|b| *b == b'x'));
+}
+
+#[tokio::test]
+async fn a_shell_reads_each_answer_up_to_the_prompt() {
+    let f = serve(password_server(), Preferred::default()).await;
+    let profile = SshProfile {
+        mode: CommandMode::Shell,
+        shell_setup: vec!["terminal length 0".into()],
+        ..SshProfile::default()
+    };
+    let t = SshTransport::new(
+        credentials(Secret::Password("s3cret".into())),
+        pinned(&f),
+        SshLimits::default(),
+    )
+    .with_profile("r1", profile);
+    let d = device(&f.address);
+    assert!(!t.banner_each_command(&d));
+    let color = t.run(&d, "show color").await.unwrap();
+    assert_eq!(color, b"green\ndescription r1# here\n");
+    let runs = join_all((0..3).map(|_| t.run(&d, "show big"))).await;
+    for big in runs {
+        let big = String::from_utf8(big.unwrap()).unwrap();
+        assert_eq!(big.lines().count(), 3000);
+        assert_eq!(big.lines().last(), Some("line 2999"));
+    }
+    let bad = t.run(&d, "bad").await;
+    let spec = SectionSpec {
+        name: "bad",
+        command: "bad".into(),
+        class: rsim_store::Class::Observation,
+        format: rsim_store::Format::Text,
+        volatile: &[],
+        extract: None,
+        optional: true,
+    };
+    let mut sections = vec![RawSection { spec, result: bad }];
+    CliRules::CISCO.apply(&mut sections, t.banner_each_command(&d));
+    assert!(sections[0].absent());
+    assert_eq!(f.stats.connections.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn the_connection_mode_logs_in_for_each_command() {
+    let f = serve(password_server(), Preferred::default()).await;
+    let profile = SshProfile {
+        mode: CommandMode::Connection,
+        ..SshProfile::default()
+    };
+    let t = SshTransport::new(
+        credentials(Secret::Password("s3cret".into())),
+        pinned(&f),
+        SshLimits::default(),
+    )
+    .with_profile("r1", profile);
+    let d = device(&f.address);
+    let outs = join_all(["a", "b", "c"].map(|c| t.run(&d, c))).await;
+    let outs: Vec<Vec<u8>> = outs.into_iter().map(Result::unwrap).collect();
+    assert_eq!(outs, [b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]);
+    assert_eq!(f.stats.connections.load(Ordering::SeqCst), 3);
+    assert_eq!(f.stats.max_open.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_jump_host_never_gets_the_device_credential() {
+    let f = serve(password_server(), Preferred::default()).await;
+    let b = route::bastion("hop", "hop-pass").await;
+    let trust = TrustStore::memory(PinPolicy::Strict);
+    trust.pin(PinKind::Ssh, b.address(), &b.host_key);
+    trust.pin(
+        PinKind::Ssh,
+        &format!("{}>{}", b.address(), f.address),
+        &f.host_key,
+    );
+    let t = SshTransport::new(route_credentials(), Arc::new(trust), SshLimits::default());
+    let mut d = device(&f.address);
+    d.route = Route {
+        proxy: None,
+        jumps: vec![jump(b.address())],
+    };
+    assert_eq!(t.run(&d, "one").await.unwrap(), b"one");
+    assert_eq!(t.run(&d, "two").await.unwrap(), b"two");
+    assert_eq!(b.forwarder.forwards(), 1);
+    let log = b.log();
+    assert_eq!(log, ["password hop hop-pass"]);
+    assert!(
+        log.iter()
+            .all(|l| !l.contains("collector") && !l.contains("s3cret"))
+    );
+}
+
+#[tokio::test]
+async fn a_chain_of_2_jump_hosts_reaches_the_device() {
+    let f = serve(password_server(), Preferred::default()).await;
+    let b1 = route::bastion("hop", "hop-pass").await;
+    let b2 = route::bastion("hop", "hop-pass").await;
+    let trust = TrustStore::memory(PinPolicy::AcceptNew);
+    let trust = Arc::new(trust);
+    let t = SshTransport::new(route_credentials(), trust.clone(), SshLimits::default());
+    let mut d = device(&f.address);
+    d.route = Route {
+        proxy: None,
+        jumps: vec![jump(b1.address()), jump(b2.address())],
+    };
+    assert_eq!(t.run(&d, "one").await.unwrap(), b"one");
+    t.close("r1").await;
+    assert_eq!(t.run(&d, "two").await.unwrap(), b"two");
+    assert_eq!(b1.forwarder.forwards(), 2);
+    assert_eq!(b2.forwarder.forwards(), 2);
+    let chain = format!("{}>{}", b1.address(), b2.address());
+    assert_eq!(
+        trust.get(PinKind::Ssh, b1.address()),
+        Some(b1.host_key.clone())
+    );
+    assert_eq!(trust.get(PinKind::Ssh, &chain), Some(b2.host_key.clone()));
+    assert_eq!(
+        trust.get(PinKind::Ssh, &format!("{chain}>{}", f.address)),
+        Some(f.host_key.clone())
+    );
+    assert_eq!(trust.get(PinKind::Ssh, &f.address), None);
+}
+
+#[tokio::test]
+async fn an_error_names_the_hop_that_failed() {
+    let f = serve(password_server(), Preferred::default()).await;
+    let b = route::bastion("hop", "hop-pass").await;
+    let trust = TrustStore::memory(PinPolicy::Strict);
+    trust.pin(PinKind::Ssh, b.address(), &f.host_key);
+    let t = SshTransport::new(route_credentials(), Arc::new(trust), SshLimits::default());
+    let mut d = device(&f.address);
+    d.route.jumps = vec![jump(b.address())];
+    let Err(TransportError::Connect(e)) = t.run(&d, "x").await else {
+        panic!("a wrong bastion key is a connect error");
+    };
+    assert!(e.starts_with(&format!("bastion {}", b.address())), "{e}");
+
+    let trust = TrustStore::memory(PinPolicy::AcceptNew);
+    let mut creds = MemoryCredentials::new();
+    creds.insert(
+        "lab",
+        Credential {
+            user: "collector".into(),
+            secret: Secret::Password("wrong".into()),
+        },
+    );
+    creds.insert(
+        "hop",
+        Credential {
+            user: "hop".into(),
+            secret: Secret::Password("hop-pass".into()),
+        },
+    );
+    let t = SshTransport::new(Arc::new(creds), Arc::new(trust), SshLimits::default());
+    let Err(TransportError::Connect(e)) = t.run(&d, "x").await else {
+        panic!("a wrong device password is a connect error");
+    };
+    assert!(e.starts_with(&format!("device {}", f.address)), "{e}");
+    assert!(b.log().iter().all(|l| !l.contains("wrong")));
+}
+
+#[tokio::test]
+async fn a_proxy_carries_the_first_connection() {
+    let f = serve(password_server(), Preferred::default()).await;
+    let http = route::http_proxy(Some("pu:pp")).await;
+    let socks = route::socks5_proxy().await;
+    for (url, forwards) in [
+        (format!("http://pu:pp@{}", http.address), &http.forwards),
+        (format!("socks5://{}", socks.address), &socks.forwards),
+    ] {
+        let t = SshTransport::new(
+            credentials(Secret::Password("s3cret".into())),
+            pinned(&f),
+            SshLimits::default(),
+        );
+        let mut d = device(&f.address);
+        d.route.proxy = Some(Proxy::parse(&url).unwrap());
+        assert_eq!(t.run(&d, "via").await.unwrap(), b"via");
+        assert_eq!(forwards.load(Ordering::SeqCst), 1, "{url}");
+    }
+    let t = SshTransport::new(
+        credentials(Secret::Password("s3cret".into())),
+        pinned(&f),
+        SshLimits::default(),
+    );
+    let mut d = device(&f.address);
+    d.route.proxy = Some(Proxy::parse(&format!("http://pu:bad@{}", http.address)).unwrap());
+    let Err(TransportError::Connect(e)) = t.run(&d, "x").await else {
+        panic!("a refused proxy login is a connect error");
+    };
+    assert!(
+        e.contains(&format!("proxy {}", http.address)) && e.contains("407"),
+        "{e}"
+    );
+    assert!(!e.contains("bad"), "{e}");
+}
+
+#[tokio::test]
+async fn a_jump_host_behind_a_proxy() {
+    let f = serve(password_server(), Preferred::default()).await;
+    let b = route::bastion("hop", "hop-pass").await;
+    let socks = route::socks5_proxy().await;
+    let t = SshTransport::new(
+        route_credentials(),
+        Arc::new(TrustStore::memory(PinPolicy::AcceptNew)),
+        SshLimits::default(),
+    );
+    let mut d = device(&f.address);
+    d.route = Route {
+        proxy: Some(Proxy::parse(&format!("socks5://{}", socks.address)).unwrap()),
+        jumps: vec![jump(b.address())],
+    };
+    assert_eq!(t.run(&d, "x").await.unwrap(), b"x");
+    assert_eq!(socks.forwards.load(Ordering::SeqCst), 1);
+    assert_eq!(b.forwarder.forwards(), 1);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_agent_key_logs_in() {
+    use russh::keys::agent::client::AgentClient;
+
+    #[derive(Clone)]
+    struct Agent;
+    impl russh::keys::agent::server::Agent for Agent {}
+
+    let (server, secret) = key_server();
+    let Secret::Key { pem, .. } = secret else {
+        unreachable!()
+    };
+    let key = russh::keys::decode_secret_key(&pem, None).unwrap();
+    let f = serve(server, Preferred::default()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("agent.sock");
+    let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+    let incoming = futures_util::stream::unfold(listener, |l| async move {
+        let r = l.accept().await.map(|(s, _)| s);
+        Some((r, l))
+    });
+    tokio::spawn(russh::keys::agent::server::serve(Box::pin(incoming), Agent));
+    let mut client = AgentClient::connect_uds(&socket).await.unwrap();
+    client.add_identity(&key, &[]).await.unwrap();
+    let t = SshTransport::new(
+        credentials(Secret::Agent {
+            socket: Some(socket.clone()),
+        }),
+        pinned(&f),
+        SshLimits::default(),
+    );
+    assert_eq!(t.run(&device(&f.address), "agent").await.unwrap(), b"agent");
+}
+
+#[tokio::test]
+async fn an_idle_connection_is_closed() {
+    let f = serve(password_server(), Preferred::default()).await;
+    let limits = SshLimits {
+        idle_timeout: Duration::from_millis(300),
+        ..SshLimits::default()
+    };
+    let t = SshTransport::new(
+        credentials(Secret::Password("s3cret".into())),
+        pinned(&f),
+        limits,
+    );
+    let d = device(&f.address);
+    t.run(&d, "a").await.unwrap();
+    t.run(&d, "b").await.unwrap();
+    assert_eq!(f.stats.connections.load(Ordering::SeqCst), 1);
+    tokio::time::sleep(Duration::from_millis(1600)).await;
+    t.run(&d, "c").await.unwrap();
+    assert_eq!(f.stats.connections.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn a_host_that_closes_before_the_login_gets_one_more_try() {
+    let f = serve(password_server(), Preferred::default()).await;
+    let flaky = route::flaky(f.address.clone()).await;
+    let trust = TrustStore::memory(PinPolicy::Strict);
+    trust.pin(PinKind::Ssh, &flaky.address, &f.host_key);
+    let t = SshTransport::new(
+        credentials(Secret::Password("s3cret".into())),
+        Arc::new(trust),
+        SshLimits::default(),
+    );
+    assert_eq!(t.run(&device(&flaky.address), "x").await.unwrap(), b"x");
+    assert_eq!(flaky.forwards(), 1);
 }

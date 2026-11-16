@@ -12,7 +12,7 @@ default = ["vyos", "unifi"]
 vyos = ["ssh"]
 unifi = ["https"]
 ssh = ["dep:russh"]
-https = ["dep:ring", "dep:rustls", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:bytes"]
+https = ["ssh", "dep:ring", "dep:rustls", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:bytes"]
 
 [dependencies]
 futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }

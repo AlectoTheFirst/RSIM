@@ -20,6 +20,9 @@ pub enum Secret {
     },
     /// An API key that HTTPS sends in the `X-API-KEY` header.
     ApiKey(String),
+    /// The keys of an SSH agent at a Unix socket. With no socket, the
+    /// socket is the value of `SSH_AUTH_SOCK`.
+    Agent { socket: Option<PathBuf> },
 }
 
 impl fmt::Debug for Secret {
@@ -28,6 +31,7 @@ impl fmt::Debug for Secret {
             Secret::Password(_) => "Password(..)",
             Secret::Key { .. } => "Key(..)",
             Secret::ApiKey(_) => "ApiKey(..)",
+            Secret::Agent { .. } => "Agent(..)",
         })
     }
 }

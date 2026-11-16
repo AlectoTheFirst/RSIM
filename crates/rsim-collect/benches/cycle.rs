@@ -38,6 +38,7 @@ fn device(id: &str) -> Device {
         address: "192.0.2.1".into(),
         credential: "lab".into(),
         site: None,
+        route: Default::default(),
     }
 }
 

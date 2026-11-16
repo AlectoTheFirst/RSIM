@@ -209,6 +209,7 @@ mod tests {
                 address: "192.0.2.1".into(),
                 credential: "lab".into(),
                 site: None,
+                route: Default::default(),
             },
             collected_at: 5,
             sections: vec![RawSection {
