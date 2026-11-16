@@ -58,6 +58,10 @@ pub struct Port {
     pub stp_state: Option<String>,
     pub isolation: bool,
     pub aggregated: bool,
+    /// The link speed in Mbit/s, the duplex and the media of the port.
+    pub speed: Option<u64>,
+    pub full_duplex: Option<bool>,
+    pub media: Option<String>,
 }
 
 impl Port {
@@ -104,6 +108,10 @@ pub struct Device {
     pub lldp: Vec<(u32, String)>,
     /// The MAC of the gateway of the management network of the device.
     pub gateway_mac: Option<String>,
+    /// The speed in Mbit/s, the duplex and the media of the uplink.
+    pub uplink_speed: Option<u64>,
+    pub uplink_full_duplex: Option<bool>,
+    pub uplink_media: Option<String>,
     pub vaps: Vec<Vap>,
     pub index: usize,
 }
@@ -278,6 +286,11 @@ pub fn read(networks: &Value, wlans: &Value, devices: &Value, clients: &Value) -
                 uplink_peer,
                 lldp,
                 gateway_mac: s(x, "gateway_mac").map(|m| m.to_lowercase()),
+                uplink_speed: up.and_then(|u| n(u, "speed")).filter(|s| *s > 0),
+                uplink_full_duplex: up
+                    .and_then(|u| u.get("full_duplex"))
+                    .and_then(Value::as_bool),
+                uplink_media: up.and_then(|u| s(u, "media")),
                 vaps,
                 index,
             })
@@ -339,5 +352,8 @@ fn port(x: &Value) -> Option<Port> {
         aggregated: x
             .get("aggregated_by")
             .is_some_and(|v| !matches!(v, Value::Bool(false) | Value::Null)),
+        speed: n(x, "speed").filter(|s| *s > 0),
+        full_duplex: x.get("full_duplex").and_then(Value::as_bool),
+        media: s(x, "media"),
     })
 }

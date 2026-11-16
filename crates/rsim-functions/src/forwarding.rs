@@ -250,6 +250,8 @@ pub struct Link {
     /// The link delay in nanoseconds. `None` if there is no data.
     pub delay_ns: Option<u64>,
     pub provenance: Vec<SourceSpan>,
+    /// The physical facts of the link.
+    pub facts: Option<crate::layer2::LinkFacts>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -301,6 +303,10 @@ impl Egress {
             .and_then(|l| l.peer.as_ref().map(|p| (l, p)))
         {
             Some((l, peer)) => {
+                let facts = l
+                    .facts
+                    .as_ref()
+                    .map_or(String::new(), |f| format!(" · {}", f.text()));
                 let mut b = self.meta.forward(
                     match self.tag {
                         Tag::Keep => input.rewrite(&self.rewrite),
@@ -309,12 +315,15 @@ impl Egress {
                     },
                     peer,
                     ReasonCode::LinkHandOff,
-                    format!("leave on {} to {peer}", self.interface),
+                    format!("leave on {} to {peer}{facts}", self.interface),
                     ctx.clone(),
                     state,
                 );
                 b.delay = b.delay.add(&self.link_delay());
                 b.spans = l.provenance.clone();
+                if let Some(f) = &l.facts {
+                    b.spans.extend(f.spans());
+                }
                 b
             }
             None => self.meta.unknown(

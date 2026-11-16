@@ -3,13 +3,13 @@
    "uplink": {"port_idx": 1, "type": "wire"},
    "lldp_table": [],
    "port_table": [
-     {"port_idx": 1, "up": true, "enable": true, "forward": "all", "native_networkconf_id": "n-default", "excluded_networkconf_ids": [], "stp_state": "forwarding"},
-     {"port_idx": 2, "up": true, "enable": true, "forward": "native", "native_networkconf_id": "n-lan", "stp_state": "forwarding"},
-     {"port_idx": 3, "up": true, "enable": true, "forward": "customize", "native_networkconf_id": "n-default", "excluded_networkconf_ids": ["n-lan"], "stp_state": "forwarding"},
+     {"port_idx": 1, "up": true, "enable": true, "forward": "all", "native_networkconf_id": "n-default", "excluded_networkconf_ids": [], "stp_state": "forwarding", "speed": 1000, "full_duplex": true, "media": "GE"},
+     {"port_idx": 2, "up": true, "enable": true, "forward": "native", "native_networkconf_id": "n-lan", "stp_state": "forwarding", "speed": 1000, "full_duplex": true, "media": "GE"},
+     {"port_idx": 3, "up": true, "enable": true, "forward": "customize", "native_networkconf_id": "n-default", "excluded_networkconf_ids": ["n-lan"], "stp_state": "forwarding", "speed": 1000, "full_duplex": true, "media": "GE"},
      {"port_idx": 4, "up": false, "enable": true, "forward": "native", "native_networkconf_id": "n-lan", "stp_state": "disabled"}
    ]},
   {"mac": "00:00:5e:00:53:b1", "name": "ap1", "type": "uap",
-   "uplink": {"port_idx": 1, "type": "wire", "uplink_mac": "00:00:5e:00:53:a1", "uplink_remote_port": 3},
+   "uplink": {"port_idx": 1, "type": "wire", "uplink_mac": "00:00:5e:00:53:a1", "uplink_remote_port": 3, "speed": 100, "full_duplex": true, "media": "GE"},
    "vap_table": [
      {"essid": "guest", "wlanconf_id": "w-guest", "radio": "ng", "up": true},
      {"essid": "guest", "wlanconf_id": "w-guest", "radio": "na", "up": true}

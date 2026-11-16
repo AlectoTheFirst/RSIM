@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use rsim_core::{Destination, EndpointId, FieldValue, Header, PROTO_TCP, ReasonCode, Verdict};
 use rsim_engine::{Answer, Executor, Query, Twin};
 use rsim_ingest::State;
-use rsim_ingest::collected::{AddressRow, Collected, LinkRow, RouteRow, row_span};
+use rsim_ingest::collected::{AddressRow, Collected, LinkRow, RouteRow, SpeedRow, row_span};
 use rsim_ingest::estate::{Estate, Input, assemble};
 
 const VYOS: &[u8] = include_bytes!("fixtures/vyos/r1-config.json");
@@ -66,6 +66,12 @@ fn estate_with(change: impl Fn(&str, Vec<u8>) -> Vec<u8>) -> Estate {
             link("eth0.10", Some("eth0")),
             link("eth0.110", Some("eth0")),
         ],
+        speeds: vec![SpeedRow {
+            interface: "eth0".into(),
+            mbps: Some(1000),
+            duplex: Some("full".into()),
+            span: row_span("r1", "link_speeds", "b5", 0),
+        }],
     };
     let sections: BTreeMap<String, (Vec<u8>, String)> =
         ["networks", "wlans", "devices", "clients", "port_profiles"]
@@ -243,4 +249,37 @@ fn the_reply_starts_at_the_attachment_point_of_the_destination() {
         ),
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn each_link_step_shows_the_speed_duplex_and_media_of_both_ends() {
+    let t = twin();
+    let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
+    let b = &a.branches()[0];
+    let detail = |name: &str| {
+        b.steps
+            .iter()
+            .find(|s| s.function.as_str() == name)
+            .unwrap()
+            .reason
+            .detail
+            .clone()
+    };
+    let ap = detail("ap1/port/1/out");
+    assert!(
+        ap.contains("link 100 Mbit/s full duplex GE to 1000 Mbit/s full duplex GE"),
+        "{ap}"
+    );
+    assert!(ap.contains("speed mismatch"), "{ap}");
+    let up = detail("sw1/port/1/out");
+    assert!(
+        up.contains("link 1000 Mbit/s full duplex GE to 1000 Mbit/s full duplex"),
+        "{up}"
+    );
+    assert!(!up.contains("mismatch"), "{up}");
+    let router = detail("r1/out/eth0.10");
+    assert!(
+        router.contains("link 1000 Mbit/s full duplex to 1000 Mbit/s full duplex GE"),
+        "{router}"
+    );
 }
