@@ -125,6 +125,7 @@ impl Dev {
                 peer: (!peer.is_empty()).then(|| fid(peer)),
                 delay_ns: delay,
                 provenance: vec![SourceSpan::line("topology/links.yaml", line)],
+                facts: None,
             }),
             rewrite: Default::default(),
             tag: Default::default(),

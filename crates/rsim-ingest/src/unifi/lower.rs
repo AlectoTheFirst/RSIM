@@ -11,8 +11,8 @@ use rsim_core::{
 };
 use rsim_engine::{AttachmentKind, AttachmentRecord, Endpoint};
 use rsim_functions::{
-    Flood, HostMac, HostResolution, MacEntry, MacLookup, Meta, PortEgress, PortIngress,
-    VendorProfile, WirelessAttachment,
+    Flood, HostMac, HostResolution, LinkEnd, LinkFacts, MacEntry, MacLookup, Meta, PortEgress,
+    PortIngress, VendorProfile, WirelessAttachment,
 };
 
 use crate::unifi::site::{Client, Device, DeviceKind, Forward, Network, Port, Site};
@@ -34,6 +34,8 @@ pub struct RouterPort {
     /// the untagged interface.
     pub vlans: BTreeMap<Option<u16>, Vec<(IpAddr, u8)>>,
     pub provenance: Vec<SourceSpan>,
+    /// The physical facts of the router interface.
+    pub facts: Option<LinkEnd>,
 }
 
 /// The function instances, endpoints, attachment records and notes of a
@@ -44,8 +46,8 @@ pub struct Lowered {
     pub endpoints: Vec<Endpoint>,
     pub attachments: Vec<AttachmentRecord>,
     /// The ingress function of the UniFi port that the router port links
-    /// to, with the router interface.
-    pub router_peer: Option<(String, FunctionId)>,
+    /// to, with the router interface and the facts of the UniFi port.
+    pub router_peer: Option<(String, FunctionId, LinkEnd)>,
     pub notes: Vec<String>,
 }
 
@@ -175,6 +177,17 @@ impl<'a> L<'a> {
         }
     }
 
+    /// The physical facts of a port of a device.
+    fn port_facts(&self, d: &Device, idx: u32) -> LinkEnd {
+        let p = ports(d).into_iter().find(|p| p.idx == idx);
+        LinkEnd {
+            speed_mbps: p.as_ref().and_then(|p| p.speed),
+            full_duplex: p.as_ref().and_then(|p| p.full_duplex),
+            media: p.and_then(|p| p.media),
+            spans: vec![self.dev_span(d)],
+        }
+    }
+
     /// The port of the device on the link to the router.
     fn root_router_port(&self, d: &Device) -> Option<u32> {
         self.router.filter(|r| r.switch == d.mac).map(|r| r.port)
@@ -198,6 +211,9 @@ fn ports(d: &Device) -> Vec<Port> {
             stp_state: None,
             isolation: false,
             aggregated: false,
+            speed: d.uplink_speed,
+            full_duplex: d.uplink_full_duplex,
+            media: d.uplink_media.clone(),
         }],
         _ => Vec::new(),
     }
@@ -336,23 +352,34 @@ pub fn lower(
                 next: l.id(d, "mac"),
             }));
             // The peer of the port.
-            let peer = if Some(p.idx) == d.uplink_port
+            let local = l.port_facts(d, p.idx);
+            let (peer, remote) = if Some(p.idx) == d.uplink_port
                 && let Some((up, rp)) = parent
             {
-                Some(l.id(up, &format!("port/{rp}/in")))
+                (
+                    Some(l.id(up, &format!("port/{rp}/in"))),
+                    Some(l.port_facts(up, rp)),
+                )
             } else if Some(p.idx) == router_port {
                 let r = router.expect("a router port has a router");
-                l.out.router_peer = Some((r.interface.clone(), l.id(d, &in_id)));
-                Some(r.handoff.clone())
+                l.out.router_peer = Some((r.interface.clone(), l.id(d, &in_id), local.clone()));
+                (Some(r.handoff.clone()), r.facts.clone())
             } else {
-                site.devices
-                    .iter()
-                    .find(|c| {
-                        c.uplink_peer.as_ref() == Some(&(d.mac.clone(), p.idx))
-                            && c.kind != DeviceKind::Other
-                    })
-                    .and_then(|c| c.uplink_port.map(|up| l.id(c, &format!("port/{up}/in"))))
+                match site.devices.iter().find(|c| {
+                    c.uplink_peer.as_ref() == Some(&(d.mac.clone(), p.idx))
+                        && c.kind != DeviceKind::Other
+                }) {
+                    Some(c) => match c.uplink_port {
+                        Some(up) => (
+                            Some(l.id(c, &format!("port/{up}/in"))),
+                            Some(l.port_facts(c, up)),
+                        ),
+                        None => (None, None),
+                    },
+                    None => (None, None),
+                }
             };
+            let link = peer.as_ref().map(|_| LinkFacts { local, remote });
             let port_hosts: BTreeMap<Mac, EndpointId> = located
                 .iter()
                 .filter(|(_, loc, _)| loc.0 == d.mac && loc.1 == pid.to_string())
@@ -370,6 +397,7 @@ pub fn lower(
                     .collect(),
                 peer,
                 hosts: port_hosts,
+                link,
             }));
             let out_id = l.id(d, &out_name);
             egress.insert(pid.clone(), out_id.clone());
@@ -417,6 +445,7 @@ pub fn lower(
                 tagged: BTreeMap::new(),
                 peer: None,
                 hosts: hosts_on,
+                link: None,
             }));
             let out_id = l.id(d, &out_name);
             egress.insert(pid.clone(), out_id.clone());

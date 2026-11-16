@@ -162,6 +162,7 @@ pub fn layer2_site() -> TwinBuilder {
                 .get(n)
                 .map(|(m, h)| BTreeMap::from([(*m, EndpointId::new(*h))]))
                 .unwrap_or_default(),
+            link: None,
         });
         let out = sw.id(&format!("port/{n}/out"));
         egress.insert(p.clone(), out.clone());
@@ -219,6 +220,7 @@ pub fn layer2_site() -> TwinBuilder {
         tagged: BTreeMap::from([(v20.clone(), 20)]),
         peer: Some(fid("sw1/port/3/in")),
         hosts: BTreeMap::new(),
+        link: None,
     });
     add!(WirelessAttachment {
         meta: ap.meta("wlan/office/in", 62, 62),
@@ -233,6 +235,7 @@ pub fn layer2_site() -> TwinBuilder {
         tagged: BTreeMap::new(),
         peer: None,
         hosts: BTreeMap::from([(W1_MAC, EndpointId::new("w1"))]),
+        link: None,
     });
     let ap_entry = |p: &str| MacEntry {
         port: port(p),

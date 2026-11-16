@@ -182,10 +182,11 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         };
         let router = router_port(&site, &routers, &files.devices);
         let low = unifi::lower(device, &site, &profile, &files, router.as_ref());
-        if let (Some(r), Some((iface, peer))) = (&router, &low.router_peer) {
-            l2.entry(r.device.clone())
-                .or_default()
-                .insert(iface.clone(), (peer.clone(), r.provenance.clone()));
+        if let (Some(r), Some((iface, peer, port))) = (&router, &low.router_peer) {
+            l2.entry(r.device.clone()).or_default().insert(
+                iface.clone(),
+                (peer.clone(), r.provenance.clone(), Some(port.clone())),
+            );
             // The clients of the site are neighbours of the router on the
             // interface of their VLAN.
             for c in &site.clients {
@@ -311,6 +312,7 @@ fn router_port(
             port,
             mac,
             handoff: FunctionId::new(format!("{name}/handoff/{phys}")),
+            facts: vyos::interface_facts(&r.col, &phys),
             vlans,
             provenance: vec![span, row.span.clone()],
         });

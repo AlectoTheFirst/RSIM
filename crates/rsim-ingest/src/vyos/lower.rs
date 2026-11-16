@@ -13,9 +13,10 @@ use rsim_core::{
 use rsim_engine::EdgeInterface;
 use rsim_functions::{
     DestinationNat, DeviceDelivery, Egress, EgressMode, FirewallPolicy, Ingress, Layer3HandOff,
-    Link, LocalInput, Meta, NatAction, Neighbour, NextHopResolution, PolicyRoute, QosNotEvaluated,
-    Route, RouteKind, RouteLookup, RouteNextHop, Rule as FRule, RuleAction, SessionCommit,
-    SessionLookup, SourceNat, Tag, VendorProfile, VrfSelection, ZoneLookup, ZoneRole, ZoneScope,
+    Link, LinkEnd, LinkFacts, LocalInput, Meta, NatAction, Neighbour, NextHopResolution,
+    PolicyRoute, QosNotEvaluated, Route, RouteKind, RouteLookup, RouteNextHop, Rule as FRule,
+    RuleAction, SessionCommit, SessionLookup, SourceNat, Tag, VendorProfile, VrfSelection,
+    ZoneLookup, ZoneRole, ZoneScope,
 };
 
 use crate::collected::Collected;
@@ -23,6 +24,9 @@ use crate::vyos::config::{Action, Config, Family, Interface, Kind, Lines, RuleMa
 
 /// The VRF of all interfaces. VRFs are unhandled.
 const VRF: &str = "default";
+
+/// The zone of an interface that is in no firewall zone.
+pub const NO_ZONE: &str = "(no zone)";
 
 /// The function instances, the edge interfaces and the notes of one device.
 #[derive(Default)]
@@ -99,9 +103,20 @@ fn addresses(cfg: &Config, col: &Collected) -> Addrs {
 }
 
 /// The layer 2 peer of each physical interface: the ingress function of
-/// the switch port on the other end of the link, and the provenance of the
-/// link.
-pub type Layer2Links = BTreeMap<String, (FunctionId, Vec<SourceSpan>)>;
+/// the switch port on the other end of the link, the provenance of the
+/// link, and the physical facts of the switch port.
+pub type Layer2Links = BTreeMap<String, (FunctionId, Vec<SourceSpan>, Option<LinkEnd>)>;
+
+/// The physical facts of an interface from the collected link speeds.
+pub fn interface_facts(col: &Collected, iface: &str) -> Option<LinkEnd> {
+    let r = col.speeds.iter().find(|r| r.interface == iface)?;
+    Some(LinkEnd {
+        speed_mbps: r.mbps,
+        full_duplex: r.duplex.as_deref().map(|d| d == "full"),
+        media: None,
+        spans: vec![r.span.clone()],
+    })
+}
 
 /// The physical interface and the VLAN of an interface name such as
 /// `eth0.10`.
@@ -159,7 +174,7 @@ pub fn lower(
         default_vrf: profile.default_vrf.clone(),
         next: l.id("zone-src"),
     });
-    let zone_of: BTreeMap<InterfaceId, ZoneId> = cfg
+    let mut zone_of: BTreeMap<InterfaceId, ZoneId> = cfg
         .zones
         .iter()
         .flat_map(|z| {
@@ -168,6 +183,11 @@ pub fn lower(
                 .map(move |m| (InterfaceId::new(m), ZoneId::new(&z.name)))
         })
         .collect();
+    for i in &active {
+        zone_of
+            .entry(InterfaceId::new(&i.name))
+            .or_insert_with(|| ZoneId::new(NO_ZONE));
+    }
     let zone_spans: Vec<SourceSpan> = cfg.zones.iter().map(|z| l.span(z.lines)).collect();
     for (name, role, next) in [
         ("zone-src", ZoneRole::Source, "session-lookup"),
@@ -450,11 +470,15 @@ pub fn lower(
         let (phys, vlan) = physical(&i.name);
         let joined = l2.get(phys).zip(interface_mac(col, phys));
         let (link, rewrite, tag) = match joined {
-            Some(((peer, prov), m)) => (
+            Some(((peer, prov, remote), m)) => (
                 Some(Link {
                     peer: Some(peer.clone()),
                     delay_ns: None,
                     provenance: prov.clone(),
+                    facts: Some(LinkFacts {
+                        local: interface_facts(col, phys).unwrap_or_default(),
+                        remote: remote.clone(),
+                    }),
                 }),
                 Rewrite {
                     src_mac: Some(FieldValue::Known(m)),
@@ -473,7 +497,7 @@ pub fn lower(
             tag,
         });
     }
-    for (phys, (_, prov)) in l2 {
+    for (phys, (_, prov, _)) in l2 {
         let Some(m) = interface_mac(col, phys) else {
             l.note(format!(
                 "{phys}: no collected MAC, so the layer 2 link is not lowered"
@@ -799,6 +823,49 @@ impl L<'_> {
             let r = self.zone_default(to, &name, None);
             pairs.push((scope, r));
             out.extend(pairs);
+        }
+        // Traffic to an interface in no zone enters no zone chain, and the
+        // forward hook accepts it.
+        let span = self.profile.source.last().cloned();
+        let mut r = FRule::new(
+            format!("to {NO_ZONE}"),
+            RulePredicate::exact(Match::any()),
+            RuleAction::Permit,
+        );
+        if let Some(s) = span {
+            r = r.with_span(s);
+        }
+        forward.push((
+            ZoneScope {
+                from: None,
+                to: Some(BTreeSet::from([ZoneId::new(NO_ZONE)])),
+                ingress: None,
+                egress: None,
+            },
+            r,
+        ));
+        // A global filter that the handlers do not read comes first, so the
+        // policy is unknown for each packet.
+        let whole = SourceSpan::new(self.file, 1, 1);
+        if self.cfg.forward_filter {
+            self.note("the global forward filter is not lowered".into());
+            forward.insert(
+                0,
+                (
+                    ZoneScope::default(),
+                    FRule::unhandled("firewall forward filter", whole.clone()),
+                ),
+            );
+        }
+        if self.cfg.input_filter {
+            self.note("the global input filter is not lowered".into());
+            to_local.insert(
+                0,
+                (
+                    ZoneScope::default(),
+                    FRule::unhandled("firewall input filter", whole),
+                ),
+            );
         }
         (forward, to_local)
     }

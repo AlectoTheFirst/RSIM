@@ -113,6 +113,7 @@
           "110": {"address": "192.0.2.65/26", "description": "guest"}
         }
       },
+      "eth1": {"address": "203.0.113.129/25", "description": "lab, in no zone"},
       "eth2": {"description": "wan underlay", "hw-id": "00:00:5e:00:53:02"}
     },
     "loopback": {"lo": {}},

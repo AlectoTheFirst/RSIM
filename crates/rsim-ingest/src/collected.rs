@@ -5,7 +5,9 @@ use arrow_array::cast::AsArray;
 use arrow_array::types::UInt64Type;
 use arrow_array::{Array, RecordBatch};
 use rsim_core::SourceSpan;
-use rsim_store::{ADDRESSES, LINKS, NEIGHBOURS, ROUTES, Snapshot, Store, StoreError, TableSchema};
+use rsim_store::{
+    ADDRESSES, LINK_SPEEDS, LINKS, NEIGHBOURS, ROUTES, Snapshot, Store, StoreError, TableSchema,
+};
 
 /// An address of an interface, for example `192.0.2.1/24`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,6 +49,15 @@ pub struct LinkRow {
     pub span: SourceSpan,
 }
 
+/// The speed and the duplex of an interface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpeedRow {
+    pub interface: String,
+    pub mbps: Option<u64>,
+    pub duplex: Option<String>,
+    pub span: SourceSpan,
+}
+
 /// The collected state of one device.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Collected {
@@ -55,6 +66,7 @@ pub struct Collected {
     pub routes: Vec<RouteRow>,
     pub neighbours: Vec<NeighbourRow>,
     pub links: Vec<LinkRow>,
+    pub speeds: Vec<SpeedRow>,
 }
 
 /// The source span of a row: the device, the table, the blob of its section
@@ -149,6 +161,14 @@ pub fn read(store: &Store, snapshot: &Snapshot, device: &str) -> Result<Collecte
                 parent: c.s("parent", i),
                 vlan: c.u("vlan", i),
                 span: c.span(device, LINKS.name, i),
+            })
+        })?,
+        speeds: rows(store, snapshot, &LINK_SPEEDS, device, |c, i| {
+            Some(SpeedRow {
+                interface: c.s("interface", i)?,
+                mbps: c.u("mbps", i),
+                duplex: c.s("duplex", i),
+                span: c.span(device, LINK_SPEEDS.name, i),
             })
         })?,
     })

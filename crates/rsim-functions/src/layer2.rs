@@ -13,6 +13,77 @@ use rsim_core::{
 use crate::common::{Meta, push_nonempty};
 use crate::forwarding::meta_methods;
 
+/// The physical facts of one end of a link: the speed, the duplex and the
+/// media of the port, from collected state.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LinkEnd {
+    pub speed_mbps: Option<u64>,
+    pub full_duplex: Option<bool>,
+    /// The media, for example `GE` or `SFP+`.
+    pub media: Option<String>,
+    pub spans: Vec<SourceSpan>,
+}
+
+impl LinkEnd {
+    fn text(&self) -> String {
+        let mut v = Vec::new();
+        v.push(match self.speed_mbps {
+            Some(s) => format!("{s} Mbit/s"),
+            None => "speed not known".to_string(),
+        });
+        match self.full_duplex {
+            Some(true) => v.push("full duplex".into()),
+            Some(false) => v.push("half duplex".into()),
+            None => {}
+        }
+        if let Some(m) = &self.media {
+            v.push(m.clone());
+        }
+        v.join(" ")
+    }
+}
+
+/// The physical facts of a link: the local end and, if it is known, the
+/// remote end.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LinkFacts {
+    pub local: LinkEnd,
+    pub remote: Option<LinkEnd>,
+}
+
+impl LinkFacts {
+    /// The facts as text for a trace step, with a mismatch of the 2 ends.
+    pub fn text(&self) -> String {
+        let mut t = format!("link {}", self.local.text());
+        if let Some(r) = &self.remote {
+            t.push_str(&format!(" to {}", r.text()));
+            if let (Some(a), Some(b)) = (self.local.speed_mbps, r.speed_mbps)
+                && a != b
+            {
+                t.push_str(" · speed mismatch");
+            }
+            if let (Some(a), Some(b)) = (self.local.full_duplex, r.full_duplex)
+                && a != b
+            {
+                t.push_str(" · duplex mismatch");
+            }
+        }
+        if self.local.full_duplex == Some(false) {
+            t.push_str(" · half duplex");
+        }
+        t
+    }
+
+    /// The provenance of both ends.
+    pub fn spans(&self) -> Vec<SourceSpan> {
+        let mut v = self.local.spans.clone();
+        if let Some(r) = &self.remote {
+            v.extend(r.spans.iter().cloned());
+        }
+        v
+    }
+}
+
 /// The broadcast MAC address.
 pub const BROADCAST: Mac = Mac([0xff; 6]);
 
@@ -541,6 +612,8 @@ pub struct PortEgress {
     pub peer: Option<FunctionId>,
     /// The hosts on the port.
     pub hosts: BTreeMap<Mac, EndpointId>,
+    /// The physical facts of the link of the port.
+    pub link: Option<LinkFacts>,
 }
 
 impl NetFunction for PortEgress {
@@ -587,14 +660,20 @@ impl NetFunction for PortEgress {
             None => "untagged".to_string(),
         };
         if let Some(peer) = &self.peer {
-            return vec![self.meta.forward(
+            let facts = self
+                .link
+                .as_ref()
+                .map_or(String::new(), |l| format!(" · {}", l.text()));
+            let b = self.meta.forward(
                 set,
                 peer,
                 ReasonCode::LinkHandOff,
-                format!("leave port {} {shown} to {peer}", self.port),
+                format!("leave port {} {shown} to {peer}{facts}", self.port),
                 ctx.clone(),
                 state,
-            )];
+            );
+            let spans = self.link.as_ref().map(LinkFacts::spans).unwrap_or_default();
+            return vec![b.with_spans(spans)];
         }
         // The reply of a host starts on the port, which is also the
         // interface of the attachment point of the host.

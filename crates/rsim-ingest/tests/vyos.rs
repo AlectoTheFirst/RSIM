@@ -29,7 +29,7 @@ fn the_handlers_give_typed_structures() {
     assert_eq!(
         names,
         [
-            "eth0", "eth0.10", "eth0.110", "eth2", "dum0", "lo", "pppoe0", "wg0"
+            "eth0", "eth0.10", "eth0.110", "eth1", "eth2", "dum0", "lo", "pppoe0", "wg0"
         ]
     );
     let lan = cfg.interfaces.iter().find(|i| i.name == "eth0.10").unwrap();
@@ -111,6 +111,7 @@ mod twin {
                 route("192.0.2.0/26", "connected", "eth0.10"),
                 route("192.0.2.64/26", "connected", "eth0.110"),
                 route("192.0.2.192/27", "connected", "eth0"),
+                route("203.0.113.128/25", "connected", "eth1"),
             ],
             neighbours: vec![NeighbourRow {
                 interface: "eth0.10".into(),
@@ -120,11 +121,16 @@ mod twin {
                 span: row_span("r1", "neighbours", "b3", 0),
             }],
             links: Vec::new(),
+            speeds: Vec::new(),
         }
     }
 
     fn build() -> (Twin, Vec<String>) {
-        let cfg = vyos::read(&read_json(CONFIG).unwrap());
+        build_from(CONFIG)
+    }
+
+    fn build_from(config: &[u8]) -> (Twin, Vec<String>) {
+        let cfg = vyos::read(&read_json(config).unwrap());
         let low = vyos::lower(
             "r1",
             "r1/config",
@@ -307,5 +313,38 @@ mod twin {
         let a = run(&t, "eth0.10", tcp("192.0.2.30", "203.0.113.99", 25));
         let (detail, code) = policy_step(&a);
         assert_eq!(code, ReasonCode::Permitted, "{detail}");
+    }
+
+    #[test]
+    fn an_interface_in_no_zone_is_reachable_and_cannot_reach_a_zone() {
+        let (t, _) = build();
+        let a = run(&t, "eth0.10", tcp("192.0.2.30", "203.0.113.130", 443));
+        let (detail, code) = policy_step(&a);
+        assert_eq!(code, ReasonCode::Permitted, "{detail}");
+        assert!(detail.contains("(no zone)"), "{detail}");
+        let a = run(&t, "eth1", tcp("203.0.113.130", "192.0.2.30", 443));
+        let (detail, code) = policy_step(&a);
+        assert_eq!(code, ReasonCode::Denied, "{detail}");
+        assert!(detail.contains("zone LAN default"), "{detail}");
+    }
+
+    #[test]
+    fn a_global_forward_filter_that_is_not_lowered_makes_the_policy_unknown() {
+        let text = String::from_utf8(CONFIG.to_vec()).unwrap().replace(
+            "\"ipv4\": {\n      \"name\": {",
+            "\"ipv4\": {\n      \"forward\": {\"filter\": {\"default-action\": \"drop\"}},\n      \"name\": {",
+        );
+        assert!(text.contains("forward"));
+        let (t, notes) = build_from(text.as_bytes());
+        assert!(
+            notes.iter().any(|n| n.contains("forward filter")),
+            "{notes:?}"
+        );
+        let a = run(&t, "eth0.10", tcp("192.0.2.30", "203.0.113.99", 443));
+        assert!(
+            matches!(first(&a).1, Verdict::Unknown(_)),
+            "{:?}",
+            first(&a).1
+        );
     }
 }

@@ -207,6 +207,12 @@ pub struct Config {
     pub policy_routes: Vec<PolicyRoute>,
     pub static_routes: Vec<StaticRoute>,
     pub qos: Vec<Qos>,
+    /// True if the config has a global forward filter, which the handlers
+    /// do not read.
+    pub forward_filter: bool,
+    /// True if the config has a global input filter, which the handlers do
+    /// not read.
+    pub input_filter: bool,
     /// The first lines of the stanzas that the handlers read.
     pub read: BTreeSet<u32>,
 }
@@ -439,6 +445,10 @@ fn read_interface(r: &mut Reader, s: &Stanza, name: String, kind: Kind) -> Inter
 }
 
 fn read_firewall(r: &mut Reader, fw: &Stanza, c: &mut Config) {
+    for family in ["ipv4", "ipv6"] {
+        c.forward_filter |= fw.at(&[family, "forward"]).is_some();
+        c.input_filter |= fw.at(&[family, "input"]).is_some();
+    }
     if let Some(groups) = fw.get("group") {
         r.mark(groups);
         for key in [
