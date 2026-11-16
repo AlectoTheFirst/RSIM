@@ -1,0 +1,17 @@
+[package]
+name = "rsim-ingest"
+description = "The ingestion of rsim: structural parsers, stanza classification, vendor handlers and lowering."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rsim-store.workspace = true
+serde_json = "1"
+
+[dev-dependencies]
+
+[lints]
+workspace = true
