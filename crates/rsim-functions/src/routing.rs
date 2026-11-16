@@ -69,6 +69,9 @@ pub struct RouteLookup {
     /// lookup of the main table after a policy route table. `None` drops
     /// them.
     pub fallback: Option<FunctionId>,
+    /// The function that gets the packets of a local route, for example the
+    /// input policy of the device. `None` delivers them to the device.
+    pub local: Option<FunctionId>,
 }
 
 impl RouteLookup {
@@ -103,6 +106,7 @@ impl NetFunction for RouteLookup {
                     .collect::<Vec<_>>()
             })
             .chain(self.fallback.clone())
+            .chain(self.local.clone())
             .collect();
         v.sort();
         v.dedup();
@@ -178,6 +182,21 @@ impl RouteLookup {
     ) {
         match route.kind {
             RouteKind::Local => {
+                if let Some(next) = &self.local {
+                    out.push(
+                        self.meta
+                            .forward(
+                                set,
+                                next,
+                                ReasonCode::Routed,
+                                format!("{prefix} is an address of {}", self.meta.device),
+                                ctx.clone(),
+                                state,
+                            )
+                            .with_spans(route.spans.clone()),
+                    );
+                    return;
+                }
                 out.push(
                     self.meta
                         .branch(

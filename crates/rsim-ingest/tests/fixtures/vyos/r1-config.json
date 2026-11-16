@@ -1,0 +1,174 @@
+{
+  "firewall": {
+    "global-options": {
+      "all-ping": "enable",
+      "receive-redirects": "disable",
+      "state-policy": {
+        "established": {"action": "accept"},
+        "invalid": {"action": "drop"},
+        "related": {"action": "accept"}
+      }
+    },
+    "group": {
+      "address-group": {
+        "vpn-clients": {"address": ["192.0.2.10", "192.0.2.20-192.0.2.23"]}
+      }
+    },
+    "ipv4": {
+      "name": {
+        "GUEST-LOCAL": {
+          "default-action": "drop",
+          "rule": {
+            "10": {"action": "accept", "description": "DHCP", "destination": {"port": "67"}, "protocol": "udp"},
+            "20": {"action": "accept", "description": "DNS", "destination": {"port": "53"}, "protocol": "tcp_udp"}
+          }
+        },
+        "GUEST-WAN": {"default-action": "accept"},
+        "GUEST-LAN": {
+          "default-action": "drop",
+          "rule": {
+            "10": {"action": "accept", "destination": {"address": "192.0.2.50/32", "port": "8123,8443-8445"}, "protocol": "tcp"},
+            "20": {"action": "accept", "destination": {"address": "192.0.2.51"}, "protocol": "icmp"},
+            "30": {"action": "accept", "destination": {"port": "9999"}, "protocol": "tcp", "recent": {"count": "3"}}
+          }
+        },
+        "LAN-GUEST": {"default-action": "accept"},
+        "LAN-LOCAL": {"default-action": "accept"},
+        "LAN-WAN": {"default-action": "accept"},
+        "LOCAL-GUEST": {"default-action": "accept"},
+        "LOCAL-LAN": {"default-action": "accept"},
+        "LOCAL-WAN": {"default-action": "accept"},
+        "WAN-GUEST": {"default-action": "drop"},
+        "WAN-LAN": {"default-action": "drop"},
+        "WAN-LOCAL": {
+          "default-action": "drop",
+          "rule": {
+            "10": {"action": "accept", "destination": {"port": "51820"}, "protocol": "udp"}
+          }
+        }
+      }
+    },
+    "ipv6": {
+      "name": {
+        "LAN6-WAN6": {"default-action": "accept"},
+        "WAN6-LAN6": {"default-action": "drop"}
+      }
+    },
+    "zone": {
+      "GUEST": {
+        "default-action": "drop",
+        "from": {
+          "LAN": {"firewall": {"name": "LAN-GUEST"}},
+          "LOCAL": {"firewall": {"name": "LOCAL-GUEST"}},
+          "WAN": {"firewall": {"name": "WAN-GUEST"}}
+        },
+        "member": {"interface": ["eth0.110"]}
+      },
+      "LAN": {
+        "default-action": "drop",
+        "default-log": {},
+        "from": {
+          "GUEST": {"firewall": {"name": "GUEST-LAN"}},
+          "LOCAL": {"firewall": {"name": "LOCAL-LAN"}},
+          "WAN": {"firewall": {"ipv6-name": "WAN6-LAN6", "name": "WAN-LAN"}}
+        },
+        "intra-zone-filtering": {"action": "accept"},
+        "member": {"interface": ["eth0", "eth0.10"]}
+      },
+      "LOCAL": {
+        "default-action": "drop",
+        "from": {
+          "GUEST": {"firewall": {"name": "GUEST-LOCAL"}},
+          "LAN": {"firewall": {"name": "LAN-LOCAL"}},
+          "WAN": {"firewall": {"name": "WAN-LOCAL"}}
+        },
+        "local-zone": {}
+      },
+      "WAN": {
+        "default-action": "drop",
+        "from": {
+          "GUEST": {"firewall": {"name": "GUEST-WAN"}},
+          "LAN": {"firewall": {"ipv6-name": "LAN6-WAN6", "name": "LAN-WAN"}},
+          "LOCAL": {"firewall": {"name": "LOCAL-WAN"}}
+        },
+        "member": {"interface": ["pppoe0", "wg0"]}
+      }
+    }
+  },
+  "interfaces": {
+    "dummy": {"dum0": {"address": "192.0.2.254/32"}},
+    "ethernet": {
+      "eth0": {
+        "address": "192.0.2.193/27",
+        "description": "mgmt",
+        "hw-id": "00:00:5e:00:53:01",
+        "offload": {"sg": {}, "tso": {}},
+        "vif": {
+          "10": {"address": "192.0.2.1/26", "description": "lan", "ip": {"adjust-mss": "1452"}},
+          "110": {"address": "192.0.2.65/26", "description": "guest"}
+        }
+      },
+      "eth2": {"description": "wan underlay", "hw-id": "00:00:5e:00:53:02"}
+    },
+    "loopback": {"lo": {}},
+    "pppoe": {
+      "pppoe0": {
+        "authentication": {"password": "x", "username": "y"},
+        "ipv6": {"address": {"autoconf": {}}},
+        "mtu": "1492",
+        "source-interface": "eth2"
+      }
+    },
+    "wireguard": {
+      "wg0": {
+        "address": "198.51.100.2/32",
+        "peer": {
+          "vpn": {
+            "address": "198.51.100.1",
+            "allowed-ips": "0.0.0.0/0",
+            "port": "51820",
+            "public-key": "AAAA"
+          }
+        },
+        "private-key": "BBBB"
+      }
+    }
+  },
+  "nat": {
+    "source": {
+      "rule": {
+        "10": {"outbound-interface": {"name": "wg0"}, "source": {"group": {"address-group": "vpn-clients"}}, "translation": {"address": "masquerade"}},
+        "100": {"description": "hide lan", "outbound-interface": {"name": "pppoe0"}, "translation": {"address": "masquerade"}}
+      }
+    }
+  },
+  "policy": {
+    "route": {
+      "PBR-LAN": {
+        "interface": "eth0.10",
+        "rule": {
+          "10": {"description": "local", "destination": {"address": "192.0.2.0/24"}, "set": {"table": "main"}},
+          "20": {"set": {"table": "100"}, "source": {"group": {"address-group": "vpn-clients"}}}
+        }
+      }
+    },
+    "prefix-list": {"pl": {"rule": {"10": {"action": "permit", "prefix": "192.0.2.0/24"}}}}
+  },
+  "protocols": {
+    "bgp": {"system-as": "64496"},
+    "static": {
+      "table": {
+        "100": {"route": {"0.0.0.0/0": {"interface": {"wg0": {}}}}}
+      }
+    }
+  },
+  "qos": {
+    "interface": {"pppoe0": {"egress": "WAN"}},
+    "policy": {"cake": {"WAN": {"bandwidth": "100mbit"}}}
+  },
+  "service": {
+    "dns": {"forwarding": {"listen-address": ["192.0.2.1", "192.0.2.65"]}},
+    "ssh": {"port": "22"}
+  },
+  "system": {"host-name": "r1"}
+}

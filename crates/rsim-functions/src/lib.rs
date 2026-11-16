@@ -13,7 +13,10 @@ pub mod rules;
 pub mod session;
 
 pub use common::Meta;
-pub use forwarding::{Egress, EgressMode, Ingress, Link, VrfSelection, ZoneLookup, ZoneRole};
+pub use forwarding::{
+    DeviceDelivery, Egress, EgressMode, Ingress, Link, LocalInput, VrfSelection, ZoneLookup,
+    ZoneRole,
+};
 pub use nat::{DestinationNat, NatAction, SourceNat};
 pub use policy::{AclMatch, FirewallPolicy, ZoneScope};
 pub use profile::{PortTranslation, RuleAction, UnzonedInterface, VendorProfile};

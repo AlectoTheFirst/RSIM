@@ -358,3 +358,79 @@ impl NetFunction for Egress {
         }
     }
 }
+
+/// Packets to an address of the device itself, before the input policy.
+/// It sets the destination zone to the zone of the device, if it has one.
+#[derive(Clone, Debug)]
+pub struct LocalInput {
+    pub meta: Meta,
+    pub zone: Option<ZoneId>,
+    pub next: FunctionId,
+}
+
+impl NetFunction for LocalInput {
+    meta_methods!(FunctionKind::ZoneLookup);
+
+    fn requires(&self) -> Vec<ContextAttr> {
+        Vec::new()
+    }
+    fn provides(&self) -> Vec<ContextAttr> {
+        vec![ContextAttr::DstZone]
+    }
+    fn reads(&self) -> Vec<Dependency> {
+        Vec::new()
+    }
+    fn successors(&self) -> Vec<FunctionId> {
+        vec![self.next.clone()]
+    }
+    fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
+        let mut c = ctx.clone();
+        let detail = match &self.zone {
+            Some(z) => {
+                c.dst_zone = Attr::Known(z.clone());
+                format!("to the device · zone {z}")
+            }
+            None => "to the device".to_string(),
+        };
+        vec![self.meta.forward(
+            input.clone(),
+            &self.next,
+            ReasonCode::Classified,
+            detail,
+            c,
+            state,
+        )]
+    }
+}
+
+/// Delivers the packets to the device itself.
+#[derive(Clone, Debug)]
+pub struct DeviceDelivery {
+    pub meta: Meta,
+}
+
+impl NetFunction for DeviceDelivery {
+    meta_methods!(FunctionKind::Egress);
+
+    fn requires(&self) -> Vec<ContextAttr> {
+        Vec::new()
+    }
+    fn provides(&self) -> Vec<ContextAttr> {
+        Vec::new()
+    }
+    fn reads(&self) -> Vec<Dependency> {
+        Vec::new()
+    }
+    fn successors(&self) -> Vec<FunctionId> {
+        Vec::new()
+    }
+    fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
+        vec![self.meta.branch(
+            input.clone(),
+            Outcome::Deliver(Destination::Device(self.meta.device.clone())),
+            Reason::new(ReasonCode::Delivered, format!("to {}", self.meta.device)),
+            ctx.clone(),
+            state,
+        )]
+    }
+}

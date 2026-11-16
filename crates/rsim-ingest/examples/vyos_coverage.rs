@@ -11,7 +11,12 @@ fn main() {
         .read_to_end(&mut bytes)
         .expect("stdin is readable");
     let doc = read_json(&bytes).expect("stdin is a JSON configuration");
-    let cov = classify(&doc, &vyos::table(true));
+    let table = vyos::table(true);
+    let cov = classify(&doc, &table);
+    let cfg = vyos::read(&doc);
+    for path in vyos::unread(&doc, &table, &cfg.read) {
+        println!("handled but not read: {path}");
+    }
     for state in [State::Handled, State::Irrelevant, State::Unhandled] {
         println!(
             "{state:?}: {} lines, {:.1} %",

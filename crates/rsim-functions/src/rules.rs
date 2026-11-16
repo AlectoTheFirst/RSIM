@@ -117,6 +117,10 @@ fn eval_from<A: Clone + Eq>(
         if rest.is_empty() {
             return;
         }
+        let applies = scope(i);
+        if applies == Tri::False {
+            continue;
+        }
         let (predicate, action) = match &rule.body {
             RuleBody::Unhandled => {
                 out.push((
@@ -129,10 +133,6 @@ fn eval_from<A: Clone + Eq>(
             }
             RuleBody::Handled { predicate, action } => (predicate, action),
         };
-        let applies = scope(i);
-        if applies == Tri::False {
-            continue;
-        }
         let split = rest.split(predicate);
         let (matched, uncertain) = if applies == Tri::Unknown {
             (split.matched.empty(), split.matched.union(&split.uncertain))

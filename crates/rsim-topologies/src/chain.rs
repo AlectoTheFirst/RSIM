@@ -97,6 +97,7 @@ pub fn chain(n: usize, acl_rules: usize, extra_routes: usize) -> TwinBuilder {
             meta: r.meta("route", 1000, 1000 + routes.len() as u32),
             tables: BTreeMap::from([(VrfId::new("default"), t)]),
             fallback: None,
+            local: None,
         });
         let mut nbr: Vec<(String, &str, Target)> = vec![
             (east_gw.clone(), "east", Target::Link("east neighbour")),
