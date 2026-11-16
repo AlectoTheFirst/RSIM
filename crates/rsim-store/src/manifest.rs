@@ -30,6 +30,9 @@ pub enum SectionStatus {
     Old { error: String },
     /// No read was successful. The section has no blob.
     Missing { error: String },
+    /// The device does not have the section, for example an API path of a
+    /// model that the device does not run. The section has no blob.
+    Absent { reason: String },
 }
 
 /// One section of a device manifest.

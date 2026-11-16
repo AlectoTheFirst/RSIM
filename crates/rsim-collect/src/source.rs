@@ -24,6 +24,9 @@ pub struct SectionSpec {
     pub volatile: &'static [&'static str],
     /// The extract of an observation section with a table.
     pub extract: Option<&'static dyn Extract>,
+    /// A device can lack the section. A [`TransportError::NotFound`] reply
+    /// then gives the status `Absent`, which is not a failure.
+    pub optional: bool,
 }
 
 impl std::fmt::Debug for SectionSpec {
@@ -34,6 +37,7 @@ impl std::fmt::Debug for SectionSpec {
             .field("class", &self.class)
             .field("format", &self.format)
             .field("table", &self.extract.map(|e| e.table().name))
+            .field("optional", &self.optional)
             .finish()
     }
 }
@@ -54,10 +58,19 @@ pub struct Capture {
     pub sections: Vec<RawSection>,
 }
 
+impl RawSection {
+    /// True if the section is optional and the device does not have it.
+    pub fn absent(&self) -> bool {
+        self.spec.optional && matches!(self.result, Err(TransportError::NotFound(_)))
+    }
+}
+
 impl Capture {
-    /// True if each section failed.
+    /// True if each section failed. An absent section is not a failure.
     pub fn failed(&self) -> bool {
-        self.sections.iter().all(|s| s.result.is_err())
+        self.sections
+            .iter()
+            .all(|s| s.result.is_err() && !s.absent())
     }
 }
 

@@ -37,6 +37,8 @@ pub struct Classified {
 /// - A volatile section with a previous entry keeps it, unless the
 ///   collection is forced.
 /// - A failed read keeps the previous blob and marks it old.
+/// - An optional section that the device does not have is absent. A change
+///   to or from absent changes the class of the section.
 /// - If a section of a table changed, all sections of that table give their
 ///   rows again. A section with no bytes in the capture gives the rows of
 ///   its previous blob, which `old_bytes` reads.
@@ -60,6 +62,29 @@ pub fn classify(
     for (i, raw) in capture.sections.iter().enumerate() {
         let spec = &raw.spec;
         let old = prev.and_then(|m| m.section(spec.name));
+        if raw.absent() {
+            let reason = raw.result.as_ref().err().map(|e| e.to_string());
+            let entry = match old {
+                Some(o) if matches!(o.status, SectionStatus::Absent { .. }) => o.clone(),
+                _ => {
+                    out.changed.insert(spec.class);
+                    SectionEntry {
+                        name: spec.name.to_string(),
+                        command: spec.command.clone(),
+                        class: spec.class,
+                        format: spec.format,
+                        change_hash: None,
+                        blob: None,
+                        status: SectionStatus::Absent {
+                            reason: reason.unwrap_or_default(),
+                        },
+                        collected_at: Some(capture.collected_at),
+                    }
+                }
+            };
+            out.sections.push(entry);
+            continue;
+        }
         let read = raw
             .result
             .as_ref()
@@ -194,6 +219,7 @@ mod tests {
                     format: Format::Text,
                     volatile: &[],
                     extract: None,
+                    optional: false,
                 },
                 result: Ok(bytes.to_vec()),
             }],

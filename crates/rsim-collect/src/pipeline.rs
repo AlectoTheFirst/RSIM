@@ -490,6 +490,7 @@ mod tests {
                 format: Format::Text,
                 volatile: &[],
                 extract: None,
+                optional: false,
             }]
         }
         fn fetch<'a>(
