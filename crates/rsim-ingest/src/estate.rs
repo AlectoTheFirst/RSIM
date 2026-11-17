@@ -1,7 +1,8 @@
 //! The twin of a snapshot: the VyOS routers and the UniFi sites, with the
 //! links between them, and the NX-OS switches.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::net::IpAddr;
 
 use rsim_core::{FunctionId, SourceSpan};
 use rsim_engine::TwinBuilder;
@@ -194,6 +195,25 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         }
     }
 
+    // The next hops of the routes of the routers: the collected route table
+    // and the static routes.
+    let mut next_hops: BTreeSet<IpAddr> = BTreeSet::new();
+    for r in routers.values() {
+        next_hops.extend(
+            r.col
+                .routes
+                .iter()
+                .filter_map(|x| x.next_hop.as_deref()?.parse::<IpAddr>().ok()),
+        );
+        next_hops.extend(
+            r.cfg
+                .static_routes
+                .iter()
+                .flat_map(|x| x.gateways.iter())
+                .filter_map(|g| g.parse::<IpAddr>().ok()),
+        );
+    }
+
     let mut l2: BTreeMap<String, vyos::Layer2Links> = BTreeMap::new();
     let mut extra: BTreeMap<String, Vec<collected::NeighbourRow>> = BTreeMap::new();
     let profile = unifi_profile();
@@ -234,7 +254,7 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
             wlans: file("wlans"),
         };
         let router = router_port(&site, &routers, &files.devices);
-        let low = unifi::lower(device, &site, &profile, &files, router.as_ref());
+        let low = unifi::lower(device, &site, &profile, &files, router.as_ref(), &next_hops);
         if let (Some(r), Some((iface, peer, port))) = (&router, &low.router_peer) {
             l2.entry(r.device.clone()).or_default().insert(
                 iface.clone(),
