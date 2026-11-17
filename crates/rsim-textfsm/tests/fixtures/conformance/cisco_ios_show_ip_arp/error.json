@@ -1,0 +1,12 @@
+{
+ "template": "cisco_ios_show_ip_arp.textfsm",
+ "header": [
+  "PROTOCOL",
+  "IP_ADDRESS",
+  "AGE",
+  "MAC_ADDRESS",
+  "TYPE",
+  "INTERFACE"
+ ],
+ "error": "State Error raised. Rule Line: 15. Input Line: Total number of ARP entries: 19"
+}

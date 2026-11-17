@@ -1,0 +1,75 @@
+{
+ "template": "cisco_ios_show_vrf_detail.textfsm",
+ "header": [
+  "VRF",
+  "RD",
+  "RT_IMPORT",
+  "RT_EXPORT",
+  "VPN_ID",
+  "DESCRIPTION",
+  "INTERFACES"
+ ],
+ "records": [
+  [
+   "CUST-A",
+   "64500:100",
+   [
+    "64500:100",
+    "64500:999"
+   ],
+   [
+    "64500:100",
+    "64500:101"
+   ],
+   "<not set>",
+   "Customer A head office",
+   [
+    "Gi0/0/1",
+    "Gi0/0/2.100",
+    "Te0/1/0.100"
+   ]
+  ],
+  [
+   "CUST-B",
+   "192.0.2.1:200",
+   [
+    "64501:200",
+    "192.0.2.1:200",
+    "64501:200"
+   ],
+   [
+    "64501:200"
+   ],
+   "<not set>",
+   "Customer B branch network",
+   [
+    "Gi0/0/3.200"
+   ]
+  ],
+  [
+   "RESERVED",
+   "<not set>",
+   [],
+   [],
+   "<not set>",
+   "",
+   []
+  ],
+  [
+   "LEGACY",
+   "64502:5",
+   [
+    "64502:5"
+   ],
+   [
+    "64502:5"
+   ],
+   "64502:5",
+   "",
+   [
+    "Lo5",
+    "Vl500"
+   ]
+  ]
+ ]
+}

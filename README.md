@@ -53,6 +53,7 @@ A VXLAN tunnel end uses `VxlanEncap` and `VxlanDecap`. `VxlanEncap` puts the pac
 | `rsim-store` | The append-only snapshot store: the format, the writer and the reader |
 | `rsim-collect` | The collectors: SSH and HTTPS transports, jump hosts and proxies, the vendor sources |
 | `rsim-ingest` | The stanza reader, the coverage report and the lowering of each vendor into functions |
+| `rsim-textfsm` | A TextFSM engine, the ntc-templates index and the IOS-XR and IOS-XE templates |
 | `rsim-topologies` | The hand-built topologies |
 | `rsim-contract` | The contract types and the registry of operations, with their JSON Schema; no engine dependency |
 | `rsim-cli` | The command `rsim` |

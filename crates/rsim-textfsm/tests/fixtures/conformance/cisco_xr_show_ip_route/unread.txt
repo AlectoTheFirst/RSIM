@@ -1,0 +1,54 @@
+Tue Nov 17 08:02:40.512 UTC
+Routing table: default (table id 0xe0000000)
+Mon Nov 16 10:20:11.004 UTC
+RIB summary: 14 routes
+VRF: default
+Table id: 0xe0000000
+Codes: C - connected, S - static, R - RIP, B - BGP, (>) - Diversion path
+       Sr: SRv6 locator, Ss: SRv6 static
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2, E - EGP
+       i - ISIS, L1 - IS-IS level-1, L2 - IS-IS level-2
+       ia - IS-IS inter area, su - IS-IS summary null, * - candidate default
+       U - per-user static route, o - ODR, L - local, G  - DAGR, l - LISP
+       A - access/subscriber, a - Application route
+       M - mobile route, r - RPL, t - Traffic Engineering, (!) - FRR Backup path
+Default table entries: 14
+Gateway of last resort is 198.51.100.2 to network 0.0.0.0
+
+S*   0.0.0.0/0 [1/0] via 198.51.100.2, 3d04h
+L    192.0.2.1/32 is directly connected, 3d04h, Loopback0
+O    192.0.2.64/26 [110/20] via 198.51.100.6, 1d02h, GigabitEthernet0/0/0/1
+                   [110/20] via 198.51.100.10, 1d02h, GigabitEthernet0/0/0/2
+C    198.51.100.0/30 is directly connected, 3d04h, GigabitEthernet0/0/0/0
+L    198.51.100.1/32 is directly connected, 3d04h, GigabitEthernet0/0/0/0
+C    198.51.100.4/30 is directly connected, 3d04h, GigabitEthernet0/0/0/1
+L    198.51.100.5/32 is directly connected, 3d04h, GigabitEthernet0/0/0/1
+C    198.51.100.8/30 is directly connected, 3d04h, GigabitEthernet0/0/0/2
+L    198.51.100.9/32 is directly connected, 3d04h, GigabitEthernet0/0/0/2
+B    203.0.113.0/26 [200/0] via 192.0.2.2, 2d01h
+Sr   203.0.113.64/26 [1/0] via 2001:db8:0:a::1, 00:12:01, srv6-locator-MAIN
+VRF: BLUE
+B    203.0.113.128/26 [20/0] via 2001:db8:0:b::1 (nexthop in vrf default), 00:12:01
+% No matching routes found
+B    203.0.113.192/27 [20/0] via 2001:db8:0:b::2 (nexthop in vrf default), 00:12:01
+% Network not in table
+RIB entry follows
+Routing entry for 203.0.113.192/27
+  Known via "bgp 64496", distance 20, metric 0
+  Tag 64497, type external
+  Installed Nov 16 10:08:10.001 for 00:12:01
+  Routing Descriptor Blocks
+    2001:db8:0:b::2, from 2001:db8:0:b::2, BGP external
+      Route metric is 0
+  No advertising protos.
+Routing entry for 203.0.113.200/29
+  Known via "bgp 64496", distance 20, metric 0
+  Tag 64497, type external
+  Installed Nov 16 10:08:10.001 for 00:12:01
+  Routing Descriptor Blocks
+    2001:db8:0:b::3, from 2001:db8:0:b::3, BGP external
+    198.51.100.50, from 192.0.2.80, via GigabitEthernet0/0/0/7
+  Redistributing to: none
+  No advertising protos.

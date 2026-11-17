@@ -1,0 +1,7 @@
+Mon Nov 16 10:33:05.611 UTC
+NAME: "module 0/RSP0/CPU0", DESCR: "ASR9K Route Switch Processor with 880G/slot Fabric and 16GB"
+PID: A9K-RSP880-SE, VID: V02, SN: FOC0000A1B2
+
+admin show inventory chassis
+                     ^
+% Invalid input detected at '^' marker.

@@ -1,0 +1,12 @@
+Value Filldown HOST (\S+)
+Value IF (\S+)
+Value STATE (up|down)
+
+Start
+  ^host\s+${HOST} -> Clearall
+  ^interface\s+${IF} -> Continue
+  ^interface\s+\S+\s+${STATE} -> Record
+  ^drop -> Clear
+  ^reset -> Clearall
+  ^set\s+${IF}
+  ^emit -> Record

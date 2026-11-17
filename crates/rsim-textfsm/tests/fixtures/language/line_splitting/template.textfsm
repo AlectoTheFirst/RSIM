@@ -1,0 +1,4 @@
+Value Required WORD (\S+)
+
+Start
+  ^\s*${WORD}\s*$$ -> Record

@@ -1,0 +1,13 @@
+{
+ "template": "template.textfsm",
+ "header": [
+  "COST",
+  "NAME"
+ ],
+ "records": [
+  [
+   "12",
+   "apple"
+  ]
+ ]
+}

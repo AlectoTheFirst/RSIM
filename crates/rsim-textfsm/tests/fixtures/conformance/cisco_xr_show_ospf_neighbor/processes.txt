@@ -1,0 +1,40 @@
+Mon Nov 16 10:28:55.146 UTC
+
+* Indicates MADJ interface
+# Indicates Neighbor awaiting BFD session up
+
+Neighbors for OSPF 1
+
+Neighbor ID     Pri   State           Dead Time   Address         Interface
+192.0.2.2       1     FULL/DR         00:00:35    198.51.100.6    GigabitEthernet0/0/0/1
+    Neighbor is up for 1d02h
+192.0.2.3       1     FULL/BDR        00:00:31    198.51.100.10   GigabitEthernet0/0/0/2
+    Neighbor is up for 1d02h
+192.0.2.4       1     FULL/  -        00:00:38    198.51.100.14   Bundle-Ether10
+    Neighbor is up for 1w2d
+192.0.2.5       1     2WAY/DROTHER    00:00:33    198.51.100.30   GigabitEthernet0/0/0/6
+    Neighbor is up for 00:12:40
+192.0.2.6       0     INIT/  -        00:00:39    198.51.100.34   GigabitEthernet0/0/0/7
+    Neighbor is up for 00:00:04
+
+Total neighbor count: 5
+
+Neighbors for OSPF 10, VRF BLUE
+
+Neighbor ID     Pri   State           Dead Time   Address         Interface
+192.0.2.66      1     FULL/DR         00:00:36    203.0.113.254   GigabitEthernet0/0/0/3.100
+    Neighbor is up for 00:44:12
+192.0.2.67      1     FULL/DR         00:00:34    203.0.113.250   GigabitEthernet0/0/0/4.100
+    Neighbor is up for 00:44:12
+
+Total neighbor count: 2
+
+Neighbors for OSPF 20, VRF ORANGE
+
+Neighbor ID     Pri   State           Dead Time   Address         Interface
+192.0.2.71      1     FULL/  -        00:00:32    198.51.100.38   GigabitEthernet0/0/0/5.200
+    Neighbor is up for 1d02h
+192.0.2.72      1     EXSTART/  -     00:00:37    198.51.100.42   GigabitEthernet0/0/0/6.200
+    Neighbor is up for 00:00:21
+
+Total neighbor count: 2

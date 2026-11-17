@@ -1,0 +1,21 @@
+{
+ "template": "cisco_xr_show_version.textfsm",
+ "header": [
+  "VERSION",
+  "UPTIME",
+  "LOCATION",
+  "HARDWARE",
+  "BUILD_HOST",
+  "LABEL"
+ ],
+ "records": [
+  [
+   "5.3.4",
+   "1 year, 12 weeks, 4 days, 3 hours, 2 minutes",
+   "",
+   "CRS-16/S-B",
+   "",
+   ""
+  ]
+ ]
+}

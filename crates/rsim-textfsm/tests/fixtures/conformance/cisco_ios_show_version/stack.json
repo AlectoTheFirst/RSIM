@@ -1,0 +1,54 @@
+{
+ "template": "cisco_ios_show_version.textfsm",
+ "header": [
+  "SOFTWARE_IMAGE",
+  "VERSION",
+  "RELEASE",
+  "ROMMON",
+  "HOSTNAME",
+  "UPTIME",
+  "UPTIME_YEARS",
+  "UPTIME_WEEKS",
+  "UPTIME_DAYS",
+  "UPTIME_HOURS",
+  "UPTIME_MINUTES",
+  "RELOAD_REASON",
+  "RUNNING_IMAGE",
+  "HARDWARE",
+  "SERIAL",
+  "CONFIG_REGISTER",
+  "MAC_ADDRESS",
+  "RESTARTED"
+ ],
+ "records": [
+  [
+   "CAT9K_IOSXE",
+   "17.9.4a",
+   "fc3",
+   "IOS-XE",
+   "acc-sw01",
+   "1 year, 6 weeks, 3 days, 2 hours, 14 minutes",
+   "1",
+   "6",
+   "3",
+   "2",
+   "14",
+   "Reload Command",
+   "packages.conf",
+   [
+    "C9300-48P",
+    "C9300-48P"
+   ],
+   [
+    "FOC0000A1B2",
+    "FOC0000A2B2"
+   ],
+   "0x102",
+   [
+    "00:00:5e:00:53:10",
+    "00:00:5e:00:53:20"
+   ],
+   "08:12:45 UTC Mon Sep 29 2025"
+  ]
+ ]
+}

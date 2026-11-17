@@ -1,0 +1,61 @@
+{
+ "template": "cisco_xr_admin_show_inventory.textfsm",
+ "header": [
+  "NAME",
+  "DESCR",
+  "PID",
+  "VID",
+  "SN"
+ ],
+ "records": [
+  [
+   "module 0/RSP0/CPU0",
+   "ASR9K Route Switch Processor with 880G/slot Fabric and 16GB",
+   "A9K-RSP880-SE",
+   "V02",
+   "FOC0000A1B2"
+  ],
+  [
+   "module 0/0/CPU0",
+   "ASR 9000 8-port 10GE Modular Port Adapter",
+   "A9K-MPA-8X10GE",
+   "V03",
+   "FOC0000A1C3"
+  ],
+  [
+   "module mau 0/0/0/0",
+   "10GBASE-LR SFP+ Module for SMF",
+   "SFP-10G-LR",
+   "V02",
+   "FNS0000A1D4"
+  ],
+  [
+   "module mau 0/0/0/1",
+   "10GBASE-LR SFP+ Module for SMF",
+   "SFP-10G-LR",
+   "V02",
+   "FNS0000A1D5"
+  ],
+  [
+   "fan0 0/FT0/SP",
+   "ASR-9006 Fan Tray v2",
+   "ASR-9006-FAN-V2",
+   "V01",
+   "FOC0000A1E6"
+  ],
+  [
+   "power-module 0/PS0/M0/SP",
+   "3kW AC V3 Power Module",
+   "PWR-3KW-AC-V3",
+   "V00",
+   "POG0000A1F7"
+  ],
+  [
+   "chassis ASR-9006-AC-V2",
+   "ASR-9006 AC Chassis with PEM Version 2",
+   "ASR-9006-AC-V2",
+   "V02",
+   "FOX0000A1G8"
+  ]
+ ]
+}

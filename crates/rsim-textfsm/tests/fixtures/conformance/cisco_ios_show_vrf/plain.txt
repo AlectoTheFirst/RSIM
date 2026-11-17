@@ -1,0 +1,21 @@
+
+  Name                             Default RD            Protocols   Interfaces
+  BLUE                             64510:1               ipv4        Vl101
+                                                                     Vl102
+  GREEN                            64510:2               ipv4,ipv6   Vl201
+  RED                              203.0.113.1:3         ipv4        Gi1/0/1
+                                                                     Gi1/0/2
+                                                                     Po10.30
+  UNUSED                           <not set>
+  YELLOW                           64510:4               ipv6
+  ORANGE                           64510:5               ipv4        Vl501
+                                                                     Vl502
+                                                                     Vl503
+  PURPLE                           64510:6               ipv4,ipv6   Gi1/0/3
+  SECURITY-CAM                     198.51.100.1:7        ipv4        Vl700
+                                                                     Vl701
+  VOICE                            64510:8               ipv4        Vl110
+                                                                     Vl111
+                                                                     Gi1/0/48
+  WIRELESS-GUEST                   64510:9               ipv4        Vl900
+

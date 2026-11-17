@@ -1,0 +1,86 @@
+# ntc-templates 9.3.0 cisco_xr_show_ip_route.textfsm, changed where upstream
+# sends a line it does not know (a route line of a layout it lacks, a message
+# a release adds) to Error, which fails the whole command and, the route table
+# being required, the device:
+#   - Such a line is recorded into UNREAD instead, by the last rule of each
+#     state. cli_parse counts those records and leaves them out
+#     (`cli_parse._UNREAD`), so the line costs itself alone.
+#   - A continuation line (another path of the route on the line before) after
+#     an unread line is unread as well (the AFTER_UNREAD state), where Start
+#     would give it to the route read before the unread line.
+#   - A continuation line whose next hop is in another VRF (`(nexthop in vrf
+#     default)`) is read as the route line of that form is, its `vrf <name>`
+#     into INTERFACE (`cisco_common.rib_row` takes it out of the interface).
+#   - A path that ends in `(!)` is a backup path (LFA or PIC), read into
+#     BACKUP; `cisco_common.rib_row` drops it, so it is not an equal-cost path
+#     of the route.
+# Every other rule is upstream's, in upstream's order. A record of an unread
+# line clears the values of the route being read, as any Record does; the
+# Filldown values stay.
+Value Filldown VRF (\S+)
+Value Filldown PROTOCOL (\S+|\S+\s\S+)
+Value Filldown NETWORK (\d+\.\d+\.\d+\.\d+)
+Value Filldown PREFIX_LENGTH (\d+)
+Value DISTANCE (\d+|is)
+Value METRIC (\d+)
+Value TYPE (directly|via)
+Value Required NEXT_HOP (connected|\d+\.\d+\.\d+\.\d+)
+Value INTERFACE (\S+|vrf\s\S+)
+Value UPTIME (\S+)
+Value BACKUP (\(!\))
+Value UNREAD (.+)
+
+
+Start
+  ^VRF?:\s${VRF}
+  ^Codes:
+  ^\s+(\S+\s+-\s+.+[,]*)+
+  ^Gateway\s+of\s+last\s+resort
+  ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP},\s+${UPTIME},\s+${INTERFACE}(?:\s+${BACKUP})? -> Record
+  ^\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP},\s+${UPTIME},\s+${INTERFACE}(?:\s+${BACKUP})? -> Record
+  ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP},\s+${UPTIME} -> Record
+  ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP}\s+\(nexthop\sin\s${INTERFACE}\),\s+${UPTIME} -> Record
+  ^\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP},\s+${UPTIME} -> Record
+  ^\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP}\s+\(nexthop\sin\s${INTERFACE}\),\s+${UPTIME} -> Record
+  ^\s*$$
+  ^\S+\s+\S+\s+\d+\s+\d+:\d+:\d+
+  ^% No matching routes found
+  ^% Network not in table
+  ^\s*Routing\s+entry\s+for\s+${NETWORK}/${PREFIX_LENGTH} -> ROUTE_ENTRY
+  ^\s+Route\s+metric\s+is\s+\d+
+  ^\s+\S+,\s+from\s+\S+,\s+via\s+\S+
+  ^\s+No\s+advertising\s+protos
+  ^${UNREAD} -> Record AFTER_UNREAD
+
+# A line this state does not know ends the entry: it is recorded as unread, and
+# the lines after it are read as AFTER_UNREAD reads them.
+ROUTE_ENTRY
+  ^\s+Known\s+via\s+\"${PROTOCOL}\",\s+distance\s+${DISTANCE},\s+metric\s+${METRIC},\s+candidate\s+default\s+path
+  ^\s+Tag\s+\d+,\s+type\s+extern\s+\d+
+  ^\s+Installed\s\S+\s+\S+\s+\S+\s+for\s+${UPTIME}
+  ^\s+Routing\s+Descriptor\s+Blocks
+  ^\s+${NEXT_HOP},\s+from\s+\S+,\s+${TYPE}\s+${INTERFACE} -> Record Start
+  ^\s+${NEXT_HOP}$$ -> Record Start
+  ^${UNREAD} -> Record AFTER_UNREAD
+
+# The lines after an unread line. Each rule of Start but the two continuation
+# rules, in Start's order, returning to Start (or entering ROUTE_ENTRY, as in
+# Start); a continuation line matches none of them and is unread, as is every
+# other line none of them reads.
+AFTER_UNREAD
+  ^VRF?:\s${VRF} -> Start
+  ^Codes: -> Start
+  ^\s+(\S+\s+-\s+.+[,]*)+ -> Start
+  ^Gateway\s+of\s+last\s+resort -> Start
+  ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP},\s+${UPTIME},\s+${INTERFACE}(?:\s+${BACKUP})? -> Record Start
+  ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP},\s+${UPTIME} -> Record Start
+  ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP}\s+\(nexthop\sin\s${INTERFACE}\),\s+${UPTIME} -> Record Start
+  ^\s*$$ -> Start
+  ^\S+\s+\S+\s+\d+\s+\d+:\d+:\d+ -> Start
+  ^% No matching routes found -> Start
+  ^% Network not in table -> Start
+  ^\s*Routing\s+entry\s+for\s+${NETWORK}/${PREFIX_LENGTH} -> ROUTE_ENTRY
+  ^\s+Route\s+metric\s+is\s+\d+ -> Start
+  ^\s+\S+,\s+from\s+\S+,\s+via\s+\S+ -> Start
+  ^\s+No\s+advertising\s+protos -> Start
+  ^${UNREAD} -> Record

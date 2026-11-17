@@ -1,0 +1,21 @@
+Load for five secs: 6%/1%; one minute: 4%; five minutes: 4%
+
+  Name                             Default RD            Protocols   Interfaces
+  BLUE                             64510:1               ipv4        Vl101
+                                                                     Vl102
+  BROWN                            64510:10              ipv4        Vl1001
+                                                                     Vl1002
+                                                                     Vl1003
+  CYAN                             64510:11              ipv4,ipv6   Gi1/0/11
+                                                                     Gi1/0/12
+  DEV                              <not set>             ipv4
+  DMZ                              203.0.113.1:12        ipv4        Vl1200
+                                                                     Vl1201
+                                                                     Po2.1200
+  EVPN-TENANT                      auto                  ipv4,ipv6   Vl3001
+  LAB                              64510:13              ipv4        Vl1300
+                                                                     Vl1301
+  ORANGE                           64510:5               ipv4        Vl501
+                                                                     Vl502
+                                                                     Vl503
+  GREEN                            64510:2               ipv4,ipv6   Vl201

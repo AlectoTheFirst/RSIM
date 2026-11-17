@@ -1,0 +1,7 @@
+{
+ "template": "template.textfsm",
+ "header": [
+  "ITEM"
+ ],
+ "error": "State Error raised. Rule Line: 6. Input Line: worse line"
+}

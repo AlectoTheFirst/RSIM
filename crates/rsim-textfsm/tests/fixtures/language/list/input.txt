@@ -1,0 +1,11 @@
+group g1 tag t1
+  member m1
+  member m2
+  pair a=1
+  pair b=
+  maybe 5
+  maybe
+end
+group g2
+  member m3
+end

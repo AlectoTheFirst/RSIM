@@ -1,0 +1,51 @@
+{
+ "template": "cisco_ios_show_version.textfsm",
+ "header": [
+  "SOFTWARE_IMAGE",
+  "VERSION",
+  "RELEASE",
+  "ROMMON",
+  "HOSTNAME",
+  "UPTIME",
+  "UPTIME_YEARS",
+  "UPTIME_WEEKS",
+  "UPTIME_DAYS",
+  "UPTIME_HOURS",
+  "UPTIME_MINUTES",
+  "RELOAD_REASON",
+  "RUNNING_IMAGE",
+  "HARDWARE",
+  "SERIAL",
+  "CONFIG_REGISTER",
+  "MAC_ADDRESS",
+  "RESTARTED"
+ ],
+ "records": [
+  [
+   "C2960X-UNIVERSALK9-M",
+   "15.2(7)E10a",
+   "",
+   "Bootstrap",
+   "edge-sw03",
+   "45 minutes",
+   "",
+   "",
+   "",
+   "",
+   "45",
+   "power-on",
+   "c2960x-universalk9-mz.152-7.E10a.bin",
+   [
+    "WS-C2960X-24TS-L"
+   ],
+   [
+    "FOC0000B3C4"
+   ],
+   "0xF",
+   [
+    "00:00:5E:00:53:A0"
+   ],
+   ""
+  ]
+ ]
+}

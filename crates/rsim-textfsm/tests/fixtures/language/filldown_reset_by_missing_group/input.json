@@ -1,0 +1,21 @@
+{
+ "template": "template.textfsm",
+ "header": [
+  "A",
+  "B"
+ ],
+ "records": [
+  [
+   "one",
+   "x"
+  ],
+  [
+   "",
+   "y"
+  ],
+  [
+   "",
+   "z"
+  ]
+ ]
+}

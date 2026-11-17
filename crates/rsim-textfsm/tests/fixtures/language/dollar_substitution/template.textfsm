@@ -1,0 +1,5 @@
+Value COST (\d+)
+Value NAME (\w+)
+
+Start
+  ^price\s+\$$${COST}\s+for\s+$NAME$$ -> Record

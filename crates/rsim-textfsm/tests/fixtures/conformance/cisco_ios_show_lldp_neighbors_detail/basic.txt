@@ -1,0 +1,105 @@
+Load for five secs: 4%/0%; one minute: 3%; five minutes: 3%
+Time source is NTP, 09:12:44.512 UTC Wed Nov 17 2026
+
+------------------------------------------------
+Local Intf: Gi1/0/1
+Chassis id: 0000.5e00.5301
+Port id: Gi0/1
+Port Description: GigabitEthernet0/1
+System Name: sw-access-01.lab.example
+
+System Description: 
+Example Switch Software, Version 17.9.4, RELEASE SOFTWARE (fc2)
+Technical Support: https://support.example.com
+Copyright (c) 2026 by Example Networks, Inc.
+Compiled Mon 01-Jun-26 10:00 by builder
+
+Time remaining: 98 seconds
+System Capabilities: B,R
+Enabled Capabilities: B
+Management Addresses:
+    IP: 192.0.2.11
+    IPV6: 2001:db8:0:1::11
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+    100base-TX(FD)
+    100base-TX(HD)
+    10base-T(FD)
+Media Attachment Unit type: 30
+Vlan ID: 1
+
+------------------------------------------------
+Local Intf: Te1/1/1
+Local Intf service instance: 20
+Chassis id: 0000.5e00.5310
+Port id: Te0/0/2
+Port Description: to agg-sw-02 Te1/1/1
+System Name - not advertised
+System Description - not advertised
+
+Time remaining: 110 seconds
+System Capabilities: R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 198.51.100.10
+    OID:
+        1.3.6.1.4.1.32473.1.
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: 20
+Peer Source MAC: 0000.5e00.5310
+
+------------------------------------------------
+Local Intf: Gi1/0/24
+Chassis id: 0000.5e00.5330
+Port id: 0000.5e00.5330
+Port Description - not advertised
+System Name:
+
+System Description: 
+Example Linux 6.8 x86_64
+
+Time remaining: 101 seconds
+System Capabilities: B,R,S
+Enabled Capabilities: S
+Management Addresses - not advertised
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Gi1/0/10
+Chassis id: 0000.5e00.5340
+Port id: 0000.5e00.5340
+Port Description: eth0
+System Name: ap-floor2-east
+
+System Description: 
+Example Wireless AP 9100, Version 17.9.4
+
+Time remaining: 113 seconds
+System Capabilities: B,R,W
+Enabled Capabilities: W
+Management Addresses:
+    IP: 203.0.113.40
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+    Other/unknown
+Media Attachment Unit type: 16
+Vlan ID: 40
+PoE+ Power-via-MDI TLV:
+    Power Pair: Signal
+Power via MDI:
+    Power Pair: Signal
+    Power Class: 4
+    Power Device Type: PD
+    Power Source: PSE
+    Power Priority: high
+    Power Requested: 25500 mW
+
+Total entries displayed: 4
+

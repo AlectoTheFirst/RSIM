@@ -1,0 +1,11 @@
+Value Required,List FIRST (\w+)
+Value List,Required SECOND (\w+)
+Value ID (\d+)
+
+Start
+  ^id\s+${ID}
+  ^first\s+${FIRST}
+  ^second\s+${SECOND}
+  ^both\s+${FIRST}\s+${SECOND}
+  ^none\s+(${FIRST}|${SECOND})
+  ^end -> Record

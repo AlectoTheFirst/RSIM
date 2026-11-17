@@ -1,0 +1,14 @@
+id 1
+first a
+second b
+end
+id 2
+first a
+none x
+end
+id 3
+both a b
+end
+id 4
+second b
+end

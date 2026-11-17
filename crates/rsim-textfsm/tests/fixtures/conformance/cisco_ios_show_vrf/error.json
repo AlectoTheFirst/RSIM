@@ -1,0 +1,10 @@
+{
+ "template": "cisco_ios_show_vrf.textfsm",
+ "header": [
+  "NAME",
+  "DEFAULT_RD",
+  "PROTOCOLS",
+  "INTERFACES"
+ ],
+ "error": "Error: \"VRFError\". Rule Line: 22. Input Line:   EVPN-TENANT                      auto                  ipv4,ipv6   Vl3001."
+}

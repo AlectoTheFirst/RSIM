@@ -1,0 +1,22 @@
+[package]
+name = "rsim-textfsm"
+description = "A TextFSM engine for rsim: templates, the template index and the ntc-templates that rsim uses."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+regex = "1"
+
+[dev-dependencies]
+criterion = "0.8"
+serde_json = "1"
+
+[[bench]]
+name = "route_table"
+harness = false
+
+[lints]
+workspace = true

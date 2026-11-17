@@ -1,0 +1,47 @@
+{
+ "template": "cisco_xr_show_ip_route.textfsm",
+ "header": [
+  "VRF",
+  "PROTOCOL",
+  "NETWORK",
+  "PREFIX_LENGTH",
+  "DISTANCE",
+  "METRIC",
+  "TYPE",
+  "NEXT_HOP",
+  "INTERFACE",
+  "UPTIME",
+  "BACKUP",
+  "UNREAD"
+ ],
+ "records": [
+  [
+   "default",
+   "static",
+   "0.0.0.0",
+   "0",
+   "1",
+   "0",
+   "",
+   "198.51.100.2",
+   "",
+   "3d04h",
+   "",
+   ""
+  ],
+  [
+   "BLUE",
+   "ospf 10",
+   "0.0.0.0",
+   "0",
+   "110",
+   "1",
+   "via",
+   "203.0.113.254",
+   "GigabitEthernet0/0/0/3.100",
+   "00:44:10",
+   "",
+   ""
+  ]
+ ]
+}

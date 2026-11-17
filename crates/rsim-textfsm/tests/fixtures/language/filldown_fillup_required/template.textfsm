@@ -1,0 +1,10 @@
+Value Filldown,Required SECTION (\S+)
+Value Fillup OWNER (\S+)
+Value Required NAME (\S+)
+Value COUNT (\d+)
+
+Start
+  ^section\s+${SECTION}
+  ^owner\s+${OWNER}
+  ^item\s+${NAME}(\s+${COUNT})? -> Record
+  ^blank -> Record

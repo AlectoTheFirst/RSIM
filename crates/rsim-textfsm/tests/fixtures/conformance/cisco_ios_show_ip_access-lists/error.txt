@@ -1,0 +1,4 @@
+Extended IP access list BROKEN
+    10 permit tcp any any eq www
+    20 frobnicate everything
+    30 permit ip any any

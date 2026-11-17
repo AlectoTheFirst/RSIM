@@ -1,0 +1,24 @@
+Mon Nov 16 10:30:12.882 UTC
+NAME: "module 0/RSP0/CPU0", DESCR: "ASR9K Route Switch Processor with 880G/slot Fabric and 16GB"
+PID: A9K-RSP880-SE, VID: V02, SN: FOC0000A1B2
+
+NAME: "module 0/0/CPU0", DESCR: "ASR 9000 8-port 10GE Modular Port Adapter"
+PID: A9K-MPA-8X10GE, VID: V03, SN: FOC0000A1C3
+
+NAME: "module mau 0/0/0/0", DESCR: "10GBASE-LR SFP+ Module for SMF"
+PID: SFP-10G-LR        , VID: V02 , SN: FNS0000A1D4
+
+NAME: "module mau 0/0/0/1", DESCR: "10GBASE-LR SFP+ Module for SMF"
+PID: SFP-10G-LR        , VID: V02 , SN: FNS0000A1D5
+
+NAME: "", DESCR: "ASR 9000 Series SPA Interface Processor slot cover"
+PID: N/A               , VID: N/A, SN:
+
+NAME: "fan0 0/FT0/SP", DESCR: "ASR-9006 Fan Tray v2"
+PID: ASR-9006-FAN-V2, VID: V01, SN: FOC0000A1E6
+
+NAME: "power-module 0/PS0/M0/SP", DESCR: "3kW AC V3 Power Module"
+PID: PWR-3KW-AC-V3, VID: V00, SN: POG0000A1F7
+
+NAME: "chassis ASR-9006-AC-V2", DESCR: "ASR-9006 AC Chassis with PEM Version 2"
+PID: ASR-9006-AC-V2, VID: V02, SN: FOX0000A1G8

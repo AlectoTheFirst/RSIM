@@ -1,0 +1,195 @@
+Mon Nov 16 10:05:12.417 UTC
+Bundle-Ether10 is up, line protocol is up 
+  Interface state transitions: 3
+  Hardware is Aggregated Ethernet interface(s), address is 0000.5e00.5310
+  Description: core-to-pe2
+  Internet address is 192.0.2.1/31
+  MTU 9216 bytes, BW 20000000 Kbit (Max: 20000000 Kbit)
+     reliability 255/255, txload 0/255, rxload 0/255
+  Encapsulation ARPA,
+  Full-duplex, 20000Mb/s
+  loopback not set,
+  ARP type ARPA, ARP timeout 04:00:00
+    No. of members in this bundle: 2
+      TenGigE0/0/0/0               Full-duplex  10000Mb/s    Active          
+      TenGigE0/0/0/1               Full-duplex  10000Mb/s    Active          
+  Last input 00:00:00, output 00:00:00
+  Last clearing of "show interface" counters never
+  5 minute input rate 184000 bits/sec, 212 packets/sec
+  5 minute output rate 179000 bits/sec, 205 packets/sec
+     918273645 packets input, 102938475610 bytes, 12 total input drops
+     0 drops for unrecognized upper-level protocol
+     Received 4 broadcast packets, 120334 multicast packets
+              0 runts, 0 giants, 0 throttles, 0 parity
+     0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored, 0 abort
+     887766554 packets output, 99887766554 bytes, 0 total output drops
+     Output 6 broadcast packets, 118201 multicast packets
+     0 output errors, 0 underruns, 0 applique, 0 resets
+     0 output buffer failures, 0 output buffers swapped out
+     0 carrier transitions
+
+Bundle-Ether10.200 is up, line protocol is up 
+  Interface state transitions: 1
+  Hardware is VLAN sub-interface(s), address is 0000.5e00.5310
+  Description: customer-a vlan 200
+  Internet address is 198.51.100.1/29
+  MTU 1518 bytes, BW 20000000 Kbit (Max: 20000000 Kbit)
+     reliability 255/255, txload 0/255, rxload 0/255
+  Encapsulation 802.1Q Virtual LAN, VLAN Id 200,  loopback not set,
+  Last link flapped 2w3d
+  ARP type ARPA, ARP timeout 04:00:00
+  Last input 00:00:01, output 00:00:00
+  Last clearing of "show interface" counters never
+  5 minute input rate 3000 bits/sec, 4 packets/sec
+  5 minute output rate 2000 bits/sec, 3 packets/sec
+     4455667 packets input, 556677889 bytes, 0 total input drops
+     0 drops for unrecognized upper-level protocol
+     Received 0 broadcast packets, 0 multicast packets
+     2233445 packets output, 334455667 bytes, 0 total output drops
+     Output 1 broadcast packets, 0 multicast packets
+
+TenGigE0/0/0/2 is up, line protocol is up 
+  Interface state transitions: 5
+  Hardware is TenGigE, address is 0000.5e00.5312 (bia 0000.5e00.5312)
+  Layer 1 Transport Mode is LAN
+  Description: to-agg1 te0/1/0/3
+  Internet address is 203.0.113.17/30
+  MTU 9216 bytes, BW 10000000 Kbit (Max: 10000000 Kbit)
+     reliability 255/255, txload 0/255, rxload 0/255
+  Encapsulation ARPA,
+  Full-duplex, 10000Mb/s, 10GBASE-LR, link type is force-up
+  output flow control is off, input flow control is off
+  Carrier delay (up) is 10 msec
+  loopback not set,
+  Last link flapped 5w0d
+  ARP type ARPA, ARP timeout 04:00:00
+  Last input 00:00:00, output 00:00:00
+  Last clearing of "show interface" counters never
+  5 minute input rate 52000 bits/sec, 61 packets/sec
+  5 minute output rate 48000 bits/sec, 57 packets/sec
+     122334455 packets input, 15566778899 bytes, 0 total input drops
+     0 drops for unrecognized upper-level protocol
+     Received 2 broadcast packets, 40211 multicast packets
+              0 runts, 0 giants, 0 throttles, 0 parity
+     3 input errors, 3 CRC, 0 frame, 0 overrun, 0 ignored, 0 abort
+     112233445 packets output, 14455667788 bytes, 0 total output drops
+     Output 3 broadcast packets, 40108 multicast packets
+     0 output errors, 0 underruns, 0 applique, 0 resets
+     0 output buffer failures, 0 output buffers swapped out
+     9 carrier transitions
+
+TenGigE0/0/0/3 is down, line protocol is down 
+  Interface state transitions: 2
+  Hardware is TenGigE, address is 0000.5e00.5313 (bia 0000.5e00.5313)
+  Layer 1 Transport Mode is LAN
+  Description: spare - no optic
+  Internet address is Unknown
+  MTU 1514 bytes, BW 10000000 Kbit (Max: 10000000 Kbit)
+     reliability 255/255, txload 0/255, rxload 0/255
+  Encapsulation ARPA,
+  Full-duplex, 10000Mb/s, link type is force-up
+  output flow control is off, input flow control is off
+  Carrier delay (up) is 10 msec
+  loopback not set,
+  Last input never, output never
+  Last clearing of "show interface" counters never
+  5 minute input rate 0 bits/sec, 0 packets/sec
+  5 minute output rate 0 bits/sec, 0 packets/sec
+     0 packets input, 0 bytes, 0 total input drops
+     0 drops for unrecognized upper-level protocol
+     Received 0 broadcast packets, 0 multicast packets
+              0 runts, 0 giants, 0 throttles, 0 parity
+     0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored, 0 abort
+     0 packets output, 0 bytes, 0 total output drops
+     Output 0 broadcast packets, 0 multicast packets
+     0 output errors, 0 underruns, 0 applique, 0 resets
+     0 output buffer failures, 0 output buffers swapped out
+     2 carrier transitions
+
+GigabitEthernet0/0/0/4 is administratively down, line protocol is administratively down 
+  Interface state transitions: 0
+  Hardware is GigabitEthernet, address is 0000.5e00.5314 (bia 0000.5e00.5314)
+  Internet address is Unknown
+  MTU 1514 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+     reliability 255/255, txload 0/255, rxload 0/255
+  Encapsulation ARPA,
+  Duplex unknown, 1000Mb/s, link type is force-up
+  output flow control is off, input flow control is off
+  loopback not set,
+  Last input never, output never
+  Last clearing of "show interface" counters never
+  5 minute input rate 0 bits/sec, 0 packets/sec
+  5 minute output rate 0 bits/sec, 0 packets/sec
+     0 packets input, 0 bytes, 0 total input drops
+     0 drops for unrecognized upper-level protocol
+     Received 0 broadcast packets, 0 multicast packets
+              0 runts, 0 giants, 0 throttles, 0 parity
+     0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored
+     0 packets output, 0 bytes, 0 total output drops
+     Output 0 broadcast packets, 0 multicast packets
+     0 output errors, 0 underruns, 0 applique, 0 resets
+     0 output buffer failures, 0 output buffers swapped out
+     0 carrier transitions
+
+Loopback0 is up, line protocol is up 
+  Interface state transitions: 1
+  Hardware is Loopback interface(s)
+  Description: router-id
+  Internet address is 192.0.2.255/32
+  MTU 1500 bytes, BW 0 Kbit
+     reliability Unknown, txload Unknown, rxload Unknown
+  Encapsulation Loopback,  loopback not set,
+  Last link flapped 5w0d
+  Last input Unknown, output Unknown
+  Last clearing of "show interface" counters Unknown
+  Input/output data rate is disabled.
+
+tunnel-ip100 is up, line protocol is up 
+  Interface state transitions: 1
+  Hardware is Tunnel
+  Description: gre to branch-7
+  Internet address is 198.51.100.249/30
+  MTU 1500 bytes, BW 100 Kbit (Max: 100 Kbit)
+     reliability 255/255, txload 2/255, rxload 1/255
+  Encapsulation TUNNEL_IP,
+  Tunnel TOS 0
+  Tunnel mode GRE IPV4,
+  Keepalive is disabled.
+  Tunnel source 192.0.2.255 (Loopback0), destination 203.0.113.200/32
+  Tunnel TTL 255
+  Last input 00:00:02, output 00:00:02
+  Last clearing of "show interface" counters never
+  5 minute input rate 1000 bits/sec, 1 packets/sec
+  5 minute output rate 1000 bits/sec, 1 packets/sec
+     88776 packets input, 9988776 bytes, 0 total input drops
+     0 drops for unrecognized upper-level protocol
+     Received 0 broadcast packets, 0 multicast packets
+     88990 packets output, 10011223 bytes, 0 total output drops
+     Output 0 broadcast packets, 0 multicast packets
+
+MgmtEth0/RP0/CPU0/0 is up, line protocol is up 
+  Interface state transitions: 1
+  Hardware is Management Ethernet, address is 0000.5e00.53f0 (bia 0000.5e00.53f0)
+  Description: oob
+  Internet address is 203.0.113.10/24
+  MTU 1514 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+     reliability 255/255, txload 0/255, rxload 0/255
+  Encapsulation ARPA,
+  Full-duplex, 1000Mb/s, 1000BASE-T, link type is autonegotiation
+  loopback not set,
+  Last link flapped 5w0d
+  ARP type ARPA, ARP timeout 04:00:00
+  Last input 00:00:00, output 00:00:00
+  Last clearing of "show interface" counters never
+  5 minute input rate 4000 bits/sec, 6 packets/sec
+  5 minute output rate 3000 bits/sec, 2 packets/sec
+     2468013 packets input, 246801357 bytes, 0 total input drops
+     0 drops for unrecognized upper-level protocol
+     Received 11223 broadcast packets, 0 multicast packets
+              0 runts, 0 giants, 0 throttles, 0 parity
+     0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored, 0 abort
+     1357924 packets output, 135792468 bytes, 0 total output drops
+     Output 2 broadcast packets, 0 multicast packets
+     0 output errors, 0 underruns, 0 applique, 0 resets
+     0 output buffer failures, 0 output buffers swapped out
+     1 carrier transitions

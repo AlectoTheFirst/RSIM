@@ -1,0 +1,7 @@
+Value A (\S+)
+
+Start
+  ^${A} -> Continue Other
+
+Other
+  ^x

@@ -1,0 +1,14 @@
+{
+ "template": "cisco_ios_show_standby_brief.textfsm",
+ "header": [
+  "INTERFACE",
+  "GROUP",
+  "PRIORITY",
+  "PREEMPT",
+  "STATE",
+  "ACTIVE",
+  "STANDBY",
+  "VIRTUAL_IP_ADDRESS"
+ ],
+ "error": "State Error raised. Rule Line: 21. Input Line: Vl50        50   100   Init    unknown         unknown"
+}

@@ -1,0 +1,25 @@
+Mon Nov 16 11:02:17.903 UTC
+
+Cisco IOS XR Software, Version 5.3.4[Default]
+Copyright (c) 2016 by Cisco Systems, Inc.
+
+ROM: System Bootstrap, Version 2.10(20150707:120000) [CRS ROMMON],
+
+p2-core uptime is 1 year, 12 weeks, 4 days, 3 hours, 2 minutes
+System image file is "bootflash:disk0/hfr-os-mbi-5.3.4/0x100000/mbihfr-rp-x86e.vm"
+
+cisco CRS-16/S-B (Intel 686 F6M14S4) processor with 12582912K bytes of memory.
+4 Management Ethernet
+16 TenGigE
+2 SONET/SDH
+2043k bytes of non-volatile configuration memory.
+
+Boot device on node 0/RP0/CPU0 is disk0:
+Package active on node 0/RP0/CPU0:
+hfr-doc, V 5.3.4[Default], Cisco Systems, at disk0:hfr-doc-5.3.4
+    Built on Thu Sep 22 10:12:00 UTC 2016
+    By sjc-lds-100 in /auto/srcarchive/prod/5.3.4/hfr/workspace for pie
+
+hfr-fpd, V 5.3.4[Default], Cisco Systems, at disk0:hfr-fpd-5.3.4
+    Built on Thu Sep 22 10:13:00 UTC 2016
+    By sjc-lds-100 in /auto/srcarchive/prod/5.3.4/hfr/workspace for pie

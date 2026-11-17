@@ -1,0 +1,13 @@
+Value Key NAME (\S+)
+Value List MEMBERS (\S+)
+Value List PAIRS ((?P<key>\w+)=(?P<val>\w+)?)
+Value List,Filldown TAGS (\w+)
+Value List OPTIONAL (\d+)
+
+Start
+  ^group\s+${NAME} -> Continue
+  ^group\s+\S+\s+tag\s+${TAGS}
+  ^\s+member\s+${MEMBERS}
+  ^\s+pair\s+${PAIRS}
+  ^\s+maybe(\s+${OPTIONAL})?
+  ^end -> Record

@@ -1,0 +1,13 @@
+Load for five secs: 4%/1%; one minute: 3%; five minutes: 3%
+Time source is NTP, 10:55:09.312 UTC Mon Nov 16 2026
+
+Interface          Grp Pri Time  Own Pre State   Master addr     Group addr
+Gi0/0/1            1   110 3570       Y  Master  192.0.2.2       192.0.2.1
+Gi0/0/1            2   100 3609       Y  Backup  192.0.2.18      192.0.2.17
+Gi0/0/2            5   255 3003   Y   Y  Master  198.51.100.1    198.51.100.1
+Gi0/0/3.200        20  100 3609       N  Init    0.0.0.0         198.51.100.65
+Gi0/0/3.201        21  120 3531       Y  Master  198.51.100.98   198.51.100.97
+GigabitEthernet0/0/3.1201
+                   100 105 3589       Y  Backup  203.0.113.3     203.0.113.1
+Vl300              30  100 3609       Y  Backup  203.0.113.66    203.0.113.65
+

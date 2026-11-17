@@ -1,0 +1,21 @@
+{
+ "template": "cisco_xr_show_version.textfsm",
+ "header": [
+  "VERSION",
+  "UPTIME",
+  "LOCATION",
+  "HARDWARE",
+  "BUILD_HOST",
+  "LABEL"
+ ],
+ "records": [
+  [
+   "6.5.3",
+   "3 weeks, 2 days, 5 hours, 41 minutes",
+   "",
+   "ASR9K Series",
+   "",
+   ""
+  ]
+ ]
+}

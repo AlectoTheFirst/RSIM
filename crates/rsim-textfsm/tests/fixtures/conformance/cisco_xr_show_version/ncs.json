@@ -1,0 +1,21 @@
+{
+ "template": "cisco_xr_show_version.textfsm",
+ "header": [
+  "VERSION",
+  "UPTIME",
+  "LOCATION",
+  "HARDWARE",
+  "BUILD_HOST",
+  "LABEL"
+ ],
+ "records": [
+  [
+   "7.5.2",
+   "4 weeks 1 day 6 hours 18 minutes",
+   "/opt/cisco/XR/packages/",
+   "NCS-5500",
+   "xr-build-host-07",
+   "7.5.2"
+  ]
+ ]
+}

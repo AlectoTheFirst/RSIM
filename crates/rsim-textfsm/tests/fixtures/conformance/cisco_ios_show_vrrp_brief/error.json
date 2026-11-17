@@ -1,0 +1,16 @@
+{
+ "template": "cisco_ios_show_vrrp_brief.textfsm",
+ "header": [
+  "INTERFACE",
+  "GROUP",
+  "ADDR_FAMILY",
+  "PRIORITY",
+  "TIME",
+  "OWN",
+  "PREEMPT",
+  "STATE",
+  "MASTER_IP_ADDRESS",
+  "VIRTUAL_IP_ADDRESS"
+ ],
+ "error": "State Error raised. Rule Line: 25. Input Line: Gi0/0/4            9   100 3609       Y  Init    unknown         unknown"
+}

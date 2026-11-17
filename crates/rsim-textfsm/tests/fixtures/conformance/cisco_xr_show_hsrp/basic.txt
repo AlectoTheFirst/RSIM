@@ -1,0 +1,23 @@
+Mon Nov 16 10:40:01.223 UTC
+
+IPv4 Groups:
+                     P indicates configured to preempt.
+                     |
+Interface   Grp  Pri P State   Active addr     Standby addr    Group addr     
+BE10.200      1  110 P Active  local           198.51.100.2    198.51.100.1     
+BE10.201      2  100   Standby 198.51.100.10   local           198.51.100.9     
+Gi0/0/0/4    10  120 P Active  local           unknown         192.0.2.65     
+Gi0/0/0/5    11   90   Init    unknown         unknown         192.0.2.97     
+Te0/0/0/2.30 30  100 P Listen  203.0.113.34    203.0.113.35    203.0.113.33     
+
+IPv6 Groups:
+                     P indicates configured to preempt.
+                     |
+Interface   Grp  Pri P State   Active addr     Standby addr    Group addr     
+BE10.200      1  110 P Active  local
+                                               2001:db8:0:200::3
+                                                               2001:db8:0:200::1
+BE10.201      2  100   Standby 2001:db8:0:201::2 local
+                                                               2001:db8:0:201::1
+Gi0/0/0/4    10  120 P Active  local           unknown         2001:db8:10::1     
+

@@ -1,0 +1,50 @@
+{
+ "template": "cisco_ios_show_cdp_neighbors_detail.textfsm",
+ "header": [
+  "NEIGHBOR_NAME",
+  "MGMT_ADDRESS",
+  "PLATFORM",
+  "NEIGHBOR_INTERFACE",
+  "LOCAL_INTERFACE",
+  "NEIGHBOR_DESCRIPTION",
+  "CAPABILITIES"
+ ],
+ "records": [
+  [
+   "sw-core-01.lab.example",
+   "192.0.2.21",
+   "Example EX-9300-48P",
+   "TenGigabitEthernet2/0/48",
+   "TenGigabitEthernet1/1/1",
+   "Example Switch Software, Version 17.9.4, RELEASE SOFTWARE (fc2)",
+   "Router Switch IGMP"
+  ],
+  [
+   "rtr-edge-02",
+   "",
+   "Example ER-4451",
+   "GigabitEthernet0/0/1",
+   "GigabitEthernet1/0/48",
+   "Example Router Software, Version 17.6.5",
+   "Router Source-Route-Bridge"
+  ],
+  [
+   "SEP00005E005322",
+   "",
+   "Example IP Phone 7841",
+   "Port 1",
+   "GigabitEthernet1/0/5",
+   "sip78xx.14-2-1-0001-14",
+   "Host Phone Two-port Mac Relay"
+  ],
+  [
+   "ap-floor2-east",
+   "203.0.113.40",
+   "Example AP 9100",
+   "GigabitEthernet0",
+   "GigabitEthernet1/0/10",
+   "Example Wireless AP Software, Version 17.9.4",
+   "Router Trans-Bridge"
+  ]
+ ]
+}

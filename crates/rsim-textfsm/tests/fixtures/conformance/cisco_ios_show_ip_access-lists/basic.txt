@@ -1,0 +1,36 @@
+Load for five secs: 2%/0%; one minute: 1%; five minutes: 1%
+Time source is NTP, 10:15:02.123 UTC Mon Nov 16 2026
+
+Standard IP access list MGMT-HOSTS
+    10 permit 192.0.2.10 (12 matches)
+    20 permit 198.51.100.0, wildcard bits 0.0.0.255 log
+    30 deny   any (3 matches)
+Standard IP access list 5
+    10 permit 203.0.113.7
+    20 permit 192.0.2.0, wildcard bits 0.0.0.63 time-range OFFICE (active)
+Extended IP access list EDGE-IN
+    10 permit tcp any range 1024 2048 host 192.0.2.20 range 8000 8080
+    20 permit tcp any range ftp-data ftp 198.51.100.0 0.0.0.255 eq www
+    30 permit udp host 203.0.113.5 range 5000 5010 any
+    40 permit tcp 192.0.2.0 0.0.0.255 any range 6000 6063 log
+    50 permit tcp any eq www 443 any
+    60 permit tcp any host 192.0.2.30 eq 80 443 8443 (1520 matches)
+    70 permit udp any eq domain any gt 1023
+    80 permit tcp any any neq telnet
+    90 permit tcp object-group SERVERS any lt 1024
+    100 permit tcp any object-group CLIENTS established
+    110 permit tcp any any match-any +syn -ack
+    120 permit tcp any any ack psh
+    130 permit icmp any any echo-reply
+    140 permit icmp any host 198.51.100.9 timestamp-request log
+    150 deny   icmp any any 3 4
+    160 permit ip 192.0.2.0 0.0.0.255 203.0.113.0 0.0.0.255 time-range WORKHOURS (inactive)
+    180 permit tcp host 192.0.2.1 eq bgp host 192.0.2.2
+    190 permit tcp any precedence critical any
+    210 deny   ip any any log-input (tag = DROP-ALL)
+    220 permit tcp any range 1 2 any range 3 4 (7 matches)
+    230 permit tcp any eq 22 any range 100 200
+Extended IP access list 101
+    10 deny   ip host 203.0.113.66 any log
+    20 permit gre host 192.0.2.1 host 192.0.2.2
+    30 permit udp any any eq snmp

@@ -1,0 +1,35 @@
+{
+ "template": "template.textfsm",
+ "header": [
+  "SECTION",
+  "OWNER",
+  "NAME",
+  "COUNT"
+ ],
+ "records": [
+  [
+   "a",
+   "alice",
+   "x",
+   "1"
+  ],
+  [
+   "a",
+   "alice",
+   "y",
+   ""
+  ],
+  [
+   "a",
+   "alice",
+   "z",
+   "3"
+  ],
+  [
+   "b",
+   "bob",
+   "w",
+   "4"
+  ]
+ ]
+}

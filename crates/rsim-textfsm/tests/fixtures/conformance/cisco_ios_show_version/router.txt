@@ -1,0 +1,49 @@
+Load for five secs: 1%/0%; one minute: 1%; five minutes: 1%
+Time source is NTP, 10:15:02.441 UTC Mon Nov 16 2026
+
+Cisco IOS XE Software, Version 17.06.05
+Cisco IOS Software [Bengaluru], ISR Software (X86_64_LINUX_IOSD-UNIVERSALK9-M), Version 17.6.5, RELEASE SOFTWARE (fc2)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2023 by Cisco Systems, Inc.
+Compiled Wed 25-Jan-23 16:15 by mcpre
+
+
+Cisco IOS-XE software, Copyright (c) 2005-2023 by cisco Systems, Inc.
+All rights reserved.  Certain components of Cisco IOS-XE software are
+licensed under the GNU General Public License ("GPL") Version 2.0.
+
+ROM: 16.12(2r)
+
+wan-rtr01 uptime is 2 weeks, 4 days, 1 hour, 7 minutes
+Uptime for this control processor is 2 weeks, 4 days, 1 hour, 9 minutes
+System returned to ROM by PowerOn
+System image file is "bootflash:isr4300-universalk9.17.06.05.SPA.bin"
+Last reload reason: PowerOn
+
+
+
+This product contains cryptographic features and is subject to United
+States and local country laws governing import, export, transfer and
+use. Delivery of Cisco cryptographic products does not imply
+third-party authority to import, export, distribute or use encryption.
+
+Technology Package License Information:
+
+-----------------------------------------------------------------
+Technology    Type         Technology-package   Technology-package
+                           Current              Next Reboot
+-----------------------------------------------------------------
+appxk9        None         None                 None
+uck9          None         None                 None
+securityk9    Smart License securityk9          securityk9
+ipbase        Smart License ipbasek9            ipbasek9
+
+cisco ISR4331/K9 (1RU) processor with 1795979K/6147K bytes of memory.
+Processor board ID FDO0000A1B2
+Router operating mode: Autonomous
+3 Gigabit Ethernet interfaces
+32768K bytes of non-volatile configuration memory.
+4194304K bytes of physical memory.
+3207167K bytes of flash memory at bootflash:.
+
+Configuration register is 0x2102

@@ -1,0 +1,41 @@
+# The templates of ntc-templates 9.3.0 (Apache-2.0, see LICENSE) that rsim
+# uses, in the format of the ntc-templates index. The first row that matches a
+# command selects its template.
+#
+# The first three rows are the route tables and the access lists, whose
+# templates differ from ntc-templates (see the comment at the top of each).
+# Their patterns end in `$` or come before the ntc-templates rows, so that
+# they win over a row of the same command prefix. The other rows are the
+# ntc-templates rows, in the order of the ntc-templates index.
+#
+# abc[[xyz]] is expanded to abc(x(y(z)?)?)?
+#
+Template, Hostname, Platform, Command
+
+cisco_ios_show_ip_access-lists.textfsm, .*, cisco_ios, sh[[ow]] ip acce[[ss-lists]]
+cisco_ios_show_ip_route.textfsm, .*, cisco_ios, sh[[ow]] ip ro[[ute]] vrf \*$
+cisco_xr_show_ip_route.textfsm, .*, cisco_xr, sh[[ow]] ro[[ute]] vrf all ipv4$
+
+cisco_ios_show_ip_ospf_database_network.textfsm, .*, cisco_ios, sh[[ow]] ip ospf data[[base]] ne[[twork]]
+cisco_ios_show_ip_ospf_database_router.textfsm, .*, cisco_ios, sh[[ow]] ip ospf data[[base]] r[[outer]]
+cisco_ios_show_lldp_neighbors_detail.textfsm, .*, cisco_ios, sh[[ow]] lld[[p]] neig[[hbors]] det[[ail]]
+cisco_ios_show_cdp_neighbors_detail.textfsm, .*, cisco_ios, sh[[ow]] c[[dp]] neig[[hbors]] det[[ail]]
+cisco_ios_show_ip_ospf_neighbor.textfsm, .*, cisco_ios, sh[[ow]] ip ospf nei[[ghbor]]
+cisco_ios_show_ip_bgp_summary.textfsm, .*, cisco_ios, sh[[ow]] ip bgp (?:all\s+)?sum[[mary]]
+cisco_ios_show_standby_brief.textfsm, .*, cisco_ios, sh[[ow]] standby(?:\s+\S+)? br[[ief]]
+cisco_ios_show_interfaces.textfsm, .*, cisco_ios, sh[[ow]] int[[erfaces]](?: (?:\S+))?
+cisco_ios_show_vrf_detail.textfsm, .*, cisco_ios, sh[[ow]] vrf detail
+cisco_ios_show_vrrp_brief.textfsm, .*, cisco_ios, sh[[ow]] vrr[[p]] b[[rief]]
+cisco_ios_show_version.textfsm, .*, cisco_ios, sh[[ow]] ver[[sion]]
+cisco_ios_show_ip_arp.textfsm, .*, cisco_ios, sh[[ow]] i[[p]] a[[rp]]
+cisco_ios_show_vrf.textfsm, .*, cisco_ios, sh[[ow]] vrf
+
+cisco_xr_show_lldp_neighbors_detail.textfsm, .*, cisco_xr, sh[[ow]] ll[[dp]] ne[[ighbors]] de[[tail]]
+cisco_xr_show_cdp_neighbors_detail.textfsm, .*, cisco_xr, sh[[ow]] c[[dp]] neig[[hbors]] det[[ail]]
+cisco_xr_admin_show_inventory.textfsm, .*, cisco_xr, (adm[[in]] )?sh[[ow]] inven[[tory]]
+cisco_xr_show_vrf_all_detail.textfsm, .*, cisco_xr, sh[[ow]] vrf (\S+) det[[ail]]
+cisco_xr_show_ospf_neighbor.textfsm, .*, cisco_xr, sh[[ow]] ospf nei[[ghbor]]
+cisco_xr_show_interfaces.textfsm, .*, cisco_xr, sh[[ow]] inte[[rfaces]]
+cisco_xr_show_version.textfsm, .*, cisco_xr, sh[[ow]] ver[[sion]]
+cisco_xr_show_hsrp.textfsm, .*, cisco_xr, sh[[ow]] hs[[rp]]
+cisco_xr_show_arp.textfsm, .*, cisco_xr, sh[[ow]] arp

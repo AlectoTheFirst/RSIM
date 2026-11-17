@@ -1,0 +1,4 @@
+item a
+  last b
+quit
+item c

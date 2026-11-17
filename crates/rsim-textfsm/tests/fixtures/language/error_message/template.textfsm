@@ -1,0 +1,6 @@
+Value ITEM (\S+)
+
+Start
+  ^item\s+${ITEM} -> Record
+  ^bad -> Error "unexpected line"
+  ^worse -> Error

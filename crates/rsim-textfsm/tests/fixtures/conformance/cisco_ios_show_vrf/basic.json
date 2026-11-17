@@ -1,0 +1,69 @@
+{
+ "template": "cisco_ios_show_vrf.textfsm",
+ "header": [
+  "NAME",
+  "DEFAULT_RD",
+  "PROTOCOLS",
+  "INTERFACES"
+ ],
+ "records": [
+  [
+   "CUST-A",
+   "64500:100",
+   "ipv4,ipv6",
+   [
+    "Gi0/0/1",
+    "Gi0/0/2.100",
+    "Te0/1/0.100"
+   ]
+  ],
+  [
+   "CUST-B",
+   "192.0.2.1:200",
+   "ipv4",
+   [
+    "Gi0/0/3.200"
+   ]
+  ],
+  [
+   "LEGACY",
+   "64502:5",
+   "ipv4",
+   [
+    "Lo5",
+    "Vl500"
+   ]
+  ],
+  [
+   "Mgmt-intf",
+   "<not set>",
+   "ipv4,ipv6",
+   [
+    "Gi0"
+   ]
+  ],
+  [
+   "RESERVED",
+   "<not set>",
+   "ipv4",
+   []
+  ],
+  [
+   "SHARED-SVC",
+   "64500:999",
+   "ipv4,ipv6",
+   [
+    "Lo999",
+    "Vl999",
+    "Vl998",
+    "Tu10"
+   ]
+  ],
+  [
+   "STAGING",
+   "64500:300",
+   "",
+   []
+  ]
+ ]
+}

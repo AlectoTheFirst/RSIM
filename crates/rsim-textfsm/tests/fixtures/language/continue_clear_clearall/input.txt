@@ -1,0 +1,12 @@
+host r1
+interface e0 up
+interface e1 down
+set e2
+drop
+emit
+set e3
+reset
+emit
+host r2
+set e4
+emit
