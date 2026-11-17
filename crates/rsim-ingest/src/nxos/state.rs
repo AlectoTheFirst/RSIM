@@ -51,7 +51,8 @@ pub fn neighbour_name(s: &str) -> Option<String> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NvePeer {
     pub address: std::net::IpAddr,
-    pub up: bool,
+    /// `None` if the state word is not `Up` or `Down`.
+    pub up: Option<bool>,
     pub span: SourceSpan,
 }
 
@@ -59,7 +60,8 @@ pub struct NvePeer {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NveVni {
     pub vni: u32,
-    pub up: bool,
+    /// `None` if the state word is not `Up` or `Down`.
+    pub up: Option<bool>,
     pub span: SourceSpan,
 }
 
@@ -82,10 +84,12 @@ pub struct State {
     pub host_name: Option<String>,
     /// The state of the vPC domain, if the section is in the snapshot.
     pub vpc: Option<VpcState>,
-    /// The peer tunnel ends, if the section was collected.
-    pub nve_peers: Option<Vec<NvePeer>>,
-    /// The VNIs of the NVE interface, if the section was collected.
-    pub nve_vnis: Option<Vec<NveVni>>,
+    /// The peer tunnel ends, if the section was collected. An error names a
+    /// row that is not read.
+    pub nve_peers: Option<Result<Vec<NvePeer>, String>>,
+    /// The VNIs of the NVE interface, if the section was collected. An error
+    /// names a row that is not read.
+    pub nve_vnis: Option<Result<Vec<NveVni>, String>>,
 }
 
 /// The state of a vPC domain from `show vpc`, with the fields that HST
@@ -271,29 +275,34 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
         });
     }
     // The keys of the NVE sections are not confirmed on a device. A row
-    // whose state is not `Up` counts as down.
+    // with no address or VNI makes the section unread.
     if let Some((v, file)) = json("nve_peers") {
-        let peers = rows(&v, "nve_peers")
-            .iter()
-            .enumerate()
-            .filter_map(|(i, r)| {
-                Some(NvePeer {
-                    address: text(r, "peer-ip")?.parse().ok()?,
-                    up: up(text(r, "peer-state")) == Some(true),
-                    span: line(file, i),
+        let peers =
+            rows(&v, "nve_peers")
+                .iter()
+                .enumerate()
+                .map(|(i, r)| {
+                    Ok(NvePeer {
+                        address: text(r, "peer-ip").and_then(|a| a.parse().ok()).ok_or_else(
+                            || format!("row {} of the NVE peers has no peer address", i + 1),
+                        )?,
+                        up: up(text(r, "peer-state")),
+                        span: line(file, i),
+                    })
                 })
-            })
-            .collect();
+                .collect();
         st.nve_peers = Some(peers);
     }
     if let Some((v, file)) = json("nve_vnis") {
         let vnis = rows(&v, "nve_vni")
             .iter()
             .enumerate()
-            .filter_map(|(i, r)| {
-                Some(NveVni {
-                    vni: text(r, "vni")?.parse().ok()?,
-                    up: up(text(r, "vni-state")) == Some(true),
+            .map(|(i, r)| {
+                Ok(NveVni {
+                    vni: text(r, "vni")
+                        .and_then(|a| a.parse().ok())
+                        .ok_or_else(|| format!("row {} of the NVE VNIs has no VNI", i + 1))?,
+                    up: up(text(r, "vni-state")),
                     span: line(file, i),
                 })
             })

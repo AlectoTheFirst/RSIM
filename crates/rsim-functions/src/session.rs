@@ -125,6 +125,10 @@ impl NetFunction for SessionLookup {
 pub struct SessionCommit {
     pub meta: Meta,
     pub next: FunctionId,
+    /// False on a device that keeps a session only for a translated flow,
+    /// for example a stateless router with NAT: an untranslated flow gets no
+    /// session.
+    pub keep_untranslated: bool,
 }
 
 impl NetFunction for SessionCommit {
@@ -158,6 +162,16 @@ impl NetFunction for SessionCommit {
         }
         let relation = entry.session_relation(input);
         let translated = relation.changes_flow();
+        if !translated && !self.keep_untranslated {
+            return vec![self.meta.forward(
+                input.clone(),
+                &self.next,
+                ReasonCode::Passed,
+                "not translated, so the device keeps no session",
+                ctx.clone(),
+                state,
+            )];
+        }
         let (next_state, index) = state.with_session(
             &self.meta.device,
             Session {

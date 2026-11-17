@@ -35,8 +35,8 @@ pub(super) struct Tunnel {
     pub spans: Vec<SourceSpan>,
     /// The layer 2 VNI of each VLAN.
     pub l2: BTreeMap<u16, L2Vni>,
-    /// The peer tunnel ends that are up, if the section was collected.
-    pub peers: Option<Vec<(IpAddr, SourceSpan)>>,
+    /// The peer tunnel ends that are up, or why they are not known.
+    pub peers: Result<Vec<(IpAddr, SourceSpan)>, String>,
 }
 
 /// The plan of the tunnel end of a switch.
@@ -110,8 +110,15 @@ pub(super) fn plan(cfg: &Config, st: &State, active: &[Interface], l: &mut L<'_>
         };
         let mut vspans = vec![l.span(m.lines), l.span(*seg_lines)];
         if let Some(vnis) = &st.nve_vnis {
+            let vnis = match vnis {
+                Ok(v) => v,
+                Err(why) => return unknown(why.clone()),
+            };
             match vnis.iter().find(|r| r.vni == m.vni) {
-                Some(r) if r.up => vspans.push(r.span.clone()),
+                Some(r) if r.up == Some(true) => vspans.push(r.span.clone()),
+                Some(r) if r.up.is_none() => {
+                    return unknown(format!("the state of VNI {} is not known", m.vni));
+                }
                 Some(_) => {
                     l.note(format!("VNI {}: the collected state is not up", m.vni));
                     continue;
@@ -138,12 +145,21 @@ pub(super) fn plan(cfg: &Config, st: &State, active: &[Interface], l: &mut L<'_>
     if st.nve_vnis.is_none() {
         l.note("no NVE VNI section, so each member VNI counts as up".into());
     }
-    let peers = st.nve_peers.as_ref().map(|ps| {
-        ps.iter()
-            .filter(|p| p.up)
-            .map(|p| (p.address, p.span.clone()))
-            .collect()
-    });
+    let peers = match &st.nve_peers {
+        None => Err("no NVE peer section, so the peers of the flood are not known".to_string()),
+        Some(Err(why)) => Err(why.clone()),
+        Some(Ok(ps)) => match ps.iter().find(|p| p.up.is_none()) {
+            Some(p) => Err(format!(
+                "the state of the NVE peer {} is not known",
+                p.address
+            )),
+            None => Ok(ps
+                .iter()
+                .filter(|p| p.up == Some(true))
+                .map(|p| (p.address, p.span.clone()))
+                .collect()),
+        },
+    };
     Plan::Exact(Tunnel {
         nve: n.name.clone(),
         source,
@@ -176,7 +192,8 @@ pub(super) fn summary(
         .nve_peers
         .iter()
         .flatten()
-        .filter(|p| p.up)
+        .flatten()
+        .filter(|p| p.up != Some(false))
         .map(|p| p.address)
         .collect();
     peers.extend(
@@ -305,7 +322,7 @@ impl L<'_> {
                 }
                 for (v, x) in &t.l2 {
                     let copies: Vec<(PortId, FunctionId)> = match (&x.replication, &t.peers) {
-                        (Replication::Ingress, Some(ps)) => ps
+                        (Replication::Ingress, Ok(ps)) => ps
                             .iter()
                             .map(|(p, _)| {
                                 (
@@ -314,12 +331,9 @@ impl L<'_> {
                                 )
                             })
                             .collect(),
-                        (rep, _) => {
+                        (rep, peers) => {
                             let why = match rep {
-                                Replication::Ingress => {
-                                    "no NVE peer section, so the peers of the flood are not known"
-                                        .to_string()
-                                }
+                                Replication::Ingress => peers.clone().err().unwrap_or_default(),
                                 Replication::Multicast(g) => {
                                     format!("the flood to the multicast group {g} is not lowered")
                                 }

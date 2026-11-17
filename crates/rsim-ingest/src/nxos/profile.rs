@@ -73,11 +73,20 @@ pub const VXLAN_GUIDE: &str = "Cisco Nexus 9000 Series NX-OS VXLAN Configuration
 /// line: the IANA port 4789. Not confirmed against a device.
 pub const VXLAN_UDP_PORT: u16 = 4789;
 
+/// NX-OS keeps state only for a NAT translation: a flow that no rule
+/// translates gets no session. The NX-OS interface and system management
+/// guides describe no connection tracking for routed traffic. Not confirmed
+/// against a device.
+pub const KEEPS_UNTRANSLATED_FLOWS: bool = false;
+
 /// The function where an encapsulated packet enters the layer 3 chain of
-/// the switch: a route lookup of the default VRF whose next hops go to the
-/// next-hop resolution. The ACLs, the NAT and the sessions of the switch do
-/// not apply to the outer header. No source states the order; it is not
-/// confirmed against a device.
+/// the switch: a route lookup of the default VRF whose next hops go to a
+/// next-hop resolution of the outer header. The NAT and the sessions of the
+/// switch do not apply to the outer header, and an egress with an output
+/// ACL gives Unknown. On a switch that receives it, the outer header goes
+/// through the input ACL, the NAT and the route lookup of the default VRF
+/// as each other packet. No source states the order; it is not confirmed
+/// against a device.
 pub const VXLAN_ENTRY: &str = "vxlan/route";
 
 /// The status words that the lowering reads: the vPC peer status `peer-ok`,

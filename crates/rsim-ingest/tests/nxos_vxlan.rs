@@ -35,6 +35,8 @@ struct Opts {
     vni_state: &'static str,
     /// True if the MAC table of leaf1 has host2.
     leaf1_knows_host2: bool,
+    /// More lines of Ethernet1/49 of leaf1.
+    uplink_extra: &'static str,
 }
 
 impl Default for Opts {
@@ -45,6 +47,7 @@ impl Default for Opts {
             peers: Some("Up"),
             vni_state: "Up",
             leaf1_knows_host2: true,
+            uplink_extra: "",
         }
     }
 }
@@ -67,7 +70,7 @@ interface nve1
 interface Ethernet1/49
   no switchport
   ip address {link}/31
-  no shutdown
+{uplink}  no shutdown
 interface Vlan10
   no shutdown
   ip address 198.51.100.{n}/24
@@ -83,6 +86,7 @@ router bgp 65000
   neighbor 172.16.0.{peer}
 ",
         extra = o.nve_extra,
+        uplink = if n == 1 { o.uplink_extra } else { "" },
         member = o.member,
         peer = if n == 1 { 1 } else { 0 },
     )
@@ -436,4 +440,37 @@ fn a_vni_that_is_down_has_no_tunnel() {
     let a = run(&t, "198.51.100.11", "198.51.100.12");
     let branches = show(&a);
     assert_eq!(branches[0].0, VerdictKind::Unknown, "{branches:#?}");
+}
+
+#[test]
+fn a_peer_with_a_state_that_is_not_read_makes_the_flood_unknown() {
+    let o = Opts {
+        peers: Some("Init"),
+        leaf1_knows_host2: false,
+        ..Opts::default()
+    };
+    let t = estate(&o).builder.build().expect("the twin builds");
+    let a = run(&t, "198.51.100.11", "198.51.100.12");
+    let branches = show(&a);
+    assert!(
+        branches.iter().any(|(v, s)| *v == VerdictKind::Unknown
+            && has(s, "the state of the NVE peer 192.0.2.2 is not known")),
+        "{branches:#?}"
+    );
+}
+
+#[test]
+fn an_output_acl_on_the_egress_of_the_outer_header_is_unknown() {
+    let o = Opts {
+        uplink_extra: "  ip access-group FABRIC out\n",
+        ..Opts::default()
+    };
+    let t = estate(&o).builder.build().expect("the twin builds");
+    let a = run(&t, "198.51.100.11", "198.51.100.12");
+    let branches = show(&a);
+    assert_eq!(branches[0].0, VerdictKind::Unknown, "{branches:#?}");
+    assert!(
+        has(&branches[0].1, "leaf1/vxlan/acl-out/Ethernet1/49"),
+        "{branches:#?}"
+    );
 }
