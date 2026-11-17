@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
-use rsim_core::{FunctionId, SourceSpan};
+use rsim_core::SourceSpan;
 use rsim_engine::TwinBuilder;
 use rsim_store::{Hash, Snapshot, Store, StoreError};
 use serde_json::Value;
@@ -239,7 +239,7 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
     // The routers give their summaries too: the ports that can end a link.
     let mut summaries = summaries;
     for (d, r) in &routers {
-        summaries.insert(d.clone(), vyos::link_summary(d, &r.col));
+        summaries.insert(d.clone(), vyos::link_summary(d, &r.cfg, &r.col));
     }
     // The MACs of the collected devices: the interfaces of the routers and
     // of the switches, and the UniFi devices. None of them is an endpoint.
@@ -267,14 +267,9 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         let site = unifi::read(&Value::Null, &Value::Null, &devices, &Value::Null);
         device_macs.extend(site.devices.iter().filter_map(|d| nxos::state::mac(&d.mac)));
     }
-    let mut joined = crate::links::join(&summaries, &next_hops, &device_macs);
-    for (d, notes) in std::mem::take(&mut joined.notes) {
-        e.notes.entry(d).or_default().extend(notes);
-    }
-
-    let mut l2: BTreeMap<String, vyos::Layer2Links> = BTreeMap::new();
-    let mut extra: BTreeMap<String, Vec<collected::NeighbourRow>> = BTreeMap::new();
-    let profile = unifi_profile();
+    // The UniFi sites: their coverage, and the summaries of their root
+    // devices for the join.
+    let mut parsed: Vec<(String, unifi::Site, unifi::Files)> = Vec::new();
     for (device, sections) in &sites {
         let mut cov = Coverage::default();
         let mut docs: BTreeMap<&str, (Value, String)> = BTreeMap::new();
@@ -311,35 +306,50 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
             networks: file("networks"),
             wlans: file("wlans"),
         };
-        let mut router = router_port(&site, &routers, &files.devices);
-        // A router interface that an NX-OS switch claims too gets no link on
-        // either side.
-        if let Some(r) = &router
-            && joined
-                .devices
-                .get_mut(&r.device)
-                .and_then(|x| x.peers.remove(&r.interface))
-                .is_some()
-        {
-            let target = format!("{}/handoff/{}", r.device, r.interface);
-            for ext in joined.devices.values_mut() {
-                for list in ext.peers.values_mut() {
-                    list.retain(|p| p.target.as_str() != target);
-                }
-                ext.peers.retain(|_, list| !list.is_empty());
-            }
-            e.notes.entry(r.device.clone()).or_default().push(format!(
-                "{}: a UniFi site and an NX-OS switch both claim the interface, so it has no link",
-                r.interface
-            ));
-            router = None;
-        }
-        let low = unifi::lower(device, &site, &profile, &files, router.as_ref(), &next_hops);
-        if let (Some(r), Some((iface, peer, port))) = (&router, &low.router_peer) {
-            l2.entry(r.device.clone()).or_default().insert(
-                iface.clone(),
-                (peer.clone(), r.provenance.clone(), Some(port.clone())),
-            );
+        parsed.push((device.clone(), site, files));
+    }
+    for (_, site, files) in &parsed {
+        summaries.extend(unifi::link_summary(site, files));
+    }
+    let mut joined = crate::links::join(&summaries, &next_hops, &device_macs);
+    for (d, notes) in std::mem::take(&mut joined.notes) {
+        e.notes.entry(d).or_default().extend(notes);
+    }
+
+    let mut l2: BTreeMap<String, vyos::Layer2Links> = BTreeMap::new();
+    let mut extra: BTreeMap<String, Vec<collected::NeighbourRow>> = BTreeMap::new();
+    let profile = unifi_profile();
+    for (device, site, files) in &parsed {
+        // The far end of the link of a root device, from the join.
+        let router = site
+            .devices
+            .iter()
+            .filter(|d| d.uplink_peer.is_none())
+            .find_map(|d| {
+                let port = d.uplink_port?;
+                let peers = joined
+                    .devices
+                    .get(&d.name)?
+                    .peers
+                    .get(&format!("port/{port}"))?;
+                let [p] = peers.as_slice() else {
+                    return None;
+                };
+                let far = summaries.get(&p.far.0)?;
+                Some(unifi::RouterPort {
+                    device: p.far.0.clone(),
+                    interface: p.far.1.clone(),
+                    switch: d.mac.clone(),
+                    port,
+                    mac: *far.port_macs.get(&p.far.1)?,
+                    handoff: p.target.clone(),
+                    facts: far.facts.get(&p.far.1).cloned(),
+                    vlans: far.l3.get(&p.far.1).cloned().unwrap_or_default(),
+                    provenance: p.provenance.clone(),
+                })
+            });
+        let low = unifi::lower(device, site, &profile, files, router.as_ref(), &next_hops);
+        if let Some(r) = &router {
             // The clients of the site are neighbours of the router on the
             // interface of their VLAN.
             for c in &site.clients {
@@ -448,63 +458,6 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         }
     }
     e
-}
-
-/// The router port on the uplink of a site. A root device links to the
-/// router on the port with an LLDP neighbour that has the MAC of a router
-/// interface. With no such neighbour, it links on its uplink port if its
-/// gateway MAC is the MAC of a router interface.
-fn router_port(
-    site: &unifi::Site,
-    routers: &BTreeMap<String, Router>,
-    devices_file: &str,
-) -> Option<unifi::RouterPort> {
-    let find = |mac: &str| {
-        routers.iter().find_map(|(name, r)| {
-            let row = r
-                .col
-                .links
-                .iter()
-                .find(|l| l.mac.as_deref().map(str::to_lowercase).as_deref() == Some(mac))?;
-            Some((name, r, row))
-        })
-    };
-    for d in site.devices.iter().filter(|d| d.uplink_peer.is_none()) {
-        let by_lldp = d
-            .lldp
-            .iter()
-            .find_map(|(p, chassis)| find(chassis).map(|x| (*p, x)));
-        let by_gateway = || {
-            let p = d.uplink_port?;
-            let x = find(d.gateway_mac.as_deref()?)?;
-            Some((p, x))
-        };
-        let Some((port, (name, r, row))) = by_lldp.or_else(by_gateway) else {
-            continue;
-        };
-        let phys = row.parent.clone().unwrap_or_else(|| row.interface.clone());
-        let mac = row.mac.as_deref()?.parse().ok()?;
-        let mut vlans = BTreeMap::new();
-        for (iface, list) in vyos::interface_addresses(&r.cfg, &r.col) {
-            let (p, vlan) = vyos::physical(&iface);
-            if p == phys {
-                vlans.insert(vlan, list);
-            }
-        }
-        let span = SourceSpan::line(devices_file, u32::try_from(d.index + 1).unwrap_or(u32::MAX));
-        return Some(unifi::RouterPort {
-            device: name.clone(),
-            interface: phys.clone(),
-            switch: d.mac.clone(),
-            port,
-            mac,
-            handoff: FunctionId::new(format!("{name}/handoff/{phys}")),
-            facts: vyos::interface_facts(&r.col, &phys),
-            vlans,
-            provenance: vec![span, row.span.clone()],
-        });
-    }
-    None
 }
 
 /// The vendor profile of UniFi switches and access points. They have no

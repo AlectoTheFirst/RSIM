@@ -359,10 +359,7 @@ interface Ethernet1/1
     };
     let e = estate_more(|_, b| b, Vec::new(), vec![switch]);
     assert!(
-        e.notes["r1"].contains(
-            &"eth0: a UniFi site and an NX-OS switch both claim the interface, so it has no link"
-                .to_string()
-        ),
+        e.notes["r1"].contains(&"eth0: 2 links claim the port, so it has no link".to_string()),
         "{:#?}",
         e.notes
     );
