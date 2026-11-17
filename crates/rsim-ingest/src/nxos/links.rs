@@ -67,8 +67,12 @@ pub struct VpcSummary {
     pub members: BTreeMap<String, u32>,
     /// The vPC ids whose member port channel is down.
     pub down: BTreeSet<u32>,
+    /// The vPC ids whose member port channel is up.
+    pub up: BTreeSet<u32>,
     /// The MAC of each SVI.
     pub svi_macs: BTreeMap<String, Mac>,
+    /// The peer-link port channel.
+    pub peer_link: Option<String>,
 }
 
 /// The vPC facts of the peer switch of a vPC pair.
@@ -76,6 +80,8 @@ pub struct VpcSummary {
 pub struct VpcPeer {
     /// The vPC ids whose member port channel is down on the peer.
     pub down: BTreeSet<u32>,
+    /// The vPC ids whose member port channel is up on the peer.
+    pub up: BTreeSet<u32>,
     /// The MAC of each SVI of the peer.
     pub svi_macs: BTreeMap<String, Mac>,
 }
@@ -294,6 +300,11 @@ pub fn join(
         let Some(far) = far else {
             continue;
         };
+        // A member port of a vPC that links to a port with 2 peers: the vPC
+        // link below covers it.
+        if vpc_named.get(far).is_some_and(|(e, _)| e.contains(here)) {
+            continue;
+        }
         let confirmed = match far {
             End::Switch(o, _) => {
                 if !switches[o].neighbour_section {
@@ -328,17 +339,44 @@ pub fn join(
         links.push((here.clone(), far.clone(), spans));
     }
 
-    // A link to a vPC pair: each member port must report the link back if
-    // its switch has a neighbour section.
+    // The vPC pairs: 2 switches of one lowered domain whose peer-link port
+    // channels a link joins.
+    let peer_link = |e: &End| -> Option<(String, u32)> {
+        let End::Switch(d, p) = e else { return None };
+        let v = switches[d].vpc.as_ref().filter(|v| v.ok)?;
+        (v.peer_link.as_deref() == Some(p.as_str())).then(|| (d.clone(), v.domain))
+    };
+    let mut pairs: BTreeSet<(String, String)> = BTreeSet::new();
+    for (a, b, _) in &links {
+        if let (Some((da, x)), Some((db, y))) = (peer_link(a), peer_link(b))
+            && x == y
+            && da != db
+        {
+            pairs.insert((da.clone(), db.clone()));
+            pairs.insert((db, da));
+        }
+    }
+
+    // A link to a vPC pair: the 2 member ports are on a pair, and each must
+    // report the link back if its switch has a neighbour section.
     let mut vpc_links: Vec<(End, Vec<End>, Vec<SourceSpan>)> = Vec::new();
     for (here, (ends, spans)) in &vpc_named {
-        let confirmed = ends.iter().all(|f| match f {
-            End::Switch(o, _) => {
-                !switches[o].neighbour_section
-                    || matches!(named.get(f), Some((Some(back), _)) if back == here)
-            }
-            End::Router(..) => false,
-        });
+        let devs: Vec<&str> = ends
+            .iter()
+            .filter_map(|e| match e {
+                End::Switch(d, _) => Some(d.as_str()),
+                End::Router(..) => None,
+            })
+            .collect();
+        let paired = matches!(devs.as_slice(), [a, b] if pairs.contains(&((*a).to_string(), (*b).to_string())));
+        let confirmed = paired
+            && ends.iter().all(|f| match f {
+                End::Switch(o, _) => {
+                    !switches[o].neighbour_section
+                        || matches!(named.get(f), Some((Some(back), _)) if back == here)
+                }
+                End::Router(..) => false,
+            });
         if !confirmed {
             let End::Switch(d, p) = here else { continue };
             out.notes.entry(d.clone()).or_default().push(format!(
@@ -468,21 +506,14 @@ pub fn join(
         }
     }
 
-    // The vPC peer of each switch: the other switch with the same domain.
-    let mut domains: BTreeMap<u32, Vec<&str>> = BTreeMap::new();
-    for (d, s) in switches {
-        if let Some(v) = s.vpc.as_ref().filter(|v| v.ok) {
-            domains.entry(v.domain).or_default().push(d);
-        }
-    }
-    for pair in domains.values().filter(|v| v.len() == 2) {
-        for (a, b) in [(pair[0], pair[1]), (pair[1], pair[0])] {
-            let v = switches[b].vpc.as_ref().expect("a domain");
-            out.switches.entry(a.to_string()).or_default().vpc_peer = Some(VpcPeer {
-                down: v.down.clone(),
-                svi_macs: v.svi_macs.clone(),
-            });
-        }
+    // The vPC peer of each switch of a pair.
+    for (a, b) in &pairs {
+        let v = switches[b].vpc.as_ref().expect("a domain");
+        out.switches.entry(a.clone()).or_default().vpc_peer = Some(VpcPeer {
+            down: v.down.clone(),
+            up: v.up.clone(),
+            svi_macs: v.svi_macs.clone(),
+        });
     }
     place(switches, &mut out, next_hops, device_macs);
     out

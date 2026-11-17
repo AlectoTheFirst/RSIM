@@ -19,7 +19,7 @@ use super::config::{FhrpKind, Interface, PortMode, VpcPort};
 use super::links::{External, PortVlans, Summary, VlanInfo, VpcSummary};
 use super::lower::{L, iface_addr};
 use super::names::Names;
-use super::profile::{ACCESS_VLAN, DEFAULT_MODE_IS_ACCESS, NATIVE_VLAN, VPC_GUIDE};
+use super::profile::{ACCESS_VLAN, DEFAULT_MODE_IS_ACCESS, NATIVE_VLAN, STATE_WORDS, VPC_GUIDE};
 use super::state::{self, State};
 use crate::collected::Collected;
 
@@ -105,8 +105,8 @@ impl L<'_> {
             };
             for f in &i.fhrp {
                 let (collected, word, others, what) = match f.kind {
-                    FhrpKind::Hsrp => (st.hsrp_collected, "active", HSRP_OTHER, "HSRP"),
-                    FhrpKind::Vrrp => (st.vrrp_collected, "master", VRRP_OTHER, "VRRP"),
+                    FhrpKind::Hsrp => (st.hsrp_collected, STATE_WORDS[1], HSRP_OTHER, "HSRP"),
+                    FhrpKind::Vrrp => (st.vrrp_collected, STATE_WORDS[3], VRRP_OTHER, "VRRP"),
                 };
                 let row = st
                     .groups
@@ -124,7 +124,7 @@ impl L<'_> {
                 let vip = r.vip.as_deref().and_then(|v| v.parse::<IpAddr>().ok());
                 match (state.as_str(), vip, r.vmac) {
                     (s, Some(vip), Some(m)) if s == word => g.active.push((m, vip, spans)),
-                    (s, _, Some(m)) if vpc_ok && (s == "standby" || s == "backup") => {
+                    (s, _, Some(m)) if vpc_ok && (s == STATE_WORDS[2] || s == STATE_WORDS[4]) => {
                         g.passive.push((m, spans));
                     }
                     (s, _, _) if others.contains(&s) => {}
@@ -381,16 +381,20 @@ impl L<'_> {
         // each active virtual MAC. The lowering adds them, so their MAC table
         // rows are not used.
         let mut own: BTreeSet<(u16, Mac)> = BTreeSet::new();
+        // The MACs that another switch owns too: the standby virtual MACs and
+        // the SVI MACs of the peer.
+        let mut foreign: BTreeSet<(u16, Mac)> = BTreeSet::new();
         for (name, (v, m, _)) in &svis {
             own.insert((*v, *m));
             if let Some(g) = gws.get(name) {
                 own.extend(g.active.iter().map(|a| (*v, a.0)));
-                own.extend(g.passive.iter().map(|a| (*v, a.0)));
+                foreign.extend(g.passive.iter().map(|a| (*v, a.0)));
             }
             if let Some(pm) = peer_gateway(name) {
-                own.insert((*v, pm));
+                foreign.insert((*v, pm));
             }
         }
+        own.extend(foreign.iter().copied());
 
         // The summary: the ports, the next hops, the ARP rows of the SVIs and
         // the facts of each VLAN with an SVI.
@@ -635,7 +639,11 @@ impl L<'_> {
                 port: pid.clone(),
                 native: Some(self.bd(*v)),
                 tagged: BTreeMap::new(),
-                next: mac_id.clone(),
+                next: if foreign.is_empty() {
+                    mac_id.clone()
+                } else {
+                    self.id("mac-svi")
+                },
             });
             let g = gws.get(name).cloned().unwrap_or_default();
             match &g.unknown {
@@ -697,6 +705,7 @@ impl L<'_> {
 
         // The collected MAC table.
         let mut missing: BTreeSet<u16> = BTreeSet::new();
+        let mut own_rows: BTreeMap<(u16, Mac), (String, SourceSpan)> = BTreeMap::new();
         for r in &col.macs {
             let (Ok(v), Some(m)) = (u16::try_from(r.vlan), state::mac(&r.mac)) else {
                 continue;
@@ -706,6 +715,9 @@ impl L<'_> {
                 continue;
             }
             if own.contains(&(v, m)) {
+                if let Some(port) = r.port.as_deref().map(port_of) {
+                    own_rows.insert((v, m), (port, r.span.clone()));
+                }
                 continue;
             }
             let Some(port) = r.port.as_deref().map(port_of) else {
@@ -733,17 +745,45 @@ impl L<'_> {
             .iter()
             .any(|p| matches!(plans.get(p), Some(Plan::Exact { .. })))
         {
-            let peer_down = ext
-                .vpc_peer
-                .as_ref()
-                .map(|p| p.down.clone())
-                .unwrap_or_default();
+            let peer = ext.vpc_peer.clone().unwrap_or_default();
+            // The member ports of the vPCs that are up on the peer, and the
+            // member ports whose state on the peer is not known.
             let blocked: BTreeSet<String> = members
                 .iter()
-                .filter(|(p, n)| !peer_down.contains(n) && plans.contains_key(*p))
+                .filter(|(p, n)| peer.up.contains(n) && plans.contains_key(*p))
+                .map(|(p, _)| p.clone())
+                .collect();
+            let unsure: BTreeSet<String> = members
+                .iter()
+                .filter(|(p, n)| {
+                    !peer.up.contains(n) && !peer.down.contains(n) && plans.contains_key(*p)
+                })
                 .map(|(p, _)| p.clone())
                 .collect();
             let mut egress_peer = egress.clone();
+            for p in &unsure {
+                let f = format!("vpc/unknown/{p}");
+                let s = self.sink(
+                    &f,
+                    format!("{p}: the state of its vPC on the peer is not known"),
+                    SourceSpan::line(VPC_GUIDE, 7),
+                );
+                self.add(s);
+                egress_peer.insert(PortId::new(p), self.id(&f));
+            }
+            // A frame from the peer link that goes to layer 3 can leave on a
+            // vPC member port after the routing, where the rule applies too;
+            // the twin does not carry that fact across the hand-off.
+            for name in svis.keys() {
+                let f = format!("vpc/routed/{name}");
+                let s = self.sink(
+                    &f,
+                    format!("{name}: a frame from the peer link to layer 3 is not lowered"),
+                    SourceSpan::line(VPC_GUIDE, 7),
+                );
+                self.add(s);
+                egress_peer.insert(PortId::new(format!("svi/{name}")), self.id(&f));
+            }
             for p in &blocked {
                 let f = format!("vpc/loop/{p}");
                 let span = SourceSpan::line(VPC_GUIDE, 7);
@@ -768,7 +808,17 @@ impl L<'_> {
                     let kept = ports
                         .iter()
                         .filter(|(p, _)| !blocked.contains(&p.to_string()))
-                        .cloned()
+                        .map(|(p, f)| {
+                            let name = p.to_string();
+                            let to = if unsure.contains(&name) {
+                                self.id(&format!("vpc/unknown/{name}"))
+                            } else if let Some(svi) = name.strip_prefix("svi/") {
+                                self.id(&format!("vpc/routed/{svi}"))
+                            } else {
+                                f.clone()
+                            };
+                            (p.clone(), to)
+                        })
                         .collect();
                     (bd.clone(), kept)
                 })
@@ -786,6 +836,34 @@ impl L<'_> {
             self.out.functions.push(Arc::new(Flood {
                 meta,
                 ports: flood_peer,
+            }));
+        }
+        // A frame that this switch routes into a VLAN: the standby virtual
+        // MACs and the MAC of the SVI of the peer go by their collected rows,
+        // not to the hand-off of this switch.
+        if !foreign.is_empty() {
+            let mut tables_svi = tables.clone();
+            for (v, m) in &foreign {
+                let t = tables_svi.entry(self.bd(*v)).or_default();
+                t.remove(m);
+                if let Some((port, span)) = own_rows.get(&(*v, *m)) {
+                    t.insert(
+                        *m,
+                        MacEntry {
+                            port: PortId::new(port),
+                            spans: vec![span.clone()],
+                        },
+                    );
+                }
+            }
+            let meta = self.meta("mac-svi", Vec::new());
+            self.out.functions.push(Arc::new(MacLookup {
+                meta,
+                tables: tables_svi,
+                egress: egress.clone(),
+                flood: self.id("flood"),
+                hairpin: BTreeSet::new(),
+                blocked: BTreeMap::new(),
             }));
         }
         if let Some(d) = &cfg.vpc_domain {
@@ -806,7 +884,17 @@ impl L<'_> {
                     })
                     .map(|(_, n)| *n)
                     .collect(),
+                up: members
+                    .iter()
+                    .filter(|(p, _)| {
+                        let st = st.interfaces.get(*p);
+                        st.and_then(|s| s.oper_up) == Some(true)
+                            && st.and_then(|s| s.admin_up) == Some(true)
+                    })
+                    .map(|(_, n)| *n)
+                    .collect(),
                 svi_macs: svis.iter().map(|(n, (_, m, _))| (n.clone(), *m)).collect(),
+                peer_link: peer_links.iter().next().cloned(),
             });
         }
         if !plans.is_empty() || !svis.is_empty() {

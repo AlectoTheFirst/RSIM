@@ -62,3 +62,9 @@ pub const DEFAULT_MODE_IS_ACCESS: bool = true;
 /// active-active mode of the data plane (page 86), and `peer-gateway`
 /// (page 118). Not confirmed against a device.
 pub const VPC_GUIDE: &str = "https://www.cisco.com/c/dam/en/us/td/docs/switches/datacenter/sw/design/vpc_design/vpc_best_practices_design_guide.pdf";
+
+/// The status words that the lowering reads: the vPC peer status `peer-ok`,
+/// the HSRP states `Active` and `Standby`, and the VRRP states `Master` and
+/// `Backup`. No source confirms these words in the JSON of NX-OS. Each other
+/// word gives `Unknown`.
+pub const STATE_WORDS: [&str; 5] = ["peer-ok", "active", "standby", "master", "backup"];

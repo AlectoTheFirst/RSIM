@@ -254,7 +254,8 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
                 .get("vpc-domain-id")
                 .and_then(|d| d.as_u64().or_else(|| d.as_str()?.trim().parse().ok()))
                 .and_then(|d| u32::try_from(d).ok()),
-            peer_ok: text(&v, "vpc-peer-status").map(|t| t.eq_ignore_ascii_case("peer-ok")),
+            peer_ok: text(&v, "vpc-peer-status")
+                .map(|t| t.eq_ignore_ascii_case(super::profile::STATE_WORDS[0])),
             peer_link: rows(&v, "peerlink")
                 .first()
                 .and_then(|r| text(r, "peerlink-ifindex"))
