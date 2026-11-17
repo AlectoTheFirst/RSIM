@@ -530,3 +530,115 @@ fn a_batch_gives_one_line_for_each_item() {
     );
     assert_eq!(r.status, 413);
 }
+
+fn mcp(s: &State, body: &Value, headers: &[(&str, &str)]) -> Response {
+    let mut r = req("POST", "/mcp");
+    r.body = body.to_string().into_bytes();
+    for (k, v) in headers {
+        r.headers.insert((*k).to_string(), (*v).to_string());
+    }
+    handle(s, &r)
+}
+
+fn meta() -> Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
+        "io.modelcontextprotocol/clientInfo": {"name": "rsim-test", "version": "1"}
+    })
+}
+
+#[test]
+fn the_mcp_tools_answer_through_the_streamable_http_transport() {
+    let s = state(None);
+    let v = "2026-07-28";
+    let list =
+        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {"_meta": meta()}});
+    let r = mcp(
+        &s,
+        &list,
+        &[("mcp-protocol-version", v), ("mcp-method", "tools/list")],
+    );
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
+    let names: Vec<String> = json(&r)["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect();
+    assert!(names.contains(&"path_query".to_string()), "{names:?}");
+    let call = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+        "_meta": meta(),
+        "name": "table_query",
+        "arguments": {"topology": "leaf-spine", "table": "fib", "verb": "lpm", "address": "10.2.0.10", "filters": {"device": ["leaf1"]}}
+    }});
+    let r = mcp(
+        &s,
+        &call,
+        &[
+            ("mcp-protocol-version", v),
+            ("mcp-method", "tools/call"),
+            ("mcp-name", "table_query"),
+        ],
+    );
+    assert_eq!(r.status, 200);
+    let out = json(&r);
+    assert_eq!(out["id"], 2);
+    assert_eq!(
+        out["result"]["structuredContent"]["rows"][0][2],
+        "10.2.0.0/24"
+    );
+    // A notification gets 202 with no body.
+    let note =
+        json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"_meta": meta()}});
+    let r = mcp(
+        &s,
+        &note,
+        &[
+            ("mcp-protocol-version", v),
+            ("mcp-method", "notifications/cancelled"),
+        ],
+    );
+    assert_eq!((r.status, r.body.len()), (202, 0));
+    // The headers must agree with the body.
+    for (headers, code) in [
+        (vec![("mcp-method", "tools/list")], -32020),
+        (
+            vec![
+                ("mcp-protocol-version", "2025-11-25"),
+                ("mcp-method", "tools/list"),
+            ],
+            -32022,
+        ),
+        (
+            vec![("mcp-protocol-version", v), ("mcp-method", "tools/call")],
+            -32020,
+        ),
+    ] {
+        let r = mcp(&s, &list, &headers);
+        assert_eq!(r.status, 400, "{headers:?}");
+        assert_eq!(json(&r)["error"]["code"], code, "{headers:?}");
+    }
+    let r = mcp(
+        &s,
+        &call,
+        &[
+            ("mcp-protocol-version", v),
+            ("mcp-method", "tools/call"),
+            ("mcp-name", "path_query"),
+        ],
+    );
+    assert_eq!(json(&r)["error"]["code"], -32020);
+    // GET is not a method of the transport, and the origin check applies.
+    assert_eq!(get(&s, "/mcp").status, 405);
+    let r = mcp(
+        &s,
+        &list,
+        &[
+            ("mcp-protocol-version", v),
+            ("mcp-method", "tools/list"),
+            ("origin", "http://evil.example"),
+        ],
+    );
+    assert_eq!(r.status, 403);
+}

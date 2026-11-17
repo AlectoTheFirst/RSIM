@@ -236,6 +236,15 @@ pub const ROUTES: &[Route] = &[
         body: &[object],
         ok: (200, &[object]),
     },
+    Route {
+        method: "post",
+        path: "/mcp",
+        id: "mcpMessage",
+        summary: "The Model Context Protocol through its Streamable HTTP transport, revision 2026-07-28: one JSON-RPC message in the body; the headers MCP-Protocol-Version, Mcp-Method and, for tools/call, Mcp-Name must agree with it. A request gets its response; a notification gets 202. The tools are the tools of rsim-mcp.",
+        query: &[],
+        body: &[object],
+        ok: (200, &[object]),
+    },
 ];
 
 /// Moves the definitions of a schema into `components`, with each

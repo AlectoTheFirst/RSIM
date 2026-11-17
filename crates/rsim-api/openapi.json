@@ -2902,6 +2902,52 @@
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "openapi": "3.1.0",
   "paths": {
+    "/mcp": {
+      "post": {
+        "operationId": "mcpMessage",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The Model Context Protocol through its Streamable HTTP transport, revision 2026-07-28: one JSON-RPC message in the body; the headers MCP-Protocol-Version, Mcp-Method and, for tools/call, Mcp-Name must agree with it. A request gets its response; a notification gets 202. The tools are the tools of rsim-mcp."
+      }
+    },
     "/v1": {
       "get": {
         "operationId": "getEntry",
