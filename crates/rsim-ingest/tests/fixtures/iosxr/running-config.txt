@@ -1,0 +1,255 @@
+Tue Nov 17 10:00:00.000 UTC
+Building configuration...
+!! IOS XR Configuration 7.11.2
+!! Last configuration change at Tue Nov 17 09:58:12 2026 by admin
+!
+hostname pe1
+clock timezone UTC 0
+banner motd ;Authorized access only;
+logging trap informational
+logging console disabled
+logging 192.0.2.50 vrf MGMT severity info port default
+logging source-interface MgmtEth0/RP0/CPU0/0 vrf MGMT
+domain name example.net
+domain lookup disable
+username admin
+ group root-lr
+ group cisco-support
+ secret 10 $6$FAKESALT$FAKEHASH
+!
+username oper
+ group operator
+ password 7 FAKEOPERPASSWORD
+!
+aaa authentication login default group tacacs+ local
+aaa authorization exec default group tacacs+ local
+aaa group server tacacs+ TAC
+ server 192.0.2.60
+!
+tacacs-server host 192.0.2.60 port 49
+ key 7 FAKETACACSKEY
+!
+radius-server host 192.0.2.61 auth-port 1812 acct-port 1813
+ key 7 FAKERADIUSKEY
+!
+key chain KC1
+ key 1
+  key-string password FAKEKEYSTRING
+  cryptographic-algorithm HMAC-MD5
+ !
+!
+ftp client password encrypted FAKEFTPPASSWORD
+vrf MGMT
+ description management
+ address-family ipv4 unicast
+ !
+!
+vrf RED
+ description tenant red
+ rd 64496:100
+ address-family ipv4 unicast
+  import route-target
+   64496:100
+  !
+  export route-target
+   64496:100
+  !
+ !
+!
+vrf BLUE
+ address-family ipv4 unicast
+  import route-target
+   64496:200
+  !
+  export route-target
+   64496:200
+  !
+ !
+!
+line console
+ exec-timeout 10 0
+!
+line default
+ exec-timeout 15 0
+ transport input ssh
+!
+vty-pool default 0 4 line-template default
+snmp-server community FAKECOMMUNITY RO
+snmp-server host 192.0.2.62 traps version 2c FAKECOMMUNITYHOST
+snmp-server location lab
+ntp
+ server vrf MGMT 192.0.2.63
+ source vrf MGMT MgmtEth0/RP0/CPU0/0
+!
+call-home
+ service active
+ contact smart-licensing
+!
+control-plane
+ management-plane
+  out-of-band
+   vrf MGMT
+   interface MgmtEth0/RP0/CPU0/0
+    allow SSH
+   !
+  !
+ !
+!
+ipv4 access-list EDGE-IN
+ 10 remark permit the web and the name service
+ 20 permit tcp any host 203.0.113.10 eq www
+ 30 permit tcp any host 203.0.113.10 eq 443
+ 40 permit udp 198.51.100.0 0.0.0.255 host 203.0.113.53 eq domain
+ 50 permit icmp any any echo
+ 60 permit ipv4 any net-group INTERNAL
+ 70 deny ipv4 any any log
+!
+ipv4 access-list RED-OUT
+ 10 deny tcp any any eq telnet
+ 20 permit ipv4 any any
+!
+ipv6 access-list EDGE6-IN
+ 10 permit ipv6 any any
+!
+interface Bundle-Ether10
+ description to-core1
+ mtu 9216
+ ipv4 address 198.51.100.1 255.255.255.252
+ ipv6 address 2001:db8:10::1/64
+ bundle minimum-active links 1
+ load-interval 30
+!
+interface Bundle-Ether20
+ description to-red-customer
+!
+interface Bundle-Ether20.100
+ vrf RED
+ ipv4 address 192.0.2.1 255.255.255.192
+ ipv4 address 192.0.2.65 255.255.255.192 secondary
+ ipv4 access-group RED-OUT egress
+ encapsulation dot1q 100
+ service-policy input QOS-IN
+ service-policy output QOS-OUT
+!
+interface Bundle-Ether20.200
+ vrf BLUE
+ ipv4 address 192.0.2.129 255.255.255.192
+ ipv4 verify unicast source reachable-via rx
+ encapsulation dot1q 200
+!
+interface Loopback0
+ ipv4 address 203.0.113.1 255.255.255.255
+ ipv6 address 2001:db8::1/128
+!
+interface MgmtEth0/RP0/CPU0/0
+ vrf MGMT
+ ipv4 address 192.0.2.250 255.255.255.0
+!
+interface GigabitEthernet0/0/0/0
+ description core1-a
+ bundle id 10 mode active
+ lldp
+  receive disable
+ !
+ carrier-delay up 100 down 0
+!
+interface GigabitEthernet0/0/0/1
+ description core1-b
+ bundle id 10 mode active
+!
+interface GigabitEthernet0/0/0/2
+ description red-customer
+ bundle id 20 mode on
+ negotiation auto
+!
+interface GigabitEthernet0/0/0/3
+ description internet edge
+ ipv4 address 203.0.113.2 255.255.255.0
+ ipv4 access-group EDGE-IN ingress
+ dampening
+ bfd mode ietf
+!
+interface GigabitEthernet0/0/0/4
+ shutdown
+!
+prefix-set PS-CUSTOMER
+  192.0.2.0/26 le 32,
+  192.0.2.64/26 le 32
+end-set
+!
+community-set CS-RED
+  64496:100
+end-set
+!
+route-policy RP-RED-IN
+  if destination in PS-CUSTOMER then
+    set community CS-RED additive
+    pass
+  else
+    drop
+  endif
+end-policy
+!
+route-policy PASS
+  pass
+end-policy
+!
+router static
+ address-family ipv4 unicast
+  0.0.0.0/0 203.0.113.254
+ !
+ vrf RED
+  address-family ipv4 unicast
+   192.0.2.192/27 192.0.2.10
+  !
+ !
+!
+router ospf CORE
+ area 0
+  interface Bundle-Ether10
+   authentication message-digest
+   message-digest-key 1 md5 encrypted FAKEOSPFKEY
+  !
+  interface Loopback0
+   passive enable
+  !
+ !
+!
+router bgp 64496
+ bgp router-id 203.0.113.1
+ address-family ipv4 unicast
+ !
+ address-family vpnv4 unicast
+ !
+ neighbor 203.0.113.9
+  remote-as 64496
+  password encrypted FAKEBGPPASSWORD
+  update-source Loopback0
+  address-family vpnv4 unicast
+  !
+ !
+ vrf RED
+  rd 64496:100
+  address-family ipv4 unicast
+   redistribute connected
+  !
+  neighbor 192.0.2.10
+   remote-as 64511
+   address-family ipv4 unicast
+    route-policy RP-RED-IN in
+    route-policy PASS out
+   !
+  !
+ !
+!
+mpls ldp
+ router-id 203.0.113.1
+ interface Bundle-Ether10
+ !
+!
+ssh server v2
+ssh server vrf MGMT
+netconf-yang agent
+ ssh
+!
+end

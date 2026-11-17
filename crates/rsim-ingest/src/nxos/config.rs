@@ -961,7 +961,7 @@ const PORT_PROTOCOLS: &[&str] = &["tcp", "udp", "sctp", "6", "17", "132"];
 
 /// Reads an ACL entry: `<protocol> <source> [<port>] <destination> [<port>]
 /// [<options>]`.
-fn ace(seq: &str, action: AclAction, w: &[&str], lines: Lines) -> Option<Ace> {
+pub(crate) fn ace(seq: &str, action: AclAction, w: &[&str], lines: Lines) -> Option<Ace> {
     let protocol = (*w.first()?).to_string();
     let mut i = 1;
     let ports = PORT_PROTOCOLS.contains(&protocol.as_str());
