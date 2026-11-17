@@ -4,6 +4,7 @@
 use crate::json::FromEngine;
 use std::collections::BTreeMap;
 
+use rsim_contract::twin::TwinJson;
 use rsim_engine::{Answer, Executor, Twin};
 
 use crate::error::{ErrorCode, QueryError};
@@ -18,14 +19,27 @@ use crate::set_query::SetInput;
 /// The prefix of a topology name that names the data folder of a store.
 pub const STORE_PREFIX: &str = "store:";
 
+/// A twin with its identity.
+pub struct Loaded {
+    pub twin: Twin,
+    pub identity: TwinJson,
+}
+
+impl std::ops::Deref for Loaded {
+    type Target = Twin;
+    fn deref(&self) -> &Twin {
+        &self.twin
+    }
+}
+
 /// The twin of a topology: a built-in topology, or `store:<folder>` for the
 /// newest snapshot of the store in the data folder of `rsim-collect`. The
 /// folder holds the store in `store` and the store keys in `keys`.
-pub fn load(topology: &str) -> Result<Twin, QueryError> {
+pub fn load(topology: &str) -> Result<Loaded, QueryError> {
     if let Some(folder) = topology.strip_prefix(STORE_PREFIX) {
         return load_store(folder);
     }
-    rsim_topologies::builtin(topology).ok_or_else(|| {
+    let unknown = || {
         QueryError::new(
             ErrorCode::UnknownTopology,
             format!(
@@ -33,12 +47,15 @@ pub fn load(topology: &str) -> Result<Twin, QueryError> {
                 rsim_topologies::names().join(", ")
             ),
         )
-    })
+    };
+    let twin = rsim_topologies::builtin(topology).ok_or_else(unknown)?;
+    let identity = TwinJson::builtin(topology).map_err(|_| unknown())?;
+    Ok(Loaded { twin, identity })
 }
 
 /// The twin of the newest snapshot of a store. It reads the store and
 /// writes nothing.
-pub fn load_store(folder: &str) -> Result<Twin, QueryError> {
+pub fn load_store(folder: &str) -> Result<Loaded, QueryError> {
     let err = |d: String| QueryError::new(ErrorCode::Store, d);
     let folder = match (folder.strip_prefix("~/"), std::env::var("HOME")) {
         (Some(rest), Ok(home)) => format!("{home}/{rest}"),
@@ -54,9 +71,13 @@ pub fn load_store(folder: &str) -> Result<Twin, QueryError> {
         .map_err(|e| err(e.to_string()))?
         .ok_or_else(|| err(format!("{folder} has no snapshot")))?;
     let estate = rsim_ingest::estate::build(&store, &snap).map_err(|e| err(e.to_string()))?;
-    estate.builder.build().map_err(|errors| {
+    let twin = estate.builder.build().map_err(|errors| {
         let text: Vec<String> = errors.iter().map(ToString::to_string).collect();
         err(format!("the twin does not build: {}", text.join("; ")))
+    })?;
+    Ok(Loaded {
+        twin,
+        identity: TwinJson::snapshot(snap.manifest.cycle),
     })
 }
 
@@ -76,7 +97,7 @@ pub fn topologies() -> TopologiesOut {
     }
 }
 
-pub fn devices(topology: &str, twin: &Twin) -> DevicesOut {
+pub fn devices(topology: &str, twin: &Loaded) -> DevicesOut {
     let mut by_device: BTreeMap<String, Vec<FunctionJson>> = twin
         .devices()
         .iter()
@@ -97,6 +118,7 @@ pub fn devices(topology: &str, twin: &Twin) -> DevicesOut {
         rsim_json: VERSION,
         kind: "devices".into(),
         topology: topology.to_string(),
+        twin: twin.identity.clone(),
         devices: twin
             .devices()
             .iter()
@@ -145,12 +167,13 @@ pub fn run(input: &QueryInput, twin: &Twin) -> Result<Answer, QueryError> {
         .map_err(|e| crate::error::from_exec(&e))
 }
 
-pub fn path(input: &QueryInput, twin: &Twin) -> Result<PathAnswerOut, QueryError> {
+pub fn path(input: &QueryInput, twin: &Loaded) -> Result<PathAnswerOut, QueryError> {
     let answer = run(input, twin)?;
     Ok(PathAnswerOut {
         rsim_json: VERSION,
         kind: "path_answer".into(),
         topology: input.topology.clone(),
+        twin: twin.identity.clone(),
         query: input.echo(),
         answer: AnswerJson::new(&answer),
     })
@@ -173,35 +196,38 @@ pub fn run_set(input: &SetInput, twin: &Twin) -> Result<Answer, QueryError> {
         .map_err(|e| crate::error::from_exec(&e))
 }
 
-pub fn set(input: &SetInput, twin: &Twin) -> Result<SetAnswerOut, QueryError> {
+pub fn set(input: &SetInput, twin: &Loaded) -> Result<SetAnswerOut, QueryError> {
     let answer = run_set(input, twin)?;
     Ok(SetAnswerOut {
         rsim_json: VERSION,
         kind: "set_answer".into(),
         topology: input.topology.clone(),
+        twin: twin.identity.clone(),
         query: input.echo(),
         answer: AnswerJson::new(&answer),
     })
 }
 
 /// Runs the query again and gives one trace step of the answer.
-pub fn explain(input: &QueryInput, at: StepRef, twin: &Twin) -> Result<StepOut, QueryError> {
+pub fn explain(input: &QueryInput, at: StepRef, twin: &Loaded) -> Result<StepOut, QueryError> {
     let forward = run(input, twin)?;
     step_of(
         &forward,
         at,
         &input.topology,
+        &twin.identity,
         QueryJson::Path(Box::new(input.echo())),
     )
 }
 
 /// Runs the set query again and gives one trace step of the answer.
-pub fn explain_set(input: &SetInput, at: StepRef, twin: &Twin) -> Result<StepOut, QueryError> {
+pub fn explain_set(input: &SetInput, at: StepRef, twin: &Loaded) -> Result<StepOut, QueryError> {
     let forward = run_set(input, twin)?;
     step_of(
         &forward,
         at,
         &input.topology,
+        &twin.identity,
         QueryJson::Set(Box::new(input.echo())),
     )
 }
@@ -210,6 +236,7 @@ fn step_of(
     forward: &Answer,
     at: StepRef,
     topology: &str,
+    twin: &TwinJson,
     query: QueryJson,
 ) -> Result<StepOut, QueryError> {
     let no_such = |d: String| QueryError::new(ErrorCode::NoSuchStep, d);
@@ -242,6 +269,7 @@ fn step_of(
         rsim_json: VERSION,
         kind: "step".into(),
         topology: topology.to_string(),
+        twin: twin.clone(),
         query,
         reply_of: at.reply_of,
         branch: at.branch,
