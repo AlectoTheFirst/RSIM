@@ -6,7 +6,8 @@ use arrow_array::types::UInt64Type;
 use arrow_array::{Array, RecordBatch};
 use rsim_core::SourceSpan;
 use rsim_store::{
-    ADDRESSES, LINK_SPEEDS, LINKS, NEIGHBOURS, ROUTES, Snapshot, Store, StoreError, TableSchema,
+    ADDRESSES, LINK_SPEEDS, LINKS, MAC_TABLE, NEIGHBOURS, ROUTES, Snapshot, Store, StoreError,
+    TableSchema,
 };
 
 /// An address of an interface, for example `192.0.2.1/24`.
@@ -58,6 +59,17 @@ pub struct SpeedRow {
     pub span: SourceSpan,
 }
 
+/// An entry of the MAC table: the VLAN, the MAC, the port and the kind of
+/// the entry, for example `dynamic` or `static`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MacRow {
+    pub vlan: u64,
+    pub mac: String,
+    pub port: Option<String>,
+    pub kind: Option<String>,
+    pub span: SourceSpan,
+}
+
 /// The collected state of one device.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Collected {
@@ -67,6 +79,7 @@ pub struct Collected {
     pub neighbours: Vec<NeighbourRow>,
     pub links: Vec<LinkRow>,
     pub speeds: Vec<SpeedRow>,
+    pub macs: Vec<MacRow>,
 }
 
 /// The source span of a row: the device, the table, the blob of its section
@@ -169,6 +182,15 @@ pub fn read(store: &Store, snapshot: &Snapshot, device: &str) -> Result<Collecte
                 mbps: c.u("mbps", i),
                 duplex: c.s("duplex", i),
                 span: c.span(device, LINK_SPEEDS.name, i),
+            })
+        })?,
+        macs: rows(store, snapshot, &MAC_TABLE, device, |c, i| {
+            Some(MacRow {
+                vlan: c.u("vlan", i)?,
+                mac: c.s("mac", i)?,
+                port: c.s("port", i),
+                kind: c.s("kind", i),
+                span: c.span(device, MAC_TABLE.name, i),
             })
         })?,
     })

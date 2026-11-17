@@ -56,8 +56,45 @@ pub struct Interface {
     /// The QoS policies of the input and the output.
     pub qos_in: Option<(String, Lines)>,
     pub qos_out: Option<(String, Lines)>,
+    /// `Some(true)` with a `switchport` line, `Some(false)` with
+    /// `no switchport`, and `None` with neither.
+    pub switchport: Option<bool>,
+    pub mode: Option<PortMode>,
+    pub access_vlan: Option<u16>,
+    pub native_vlan: Option<u16>,
+    /// The allowed VLANs of a trunk as ranges, or `None` if the config does
+    /// not state them.
+    pub allowed: Option<Vec<(u16, u16)>>,
+    /// The port channel of a member port.
+    pub channel_group: Option<u32>,
+    /// The HSRP and VRRP groups.
+    pub fhrp: Vec<Fhrp>,
     /// The masked lines of the unhandled options of the interface.
     pub unhandled: Vec<String>,
+    pub lines: Lines,
+}
+
+/// The mode of a switch port.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PortMode {
+    Access,
+    Trunk,
+}
+
+/// The protocol of a gateway group.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FhrpKind {
+    Hsrp,
+    Vrrp,
+}
+
+/// An HSRP or a VRRP group of an interface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Fhrp {
+    pub kind: FhrpKind,
+    pub group: u32,
+    /// The virtual address.
+    pub vip: Option<String>,
     pub lines: Lines,
 }
 
@@ -189,6 +226,14 @@ pub struct Config {
     pub vrfs: BTreeMap<String, Lines>,
     pub nat_rules: Vec<NatRule>,
     pub nat_pools: BTreeMap<String, NatPool>,
+    /// The VLANs of the `vlan` lines, as ranges.
+    pub vlans: Vec<(u16, u16)>,
+    /// The VLANs with a line that the lowering does not read, for example
+    /// `vn-segment`.
+    pub unknown_vlans: Vec<(u16, u16)>,
+    /// `Some(true)` with `system default switchport`, `Some(false)` with
+    /// `no system default switchport`.
+    pub default_switchport: Option<bool>,
     /// The first line of each stanza that a handler read.
     pub read: BTreeSet<u32>,
 }
@@ -203,17 +248,25 @@ impl R<'_> {
         self.read.insert(s.first_line);
     }
 
-    /// The masked keys of the children of a stanza that the table
-    /// classifies as unhandled.
+    /// The masked keys of the stanzas below a stanza that the table
+    /// classifies as unhandled, at the top of each unhandled part.
     fn unhandled_children(&self, parent: &Stanza) -> Vec<String> {
-        parent
-            .children()
-            .iter()
-            .filter(|c| {
-                self.table.state(&[parent.key.as_str(), c.key.as_str()]) == State::Unhandled
-            })
-            .map(|c| self.table.report_key(&c.key))
-            .collect()
+        let mut out = Vec::new();
+        let mut path = vec![parent.key.as_str()];
+        self.unhandled_below(parent, &mut path, &mut out);
+        out
+    }
+
+    fn unhandled_below<'a>(&self, s: &'a Stanza, path: &mut Vec<&'a str>, out: &mut Vec<String>) {
+        for c in s.children() {
+            path.push(&c.key);
+            if self.table.state(path) == State::Unhandled {
+                out.push(self.table.report_key(&c.key));
+            } else {
+                self.unhandled_below(c, path, out);
+            }
+            path.pop();
+        }
     }
 }
 
@@ -313,6 +366,26 @@ pub fn read(doc: &Document, table: &Table) -> Config {
                 );
             }
             ["ip", "nat", "translation", ..] => {}
+            ["vlan", list] => {
+                r.mark(s);
+                let ranges = vlan_list(list).unwrap_or_default();
+                let unknown = s
+                    .children()
+                    .iter()
+                    .any(|c| table.state(&[s.key.as_str(), c.key.as_str()]) == State::Unhandled);
+                if unknown {
+                    cfg.unknown_vlans.extend(ranges.iter().copied());
+                }
+                cfg.vlans.extend(ranges);
+            }
+            ["system", "default", "switchport"] => {
+                r.mark(s);
+                cfg.default_switchport = Some(true);
+            }
+            ["no", "system", "default", "switchport"] => {
+                r.mark(s);
+                cfg.default_switchport = Some(false);
+            }
             ["ip", "nat", "inside", "source", ..] => {
                 r.mark(s);
                 cfg.nat_rules.push(NatRule {
@@ -352,7 +425,84 @@ fn interface(r: &mut R, s: &Stanza, name: &str) -> Interface {
                 i.admin_up = Some(true);
                 true
             }
-            ["no", "switchport"] => true,
+            ["no", "switchport"] => {
+                i.switchport = Some(false);
+                true
+            }
+            ["switchport"] => {
+                i.switchport = Some(true);
+                true
+            }
+            ["switchport", "mode", m @ ("access" | "trunk")] => {
+                i.switchport = Some(true);
+                i.mode = Some(if *m == "access" {
+                    PortMode::Access
+                } else {
+                    PortMode::Trunk
+                });
+                true
+            }
+            ["switchport", "access", "vlan", v] => {
+                i.switchport = Some(true);
+                match v.parse() {
+                    Ok(v) => i.access_vlan = Some(v),
+                    Err(_) => i.unhandled.push(r.table.report_key(&c.key)),
+                }
+                true
+            }
+            ["switchport", "trunk", "native", "vlan", v] => {
+                i.switchport = Some(true);
+                match v.parse() {
+                    Ok(v) => i.native_vlan = Some(v),
+                    Err(_) => i.unhandled.push(r.table.report_key(&c.key)),
+                }
+                true
+            }
+            ["switchport", "trunk", "allowed", "vlan", rest @ ..] => {
+                i.switchport = Some(true);
+                let list = match rest {
+                    ["none"] => Some((false, Vec::new())),
+                    ["all"] => Some((false, vec![(1, 4094)])),
+                    ["add", l] => vlan_list(l).map(|v| (true, v)),
+                    [l] => vlan_list(l).map(|v| (false, v)),
+                    _ => None,
+                };
+                match list {
+                    Some((true, v)) => i.allowed.get_or_insert_with(Vec::new).extend(v),
+                    Some((false, v)) => i.allowed = Some(v),
+                    None => i.unhandled.push(r.table.report_key(&c.key)),
+                }
+                true
+            }
+            ["channel-group", n, ..] => {
+                match n.parse() {
+                    Ok(n) => i.channel_group = Some(n),
+                    Err(_) => i.unhandled.push(r.table.report_key(&c.key)),
+                }
+                true
+            }
+            ["hsrp", "version", _] => true,
+            [kind @ ("hsrp" | "vrrp"), n] => {
+                let kind = if *kind == "hsrp" {
+                    FhrpKind::Hsrp
+                } else {
+                    FhrpKind::Vrrp
+                };
+                let mut g = Fhrp {
+                    kind,
+                    group: n.parse().unwrap_or(u32::MAX),
+                    vip: None,
+                    lines,
+                };
+                for gc in c.children() {
+                    if let ["ip" | "address", a] = words(&gc.key).as_slice() {
+                        r.mark(gc);
+                        g.vip = Some((*a).to_string());
+                    }
+                }
+                i.fhrp.push(g);
+                true
+            }
             [
                 "service-policy",
                 "type",
@@ -423,6 +573,22 @@ fn interface(r: &mut R, s: &Stanza, name: &str) -> Interface {
         }
     }
     i
+}
+
+/// The VLAN ranges of a list such as `1,10,20-25`, or `None` if a part is
+/// not a VLAN or a range.
+pub fn vlan_list(text: &str) -> Option<Vec<(u16, u16)>> {
+    let mut out = Vec::new();
+    for part in text.split(',') {
+        let (a, b) = part.split_once('-').unwrap_or((part, part));
+        let a: u16 = a.trim().parse().ok()?;
+        let b: u16 = b.trim().parse().ok()?;
+        if a == 0 || a > b || b > 4094 {
+            return None;
+        }
+        out.push((a, b));
+    }
+    Some(out)
 }
 
 /// The prefix length of a contiguous dotted mask.
@@ -736,6 +902,17 @@ fn nat_rule(w: &[&str], table: &Table) -> NatKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_vlan_list_gives_its_ranges() {
+        assert_eq!(
+            vlan_list("1,10,20-25"),
+            Some(vec![(1, 1), (10, 10), (20, 25)])
+        );
+        assert_eq!(vlan_list("10,x"), None);
+        assert_eq!(vlan_list("30-20"), None);
+        assert_eq!(vlan_list("0"), None);
+    }
 
     #[test]
     fn a_mask_gives_its_length() {

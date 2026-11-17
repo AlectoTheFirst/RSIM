@@ -47,7 +47,7 @@ ip access-list NATACL
   10 permit ip 192.0.2.128/26 any
 object-group ip address HOSTS
   10 host 192.0.2.130
-vlan 1,10,20
+vlan 1,10,20,30,50
 vlan 10
   name USERS
 vlan 20
@@ -63,6 +63,7 @@ interface Vlan10
   no shutdown
   ip address 192.0.2.2/26
   ip access-group WEB in
+  ip nat inside
   hsrp version 2
   hsrp 10
     authentication md5 key-string FAKEHSRPKEY
@@ -81,6 +82,11 @@ interface Vlan30
   ip access-group FROM30 in
   ip nat inside
 
+interface Vlan50
+  no shutdown
+  ip address 203.0.113.1/25
+  ip nat outside
+
 interface port-channel10
   switchport mode trunk
   switchport trunk allowed vlan 10,20
@@ -89,6 +95,21 @@ interface Ethernet1/1
   switchport mode trunk
   switchport trunk allowed vlan 10,20
   channel-group 10 mode active
+  no shutdown
+
+interface Ethernet1/5
+  switchport
+  switchport access vlan 30
+  no shutdown
+
+interface Ethernet1/6
+  switchport
+  switchport access vlan 10
+  no shutdown
+
+interface Ethernet1/7
+  switchport
+  switchport access vlan 50
   no shutdown
 
 interface Ethernet1/2

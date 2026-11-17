@@ -28,11 +28,14 @@ const VRF: &str = "default";
 /// The zone of an interface that is in no firewall zone.
 pub const NO_ZONE: &str = "(no zone)";
 
-/// The function instances, the edge interfaces and the notes of one device.
+/// The function instances, the edge interfaces, the endpoints, the
+/// attachment records and the notes of one device.
 #[derive(Default)]
 pub struct Lowered {
     pub functions: Vec<Arc<dyn NetFunction>>,
     pub edges: Vec<EdgeInterface>,
+    pub endpoints: Vec<rsim_engine::Endpoint>,
+    pub attachments: Vec<rsim_engine::AttachmentRecord>,
     /// The parts that lowering could not change into a definite function,
     /// with the reason.
     pub notes: Vec<String>,

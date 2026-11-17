@@ -1,5 +1,5 @@
 //! The twin of a snapshot: the VyOS routers and the UniFi sites, with the
-//! links between them, and the layer 3 part of the NX-OS switches.
+//! links between them, and the NX-OS switches.
 
 use std::collections::BTreeMap;
 
@@ -43,12 +43,14 @@ pub enum Input {
         collected: Collected,
     },
     /// An NX-OS switch: its running config, the file name of the config
-    /// for the provenance, and its collected state.
+    /// for the provenance, its collected state, and the JSON sections that
+    /// the lowering reads, each with its file name.
     Nxos {
         name: String,
         config: Vec<u8>,
         file: String,
         collected: Collected,
+        sections: BTreeMap<String, (Vec<u8>, String)>,
     },
     /// A UniFi site: each section with its file name.
     Unifi {
@@ -82,12 +84,21 @@ pub fn inputs(store: &Store, snap: &Snapshot) -> Result<(Vec<Input>, Vec<String>
                 None => skipped.push(format!("{device}: no config section")),
             },
             "nxos" => match section("config")? {
-                Some((config, file)) => out.push(Input::Nxos {
-                    name: device.clone(),
-                    config,
-                    file,
-                    collected: collected::read(store, snap, device)?,
-                }),
+                Some((config, file)) => {
+                    let mut sections = BTreeMap::new();
+                    for name in nxos::SECTIONS {
+                        if let Some(x) = section(name)? {
+                            sections.insert(name.to_string(), x);
+                        }
+                    }
+                    out.push(Input::Nxos {
+                        name: device.clone(),
+                        config,
+                        file,
+                        collected: collected::read(store, snap, device)?,
+                        sections,
+                    })
+                }
                 None => skipped.push(format!("{device}: no config section")),
             },
             "unifi" => {
@@ -119,8 +130,7 @@ pub fn build(store: &Store, snap: &Snapshot) -> Result<Estate, StoreError> {
 }
 
 /// Builds the twin of the inputs: the routers, then each UniFi site joined
-/// to the router on its uplink, then the layer 3 part of each NX-OS
-/// switch.
+/// to the router on its uplink, then each NX-OS switch.
 pub fn assemble(inputs: Vec<Input>) -> Estate {
     let mut e = Estate {
         builder: TwinBuilder::new(),
@@ -129,7 +139,16 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         notes: BTreeMap::new(),
     };
     let mut routers: BTreeMap<String, Router> = BTreeMap::new();
-    let mut switches: BTreeMap<String, (nxos::Config, Collected, String)> = BTreeMap::new();
+    #[allow(clippy::type_complexity)]
+    let mut switches: BTreeMap<
+        String,
+        (
+            nxos::Config,
+            Collected,
+            String,
+            BTreeMap<String, (Vec<u8>, String)>,
+        ),
+    > = BTreeMap::new();
     let mut sites = Vec::new();
     for input in inputs {
         match input {
@@ -161,6 +180,7 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
                 config,
                 file,
                 collected: col,
+                sections,
             } => {
                 let doc = nxos::read_text(&config);
                 let table = nxos::table(!col.routes.is_empty());
@@ -168,7 +188,7 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
                     .insert(name.clone(), nxos::unread(&doc, &table, &cfg.read));
-                switches.insert(name, (cfg, col, file));
+                switches.insert(name, (cfg, col, file, sections));
             }
             Input::Unifi { name, sections } => sites.push((name, sections)),
         }
@@ -296,14 +316,20 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
 
     // The layer 3 part of the NX-OS switches.
     let profile = nxos::profile();
-    for (device, (cfg, col, file)) in &switches {
-        let low = nxos::lower(device, file, &profile, cfg, col);
+    for (device, (cfg, col, file, sections)) in &switches {
+        let low = nxos::lower(device, file, &profile, cfg, col, sections);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         for f in low.functions {
             e.builder.add_arc(f);
         }
         for x in low.edges {
             e.builder.edge_interface(x);
+        }
+        for x in low.endpoints {
+            e.builder.endpoint(x);
+        }
+        for a in low.attachments {
+            e.builder.attachment(a);
         }
     }
     e
