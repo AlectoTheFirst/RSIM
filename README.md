@@ -6,7 +6,7 @@ The engine compiles device configs and collected state into typed network functi
 
 ## Status
 
-The engine has the core types, the network functions, the executor for single packets and packet sets, the trace and the return path. The packet sets use the decision diagram engine in `rsim-dd`. `rsim-collect` collects VyOS routers, UniFi consoles and NX-OS switches into the snapshot store. `rsim-ingest` builds a twin from the VyOS and UniFi data of a store. The NX-OS ingestion is in progress. The command `rsim` and the MCP server `rsim-mcp` run queries on the built-in topologies and on the newest snapshot of a store.
+The engine has the core types, the network functions, the executor for single packets and packet sets, the trace and the return path. The packet sets use the decision diagram engine in `rsim-dd`. `rsim-collect` collects VyOS routers, UniFi consoles and NX-OS switches into the snapshot store. `rsim-ingest` builds a twin from the VyOS, UniFi and NX-OS data of a store, with one link join for all vendors. The packet sets can carry one encapsulation, with the inner header kept aside; EVPN and VXLAN in the twin are in progress. The command `rsim` and the MCP server `rsim-mcp` run queries on the built-in topologies and on the newest snapshot of a store.
 
 ## How the twin works
 
