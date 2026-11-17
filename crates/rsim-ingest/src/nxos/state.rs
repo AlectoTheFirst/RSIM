@@ -40,6 +40,8 @@ pub struct State {
     pub vrrp_collected: bool,
     /// The ports with an LLDP or a CDP neighbour.
     pub neighbour_ports: BTreeSet<String>,
+    /// True if the LLDP or the CDP section is in the snapshot.
+    pub neighbours_collected: bool,
 }
 
 /// A MAC in the form of NX-OS, `0000.5e00.5301`, or with `:` or `-`.
@@ -93,7 +95,12 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
             let Some(name) = text(r, "interface") else {
                 continue;
             };
-            let admin = up(text(r, "admin_state")).or_else(|| up(text(r, "svi_admin_state")));
+            // The first of these fields that the row has decides, as in the
+            // HST parser.
+            let admin = ["admin_state", "svi_admin_state", "state", "svi_line_proto"]
+                .iter()
+                .find_map(|k| text(r, k))
+                .map(|v| v == "up");
             let oper = up(text(r, "state")).or_else(|| up(text(r, "svi_line_proto")));
             st.interfaces.insert(
                 names.resolve(name),
@@ -153,6 +160,7 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
         }
     }
     if let Some((v, _)) = json("lldp") {
+        st.neighbours_collected = true;
         for r in rows(&v, "nbor_detail") {
             if let Some(p) = text(r, "l_port_id") {
                 st.neighbour_ports.insert(names.resolve(p));
@@ -160,6 +168,7 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
         }
     }
     if let Some((v, _)) = json("cdp") {
+        st.neighbours_collected = true;
         for r in rows(&v, "cdp_neighbor_brief_info") {
             if let Some(p) = text(r, "intf_id") {
                 st.neighbour_ports.insert(names.resolve(p));
@@ -172,6 +181,21 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_collector_fixture_gives_the_admin_state() {
+        let bytes = include_bytes!("../../../rsim-collect/tests/fixtures/nxos/interface.json");
+        let sections = BTreeMap::from([(
+            "interfaces".to_string(),
+            (bytes.to_vec(), "s1/interfaces".to_string()),
+        )]);
+        let names = Names::new(["Ethernet1/1", "Ethernet1/2", "Vlan10"]);
+        let st = read(&sections, &names);
+        for n in ["Ethernet1/1", "Ethernet1/2", "Vlan10"] {
+            assert_eq!(st.interfaces[n].admin_up, Some(true), "{n}");
+            assert_eq!(st.interfaces[n].oper_up, Some(true), "{n}");
+        }
+    }
 
     #[test]
     fn a_mac_of_each_form_is_read() {

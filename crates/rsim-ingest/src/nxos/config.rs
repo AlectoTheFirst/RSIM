@@ -231,6 +231,8 @@ pub struct Config {
     /// The VLANs with a line that the lowering does not read, for example
     /// `vn-segment`.
     pub unknown_vlans: Vec<(u16, u16)>,
+    /// The masked `vlan` lines whose list the handler cannot read.
+    pub unreadable_vlans: Vec<String>,
     /// `Some(true)` with `system default switchport`, `Some(false)` with
     /// `no system default switchport`.
     pub default_switchport: Option<bool>,
@@ -368,7 +370,10 @@ pub fn read(doc: &Document, table: &Table) -> Config {
             ["ip", "nat", "translation", ..] => {}
             ["vlan", list] => {
                 r.mark(s);
-                let ranges = vlan_list(list).unwrap_or_default();
+                let Some(ranges) = vlan_list(list) else {
+                    cfg.unreadable_vlans.push(table.report_key(&s.key));
+                    continue;
+                };
                 let unknown = s
                     .children()
                     .iter()

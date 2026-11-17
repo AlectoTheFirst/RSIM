@@ -94,6 +94,14 @@ fn collected() -> Collected {
             route("default", "203.0.113.0/25", "direct", "Vlan50", None),
             route("default", "192.0.2.1/32", "hsrp", "Vlan10", None),
             route("RED", "192.0.2.64/26", "direct", "Vlan20", None),
+            route("RED", "192.0.2.0/26", "direct", "Vlan60", None),
+            route(
+                "default",
+                "10.0.0.0/8",
+                "static",
+                "Vlan10",
+                Some("192.0.2.20"),
+            ),
             route(
                 "RED",
                 "0.0.0.0/0",
@@ -110,6 +118,12 @@ fn collected() -> Collected {
             arp("Vlan50", "203.0.113.50", "00:00:5e:00:53:a4", 4),
             arp("Vlan10", "192.0.2.11", "00:00:5e:00:53:b1", 5),
             arp("Vlan10", "192.0.2.12", "00:00:5e:00:53:c1", 6),
+            arp("Vlan10", "192.0.2.20", "00:00:5e:00:53:e1", 7),
+            arp("Vlan60", "192.0.2.10", "00:00:5e:00:53:d1", 8),
+            arp("Vlan10", "192.0.2.30", "00:00:5e:00:53:f1", 9),
+            arp("Vlan20", "192.0.2.70", "00:00:5e:00:53:a5", 10),
+            arp("Vlan50", "203.0.113.60", "00:00:5e:00:53:a6", 11),
+            arp("Vlan10", "192.0.2.13", "00:00:5e:00:53:b2", 12),
         ],
         macs: vec![
             mac_row(30, "00:00:5e:00:53:a1", "Eth1/5", 0),
@@ -118,12 +132,19 @@ fn collected() -> Collected {
             mac_row(50, "00:00:5e:00:53:a4", "Eth1/7", 3),
             mac_row(10, "00:00:0c:9f:f0:0a", "sup-eth1(R)", 4),
             mac_row(10, "00:00:5e:00:53:b1", "Po10", 5),
+            mac_row(10, "00:00:5e:00:53:e1", "Eth1/6", 6),
+            mac_row(60, "00:00:5e:00:53:d1", "Eth1/8", 7),
+            mac_row(10, "00:00:5e:00:53:f1", "Eth1/9", 8),
+            mac_row(20, "00:00:5e:00:53:a5", "Eth1/10", 9),
+            mac_row(20, "00:00:0c:9f:f0:14", "Po10", 10),
+            mac_row(10, "00:00:5e:00:53:b2", "Eth1/1", 11),
         ],
         links: vec![
             link("Vlan10", "00:00:5e:00:53:10"),
             link("Vlan20", "00:00:5e:00:53:20"),
             link("Vlan30", "00:00:5e:00:53:30"),
             link("Vlan50", "00:00:5e:00:53:50"),
+            link("Vlan60", "00:00:5e:00:53:60"),
         ],
         ..Collected::default()
     }
@@ -131,7 +152,7 @@ fn collected() -> Collected {
 
 /// The synthetic JSON sections of the switch.
 fn sections() -> BTreeMap<String, (Vec<u8>, String)> {
-    ["interfaces", "hsrp", "lldp"]
+    ["interfaces", "hsrp", "vrrp", "lldp"]
         .into_iter()
         .map(|n| {
             let path = format!(
@@ -205,7 +226,10 @@ fn the_coverage_lists_the_unhandled_lines() {
     let cov = classify(&doc, &nxos::table(true));
     let mut paths: Vec<&str> = cov.ranked().iter().map(|r| r.0).collect();
     paths.sort_unstable();
-    assert_eq!(paths, ["ip ospf authentication-key <secret>"]);
+    assert_eq!(
+        paths,
+        ["interface */vpc 10", "ip ospf authentication-key <secret>"]
+    );
     assert!(cov.lines[&State::Handled] > 0);
 }
 
@@ -361,6 +385,8 @@ fn what_is_not_lowered_gives_unknown() {
     assert_eq!(
         notes,
         &[
+            "Ethernet1/9: options not lowered: vpc 10",
+            "leaf1/vlan10/00:00:5e:00:53:e1: a next hop of a route, so it is not an endpoint",
             "route 0.0.0.0/0 in VRF RED: a next hop in another VRF is not lowered",
             "IPv6 is not lowered: each IPv6 packet is unknown at the route lookup",
         ]
@@ -599,7 +625,7 @@ fn a_host_reaches_a_host_of_another_vlan_through_the_svis() {
         "handoff/Vlan30 untagged to leaf1/in/Vlan30",
         "out/Vlan10 leave on Vlan10 to leaf1/svi/Vlan10/in",
         "mac 00:00:5e:00:53:a2 is on port Ethernet1/6",
-        "deliver to 192.0.2.10@leaf1 on port Ethernet1/6",
+        "deliver to leaf1/vlan10/00:00:5e:00:53:a2 on port Ethernet1/6",
     ] {
         assert!(has(&steps, text), "{text}: {steps:#?}");
     }
@@ -629,7 +655,7 @@ fn the_reply_of_a_static_nat_comes_back_through_the_session() {
     ));
     assert!(has(
         &steps,
-        "deliver to 192.0.2.5@leaf1 on port Ethernet1/6"
+        "deliver to leaf1/vlan10/00:00:5e:00:53:a3 on port Ethernet1/6"
     ));
 }
 
@@ -698,4 +724,136 @@ fn an_hsrp_state_that_is_not_known_gives_unknown() {
             .any(|n| n.contains("route 192.0.2.1/32 in VRF default: a route of a gateway group")),
         "{notes:#?}"
     );
+}
+
+#[test]
+fn a_packet_to_a_router_behind_a_port_is_not_delivered() {
+    let t = twin();
+    let (verdict, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "10.1.1.1",
+        PROTO_TCP,
+        443,
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown, "{steps:#?}");
+    assert!(has(
+        &steps,
+        "nexthop 192.0.2.20 is 00:00:5e:00:53:e1 on Vlan10"
+    ));
+    assert!(has(&steps, "mac 00:00:5e:00:53:e1 is on port Ethernet1/6"));
+    let notes = &estate().notes["leaf1"];
+    assert!(
+        notes.contains(
+            &"leaf1/vlan10/00:00:5e:00:53:e1: a next hop of a route, so it is not an endpoint"
+                .to_string()
+        )
+    );
+}
+
+#[test]
+fn the_same_address_in_two_vrfs_gives_two_endpoints() {
+    let e = estate();
+    let t = e.builder.build().expect("the twin builds");
+    let ids: Vec<String> = t
+        .attachments()
+        .iter()
+        .filter(|a| a.address == ip("192.0.2.10"))
+        .map(|a| a.host.clone())
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "leaf1/vlan10/00:00:5e:00:53:a2",
+            "leaf1/vlan60/00:00:5e:00:53:d1"
+        ]
+    );
+    // The host table of VLAN 60 gives the MAC of Vlan60, not of Vlan10.
+    let (verdict, steps) = only(&run(
+        &t,
+        "Ethernet1/8",
+        "192.0.2.10",
+        "192.0.2.2",
+        PROTO_TCP,
+        22,
+    ));
+    assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
+    assert!(has(&steps, "00:00:5e:00:53:60"), "{steps:#?}");
+    assert!(has(&steps, "in/Vlan60"));
+}
+
+#[test]
+fn a_port_with_an_unhandled_line_gives_unknown() {
+    let t = twin();
+    let (verdict, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "192.0.2.30",
+        PROTO_TCP,
+        443,
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown);
+    assert!(has(&steps, "port/Ethernet1/9/out"), "{steps:#?}");
+    assert!(has(&steps, "options not lowered: vpc 10"), "{steps:#?}");
+}
+
+#[test]
+fn the_virtual_mac_of_a_standby_group_stays_on_its_port() {
+    let t = twin();
+    let (verdict, steps) = only(&run(
+        &t,
+        "Ethernet1/10",
+        "192.0.2.70",
+        "192.0.2.200",
+        PROTO_TCP,
+        443,
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown);
+    assert!(
+        has(&steps, "to the gateway 00:00:0c:9f:f0:14"),
+        "{steps:#?}"
+    );
+    assert!(
+        has(&steps, "mac 00:00:0c:9f:f0:14 is on port port-channel10"),
+        "{steps:#?}"
+    );
+}
+
+#[test]
+fn an_added_trunk_vlan_and_a_member_port_map_to_the_port_channel() {
+    let t = twin();
+    // VLAN 50 is added to the trunk, so the flood of VLAN 50 has a copy to it.
+    let a = run(&t, "Vlan30", "192.0.2.130", "203.0.113.60", PROTO_TCP, 443);
+    let all: Vec<String> = show(&a).into_iter().flat_map(|b| b.1).collect();
+    assert!(has(&all, "port/port-channel10/stp"), "{all:#?}");
+    // A MAC on the member port Ethernet1/1 is on the port channel.
+    let (_, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "192.0.2.13",
+        PROTO_TCP,
+        443,
+    ));
+    assert!(
+        has(&steps, "mac 00:00:5e:00:53:b2 is on port port-channel10"),
+        "{steps:#?}"
+    );
+}
+
+#[test]
+fn a_vrrp_master_owns_its_virtual_address_and_mac() {
+    let t = twin();
+    let (verdict, steps) = only(&run(
+        &t,
+        "Ethernet1/7",
+        "203.0.113.50",
+        "203.0.113.2",
+        PROTO_TCP,
+        22,
+    ));
+    assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
+    assert!(has(&steps, "00:00:5e:00:01:32"), "{steps:#?}");
 }

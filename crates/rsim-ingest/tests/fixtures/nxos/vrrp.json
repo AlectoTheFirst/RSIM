@@ -1,0 +1,1 @@
+{"TABLE_vrrp_group": {"ROW_vrrp_group": [{"sh_if_name": "Vlan50", "sh_group_id": 50, "sh_group_state": "Master", "sh_vip_addr": "203.0.113.2", "sh_vmac": "0000.5e00.0132"}]}}

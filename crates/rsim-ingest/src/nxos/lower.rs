@@ -697,7 +697,7 @@ impl L<'_> {
 
     /// The function of a QoS policy of an interface. It forwards the
     /// packets, and the marking and the class become unknown.
-    fn qos(&self, f: &str, policy: &str, lines: Lines, next: &str) -> QosNotEvaluated {
+    pub(super) fn qos(&self, f: &str, policy: &str, lines: Lines, next: &str) -> QosNotEvaluated {
         QosNotEvaluated {
             meta: self.meta(f, vec![self.span(lines)]),
             stanza: ObjectId::new(format!("{}:qos:{policy}", self.dev)),
