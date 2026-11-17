@@ -4,10 +4,6 @@ rsim is a Rust engine for a network digital twin.
 
 The engine compiles device configs and collected state into typed network functions. The functions stay in memory. The engine sends packets or packet sets through the functions to answer reachability questions and policy questions. Each answer has a full trace.
 
-## Status
-
-The engine has the core types, the network functions, the executor for single packets and packet sets, the trace and the return path. The packet sets use the decision diagram engine in `rsim-dd`. `rsim-collect` collects VyOS routers, UniFi consoles and NX-OS switches into the snapshot store. `rsim-ingest` builds a twin from the VyOS, UniFi and NX-OS data of a store, with one link join for all vendors. The packet sets can carry one encapsulation, with the inner header kept aside; EVPN and VXLAN in the twin are in progress. The command `rsim` and the MCP server `rsim-mcp` run queries on the built-in topologies and on the newest snapshot of a store.
-
 ## How the twin works
 
 ### The twin
