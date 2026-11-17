@@ -38,6 +38,15 @@ ip route 0.0.0.0/0 198.51.100.2
 ip access-list WEB
   10 permit tcp 192.0.2.0/26 any eq 443
   20 deny ip any any
+ip access-list FROM30
+  10 remark the hosts of VLAN 30
+  20 permit tcp 192.0.2.128/26 any eq 443
+  30 permit udp addrgroup HOSTS any eq domain
+  40 deny ip any any log
+ip access-list NATACL
+  10 permit ip 192.0.2.128/26 any
+object-group ip address HOSTS
+  10 host 192.0.2.130
 vlan 1,10,20
 vlan 10
   name USERS
@@ -65,6 +74,12 @@ interface Vlan20
   no shutdown
   vrf member RED
   ip address 192.0.2.66/26
+
+interface Vlan30
+  no shutdown
+  ip address 192.0.2.129/26
+  ip access-group FROM30 in
+  ip nat inside
 
 interface port-channel10
   switchport mode trunk
@@ -100,4 +115,5 @@ router bgp 65000
     remote-as 65001
     password 3 FAKEBGPPASSWORD
 ip nat inside source static 192.0.2.5 198.51.100.5
+ip nat inside source list NATACL interface Ethernet1/2 overload
 ip ospf authentication-key 3 FAKEUNLISTEDKEY

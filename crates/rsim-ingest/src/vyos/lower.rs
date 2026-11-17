@@ -249,6 +249,7 @@ pub fn lower(
         meta,
         table: ObjectId::new(format!("{device}:nat:destination")),
         rules: dnat,
+        ingress: Vec::new(),
         next: l.id(after_nat),
     });
 
