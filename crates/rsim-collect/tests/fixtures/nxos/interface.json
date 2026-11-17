@@ -1,5 +1,5 @@
 {"TABLE_interface": {"ROW_interface": [
- {"interface": "Ethernet1/1", "state": "up", "admin_state": "up", "eth_hw_addr": "0000.5e00.5301", "eth_mtu": "9216", "eth_speed": "10 Gb/s", "eth_duplex": "full", "eth_bw": 10000000, "desc": "uplink", "eth_inpkts": 1000, "eth_outpkts": 2000, "eth_inrate1_bits": "123", "eth_link_flapped": "1week(s) 2day(s)"},
- {"interface": "Ethernet1/2", "state": "up", "admin_state": "up", "eth_hw_addr": "0000.5e00.5302", "eth_ip_addr": "198.51.100.1", "eth_ip_mask": 24, "eth_mtu": "1500", "eth_speed": "1000 Mb/s", "eth_duplex": "auto", "eth_inpkts": 10, "eth_outpkts": 20},
+ {"interface": "Ethernet1/1", "state": "up", "admin_state": "up", "eth_hw_addr": "0000.5e00.5301", "eth_mode": "trunk", "eth_mtu": "9216", "eth_speed": "10 Gb/s", "eth_duplex": "full", "eth_bw": 10000000, "desc": "uplink", "eth_inpkts": 1000, "eth_outpkts": 2000, "eth_inrate1_bits": "123", "eth_link_flapped": "1week(s) 2day(s)"},
+ {"interface": "Ethernet1/2", "state": "up", "admin_state": "up", "eth_hw_addr": "0000.5e00.5302", "eth_mode": "routed", "eth_ip_addr": "198.51.100.1", "eth_ip_mask": 24, "eth_mtu": "1500", "eth_speed": "1000 Mb/s", "eth_duplex": "auto", "eth_inpkts": 10, "eth_outpkts": 20},
  {"interface": "Vlan10", "svi_admin_state": "up", "svi_line_proto": "up", "svi_mac": "0000.5e00.5310", "svi_ip_addr": "192.0.2.1", "svi_ip_mask": "255.255.255.0", "svi_mtu": 1500, "svi_ucast_pkts_in": 5, "svi_time_last_cleared": "never"}
 ]}}

@@ -124,6 +124,7 @@ fn collected() -> Collected {
             arp("Vlan20", "192.0.2.70", "00:00:5e:00:53:a5", 10),
             arp("Vlan50", "203.0.113.60", "00:00:5e:00:53:a6", 11),
             arp("Vlan10", "192.0.2.13", "00:00:5e:00:53:b2", 12),
+            arp("Vlan10", "192.0.2.14", "00:00:5e:00:53:b3", 13),
         ],
         macs: vec![
             mac_row(30, "00:00:5e:00:53:a1", "Eth1/5", 0),
@@ -138,6 +139,7 @@ fn collected() -> Collected {
             mac_row(20, "00:00:5e:00:53:a5", "Eth1/10", 9),
             mac_row(20, "00:00:0c:9f:f0:14", "Po10", 10),
             mac_row(10, "00:00:5e:00:53:b2", "Eth1/1", 11),
+            mac_row(10, "00:00:5e:00:53:b3", "Eth1/11", 12),
         ],
         links: vec![
             link("Vlan10", "00:00:5e:00:53:10"),
@@ -856,4 +858,52 @@ fn a_vrrp_master_owns_its_virtual_address_and_mac() {
     ));
     assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
     assert!(has(&steps, "00:00:5e:00:01:32"), "{steps:#?}");
+}
+
+#[test]
+fn the_collected_mode_decides_a_port_with_no_switchport_line() {
+    let t = twin();
+    let (_, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "192.0.2.14",
+        PROTO_TCP,
+        443,
+    ));
+    let last = steps.last().unwrap();
+    assert!(
+        last.starts_with("leaf1/port/Ethernet1/11/out"),
+        "{steps:#?}"
+    );
+    assert!(!has(&steps, "the mode of the port is not known"));
+    // Without the collected mode, the port gives Unknown.
+    let mut sections = sections();
+    let text = String::from_utf8(sections["interfaces"].0.clone()).unwrap();
+    let text = text.replace(", \"eth_mode\": \"trunk\"", "");
+    sections.insert(
+        "interfaces".into(),
+        (text.into_bytes(), "leaf1/interfaces".into()),
+    );
+    let e = assemble(vec![Input::Nxos {
+        name: "leaf1".into(),
+        config: CONFIG.to_vec(),
+        file: "leaf1/config@000000000000".into(),
+        collected: collected(),
+        sections,
+    }]);
+    let t = e.builder.build().expect("the twin builds");
+    let (verdict, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "192.0.2.14",
+        PROTO_TCP,
+        443,
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown);
+    assert!(
+        has(&steps, "the mode of the port is not known"),
+        "{steps:#?}"
+    );
 }

@@ -138,6 +138,9 @@ interface Ethernet1/10
   switchport access vlan 20
   no shutdown
 
+interface Ethernet1/11
+  no shutdown
+
 interface Ethernet1/2
   no switchport
   ip address 198.51.100.1/30

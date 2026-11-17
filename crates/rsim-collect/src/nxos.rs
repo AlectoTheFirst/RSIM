@@ -125,6 +125,7 @@ const INTERFACE_KEEP: &[&str] = &[
     "/TABLE_interface/ROW_interface/*/desc",
     "/TABLE_interface/ROW_interface/*/svi_desc",
     "/TABLE_interface/ROW_interface/*/*mtu*",
+    "/TABLE_interface/ROW_interface/*/eth_mode",
 ];
 
 const VERSION_KEEP: &[&str] = &[
@@ -167,6 +168,15 @@ const LLDP_KEEP: &[&str] = &[
     "/TABLE_nbor_detail/ROW_nbor_detail/*/port_id",
     "/TABLE_nbor_detail/ROW_nbor_detail/*/sys_desc",
     "/TABLE_nbor_detail/ROW_nbor_detail/*/port_desc",
+];
+
+/// The fields of `show spanning-tree` that the NX-OS reference documents:
+/// the VLAN of each tree and the name of each port. The reference has no key
+/// for the state of a port, so the change hash does not cover it.
+const STP_KEEP: &[&str] = &[
+    "/TABLE_tree/ROW_tree/*/tree_id",
+    "/TABLE_tree/ROW_tree/*/tree_tree_type",
+    "/TABLE_tree/ROW_tree/*/TABLE_port/ROW_port/*/if_index",
 ];
 
 const CDP_KEEP: &[&str] = &[
@@ -247,6 +257,7 @@ const SPECS: &[Spec] = {
         row("hsrp", "show hsrp all | json", Observation, Json, true),
         row("vrrp", "show vrrp detail | json", Observation, Json, true),
         row("vpc", "show vpc | json", Observation, Json, true),
+        row("stp", "show spanning-tree | json", Observation, Json, true).keep(STP_KEEP),
     ]
 };
 
