@@ -21,9 +21,9 @@ use rsim_functions::{
 use super::config::{
     AclAction, AddrSpec, Config, Interface, Lines, NatKind, NatRole, NatTarget, PortSpec,
 };
-use super::links::{External, Summary};
 use super::names::Names;
 use crate::collected::Collected;
+use crate::links::{External, Summary};
 use crate::vyos::Lowered;
 
 /// The VRF of an interface with no `vrf member`.
@@ -154,6 +154,21 @@ pub fn lower(
         })
         .map(|i| i.name.clone())
         .collect();
+    // The entry function and the MAC of each port that can end a link.
+    for p in sum.ports.keys() {
+        sum.entries.insert(p.clone(), l.id(&format!("port/{p}/in")));
+    }
+    for p in &sum.routed {
+        sum.entries.insert(p.clone(), l.id(&format!("handoff/{p}")));
+    }
+    for r in &col.links {
+        let p = names.resolve(&r.interface);
+        if sum.entries.contains_key(&p)
+            && let Some(m) = r.mac.as_deref().and_then(super::state::mac)
+        {
+            sum.port_macs.insert(p, m);
+        }
+    }
     // A switch with no layer 3 interface has no layer 3 chain.
     if active.is_empty() {
         return (l.out, sum);

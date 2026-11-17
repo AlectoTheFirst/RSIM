@@ -2,7 +2,6 @@
 
 pub mod config;
 mod layer2;
-pub mod links;
 pub mod lower;
 mod mask;
 pub mod names;
@@ -15,7 +14,6 @@ use std::collections::BTreeSet;
 use crate::coverage::Table;
 use crate::stanza::{Document, read_indented};
 pub use config::{Config, read};
-pub use links::{External, Joined, RouterPort, Summary, join};
 pub use lower::lower;
 pub use mask::mask;
 pub use profile::profile;

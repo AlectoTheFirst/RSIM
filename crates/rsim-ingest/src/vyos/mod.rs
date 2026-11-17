@@ -11,7 +11,8 @@ use crate::coverage::Table;
 use crate::stanza::Document;
 pub use config::{Config, read};
 pub use lower::{
-    Layer2Links, Lowered, interface_addresses, interface_facts, interface_mac, lower, physical,
+    Layer2Links, Lowered, interface_addresses, interface_facts, interface_mac, link_summary, lower,
+    physical,
 };
 pub use profile::profile;
 pub use table::table;

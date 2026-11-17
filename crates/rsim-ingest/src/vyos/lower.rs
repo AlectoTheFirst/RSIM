@@ -556,6 +556,27 @@ pub fn interface_addresses(cfg: &Config, col: &Collected) -> BTreeMap<String, Ve
         .collect()
 }
 
+/// The summary of a router for the join of the links: each physical
+/// interface with a collected MAC can end a link, and a frame enters it at
+/// its layer 3 hand-off. A router has no neighbour section.
+pub fn link_summary(device: &str, col: &Collected) -> crate::links::Summary {
+    let mut s = crate::links::Summary::default();
+    for l in col.links.iter().filter(|l| l.parent.is_none()) {
+        let Some(m) = l.mac.as_deref().and_then(|m| m.parse().ok()) else {
+            continue;
+        };
+        s.entries.insert(
+            l.interface.clone(),
+            FunctionId::new(format!("{device}/handoff/{}", l.interface)),
+        );
+        s.port_macs.insert(l.interface.clone(), m);
+        if let Some(f) = interface_facts(col, &l.interface) {
+            s.facts.insert(l.interface.clone(), f);
+        }
+    }
+    s
+}
+
 /// The collected MAC of an interface.
 pub fn interface_mac(col: &Collected, iface: &str) -> Option<Mac> {
     col.links

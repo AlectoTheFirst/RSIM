@@ -5,6 +5,7 @@
 pub mod collected;
 pub mod coverage;
 pub mod estate;
+pub mod links;
 pub mod nxos;
 pub mod stanza;
 pub mod unifi;

@@ -33,20 +33,7 @@ pub struct GroupState {
     pub span: SourceSpan,
 }
 
-/// A neighbour row of LLDP or CDP.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Neighbour {
-    /// The local port, with the config name.
-    pub port: String,
-    /// The name of the neighbour, without the domain and the serial.
-    pub name: Option<String>,
-    /// The port of the neighbour as it sends it.
-    pub remote_port: Option<String>,
-    /// The chassis MAC (LLDP), and the remote port as a MAC if it is one.
-    pub chassis: Option<Mac>,
-    pub port_mac: Option<Mac>,
-    pub span: SourceSpan,
-}
+pub use crate::links::Neighbour;
 
 /// The name of a neighbour: the text without a serial number in
 /// parentheses (CDP of NX-OS) and without the domain, in lower case.
