@@ -982,6 +982,18 @@ impl PacketSet {
         Decapsulated { done, plain }
     }
 
+    /// The packets with a VXLAN encapsulation with the network identifier
+    /// `vni`.
+    pub fn vxlan_vni(&self, vni: u32) -> PacketSet {
+        self.op(&[], |ops| {
+            let mut b = ops.builder();
+            let kind = b.value(bits::ENCAP_KIND, Bank::Current, bits::ENCAP_VXLAN)?;
+            let id = b.value(bits::ENCAP_VNI, Bank::Current, u128::from(vni))?;
+            let m = ops.dd.and(kind, id)?;
+            ops.dd.and(self.edge, m)
+        })
+    }
+
     /// The reply packets of the current header. The addresses, the ports
     /// and the MAC addresses swap. An echo request gives an echo reply. TCP
     /// flags with only SYN give SYN and ACK. All other TCP flags and ICMP

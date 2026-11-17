@@ -10,7 +10,7 @@ use rsim_cli::{QueryInput, commands, json};
 use serde_json::Value;
 
 /// One stated query for each built-in topology, as `rsim path` arguments.
-const QUERIES: [(&str, &[&str]); 6] = [
+const QUERIES: [(&str, &[&str]); 7] = [
     (
         "mini-enterprise",
         &[
@@ -103,6 +103,56 @@ const QUERIES: [(&str, &[&str]); 6] = [
             "443",
         ],
     ),
+    (
+        "leaf-spine",
+        &[
+            "--source.ip",
+            "10.1.0.10",
+            "--destination.ip",
+            "10.2.0.10",
+            "--network.transport",
+            "tcp",
+            "--source.port",
+            "40000",
+            "--destination.port",
+            "22",
+        ],
+    ),
+];
+
+/// More stated queries of the topology `leaf-spine`: the name of the stored
+/// file and the `rsim path` arguments.
+const FABRIC_QUERIES: [(&str, &[&str]); 2] = [
+    (
+        "leaf-spine-acl",
+        &[
+            "--source.ip",
+            "10.1.0.10",
+            "--destination.ip",
+            "10.3.0.10",
+            "--network.transport",
+            "udp",
+            "--source.port",
+            "40000",
+            "--destination.port",
+            "53",
+        ],
+    ),
+    (
+        "leaf-spine-no-route",
+        &[
+            "--source.ip",
+            "10.1.0.10",
+            "--destination.ip",
+            "10.4.0.10",
+            "--network.transport",
+            "udp",
+            "--source.port",
+            "40000",
+            "--destination.port",
+            "53",
+        ],
+    ),
 ];
 
 fn rsim(args: &[&str]) -> Output {
@@ -189,6 +239,15 @@ fn a_path_query_with_its_reply_gives_the_stored_json() {
         let mut text = path_args(topology, flags);
         text.truncate(text.len() - 2);
         assert!(rsim(&text).status.success(), "{topology}");
+    }
+}
+
+#[test]
+fn the_fabric_queries_give_the_stored_json() {
+    for (file, flags) in FABRIC_QUERIES {
+        let o = rsim(&path_args("leaf-spine", flags));
+        assert_eq!(o.status.code(), Some(0), "{file}");
+        assert_eq!(stdout(&o), stored(file), "{file} differs from its file");
     }
 }
 

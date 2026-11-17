@@ -43,6 +43,8 @@ pub enum ReasonCode {
     Routed,
     Resolved,
     LinkHandOff,
+    Encapsulated,
+    Decapsulated,
     // Deliver.
     Delivered,
     // Drop.
@@ -52,6 +54,9 @@ pub enum ReasonCode {
     NoNeighbour,
     NotInZone,
     Loop,
+    /// The device has no segment for the network identifier of the
+    /// tunnel.
+    NoSegment,
     // Unknown.
     UnhandledStanza,
     MatchUnknown,
@@ -62,6 +67,9 @@ pub enum ReasonCode {
     /// part has one original request.
     SetBudget,
     NoLink,
+    /// The packets have an encapsulation already, and a packet has at
+    /// most one.
+    Nested,
     /// The branch used more steps than the budget of the query. The
     /// executor reports this; it is not a verdict on the packets.
     StepBudget,

@@ -74,10 +74,18 @@ fn twins() -> Vec<Twin> {
         edge_dnat(EdgeOpts::default()).build().unwrap(),
         ecmp().build().unwrap(),
         hairpin().build().unwrap(),
+        leaf_spine().build().unwrap(),
     ]
 }
 
-const STARTS: [&str; 5] = ["guest-client", "fra01-dns", "client", "server", "client"];
+const STARTS: [&str; 6] = [
+    "guest-client",
+    "fra01-dns",
+    "client",
+    "server",
+    "client",
+    "host1",
+];
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(400))]
@@ -87,8 +95,8 @@ proptest! {
     /// same on a second run.
     #[test]
     fn queries_keep_the_contract_and_are_deterministic(
-        t in 0..5usize,
-        start in 0..5usize,
+        t in 0..6usize,
+        start in 0..6usize,
         h in header(),
     ) {
         let twins = twins();
@@ -109,15 +117,23 @@ proptest! {
         };
         prop_assert_eq!(verdicts(&a), verdicts(&again));
 
-        // No function of these twins writes QoS fields, so each step shows the
-        // marking of the request. A DSCP that the request does not state has
-        // all values.
+        // Only the tunnel ends of these twins write QoS fields: the outer
+        // header has its own marking. So each step with an output outside a
+        // tunnel shows the marking of the request. A DSCP that the request
+        // does not state has all values.
         let want = match h.dscp {
             FieldValue::Unstated => Uniform::Varies,
             v => Uniform::Value(v),
         };
         for b in a.branches() {
             for s in &b.steps {
+                let tunnelled = s
+                    .output
+                    .witness()
+                    .is_some_and(|w| w.current.inner.is_some());
+                if tunnelled {
+                    continue;
+                }
                 prop_assert_eq!(s.qos.dscp, want);
                 prop_assert!(s.function_qos_unset());
             }
