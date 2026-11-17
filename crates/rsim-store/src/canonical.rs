@@ -37,8 +37,17 @@ pub fn canonical(format: Format, bytes: &[u8]) -> Result<Vec<u8>, StoreError> {
 /// `*_bytes` matches `rx_bytes` and `tx_bytes`. The last segment names the
 /// removed members.
 ///
-/// For text, each pattern is a line prefix. A line that starts with the
-/// prefix after its leading spaces is removed.
+/// For text, a pattern is one of these, and each applies after the leading
+/// spaces of a line:
+///
+/// - A plain pattern is a line prefix. A line that starts with it is
+///   removed.
+/// - `=shape` removes a line that starts with the shape.
+/// - `~shape` removes each word of a line that is the shape. A word is a
+///   run of text between spaces, without a final comma. The words that
+///   stay are joined with one space.
+///
+/// In a shape, `#` matches one or more digits and `*` matches any text.
 pub fn strip_volatile(
     format: Format,
     bytes: &[u8],
@@ -57,11 +66,34 @@ pub fn strip_volatile(
             let t = text(bytes);
             let s = String::from_utf8_lossy(&t);
             let mut out = String::with_capacity(s.len());
+            let words: Vec<&str> = volatile
+                .iter()
+                .filter_map(|p| p.strip_prefix('~'))
+                .collect();
             for line in s.split_inclusive('\n') {
                 let body = line.trim_start();
-                if !volatile.iter().any(|p| body.starts_with(p)) {
-                    out.push_str(line);
+                let gone = volatile.iter().any(|p| match p.strip_prefix('=') {
+                    Some(shape) => starts_with_shape(shape.as_bytes(), body.as_bytes()),
+                    None => !p.starts_with('~') && body.starts_with(p),
+                });
+                if gone {
+                    continue;
                 }
+                if words.is_empty() {
+                    out.push_str(line);
+                    continue;
+                }
+                let kept: Vec<&str> = body
+                    .split_whitespace()
+                    .filter(|w| {
+                        let w = w.strip_suffix(',').unwrap_or(w);
+                        !words
+                            .iter()
+                            .any(|shape| shape_is(shape.as_bytes(), w.as_bytes()))
+                    })
+                    .collect();
+                out.push_str(&kept.join(" "));
+                out.push('\n');
             }
             Ok(out.into_bytes())
         }
@@ -174,6 +206,27 @@ fn remove(v: &mut Value, segs: &[&str]) {
 }
 
 /// True if `key` matches `pattern`, in which `*` matches any text.
+/// True if the whole text is the shape: `#` is one or more digits, `*` is
+/// any text and each other byte is itself.
+fn shape_is(shape: &[u8], text: &[u8]) -> bool {
+    match shape.split_first() {
+        None => text.is_empty(),
+        Some((b'*', rest)) => (0..=text.len()).any(|i| shape_is(rest, &text[i..])),
+        Some((b'#', rest)) => {
+            let digits = text.iter().take_while(|c| c.is_ascii_digit()).count();
+            (1..=digits).rev().any(|i| shape_is(rest, &text[i..]))
+        }
+        Some((c, rest)) => text.first() == Some(c) && shape_is(rest, &text[1..]),
+    }
+}
+
+/// True if the text starts with the shape.
+fn starts_with_shape(shape: &[u8], text: &[u8]) -> bool {
+    let mut open = shape.to_vec();
+    open.push(b'*');
+    shape_is(&open, text)
+}
+
 fn glob(pattern: &str, key: &str) -> bool {
     let parts: Vec<&str> = pattern.split('*').collect();
     if parts.len() == 1 {
@@ -332,5 +385,20 @@ mod tests {
         let h = |x: &[u8]| change_hash(&keys, Format::Text, x, &["Uptime:"]).unwrap();
         assert_eq!(h(a), h(b));
         assert_ne!(h(a), h(b"Version: VyOS 1.5.0\n"));
+    }
+
+    #[test]
+    fn volatile_shapes_remove_counter_lines_and_age_words() {
+        let keys = Keys::new([1; 32], [2; 32]);
+        let p = &["=# packets input", "=*uptime is", "~#w#d", "~#:#:#"];
+        let h = |x: &str| change_hash(&keys, Format::Text, x.as_bytes(), p).unwrap();
+        let a = "r1 uptime is 3 weeks\n  1234 packets input, 9 bytes\nS 0.0.0.0/0 via 192.0.2.1, 3w2d\nC 192.0.2.0/24 is directly connected, 00:01:23, Gi0\n";
+        let b = "r1 uptime is 4 weeks\n  99 packets input, 1 bytes\nS 0.0.0.0/0 via 192.0.2.1, 4w1d\nC 192.0.2.0/24 is directly connected, 01:02:03, Gi0\n";
+        assert_eq!(h(a), h(b));
+        assert_ne!(h(a), h(&a.replace("192.0.2.1,", "192.0.2.9,")));
+        assert_ne!(h(a), h(&a.replace("Gi0", "Gi1")));
+        assert!(shape_is(b"#:#:#", b"00:01:23"));
+        assert!(!shape_is(b"#:#:#", b"2001:db8::1"));
+        assert!(!shape_is(b"#w#d", b"3w"));
     }
 }
