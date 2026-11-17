@@ -135,7 +135,7 @@ cargo run -p rsim-api -- --listen 127.0.0.1:8787
 | The answer | `GET` the query resource, with `?form=summary`, `steps` or `full` |
 | A claim on the paths of the query | `GET <query resource>/claims/no-unknown` |
 
-Add `--store <data folder>` for the twin `store`, which redirects to its snapshot `snap-<cycle>`. A browser needs `--allow-origin <origin>`. The server has no authentication yet, so it accepts only a loopback listen address.
+The same server gives the MCP tools at `POST /mcp`, the Streamable HTTP transport of MCP, so many agents can share one server and its twins. Add `--store <data folder>` for the twin `store`, which redirects to its snapshot `snap-<cycle>`. A browser needs `--allow-origin <origin>`. The server has no authentication yet, so it accepts only a loopback listen address.
 
 ## License
 

@@ -69,14 +69,21 @@ pub struct Settings {
 /// and the query texts above the inline limit. It keeps no answer.
 pub struct State {
     pub settings: Settings,
+    /// The tools of the MCP transport, with their own twin cache.
+    mcp: rsim_mcp::tools::Tools,
     twins: Mutex<BTreeMap<String, Arc<Loaded>>>,
     long_queries: Mutex<BTreeMap<String, String>>,
 }
 
 impl State {
     pub fn new(settings: Settings) -> Self {
+        let mcp = match &settings.store {
+            Some(folder) => rsim_mcp::tools::Tools::with_store(folder.clone()),
+            None => rsim_mcp::tools::Tools::default(),
+        };
         State {
             settings,
+            mcp,
             twins: Mutex::new(BTreeMap::new()),
             long_queries: Mutex::new(BTreeMap::new()),
         }
@@ -413,6 +420,7 @@ fn route(state: &State, req: &Request) -> Result<Response, Problem> {
             let body = json!({"rsim_json": VERSION, "kind": "twins", "twins": list});
             Ok(json_response(&body))
         }
+        ["mcp"] => mcp(state, req),
         ["v1", "twins", twin, rest @ ..] => {
             let t = match state.twin(twin)? {
                 Resolved::Twin(t) => t,
@@ -829,5 +837,99 @@ fn batch(state: &State, req: &Request, t: &TwinRef) -> Result<Response, Problem>
         status: 200,
         headers: vec![("content-type".into(), "application/x-ndjson".into())],
         body: out.into_bytes(),
+    })
+}
+
+/// The MCP protocol revision of the Streamable HTTP transport.
+const MCP_REVISION: &str = rsim_mcp::server::MODERN;
+/// The JSON-RPC error code of a header that does not match the body.
+const HEADER_MISMATCH: i64 = -32020;
+
+fn rpc_error(status: u16, id: &Value, code: i64, message: String) -> Response {
+    let body = json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}});
+    Response {
+        status,
+        headers: vec![("content-type".into(), "application/json".into())],
+        body: body.to_string().into_bytes(),
+    }
+}
+
+/// One message of the Streamable HTTP transport of MCP, revision
+/// 2026-07-28: one JSON-RPC message in the body of a POST. A request gets
+/// its response as JSON; a notification or a response gets 202 with no
+/// body. The headers `MCP-Protocol-Version`, `Mcp-Method` and, for a tool
+/// call, `Mcp-Name` must agree with the body. The server keeps no session.
+fn mcp(state: &State, req: &Request) -> Result<Response, Problem> {
+    method(req, "POST")?;
+    let msg: Value = match serde_json::from_slice(&req.body) {
+        Ok(v) => v,
+        Err(_) => return Ok(rpc_error(400, &Value::Null, -32700, "Parse error".into())),
+    };
+    let id = msg.get("id").cloned().unwrap_or(Value::Null);
+    let method_name = msg.get("method").and_then(Value::as_str);
+    let header = |k: &str| req.headers.get(k).map(String::as_str);
+    if let Some(m) = method_name {
+        match header("mcp-protocol-version") {
+            None => {
+                return Ok(rpc_error(
+                    400,
+                    &id,
+                    HEADER_MISMATCH,
+                    "MCP-Protocol-Version is not given".into(),
+                ));
+            }
+            Some(v) if v != MCP_REVISION => {
+                return Ok(rpc_error(
+                    400,
+                    &id,
+                    -32022,
+                    format!("Unsupported protocol version {v}; the server supports {MCP_REVISION}"),
+                ));
+            }
+            Some(_) => {}
+        }
+        let meta = msg
+            .pointer("/params/_meta/io.modelcontextprotocol~1protocolVersion")
+            .and_then(Value::as_str);
+        if meta.is_some_and(|v| v != MCP_REVISION) {
+            return Ok(rpc_error(
+                400,
+                &id,
+                HEADER_MISMATCH,
+                "MCP-Protocol-Version does not match params._meta".into(),
+            ));
+        }
+        if header("mcp-method") != Some(m) {
+            return Ok(rpc_error(
+                400,
+                &id,
+                HEADER_MISMATCH,
+                format!("Mcp-Method does not match the method {m}"),
+            ));
+        }
+        if m == "tools/call" {
+            let name = msg.pointer("/params/name").and_then(Value::as_str);
+            if header("mcp-name") != name {
+                return Ok(rpc_error(
+                    400,
+                    &id,
+                    HEADER_MISMATCH,
+                    "Mcp-Name does not match params.name".into(),
+                ));
+            }
+        }
+    }
+    let mut server = rsim_mcp::server::Server::new(state.mcp.clone());
+    Ok(match server.handle_line(&req.body) {
+        Some(line) => Response {
+            status: 200,
+            headers: vec![("content-type".into(), "application/json".into())],
+            body: line.trim_end().as_bytes().to_vec(),
+        },
+        None => Response {
+            status: 202,
+            headers: Vec::new(),
+            body: Vec::new(),
+        },
     })
 }

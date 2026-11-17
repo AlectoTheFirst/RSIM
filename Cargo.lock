@@ -2608,6 +2608,7 @@ dependencies = [
  "hyper-util",
  "rsim-cli",
  "rsim-contract",
+ "rsim-mcp",
  "rsim-store",
  "serde",
  "serde_json",

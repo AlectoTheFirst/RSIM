@@ -1,6 +1,7 @@
 //! The tools of the server: their definitions and their calls.
 
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 use rsim_cli::commands::Loaded;
 use rsim_cli::json::{self, ErrorOut};
@@ -25,9 +26,11 @@ pub const STORE: &str = "store";
 /// Runs tools. It keeps the twin of each topology that a call named, and no
 /// answer. With a store, the topology `store` is the newest snapshot of the
 /// store when the first call names it.
-#[derive(Default)]
+/// The twins share one cache, so the tools of many requests at the same
+/// time build each twin once.
+#[derive(Clone, Default)]
 pub struct Tools {
-    twins: BTreeMap<String, Loaded>,
+    twins: Arc<Mutex<BTreeMap<String, Arc<Loaded>>>>,
     store: Option<String>,
 }
 
@@ -35,7 +38,7 @@ impl Tools {
     /// Tools with the topology `store` for the store in a data folder.
     pub fn with_store(folder: String) -> Tools {
         Tools {
-            twins: BTreeMap::new(),
+            twins: Arc::default(),
             store: Some(folder),
         }
     }
@@ -50,8 +53,9 @@ impl Tools {
         v
     }
 
-    fn twin(&mut self, topology: &str) -> Result<&Loaded, QueryError> {
-        if !self.twins.contains_key(topology) {
+    fn twin(&mut self, topology: &str) -> Result<Arc<Loaded>, QueryError> {
+        let mut twins = self.twins.lock().unwrap_or_else(|p| p.into_inner());
+        if !twins.contains_key(topology) {
             let source = match (&self.store, topology) {
                 (Some(folder), STORE) => format!("{}{folder}", commands::STORE_PREFIX),
                 (_, t) if t.starts_with(commands::STORE_PREFIX) => {
@@ -63,10 +67,10 @@ impl Tools {
                 _ => topology.to_string(),
             };
             let twin = commands::load(&source)?;
-            self.twins.insert(topology.to_string(), twin);
+            twins.insert(topology.to_string(), Arc::new(twin));
         }
-        match self.twins.get(topology) {
-            Some(t) => Ok(t),
+        match twins.get(topology) {
+            Some(t) => Ok(Arc::clone(t)),
             None => unreachable!("the twin was inserted"),
         }
     }
@@ -75,14 +79,14 @@ impl Tools {
     pub fn call(&mut self, name: &str, arguments: &Map<String, Value>) -> Option<Output> {
         let r = match name {
             "list_devices" => args::topology(arguments)
-                .and_then(|t| self.twin(&t).map(|twin| commands::devices(&t, twin)))
+                .and_then(|t| self.twin(&t).map(|twin| commands::devices(&t, &twin)))
                 .map(|o| text(&o)),
             "path_query" => args::form(arguments).and_then(|form| {
                 args::query(arguments, &["form"]).and_then(|q| {
                     let t = self.twin(&q.topology)?;
                     match form {
-                        Form::Full => commands::path(&q, t).map(|o| text(&o)),
-                        f => commands::path_brief(&q, t, f).map(|o| text(&o)),
+                        Form::Full => commands::path(&q, &t).map(|o| text(&o)),
+                        f => commands::path_brief(&q, &t, f).map(|o| text(&o)),
                     }
                 })
             }),
@@ -90,8 +94,8 @@ impl Tools {
                 args::set_query(arguments, &["form"]).and_then(|q| {
                     let t = self.twin(&q.topology)?;
                     match form {
-                        Form::Full => commands::set(&q, t).map(|o| text(&o)),
-                        f => commands::set_brief(&q, t, f).map(|o| text(&o)),
+                        Form::Full => commands::set(&q, &t).map(|o| text(&o)),
+                        f => commands::set_brief(&q, &t, f).map(|o| text(&o)),
                     }
                 })
             }),
@@ -99,13 +103,13 @@ impl Tools {
                 Ok(false) => args::step(arguments)
                     .and_then(|(q, at)| {
                         self.twin(&q.topology)
-                            .and_then(|t| commands::explain(&q, at, t))
+                            .and_then(|t| commands::explain(&q, at, &t))
                     })
                     .map(|o| text(&o)),
                 Ok(true) => args::set_step(arguments)
                     .and_then(|(q, at)| {
                         self.twin(&q.topology)
-                            .and_then(|t| commands::explain_set(&q, at, t))
+                            .and_then(|t| commands::explain_set(&q, at, &t))
                     })
                     .map(|o| text(&o)),
                 Err(e) => Err(e),
@@ -119,14 +123,14 @@ impl Tools {
             .and_then(|a| {
                 let t = a.topology.clone();
                 let twin = self.twin(&t)?;
-                rsim_cli::topology::topology(&t, twin, &a).map(|o| text(&o))
+                rsim_cli::topology::topology(&t, &twin, &a).map(|o| text(&o))
             }),
             "run_claim" => serde_json::from_value::<ClaimArgs>(Value::Object(arguments.clone()))
                 .map_err(|e| QueryError::new(rsim_cli::ErrorCode::InvalidQuery, e.to_string()))
                 .and_then(|a| {
                     let t = a.topology.clone();
                     let twin = self.twin(&t)?;
-                    rsim_cli::claims::run(&t, twin, &a).map(|o| text(&o))
+                    rsim_cli::claims::run(&t, &twin, &a).map(|o| text(&o))
                 }),
             "table_query" => {
                 serde_json::from_value::<TableQueryArgs>(Value::Object(arguments.clone()))
@@ -137,10 +141,10 @@ impl Tools {
                         let s = &a.selection;
                         let name = a.table.as_str();
                         match a.verb.unwrap_or_default() {
-                            TableVerb::Show => tables::show(&t, twin, name, s).map(|o| text(&o)),
+                            TableVerb::Show => tables::show(&t, &twin, name, s).map(|o| text(&o)),
                             TableVerb::Top => tables::top(
                                 &t,
-                                twin,
+                                &twin,
                                 name,
                                 a.column.as_deref().unwrap_or_default(),
                                 a.count.unwrap_or(5),
@@ -150,7 +154,7 @@ impl Tools {
                             .map(|o| text(&o)),
                             TableVerb::Lpm => tables::lpm(
                                 &t,
-                                twin,
+                                &twin,
                                 name,
                                 a.column.as_deref().unwrap_or("prefix"),
                                 a.address.as_deref().unwrap_or_default(),
@@ -160,10 +164,10 @@ impl Tools {
                             TableVerb::Unique => {
                                 let mut sel = s.clone();
                                 let columns = sel.columns.take().unwrap_or_default();
-                                tables::unique(&t, twin, name, &columns, &sel).map(|o| text(&o))
+                                tables::unique(&t, &twin, name, &columns, &sel).map(|o| text(&o))
                             }
                             TableVerb::Summarize => {
-                                tables::summarize(&t, twin, name, s).map(|o| text(&o))
+                                tables::summarize(&t, &twin, name, s).map(|o| text(&o))
                             }
                         }
                     })

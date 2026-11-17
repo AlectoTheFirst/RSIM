@@ -5,8 +5,7 @@
 
 #![deny(clippy::disallowed_methods, clippy::disallowed_types)]
 
-mod server;
-mod tools;
+use rsim_mcp::{server, tools};
 
 use std::process::ExitCode;
 
