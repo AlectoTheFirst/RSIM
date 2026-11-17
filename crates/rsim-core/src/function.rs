@@ -70,7 +70,7 @@ pub enum Dependency {
 ///   unchanged.
 /// - If part of the function came from an unhandled stanza, the affected
 ///   packets get `Unknown`.
-pub trait NetFunction: Debug + Send + Sync {
+pub trait NetFunction: Debug + Send + Sync + std::any::Any {
     fn id(&self) -> &FunctionId;
     fn kind(&self) -> FunctionKind;
     fn device(&self) -> Option<&DeviceId>;

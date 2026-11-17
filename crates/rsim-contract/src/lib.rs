@@ -8,6 +8,7 @@ pub mod error;
 pub mod json;
 pub mod query;
 pub mod registry;
+pub mod table;
 pub mod twin;
 
 /// The JSON Schema of a contract type, in the dialect of JSON Schema

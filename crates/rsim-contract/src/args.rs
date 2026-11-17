@@ -221,3 +221,44 @@ pub struct StepArgs {
     /// the step index are indexes in the reply.
     pub reply_of: Option<u32>,
 }
+
+/// A verb of a table.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TableVerb {
+    /// The selected rows.
+    #[default]
+    Show,
+    /// The counts of the table and of each column.
+    Summarize,
+    /// The distinct values of the selected columns, with their counts.
+    Unique,
+    /// The rows with the largest values of `column`, or the smallest with
+    /// `ascending`.
+    Top,
+    /// The rows of the longest prefix of `column` that contains `address`.
+    Lpm,
+}
+
+/// A query of a table of a twin.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct TableQueryArgs {
+    /// A built-in topology, or `store` for the newest snapshot of the store
+    /// of the server.
+    pub topology: String,
+    /// The table. The tool `list_tables` gives the tables and their
+    /// columns.
+    pub table: String,
+    /// The verb. The default is show.
+    pub verb: Option<TableVerb>,
+    #[serde(flatten)]
+    pub selection: crate::table::Selection,
+    /// The column of the verbs top and lpm. The default of lpm is prefix.
+    pub column: Option<String>,
+    /// The number of rows of the verb top. The default is 5.
+    pub count: Option<usize>,
+    /// With the verb top: the smallest values first.
+    pub ascending: Option<bool>,
+    /// The address of the verb lpm.
+    pub address: Option<String>,
+}

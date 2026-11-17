@@ -762,6 +762,12 @@ fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
             "layers": []
         })
     );
+    // The coverage table of a store twin has the unhandled stanzas.
+    let cov = rsim(&[topology.as_str(), "coverage", "--format", "json"]);
+    assert_eq!(cov.status.code(), Some(0));
+    let cov: Value = serde_json::from_slice(&cov.stdout).unwrap();
+    assert_eq!(cov["kind"], "table_rows");
+    assert!(cov["total"].as_u64().unwrap() > 0, "{cov}");
     let text = v.to_string();
     for f in [
         "ap1/wlan/guest/in",
@@ -790,4 +796,73 @@ fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
     let e: Value = serde_json::from_slice(&bad.stdout).unwrap_or(Value::Null);
     let shown = format!("{e}{}", String::from_utf8_lossy(&bad.stderr));
     assert!(shown.contains("store"), "{shown}");
+}
+
+#[test]
+fn a_table_query_gives_rows_pages_and_the_bytes_of_the_library() {
+    let o = rsim(&[
+        "leaf-spine",
+        "fib",
+        "lpm",
+        "10.2.0.10",
+        "--device",
+        "leaf1",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(o.status.code(), Some(0));
+    let v = json_of(&o);
+    assert_eq!(v["kind"], "table_rows");
+    assert_eq!(v["twin"]["id"], "builtin.leaf-spine");
+    assert_eq!(v["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(v["rows"][0][2], "10.2.0.0/24");
+
+    // The library gives the same bytes.
+    let twin = commands::load("leaf-spine").unwrap();
+    let mut sel = rsim_contract::table::Selection::default();
+    sel.filters.insert("device".into(), vec!["leaf1".into()]);
+    let lib =
+        rsim_cli::tables::lpm("leaf-spine", &twin, "fib", "prefix", "10.2.0.10", &sel).unwrap();
+    assert_eq!(stdout(&o), json::to_text(&lib, false) + "\n");
+
+    // The joined pages are the rows with no pages.
+    let all = json_of(&rsim(&["mini-enterprise", "functions", "--format", "json"]));
+    let mut joined = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut a = vec![
+            "mini-enterprise",
+            "functions",
+            "--limit",
+            "7",
+            "--format",
+            "json",
+        ];
+        if let Some(c) = &cursor {
+            a.extend_from_slice(&["--cursor", c.as_str()]);
+        }
+        let page = json_of(&rsim(&a));
+        joined.extend(page["rows"].as_array().unwrap().iter().cloned());
+        match page["next_cursor"].as_str() {
+            Some(c) => cursor = Some(c.to_string()),
+            None => break,
+        }
+    }
+    assert_eq!(Value::from(joined), all["rows"]);
+    assert_eq!(all["total"], all["rows"].as_array().unwrap().len());
+
+    // Text output has one header line and one line for each row.
+    let t = stdout(&rsim(&["leaf-spine", "devices"]));
+    assert!(t.starts_with("device"), "{t}");
+    assert_eq!(t.lines().count(), 7, "{t}");
+
+    // Errors.
+    let o = rsim(&["leaf-spine", "colours", "--format", "json"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(json_of(&o)["error"]["code"], "unknown_table");
+    let o = rsim(&["leaf-spine", "fib", "--colour", "red", "--format", "json"]);
+    assert_eq!(json_of(&o)["error"]["code"], "invalid_filter");
+    // A built-in topology has no coverage report.
+    let o = rsim(&["leaf-spine", "coverage", "--format", "json"]);
+    assert_eq!(json_of(&o)["total"], 0);
 }

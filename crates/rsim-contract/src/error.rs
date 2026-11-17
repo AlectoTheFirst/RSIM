@@ -15,6 +15,8 @@ pub enum ErrorCode {
     ContractViolation,
     /// The store of a `store:` topology cannot be read.
     Store,
+    UnknownTable,
+    InvalidFilter,
     Internal,
 }
 
@@ -28,6 +30,8 @@ impl ErrorCode {
             ErrorCode::StartRequiresContext => "start_requires_context",
             ErrorCode::ContractViolation => "contract_violation",
             ErrorCode::Store => "store",
+            ErrorCode::UnknownTable => "unknown_table",
+            ErrorCode::InvalidFilter => "invalid_filter",
             ErrorCode::Internal => "internal",
         }
     }

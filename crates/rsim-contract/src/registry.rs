@@ -3,12 +3,13 @@
 
 use serde_json::{Value, json};
 
-use crate::args::{PathQueryArgs, SetQueryArgs, StepArgs, TopologyArgs};
+use crate::args::{PathQueryArgs, SetQueryArgs, StepArgs, TableQueryArgs, TopologyArgs};
 use crate::json::{
     DevicesOut, ErrorOut, PathAnswerOut, PathBriefOut, SetAnswerOut, SetBriefOut, StepOut,
     TopologiesOut,
 };
 use crate::schema;
+use crate::table::{SummarizeOut, TableOut, TablesOut, UniqueOut};
 
 /// What an operation changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,7 +101,36 @@ pub const OPERATIONS: &[Operation] = &[
         input: Some(schema::<StepArgs>),
         outputs: &[schema::<StepOut>],
     },
+    Operation {
+        id: "listTables",
+        description: "The catalog of the tables: each table with its key, its columns with their types and meanings, its verbs, and the data that it needs.",
+        effect: Effect::Read,
+        tool: Some("list_tables"),
+        command: Some("tables"),
+        http: Some((Method::Get, "/v1/tables")),
+        input: Some(empty),
+        outputs: &[schema::<TablesOut>],
+    },
+    Operation {
+        id: "queryTable",
+        description: "A table of a twin with a verb: show the rows with filters, columns, sort and pages; summarize; unique values; top rows; or the longest prefix match of an address. A table with no rows for a built-in topology needs data that only a store has.",
+        effect: Effect::Read,
+        tool: Some("table_query"),
+        command: Some("<twin> <table>"),
+        http: Some((Method::Get, "/v1/twins/{twin}/tables/{table}/rows")),
+        input: Some(schema::<TableQueryArgs>),
+        outputs: &[
+            schema::<TableOut>,
+            schema::<UniqueOut>,
+            schema::<SummarizeOut>,
+        ],
+    },
 ];
+
+/// The schema of an operation with no arguments.
+fn empty() -> Value {
+    json!({"type": "object", "properties": {}})
+}
 
 /// The operation of an MCP tool.
 pub fn by_tool(tool: &str) -> Option<&'static Operation> {
