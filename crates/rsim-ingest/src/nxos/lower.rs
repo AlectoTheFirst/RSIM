@@ -1,20 +1,21 @@
 //! Lowering of an NX-OS running config and its collected state into the
-//! layer 3 function instances of a switch.
+//! function instances of a switch.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 use std::sync::Arc;
 
 use rsim_core::{
-    AddrCond, FunctionId, InterfaceId, Match, NeighbourTarget, NetFunction, ObjectId, PortCond,
-    Prefix, PrefixTable, RulePredicate, SourceSpan, TriePrefixTable, ValueCond, VrfId,
+    AddrCond, FieldValue, FunctionId, InterfaceId, Match, NeighbourTarget, NetFunction, ObjectId,
+    PortCond, Prefix, PrefixTable, Rewrite, RulePredicate, SourceSpan, TriePrefixTable, ValueCond,
+    VrfId,
 };
 use rsim_engine::EdgeInterface;
 use rsim_functions::{
-    AclMatch, DestinationNat, DeviceDelivery, Egress, EgressMode, Fib, Ingress, LocalInput, Meta,
-    NatAction, NatScope, Neighbour, NextHopResolution, PortTranslation, QosNotEvaluated, Route,
-    RouteKind, RouteLookup, RouteNextHop, Rule as FRule, RuleAction, SessionCommit, SessionLookup,
-    SourceNat, Tag, VendorProfile, VrfSelection,
+    AclMatch, DestinationNat, DeviceDelivery, Egress, EgressMode, Fib, Ingress, Link, LocalInput,
+    Meta, NatAction, NatScope, Neighbour, NextHopResolution, PortTranslation, QosNotEvaluated,
+    Route, RouteKind, RouteLookup, RouteNextHop, Rule as FRule, RuleAction, SessionCommit,
+    SessionLookup, SourceNat, Tag, VendorProfile, VrfSelection,
 };
 
 use super::config::{
@@ -27,30 +28,30 @@ use crate::vyos::Lowered;
 /// The VRF of an interface with no `vrf member`.
 const DEFAULT_VRF: &str = "default";
 
-struct L<'a> {
-    dev: &'a str,
+pub(super) struct L<'a> {
+    pub(super) dev: &'a str,
     file: &'a str,
     profile: &'a VendorProfile,
-    cfg: &'a Config,
-    out: Lowered,
+    pub(super) cfg: &'a Config,
+    pub(super) out: Lowered,
 }
 
 impl L<'_> {
-    fn id(&self, f: &str) -> FunctionId {
+    pub(super) fn id(&self, f: &str) -> FunctionId {
         FunctionId::new(format!("{}/{f}", self.dev))
     }
-    fn span(&self, l: Lines) -> SourceSpan {
+    pub(super) fn span(&self, l: Lines) -> SourceSpan {
         SourceSpan::new(self.file, l.first.max(1), l.last.max(l.first).max(1))
     }
-    fn meta(&self, f: &str, spans: Vec<SourceSpan>) -> Meta {
+    pub(super) fn meta(&self, f: &str, spans: Vec<SourceSpan>) -> Meta {
         let mut m = Meta::new(self.id(f), self.dev, self.profile);
         m.provenance = spans;
         m
     }
-    fn add(&mut self, f: impl NetFunction + 'static) {
+    pub(super) fn add(&mut self, f: impl NetFunction + 'static) {
         self.out.functions.push(Arc::new(f));
     }
-    fn note(&mut self, s: String) {
+    pub(super) fn note(&mut self, s: String) {
         self.out.notes.push(s);
     }
 }
@@ -60,18 +61,20 @@ fn vrf_of(i: &Interface) -> &str {
 }
 
 /// An interface address: the address and the prefix length.
-fn iface_addr(s: &str) -> Option<(IpAddr, u8)> {
+pub(super) fn iface_addr(s: &str) -> Option<(IpAddr, u8)> {
     let (a, l) = s.split_once('/')?;
     Some((a.parse().ok()?, l.parse().ok()?))
 }
 
-/// Lowers the layer 3 part of one NX-OS switch.
+/// Lowers one NX-OS switch. `sections` holds the JSON sections of
+/// [`super::SECTIONS`], each with its file name.
 pub fn lower(
     device: &str,
     file: &str,
     profile: &VendorProfile,
     cfg: &Config,
     col: &Collected,
+    sections: &BTreeMap<String, (Vec<u8>, String)>,
 ) -> Lowered {
     let mut l = L {
         dev: device,
@@ -81,19 +84,25 @@ pub fn lower(
         out: Lowered::default(),
     };
     let names = Names::new(cfg.interfaces.iter().map(|i| i.name.as_str()));
+    let st = super::state::read(sections, &names);
     let mut active: Vec<Interface> = Vec::new();
     for i in &cfg.interfaces {
-        if i.admin_up == Some(false) || (i.addresses.is_empty() && !i.dynamic_address) {
+        let collected = st.interfaces.get(&i.name);
+        let admin = i.admin_up.or(collected.and_then(|s| s.admin_up));
+        let oper = collected.and_then(|s| s.oper_up);
+        if admin == Some(false)
+            || oper == Some(false)
+            || (i.addresses.is_empty() && !i.dynamic_address)
+        {
             continue;
         }
         let mut i = i.clone();
         let lower_name = i.name.to_ascii_lowercase();
-        if i.admin_up.is_none()
-            && !lower_name.starts_with("loopback")
-            && !lower_name.starts_with("mgmt")
+        if admin.is_none() && !lower_name.starts_with("loopback") && !lower_name.starts_with("mgmt")
         {
-            i.unhandled
-                .push("no shutdown line, so the admin state is not known".into());
+            i.unhandled.push(
+                "no shutdown line and no collected state, so the admin state is not known".into(),
+            );
         }
         if i.dynamic_address {
             l.note(format!(
@@ -124,6 +133,8 @@ pub fn lower(
             .map(|i| InterfaceId::new(&i.name))
             .collect()
     };
+    let gws = l.gateways(&active, &st, col, &names);
+    let svi_links = l.layer2(&active, &gws, &st, col, &names);
     let inside = nat_ifs(NatRole::Inside);
     let outside = nat_ifs(NatRole::Outside);
 
@@ -187,7 +198,13 @@ pub fn lower(
     vrfs.extend(active.iter().map(|i| vrf_of(i).to_string()));
     let mut tables = BTreeMap::new();
     for v in &vrfs {
-        let fib = l.fib(v, &active, col, &names);
+        let vips: Vec<(IpAddr, Vec<SourceSpan>)> = active
+            .iter()
+            .filter(|i| vrf_of(i) == v.as_str())
+            .filter_map(|i| gws.get(&i.name))
+            .flat_map(|g| g.active.iter().map(|(_, a, s)| (*a, s.clone())))
+            .collect();
+        let fib = l.fib(v, &active, col, &names, &vips);
         tables.insert(VrfId::new(v), fib);
     }
     l.note("IPv6 is not lowered: each IPv6 packet is unknown at the route lookup".into());
@@ -279,13 +296,31 @@ pub fn lower(
         }
         let span = l.span(i.lines);
         let meta = l.meta(&format!("out/{}", i.name), vec![span]);
+        // The routed egress of an SVI goes into its VLAN through the SVI
+        // port, with the MAC of the SVI as the source MAC.
+        let (link, rewrite, tag) = match svi_links.get(&i.name) {
+            Some((peer, m)) => (
+                Some(Link {
+                    peer: Some(peer.clone()),
+                    delay_ns: None,
+                    provenance: Vec::new(),
+                    facts: None,
+                }),
+                Rewrite {
+                    src_mac: Some(FieldValue::Known(*m)),
+                    ..Rewrite::default()
+                },
+                Tag::Untagged,
+            ),
+            None => (None, Rewrite::default(), Tag::Keep),
+        };
         l.add(Egress {
             meta,
             interface: InterfaceId::new(&i.name),
             mode: EgressMode::Routed,
-            link: None,
-            rewrite: Default::default(),
-            tag: Tag::Keep,
+            link: link.clone(),
+            rewrite: rewrite.clone(),
+            tag,
         });
     }
 
@@ -662,7 +697,7 @@ impl L<'_> {
 
     /// The function of a QoS policy of an interface. It forwards the
     /// packets, and the marking and the class become unknown.
-    fn qos(&self, f: &str, policy: &str, lines: Lines, next: &str) -> QosNotEvaluated {
+    pub(super) fn qos(&self, f: &str, policy: &str, lines: Lines, next: &str) -> QosNotEvaluated {
         QosNotEvaluated {
             meta: self.meta(f, vec![self.span(lines)]),
             stanza: ObjectId::new(format!("{}:qos:{policy}", self.dev)),
@@ -930,7 +965,14 @@ impl L<'_> {
     /// The FIB of a VRF: the collected route table, or else the connected
     /// and static routes of the config. The addresses of the interfaces of
     /// the VRF are local routes. Each IPv6 packet is unknown.
-    fn fib(&mut self, vrf: &str, active: &[Interface], col: &Collected, names: &Names) -> Fib {
+    fn fib(
+        &mut self,
+        vrf: &str,
+        active: &[Interface],
+        col: &Collected,
+        names: &Names,
+        vips: &[(IpAddr, Vec<SourceSpan>)],
+    ) -> Fib {
         let mut t = Fib::new();
         let hop = |l: &L, iface: &str, gw: Option<IpAddr>| RouteNextHop {
             interface: InterfaceId::new(iface),
@@ -1031,6 +1073,10 @@ impl L<'_> {
                     t.insert(p, Route::new(RouteKind::Null, Vec::new(), spans));
                     continue;
                 }
+                // An active virtual address is a local route below.
+                if vips.iter().any(|(a, _)| Prefix::host(*a) == p) {
+                    continue;
+                }
                 // A route stays in the table with no next hop when one of its
                 // paths cannot be lowered, so its packets are unknown and do
                 // not fall to a shorter prefix.
@@ -1038,7 +1084,7 @@ impl L<'_> {
                     .iter()
                     .any(|r| matches!(r.protocol.as_str(), "hsrp" | "vrrp"))
                 {
-                    Some("a route of a gateway protocol is not lowered")
+                    Some("a route of a gateway group that is not active on this switch")
                 } else if rows
                     .iter()
                     .any(|r| r.next_hop.as_deref().is_some_and(|g| g.contains('%')))
@@ -1075,6 +1121,12 @@ impl L<'_> {
                     );
                 }
             }
+        }
+        for (a, spans) in vips {
+            t.insert(
+                Prefix::host(*a),
+                Route::new(RouteKind::Local, Vec::new(), spans.clone()),
+            );
         }
         let v6: Prefix = "::/0".parse().expect("a valid prefix");
         t.insert(v6, Route::new(RouteKind::Static, Vec::new(), Vec::new()));

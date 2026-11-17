@@ -1,0 +1,1 @@
+{"TABLE_grp_detail": {"ROW_grp_detail": [{"sh_if_index": "Vlan10", "sh_group_num": 10, "sh_group_state": "Active", "sh_vip": "192.0.2.1", "sh_vmac": "0000.0c9f.f00a"}, {"sh_if_index": "Vlan20", "sh_group_num": 20, "sh_group_state": "Standby", "sh_vip": "192.0.2.65", "sh_vmac": "0000.0c9f.f014"}]}}

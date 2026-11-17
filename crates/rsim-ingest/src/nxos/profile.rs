@@ -39,3 +39,19 @@ pub fn profile() -> VendorProfile {
         ],
     }
 }
+
+/// The VLAN of an access port with no `switchport access vlan`. The
+/// section "Default Settings" of the NX-OS Layer 2 switching configuration
+/// guide gives VLAN 1. Not confirmed against a device.
+pub const ACCESS_VLAN: u16 = 1;
+
+/// The native VLAN of a trunk port with no `switchport trunk native vlan`.
+/// The same section gives VLAN 1, and all VLANs allowed. Not confirmed
+/// against a device.
+pub const NATIVE_VLAN: u16 = 1;
+
+/// The mode of a switch port with `switchport` and no `switchport mode` is
+/// access. A trunk drops untagged frames when its native VLAN is not
+/// allowed. No source states these 2 rules; they are not confirmed against
+/// a device.
+pub const DEFAULT_MODE_IS_ACCESS: bool = true;

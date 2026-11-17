@@ -122,6 +122,7 @@ mod twin {
             }],
             links: Vec::new(),
             speeds: Vec::new(),
+            macs: Vec::new(),
         }
     }
 

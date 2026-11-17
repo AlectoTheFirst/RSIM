@@ -72,6 +72,7 @@ fn estate_with(change: impl Fn(&str, Vec<u8>) -> Vec<u8>) -> Estate {
             duplex: Some("full".into()),
             span: row_span("r1", "link_speeds", "b5", 0),
         }],
+        macs: Vec::new(),
     };
     let sections: BTreeMap<String, (Vec<u8>, String)> =
         ["networks", "wlans", "devices", "clients", "port_profiles"]

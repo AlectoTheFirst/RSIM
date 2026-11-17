@@ -1,10 +1,12 @@
 //! Cisco NX-OS: the running config as indented text.
 
 pub mod config;
+mod layer2;
 pub mod lower;
 mod mask;
 pub mod names;
 mod profile;
+pub mod state;
 mod table;
 
 use std::collections::BTreeSet;
@@ -16,6 +18,9 @@ pub use lower::lower;
 pub use mask::mask;
 pub use profile::profile;
 pub use table::table;
+
+/// The JSON sections of a switch that the lowering reads.
+pub const SECTIONS: &[&str] = &["interfaces", "hsrp", "vrrp", "lldp", "cdp"];
 
 /// Reads the bytes of a running config into a stanza tree. A byte sequence
 /// that is not UTF-8 becomes the replacement character.
