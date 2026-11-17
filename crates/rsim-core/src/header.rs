@@ -127,8 +127,12 @@ pub struct Header {
     pub icmp_code: FieldValue<u8>,
     /// Present only with an MPLS encapsulation.
     pub mpls_tc: FieldValue<u8>,
-    /// Outer headers, outermost first.
+    /// The encapsulation of this header. With an encapsulation, the fields
+    /// of this header are the outer header, and `inner` is the encapsulated
+    /// packet.
     pub encap: Vec<Encap>,
+    /// The inner header of an encapsulated packet.
+    pub inner: Option<Box<Header>>,
 }
 
 impl Header {
@@ -174,6 +178,7 @@ impl Header {
             icmp_code: icmp,
             mpls_tc: FieldValue::Absent,
             encap: Vec::new(),
+            inner: None,
         }
     }
 

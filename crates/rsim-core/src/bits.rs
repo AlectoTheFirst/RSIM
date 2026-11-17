@@ -335,6 +335,22 @@ fn state(f: FieldBits, bit: &dyn Fn(u32) -> bool) -> FieldValue<u128> {
     FieldValue::Known(value_of(f, bit))
 }
 
+/// The bits of the header below the encapsulation fields. They move to the
+/// inner level when a packet is encapsulated.
+pub fn header_bits() -> std::ops::Range<u32> {
+    0..ENCAP_KIND.start
+}
+
+/// The header of one assignment of the bits. `inner` gives the bits of the
+/// inner level, which hold the inner header of an encapsulated packet.
+pub(crate) fn decode_with(bit: &dyn Fn(u32) -> bool, inner: &dyn Fn(u32) -> bool) -> Header {
+    let mut h = decode(bit);
+    if !h.encap.is_empty() {
+        h.inner = Some(Box::new(decode(inner)));
+    }
+    h
+}
+
 /// The header of one assignment of the bits.
 pub(crate) fn decode(bit: &dyn Fn(u32) -> bool) -> Header {
     let v6 = bit(AF);
@@ -381,6 +397,7 @@ pub(crate) fn decode(bit: &dyn Fn(u32) -> bool) -> Header {
         icmp_code: n8(ICMP_CODE),
         mpls_tc: n8(MPLS_TC),
         encap,
+        inner: None,
     }
 }
 

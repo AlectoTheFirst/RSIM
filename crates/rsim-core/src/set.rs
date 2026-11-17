@@ -96,6 +96,9 @@ pub(crate) enum MapKind {
     ReverseFlow,
     /// The source and destination fields of the current bank swap.
     ReplySwap,
+    /// The current and the inner levels of the header bits below the
+    /// encapsulation fields swap.
+    CurrentInner,
 }
 
 pub(crate) struct Inner {
@@ -275,6 +278,10 @@ impl Ops<'_> {
             MapKind::CurrentWorkFlow => swap(Bank::Current, Bank::Work, &flow),
             MapKind::OriginalWorkFlow => swap(Bank::Original, Bank::Work, &flow),
             MapKind::OriginalCurrentFlow => swap(Bank::Original, Bank::Current, &flow),
+            MapKind::CurrentInner => {
+                let header: Vec<u32> = bits::header_bits().collect();
+                swap(Bank::Current, Bank::Inner, &header)
+            }
             MapKind::ReverseFlow => {
                 let pairs = bits::swap_pairs();
                 let sw = swapped(&pairs);

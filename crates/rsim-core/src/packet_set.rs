@@ -35,6 +35,22 @@ pub struct PacketPair {
 }
 
 /// A set of packet pairs in the arena of one query. Two sets of one query
+/// The result of an encapsulation: the encapsulated packets, and the packets
+/// that had an encapsulation already.
+#[derive(Clone, Debug)]
+pub struct Encapsulated {
+    pub done: PacketSet,
+    pub nested: PacketSet,
+}
+
+/// The result of a decapsulation: the decapsulated packets, and the packets
+/// that had no encapsulation.
+#[derive(Clone, Debug)]
+pub struct Decapsulated {
+    pub done: PacketSet,
+    pub plain: PacketSet,
+}
+
 /// with the same members have the same edge.
 #[derive(Clone)]
 pub struct PacketSet {
@@ -284,6 +300,12 @@ impl PacketSet {
     /// A field that the header does not state has all values, with the
     /// same value in the original request and the current header.
     pub fn single(arena: &Arc<SetArena>, h: &Header) -> PacketSet {
+        // An encapsulated packet: its inner packet, then its outer header.
+        if let Some(inner) = &h.inner {
+            let mut outer = h.clone();
+            outer.inner = None;
+            return Self::single(arena, inner).encapsulate(&outer).done;
+        }
         let enc = bits::encode(h);
         let e = arena
             .run(|ops| {
@@ -381,11 +403,13 @@ impl PacketSet {
     pub fn contains(&self, p: &PacketPair) -> bool {
         let o = bits::encode(&p.original);
         let c = bits::encode(&p.current);
+        let i = p.current.inner.as_deref().map(bits::encode);
         let bit = |l: u32| -> bool {
             let (x, bank) = (l / 4, l % 4);
             let v = match bank {
                 0 => o[x as usize],
                 1 => c[x as usize],
+                3 => i.as_ref().and_then(|i| i[x as usize]),
                 _ => Some(false),
             };
             v == Some(true)
@@ -402,16 +426,21 @@ impl PacketSet {
         let path = self.arena.run(|ops| ops.dd.pick_one(self.edge)).flatten()?;
         let mut o = vec![false; bits::BITS as usize];
         let mut c = vec![false; bits::BITS as usize];
+        let mut i = vec![false; bits::BITS as usize];
         for (l, v) in path {
             match l % 4 {
                 0 => o[(l / 4) as usize] = v,
                 1 => c[(l / 4) as usize] = v,
+                3 => i[(l / 4) as usize] = v,
                 _ => {}
             }
         }
+        let header = bits::header_bits();
         Some(PacketPair {
             original: bits::decode(&|b| o[b as usize]),
-            current: bits::decode(&|b| c[b as usize]),
+            current: bits::decode_with(&|b| c[b as usize], &|b| {
+                header.contains(&b) && i[b as usize]
+            }),
         })
     }
 
@@ -846,6 +875,59 @@ impl PacketSet {
             }
             Ok(s)
         })
+    }
+
+    /// Encapsulates each packet with no encapsulation: the current header
+    /// becomes the inner header, and `outer` becomes the current header.
+    /// `outer` gives the outer fields and one encapsulation, and has no
+    /// inner header. A packet that has an encapsulation already is in
+    /// `nested`, because the set holds 1 level.
+    pub fn encapsulate(&self, outer: &Header) -> Encapsulated {
+        assert!(
+            outer.encap.len() == 1 && outer.inner.is_none(),
+            "an outer header has one encapsulation and no inner header"
+        );
+        let shape = Self::single(&self.arena, outer);
+        let plain = self.op(&[], |ops| {
+            let none = ops.builder().value(bits::ENCAP_KIND, Bank::Current, bits::ENCAP_NONE)?;
+            ops.dd.and(self.edge, none)
+        });
+        let nested = self.difference(&plain);
+        let done = plain.op(&[], |ops| {
+            let header: Vec<u32> = bits::header_bits().collect();
+            let inner = ops.cube(&header, Bank::Inner)?;
+            let e = ops.dd.exists(plain.edge, inner)?;
+            let m = ops.map(MapKind::CurrentInner)?;
+            let e = ops.dd.rename(e, m)?;
+            let encap: Vec<u32> = (bits::ENCAP_KIND.start..bits::BITS).collect();
+            let encap = ops.cube(&encap, Bank::Current)?;
+            let e = ops.dd.exists(e, encap)?;
+            let orig = ops.base.orig_cube;
+            let o = ops.dd.exists(shape.edge, orig)?;
+            ops.dd.and(e, o)
+        });
+        Encapsulated { done, nested }
+    }
+
+    /// Decapsulates each encapsulated packet: the inner header becomes the
+    /// current header again. A packet with no encapsulation is in `plain`.
+    pub fn decapsulate(&self) -> Decapsulated {
+        let encapsulated = self.op(&[], |ops| {
+            let none = ops.builder().value(bits::ENCAP_KIND, Bank::Current, bits::ENCAP_NONE)?;
+            ops.dd.diff(self.edge, none)
+        });
+        let plain = self.difference(&encapsulated);
+        let done = encapsulated.op(&[], |ops| {
+            let all: Vec<u32> = (0..bits::BITS).collect();
+            let current = ops.cube(&all, Bank::Current)?;
+            let e = ops.dd.exists(encapsulated.edge, current)?;
+            let m = ops.map(MapKind::CurrentInner)?;
+            let e = ops.dd.rename(e, m)?;
+            let encap: Vec<u32> = (bits::ENCAP_KIND.start..bits::BITS).collect();
+            let z = ops.builder().zeros(&encap, Bank::Current)?;
+            ops.dd.and(e, z)
+        });
+        Decapsulated { done, plain }
     }
 
     /// The reply packets of the current header. The addresses, the ports
