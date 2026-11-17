@@ -800,6 +800,27 @@ impl L<'_> {
                 .map(|(p, _)| p.clone())
                 .collect();
             let mut egress_peer = egress.clone();
+            // A frame from the peer link to a tunnel port: the peer sends a
+            // frame into the tunnel itself, and no source states this case.
+            if let Some(n) = &cfg.nve {
+                let tunnel: Vec<PortId> = egress_peer
+                    .keys()
+                    .filter(|p| super::vxlan::is_tunnel(&n.name, p.as_str()))
+                    .cloned()
+                    .collect();
+                if !tunnel.is_empty() {
+                    let f = "vpc/tunnel";
+                    let s = self.sink(
+                        f,
+                        "a frame from the peer link into the tunnel is not lowered".into(),
+                        SourceSpan::line(VPC_GUIDE, 7),
+                    );
+                    self.add(s);
+                    for p in tunnel {
+                        egress_peer.insert(p, self.id(f));
+                    }
+                }
+            }
             for p in &unsure {
                 let f = format!("vpc/unknown/{p}");
                 let s = self.sink(

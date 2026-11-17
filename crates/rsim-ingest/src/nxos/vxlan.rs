@@ -43,6 +43,9 @@ pub(super) struct Tunnel {
     /// The name of the NVE interface, for example `nve1`.
     pub nve: String,
     pub source: IpAddr,
+    /// The source of a routed packet to a layer 3 VNI: the primary address
+    /// with `advertise-pip` on a vPC switch, else `source`.
+    pub routed_source: IpAddr,
     pub spans: Vec<SourceSpan>,
     /// The layer 2 VNI of each VLAN.
     pub l2: BTreeMap<u16, L2Vni>,
@@ -100,6 +103,23 @@ pub(super) fn plan(cfg: &Config, st: &State, active: &[Interface], l: &mut L<'_>
         Err(why) => return unknown(why),
     };
     let mut spans = vec![l.span(n.lines), l.span(*src_lines)];
+    let routed_source = match (vpc, cfg.advertise_pip) {
+        (true, Some(lines)) => {
+            spans.push(l.span(lines));
+            let primary = active
+                .iter()
+                .find(|i| i.name.eq_ignore_ascii_case(src))
+                .and_then(|i| i.addresses.iter().find(|a| !a.secondary))
+                .and_then(|a| iface_addr(&a.prefix));
+            match primary {
+                Some((a, _)) => a,
+                None => {
+                    return unknown(format!("the source interface {src} has no primary address"));
+                }
+            }
+        }
+        _ => source,
+    };
     if let Some(i) = active.iter().find(|i| i.name.eq_ignore_ascii_case(src)) {
         spans.push(l.span(i.lines));
     }
@@ -217,6 +237,7 @@ pub(super) fn plan(cfg: &Config, st: &State, active: &[Interface], l: &mut L<'_>
     Plan::Exact(Tunnel {
         nve: n.name.clone(),
         source,
+        routed_source,
         spans,
         l2,
         l3,
@@ -615,7 +636,7 @@ impl L<'_> {
         let next = self.id(VXLAN_ENTRY);
         self.add(VxlanEncap {
             meta,
-            source: t.source,
+            source: t.routed_source,
             peer: TunnelPeer::NextHop,
             vnis: t
                 .l3
