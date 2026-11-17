@@ -215,6 +215,17 @@ pub fn definitions(names: &[&str]) -> Value {
     // The step tool takes the fields of both modes, so it has the wider
     // set form.
     let mut step = set.clone();
+    let index_max = u64::from(u32::MAX);
+    for (k, d) in [
+        ("branch", "The branch index."),
+        ("step", "The step index in the branch."),
+        (
+            "reply_of",
+            "Select the reply of this forward branch. Then the branch index and the step index are indexes in the reply.",
+        ),
+    ] {
+        step.insert(k.to_string(), int(index_max, d));
+    }
     step.insert(
         "mode".to_string(),
         json!({"type": "string", "enum": ["path", "set"], "description": "The kind of the query: path (the default) or set. In set mode, each field takes a set."}),

@@ -180,7 +180,7 @@ Section 13 of the brief gives the steps, each with a "Done when" condition. Do t
 - `rsim-topologies` holds the hand-built topologies. The tests, the benchmarks, `rsim-cli` and `rsim-mcp` use it.
 - `rsim-cli` and `rsim-mcp` load a built-in topology by name and run a path query for one packet with its reply.
 - The JSON output is versioned and deterministic: the same query gives the same bytes.
-- `rsim-mcp` uses the stdio transport, has the tools `list_devices`, `path_query` and `explain_step`, and writes nothing. With `--store <data folder>`, the topology `store` is the newest snapshot of that store when a call first names it. A tool call cannot name another store.
+- `rsim-mcp` uses the stdio transport, has the tools `list_devices`, `path_query`, `set_query` and `explain_step`, and writes nothing. With `--store <data folder>`, the topology `store` is the newest snapshot of that store when a call first names it. A tool call cannot name another store.
 - A topology name `store:<data folder>` loads the twin of the newest snapshot of a store through `rsim-ingest`. The store is opened with `Store::open_read`, which writes nothing. It keeps no answer between calls. `explain_step` takes the query, the branch index and the step index, and runs the query again.
 - The libraries are `serde` and `serde_json` for JSON and `clap` for the arguments. The MCP protocol code is in-house and has no async runtime.
 - The JSON output is version 2. The summary is a list of parts, and each packet value is a set of members with field values. The field names are the names of the Elastic Common Schema where it has one, for example `source.ip`.
