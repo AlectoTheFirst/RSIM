@@ -22,6 +22,8 @@ struct Opts {
     segid: u32,
     /// True if leaf2 has the SVI of the layer 3 VNI.
     l3_svi: bool,
+    /// The suffix of the VXLAN next hop of leaf1, for example `%default`.
+    suffix: &'static str,
 }
 
 impl Default for Opts {
@@ -30,6 +32,7 @@ impl Default for Opts {
             anycast_line: "fabric forwarding anycast-gateway-mac 0000.5e00.5300\n",
             segid: 50001,
             l3_svi: true,
+            suffix: "",
         }
     }
 }
@@ -157,7 +160,7 @@ fn far(n: u8) -> (&'static str, &'static str) {
     }
 }
 
-fn collected(n: u8) -> Collected {
+fn collected(n: u8, o: &Opts) -> Collected {
     let dev = format!("leaf{n}");
     let d = dev.as_str();
     let (local_link, peer_link) = if n == 1 {
@@ -233,7 +236,7 @@ fn collected(n: u8) -> Collected {
                 "RED",
                 &format!("{far_host}/32"),
                 "bgp-65000",
-                Some(far_vtep),
+                Some(&format!("{far_vtep}{}", if n == 1 { o.suffix } else { "" })),
                 None,
             ),
         ],
@@ -279,8 +282,9 @@ fn sections(n: u8, o: &Opts) -> BTreeMap<String, (Vec<u8>, String)> {
         .collect();
     let (far_host, far_vtep) = far(n);
     let segid = if n == 1 { o.segid } else { 50001 };
+    let suffix = if n == 1 { o.suffix } else { "" };
     let rib = format!(
-        r#"{{"TABLE_vrf":{{"ROW_vrf":[{{"vrf-name-out":"RED","TABLE_addrf":{{"ROW_addrf":[{{"addrf":"ipv4","TABLE_prefix":{{"ROW_prefix":[{{"ipprefix":"{far_host}/32","TABLE_path":{{"ROW_path":[{{"ipnexthop":"{far_vtep}","clientname":"bgp-65000","ubest":"true","segid":"{segid}","encap":"vxlan"}}]}}}}]}}}}]}}}}]}}}}"#
+        r#"{{"TABLE_vrf":{{"ROW_vrf":[{{"vrf-name-out":"RED","TABLE_addrf":{{"ROW_addrf":[{{"addrf":"ipv4","TABLE_prefix":{{"ROW_prefix":[{{"ipprefix":"{far_host}/32","TABLE_path":{{"ROW_path":[{{"ipnexthop":"{far_vtep}{suffix}","clientname":"bgp-65000","ubest":"true","segid":"{segid}","encap":"vxlan"}}]}}}}]}}}}]}}}}]}}}}"#
     );
     let m = BTreeMap::from([
         (
@@ -328,7 +332,7 @@ fn estate(o: &Opts) -> Estate {
                 name: format!("leaf{n}"),
                 config: config(n, o).into_bytes(),
                 file: format!("leaf{n}/config"),
-                collected: collected(n),
+                collected: collected(n, o),
                 sections: sections(n, o),
             })
             .collect(),
@@ -460,4 +464,15 @@ fn an_anycast_gateway_with_no_mac_is_unknown() {
         "{:?}",
         e.notes["leaf1"]
     );
+}
+
+#[test]
+fn a_vxlan_next_hop_in_the_vrf_of_the_underlay_is_lowered() {
+    let o = Opts {
+        suffix: "%default",
+        ..Opts::default()
+    };
+    let t = estate(&o).builder.build().expect("the twin builds");
+    let branches = show(&run(&t));
+    assert_eq!(branches[0].0, VerdictKind::Deliver, "{branches:#?}");
 }

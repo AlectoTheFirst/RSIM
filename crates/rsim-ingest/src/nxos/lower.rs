@@ -1296,10 +1296,16 @@ impl L<'_> {
                     .any(|r| matches!(r.protocol.as_str(), "hsrp" | "vrrp"))
                 {
                     Some("a route of a gateway group that is not active on this switch")
-                } else if rows
-                    .iter()
-                    .any(|r| r.next_hop.as_deref().is_some_and(|g| g.contains('%')))
-                {
+                } else if rows.iter().zip(&tunnelled).any(|(r, t)| {
+                    // The next hop of a VXLAN path can name the VRF of the
+                    // underlay.
+                    r.next_hop
+                        .as_deref()
+                        .is_some_and(|g| match g.split_once('%') {
+                            Some((_, v)) => !(t.is_some() && v == DEFAULT_VRF),
+                            None => false,
+                        })
+                }) {
                     Some("a next hop in another VRF is not lowered")
                 } else if rows
                     .iter()
@@ -1319,7 +1325,10 @@ impl L<'_> {
                         .iter()
                         .zip(&tunnelled)
                         .filter_map(|(r, t)| {
-                            let gw = r.next_hop.as_deref().and_then(|g| g.parse().ok());
+                            let gw = r
+                                .next_hop
+                                .as_deref()
+                                .and_then(|g| g.split('%').next()?.parse().ok());
                             if t.is_some()
                                 && let super::vxlan::Plan::Exact(tun) = vx.tunnel
                             {
