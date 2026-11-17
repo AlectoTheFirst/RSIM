@@ -41,6 +41,7 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use rsim_collect::https::{ClientCert, HttpsLimits, HttpsProfile, HttpsTransport, TlsTrust};
+use rsim_collect::iosxr::{IosxrSource, SHELL_SETUP as IOSXR_SHELL_SETUP};
 use rsim_collect::nxos::{NxosSource, SHELL_SETUP};
 use rsim_collect::ssh::{Algorithms, CommandMode, SshLimits, SshProfile, SshTransport};
 use rsim_collect::unifi::UnifiSource;
@@ -168,6 +169,10 @@ fn ssh_devices(
                 Some(j) => return Err(format!("{prefix}_{name}_JSON {j} is not plain or native")),
             }
         }
+        if vendor == Vendor::Iosxr {
+            profile.max_channels = 1;
+            profile.shell_setup = IOSXR_SHELL_SETUP.iter().map(|c| (*c).to_string()).collect();
+        }
         if profile != SshProfile::default() {
             s.profiles.push((id, profile));
         }
@@ -287,7 +292,11 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
             })
             .unwrap_or_default()
     };
-    for (prefix, vendor) in [("VYOS", Vendor::Vyos), ("NXOS", Vendor::Nxos)] {
+    for (prefix, vendor) in [
+        ("VYOS", Vendor::Vyos),
+        ("NXOS", Vendor::Nxos),
+        ("IOSXR", Vendor::Iosxr),
+    ] {
         ssh_devices(env, prefix, vendor, &mut s)?;
     }
     let consoles = list("UNIFI_CONTROLLER");
@@ -496,8 +505,9 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
         Arc::new(TokioClock::system()),
     )
     .map_err(|e| e.to_string())?
-    .with_source(Arc::new(VyosSource::new(ssh)))
+    .with_source(Arc::new(VyosSource::new(ssh.clone())))
     .with_source(Arc::new(nxos))
+    .with_source(Arc::new(IosxrSource::new(ssh)))
     .with_source(Arc::new(UnifiSource::new(Arc::new(https))));
     if repeat {
         let stop = async {

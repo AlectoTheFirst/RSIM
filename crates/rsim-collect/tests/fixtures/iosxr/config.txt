@@ -1,0 +1,27 @@
+Tue Nov 17 10:00:00.000 UTC
+Building configuration...
+!! IOS XR Configuration 7.11.2
+!! Last configuration change at Tue Nov 17 09:58:12 2026 by admin
+!
+hostname HOST
+vrf RED
+ address-family ipv4 unicast
+ !
+!
+interface Loopback0
+ ipv4 address 192.0.2.1 255.255.255.255
+!
+interface GigabitEthernet0/0/0/0
+ description to-core
+ ipv4 address 198.51.100.1 255.255.255.0
+!
+interface GigabitEthernet0/0/0/1
+ vrf RED
+ ipv4 address 203.0.113.1 255.255.255.0
+!
+router static
+ address-family ipv4 unicast
+  0.0.0.0/0 198.51.100.254
+ !
+!
+end

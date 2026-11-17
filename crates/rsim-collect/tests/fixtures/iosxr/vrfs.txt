@@ -1,0 +1,10 @@
+Tue Nov 17 10:00:00.000 UTC
+
+VRF RED; RD not set; VPN ID not set
+VRF mode: Regular
+Description not set
+Interfaces:
+  GigabitEthernet0/0/0/1
+Address family IPV4 Unicast
+  No import VPN route-target communities
+  No export VPN route-target communities

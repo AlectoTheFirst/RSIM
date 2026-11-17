@@ -1,0 +1,18 @@
+Tue Nov 17 10:00:00.000 UTC
+
+VRF: default
+
+Codes: C - connected, S - static, R - RIP, B - BGP, (>) - Diversion path
+       L - local
+
+Gateway of last resort is 198.51.100.254 to network 0.0.0.0
+
+S*   0.0.0.0/0 [1/0] via 198.51.100.254, 3w2d
+L    192.0.2.1/32 is directly connected, 3w2d, Loopback0
+C    198.51.100.0/24 is directly connected, 3w2d, GigabitEthernet0/0/0/0
+L    198.51.100.1/32 is directly connected, 3w2d, GigabitEthernet0/0/0/0
+
+VRF: RED
+
+C    203.0.113.0/24 is directly connected, 3w2d, GigabitEthernet0/0/0/1
+L    203.0.113.1/32 is directly connected, 3w2d, GigabitEthernet0/0/0/1

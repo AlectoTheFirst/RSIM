@@ -1,0 +1,8 @@
+Tue Nov 17 10:00:00.000 UTC
+GigabitEthernet0/0/0/0 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is GigabitEthernet, address is 0000.5e00.5301 (bia 0000.5e00.5301)
+  Description: to-core
+  Internet address is 198.51.100.1/24
+  MTU 1514 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+  Full-duplex, 1000Mb/s, link type is force-up

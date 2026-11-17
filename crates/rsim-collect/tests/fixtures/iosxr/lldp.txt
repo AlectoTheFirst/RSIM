@@ -1,0 +1,9 @@
+Tue Nov 17 10:00:00.000 UTC
+Capability codes:
+        (R) Router, (B) Bridge, (T) Telephone, (C) DOCSIS Cable Device
+------------------------------------------------
+Local Interface: GigabitEthernet0/0/0/0
+Chassis id: 0000.5e00.5399
+Port id: Gi0/0/0/1
+Port Description: to-edge
+System Name: core
