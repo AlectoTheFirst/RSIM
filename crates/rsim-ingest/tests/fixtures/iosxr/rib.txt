@@ -1,0 +1,67 @@
+Tue Nov 17 10:00:02.000 UTC
+
+VRF: default
+
+Codes: C - connected, S - static, R - RIP, B - BGP, (>) - Diversion path
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2, E - EGP
+       i - ISIS, L1 - IS-IS level-1, L2 - IS-IS level-2
+       ia - IS-IS inter area, su - IS-IS summary null, * - candidate default
+       U - per-user static route, o - ODR, L - local, G  - DAGR, l - LISP
+       A - access/subscriber, a - Application route
+       M - mobile route, r - RPL, t - Traffic Engineering, (!) - FRR Backup path
+
+Gateway of last resort is 203.0.113.254 to network 0.0.0.0
+
+S*   0.0.0.0/0 [1/0] via 203.0.113.254, 3d04h
+C    198.51.100.0/30 is directly connected, 3d04h, Bundle-Ether10
+L    198.51.100.1/32 is directly connected, 3d04h, Bundle-Ether10
+B    198.51.100.32/27 [200/0] via 203.0.113.9, 1d00h
+O    198.51.100.64/26 [110/20] via 198.51.100.2, 1d02h, Bundle-Ether10
+                      [110/20] via 203.0.113.254, 1d02h, GigabitEthernet0/0/0/3
+O    198.51.100.128/26 [110/20] via 198.51.100.2, 1d02h, Bundle-Ether10
+                       [110/30] via 203.0.113.254, 1d02h, GigabitEthernet0/0/0/3 (!)
+O    198.51.100.160/27 [110/20] via 198.51.100.2, 1d02h, Bundle-Ether10
+                       [110/20] via 2001:db8::9, 1d02h, Bundle-Ether10
+B    198.51.100.192/27 [200/0] via 2001:db8::9, 1d00h
+C    203.0.113.0/24 is directly connected, 3d04h, GigabitEthernet0/0/0/3
+L    203.0.113.1/32 is directly connected, 3d04h, Loopback0
+L    203.0.113.2/32 is directly connected, 3d04h, GigabitEthernet0/0/0/3
+O    203.0.113.9/32 [110/2] via 198.51.100.2, 1d02h, Bundle-Ether10
+
+VRF: BLUE
+
+Codes: C - connected, S - static, R - RIP, B - BGP, (>) - Diversion path
+       L - local, (!) - FRR Backup path
+
+Gateway of last resort is not set
+
+C    192.0.2.128/26 is directly connected, 3d04h, Bundle-Ether20.200
+L    192.0.2.129/32 is directly connected, 3d04h, Bundle-Ether20.200
+
+VRF: MGMT
+
+Codes: C - connected, S - static, R - RIP, B - BGP, (>) - Diversion path
+       L - local, (!) - FRR Backup path
+
+Gateway of last resort is not set
+
+C    192.0.2.0/24 is directly connected, 3d04h, MgmtEth0/RP0/CPU0/0
+L    192.0.2.250/32 is directly connected, 3d04h, MgmtEth0/RP0/CPU0/0
+Route table of this VRF is being updated, the output is not complete
+
+VRF: RED
+
+Codes: C - connected, S - static, R - RIP, B - BGP, (>) - Diversion path
+       L - local, (!) - FRR Backup path
+
+Gateway of last resort is not set
+
+C    192.0.2.0/26 is directly connected, 3d04h, Bundle-Ether20.100
+L    192.0.2.1/32 is directly connected, 3d04h, Bundle-Ether20.100
+C    192.0.2.64/26 is directly connected, 3d04h, Bundle-Ether20.100
+L    192.0.2.65/32 is directly connected, 3d04h, Bundle-Ether20.100
+S    192.0.2.192/27 [1/0] via 192.0.2.10, 3d04h
+B    198.51.100.96/27 [200/0] via 203.0.113.9 (nexthop in vrf default), 1d00h
+B    203.0.113.64/26 [20/0] via 192.0.2.10, 1d00h

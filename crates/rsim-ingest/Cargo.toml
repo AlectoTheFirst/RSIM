@@ -13,6 +13,7 @@ rsim-core.workspace = true
 rsim-engine.workspace = true
 rsim-functions.workspace = true
 rsim-store.workspace = true
+rsim-textfsm.workspace = true
 serde_json = "1"
 
 [dev-dependencies]

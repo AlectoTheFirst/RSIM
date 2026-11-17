@@ -1,0 +1,39 @@
+Tue Nov 17 10:00:04.000 UTC
+
+VRF BLUE; RD not set; VPN ID not set
+VRF mode: Regular
+Description not set
+Interfaces:
+  Bundle-Ether20.200
+  GigabitEthernet0/0/0/4
+Address family IPV4 Unicast
+  Import VPN route-target communities:
+    RT:64496:200
+  Export VPN route-target communities:
+    RT:64496:200
+  No import route policy
+  No export route policy
+
+VRF MGMT; RD not set; VPN ID not set
+VRF mode: Regular
+Description management
+Interfaces:
+  MgmtEth0/RP0/CPU0/0
+Address family IPV4 Unicast
+  No import VPN route-target communities
+  No export VPN route-target communities
+  No import route policy
+  No export route policy
+
+VRF RED; RD 64496:100; VPN ID not set
+VRF mode: Regular
+Description tenant red
+Interfaces:
+  Bundle-Ether20.100
+Address family IPV4 Unicast
+  Import VPN route-target communities:
+    RT:64496:100
+  Export VPN route-target communities:
+    RT:64496:100
+  No import route policy
+  No export route policy

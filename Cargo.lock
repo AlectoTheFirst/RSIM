@@ -2711,6 +2711,7 @@ dependencies = [
  "rsim-engine",
  "rsim-functions",
  "rsim-store",
+ "rsim-textfsm",
  "serde_json",
 ]
 

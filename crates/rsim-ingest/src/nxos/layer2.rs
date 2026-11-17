@@ -174,7 +174,7 @@ impl L<'_> {
 
     /// A function that gives `Unknown` for each packet, in place of a port
     /// function that the lowering cannot make exact.
-    pub(super) fn sink(&self, f: &str, why: String, span: SourceSpan) -> AclMatch {
+    pub(crate) fn sink(&self, f: &str, why: String, span: SourceSpan) -> AclMatch {
         AclMatch {
             meta: self.meta(f, vec![span.clone()]),
             acl: ObjectId::new(format!("{}:{f}", self.dev)),

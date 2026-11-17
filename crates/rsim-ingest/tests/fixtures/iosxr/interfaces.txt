@@ -1,0 +1,89 @@
+Tue Nov 17 10:00:01.000 UTC
+Bundle-Ether10 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is Aggregated Ethernet interface(s), address is 0000.5e00.5301
+  Description: to-core1
+  Internet address is 198.51.100.1/30
+  MTU 9216 bytes, BW 20000000 Kbit (Max: 20000000 Kbit)
+     reliability 255/255, txload 0/255, rxload 0/255
+  Encapsulation ARPA,
+  Full-duplex, 20000Mb/s
+  Last input 00:00:00, output 00:00:00
+  5 minute input rate 1000 bits/sec, 1 packets/sec
+  5 minute output rate 1000 bits/sec, 1 packets/sec
+
+Bundle-Ether20 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is Aggregated Ethernet interface(s), address is 0000.5e00.5320
+  Description: to-red-customer
+  Internet address is Unknown
+  MTU 1514 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+  Encapsulation ARPA,
+
+Bundle-Ether20.100 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is VLAN sub-interface(s), address is 0000.5e00.5320
+  Internet address is 192.0.2.1/26
+  MTU 1518 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+  Encapsulation 802.1Q Virtual LAN, VLAN Id 100,  loopback not set,
+
+Bundle-Ether20.200 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is VLAN sub-interface(s), address is 0000.5e00.5320
+  Internet address is 192.0.2.129/26
+  MTU 1518 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+  Encapsulation 802.1Q Virtual LAN, VLAN Id 200,  loopback not set,
+
+Loopback0 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is Loopback interface(s)
+  Internet address is 203.0.113.1/32
+  MTU 1500 bytes, BW 0 Kbit
+  Encapsulation Loopback,
+
+MgmtEth0/RP0/CPU0/0 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is Management Ethernet, address is 0000.5e00.5310 (bia 0000.5e00.5310)
+  Internet address is 192.0.2.250/24
+  MTU 1514 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+  Encapsulation ARPA,
+
+GigabitEthernet0/0/0/0 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is GigabitEthernet, address is 0000.5e00.5340 (bia 0000.5e00.5340)
+  Description: core1-a
+  Internet address is Unknown
+  MTU 1514 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+  Encapsulation ARPA,
+
+GigabitEthernet0/0/0/1 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is GigabitEthernet, address is 0000.5e00.5341 (bia 0000.5e00.5341)
+  Description: core1-b
+  Internet address is Unknown
+  MTU 1514 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+  Encapsulation ARPA,
+
+GigabitEthernet0/0/0/2 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is GigabitEthernet, address is 0000.5e00.5342 (bia 0000.5e00.5342)
+  Description: red-customer
+  Internet address is Unknown
+  MTU 1514 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+  Encapsulation ARPA,
+
+GigabitEthernet0/0/0/3 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is GigabitEthernet, address is 0000.5e00.5330 (bia 0000.5e00.5330)
+  Description: internet edge
+  Internet address is 203.0.113.2/24
+  MTU 1514 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+  Encapsulation ARPA,
+  Full-duplex, 1000Mb/s, link type is force-up
+
+GigabitEthernet0/0/0/4 is administratively down, line protocol is administratively down
+  Interface state transitions: 0
+  Hardware is GigabitEthernet, address is 0000.5e00.5344 (bia 0000.5e00.5344)
+  Internet address is Unknown
+  MTU 1514 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+  Encapsulation ARPA,

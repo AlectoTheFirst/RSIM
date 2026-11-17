@@ -1,6 +1,6 @@
 //! The twin of a snapshot: the VyOS routers and the UniFi sites, with the
-//! links between them, and the NX-OS switches. An IOS-XR router gives its
-//! coverage and no function.
+//! links between them, the NX-OS switches, and the IOS-XR routers with no
+//! link to another device.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
@@ -55,13 +55,14 @@ pub enum Input {
         sections: BTreeMap<String, (Vec<u8>, String)>,
     },
     /// An IOS-XR router: its running config, the file name of the config
-    /// for the provenance, and its collected state. It gives its coverage
-    /// and its unread handled stanzas, and no function.
+    /// for the provenance, its collected state, and the text sections that
+    /// the lowering reads, each with its file name.
     Iosxr {
         name: String,
         config: Vec<u8>,
         file: String,
         collected: Collected,
+        sections: BTreeMap<String, (Vec<u8>, String)>,
     },
     /// A UniFi site: each section with its file name.
     Unifi {
@@ -113,12 +114,21 @@ pub fn inputs(store: &Store, snap: &Snapshot) -> Result<(Vec<Input>, Vec<String>
                 None => skipped.push(format!("{device}: no config section")),
             },
             "iosxr" => match section("config")? {
-                Some((config, file)) => out.push(Input::Iosxr {
-                    name: device.clone(),
-                    config,
-                    file,
-                    collected: collected::read(store, snap, device)?,
-                }),
+                Some((config, file)) => {
+                    let mut sections = BTreeMap::new();
+                    for name in iosxr::SECTIONS {
+                        if let Some(x) = section(name)? {
+                            sections.insert(name.to_string(), x);
+                        }
+                    }
+                    out.push(Input::Iosxr {
+                        name: device.clone(),
+                        config,
+                        file,
+                        collected: collected::read(store, snap, device)?,
+                        sections,
+                    })
+                }
                 None => skipped.push(format!("{device}: no config section")),
             },
             "unifi" => {
@@ -151,7 +161,7 @@ pub fn build(store: &Store, snap: &Snapshot) -> Result<Estate, StoreError> {
 
 /// Builds the twin of the inputs: the routers, then each UniFi site joined
 /// to the router on its uplink, then each NX-OS switch. An IOS-XR router
-/// gives its coverage and its unread handled stanzas.
+/// gives its layer 3 functions with no link to another device.
 pub fn assemble(inputs: Vec<Input>) -> Estate {
     let mut e = Estate {
         builder: TwinBuilder::new(),
@@ -214,19 +224,24 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
             Input::Iosxr {
                 name,
                 config,
-                collected: col,
+                file,
+                sections,
                 ..
             } => {
                 let doc = iosxr::read_text(&config);
-                let table = iosxr::table(!col.routes.is_empty());
+                let table = iosxr::table(iosxr::rib_collected(&sections));
                 let cfg = iosxr::read(&doc, &table);
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
                     .insert(name.clone(), iosxr::unread(&doc, &table, &cfg.read));
-                e.notes
-                    .entry(name)
-                    .or_default()
-                    .push("the IOS-XR config gives the coverage and no function".into());
+                let low = iosxr::lower(&name, &file, &iosxr::profile(), &cfg, &sections);
+                e.notes.entry(name).or_default().extend(low.notes);
+                for f in low.functions {
+                    e.builder.add_arc(f);
+                }
+                for x in low.edges {
+                    e.builder.edge_interface(x);
+                }
             }
             Input::Unifi { name, sections } => sites.push((name, sections)),
         }
