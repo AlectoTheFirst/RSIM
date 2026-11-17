@@ -45,6 +45,11 @@ pub(super) fn svi_vlan(name: &str) -> Option<u16> {
     lower.strip_prefix("vlan")?.parse().ok()
 }
 
+/// The bridge domain of a VLAN of a switch.
+pub(super) fn bd_of(dev: &str, vlan: u16) -> BridgeDomainId {
+    BridgeDomainId::new(format!("{dev}/vlan{vlan}"))
+}
+
 /// True for the name of a physical port or a port channel.
 fn is_switch_port(name: &str) -> bool {
     let l = name.to_ascii_lowercase();
@@ -157,7 +162,7 @@ impl L<'_> {
     }
 
     fn bd(&self, vlan: u16) -> BridgeDomainId {
-        BridgeDomainId::new(format!("{}/vlan{vlan}", self.dev))
+        bd_of(self.dev, vlan)
     }
 
     /// Lowers the layer 2 part. Gives the ingress function of the SVI port
@@ -172,6 +177,7 @@ impl L<'_> {
         col: &Collected,
         names: &Names,
         ext: &External,
+        tunnel: &super::vxlan::Plan,
         sum: &mut Summary,
     ) -> BTreeMap<String, (FunctionId, Mac)> {
         let cfg = self.cfg;
@@ -627,6 +633,16 @@ impl L<'_> {
             ));
         }
 
+        // The ports of the VXLAN tunnel end.
+        let dev = self.dev;
+        let bdf = move |v: u16| bd_of(dev, v);
+        let vx = self.vxlan_layer2(tunnel, col, &bdf);
+        sum.tunnel = super::vxlan::summary(cfg, st, active, col);
+        egress.extend(vx.egress);
+        for (b, ports) in vx.flood {
+            flood.entry(b).or_default().extend(ports);
+        }
+
         // The SVI ports and the hand-off to layer 3.
         let mut links = BTreeMap::new();
         for (name, (v, m, span)) in &svis {
@@ -897,6 +913,7 @@ impl L<'_> {
                 peer_link: peer_links.iter().next().cloned(),
             });
         }
+        self.vxlan_split_horizon(tunnel, &tables, &egress, &flood, &bdf);
         if !plans.is_empty() || !svis.is_empty() {
             let meta = self.meta("mac", Vec::new());
             self.out.functions.push(Arc::new(MacLookup {

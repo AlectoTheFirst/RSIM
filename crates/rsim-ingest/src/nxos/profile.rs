@@ -63,6 +63,23 @@ pub const DEFAULT_MODE_IS_ACCESS: bool = true;
 /// (page 118). Not confirmed against a device.
 pub const VPC_GUIDE: &str = "https://www.cisco.com/c/dam/en/us/td/docs/switches/datacenter/sw/design/vpc_design/vpc_best_practices_design_guide.pdf";
 
+/// The Cisco guide "Cisco Nexus 9000 Series NX-OS VXLAN Configuration
+/// Guide", the source of the VXLAN rules: the UDP port, the ingress
+/// replication and the split horizon of a frame out of the tunnel. Not
+/// confirmed against a device.
+pub const VXLAN_GUIDE: &str = "Cisco Nexus 9000 Series NX-OS VXLAN Configuration Guide";
+
+/// The UDP destination port of a VXLAN packet with no `vxlan udp port`
+/// line: the IANA port 4789. Not confirmed against a device.
+pub const VXLAN_UDP_PORT: u16 = 4789;
+
+/// The function where an encapsulated packet enters the layer 3 chain of
+/// the switch: a route lookup of the default VRF whose next hops go to the
+/// next-hop resolution. The ACLs, the NAT and the sessions of the switch do
+/// not apply to the outer header. No source states the order; it is not
+/// confirmed against a device.
+pub const VXLAN_ENTRY: &str = "vxlan/route";
+
 /// The status words that the lowering reads: the vPC peer status `peer-ok`,
 /// the HSRP states `Active` and `Standby`, and the VRRP states `Master` and
 /// `Backup`. No source confirms these words in the JSON of NX-OS. Each other

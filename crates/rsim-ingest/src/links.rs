@@ -82,6 +82,19 @@ pub struct Summary {
     /// The layer 3 addresses of a port by VLAN, `None` for the untagged
     /// interface.
     pub l3: BTreeMap<String, VlanAddrs>,
+    /// The tunnel end of the switch, if it forwards.
+    pub tunnel: Option<TunnelSummary>,
+}
+
+/// The layer 2 tunnel end of a switch, for example a VXLAN tunnel end.
+#[derive(Clone, Debug, Default)]
+pub struct TunnelSummary {
+    /// The address of the tunnel end.
+    pub address: Option<IpAddr>,
+    /// The peer tunnel ends that the switch knows.
+    pub peers: BTreeSet<IpAddr>,
+    /// The segment identifier of each VLAN in the tunnel.
+    pub segments: BTreeMap<u16, u32>,
 }
 
 /// The vPC facts of a switch.
@@ -579,6 +592,33 @@ fn place(
             e.svis.insert((s.clone(), *v));
         }
     }
+    // The VLANs of the switches that a tunnel joins into one segment: the
+    // same segment identifier on 2 tunnel ends that know each other.
+    let mut tunnelled: BTreeMap<(String, u16), BTreeSet<(String, u16)>> = BTreeMap::new();
+    for (s, a) in switches {
+        let Some(ta) = &a.tunnel else { continue };
+        for (s2, b) in switches {
+            let Some(tb) = &b.tunnel else { continue };
+            if s == s2 {
+                continue;
+            }
+            let know = tb.address.is_some_and(|x| ta.peers.contains(&x))
+                || ta.address.is_some_and(|x| tb.peers.contains(&x));
+            if !know {
+                continue;
+            }
+            for (v, id) in &ta.segments {
+                for (v2, id2) in &tb.segments {
+                    if id == id2 {
+                        tunnelled
+                            .entry((s.clone(), *v))
+                            .or_default()
+                            .insert((s2.clone(), *v2));
+                    }
+                }
+            }
+        }
+    }
     // The host table of each VLAN of a switch with an SVI: its own entries
     // and the addresses of the endpoints that its VLAN leads to.
     let mut hosts: BTreeMap<(String, u16), TriePrefixTable<HostMac>> = BTreeMap::new();
@@ -622,8 +662,9 @@ fn place(
             continue;
         };
         let info = switches[&s].vlans.get(&v).cloned().unwrap_or_default();
-        let mut table = hosts.get(&(s, v)).cloned().unwrap_or_default();
-        for (s2, v2) in a.svis.iter().skip(1) {
+        let mut table = hosts.get(&(s.clone(), v)).cloned().unwrap_or_default();
+        let joined = tunnelled.get(&(s, v)).cloned().unwrap_or_default();
+        for (s2, v2) in a.svis.iter().skip(1).chain(joined.iter()) {
             if let Some(t) = hosts.get(&(s2.clone(), *v2)) {
                 for (p, h) in t.entries() {
                     if table.get(&p).is_none() {

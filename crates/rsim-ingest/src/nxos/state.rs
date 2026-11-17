@@ -47,6 +47,22 @@ pub fn neighbour_name(s: &str) -> Option<String> {
     (!s.is_empty() && s != "null").then(|| s.to_ascii_lowercase())
 }
 
+/// A peer tunnel end of `show nve peers`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NvePeer {
+    pub address: std::net::IpAddr,
+    pub up: bool,
+    pub span: SourceSpan,
+}
+
+/// A VNI of `show nve vni`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NveVni {
+    pub vni: u32,
+    pub up: bool,
+    pub span: SourceSpan,
+}
+
 /// The collected sections of a switch.
 #[derive(Clone, Debug, Default)]
 pub struct State {
@@ -66,6 +82,10 @@ pub struct State {
     pub host_name: Option<String>,
     /// The state of the vPC domain, if the section is in the snapshot.
     pub vpc: Option<VpcState>,
+    /// The peer tunnel ends, if the section was collected.
+    pub nve_peers: Option<Vec<NvePeer>>,
+    /// The VNIs of the NVE interface, if the section was collected.
+    pub nve_vnis: Option<Vec<NveVni>>,
 }
 
 /// The state of a vPC domain from `show vpc`, with the fields that HST
@@ -249,6 +269,36 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
                 .map(|p| names.resolve(p)),
             span: Some(line(file, 0)),
         });
+    }
+    // The keys of the NVE sections are not confirmed on a device. A row
+    // whose state is not `Up` counts as down.
+    if let Some((v, file)) = json("nve_peers") {
+        let peers = rows(&v, "nve_peers")
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| {
+                Some(NvePeer {
+                    address: text(r, "peer-ip")?.parse().ok()?,
+                    up: up(text(r, "peer-state")) == Some(true),
+                    span: line(file, i),
+                })
+            })
+            .collect();
+        st.nve_peers = Some(peers);
+    }
+    if let Some((v, file)) = json("nve_vnis") {
+        let vnis = rows(&v, "nve_vni")
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| {
+                Some(NveVni {
+                    vni: text(r, "vni")?.parse().ok()?,
+                    up: up(text(r, "vni-state")) == Some(true),
+                    span: line(file, i),
+                })
+            })
+            .collect();
+        st.nve_vnis = Some(vnis);
     }
     if let Some((v, _)) = json("version") {
         st.host_name = text(&v, "host_name").and_then(neighbour_name);

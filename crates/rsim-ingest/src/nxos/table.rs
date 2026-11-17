@@ -136,6 +136,29 @@ const ENTRIES: &[Entry] = &[
     ),
     e("vpc domain */system-mac ..", Irrelevant, Subtree),
     e("vlan */name ..", Irrelevant, Subtree),
+    e("vlan */vn-segment *", Handled, Subtree),
+    e("interface */source-interface *", Handled, Subtree),
+    e(
+        "interface */host-reachability protocol bgp",
+        Handled,
+        Subtree,
+    ),
+    e(
+        "interface */global ingress-replication protocol bgp",
+        Handled,
+        Subtree,
+    ),
+    e("interface */global mcast-group ..", Handled, Subtree),
+    e("interface */global suppress-arp", Irrelevant, Subtree),
+    e("interface */member vni *", Handled, Node),
+    e(
+        "interface */member vni */ingress-replication protocol bgp",
+        Handled,
+        Subtree,
+    ),
+    e("interface */member vni */mcast-group ..", Handled, Subtree),
+    e("interface */member vni */suppress-arp", Irrelevant, Subtree),
+    e("nv overlay evpn", Irrelevant, Subtree),
     e("system default switchport", Handled, Subtree),
     e("no system default switchport", Handled, Subtree),
     e("interface */description ..", Irrelevant, Subtree),
@@ -204,6 +227,7 @@ pub fn table(rib_collected: bool) -> Table {
         "ip prefix-list ..",
         "ip community-list ..",
         "ip as-path ..",
+        "evpn",
     ] {
         t.push_levels(&[protocol], routing, Subtree);
     }
