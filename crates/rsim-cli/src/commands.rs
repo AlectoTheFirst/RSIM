@@ -1,6 +1,7 @@
 //! The commands that `rsim` and `rsim-mcp` share. Each command takes a
 //! twin and gives a JSON output object or a query error.
 
+use crate::json::FromEngine;
 use std::collections::BTreeMap;
 
 use rsim_engine::{Answer, Executor, Twin};
@@ -8,7 +9,7 @@ use rsim_engine::{Answer, Executor, Twin};
 use crate::error::{ErrorCode, QueryError};
 use crate::json::{
     AnswerJson, AttachmentJson, DeviceJson, DevicesOut, EdgeInterfaceJson, EndpointJson,
-    FunctionJson, PathAnswerOut, SpanJson, StepOut, TopologiesOut, TraceStepJson, VERSION, snake,
+    FunctionJson, PathAnswerOut, SpanJson, StepOut, TopologiesOut, VERSION, snake,
 };
 use crate::json::{QueryJson, SetAnswerOut};
 use crate::query::QueryInput;
@@ -67,7 +68,7 @@ pub fn topology_names() -> Vec<&'static str> {
 pub fn topologies() -> TopologiesOut {
     TopologiesOut {
         rsim_json: VERSION,
-        kind: "topologies",
+        kind: "topologies".into(),
         topologies: rsim_topologies::names()
             .into_iter()
             .map(str::to_string)
@@ -94,7 +95,7 @@ pub fn devices(topology: &str, twin: &Twin) -> DevicesOut {
     }
     DevicesOut {
         rsim_json: VERSION,
-        kind: "devices",
+        kind: "devices".into(),
         topology: topology.to_string(),
         devices: twin
             .devices()
@@ -141,14 +142,14 @@ pub fn run(input: &QueryInput, twin: &Twin) -> Result<Answer, QueryError> {
     let q = input.to_query(twin)?;
     Executor::new(twin)
         .run(&q)
-        .map_err(|e| QueryError::from_exec(&e))
+        .map_err(|e| crate::error::from_exec(&e))
 }
 
 pub fn path(input: &QueryInput, twin: &Twin) -> Result<PathAnswerOut, QueryError> {
     let answer = run(input, twin)?;
     Ok(PathAnswerOut {
         rsim_json: VERSION,
-        kind: "path_answer",
+        kind: "path_answer".into(),
         topology: input.topology.clone(),
         query: input.echo(),
         answer: AnswerJson::new(&answer),
@@ -169,14 +170,14 @@ pub fn run_set(input: &SetInput, twin: &Twin) -> Result<Answer, QueryError> {
     let q = input.to_query(twin)?;
     Executor::new(twin)
         .run(&q)
-        .map_err(|e| QueryError::from_exec(&e))
+        .map_err(|e| crate::error::from_exec(&e))
 }
 
 pub fn set(input: &SetInput, twin: &Twin) -> Result<SetAnswerOut, QueryError> {
     let answer = run_set(input, twin)?;
     Ok(SetAnswerOut {
         rsim_json: VERSION,
-        kind: "set_answer",
+        kind: "set_answer".into(),
         topology: input.topology.clone(),
         query: input.echo(),
         answer: AnswerJson::new(&answer),
@@ -239,12 +240,12 @@ fn step_of(
     })?;
     Ok(StepOut {
         rsim_json: VERSION,
-        kind: "step",
+        kind: "step".into(),
         topology: topology.to_string(),
         query,
         reply_of: at.reply_of,
         branch: at.branch,
         step: at.step,
-        trace_step: TraceStepJson::new(at.step, step),
+        trace_step: crate::json::trace_step_json(at.step, step),
     })
 }

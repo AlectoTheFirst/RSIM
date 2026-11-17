@@ -9,10 +9,12 @@ repository.workspace = true
 
 [dependencies]
 rsim-cli.workspace = true
+rsim-contract.workspace = true
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["raw_value"] }
 
 [dev-dependencies]
+boon = "=0.6.1"
 rsim-store.workspace = true
 
 [lints]

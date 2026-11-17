@@ -3,6 +3,8 @@
 
 #![deny(clippy::disallowed_methods, clippy::disallowed_types)]
 
+use rsim_contract::args::Form;
+use rsim_contract::json::{PathBriefOut, SetBriefOut};
 use std::io::Write;
 use std::net::IpAddr;
 use std::process::ExitCode;
@@ -28,6 +30,10 @@ struct Cli {
     /// With `--format json`: indented JSON.
     #[arg(long, global = true)]
     pretty: bool,
+    /// With `--format json`, the form of a path or set answer: summary,
+    /// steps or full.
+    #[arg(long, value_enum, default_value_t = FormArg::Full, global = true)]
+    form: FormArg,
     #[command(subcommand)]
     command: Command,
 }
@@ -36,6 +42,25 @@ struct Cli {
 enum Format {
     Text,
     Json,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum FormArg {
+    Summary,
+    Steps,
+    Full,
+}
+
+impl Cli {
+    /// The brief form of a JSON answer, or `None` for the full form or
+    /// the text output.
+    fn brief(&self) -> Option<Form> {
+        match (self.format, self.form) {
+            (Format::Json, FormArg::Summary) => Some(Form::Summary),
+            (Format::Json, FormArg::Steps) => Some(Form::Steps),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -295,12 +320,22 @@ fn main() -> ExitCode {
         Command::Path(q) => {
             let input = q.clone_input();
             let r = commands::load(&input.topology).and_then(|t| commands::path(&input, &t));
-            emit(&cli, r, text::path)
+            match cli.brief() {
+                Some(f) => emit(&cli, r.map(|o| PathBriefOut::from_full(&o, f)), |_| {
+                    String::new()
+                }),
+                None => emit(&cli, r, text::path),
+            }
         }
         Command::Set(q) => {
             let input = q.input();
             let r = commands::load(&input.topology).and_then(|t| commands::set(&input, &t));
-            emit(&cli, r, text::set)
+            match cli.brief() {
+                Some(f) => emit(&cli, r.map(|o| SetBriefOut::from_full(&o, f)), |_| {
+                    String::new()
+                }),
+                None => emit(&cli, r, text::set),
+            }
         }
         Command::ExplainSet {
             query,

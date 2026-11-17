@@ -6,6 +6,7 @@ members = [
     "crates/rsim-functions",
     "crates/rsim-engine",
     "crates/rsim-topologies",
+    "crates/rsim-contract",
     "crates/rsim-cli",
     "crates/rsim-mcp",
     "crates/rsim-store",
@@ -26,6 +27,7 @@ rsim-dd = { path = "crates/rsim-dd" }
 rsim-functions = { path = "crates/rsim-functions" }
 rsim-engine = { path = "crates/rsim-engine" }
 rsim-topologies = { path = "crates/rsim-topologies" }
+rsim-contract = { path = "crates/rsim-contract" }
 rsim-cli = { path = "crates/rsim-cli" }
 rsim-store = { path = "crates/rsim-store" }
 rsim-collect = { path = "crates/rsim-collect" }

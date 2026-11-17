@@ -54,6 +54,7 @@ A VXLAN tunnel end uses `VxlanEncap` and `VxlanDecap`. `VxlanEncap` puts the pac
 | `rsim-collect` | The collectors: SSH and HTTPS transports, jump hosts and proxies, the vendor sources |
 | `rsim-ingest` | The stanza reader, the coverage report and the lowering of each vendor into functions |
 | `rsim-topologies` | The hand-built topologies |
+| `rsim-contract` | The contract types and the registry of operations, with their JSON Schema; no engine dependency |
 | `rsim-cli` | The command `rsim` |
 | `rsim-mcp` | A Model Context Protocol server on stdio |
 

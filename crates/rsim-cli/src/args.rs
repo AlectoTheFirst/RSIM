@@ -264,3 +264,17 @@ pub fn set_step(args: &Map<String, Value>) -> Result<(SetInput, StepRef), QueryE
     };
     Ok((input, at))
 }
+
+/// The form of the answer of a tool. The default is `summary`.
+pub fn form(args: &Map<String, Value>) -> Result<rsim_contract::args::Form, QueryError> {
+    use rsim_contract::args::Form;
+    match get(args, "form") {
+        None => Ok(Form::Summary),
+        Some(v) => match v.as_str() {
+            Some("summary") => Ok(Form::Summary),
+            Some("steps") => Ok(Form::Steps),
+            Some("full") => Ok(Form::Full),
+            _ => Err(invalid(format!("form {v} is not summary, steps or full"))),
+        },
+    }
+}
