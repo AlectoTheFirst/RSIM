@@ -42,6 +42,8 @@ pub(super) struct L3Vni {
 pub(super) struct Tunnel {
     /// The name of the NVE interface, for example `nve1`.
     pub nve: String,
+    /// The source interface of the tunnel end.
+    pub source_if: String,
     pub source: IpAddr,
     /// The source of a routed packet to a layer 3 VNI: the primary address
     /// with `advertise-pip` on a vPC switch, else `source`.
@@ -236,6 +238,7 @@ pub(super) fn plan(cfg: &Config, st: &State, active: &[Interface], l: &mut L<'_>
     };
     Plan::Exact(Tunnel {
         nve: n.name.clone(),
+        source_if: src.clone(),
         source,
         routed_source,
         spans,
@@ -424,7 +427,39 @@ impl L<'_> {
                     out.egress
                         .insert(PortId::new(format!("{}({peer})", t.nve)), self.id(&f));
                 }
+                let mut groups: BTreeSet<IpAddr> = BTreeSet::new();
                 for (v, x) in &t.l2 {
+                    let group = match &x.replication {
+                        Replication::Multicast(g) => g
+                            .split('/')
+                            .next()
+                            .and_then(|a| a.parse::<IpAddr>().ok())
+                            .filter(IpAddr::is_multicast),
+                        _ => None,
+                    };
+                    if let Some(g) = group {
+                        let f = format!("vxlan/encap/{g}");
+                        if groups.insert(g) {
+                            let mut spans = t.spans.clone();
+                            spans.extend(x.spans.iter().cloned());
+                            let meta = self.meta(&f, spans);
+                            let next = self.id("vxlan/mroute");
+                            self.add(VxlanEncap {
+                                meta,
+                                source: t.source,
+                                peer: TunnelPeer::Fixed(g),
+                                vnis: vnis.clone(),
+                                outer: outer(),
+                                underlay: VrfId::new(super::lower::DEFAULT_VRF),
+                                next,
+                            });
+                        }
+                        out.flood
+                            .entry(bd(*v))
+                            .or_default()
+                            .push((PortId::new(format!("{}({g})", t.nve)), self.id(&f)));
+                        continue;
+                    }
                     let copies: Vec<(PortId, FunctionId)> = match (&x.replication, &t.peers) {
                         (Replication::Ingress, Ok(ps)) => ps
                             .iter()
@@ -439,7 +474,7 @@ impl L<'_> {
                             let why = match rep {
                                 Replication::Ingress => peers.clone().err().unwrap_or_default(),
                                 Replication::Multicast(g) => {
-                                    format!("the flood to the multicast group {g} is not lowered")
+                                    format!("the multicast group {g} is not read")
                                 }
                                 Replication::Unstated => {
                                     format!("VNI {}: the replication is not stated", x.vni)

@@ -6,6 +6,7 @@ pub mod common;
 pub mod fib;
 pub mod forwarding;
 pub mod layer2;
+pub mod multicast;
 pub mod nat;
 pub mod policy;
 pub mod profile;
@@ -25,6 +26,7 @@ pub use layer2::{
     BROADCAST, Flood, HostMac, HostResolution, Layer3HandOff, LinkEnd, LinkFacts, MacEntry,
     MacLookup, PortEgress, PortIngress, PortPeer, WirelessAttachment,
 };
+pub use multicast::{McastRoute, MulticastLookup, group_mac};
 pub use nat::{DestinationNat, NatAction, NatScope, SourceNat};
 pub use policy::{AclMatch, FirewallPolicy, ZoneScope};
 pub use profile::{PortTranslation, RuleAction, UnzonedInterface, VendorProfile};

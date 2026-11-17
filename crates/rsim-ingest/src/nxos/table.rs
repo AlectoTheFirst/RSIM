@@ -238,6 +238,8 @@ pub fn table(rib_collected: bool) -> Table {
         "ip community-list ..",
         "ip as-path ..",
         "evpn",
+        "ip pim ..",
+        "ip igmp ..",
     ] {
         t.push_levels(&[protocol], routing, Subtree);
     }

@@ -65,6 +65,18 @@ pub struct NveVni {
     pub span: SourceSpan,
 }
 
+/// A multicast route of `show ip mroute`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MrouteRow {
+    pub vrf: String,
+    /// `None` for a (*,G) route.
+    pub source: Option<std::net::IpAddr>,
+    pub group: rsim_core::Prefix,
+    pub iif: Option<String>,
+    pub oifs: Vec<String>,
+    pub span: SourceSpan,
+}
+
 /// The collected sections of a switch.
 #[derive(Clone, Debug, Default)]
 pub struct State {
@@ -90,6 +102,9 @@ pub struct State {
     /// The VNIs of the NVE interface, if the section was collected. An error
     /// names a row that is not read.
     pub nve_vnis: Option<Result<Vec<NveVni>, String>>,
+    /// The multicast routes, if the section was collected. An error names a
+    /// row that is not read.
+    pub mroutes: Option<Result<Vec<MrouteRow>, String>>,
     /// The VNI of each route path with a VXLAN encapsulation, by VRF,
     /// prefix and next hop, from the route table section.
     pub vxlan_paths: BTreeMap<(String, String, String), (u32, SourceSpan)>,
@@ -311,6 +326,63 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
             })
             .collect();
         st.nve_vnis = Some(vnis);
+    }
+    // The keys of the multicast route section are not confirmed on a
+    // device. The source and the group come from `source-addr` and
+    // `group-addr`, else from `mcast-addrs` such as `(*, 233.252.0.20/32)`.
+    if let Some((v, file)) = json("mroutes") {
+        let mut out: Result<Vec<MrouteRow>, String> = Ok(Vec::new());
+        let mut i = 0usize;
+        'rows: for vrf in rows(&v, "vrf") {
+            let name = text(vrf, "vrf-name").unwrap_or("default");
+            for r in rows(vrf, "one_route") {
+                i += 1;
+                let pair = text(r, "mcast-addrs").and_then(|t| {
+                    let t = t.trim_start_matches('(').trim_end_matches(')');
+                    let (s, g) = t.split_once(',')?;
+                    Some((s.trim().to_string(), g.trim().to_string()))
+                });
+                let src = text(r, "source-addr")
+                    .map(str::to_string)
+                    .or_else(|| pair.as_ref().map(|p| p.0.clone()));
+                let grp = text(r, "group-addr")
+                    .map(str::to_string)
+                    .or_else(|| pair.as_ref().map(|p| p.1.clone()));
+                // `Some(None)` for a (*,G) route, `None` for a row with no
+                // readable source.
+                let source: Option<Option<std::net::IpAddr>> = match src.as_deref() {
+                    Some("*") => Some(None),
+                    Some(s) => s.split('/').next().and_then(|a| a.parse().ok()).map(Some),
+                    None => None,
+                };
+                let group = grp.as_deref().and_then(|g| {
+                    if g.contains('/') {
+                        g.parse().ok()
+                    } else {
+                        g.parse().ok().map(rsim_core::Prefix::host)
+                    }
+                });
+                let (Some(source), Some(group)) = (source, group) else {
+                    out = Err(format!("row {i} of the multicast routes is not read"));
+                    break 'rows;
+                };
+                if let Ok(v) = &mut out {
+                    v.push(MrouteRow {
+                        vrf: name.to_string(),
+                        source,
+                        group,
+                        iif: text(r, "route-iif").map(|x| names.resolve(x)),
+                        oifs: rows(r, "oif")
+                            .iter()
+                            .filter_map(|o| text(o, "oif-name"))
+                            .map(|o| names.resolve(o))
+                            .collect(),
+                        span: line(file, i - 1),
+                    });
+                }
+            }
+        }
+        st.mroutes = Some(out);
     }
     // The keys `segid` and `encap` are not confirmed on a device.
     if let Some((v, file)) = json("rib") {

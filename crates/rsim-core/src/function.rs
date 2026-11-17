@@ -43,6 +43,8 @@ pub enum FunctionKind {
     // Tunnels.
     Encapsulation,
     Decapsulation,
+    // Multicast.
+    MulticastLookup,
 }
 
 /// An object that a function reads. Delta recompilation uses it.

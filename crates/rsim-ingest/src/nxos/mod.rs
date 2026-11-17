@@ -4,6 +4,7 @@ pub mod config;
 mod layer2;
 pub mod lower;
 mod mask;
+mod mcast;
 pub mod names;
 mod profile;
 pub mod state;
@@ -32,6 +33,7 @@ pub const SECTIONS: &[&str] = &[
     "nve_peers",
     "nve_vnis",
     "rib",
+    "mroutes",
 ];
 
 /// Reads the bytes of a running config into a stanza tree. A byte sequence
