@@ -6,3 +6,9 @@
 pub mod error;
 pub mod json;
 pub mod query;
+
+/// The JSON Schema of a contract type, in the dialect of JSON Schema
+/// 2020-12.
+pub fn schema<T: schemars::JsonSchema>() -> serde_json::Value {
+    schemars::schema_for!(T).to_value()
+}
