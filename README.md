@@ -5,12 +5,11 @@ rsim is a Rust engine for a network digital twin. It compiles device configs and
 ## How it works
 
 ```mermaid
-flowchart LR
+flowchart TD
   D[Devices] -->|rsim-collect| S[Snapshot store]
-  S -->|rsim-ingest| F[Function instances]
-  F --> W[Twin]
-  Q[Query] --> X[Executor]
-  W --> X
+  S -->|rsim-ingest| W[Twin]
+  W --> X[Executor]
+  Q[Query] --> X
   X --> A[Answer with trace]
 ```
 
