@@ -61,7 +61,7 @@ fn command(d: &Device, section: &str) -> String {
     let specs = match d.vendor {
         Vendor::Vyos => rsim_collect::vyos::sections(),
         Vendor::Unifi => rsim_collect::unifi::sections(d.site.as_deref().unwrap()),
-        Vendor::Nxos | Vendor::Iosxr => {
+        Vendor::Nxos | Vendor::Iosxr | Vendor::Iosxe => {
             unreachable!("the NX-OS and IOS XR cycles have their own tests")
         }
     };
@@ -111,7 +111,7 @@ fn load(t: &FakeTransport, d: &Device) {
                 );
             }
         }
-        Vendor::Nxos | Vendor::Iosxr => {
+        Vendor::Nxos | Vendor::Iosxr | Vendor::Iosxe => {
             unreachable!("the NX-OS and IOS XR cycles have their own tests")
         }
     }

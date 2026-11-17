@@ -41,6 +41,7 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use rsim_collect::https::{ClientCert, HttpsLimits, HttpsProfile, HttpsTransport, TlsTrust};
+use rsim_collect::iosxe::{IosxeSource, SHELL_SETUP as IOSXE_SHELL_SETUP};
 use rsim_collect::iosxr::{IosxrSource, SHELL_SETUP as IOSXR_SHELL_SETUP};
 use rsim_collect::nxos::{NxosSource, SHELL_SETUP};
 use rsim_collect::ssh::{Algorithms, CommandMode, SshLimits, SshProfile, SshTransport};
@@ -155,7 +156,7 @@ fn ssh_devices(
             mode,
             ..SshProfile::default()
         };
-        if vendor == Vendor::Nxos || vendor == Vendor::Iosxr {
+        if matches!(vendor, Vendor::Nxos | Vendor::Iosxr | Vendor::Iosxe) {
             profile.max_channels = match get("CHANNELS") {
                 None => 1,
                 Some(n) => n
@@ -173,6 +174,9 @@ fn ssh_devices(
         }
         if vendor == Vendor::Iosxr {
             profile.shell_setup = IOSXR_SHELL_SETUP.iter().map(|c| (*c).to_string()).collect();
+        }
+        if vendor == Vendor::Iosxe {
+            profile.shell_setup = IOSXE_SHELL_SETUP.iter().map(|c| (*c).to_string()).collect();
         }
         if profile != SshProfile::default() {
             s.profiles.push((id, profile));
@@ -297,6 +301,7 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
         ("VYOS", Vendor::Vyos),
         ("NXOS", Vendor::Nxos),
         ("IOSXR", Vendor::Iosxr),
+        ("IOSXE", Vendor::Iosxe),
     ] {
         ssh_devices(env, prefix, vendor, &mut s)?;
     }
@@ -508,7 +513,8 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
     .map_err(|e| e.to_string())?
     .with_source(Arc::new(VyosSource::new(ssh.clone())))
     .with_source(Arc::new(nxos))
-    .with_source(Arc::new(IosxrSource::new(ssh)))
+    .with_source(Arc::new(IosxrSource::new(ssh.clone())))
+    .with_source(Arc::new(IosxeSource::new(ssh)))
     .with_source(Arc::new(UnifiSource::new(Arc::new(https))));
     if repeat {
         let stop = async {
