@@ -174,6 +174,8 @@ fn leaf(b: &mut TwinBuilder, n: u8) {
         meta: d.meta("vxlan-decap", 60, 62),
         vnis,
         plain: None,
+        port: None,
+        unmatched: None,
     });
     let attach = fid(&format!("{name}/in/eth9"));
     add_host(b, endpoint(&host, &ten, attach));

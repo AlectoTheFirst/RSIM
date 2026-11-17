@@ -8,6 +8,7 @@ pub mod names;
 mod profile;
 pub mod state;
 mod table;
+mod vxlan;
 
 use std::collections::BTreeSet;
 
@@ -28,6 +29,8 @@ pub const SECTIONS: &[&str] = &[
     "cdp",
     "version",
     "vpc",
+    "nve_peers",
+    "nve_vnis",
 ];
 
 /// Reads the bytes of a running config into a stanza tree. A byte sequence

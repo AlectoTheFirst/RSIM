@@ -117,6 +117,46 @@ pub struct Fhrp {
     pub lines: Lines,
 }
 
+/// How a VNI sends its broadcast and unknown frames to the other tunnel
+/// ends.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Replication {
+    /// A copy to each peer tunnel end that BGP gives.
+    Ingress,
+    /// One copy to a multicast group of the underlay.
+    Multicast(String),
+    /// The config states neither.
+    Unstated,
+}
+
+/// A `member vni` of the NVE interface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NveMember {
+    pub vni: u32,
+    /// True with `associate-vrf`: a layer 3 VNI.
+    pub l3: bool,
+    pub replication: Replication,
+    pub lines: Lines,
+}
+
+/// The NVE interface: the VXLAN tunnel end of the switch.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Nve {
+    pub name: String,
+    pub admin_up: Option<bool>,
+    /// The interface whose address is the tunnel end.
+    pub source: Option<(String, Lines)>,
+    /// True with `host-reachability protocol bgp`.
+    pub bgp: bool,
+    /// The replication of a member with no replication line, from a
+    /// `global` line.
+    pub global: Option<Replication>,
+    pub members: Vec<NveMember>,
+    /// The masked lines that the lowering does not read.
+    pub unhandled: Vec<String>,
+    pub lines: Lines,
+}
+
 /// The action of an ACL entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AclAction {
@@ -247,9 +287,12 @@ pub struct Config {
     pub nat_pools: BTreeMap<String, NatPool>,
     /// The VLANs of the `vlan` lines, as ranges.
     pub vlans: Vec<(u16, u16)>,
-    /// The VLANs with a line that the lowering does not read, for example
-    /// `vn-segment`.
+    /// The VLANs with a line that the lowering does not read.
     pub unknown_vlans: Vec<(u16, u16)>,
+    /// The VNI of each VLAN with `vn-segment`.
+    pub segments: BTreeMap<u16, (u32, Lines)>,
+    /// The NVE interface.
+    pub nve: Option<Nve>,
     /// The name of the line `hostname`.
     pub hostname: Option<String>,
     pub vpc_domain: Option<VpcDomain>,
@@ -309,6 +352,9 @@ pub fn read(doc: &Document, table: &Table) -> Config {
     for s in doc.root.children() {
         let w = words(&s.key);
         match w.as_slice() {
+            ["interface", name] if name.to_ascii_lowercase().starts_with("nve") => {
+                cfg.nve = Some(nve(&mut r, s, name));
+            }
             ["interface", name] => {
                 let i = interface(&mut r, s, name);
                 cfg.interfaces.push(i);
@@ -419,6 +465,17 @@ pub fn read(doc: &Document, table: &Table) -> Config {
                     .any(|c| table.state(&[s.key.as_str(), c.key.as_str()]) == State::Unhandled);
                 if unknown {
                     cfg.unknown_vlans.extend(ranges.iter().copied());
+                }
+                for c in s.children() {
+                    if let ["vn-segment", n] = words(&c.key).as_slice() {
+                        r.mark(c);
+                        match (ranges.as_slice(), n.parse::<u32>()) {
+                            ([(a, b)], Ok(vni)) if a == b => {
+                                cfg.segments.insert(*a, (vni, Lines::of(c)));
+                            }
+                            _ => cfg.unknown_vlans.extend(ranges.iter().copied()),
+                        }
+                    }
                 }
                 cfg.vlans.extend(ranges);
             }
@@ -628,6 +685,84 @@ fn interface(r: &mut R, s: &Stanza, name: &str) -> Interface {
         }
     }
     i
+}
+
+/// The replication of a `member vni` or a `global` line, or `None` for a
+/// line that is not a replication line.
+fn replication(w: &[&str]) -> Option<Replication> {
+    match w {
+        ["ingress-replication", "protocol", "bgp"] => Some(Replication::Ingress),
+        ["mcast-group", g] | ["mcast-group", g, "L2"] => {
+            Some(Replication::Multicast((*g).to_string()))
+        }
+        _ => None,
+    }
+}
+
+fn nve(r: &mut R, s: &Stanza, name: &str) -> Nve {
+    r.mark(s);
+    let mut n = Nve {
+        name: name.to_string(),
+        lines: Lines::of(s),
+        unhandled: r.unhandled_children(s),
+        ..Nve::default()
+    };
+    for c in s.children() {
+        let lines = Lines::of(c);
+        let w = words(&c.key);
+        let handled = match w.as_slice() {
+            ["shutdown"] => {
+                n.admin_up = Some(false);
+                true
+            }
+            ["no", "shutdown"] => {
+                n.admin_up = Some(true);
+                true
+            }
+            ["source-interface", i] => {
+                n.source = Some(((*i).to_string(), lines));
+                true
+            }
+            ["host-reachability", "protocol", "bgp"] => {
+                n.bgp = true;
+                true
+            }
+            ["global", rest @ ..] => match replication(rest) {
+                Some(rep) => {
+                    n.global = Some(rep);
+                    true
+                }
+                None => false,
+            },
+            ["member", "vni", v, rest @ ..] => {
+                let l3 = rest == ["associate-vrf"];
+                match v.parse::<u32>() {
+                    Ok(vni) if rest.is_empty() || l3 => {
+                        let mut m = NveMember {
+                            vni,
+                            l3,
+                            replication: Replication::Unstated,
+                            lines,
+                        };
+                        for gc in c.children() {
+                            if let Some(rep) = replication(&words(&gc.key)) {
+                                r.mark(gc);
+                                m.replication = rep;
+                            }
+                        }
+                        n.members.push(m);
+                    }
+                    _ => n.unhandled.push(r.table.report_key(&c.key)),
+                }
+                true
+            }
+            _ => false,
+        };
+        if handled {
+            r.mark(c);
+        }
+    }
+    n
 }
 
 /// The VLAN ranges of a list such as `1,10,20-25`, or `None` if a part is

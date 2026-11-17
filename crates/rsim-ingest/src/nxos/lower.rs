@@ -27,7 +27,7 @@ use crate::links::{External, Summary};
 use crate::vyos::Lowered;
 
 /// The VRF of an interface with no `vrf member`.
-const DEFAULT_VRF: &str = "default";
+pub(super) const DEFAULT_VRF: &str = "default";
 
 pub(super) struct L<'a> {
     pub(super) dev: &'a str,
@@ -142,7 +142,8 @@ pub fn lower(
             .collect()
     };
     let gws = l.gateways(&active, &st, col, &names, super::layer2::vpc_ok(cfg, &st));
-    let svi_links = l.layer2(&active, &gws, &st, col, &names, ext, &mut sum);
+    let tunnel = super::vxlan::plan(cfg, &st, &active, &mut l);
+    let svi_links = l.layer2(&active, &gws, &st, col, &names, ext, &tunnel, &mut sum);
     // The routed ports that can end a link: a physical port or a port
     // channel with a collected MAC.
     sum.routed = active
@@ -242,17 +243,37 @@ pub fn lower(
             .filter_map(|i| gws.get(&i.name))
             .flat_map(|g| g.active.iter().map(|(_, a, s)| (*a, s.clone())))
             .collect();
-        let fib = l.fib(v, &active, col, &names, &vips);
+        let fib = l.fib(v, &active, col, &names, &vips, "snat");
         tables.insert(VrfId::new(v), fib);
     }
     l.note("IPv6 is not lowered: each IPv6 packet is unknown at the route lookup".into());
+    let dev = l.dev;
+    let bd = move |v: u16| super::layer2::bd_of(dev, v);
+    let local = l
+        .vxlan_decap(&tunnel, "local", &bd)
+        .unwrap_or_else(|| l.id("local"));
     let meta = l.meta("route", Vec::new());
     l.add(RouteLookup {
         meta,
         tables,
         fallback: None,
-        local: Some(l.id("local")),
+        local: Some(local.clone()),
     });
+    let encapsulates = l
+        .out
+        .functions
+        .iter()
+        .any(|f| f.kind() == rsim_core::FunctionKind::Encapsulation);
+    if encapsulates {
+        let fib = l.fib(DEFAULT_VRF, &active, col, &names, &[], "vxlan/nexthop");
+        let meta = l.meta(super::profile::VXLAN_ENTRY, Vec::new());
+        l.add(RouteLookup {
+            meta,
+            tables: [(VrfId::new(DEFAULT_VRF), fib)].into_iter().collect(),
+            fallback: None,
+            local: Some(local),
+        });
+    }
     let meta = l.meta("local", Vec::new());
     l.add(LocalInput {
         meta,
@@ -275,6 +296,7 @@ pub fn lower(
     l.add(SessionCommit {
         meta,
         next: l.id("nexthop"),
+        keep_untranslated: super::profile::KEEPS_UNTRANSLATED_FLOWS,
     });
 
     // Next hops, the output ACLs and egress.
@@ -298,6 +320,40 @@ pub fn lower(
         neighbours.insert(p, v);
     }
     let filtered_out = |i: &Interface| i.acl_out.is_some() || !i.unhandled.is_empty();
+    // The next hops of the outer header of a VXLAN packet: no source states
+    // whether an output ACL of the egress applies to it, so such an egress
+    // gives Unknown.
+    if encapsulates {
+        let mut egress = BTreeMap::new();
+        for i in &active {
+            let f = if filtered_out(i) {
+                let f = format!("vxlan/acl-out/{}", i.name);
+                let s = l.sink(
+                    &f,
+                    format!(
+                        "{}: an output ACL or a line that is not lowered on the egress of a VXLAN packet",
+                        i.name
+                    ),
+                    l.span(i.lines),
+                );
+                l.add(s);
+                f
+            } else if i.qos_out.is_some() {
+                format!("qos-out/{}", i.name)
+            } else {
+                format!("out/{}", i.name)
+            };
+            egress.insert(InterfaceId::new(&i.name), l.id(&f));
+        }
+        let meta = l.meta("vxlan/nexthop", Vec::new());
+        l.add(NextHopResolution {
+            meta,
+            neighbours: neighbours.clone(),
+            complete: false,
+            egress,
+            point_to_point: BTreeMap::new(),
+        });
+    }
     let meta = l.meta("nexthop", Vec::new());
     l.add(NextHopResolution {
         meta,
@@ -1059,19 +1115,21 @@ impl L<'_> {
     /// The FIB of a VRF: the collected route table, or else the connected
     /// and static routes of the config. The addresses of the interfaces of
     /// the VRF are local routes. Each IPv6 packet is unknown.
-    fn fib(
+    /// The FIB of a VRF. Each next hop goes to the function `next`.
+    pub(super) fn fib(
         &mut self,
         vrf: &str,
         active: &[Interface],
         col: &Collected,
         names: &Names,
         vips: &[(IpAddr, Vec<SourceSpan>)],
+        next: &str,
     ) -> Fib {
         let mut t = Fib::new();
         let hop = |l: &L, iface: &str, gw: Option<IpAddr>| RouteNextHop {
             interface: InterfaceId::new(iface),
             gateway: gw,
-            next: l.id("snat"),
+            next: l.id(next),
         };
         if col.routes.is_empty() {
             for i in active.iter().filter(|i| vrf_of(i) == vrf) {

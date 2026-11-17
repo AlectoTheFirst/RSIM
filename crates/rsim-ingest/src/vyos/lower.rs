@@ -405,6 +405,7 @@ pub fn lower(
     l.add(SessionCommit {
         meta,
         next: l.id("nexthop"),
+        keep_untranslated: true,
     });
 
     // Next hops, QoS and egress.

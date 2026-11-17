@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use rsim_core::{
     Attr, Branch, BridgeDomainId, Context, ContextAttr, Dependency, Destination, Encap, FieldValue,
     FlowState, Fragment, FunctionId, FunctionKind, Header, HeaderField, NetFunction, NextHop,
-    Outcome, PROTO_UDP, PacketSet, Reason, ReasonCode, VrfId,
+    Outcome, PROTO_UDP, PacketSet, PortId, Reason, ReasonCode, VrfId,
 };
 
 use crate::common::{Meta, push_nonempty};
@@ -129,7 +129,7 @@ impl NetFunction for VxlanEncap {
     tunnel_methods!(FunctionKind::Encapsulation);
     fn requires(&self) -> Vec<ContextAttr> {
         let mut v = Vec::new();
-        if self.vnis.keys().all(|s| matches!(s, Segment::Vrf(_))) {
+        if !self.vnis.is_empty() && self.vnis.keys().all(|s| matches!(s, Segment::Vrf(_))) {
             v.push(ContextAttr::Vrf);
         }
         if self.peer == TunnelPeer::NextHop {
@@ -138,7 +138,7 @@ impl NetFunction for VxlanEncap {
         v
     }
     fn provides(&self) -> Vec<ContextAttr> {
-        vec![ContextAttr::Vrf]
+        vec![ContextAttr::Device, ContextAttr::Vrf]
     }
     fn reads(&self) -> Vec<Dependency> {
         vec![Dependency::Object(rsim_core::ObjectId::new(format!(
@@ -195,6 +195,7 @@ impl NetFunction for VxlanEncap {
         }
         let e = input.encapsulate(&self.outer.header(self.source, peer, vni));
         let mut c = ctx.clone();
+        c.device = Attr::Known(self.meta.device.clone());
         c.vrf = Attr::Known(self.underlay.clone());
         c.egress_interface = Attr::Unset;
         c.next_hop = Attr::Unset;
@@ -236,6 +237,12 @@ pub struct VxlanDecap {
     /// The function that gets the packets with no encapsulation. `None`
     /// delivers them to the device.
     pub plain: Option<FunctionId>,
+    /// The port of the tunnel in a bridge domain. A frame out of the tunnel
+    /// comes in on it.
+    pub port: Option<PortId>,
+    /// The result of a VNI that is not in `vnis`: `None` drops the packets,
+    /// and a text gives `Unknown` with that reason.
+    pub unmatched: Option<String>,
 }
 
 impl NetFunction for VxlanDecap {
@@ -289,7 +296,12 @@ impl NetFunction for VxlanDecap {
             let mut c = ctx.clone();
             match segment {
                 Segment::Vrf(v) => c.vrf = Attr::Known(v.clone()),
-                Segment::BridgeDomain(b) => c.bridge_domain = Attr::Known(b.clone()),
+                Segment::BridgeDomain(b) => {
+                    c.bridge_domain = Attr::Known(b.clone());
+                    if let Some(p) = &self.port {
+                        c.ingress_port = Attr::Known(p.clone());
+                    }
+                }
             }
             c.egress_interface = Attr::Unset;
             c.next_hop = Attr::Unset;
@@ -303,16 +315,20 @@ impl NetFunction for VxlanDecap {
                 state,
             ));
         }
-        push_nonempty(
-            &mut out,
-            self.meta.drop(
+        let other = match &self.unmatched {
+            None => self.meta.drop(
                 rest,
                 ReasonCode::NoSegment,
                 format!("no VNI of the packets on {}", self.meta.device),
                 ctx,
                 state,
             ),
-        );
+            Some(why) => {
+                self.meta
+                    .unknown(rest, ReasonCode::UnhandledStanza, why.clone(), ctx, state)
+            }
+        };
+        push_nonempty(&mut out, other);
         let plain = match &self.plain {
             Some(next) => self.meta.forward(
                 d.plain,
