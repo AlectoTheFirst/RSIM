@@ -21,8 +21,8 @@ use rsim_functions::{
 
 use super::config::{Config, HsrpGroup, Interface};
 use super::profile::{
-    ALL_IPV4, CONNECTED_CODE, DEFAULT_VRF, HSRP_ACTIVE, HSRP_DEFAULT_VERSION, HSRP_NOT_ACTIVE,
-    LOCAL_CODE, UP_WITHOUT_SHUTDOWN, hsrp_vmac,
+    ALL_IPV4, CONNECTED_CODE, DEFAULT_VRF, HSRP_ACTIVE, HSRP_NOT_ACTIVE, LOCAL_CODE,
+    UP_WITHOUT_SHUTDOWN,
 };
 use super::state::{self, Rib, RoutePath, Section, UnreadRoute};
 use crate::links::{External, Summary, VlanAddrs};
@@ -479,7 +479,6 @@ fn summary(
 fn group_state(
     g: &HsrpGroup,
     iface: &str,
-    vmac: Option<Mac>,
     st: &state::State,
     spans: &mut Vec<SourceSpan>,
 ) -> GroupState {
@@ -516,9 +515,6 @@ fn group_state(
     }
     let word = r.state.to_ascii_lowercase();
     if word == HSRP_ACTIVE {
-        if vmac.is_none() {
-            return GroupState::Unknown("the virtual MAC is not known".into());
-        }
         GroupState::Active
     } else if HSRP_NOT_ACTIVE.contains(&word.as_str()) {
         GroupState::NotActive
@@ -527,9 +523,11 @@ fn group_state(
     }
 }
 
-/// The IPv4 HSRP groups of the lowered interfaces with their state. A
-/// group whose state cannot be read, or with a line that is not read, has a
-/// state that is not known.
+/// The IPv4 HSRP groups of the lowered interfaces with their state and
+/// their virtual MAC. A group whose state cannot be read, or with a line
+/// that is not read, has a state that is not known. The virtual MAC is the
+/// MAC of the `mac-address` line; a group with no such line has a virtual
+/// MAC that is not known.
 fn hsrp<'a>(
     l: &mut L,
     cfg: &'a Config,
@@ -551,20 +549,21 @@ fn hsrp<'a>(
         }
         let mut spans = vec![l.span(g.lines)];
         spans.extend(g.addresses.iter().map(|(_, x)| l.span(*x)));
-        let version = g.version.map_or(HSRP_DEFAULT_VERSION, |v| v.0);
-        let vmac = match g.mac {
-            Some((m, x)) => {
-                spans.push(l.span(x));
-                Some(m)
-            }
-            None => hsrp_vmac(version, g.group),
-        };
-        let state = group_state(g, &iface, vmac, st, &mut spans);
-        if let GroupState::Unknown(why) = &state {
-            l.note(format!(
+        let vmac = g.mac.map(|(m, x)| {
+            spans.push(l.span(x));
+            m
+        });
+        let state = group_state(g, &iface, st, &mut spans);
+        match (&state, vmac) {
+            (GroupState::Unknown(why), _) => l.note(format!(
                 "{iface}: HSRP group {}: {why}, so the packets to its virtual address and MAC are unknown",
                 g.group
-            ));
+            )),
+            (GroupState::Active, None) => l.note(format!(
+                "{iface}: HSRP group {}: no mac-address line, so the virtual MAC is not known",
+                g.group
+            )),
+            _ => {}
         }
         out.push(Group {
             g,
@@ -580,8 +579,9 @@ fn hsrp<'a>(
 /// The hand-off of each port with a link: the MACs of the port, of its
 /// sub-interfaces and of its active HSRP groups go to the ingress of the
 /// port or of the sub-interface of the dot1q VLAN. A frame to the virtual
-/// MAC of a group whose state is not known gives `Unknown`; if that MAC is
-/// not known, each frame of the port gives `Unknown`.
+/// MAC of a group whose state is not known gives `Unknown`. If an active
+/// group or a group whose state is not known has no known virtual MAC,
+/// each frame of the port gives `Unknown`.
 fn handoffs(l: &mut L, active: &[Port], groups: &[Group], sum: &Summary, ext: &External) {
     for (port, peers) in &ext.peers {
         if !sum.entries.contains_key(port) || peers.is_empty() {
@@ -611,20 +611,17 @@ fn handoffs(l: &mut L, active: &[Port], groups: &[Group], sum: &Summary, ext: &E
                 (GroupState::Unknown(_), Some(m)) => {
                     unknown.insert(m);
                 }
-                (GroupState::Unknown(why), None) => {
-                    blind.push(format!(
-                        "HSRP group {} of {}: {why}",
-                        g.g.group, g.interface
-                    ));
+                (GroupState::Unknown(_) | GroupState::Active, None) => {
+                    blind.push(format!("HSRP group {} of {}", g.g.group, g.interface));
                 }
-                (GroupState::Active | GroupState::NotActive, _) => {}
+                (GroupState::NotActive, _) => {}
             }
         }
         if !blind.is_empty() {
             let span = l.span(mine.first().map_or_else(Default::default, |p| p.i.lines));
             let s = l.sink(
                 &f,
-                format!("{port}: a virtual MAC is not known: {}", blind.join("; ")),
+                format!("{port}: the virtual MAC is not known: {}", blind.join(", ")),
                 span,
             );
             l.add(s);

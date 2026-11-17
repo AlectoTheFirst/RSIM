@@ -127,6 +127,7 @@ router hsrp
   address-family ipv4
    hsrp 1
     address 192.0.2.3
+    mac-address 0000.5e00.53a1
    !
    hsrp 2
     address 192.0.2.4
@@ -184,8 +185,7 @@ C    198.51.100.248/30 is directly connected, 3d04h, GigabitEthernet0/0/0/5
 L    198.51.100.249/32 is directly connected, 3d04h, GigabitEthernet0/0/0/5
 ";
 
-/// The ARP rows of pe2: the virtual MAC of group 1 is the MAC of HSRP
-/// version 1, and the virtual MAC of group 3 of pe1 the MAC of version 2.
+/// The ARP rows of pe2, with the virtual MACs of the groups 1 and 3.
 const PE2_ARP: &str = "Tue Nov 17 10:00:03.000 UTC
 
 -------------------------------------------------------------------------------
@@ -194,8 +194,8 @@ const PE2_ARP: &str = "Tue Nov 17 10:00:03.000 UTC
 Address         Age        Hardware Addr   State      Type  Interface
 192.0.2.2       -          0000.5e00.5370  Interface  ARPA  BE20.100
 192.0.2.1       00:00:41   0000.5e00.5320  Dynamic    ARPA  BE20.100
-192.0.2.3       00:00:41   0000.0c07.ac01  Dynamic    ARPA  BE20.100
-192.0.2.5       00:00:41   0000.0c9f.f003  Dynamic    ARPA  BE20.100
+192.0.2.3       00:00:41   0000.5e00.53a1  Dynamic    ARPA  BE20.100
+192.0.2.5       00:00:41   0000.5e00.53a3  Dynamic    ARPA  BE20.100
 198.51.100.249  -          0000.5e00.5375  Interface  ARPA  Gi0/0/0/5
 198.51.100.250  00:00:41   0000.5e00.5376  Dynamic    ARPA  Gi0/0/0/5
 ";
@@ -522,7 +522,7 @@ fn a_sub_interface_sends_its_dot1q_vlan_to_the_active_router_of_the_group() {
     assert_eq!(w.current.vlan, FieldValue::Known(100));
     assert_eq!(
         w.current.dst_mac,
-        FieldValue::Known(mac("00:00:0c:07:ac:01"))
+        FieldValue::Known(mac("00:00:5e:00:53:a1"))
     );
     // Group 2: pe2 is active and delivers on its own.
     let (verdict, steps) = only(&query(
@@ -662,9 +662,8 @@ fn a_state_that_cannot_be_read_gives_unknown() {
 }
 
 #[test]
-fn a_virtual_mac_that_is_not_known_makes_the_port_unknown() {
-    // Group 3 has no row in show hsrp, and version 3 gives no virtual MAC.
-    let config = String::from_utf8_lossy(CONFIG).replace("hsrp 3 version 2", "hsrp 3 version 3");
+fn an_active_group_with_no_virtual_mac_makes_the_port_unknown() {
+    let config = String::from_utf8_lossy(CONFIG).replace("    mac-address 0000.5e00.53a1\n", "");
     let e = assemble(vec![
         core1(),
         Input::Iosxr {
@@ -676,17 +675,34 @@ fn a_virtual_mac_that_is_not_known_makes_the_port_unknown() {
         },
         pe2(),
     ]);
+    assert!(
+        e.notes["pe1"].iter().any(|n| n
+            == "Bundle-Ether20.100: HSRP group 1: no mac-address line, so the virtual MAC is not known"),
+        "{:#?}",
+        e.notes["pe1"]
+    );
     let t = twin_of(e);
+    // Each frame of the port is unknown.
     let (verdict, steps) = only(&query(
         &t,
         "pe2",
         "GigabitEthernet0/0/0/5",
         "198.51.100.250",
-        "192.0.2.3",
+        "192.0.2.1",
         false,
     ));
     assert_eq!(verdict, VerdictKind::Unknown, "{steps:#?}");
     assert!(has(&steps, "pe1/handoff/Bundle-Ether20"), "{steps:#?}");
+    // The virtual address of the active group stays a local route.
+    let (verdict, steps) = only(&query(
+        &t,
+        "pe1",
+        "Bundle-Ether20.100",
+        "192.0.2.20",
+        "192.0.2.3",
+        false,
+    ));
+    assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
 }
 
 #[test]

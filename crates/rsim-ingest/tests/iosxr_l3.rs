@@ -197,7 +197,7 @@ fn a_packet_follows_the_static_default_through_its_connected_next_hop() {
         "{steps:#?}"
     );
     assert!(has(&steps, "nexthop 203.0.113.254 is"));
-    // The router has no link yet, so the egress is unknown.
+    // The interface has no link, so the egress is unknown.
     assert!(has(&steps, "out/GigabitEthernet0/0/0/3 no link"));
     assert_eq!(verdict, VerdictKind::Unknown);
     // Provenance: the ingress names the config stanza and the interface

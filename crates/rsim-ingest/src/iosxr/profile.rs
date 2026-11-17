@@ -1,6 +1,6 @@
 //! The vendor behaviour profile of IOS-XR.
 
-use rsim_core::{Mac, SourceSpan, VrfId};
+use rsim_core::{SourceSpan, VrfId};
 use rsim_functions::{PortTranslation, RuleAction, UnzonedInterface, VendorProfile};
 
 use crate::nxos::names::Types;
@@ -91,22 +91,3 @@ pub const HSRP_ACTIVE: &str = "active";
 /// The HSRP state words of a router that is not the active router, in
 /// lower case. Each other word is a state that is not known.
 pub const HSRP_NOT_ACTIVE: &[&str] = &["standby", "speak", "listen", "init"];
-
-/// The HSRP version of a group with no `version` on its `hsrp` line. Not
-/// confirmed against a device.
-pub const HSRP_DEFAULT_VERSION: u8 = 1;
-
-/// The virtual MAC of an HSRP group with no `mac-address` line:
-/// `0000.0c07.acXX` for version 1 and the groups 0 to 255, and
-/// `0000.0c9f.fXXX` for version 2 and the groups 0 to 4095. RFC 2281 gives
-/// the MAC of version 1. Not confirmed against a device.
-pub fn hsrp_vmac(version: u8, group: u32) -> Option<Mac> {
-    match (version, u8::try_from(group), u16::try_from(group)) {
-        (1, Ok(g), _) => Some(Mac([0x00, 0x00, 0x0c, 0x07, 0xac, g])),
-        (2, _, Ok(g)) if g <= 0x0fff => {
-            let [hi, lo] = g.to_be_bytes();
-            Some(Mac([0x00, 0x00, 0x0c, 0x9f, 0xf0 | hi, lo]))
-        }
-        _ => None,
-    }
-}

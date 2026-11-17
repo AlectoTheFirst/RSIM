@@ -53,7 +53,7 @@ fn ranked(rib: bool) -> Vec<(String, u32, u32)> {
 fn the_coverage_shares_of_the_fixture() {
     let doc = iosxr::read_text(CONFIG);
     let cov = classify(&doc, &iosxr::table(true));
-    assert_eq!(cov.lines[&State::Handled], 65);
+    assert_eq!(cov.lines[&State::Handled], 67);
     assert_eq!(cov.lines[&State::Irrelevant], 149);
     assert_eq!(cov.lines[&State::Unhandled], 5);
     assert!(cov.share(State::Unhandled) < 0.05);
