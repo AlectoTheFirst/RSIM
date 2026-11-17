@@ -17,5 +17,5 @@ mod template;
 
 pub use index::{Index, IndexError, IndexRow};
 pub use library::{BUILTIN_INDEX, BUILTIN_TEMPLATES, Library, LibraryError};
-pub use run::{Field, Item, ParseError, Table, split_lines};
+pub use run::{Field, Item, ParseError, Table, Traced, Unread, split_lines};
 pub use template::{LineOp, RecordOp, Rule, State, Template, TemplateError, Value, ValueOption};

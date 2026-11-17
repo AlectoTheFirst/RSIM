@@ -37,33 +37,50 @@ pub(super) struct Vx<'a> {
     pub encap: Option<&'a FunctionId>,
 }
 
-pub(super) struct L<'a> {
-    pub(super) dev: &'a str,
+/// The lowering of one device: its name, the file of its config, its
+/// profile, the typed config that the ACL functions read, and the functions
+/// and notes so far.
+pub(crate) struct L<'a> {
+    pub(crate) dev: &'a str,
     file: &'a str,
     profile: &'a VendorProfile,
     pub(super) cfg: &'a Config,
-    pub(super) out: Lowered,
+    pub(crate) out: Lowered,
 }
 
-impl L<'_> {
-    pub(super) fn id(&self, f: &str) -> FunctionId {
+impl<'a> L<'a> {
+    pub(crate) fn new(
+        dev: &'a str,
+        file: &'a str,
+        profile: &'a VendorProfile,
+        cfg: &'a Config,
+    ) -> L<'a> {
+        L {
+            dev,
+            file,
+            profile,
+            cfg,
+            out: Lowered::default(),
+        }
+    }
+    pub(crate) fn id(&self, f: &str) -> FunctionId {
         FunctionId::new(format!("{}/{f}", self.dev))
     }
     pub(super) fn file_name(&self) -> &str {
         self.file
     }
-    pub(super) fn span(&self, l: Lines) -> SourceSpan {
+    pub(crate) fn span(&self, l: Lines) -> SourceSpan {
         SourceSpan::new(self.file, l.first.max(1), l.last.max(l.first).max(1))
     }
-    pub(super) fn meta(&self, f: &str, spans: Vec<SourceSpan>) -> Meta {
+    pub(crate) fn meta(&self, f: &str, spans: Vec<SourceSpan>) -> Meta {
         let mut m = Meta::new(self.id(f), self.dev, self.profile);
         m.provenance = spans;
         m
     }
-    pub(super) fn add(&mut self, f: impl NetFunction + 'static) {
+    pub(crate) fn add(&mut self, f: impl NetFunction + 'static) {
         self.out.functions.push(Arc::new(f));
     }
-    pub(super) fn note(&mut self, s: String) {
+    pub(crate) fn note(&mut self, s: String) {
         self.out.notes.push(s);
     }
 }
@@ -73,7 +90,7 @@ fn vrf_of(i: &Interface) -> &str {
 }
 
 /// An interface address: the address and the prefix length.
-pub(super) fn iface_addr(s: &str) -> Option<(IpAddr, u8)> {
+pub(crate) fn iface_addr(s: &str) -> Option<(IpAddr, u8)> {
     let (a, l) = s.split_once('/')?;
     Some((a.parse().ok()?, l.parse().ok()?))
 }
@@ -925,7 +942,7 @@ impl L<'_> {
 
     /// The function of a QoS policy of an interface. It forwards the
     /// packets, and the marking and the class become unknown.
-    pub(super) fn qos(&self, f: &str, policy: &str, lines: Lines, next: &str) -> QosNotEvaluated {
+    pub(crate) fn qos(&self, f: &str, policy: &str, lines: Lines, next: &str) -> QosNotEvaluated {
         QosNotEvaluated {
             meta: self.meta(f, vec![self.span(lines)]),
             stanza: ObjectId::new(format!("{}:qos:{policy}", self.dev)),
@@ -937,7 +954,7 @@ impl L<'_> {
     /// options of the interface come first, so the function gives `Unknown`
     /// for each packet. With no bound ACL, the function permits the other
     /// packets. An IPv4 ACL does not filter IPv6 packets.
-    fn interface_acl(
+    pub(crate) fn interface_acl(
         &mut self,
         i: &Interface,
         bound: Option<&(String, Lines)>,

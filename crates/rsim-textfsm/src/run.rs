@@ -144,10 +144,56 @@ struct Slot {
     items: Vec<Item>,
 }
 
+/// The outcome of a `Record` operation.
+enum Append {
+    /// The record was kept.
+    Kept,
+    /// A Required value was empty, so the record was discarded.
+    Discarded,
+    /// The record had no value, so nothing was kept.
+    Empty,
+}
+
+/// What a parse did with the lines of the input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Traced {
+    /// The records, as [`Template::parse_text`] gives them.
+    pub table: Table,
+    /// The first and the last input line, from 1, of each record: the lines
+    /// that assigned a value that is not Filldown to it. A record with no such
+    /// line has the line of its `Record` operation.
+    pub lines: Vec<(usize, usize)>,
+    /// The lines that no record holds: each line that no rule of the current
+    /// state matched, and each line that assigned a value that is not
+    /// Filldown to a record that an empty Required value discarded. In the
+    /// order of the input.
+    pub unread: Vec<Unread>,
+}
+
+/// An input line that no record holds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Unread {
+    /// The line, from 1.
+    pub line: usize,
+    pub text: String,
+    /// True if no rule of the current state matched the line; false if its
+    /// record was discarded.
+    pub unmatched: bool,
+    /// The text of each value after the line, in the order of the header:
+    /// the values of the record being built and the Filldown values. A list
+    /// is the empty text.
+    pub values: Vec<String>,
+}
+
 struct Run<'t> {
     template: &'t Template,
     slots: Vec<Slot>,
     records: Vec<Vec<Field>>,
+    /// The lines that assigned a value that is not Filldown to the record
+    /// being built, each with the values after the line.
+    pending: Vec<(usize, Vec<String>)>,
+    lines: Vec<(usize, usize)>,
+    unread: Vec<Unread>,
 }
 
 impl<'t> Run<'t> {
@@ -165,6 +211,52 @@ impl<'t> Run<'t> {
             template,
             slots,
             records: Vec::new(),
+            pending: Vec::new(),
+            lines: Vec::new(),
+            unread: Vec::new(),
+        }
+    }
+
+    /// The text of each value now.
+    fn values(&self) -> Vec<String> {
+        self.slots
+            .iter()
+            .map(|slot| match &slot.cell {
+                Cell::Text(text) => text.clone(),
+                Cell::None | Cell::List(_) => String::new(),
+            })
+            .collect()
+    }
+
+    /// Notes that a line assigned a value that is not Filldown.
+    fn assigned(&mut self, line: usize) {
+        let values = self.values();
+        match self.pending.last_mut() {
+            Some((last, v)) if *last == line => *v = values,
+            _ => self.pending.push((line, values)),
+        }
+    }
+
+    /// Applies a `Record` operation at a line and traces its outcome.
+    fn record_at(&mut self, line: usize, input: &[&str]) {
+        match self.append_record() {
+            Append::Kept => {
+                let first = self.pending.first().map_or(line, |p| p.0);
+                let last = self.pending.last().map_or(line, |p| p.0);
+                self.lines.push((first, last));
+                self.pending.clear();
+            }
+            Append::Discarded => {
+                for (n, values) in std::mem::take(&mut self.pending) {
+                    self.unread.push(Unread {
+                        line: n,
+                        text: input.get(n - 1).copied().unwrap_or_default().to_string(),
+                        unmatched: false,
+                        values,
+                    });
+                }
+            }
+            Append::Empty => self.pending.clear(),
         }
     }
 
@@ -238,16 +330,16 @@ impl<'t> Run<'t> {
 
     /// Keeps the current record when no Required value is empty and the
     /// record is not empty.
-    fn append_record(&mut self) {
+    fn append_record(&mut self) -> Append {
         if self.template.values.is_empty() {
-            return;
+            return Append::Empty;
         }
         for (value, slot) in self.template.values.iter().zip(&mut self.slots) {
             for option in &value.options {
                 match option {
                     ValueOption::Required if !slot.cell.is_truthy() => {
                         self.clear();
-                        return;
+                        return Append::Discarded;
                     }
                     ValueOption::List => slot.cell = Cell::List(slot.items.clone()),
                     _ => {}
@@ -260,7 +352,7 @@ impl<'t> Run<'t> {
             Cell::Text(_) => false,
         });
         if empty {
-            return;
+            return Append::Empty;
         }
         let record = self
             .slots
@@ -273,6 +365,7 @@ impl<'t> Run<'t> {
             .collect();
         self.records.push(record);
         self.clear();
+        Append::Kept
     }
 }
 
@@ -337,6 +430,13 @@ impl Template {
     /// Parses an input text into records, as TextFSM's `ParseText` does with
     /// the end of the input as the end of the text.
     pub fn parse_text(&self, text: &str) -> Result<Table, ParseError> {
+        self.parse_traced(text).map(|t| t.table)
+    }
+
+    /// Parses an input text into records, as [`Template::parse_text`] does,
+    /// with the input lines of each record and the lines that no record
+    /// holds.
+    pub fn parse_traced(&self, text: &str) -> Result<Traced, ParseError> {
         let mut run = Run::new(self);
         let mut locations: Vec<Vec<CaptureLocations>> = self
             .states
@@ -349,27 +449,42 @@ impl Template {
                     .collect()
             })
             .collect();
+        let input: Vec<&str> = split_lines(text).collect();
         let mut state = self.start;
         let mut finished = None;
-        'lines: for (number, line) in split_lines(text).enumerate() {
+        'lines: for (number, line) in input.iter().copied().enumerate() {
+            let n = number + 1;
             let rules = &self.states[state].rules;
+            let mut matched = false;
             for (rule, locs) in rules.iter().zip(locations[state].iter_mut()) {
                 if rule.regex.captures_read(locs, line).is_none() {
                     continue;
                 }
+                matched = true;
+                let mut assigned = false;
                 for &(group, index) in &rule.slots {
                     let text = locs.get(group).map(|(s, e)| &line[s..e]);
                     run.assign(index, text)
                         .map_err(|value| ParseError::ListItem {
                             value,
                             rule_line: rule.line,
-                            input_line: number + 1,
+                            input_line: n,
                         })?;
+                    assigned |= text.is_some() && !self.values[index].has(ValueOption::Filldown);
+                }
+                if assigned {
+                    run.assigned(n);
                 }
                 match rule.record_op {
-                    RecordOp::Record => run.append_record(),
-                    RecordOp::Clear => run.clear(),
-                    RecordOp::Clearall => run.clear_all(),
+                    RecordOp::Record => run.record_at(n, &input),
+                    RecordOp::Clear => {
+                        run.clear();
+                        run.pending.clear();
+                    }
+                    RecordOp::Clearall => {
+                        run.clear_all();
+                        run.pending.clear();
+                    }
                     RecordOp::NoRecord => {}
                 }
                 match rule.line_op {
@@ -377,7 +492,7 @@ impl Template {
                         return Err(ParseError::Rule {
                             rule_line: rule.line,
                             message: rule.new_state.clone(),
-                            input_line: number + 1,
+                            input_line: n,
                             input: line.to_string(),
                         });
                     }
@@ -394,13 +509,27 @@ impl Template {
                 }
                 break;
             }
+            if !matched {
+                let values = run.values();
+                run.unread.push(Unread {
+                    line: n,
+                    text: line.to_string(),
+                    unmatched: true,
+                    values,
+                });
+            }
         }
         if finished != Some(Target::End) && !self.has_eof {
-            run.append_record();
+            run.record_at(input.len(), &input);
         }
-        Ok(Table {
-            header: self.values.iter().map(|v| v.name.clone()).collect(),
-            records: run.records,
+        run.unread.sort_by_key(|u| u.line);
+        Ok(Traced {
+            table: Table {
+                header: self.values.iter().map(|v| v.name.clone()).collect(),
+                records: run.records,
+            },
+            lines: run.lines,
+            unread: run.unread,
         })
     }
 }

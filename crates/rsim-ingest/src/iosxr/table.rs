@@ -73,6 +73,9 @@ const ENTRIES: &[Entry] = &[
     e("interface */lldp ..", Irrelevant, Subtree),
     e("interface */cdp ..", Irrelevant, Subtree),
     e("interface */bfd ..", Irrelevant, Subtree),
+    // The minimum of active members decides whether the bundle is up, and
+    // the collected interface state shows that.
+    e("interface */bundle minimum-active ..", Irrelevant, Subtree),
     e("vrf *", Handled, Node),
     e("vrf */description ..", Irrelevant, Subtree),
     e("ipv4 access-list *", Handled, Node),

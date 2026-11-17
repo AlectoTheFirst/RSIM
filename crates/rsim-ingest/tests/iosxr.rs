@@ -35,6 +35,7 @@ fn estate() -> Estate {
         config: CONFIG.to_vec(),
         file: "pe1/config@000000000000".into(),
         collected: Collected::default(),
+        sections: Default::default(),
     }])
 }
 
@@ -52,8 +53,8 @@ fn the_coverage_shares_of_the_fixture() {
     let doc = iosxr::read_text(CONFIG);
     let cov = classify(&doc, &iosxr::table(true));
     assert_eq!(cov.lines[&State::Handled], 49);
-    assert_eq!(cov.lines[&State::Irrelevant], 143);
-    assert_eq!(cov.lines[&State::Unhandled], 6);
+    assert_eq!(cov.lines[&State::Irrelevant], 144);
+    assert_eq!(cov.lines[&State::Unhandled], 5);
     assert!(cov.share(State::Unhandled) < 0.05);
 }
 
@@ -62,7 +63,6 @@ fn the_coverage_lists_the_unhandled_lines() {
     let want = [
         ("mpls ldp", 1, 3),
         ("ftp client password <secret>", 1, 1),
-        ("interface */bundle minimum-active links 1", 1, 1),
         (
             "interface */ipv4 verify unicast source reachable-via rx",
             1,
@@ -226,17 +226,18 @@ fn each_handled_line_is_read() {
 }
 
 #[test]
-fn the_estate_gives_the_coverage_and_no_function() {
+fn without_a_route_table_section_the_routing_is_unhandled() {
     let e = estate();
     let doc = iosxr::read_text(CONFIG);
     assert_eq!(
         e.coverage["pe1"],
         classify(&doc, &iosxr::table(false)),
-        "an empty route table leaves the routing unhandled"
+        "no route table leaves the routing unhandled"
     );
-    assert_eq!(
-        e.notes["pe1"],
-        ["the IOS-XR config gives the coverage and no function"]
+    assert!(
+        e.notes["pe1"]
+            .iter()
+            .any(|n| n == "no route table section, so each route lookup is unknown")
     );
 }
 
@@ -272,7 +273,7 @@ fn the_typed_config() {
     assert_eq!(be10.mtu.map(|m| m.0), Some(9216));
     assert_eq!(be10.addresses[0].prefix, "198.51.100.1/30");
     assert_eq!(be10.ipv6[0].0, "2001:db8:10::1/64");
-    assert_eq!(be10.unhandled, ["bundle minimum-active links 1"]);
+    assert!(be10.unhandled.is_empty());
 
     let sub = get("Bundle-Ether20.100");
     assert_eq!(sub.vrf.as_ref().map(|v| v.0.as_str()), Some("RED"));

@@ -1,11 +1,16 @@
-//! The interface names of an NX-OS switch. The config prints each name in
+//! The interface names of a Cisco device. The config prints each name in
 //! full, for example `Ethernet1/1`, and the collected sections can print it
-//! short, for example `Eth1/1` or `Po10`.
+//! short, for example `Eth1/1` or `Po10`. The interface types are a table of
+//! each vendor; [`Names::new`] has the types of NX-OS.
 
 use std::collections::{BTreeMap, BTreeSet};
 
+/// The interface types of a vendor: each full type word with its short
+/// forms, in lower case.
+pub type Types = &'static [(&'static str, &'static [&'static str])];
+
 /// The interface types of NX-OS with their short forms, in lower case.
-const TYPES: &[(&str, &[&str])] = &[
+const TYPES: Types = &[
     ("ethernet", &["eth", "et", "e"]),
     ("port-channel", &["po"]),
     ("vlan", &["vl"]),
@@ -27,10 +32,10 @@ fn split(name: &str) -> Option<(&str, &str)> {
         .then_some((word, number))
 }
 
-/// The canonical type of a type word, in lower case, if NX-OS has it.
-fn canonical_type(word: &str) -> Option<&'static str> {
+/// The canonical type of a type word, in lower case, if the vendor has it.
+fn canonical_type(types: Types, word: &str) -> Option<&'static str> {
     let w = word.to_ascii_lowercase();
-    TYPES
+    types
         .iter()
         .find(|(full, short)| *full == w || short.contains(&w.as_str()))
         .map(|(full, _)| *full)
@@ -44,19 +49,36 @@ fn canonical_type(word: &str) -> Option<&'static str> {
 /// must be the same text, so `Eth1/1.10` does not resolve to `Ethernet1/1`.
 /// A name with no unique answer stays as it is, because a wrong answer puts
 /// a row on another interface.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Names {
+    types: Types,
     exact: BTreeSet<String>,
     by_key: BTreeMap<(String, String), Vec<String>>,
 }
 
+impl Default for Names {
+    fn default() -> Names {
+        Names::with_types(TYPES, [])
+    }
+}
+
 impl Names {
+    /// The names of an NX-OS switch.
     pub fn new<'a>(names: impl IntoIterator<Item = &'a str>) -> Names {
-        let mut n = Names::default();
+        Names::with_types(TYPES, names)
+    }
+
+    /// The names of a device whose vendor has the interface types `types`.
+    pub fn with_types<'a>(types: Types, names: impl IntoIterator<Item = &'a str>) -> Names {
+        let mut n = Names {
+            types,
+            exact: BTreeSet::new(),
+            by_key: BTreeMap::new(),
+        };
         for name in names {
             n.exact.insert(name.to_string());
             if let Some((word, number)) = split(name)
-                && let Some(t) = canonical_type(word)
+                && let Some(t) = canonical_type(types, word)
             {
                 n.by_key
                     .entry((t.to_string(), number.to_ascii_lowercase()))
@@ -74,7 +96,7 @@ impl Names {
             return name.to_string();
         }
         let found = split(name).and_then(|(word, number)| {
-            let t = canonical_type(word)?;
+            let t = canonical_type(self.types, word)?;
             match self
                 .by_key
                 .get(&(t.to_string(), number.to_ascii_lowercase()))?
