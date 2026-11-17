@@ -12,6 +12,8 @@ mod device;
 pub mod fake;
 #[cfg(feature = "https")]
 pub mod https;
+#[cfg(feature = "iosxe")]
+pub mod iosxe;
 #[cfg(feature = "iosxr")]
 pub mod iosxr;
 #[cfg(feature = "nxos")]

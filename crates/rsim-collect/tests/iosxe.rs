@@ -1,0 +1,183 @@
+//! Collection cycles of an IOS XE router on the fake transport, with the
+//! synthetic answers in `tests/fixtures/iosxe/`.
+
+#![cfg(feature = "iosxe")]
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use rsim_collect::fake::FakeTransport;
+use rsim_collect::iosxe::{IosxeSource, sections};
+use rsim_collect::*;
+use rsim_store::{Keys, SectionStatus, Snapshot, Store};
+
+const T0: u64 = 1_700_000_000_000;
+
+fn fixture(name: &str) -> String {
+    let p = format!("{}/tests/fixtures/iosxe/{name}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{p}: {e}"))
+}
+
+fn router() -> Device {
+    Device {
+        id: "e1".into(),
+        vendor: Vendor::Iosxe,
+        address: "192.0.2.10".into(),
+        credential: "lab".into(),
+        site: None,
+        route: Default::default(),
+    }
+}
+
+/// The fixture of each section that has one. The other commands are
+/// refused as on a router with no such feature.
+fn file(section: &str) -> Option<&'static str> {
+    Some(match section {
+        "config" => "config.txt",
+        "version" => "version.txt",
+        "interfaces" => "interfaces.txt",
+        "rib" => "rib.txt",
+        "arp" => "arp.txt",
+        "acls" => "acls.txt",
+        _ => return None,
+    })
+}
+
+fn command(section: &str) -> String {
+    sections()
+        .into_iter()
+        .find(|s| s.name == section)
+        .unwrap()
+        .command
+}
+
+fn set(t: &FakeTransport, section: &str, text: &str) {
+    t.reply("e1", &command(section), Ok(text.as_bytes().to_vec()));
+}
+
+fn load(t: &FakeTransport) {
+    for s in sections() {
+        match file(s.name) {
+            Some(f) => set(t, s.name, &fixture(f).replace("HOST", "e1")),
+            None => t.reply(
+                "e1",
+                &s.command,
+                Err(TransportError::Command(
+                    "% Invalid input detected at '^' marker.".into(),
+                )),
+            ),
+        }
+    }
+}
+
+struct Env {
+    _dir: tempfile::TempDir,
+    t: Arc<FakeTransport>,
+    c: Collector,
+}
+
+fn env() -> Env {
+    let dir = tempfile::tempdir().unwrap();
+    let t = Arc::new(FakeTransport::new(Duration::from_millis(1)));
+    load(&t);
+    let store = Store::open(dir.path(), Keys::new([1; 32], [2; 32])).unwrap();
+    let c = Collector::new(
+        store,
+        Box::new(vec![router()]),
+        Schedule {
+            spread: false,
+            ..Schedule::default()
+        },
+        Limits::default(),
+        Arc::new(TokioClock::new(T0)),
+    )
+    .unwrap()
+    .with_source(Arc::new(IosxeSource::new(t.clone())));
+    Env { _dir: dir, t, c }
+}
+
+fn latest(e: &Env) -> Snapshot {
+    e.c.store().latest().unwrap().unwrap()
+}
+
+fn status(e: &Env, section: &str) -> SectionStatus {
+    latest(e).devices["e1"]
+        .sections
+        .iter()
+        .find(|s| s.name == section)
+        .unwrap()
+        .status
+        .clone()
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_first_cycle_keeps_each_text_answer() {
+    let mut e = env();
+    let r = e.c.run_cycle().await.unwrap();
+    assert!(r.snapshot.is_some() && r.failed.is_empty(), "{r:?}");
+    for s in ["config", "version", "interfaces", "rib", "arp", "acls"] {
+        assert_eq!(status(&e, s), SectionStatus::Fresh, "{s}");
+    }
+    for s in ["lldp", "cdp", "vrfs", "inventory", "hsrp", "vrrp"] {
+        assert!(matches!(status(&e, s), SectionStatus::Absent { .. }), "{s}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_ages_and_counters_make_no_snapshot_and_a_config_change_makes_one() {
+    let mut e = env();
+    let first = e.c.run_cycle().await.unwrap().snapshot.unwrap();
+    let swap = |f: &str, a: &str, b: &str| fixture(f).replace("HOST", "e1").replace(a, b);
+    let later = |f: &str| {
+        let mut t = swap(f, "09:58:12 UTC", "10:00:59 UTC");
+        for (a, b) in [
+            ("1234 bytes", "1240 bytes"),
+            ("3 minutes", "4 minutes"),
+            (
+                "Internet  198.51.100.254         12",
+                "Internet  198.51.100.254         13",
+            ),
+            ("(5 matches)", "(9 matches)"),
+            ("(1234 matches)", "(1300 matches)"),
+            ("3w2d", "3w3d"),
+            ("2 days, 4 hours, 1 minute", "2 days, 4 hours, 2 minutes"),
+            ("123456 packets input", "123999 packets input"),
+            ("3 packets/sec", "7 packets/sec"),
+            ("Received 12 broadcast", "Received 19 broadcast"),
+            ("Output 2 broadcast", "Output 5 broadcast"),
+            ("Last input 00:00:00", "Last input 00:00:01"),
+        ] {
+            t = t.replace(a, b);
+        }
+        t
+    };
+    for (s, f) in [
+        ("config", "config.txt"),
+        ("version", "version.txt"),
+        ("rib", "rib.txt"),
+        ("interfaces", "interfaces.txt"),
+        ("arp", "arp.txt"),
+        ("acls", "acls.txt"),
+    ] {
+        set(&e.t, s, &later(f));
+    }
+    tokio::time::advance(Duration::from_secs(60)).await;
+    let r = e.c.run_cycle().await.unwrap();
+    assert_eq!(r.snapshot, None, "{r:?}");
+    assert_eq!(latest(&e).manifest.cycle, first);
+
+    set(
+        &e.t,
+        "config",
+        &swap("config.txt", "description to-core", "description to-core-2"),
+    );
+    tokio::time::advance(Duration::from_secs(60)).await;
+    assert!(e.c.run_cycle().await.unwrap().snapshot.is_some());
+    set(
+        &e.t,
+        "rib",
+        &swap("rib.txt", "via 203.0.113.9", "via 203.0.113.8"),
+    );
+    tokio::time::advance(Duration::from_secs(60)).await;
+    assert!(e.c.run_cycle().await.unwrap().snapshot.is_some());
+}

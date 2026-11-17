@@ -9,11 +9,18 @@ pub enum Vendor {
     Unifi,
     Nxos,
     Iosxr,
+    Iosxe,
 }
 
 impl Vendor {
     /// All vendors.
-    pub const ALL: [Vendor; 4] = [Vendor::Vyos, Vendor::Unifi, Vendor::Nxos, Vendor::Iosxr];
+    pub const ALL: [Vendor; 5] = [
+        Vendor::Vyos,
+        Vendor::Unifi,
+        Vendor::Nxos,
+        Vendor::Iosxr,
+        Vendor::Iosxe,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -21,6 +28,7 @@ impl Vendor {
             Vendor::Unifi => "unifi",
             Vendor::Nxos => "nxos",
             Vendor::Iosxr => "iosxr",
+            Vendor::Iosxe => "iosxe",
         }
     }
 }
