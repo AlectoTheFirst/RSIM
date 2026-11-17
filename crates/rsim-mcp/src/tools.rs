@@ -8,7 +8,6 @@ use rsim_cli::{QueryError, args, commands, tables};
 use rsim_contract::args::Form;
 use rsim_contract::args::{TableQueryArgs, TableVerb};
 use rsim_contract::claim::ClaimArgs;
-use rsim_contract::json::{PathBriefOut, SetBriefOut};
 use rsim_contract::registry;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -79,20 +78,22 @@ impl Tools {
                 .and_then(|t| self.twin(&t).map(|twin| commands::devices(&t, twin)))
                 .map(|o| text(&o)),
             "path_query" => args::form(arguments).and_then(|form| {
-                args::query(arguments, &["form"])
-                    .and_then(|q| self.twin(&q.topology).and_then(|t| commands::path(&q, t)))
-                    .map(|o| match form {
-                        Form::Full => text(&o),
-                        f => text(&PathBriefOut::from_full(&o, f)),
-                    })
+                args::query(arguments, &["form"]).and_then(|q| {
+                    let t = self.twin(&q.topology)?;
+                    match form {
+                        Form::Full => commands::path(&q, t).map(|o| text(&o)),
+                        f => commands::path_brief(&q, t, f).map(|o| text(&o)),
+                    }
+                })
             }),
             "set_query" => args::form(arguments).and_then(|form| {
-                args::set_query(arguments, &["form"])
-                    .and_then(|q| self.twin(&q.topology).and_then(|t| commands::set(&q, t)))
-                    .map(|o| match form {
-                        Form::Full => text(&o),
-                        f => text(&SetBriefOut::from_full(&o, f)),
-                    })
+                args::set_query(arguments, &["form"]).and_then(|q| {
+                    let t = self.twin(&q.topology)?;
+                    match form {
+                        Form::Full => commands::set(&q, t).map(|o| text(&o)),
+                        f => commands::set_brief(&q, t, f).map(|o| text(&o)),
+                    }
+                })
             }),
             "explain_step" => match args::mode(arguments) {
                 Ok(false) => args::step(arguments)
@@ -111,6 +112,15 @@ impl Tools {
             },
             "list_tables" => Ok(text(&tables::catalog())),
             "list_claims" => Ok(text(&rsim_cli::claims::catalog())),
+            "get_topology" => serde_json::from_value::<rsim_contract::args::TopologyViewArgs>(
+                Value::Object(arguments.clone()),
+            )
+            .map_err(|e| QueryError::new(rsim_cli::ErrorCode::InvalidQuery, e.to_string()))
+            .and_then(|a| {
+                let t = a.topology.clone();
+                let twin = self.twin(&t)?;
+                rsim_cli::topology::topology(&t, twin, &a).map(|o| text(&o))
+            }),
             "run_claim" => serde_json::from_value::<ClaimArgs>(Value::Object(arguments.clone()))
                 .map_err(|e| QueryError::new(rsim_cli::ErrorCode::InvalidQuery, e.to_string()))
                 .and_then(|a| {

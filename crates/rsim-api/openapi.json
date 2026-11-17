@@ -2484,6 +2484,157 @@
         ],
         "type": "string"
       },
+      "TopoEdge": {
+        "description": "One edge.",
+        "properties": {
+          "branches": {
+            "description": "In a path drawing: the branches that cross the edge.",
+            "items": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "claims": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ClaimResult"
+            },
+            "description": "The result of each requested claim on the edge.",
+            "type": "object"
+          },
+          "facts": {
+            "description": "The facts of the edge, for example the speed and the duplex of both\nends of a link, or the VNI of a tunnel."
+          },
+          "from": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "layer": {
+            "description": "`physical`, `overlay` or `function`; in a path drawing also\n`underlay` for a hop of an encapsulated packet.",
+            "type": "string"
+          },
+          "overlay": {
+            "description": "In a path drawing: the overlay edge of an underlay edge.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provenance": {
+            "description": "The source spans of the facts: file:first-last.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "layer",
+          "from",
+          "to",
+          "facts",
+          "provenance",
+          "claims",
+          "branches"
+        ],
+        "type": "object"
+      },
+      "TopoNode": {
+        "description": "One node.",
+        "properties": {
+          "device": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "functions": {
+            "description": "The number of functions of a device node.",
+            "format": "uint",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "description": "`device` or `function`.",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label"
+        ],
+        "type": "object"
+      },
+      "TopologyOut": {
+        "description": "The topology of a twin, or the drawing of the paths of a query.",
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/TopoEdge"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "layers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "level": {
+            "description": "`device` or `function`.",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/TopoNode"
+            },
+            "type": "array"
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "topology": {
+            "type": "string"
+          },
+          "twin": {
+            "$ref": "#/components/schemas/TwinJson"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "topology",
+          "twin",
+          "level",
+          "layers",
+          "nodes",
+          "edges"
+        ],
+        "title": "TopologyOut",
+        "type": "object"
+      },
       "TraceStepJson": {
         "properties": {
           "alternative": {
@@ -2976,6 +3127,61 @@
         "summary": "A twin: its identity and its links. The alias store redirects to its snapshot."
       }
     },
+    "/v1/twins/{twin}/batch": {
+      "post": {
+        "operationId": "runBatch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "Many queries, claims and table queries in one request: an object with a list items, each with op query, claim or table. The answer is NDJSON with one line for each item, its result or its problem object. At most 100 items."
+      }
+    },
     "/v1/twins/{twin}/claims/{claim}": {
       "get": {
         "operationId": "runClaim",
@@ -3312,6 +3518,68 @@
           }
         ],
         "summary": "A claim on the paths of a path query."
+      }
+    },
+    "/v1/twins/{twin}/queries/{qid}/topology": {
+      "get": {
+        "operationId": "getPathDrawing",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "qid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "json (the default), mermaid, d2 or graphml.",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopologyOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The drawing of the paths of a query: each hop with its branches, and for a tunnel the overlay edge and the underlay edges that name it."
       }
     },
     "/v1/twins/{twin}/tables/{table}/lpm": {
@@ -3667,6 +3935,114 @@
           }
         ],
         "summary": "The distinct values of the columns with their counts."
+      }
+    },
+    "/v1/twins/{twin}/topology": {
+      "get": {
+        "operationId": "getTopology",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "device (the default) or function.",
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The layers, separated by commas.",
+            "in": "query",
+            "name": "layer",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only these devices, separated by commas.",
+            "in": "query",
+            "name": "device",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only the devices near this device.",
+            "in": "query",
+            "name": "around",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The number of links of around; 1 if not given.",
+            "in": "query",
+            "name": "hops",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The claims of each edge: link-speed-duplex.",
+            "in": "query",
+            "name": "claims",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "json (the default), mermaid, d2 or graphml.",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopologyOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The topology of a twin for a drawing: nodes and edges at the level device or function, with the layers physical and overlay, or function."
       }
     }
   }

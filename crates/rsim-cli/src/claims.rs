@@ -60,7 +60,7 @@ fn links<'a>(
     out
 }
 
-fn speed_duplex(subject: String, facts: Option<&LinkFacts>) -> Evidence {
+pub(crate) fn speed_duplex(subject: String, facts: Option<&LinkFacts>) -> Evidence {
     let (local, remote) = match facts {
         Some(f) => (Some(&f.local), f.remote.as_ref()),
         None => (None, None),

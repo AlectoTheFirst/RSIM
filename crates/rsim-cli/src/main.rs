@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 
 use rsim_cli::tables;
 use rsim_contract::args::Form;
-use rsim_contract::json::{PathBriefOut, SetBriefOut};
 use rsim_contract::table::Selection;
 use std::io::Write;
 use std::net::IpAddr;
@@ -335,22 +334,34 @@ fn main() -> ExitCode {
         }
         Command::Path(q) => {
             let input = q.clone_input();
-            let r = commands::load(&input.topology).and_then(|t| commands::path(&input, &t));
             match cli.brief() {
-                Some(f) => emit(&cli, r.map(|o| PathBriefOut::from_full(&o, f)), |_| {
-                    String::new()
-                }),
-                None => emit(&cli, r, text::path),
+                Some(f) => emit(
+                    &cli,
+                    commands::load(&input.topology)
+                        .and_then(|t| commands::path_brief(&input, &t, f)),
+                    |_| String::new(),
+                ),
+                None => emit(
+                    &cli,
+                    commands::load(&input.topology).and_then(|t| commands::path(&input, &t)),
+                    text::path,
+                ),
             }
         }
         Command::Set(q) => {
             let input = q.input();
-            let r = commands::load(&input.topology).and_then(|t| commands::set(&input, &t));
             match cli.brief() {
-                Some(f) => emit(&cli, r.map(|o| SetBriefOut::from_full(&o, f)), |_| {
-                    String::new()
-                }),
-                None => emit(&cli, r, text::set),
+                Some(f) => emit(
+                    &cli,
+                    commands::load(&input.topology)
+                        .and_then(|t| commands::set_brief(&input, &t, f)),
+                    |_| String::new(),
+                ),
+                None => emit(
+                    &cli,
+                    commands::load(&input.topology).and_then(|t| commands::set(&input, &t)),
+                    text::set,
+                ),
             }
         }
         Command::ExplainSet {
@@ -472,6 +483,9 @@ fn table_command(cli: &Cli, args: &[String]) -> ExitCode {
     let args = &kept[..];
     if args.get(1).map(String::as_str) == Some("claim") {
         return claim_command(cli, args);
+    }
+    if args.get(1).map(String::as_str) == Some("topology") {
+        return topology_command(cli, args);
     }
     let usage = |d: String| QueryError::new(rsim_cli::ErrorCode::InvalidQuery, d);
     let parsed = (|| -> Result<Parsed, QueryError> {
@@ -702,4 +716,67 @@ fn claim_command(cli: &Cli, args: &[String]) -> ExitCode {
         t
     });
     ExitCode::from(code)
+}
+
+/// `rsim <twin> topology [--level device|function] [--layer a,b] [--device
+/// a,b] [--around <device> [--hops n]] [--claims c] [--as
+/// mermaid|d2|graphml]`.
+fn topology_command(cli: &Cli, args: &[String]) -> ExitCode {
+    let twin = args[0]
+        .strip_prefix("builtin.")
+        .unwrap_or(&args[0])
+        .to_string();
+    let mut view = rsim_contract::args::TopologyViewArgs {
+        topology: twin.clone(),
+        ..Default::default()
+    };
+    let mut export = None;
+    let mut rest = args[2..].iter();
+    let list = |v: &str| Some(v.split(',').map(str::to_string).collect::<Vec<_>>());
+    while let Some(a) = rest.next() {
+        let Some(v) = rest.next() else {
+            return usage_error(&format!("{a} needs a value"));
+        };
+        match a.as_str() {
+            "--level" => view.level = Some(v.clone()),
+            "--layer" => view.layers = list(v),
+            "--device" => view.devices = list(v),
+            "--around" => view.around = Some(v.clone()),
+            "--hops" => match v.parse() {
+                Ok(h) => view.hops = Some(h),
+                Err(_) => return usage_error(&format!("--hops {v} is not a number")),
+            },
+            "--claims" => view.claims = list(v),
+            "--as" => export = Some(v.clone()),
+            _ => return usage_error(&format!("{a} is not a flag of topology")),
+        }
+    }
+    let r = commands::load(&twin).and_then(|t| rsim_cli::topology::topology(&twin, &t, &view));
+    match (export.as_deref(), r) {
+        (Some(f @ ("mermaid" | "d2" | "graphml")), Ok(o)) => {
+            let text = match f {
+                "mermaid" => o.mermaid(),
+                "d2" => o.d2(),
+                _ => o.graphml(),
+            };
+            let _ = std::io::stdout().lock().write_all(text.as_bytes());
+            ExitCode::SUCCESS
+        }
+        (Some(f), _) if !["mermaid", "d2", "graphml"].contains(&f) => {
+            usage_error(&format!("--as {f} is not mermaid, d2 or graphml"))
+        }
+        (_, r) => emit(cli, r, |o| {
+            let mut t = format!("{} nodes, {} edges\n", o.nodes.len(), o.edges.len());
+            for e in &o.edges {
+                t.push_str(&format!(
+                    "{:<9} {} {} {}\n",
+                    e.layer,
+                    e.from,
+                    if e.layer == "function" { "->" } else { "--" },
+                    e.to
+                ));
+            }
+            t
+        }),
+    }
 }

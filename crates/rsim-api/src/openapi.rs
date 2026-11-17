@@ -8,6 +8,7 @@ use rsim_contract::claim::{ClaimOut, ClaimsOut};
 use rsim_contract::json::{PathAnswerOut, PathBriefOut, SetAnswerOut, SetBriefOut, StepOut};
 use rsim_contract::schema;
 use rsim_contract::table::{SummarizeOut, TableOut, TablesOut, UniqueOut};
+use rsim_contract::topology::TopologyOut;
 
 use crate::handler::contract_version;
 
@@ -199,6 +200,41 @@ pub const ROUTES: &[Route] = &[
         query: &[("device", "The devices of the scope, separated by commas.")],
         body: &[],
         ok: (200, &[schema::<ClaimOut>]),
+    },
+    Route {
+        method: "get",
+        path: "/v1/twins/{twin}/topology",
+        id: "getTopology",
+        summary: "The topology of a twin for a drawing: nodes and edges at the level device or function, with the layers physical and overlay, or function.",
+        query: &[
+            ("level", "device (the default) or function."),
+            ("layer", "The layers, separated by commas."),
+            ("device", "Only these devices, separated by commas."),
+            ("around", "Only the devices near this device."),
+            ("hops", "The number of links of around; 1 if not given."),
+            ("claims", "The claims of each edge: link-speed-duplex."),
+            ("format", "json (the default), mermaid, d2 or graphml."),
+        ],
+        body: &[],
+        ok: (200, &[schema::<TopologyOut>]),
+    },
+    Route {
+        method: "get",
+        path: "/v1/twins/{twin}/queries/{qid}/topology",
+        id: "getPathDrawing",
+        summary: "The drawing of the paths of a query: each hop with its branches, and for a tunnel the overlay edge and the underlay edges that name it.",
+        query: &[("format", "json (the default), mermaid, d2 or graphml.")],
+        body: &[],
+        ok: (200, &[schema::<TopologyOut>]),
+    },
+    Route {
+        method: "post",
+        path: "/v1/twins/{twin}/batch",
+        id: "runBatch",
+        summary: "Many queries, claims and table queries in one request: an object with a list items, each with op query, claim or table. The answer is NDJSON with one line for each item, its result or its problem object. At most 100 items.",
+        query: &[],
+        body: &[object],
+        ok: (200, &[object]),
     },
 ];
 

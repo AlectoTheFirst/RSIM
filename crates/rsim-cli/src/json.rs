@@ -482,6 +482,86 @@ impl FromEngine<EncapDesc> for EncapJson {
     }
 }
 
+/// The brief form of an answer, made from the engine answer: no packet set
+/// of a trace step is described, so it costs much less than the full
+/// form. It has the same bytes as `AnswerBriefJson::from_answer` of the
+/// full form.
+pub fn brief_json(a: &Answer, form: rsim_contract::args::Form) -> AnswerBriefJson {
+    let lines = form == rsim_contract::args::Form::Steps;
+    AnswerBriefJson {
+        mode: match a.mode {
+            Mode::Path => "path".into(),
+            Mode::Set => "set".into(),
+        },
+        ingress: a
+            .runs
+            .iter()
+            .map(|r| {
+                let i = ingress_json(&r.input, &r.ingress);
+                IngressBriefJson {
+                    found: i.found,
+                    device: i.device,
+                    interface: i.interface,
+                    function: i.function,
+                    resolved_by: i.resolved_by,
+                    reason: i.reason,
+                }
+            })
+            .collect(),
+        summary: a
+            .summary
+            .iter()
+            .map(|p| PartJson {
+                packets: PacketSetJson::new(&p.packets),
+                result: SummaryResultJson::new(&p.summary),
+            })
+            .collect(),
+        branches: a
+            .branches()
+            .iter()
+            .map(|b| BranchBriefJson {
+                index: b.index,
+                verdict: VerdictJson::new(b.verdict),
+                delay: DelayJson::new(&b.delay),
+                step_count: b.steps.len(),
+                steps: if lines {
+                    b.steps
+                        .iter()
+                        .enumerate()
+                        .map(|(i, s)| StepLineJson {
+                            index: i,
+                            function: s.function.to_string(),
+                            device: s.device.as_ref().map(ToString::to_string),
+                            outcome: OutcomeJson::new(&s.outcome).kind,
+                            reason: ReasonJson::new(&s.reason),
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                },
+            })
+            .collect(),
+        replies: a
+            .replies
+            .iter()
+            .map(|r| match &r.result {
+                ReplyResult::Ran(ans) => ReplyBriefJson {
+                    forward_branch: r.forward_branch,
+                    ran: true,
+                    not_run_reason: None,
+                    answer: Some(Box::new(brief_json(ans, form))),
+                },
+                ReplyResult::NotRun(why) => ReplyBriefJson {
+                    forward_branch: r.forward_branch,
+                    ran: false,
+                    not_run_reason: Some(why.clone()),
+                    answer: None,
+                },
+            })
+            .collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

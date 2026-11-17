@@ -422,3 +422,111 @@ fn a_real_server_answers_on_a_loopback_port() {
     assert!(r.starts_with("HTTP/1.1 413"), "{r}");
     rt.shutdown_background();
 }
+
+fn stored_api(name: &str) -> String {
+    std::fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/golden")
+            .join(name),
+    )
+    .unwrap()
+}
+
+#[test]
+fn the_topology_and_the_path_drawing_give_the_stored_files() {
+    let s = state(None);
+    let r = get(
+        &s,
+        "/v1/twins/builtin.leaf-spine/topology?claims=link-speed-duplex",
+    );
+    assert_eq!(r.status, 200);
+    assert_eq!(
+        String::from_utf8(r.body).unwrap(),
+        stored_api("leaf-spine.topology.json")
+    );
+    let q = post(
+        &s,
+        "/v1/twins/builtin.leaf-spine/queries",
+        &json!({"source.ip": "10.1.0.10", "destination.ip": "10.2.0.10",
+                "network.transport": "tcp", "source.port": 40000, "destination.port": 22}),
+    );
+    let loc = q.header("location").unwrap().to_string();
+    let r = get(&s, &format!("{loc}/topology"));
+    let body = String::from_utf8(r.body).unwrap();
+    assert_eq!(body, stored_api("leaf-spine.path.json"));
+    let d: Value = serde_json::from_str(&body).unwrap();
+    let edges = d["edges"].as_array().unwrap();
+    let overlay: Vec<&Value> = edges.iter().filter(|e| e["layer"] == "overlay").collect();
+    assert_eq!(overlay.len(), 1);
+    assert_eq!(
+        (overlay[0]["from"].as_str(), overlay[0]["to"].as_str()),
+        (Some("leaf1"), Some("leaf2"))
+    );
+    let underlay: Vec<&Value> = edges.iter().filter(|e| e["layer"] == "underlay").collect();
+    assert_eq!(underlay.len(), 4);
+    assert!(
+        underlay
+            .iter()
+            .all(|e| e["overlay"] == "overlay:leaf1>leaf2")
+    );
+    // The exports.
+    let r = get(
+        &s,
+        "/v1/twins/builtin.leaf-spine/topology?format=mermaid&layer=overlay",
+    );
+    assert_eq!(r.header("content-type"), Some("text/plain; charset=utf-8"));
+    assert!(
+        String::from_utf8(r.body)
+            .unwrap()
+            .contains("leaf1 -.-> leaf2")
+    );
+    let r = get(&s, "/v1/twins/builtin.leaf-spine/topology?format=graphml");
+    assert!(String::from_utf8(r.body).unwrap().starts_with("<?xml"));
+    // A neighbourhood and a filter that the view does not have.
+    let r = json(&get(
+        &s,
+        "/v1/twins/builtin.leaf-spine/topology?around=leaf1&hops=1",
+    ));
+    assert_eq!(r["nodes"].as_array().unwrap().len(), 3);
+    let r = get(&s, "/v1/twins/builtin.leaf-spine/topology?level=site");
+    assert_eq!(
+        (r.status, json(&r)["code"].as_str()),
+        (422, Some("invalid_filter"))
+    );
+}
+
+#[test]
+fn a_batch_gives_one_line_for_each_item() {
+    let s = state(None);
+    let r = post(
+        &s,
+        "/v1/twins/builtin.leaf-spine/batch",
+        &json!({"items": [
+            {"op": "query", "query": {"source.ip": "10.1.0.10", "destination.ip": "10.3.0.10", "network.transport": "udp", "destination.port": 53}},
+            {"op": "claim", "claim": "bgp-peers-up"},
+            {"op": "table", "table": "fib", "verb": "lpm", "address": "10.2.0.10", "filters": {"device": ["leaf1"]}},
+            {"op": "nothing"}
+        ]}),
+    );
+    assert_eq!(r.status, 200);
+    assert_eq!(r.header("content-type"), Some("application/x-ndjson"));
+    let lines: Vec<Value> = String::from_utf8(r.body)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 4);
+    assert_eq!(lines[0]["kind"], "path_brief");
+    assert_eq!(lines[1]["kind"], "claim");
+    assert_eq!(lines[2]["rows"][0][2], "10.2.0.0/24");
+    assert_eq!(lines[3]["code"], "invalid_query");
+    let many: Vec<Value> = (0..101)
+        .map(|_| json!({"op": "claim", "claim": "bgp-peers-up"}))
+        .collect();
+    let r = post(
+        &s,
+        "/v1/twins/builtin.leaf-spine/batch",
+        &json!({"items": many}),
+    );
+    assert_eq!(r.status, 413);
+}
