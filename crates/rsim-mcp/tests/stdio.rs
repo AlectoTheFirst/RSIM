@@ -272,6 +272,8 @@ fn check_tools_list(r: &Value) {
 
 /// Checks that each argument of a call of `tool` is in the input schema of
 /// the tool, with the JSON type of the schema where the schema states one.
+/// Checks that the arguments of a call are valid against the input schema
+/// that the tool list gives.
 fn check_args_in_schema(list: &Value, tool: &str, args: &Value) {
     let t = list["tools"]
         .as_array()
@@ -279,28 +281,34 @@ fn check_args_in_schema(list: &Value, tool: &str, args: &Value) {
         .iter()
         .find(|t| t["name"] == tool)
         .unwrap_or_else(|| panic!("no tool {tool}"));
-    let properties = t["inputSchema"]["properties"].as_object().unwrap();
-    for (name, v) in args.as_object().unwrap() {
-        let p = properties
-            .get(name)
-            .unwrap_or_else(|| panic!("{tool}: the argument {name} is not in properties"));
-        let kind = match v {
-            Value::String(_) => "string",
-            Value::Number(_) => "integer",
-            Value::Bool(_) => "boolean",
-            Value::Array(_) => "array",
-            _ => panic!("{tool}: {name} has an unexpected value {v}"),
-        };
-        let types: Vec<&Value> = match p.get("anyOf") {
-            Some(a) => a.as_array().unwrap().iter().map(|x| &x["type"]).collect(),
-            None => vec![&p["type"]],
-        };
-        if types.iter().all(|x| !x.is_null()) {
-            assert!(
-                types.iter().any(|x| *x == kind),
-                "{tool}: {name} is a {kind}, and the schema takes {types:?}"
-            );
-        }
+    let mut schemas = boon::Schemas::new();
+    let mut compiler = boon::Compiler::new();
+    compiler
+        .add_resource("urn:rsim:input", t["inputSchema"].clone())
+        .unwrap();
+    let idx = compiler.compile("urn:rsim:input", &mut schemas).unwrap();
+    if let Err(e) = schemas.validate(args, idx) {
+        panic!("{tool}: the arguments are not valid against the input schema: {e}");
+    }
+}
+
+/// Checks that the structured content of a result is valid against the
+/// output schema that the tool list gives.
+fn check_output_in_schema(list: &Value, tool: &str, out: &Value) {
+    let t = list["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == tool)
+        .unwrap_or_else(|| panic!("no tool {tool}"));
+    let mut schemas = boon::Schemas::new();
+    let mut compiler = boon::Compiler::new();
+    compiler
+        .add_resource("urn:rsim:output", t["outputSchema"].clone())
+        .unwrap();
+    let idx = compiler.compile("urn:rsim:output", &mut schemas).unwrap();
+    if let Err(e) = schemas.validate(out, idx) {
+        panic!("{tool}: the result is not valid against the output schema: {e}");
     }
 }
 
@@ -327,15 +335,20 @@ fn each_call_matches_the_listed_input_schema() {
 
     let list = &by_id(&responses, 2)["result"];
     check_tools_list(list);
-    let explain = &list["tools"][3]["inputSchema"]["properties"];
-    for name in ["branch", "step", "reply_of"] {
+    let schema = &list["tools"][3]["inputSchema"];
+    let explain = &schema["properties"];
+    for name in ["branch", "step"] {
         assert_eq!(explain[name]["type"], "integer", "{name}");
     }
-    assert_eq!(explain["mode"]["enum"], json!(["path", "set"]));
+    assert_eq!(explain["reply_of"]["type"], json!(["integer", "null"]));
+    assert_eq!(schema["$defs"]["QueryMode"]["enum"], json!(["path", "set"]));
     check_args_in_schema(list, "explain_step", &step);
     for c in &calls {
         let p = &c["params"];
-        check_args_in_schema(list, p["name"].as_str().unwrap(), &p["arguments"]);
+        let tool = p["name"].as_str().unwrap();
+        check_args_in_schema(list, tool, &p["arguments"]);
+        let r = &by_id(&responses, c["id"].as_u64().unwrap())["result"];
+        check_output_in_schema(list, tool, &r["structuredContent"]);
     }
 
     let r = &by_id(&responses, 3)["result"];

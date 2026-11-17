@@ -2699,7 +2699,9 @@ dependencies = [
 name = "rsim-mcp"
 version = "0.1.0"
 dependencies = [
+ "boon",
  "rsim-cli",
+ "rsim-contract",
  "rsim-store",
  "serde",
  "serde_json",

@@ -3,9 +3,11 @@
 //! server and the HTTP API take their schemas from this crate. It has no
 //! engine dependency, so a client can use it.
 
+pub mod args;
 pub mod error;
 pub mod json;
 pub mod query;
+pub mod registry;
 
 /// The JSON Schema of a contract type, in the dialect of JSON Schema
 /// 2020-12.
