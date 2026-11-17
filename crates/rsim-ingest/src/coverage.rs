@@ -1,6 +1,6 @@
 //! The classification of stanzas and the coverage report.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::stanza::{Document, Stanza};
 
@@ -48,20 +48,39 @@ pub struct Entry {
 
 /// A classification table. For each stanza, the entry with the longest path
 /// that matches the stanza decides. A stanza with no entry is unhandled.
+///
+/// The mask of a table changes each key that a report prints in full, for
+/// example to hide a secret.
 #[derive(Clone, Debug)]
 pub struct Table {
     entries: Vec<(Vec<String>, State, Reach)>,
+    mask: Option<fn(&str) -> String>,
 }
 
 impl Table {
     pub fn new(entries: &[Entry]) -> Table {
         let mut t = Table {
             entries: Vec::with_capacity(entries.len()),
+            mask: None,
         };
         for e in entries {
             t.push(e.path, e.state, e.reach);
         }
         t
+    }
+
+    /// Sets the mask of the keys that a report prints in full.
+    pub fn with_mask(mut self, mask: fn(&str) -> String) -> Table {
+        self.mask = Some(mask);
+        self
+    }
+
+    /// The report form of a key: the key through the mask of the table.
+    pub fn report_key(&self, key: &str) -> String {
+        match self.mask {
+            Some(m) => m(key),
+            None => key.to_string(),
+        }
     }
 
     /// Adds an entry.
@@ -234,10 +253,43 @@ fn generalize(path: &[&str], table: &Table) -> String {
             .max_by_key(|seg| (literal_words(seg), std::cmp::Reverse(seg.as_str())));
         out.push(match best {
             Some(seg) if seg == "*" || is_words(seg) => seg.clone(),
-            _ => (*key).to_string(),
+            _ => table.report_key(key),
         });
     }
     out.join("/")
+}
+
+/// The paths of the handled stanzas that no handler read, each key through
+/// the mask of the table. `read` holds the first line of each stanza that a
+/// handler read. A correct handler set gives an empty list.
+pub fn unread(doc: &Document, table: &Table, read: &BTreeSet<u32>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut path = Vec::new();
+    for c in doc.root.children() {
+        unread_walk(c, table, read, &mut path, &mut out);
+    }
+    out
+}
+
+fn unread_walk<'a>(
+    s: &'a Stanza,
+    table: &Table,
+    read: &BTreeSet<u32>,
+    path: &mut Vec<&'a str>,
+    out: &mut Vec<String>,
+) {
+    path.push(&s.key);
+    let state = table.state(path);
+    if state == State::Handled && !read.contains(&s.first_line) {
+        let keys: Vec<String> = path.iter().map(|k| table.report_key(k)).collect();
+        out.push(keys.join("/"));
+    }
+    if state != State::Unhandled {
+        for c in s.children() {
+            unread_walk(c, table, read, path, out);
+        }
+    }
+    path.pop();
 }
 
 #[cfg(test)]

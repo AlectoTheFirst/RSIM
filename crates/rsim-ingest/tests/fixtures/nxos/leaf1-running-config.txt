@@ -1,0 +1,103 @@
+!Command: show running-config
+!Running configuration last done at: Mon Nov 16 10:00:00 2026
+!Time: Mon Nov 16 10:05:00 2026
+
+version 9.3(8) Bios:version 05.45
+hostname leaf1
+vdc leaf1 id 1
+  limit-resource vlan minimum 16 maximum 4094
+  limit-resource vrf minimum 2 maximum 4096
+
+feature tacacs+
+feature interface-vlan
+feature hsrp
+feature lacp
+feature lldp
+feature nat
+
+username admin password 5 $5$FAKESALT$FAKEHASHFAKEHASH  role network-admin
+ip domain-lookup
+ip domain-name example.test
+crypto key param rsa label leaf1.example.test modulus 2048
+tacacs-server key 7 "FAKETACACSKEY"
+tacacs-server host 192.0.2.10 key 7 "FAKETACACSHOSTKEY"
+aaa group server tacacs+ TAC
+  server 192.0.2.10
+  use-vrf management
+aaa authentication login default group TAC
+copp profile strict
+snmp-server user admin network-admin auth md5 0xFAKEFAKEFAKEFAKE priv 0xFAKEFAKEFAKEFAKE localizedkey
+snmp-server host 192.0.2.20 traps version 2c FAKECOMMUNITYHOST
+snmp-server community FAKECOMMUNITY group network-operator
+ntp server 192.0.2.123 use-vrf management
+key chain KC1
+  key 1
+    key-string 7 FAKEKEYSTRING
+
+ip route 0.0.0.0/0 198.51.100.2
+ip access-list WEB
+  10 permit tcp 192.0.2.0/26 any eq 443
+  20 deny ip any any
+vlan 1,10,20
+vlan 10
+  name USERS
+vlan 20
+  name SERVERS
+
+spanning-tree vlan 1-3967 priority 4096
+vrf context RED
+  ip route 10.0.0.0/8 192.0.2.9
+vrf context management
+  ip route 0.0.0.0/0 192.0.2.254
+
+interface Vlan10
+  no shutdown
+  ip address 192.0.2.2/26
+  ip access-group WEB in
+  hsrp version 2
+  hsrp 10
+    authentication md5 key-string FAKEHSRPKEY
+    preempt
+    priority 110
+    ip 192.0.2.1
+
+interface Vlan20
+  no shutdown
+  vrf member RED
+  ip address 192.0.2.66/26
+
+interface port-channel10
+  switchport mode trunk
+  switchport trunk allowed vlan 10,20
+
+interface Ethernet1/1
+  switchport mode trunk
+  switchport trunk allowed vlan 10,20
+  channel-group 10 mode active
+  no shutdown
+
+interface Ethernet1/2
+  no switchport
+  ip address 198.51.100.1/30
+  ip ospf message-digest-key 1 md5 3 FAKEOSPFKEY
+  ip nat outside
+  no shutdown
+
+interface mgmt0
+  vrf member management
+  ip address 192.0.2.100/24
+
+interface loopback0
+  ip address 203.0.113.1/32
+line console
+line vty
+boot nxos bootflash:/nxos.9.3.8.bin
+router ospf 1
+  router-id 203.0.113.1
+  area 0.0.0.0 authentication message-digest
+router bgp 65000
+  neighbor 198.51.100.2
+    remote-as 65001
+    password 3 FAKEBGPPASSWORD
+ip nat inside source static 192.0.2.5 198.51.100.5
+ip ospf authentication-key 3 FAKEUNLISTEDKEY

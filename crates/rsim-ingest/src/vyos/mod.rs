@@ -7,8 +7,8 @@ mod table;
 
 use std::collections::BTreeSet;
 
-use crate::coverage::{State, Table};
-use crate::stanza::{Document, Stanza};
+use crate::coverage::Table;
+use crate::stanza::Document;
 pub use config::{Config, read};
 pub use lower::{
     Layer2Links, Lowered, interface_addresses, interface_facts, interface_mac, lower, physical,
@@ -19,30 +19,5 @@ pub use table::table;
 /// The paths of the handled stanzas that no handler read. A correct handler
 /// set gives an empty list.
 pub fn unread(doc: &Document, table: &Table, read: &BTreeSet<u32>) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut path = Vec::new();
-    for c in doc.root.children() {
-        walk(c, table, read, &mut path, &mut out);
-    }
-    out
-}
-
-fn walk<'a>(
-    s: &'a Stanza,
-    table: &Table,
-    read: &BTreeSet<u32>,
-    path: &mut Vec<&'a str>,
-    out: &mut Vec<String>,
-) {
-    path.push(&s.key);
-    let state = table.state(path);
-    if state == State::Handled && !read.contains(&s.first_line) {
-        out.push(path.join("/"));
-    }
-    if state != State::Unhandled {
-        for c in s.children() {
-            walk(c, table, read, path, out);
-        }
-    }
-    path.pop();
+    crate::coverage::unread(doc, table, read)
 }

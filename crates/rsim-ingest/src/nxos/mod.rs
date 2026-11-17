@@ -1,0 +1,23 @@
+//! Cisco NX-OS: the running config as indented text.
+
+mod mask;
+mod table;
+
+use std::collections::BTreeSet;
+
+use crate::coverage::Table;
+use crate::stanza::{Document, read_indented};
+pub use mask::mask;
+pub use table::table;
+
+/// Reads the bytes of a running config into a stanza tree. A byte sequence
+/// that is not UTF-8 becomes the replacement character.
+pub fn read_text(bytes: &[u8]) -> Document {
+    read_indented(&String::from_utf8_lossy(bytes))
+}
+
+/// The paths of the handled stanzas that no handler read, each key through
+/// the mask. A correct handler set gives an empty list.
+pub fn unread(doc: &Document, table: &Table, read: &BTreeSet<u32>) -> Vec<String> {
+    crate::coverage::unread(doc, table, read)
+}
