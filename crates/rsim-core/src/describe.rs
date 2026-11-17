@@ -17,8 +17,8 @@ pub enum Values {
     Absent,
     /// A function made the field unknown.
     Unknown,
-    /// In the current header: the value of the same field of the original
-    /// request.
+    /// In the current header or the inner header: the value of the same
+    /// field of the original request.
     Original,
     /// Inclusive ranges of a number field, in increasing order.
     Ranges(Vec<(u128, u128)>),
@@ -53,6 +53,8 @@ pub struct HeaderDesc {
     /// The fields, in the order of [`HEADER_FIELDS`].
     pub fields: Vec<(HeaderField, Values)>,
     pub encap: Option<EncapDesc>,
+    /// The inner header of an encapsulated current header.
+    pub inner: Option<Box<HeaderDesc>>,
 }
 
 impl HeaderDesc {
@@ -116,12 +118,21 @@ const VALUE_FIELDS: [FieldBits; 20] = [
     bits::ENCAP_LABEL,
 ];
 
+/// The values of one value field in one member: the original request, the
+/// current header and, for an encapsulated member, the inner header.
+type Cell = (Values, Values, Option<Values>);
+
 /// The flag bits: the presence bits, the unknown bits, the address family
 /// and the encapsulation kind.
 fn flag_bits() -> Vec<u32> {
     let mut v: Vec<u32> = (0..=bits::AF).collect();
     v.extend(bits::ENCAP_KIND.value_bits());
     v
+}
+
+/// True if the inner level of field `f` holds a field of the inner header.
+fn has_inner(f: FieldBits) -> bool {
+    bits::header_bits().contains(&f.start)
 }
 
 impl PacketSet {
@@ -136,12 +147,16 @@ impl PacketSet {
 
 fn describe_edge(ops: &mut Ops<'_>, s: Edge) -> Result<Vec<Member>, DdError> {
     let flags = flag_bits();
-    let mut flag_levels = Vec::new();
+    let mut plain_levels = Vec::new();
     for &b in &flags {
-        flag_levels.push(level(b, Bank::Original));
-        flag_levels.push(level(b, Bank::Current));
+        plain_levels.push(level(b, Bank::Original));
+        plain_levels.push(level(b, Bank::Current));
     }
-    let flag_cube = ops.dd.cube(&flag_levels)?;
+    // An encapsulated member has the flags of its inner header too.
+    let mut encap_levels = plain_levels.clone();
+    encap_levels.extend((0..=bits::AF).map(|b| level(b, Bank::Inner)));
+    let plain_cube = ops.dd.cube(&plain_levels)?;
+    let encap_cube = ops.dd.cube(&encap_levels)?;
     let mut out = Vec::new();
     let mut rest = s;
     while rest != Edge::FALSE {
@@ -149,24 +164,40 @@ fn describe_edge(ops: &mut Ops<'_>, s: Edge) -> Result<Vec<Member>, DdError> {
             break;
         };
         let value = |l: u32| path.iter().find(|(x, _)| *x == l).is_some_and(|(_, v)| *v);
+        let flag = |b: u32, bank: Bank| value(level(b, bank));
+        let inner = encap_kind(&flag, Bank::Current) != bits::ENCAP_NONE;
+        let (flag_levels, flag_cube) = if inner {
+            (&encap_levels, encap_cube)
+        } else {
+            (&plain_levels, plain_cube)
+        };
         let lits: Vec<(u32, bool)> = flag_levels.iter().map(|&l| (l, value(l))).collect();
         let a = ops.dd.literals(&lits)?;
         let part = ops.dd.and(rest, a)?;
         rest = ops.dd.diff(rest, part)?;
         let r = ops.dd.exists(part, flag_cube)?;
-        let flag = |b: u32, bank: Bank| value(level(b, bank));
-        for row in decompose(ops, r, 0)? {
+        for row in decompose(ops, r, 0, inner)? {
+            let mut current = header(&row, Bank::Current, &flag);
+            if inner {
+                current.inner = Some(Box::new(header(&row, Bank::Inner, &flag)));
+            }
             out.push(Member {
                 original: header(&row, Bank::Original, &flag),
-                current: header(&row, Bank::Current, &flag),
+                current,
             });
         }
     }
     Ok(out)
 }
 
+/// The encapsulation kind of `bank` from the flags.
+fn encap_kind(flag: &dyn Fn(u32, Bank) -> bool, bank: Bank) -> u128 {
+    u128::from(flag(bits::ENCAP_KIND.start, bank)) << 1
+        | u128::from(flag(bits::ENCAP_KIND.start + 1, bank))
+}
+
 /// The values of each value field for one bank, with the flags.
-fn header(row: &[(Values, Values)], bank: Bank, flag: &dyn Fn(u32, Bank) -> bool) -> HeaderDesc {
+fn header(row: &[Cell], bank: Bank, flag: &dyn Fn(u32, Bank) -> bool) -> HeaderDesc {
     let pick = |f: FieldBits| -> Values {
         if let Some(p) = f.presence
             && !flag(p, bank)
@@ -182,8 +213,14 @@ fn header(row: &[(Values, Values)], bank: Bank, flag: &dyn Fn(u32, Bank) -> bool
             .iter()
             .position(|g| *g == f)
             .unwrap_or_else(|| unreachable!("a value field is in the list"));
-        let (o, c) = &row[i];
-        let v = if bank == Bank::Original { o } else { c };
+        let (o, c, inner) = &row[i];
+        let v = match bank {
+            Bank::Original => o,
+            Bank::Current => c,
+            Bank::Inner | Bank::Work => inner
+                .as_ref()
+                .unwrap_or_else(|| unreachable!("an encapsulated member has the inner values")),
+        };
         match (v, f == bits::SRC_IP || f == bits::DST_IP) {
             (Values::Ranges(rs), true) => Values::Prefixes(prefixes(rs, flag(bits::AF, bank))),
             _ => v.clone(),
@@ -193,8 +230,11 @@ fn header(row: &[(Values, Values)], bank: Bank, flag: &dyn Fn(u32, Bank) -> bool
         .iter()
         .map(|f| (*f, pick(bits::field_bits(*f))))
         .collect();
-    let kind = u128::from(flag(bits::ENCAP_KIND.start, bank)) << 1
-        | u128::from(flag(bits::ENCAP_KIND.start + 1, bank));
+    // The inner header has no encapsulation.
+    let kind = match bank {
+        Bank::Inner => bits::ENCAP_NONE,
+        _ => encap_kind(flag, bank),
+    };
     let encap = (kind != bits::ENCAP_NONE).then(|| EncapDesc {
         kind,
         src: pick(bits::ENCAP_SRC),
@@ -202,7 +242,11 @@ fn header(row: &[(Values, Values)], bank: Bank, flag: &dyn Fn(u32, Bank) -> bool
         vni: pick(bits::ENCAP_VNI),
         label: pick(bits::ENCAP_LABEL),
     });
-    HeaderDesc { fields, encap }
+    HeaderDesc {
+        fields,
+        encap,
+        inner: None,
+    }
 }
 
 /// The aligned intervals of an address field as prefixes. An IPv4 address
@@ -242,25 +286,33 @@ fn prefixes(rs: &[(u128, u128)], v6: bool) -> Vec<Prefix> {
     out
 }
 
+/// The levels of the value bits of `f`: the original request, the current
+/// header and, if `inner` and the field has an inner level, the inner header.
+fn value_levels(f: FieldBits, inner: bool) -> Vec<u32> {
+    let mut v = Vec::new();
+    for b in f.value_bits() {
+        v.push(level(b, Bank::Original));
+        v.push(level(b, Bank::Current));
+        if inner && has_inner(f) {
+            v.push(level(b, Bank::Inner));
+        }
+    }
+    v
+}
+
 /// The rows of the value fields from field `i` on: for each field, the
-/// values of the original request and of the current header.
-fn decompose(ops: &mut Ops<'_>, r: Edge, i: usize) -> Result<Vec<Vec<(Values, Values)>>, DdError> {
+/// values of the original request, of the current header and, if `inner`,
+/// of the inner header.
+fn decompose(ops: &mut Ops<'_>, r: Edge, i: usize, inner: bool) -> Result<Vec<Vec<Cell>>, DdError> {
     if i == VALUE_FIELDS.len() {
         return Ok(vec![Vec::new()]);
     }
     let f = VALUE_FIELDS[i];
-    let mut f_levels = Vec::new();
-    for b in f.value_bits() {
-        f_levels.push(level(b, Bank::Original));
-        f_levels.push(level(b, Bank::Current));
-    }
-    let mut rest_levels = Vec::new();
-    for g in &VALUE_FIELDS[i + 1..] {
-        for b in g.value_bits() {
-            rest_levels.push(level(b, Bank::Original));
-            rest_levels.push(level(b, Bank::Current));
-        }
-    }
+    let f_levels = value_levels(f, inner);
+    let rest_levels: Vec<u32> = VALUE_FIELDS[i + 1..]
+        .iter()
+        .flat_map(|g| value_levels(*g, inner))
+        .collect();
     let cube_f = ops.dd.cube(&f_levels)?;
     let cube_rest = ops.dd.cube(&rest_levels)?;
     let mut out = Vec::new();
@@ -281,10 +333,10 @@ fn decompose(ops: &mut Ops<'_>, r: Edge, i: usize) -> Result<Vec<Vec<(Values, Va
         let proj = ops.dd.exists(rem, cube_rest)?;
         let group = ops.dd.diff(proj, bad)?;
         rem = ops.dd.diff(rem, group)?;
-        let tails = decompose(ops, residual, i + 1)?;
-        for (o, c) in field_values(ops, group, f)? {
+        let tails = decompose(ops, residual, i + 1, inner)?;
+        for cell in field_values(ops, group, f, inner && has_inner(f))? {
             for t in &tails {
-                let mut row = vec![(o.clone(), c.clone())];
+                let mut row = vec![cell.clone()];
                 row.extend(t.iter().cloned());
                 out.push(row);
             }
@@ -294,13 +346,18 @@ fn decompose(ops: &mut Ops<'_>, r: Edge, i: usize) -> Result<Vec<Vec<(Values, Va
 }
 
 /// The values of a field relation `g` over the original and the current
-/// bits of `f`: one product, the relation "current equals original", or
-/// more products.
+/// bits of `f`, and the inner bits if `inner`: one product, with the
+/// relation "equals the original request" for the current or the inner
+/// header, or more products.
 fn field_values(
     ops: &mut Ops<'_>,
     g: Edge,
     f: FieldBits,
-) -> Result<Vec<(Values, Values)>, DdError> {
+    inner: bool,
+) -> Result<Vec<Cell>, DdError> {
+    if inner {
+        return field_values_inner(ops, g, f);
+    }
     let bits: Vec<u32> = f.value_bits().collect();
     let orig: Vec<u32> = bits.iter().map(|&b| level(b, Bank::Original)).collect();
     let cur: Vec<u32> = bits.iter().map(|&b| level(b, Bank::Current)).collect();
@@ -310,47 +367,127 @@ fn field_values(
     let c = ops.dd.exists(g, co)?;
     let product = ops.dd.and(o, c)?;
     let c_vals = ranges(ops, c, f, Bank::Current)?;
-    let single_c = matches!(&c_vals, Values::Ranges(r) if r.len() == 1 && r[0].0 == r[0].1);
-    if product == g && single_c {
-        return Ok(vec![(ranges(ops, o, f, Bank::Original)?, c_vals)]);
+    if product == g && c_vals.single().is_some() {
+        return Ok(vec![(ranges(ops, o, f, Bank::Original)?, c_vals, None)]);
     }
-    let mut eq = Edge::TRUE;
-    {
-        let mut b = ops.builder();
-        for &x in bits.iter().rev() {
-            eq = b.eq_bit(x, Bank::Original, Bank::Current, eq)?;
-        }
-    }
+    let eq = eq_original(ops, f, Bank::Current)?;
     let same = ops.dd.and(o, eq)?;
     if same == g {
-        return Ok(vec![(ranges(ops, o, f, Bank::Original)?, Values::Original)]);
+        return Ok(vec![(
+            ranges(ops, o, f, Bank::Original)?,
+            Values::Original,
+            None,
+        )]);
     }
     if product == g {
-        return Ok(vec![(ranges(ops, o, f, Bank::Original)?, c_vals)]);
+        return Ok(vec![(ranges(ops, o, f, Bank::Original)?, c_vals, None)]);
     }
     // Group the original values by the set of their current values.
     let mut out = Vec::new();
-    let mut rem = g;
+    for (og, c0) in group_by(ops, g, &orig, co, cc)? {
+        out.push((
+            ranges(ops, og, f, Bank::Original)?,
+            ranges(ops, c0, f, Bank::Current)?,
+            None,
+        ));
+    }
+    Ok(out)
+}
+
+/// [`field_values`] with the inner bits.
+fn field_values_inner(ops: &mut Ops<'_>, g: Edge, f: FieldBits) -> Result<Vec<Cell>, DdError> {
+    let bits: Vec<u32> = f.value_bits().collect();
+    let orig: Vec<u32> = bits.iter().map(|&b| level(b, Bank::Original)).collect();
+    let cur: Vec<u32> = bits.iter().map(|&b| level(b, Bank::Current)).collect();
+    let inn: Vec<u32> = bits.iter().map(|&b| level(b, Bank::Inner)).collect();
+    let co = ops.dd.cube(&orig)?;
+    let cc = ops.dd.cube(&cur)?;
+    let ci = ops.dd.cube(&inn)?;
+    let cci = ops.dd.and(cc, ci)?;
+    let coi = ops.dd.and(co, ci)?;
+    let coc = ops.dd.and(co, cc)?;
+    let o = ops.dd.exists(g, cci)?;
+    let c = ops.dd.exists(g, coi)?;
+    let i = ops.dd.exists(g, coc)?;
+    let mut forms = Vec::new();
+    for (e, bank) in [(c, Bank::Current), (i, Bank::Inner)] {
+        let vals = ranges(ops, e, f, bank)?;
+        let eq = eq_original(ops, f, bank)?;
+        // A single value first, then the original value, then a product.
+        forms.push(if vals.single().is_some() {
+            [(vals, e), (Values::Original, eq)]
+        } else {
+            [(Values::Original, eq), (vals, e)]
+        });
+    }
+    for (cv, ce) in &forms[0] {
+        for (iv, ie) in &forms[1] {
+            let r = ops.dd.and(o, *ce)?;
+            let r = ops.dd.and(r, *ie)?;
+            if r == g {
+                return Ok(vec![(
+                    ranges(ops, o, f, Bank::Original)?,
+                    cv.clone(),
+                    Some(iv.clone()),
+                )]);
+            }
+        }
+    }
+    // Group the original values by the relation of their current and inner
+    // values, and then the current values by the set of their inner values.
+    let mut out = Vec::new();
+    for (og, r0) in group_by(ops, g, &orig, co, cci)? {
+        let ov = ranges(ops, og, f, Bank::Original)?;
+        for (cg, i0) in group_by(ops, r0, &cur, cc, ci)? {
+            out.push((
+                ov.clone(),
+                ranges(ops, cg, f, Bank::Current)?,
+                Some(ranges(ops, i0, f, Bank::Inner)?),
+            ));
+        }
+    }
+    Ok(out)
+}
+
+/// The relation "the bits of `f` in `bank` equal the original request".
+fn eq_original(ops: &mut Ops<'_>, f: FieldBits, bank: Bank) -> Result<Edge, DdError> {
+    let mut eq = Edge::TRUE;
+    let mut b = ops.builder();
+    for x in f.value_bits().rev() {
+        eq = b.eq_bit(x, Bank::Original, bank, eq)?;
+    }
+    Ok(eq)
+}
+
+/// The groups of a relation `rel` over the levels `a` (with the cube `ca`)
+/// and the levels of the cube `cb`: each group is a set of values of `a`
+/// with the same set of values of `cb`, and that set.
+fn group_by(
+    ops: &mut Ops<'_>,
+    rel: Edge,
+    a: &[u32],
+    ca: Edge,
+    cb: Edge,
+) -> Result<Vec<(Edge, Edge)>, DdError> {
+    let mut out = Vec::new();
+    let mut rem = rel;
     while rem != Edge::FALSE {
         let Some(path) = ops.dd.pick_one(rem)? else {
             break;
         };
-        let lits: Vec<(u32, bool)> = orig
+        let lits: Vec<(u32, bool)> = a
             .iter()
             .map(|&l| (l, path.iter().any(|&(x, v)| x == l && v)))
             .collect();
-        let o0 = ops.dd.literals(&lits)?;
-        let at = ops.dd.and(rem, o0)?;
-        let c0 = ops.dd.exists(at, co)?;
-        let d = ops.dd.xor(rem, c0)?;
-        let bad = ops.dd.exists(d, cc)?;
-        let proj = ops.dd.exists(rem, cc)?;
+        let a0 = ops.dd.literals(&lits)?;
+        let at = ops.dd.and(rem, a0)?;
+        let b0 = ops.dd.exists(at, ca)?;
+        let d = ops.dd.xor(rem, b0)?;
+        let bad = ops.dd.exists(d, cb)?;
+        let proj = ops.dd.exists(rem, cb)?;
         let group = ops.dd.diff(proj, bad)?;
         rem = ops.dd.diff(rem, group)?;
-        out.push((
-            ranges(ops, group, f, Bank::Original)?,
-            ranges(ops, c0, f, Bank::Current)?,
-        ));
+        out.push((group, b0));
     }
     Ok(out)
 }
@@ -477,6 +614,58 @@ mod tests {
         assert_eq!(
             m[0].original.get(HeaderField::SrcPort).single(),
             Some(40000)
+        );
+    }
+
+    #[test]
+    fn an_encapsulated_request_has_the_original_request_as_its_inner_header() {
+        use crate::header::{Encap, PROTO_UDP};
+        let a = SetArena::standalone();
+        let vtep = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+        let mut o = Header::request(vtep("198.51.100.1"), vtep("198.51.100.2"), PROTO_UDP)
+            .with_src_port(49152)
+            .with_dst_port(4789);
+        o.dscp = FieldValue::Known(0);
+        o.ecn = FieldValue::Known(0);
+        o.src_mac = FieldValue::Unknown;
+        o.dst_mac = FieldValue::Unknown;
+        o.vlan = FieldValue::Absent;
+        o.l2_priority = FieldValue::Absent;
+        o.encap = vec![Encap::Vxlan {
+            src: vtep("198.51.100.1"),
+            dst: vtep("198.51.100.2"),
+            vni: 10010,
+        }];
+        let mut req = h();
+        req.dscp = FieldValue::Known(46);
+        let m = PacketSet::single(&a, &req).encapsulate(&o).done.describe();
+        assert_eq!(m.len(), 1);
+        let c = &m[0].current;
+        assert_eq!(c.get(HeaderField::DstPort).single(), Some(4789));
+        assert_eq!(
+            c.get(HeaderField::DstIp),
+            &Values::Prefixes(vec!["198.51.100.2/32".parse().unwrap()])
+        );
+        let e = c.encap.as_ref().unwrap();
+        assert_eq!(e.kind, bits::ENCAP_VXLAN);
+        assert_eq!(e.vni.single(), Some(10010));
+        let i = c.inner.as_deref().unwrap();
+        // The inner header is the original request: each field has the
+        // original value, and a single value shows as that value.
+        assert_eq!(i.get(HeaderField::DstPort).single(), Some(22));
+        assert_eq!(i.get(HeaderField::Dscp).single(), Some(46));
+        assert_eq!(i.get(HeaderField::SrcMac), &Values::Original);
+        assert!(i.encap.is_none() && i.inner.is_none());
+        assert!(m[0].original.inner.is_none());
+        // A request with unstated fields: the inner header keeps the
+        // relation to the original request.
+        let m = PacketSet::single(&a, &h()).encapsulate(&o).done.describe();
+        assert_eq!(m.len(), 1);
+        let i = m[0].current.inner.as_deref().unwrap();
+        assert_eq!(i.get(HeaderField::Dscp), &Values::Original);
+        assert_eq!(
+            m[0].original.get(HeaderField::Dscp),
+            &Values::Ranges(vec![(0, 63)])
         );
     }
 

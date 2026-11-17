@@ -23,6 +23,9 @@ pub struct SetBase {
     pub(crate) orig_cube: Edge,
     /// The cube of all levels of the current bank.
     pub(crate) cur_cube: Edge,
+    /// The cube of the inner levels of the header bits below the
+    /// encapsulation fields.
+    pub(crate) inner_cube: Edge,
     /// The original bank equals the current bank on the flow bits.
     pub(crate) eq_flow: Edge,
     pub(crate) definite: BTreeMap<Match, Edge>,
@@ -43,6 +46,8 @@ impl SetBase {
         let orig_cube = b.dd.cube(&orig)?;
         let cur: Vec<u32> = (0..bits::BITS).map(|x| level(x, Bank::Current)).collect();
         let cur_cube = b.dd.cube(&cur)?;
+        let inner: Vec<u32> = bits::header_bits().map(|x| level(x, Bank::Inner)).collect();
+        let inner_cube = b.dd.cube(&inner)?;
         let mut eq_flow = Edge::TRUE;
         for x in bits::flow_bits().into_iter().rev() {
             eq_flow = b.eq_bit(x, Bank::Original, Bank::Current, eq_flow)?;
@@ -65,6 +70,7 @@ impl SetBase {
             eq,
             orig_cube,
             cur_cube,
+            inner_cube,
             eq_flow,
             definite,
             upper,

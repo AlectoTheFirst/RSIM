@@ -46,6 +46,10 @@ impl<T: Copy> FieldValue<T> {
         !matches!(self, FieldValue::Absent)
     }
 
+    pub fn is_unstated(&self) -> bool {
+        matches!(self, FieldValue::Unstated)
+    }
+
     /// Evaluates a membership test against this field.
     ///
     /// An absent field never matches a predicate that reads it: a transport

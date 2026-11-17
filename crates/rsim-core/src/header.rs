@@ -127,11 +127,12 @@ pub struct Header {
     pub icmp_code: FieldValue<u8>,
     /// Present only with an MPLS encapsulation.
     pub mpls_tc: FieldValue<u8>,
-    /// The encapsulation of this header. With an encapsulation, the fields
-    /// of this header are the outer header, and `inner` is the encapsulated
-    /// packet.
+    /// The encapsulation of this header: empty or 1 item. With an
+    /// encapsulation, the fields of this header are the outer header, and
+    /// `inner` is the encapsulated packet.
     pub encap: Vec<Encap>,
-    /// The inner header of an encapsulated packet.
+    /// The inner header of an encapsulated packet. It is present exactly
+    /// when `encap` is not empty, and it has no encapsulation.
     pub inner: Option<Box<Header>>,
 }
 
@@ -227,7 +228,9 @@ impl Header {
     /// ICMPv6 echo request gives an echo reply. TCP flags with only SYN give
     /// SYN and ACK. All other TCP flags and ICMP types are unstated in the
     /// reply. The DSCP and the ECN are unstated, because the host that
-    /// replies sets them. A field of an absent header stays absent.
+    /// replies sets them. A field of an absent header stays absent. The
+    /// reply of an encapsulated header is the reply of its outer header
+    /// with no encapsulation and no MPLS traffic class.
     pub fn reply(&self) -> Header {
         fn unstated<T: Copy>(v: &mut FieldValue<T>) {
             if v.is_present() {
@@ -235,6 +238,11 @@ impl Header {
             }
         }
         let mut h = self.clone();
+        if !h.encap.is_empty() {
+            h.encap.clear();
+            h.inner = None;
+            h.mpls_tc = FieldValue::Absent;
+        }
         std::mem::swap(&mut h.src_ip, &mut h.dst_ip);
         std::mem::swap(&mut h.src_port, &mut h.dst_port);
         std::mem::swap(&mut h.src_mac, &mut h.dst_mac);
@@ -265,6 +273,66 @@ impl Header {
         unstated(&mut h.ecn);
         h
     }
+
+    /// This header inside `outer`, or `None` if this header has an
+    /// encapsulation already. `outer` has one encapsulation, no inner
+    /// header and no unstated field.
+    pub fn encapsulate(&self, outer: &Header) -> Option<Header> {
+        assert!(
+            outer.is_outer(),
+            "an outer header has one encapsulation, no inner header and no unstated field"
+        );
+        if !self.encap.is_empty() {
+            return None;
+        }
+        let mut h = outer.clone();
+        h.inner = Some(Box::new(self.clone()));
+        Some(h)
+    }
+
+    /// The inner header, or `None` if this header has no encapsulation.
+    pub fn decapsulate(&self) -> Option<Header> {
+        self.inner.as_deref().cloned()
+    }
+
+    /// True if the header can be the outer header of an encapsulation.
+    pub fn is_outer(&self) -> bool {
+        self.encap.len() == 1 && self.inner.is_none() && !self.has_unstated_field()
+    }
+
+    /// True if a field of the header is unstated. The encapsulation and the
+    /// inner header are not fields of the header.
+    pub fn has_unstated_field(&self) -> bool {
+        [
+            self.src_mac.is_unstated(),
+            self.dst_mac.is_unstated(),
+            self.vlan.is_unstated(),
+            self.l2_priority.is_unstated(),
+            self.src_ip.is_unstated(),
+            self.dst_ip.is_unstated(),
+            self.protocol.is_unstated(),
+            self.dscp.is_unstated(),
+            self.ecn.is_unstated(),
+            self.fragment.is_unstated(),
+            self.src_port.is_unstated(),
+            self.dst_port.is_unstated(),
+            self.tcp_flags.is_unstated(),
+            self.icmp_type.is_unstated(),
+            self.icmp_code.is_unstated(),
+            self.mpls_tc.is_unstated(),
+        ]
+        .contains(&true)
+    }
+
+    /// True if the inner header is present exactly with an encapsulation,
+    /// and the inner header has no encapsulation.
+    pub(crate) fn has_valid_encap(&self) -> bool {
+        match (&self.inner, self.encap.len()) {
+            (None, 0) => true,
+            (Some(i), 1) => i.encap.is_empty() && i.inner.is_none(),
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -291,6 +359,51 @@ mod tests {
         h.icmp_type = FieldValue::Known(icmp_type);
         h.icmp_code = FieldValue::Known(0);
         h
+    }
+
+    fn outer() -> Header {
+        let mut o = Header::request(ip("198.51.100.1"), ip("198.51.100.2"), PROTO_UDP)
+            .with_src_port(49152)
+            .with_dst_port(4789);
+        o.dscp = FieldValue::Known(0);
+        o.ecn = FieldValue::Known(0);
+        o.src_mac = FieldValue::Unknown;
+        o.dst_mac = FieldValue::Unknown;
+        o.vlan = FieldValue::Absent;
+        o.l2_priority = FieldValue::Absent;
+        o.encap = vec![Encap::Vxlan {
+            src: ip("198.51.100.1"),
+            dst: ip("198.51.100.2"),
+            vni: 10,
+        }];
+        o
+    }
+
+    #[test]
+    fn an_encapsulation_keeps_the_header_inside_the_outer_header() {
+        let e = tcp().encapsulate(&outer()).unwrap();
+        assert_eq!(e.dst_port, FieldValue::Known(4789));
+        assert_eq!(e.inner.as_deref(), Some(&tcp()));
+        assert_eq!(e.decapsulate(), Some(tcp()));
+        assert_eq!(e.encapsulate(&outer()), None);
+        assert_eq!(tcp().decapsulate(), None);
+    }
+
+    #[test]
+    fn the_reply_to_an_encapsulated_header_is_the_reply_to_its_outer_header() {
+        let r = tcp().encapsulate(&outer()).unwrap().reply();
+        assert!(r.encap.is_empty() && r.inner.is_none());
+        assert_eq!(r.src_ip, FieldValue::Known(ip("198.51.100.2")));
+        assert_eq!(r.dst_port, FieldValue::Known(49152));
+    }
+
+    #[test]
+    fn an_outer_header_states_each_field() {
+        assert!(outer().is_outer());
+        let mut o = outer();
+        o.dscp = FieldValue::Unstated;
+        assert!(!o.is_outer());
+        assert!(!tcp().is_outer());
     }
 
     #[test]

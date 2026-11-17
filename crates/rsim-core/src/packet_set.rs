@@ -34,7 +34,6 @@ pub struct PacketPair {
     pub current: Header,
 }
 
-/// A set of packet pairs in the arena of one query. Two sets of one query
 /// The result of an encapsulation: the encapsulated packets, and the packets
 /// that had an encapsulation already.
 #[derive(Clone, Debug)]
@@ -51,7 +50,12 @@ pub struct Decapsulated {
     pub plain: PacketSet,
 }
 
+/// A set of packet pairs in the arena of one query. Two sets of one query
 /// with the same members have the same edge.
+///
+/// The original request has no encapsulation. The inner level holds the
+/// inner header of an encapsulated current header, and it is free for a
+/// current header with no encapsulation.
 #[derive(Clone)]
 pub struct PacketSet {
     arena: Arc<SetArena>,
@@ -299,13 +303,26 @@ impl PacketSet {
     /// The set of one request: the original request is the header itself.
     /// A field that the header does not state has all values, with the
     /// same value in the original request and the current header.
+    ///
+    /// For an encapsulated header, the original request is the inner
+    /// header, and the current header is the encapsulated header. The outer
+    /// header must not have an unstated field.
     pub fn single(arena: &Arc<SetArena>, h: &Header) -> PacketSet {
-        // An encapsulated packet: its inner packet, then its outer header.
+        assert!(
+            h.has_valid_encap(),
+            "a header has an inner header exactly with one encapsulation"
+        );
         if let Some(inner) = &h.inner {
             let mut outer = h.clone();
             outer.inner = None;
             return Self::single(arena, inner).encapsulate(&outer).done;
         }
+        Self::single_fields(arena, h)
+    }
+
+    /// The set of one request from the fields and the encapsulation of `h`.
+    /// The inner level is free.
+    fn single_fields(arena: &Arc<SetArena>, h: &Header) -> PacketSet {
         let enc = bits::encode(h);
         let e = arena
             .run(|ops| {
@@ -347,10 +364,17 @@ impl PacketSet {
 
     /// The set of one pair of headers. Each header must state all fields.
     /// A header with no known address has the address family of the other
-    /// header.
+    /// header. The original request has no encapsulation.
     pub fn pair(arena: &Arc<SetArena>, p: &PacketPair) -> PacketSet {
+        assert!(
+            p.original.encap.is_empty()
+                && p.original.inner.is_none()
+                && p.current.has_valid_encap(),
+            "the original request has no encapsulation, and a header has an inner header exactly with one encapsulation"
+        );
         let mut o = bits::encode(&p.original);
         let mut c = bits::encode(&p.current);
+        let i = p.current.inner.as_deref().map(bits::encode);
         let af = bits::AF as usize;
         if c[af].is_none() {
             c[af] = o[af];
@@ -367,6 +391,11 @@ impl PacketSet {
                     }
                     if let Some(v) = c[x as usize] {
                         lits.push((level(x, Bank::Current), v));
+                    }
+                    if let Some(v) = i.as_ref().and_then(|i| i[x as usize])
+                        && bits::header_bits().contains(&x)
+                    {
+                        lits.push((level(x, Bank::Inner), v));
                     }
                 }
                 ops.dd.literals(&lits)
@@ -401,6 +430,10 @@ impl PacketSet {
 
     /// True if the set holds the pair.
     pub fn contains(&self, p: &PacketPair) -> bool {
+        assert!(
+            p.current.has_valid_encap(),
+            "a header has an inner header exactly with one encapsulation"
+        );
         let o = bits::encode(&p.original);
         let c = bits::encode(&p.current);
         let i = p.current.inner.as_deref().map(bits::encode);
@@ -451,15 +484,16 @@ impl PacketSet {
             if let Some(&e) = ops.memo.get(&(MEMO_ORIGINAL, self.edge)) {
                 return Ok(e);
             }
-            let o = ops.dd.exists(self.edge, ops.base.cur_cube)?;
+            let cube = ops.dd.and(ops.base.cur_cube, ops.base.inner_cube)?;
+            let o = ops.dd.exists(self.edge, cube)?;
             let e = ops.dd.and(o, ops.base.eq)?;
             ops.memo.insert((MEMO_ORIGINAL, self.edge), e);
             Ok(e)
         })
     }
 
-    /// The projection to fields of the current header. The other fields
-    /// and the original request have all values.
+    /// The projection to fields of the current header. The other fields,
+    /// the inner header and the original request have all values.
     pub fn project(&self, fields: &[HeaderField]) -> PacketSet {
         self.op(&[], |ops| {
             let keep: Vec<u32> = fields
@@ -471,6 +505,7 @@ impl PacketSet {
             let all: Vec<u32> = (0..bits::BITS).collect();
             let c2 = ops.cube(&all, Bank::Original)?;
             let cube = ops.dd.and(c1, c2)?;
+            let cube = ops.dd.and(cube, ops.base.inner_cube)?;
             ops.dd.exists(self.edge, cube)
         })
     }
@@ -879,24 +914,25 @@ impl PacketSet {
 
     /// Encapsulates each packet with no encapsulation: the current header
     /// becomes the inner header, and `outer` becomes the current header.
-    /// `outer` gives the outer fields and one encapsulation, and has no
-    /// inner header. A packet that has an encapsulation already is in
-    /// `nested`, because the set holds 1 level.
+    /// `outer` gives the outer fields and one encapsulation, has no inner
+    /// header and has no unstated field. A packet that has an encapsulation
+    /// already is in `nested`, because the set holds 1 level. The original
+    /// request does not change.
     pub fn encapsulate(&self, outer: &Header) -> Encapsulated {
         assert!(
-            outer.encap.len() == 1 && outer.inner.is_none(),
-            "an outer header has one encapsulation and no inner header"
+            outer.is_outer(),
+            "an outer header has one encapsulation, no inner header and no unstated field"
         );
-        let shape = Self::single(&self.arena, outer);
+        let shape = Self::single_fields(&self.arena, outer);
         let plain = self.op(&[], |ops| {
-            let none = ops.builder().value(bits::ENCAP_KIND, Bank::Current, bits::ENCAP_NONE)?;
+            let none = ops
+                .builder()
+                .value(bits::ENCAP_KIND, Bank::Current, bits::ENCAP_NONE)?;
             ops.dd.and(self.edge, none)
         });
         let nested = self.difference(&plain);
         let done = plain.op(&[], |ops| {
-            let header: Vec<u32> = bits::header_bits().collect();
-            let inner = ops.cube(&header, Bank::Inner)?;
-            let e = ops.dd.exists(plain.edge, inner)?;
+            let e = ops.dd.exists(plain.edge, ops.base.inner_cube)?;
             let m = ops.map(MapKind::CurrentInner)?;
             let e = ops.dd.rename(e, m)?;
             let encap: Vec<u32> = (bits::ENCAP_KIND.start..bits::BITS).collect();
@@ -909,11 +945,36 @@ impl PacketSet {
         Encapsulated { done, nested }
     }
 
+    /// True if the levels that hold no header are free: the inner level of
+    /// each packet with no encapsulation, the inner level of the
+    /// encapsulation fields and the work level. Each set operation keeps
+    /// this property; the tests check it.
+    pub fn has_free_levels(&self) -> bool {
+        self.run(&[], |ops| {
+            let none = ops
+                .builder()
+                .value(bits::ENCAP_KIND, Bank::Current, bits::ENCAP_NONE)?;
+            let plain = ops.dd.and(self.edge, none)?;
+            let plain_free = ops.dd.exists(plain, ops.base.inner_cube)? == plain;
+            let encap: Vec<u32> = (bits::ENCAP_KIND.start..bits::BITS).collect();
+            let all: Vec<u32> = (0..bits::BITS).collect();
+            let inner = ops.cube(&encap, Bank::Inner)?;
+            let work = ops.cube(&all, Bank::Work)?;
+            let cube = ops.dd.and(inner, work)?;
+            let rest_free = ops.dd.exists(self.edge, cube)? == self.edge;
+            Ok(plain_free && rest_free)
+        })
+        .unwrap_or(false)
+    }
+
     /// Decapsulates each encapsulated packet: the inner header becomes the
     /// current header again. A packet with no encapsulation is in `plain`.
+    /// The original request does not change.
     pub fn decapsulate(&self) -> Decapsulated {
         let encapsulated = self.op(&[], |ops| {
-            let none = ops.builder().value(bits::ENCAP_KIND, Bank::Current, bits::ENCAP_NONE)?;
+            let none = ops
+                .builder()
+                .value(bits::ENCAP_KIND, Bank::Current, bits::ENCAP_NONE)?;
             ops.dd.diff(self.edge, none)
         });
         let plain = self.difference(&encapsulated);
@@ -935,11 +996,27 @@ impl PacketSet {
     /// flags with only SYN give SYN and ACK. All other TCP flags and ICMP
     /// types and codes have all values. The DSCP and the ECN have all
     /// values. The reply is a new request, so its original request is the
-    /// reply header.
+    /// reply header. The reply of an encapsulated packet is the reply of
+    /// its outer header with no encapsulation and no MPLS traffic class.
     pub fn reply(&self) -> PacketSet {
         self.op(&[], |ops| {
             let orig = ops.base.orig_cube;
             let mut e = ops.dd.exists(self.edge, orig)?;
+            let none = ops
+                .builder()
+                .value(bits::ENCAP_KIND, Bank::Current, bits::ENCAP_NONE)?;
+            let encapsulated = ops.dd.diff(e, none)?;
+            if encapsulated != Edge::FALSE {
+                let plain = ops.dd.and(e, none)?;
+                let mut drop: Vec<u32> = (bits::ENCAP_KIND.start..bits::BITS).collect();
+                drop.extend(bits::MPLS_TC.all_bits());
+                let cube = ops.cube(&drop, Bank::Current)?;
+                let cube = ops.dd.and(cube, ops.base.inner_cube)?;
+                let outer = ops.dd.exists(encapsulated, cube)?;
+                let z = ops.builder().zeros(&drop, Bank::Current)?;
+                let outer = ops.dd.and(outer, z)?;
+                e = ops.dd.or(plain, outer)?;
+            }
             let sw = ops.map(MapKind::ReplySwap)?;
             e = ops.dd.rename(e, sw)?;
             let c = Bank::Current;
@@ -1064,12 +1141,13 @@ impl PacketSet {
     /// in the relation if one original request has the first flow at the
     /// lookup and the second flow at the commit. The original bank holds
     /// the flow at the lookup, and the current bank holds the flow at the
-    /// commit. The other fields have all values.
+    /// commit. The other fields and the inner header have all values.
     pub fn session_relation(&self, commit: &PacketSet) -> PacketSet {
         self.op(&[commit], |ops| {
             let flow = bits::flow_bits();
             let rest: Vec<u32> = (0..bits::BITS).filter(|b| !flow.contains(b)).collect();
             let rest_cur = ops.cube(&rest, Bank::Current)?;
+            let rest_cur = ops.dd.and(rest_cur, ops.base.inner_cube)?;
             // The flows at the lookup and at the commit, with the original
             // requests.
             let at_lookup = ops.dd.exists(self.edge, rest_cur)?;

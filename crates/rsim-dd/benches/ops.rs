@@ -6,7 +6,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use rsim_dd::{Dd, Edge};
 
 const BITS: u32 = 763;
-const LEVELS: u32 = BITS * 3;
+const LEVELS: u32 = BITS * 4;
 /// The first header bit of the destination address in the bit table.
 const DST_IP: u32 = 5 + 11 + 1 + 8;
 
@@ -41,7 +41,7 @@ impl Seq {
 fn prefix(dd: &mut Dd, value: u128, len: u32, bank: u32) -> Edge {
     let mut f = Edge::TRUE;
     for i in (0..len).rev() {
-        let level = (DST_IP + i) * 3 + bank;
+        let level = (DST_IP + i) * 4 + bank;
         let v = dd.var(level).unwrap();
         let lit = if value >> (127 - i) & 1 == 1 {
             v
@@ -87,9 +87,9 @@ fn bench(c: &mut Criterion) {
         union(&mut root, &ps)
     };
     let pairs: Vec<(u32, u32)> = (0..BITS)
-        .flat_map(|bit| [(bit * 3 + 1, bit * 3 + 2), (bit * 3 + 2, bit * 3 + 1)])
+        .flat_map(|bit| [(bit * 4 + 1, bit * 4 + 2), (bit * 4 + 2, bit * 4 + 1)])
         .collect();
-    let bank: Vec<u32> = (0..BITS).map(|bit| bit * 3 + 1).collect();
+    let bank: Vec<u32> = (0..BITS).map(|bit| bit * 4 + 1).collect();
     let frozen = root.freeze().unwrap();
 
     c.bench_function(

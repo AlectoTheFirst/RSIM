@@ -17,7 +17,7 @@ pub const BITS: u32 = 763;
 /// The number of levels: 4 for each bit.
 pub const LEVELS: u32 = 4 * BITS;
 
-/// One of the 3 levels of a bit.
+/// One of the 4 levels of a bit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Bank {
     Original = 0,
@@ -188,8 +188,11 @@ pub(crate) type BitValue = Option<bool>;
 /// header does not state has free value bits.
 pub(crate) fn encode(h: &Header) -> Vec<BitValue> {
     let mut bits: Vec<BitValue> = vec![Some(false); BITS as usize];
-    let v6 = match (h.src_ip, h.dst_ip) {
-        (FieldValue::Known(a), _) | (_, FieldValue::Known(a)) => Some(a.is_ipv6()),
+    // With no known address, the addresses of a GRE or VXLAN encapsulation
+    // give the address family.
+    let v6 = match (h.src_ip, h.dst_ip, h.encap.first()) {
+        (FieldValue::Known(a), _, _) | (_, FieldValue::Known(a), _) => Some(a.is_ipv6()),
+        (_, _, Some(Encap::Gre { src, .. } | Encap::Vxlan { src, .. })) => Some(src.is_ipv6()),
         _ => None,
     };
     bits[AF as usize] = v6;

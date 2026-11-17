@@ -6,8 +6,9 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use proptest::prelude::*;
+use proptest::test_runner::TestCaseError;
 use rsim_core::{
-    AddrCond, AddrField, FieldValue, Header, Mac, Match, MatchClass, PROTO_ICMP, PROTO_TCP,
+    AddrCond, AddrField, Encap, FieldValue, Header, Mac, Match, MatchClass, PROTO_ICMP, PROTO_TCP,
     PROTO_UDP, PacketPair, PacketSet, PortCond, Prefix, PrefixTable, Rewrite, RulePredicate,
     SessionDirection, SetArena, SetBase, TriePrefixTable, ValueCond,
 };
@@ -331,10 +332,25 @@ proptest! {
         later in headers(),
     ) {
         prop_assume!(same_family(&rw, &a));
+        check_session(explicit(&a), rw, explicit(&later))?;
+    }
+}
+
+/// The session lookup of `probe` in the relation of `lookup` and its
+/// rewrite by `rw`, against the relation of the explicit flows.
+fn check_session(lookup: Explicit, rw: Rewrite, probe: Explicit) -> Result<(), TestCaseError> {
+    {
         let ar = arena();
-        let known = |h: &Header| [h.src_port, h.dst_port, h.src_ip.map(|_| 0), h.dst_ip.map(|_| 0)]
+        let known = |h: &Header| {
+            [
+                h.src_port,
+                h.dst_port,
+                h.src_ip.map(|_| 0),
+                h.dst_ip.map(|_| 0),
+            ]
             .iter()
-            .all(|v| !matches!(v, FieldValue::Unknown));
+            .all(|v| !matches!(v, FieldValue::Unknown))
+        };
         let mut rw = rw;
         // The explicit model has exact matches only: no unknown value.
         for f in [&mut rw.src_port, &mut rw.dst_port] {
@@ -347,10 +363,11 @@ proptest! {
                 *f = None;
             }
         }
-        let ea: Explicit = explicit(&a).into_iter().filter(|p| known(&p.current)).collect();
+        let ea: Explicit = lookup.into_iter().filter(|p| known(&p.current)).collect();
         let lookup = set(&ar, &ea);
         let commit = lookup.rewrite(&rw);
         let rel = lookup.session_relation(&commit);
+        prop_assert!(rel.has_free_levels());
         let pairs: Vec<(Flow, Flow)> = ea
             .iter()
             .map(|p| {
@@ -360,7 +377,7 @@ proptest! {
             })
             .collect();
         prop_assert_eq!(rel.changes_flow(), pairs.iter().any(|(l, c)| l != c));
-        let probe: Explicit = explicit(&later).into_iter().filter(|p| known(&p.current)).collect();
+        let probe: Explicit = probe.into_iter().filter(|p| known(&p.current)).collect();
         let s = set(&ar, &probe);
         for dir in [SessionDirection::Forward, SessionDirection::Reply] {
             let r = s.session_lookup(&rel, dir);
@@ -393,8 +410,12 @@ proptest! {
             prop_assert_eq!(&r.unmatched, &set(&ar, &unmatched), "{:?}", dir);
             prop_assert_eq!(&r.ambiguous, &set(&ar, &ambiguous), "{:?}", dir);
             prop_assert!(r.uncertain.is_empty());
+            for x in [&r.matched, &r.unmatched, &r.ambiguous] {
+                prop_assert!(x.has_free_levels());
+            }
         }
     }
+    Ok(())
 }
 
 #[test]
@@ -529,7 +550,44 @@ fn member_contains(m: &Member, p: &PacketPair) -> bool {
                 o,
             )
     }) && m.original.encap.is_none()
-        && m.current.encap.is_none()
+        && m.original.inner.is_none()
+        && encap_holds(&m.current.encap, &p.current)
+        && match (&m.current.inner, &p.current.inner) {
+            (None, None) => true,
+            (Some(mi), Some(pi)) => HEADER_FIELDS.iter().all(|&f| {
+                let o = field_value(&p.original, f);
+                holds(mi.get(f), field_value(pi, f), addr(pi, f), o)
+            }),
+            _ => false,
+        }
+}
+
+/// True if the encapsulation of a member holds the encapsulation of `h`.
+fn encap_holds(d: &Option<rsim_core::EncapDesc>, h: &Header) -> bool {
+    use rsim_core::bits::{ENCAP_GRE, ENCAP_MPLS, ENCAP_VXLAN, ip_bits};
+    let r = |v: &Values, x: u128| matches!(v, Values::Ranges(rs) if rs.iter().any(|&(lo, hi)| lo <= x && x <= hi));
+    match (d, h.encap.first()) {
+        (None, None) => true,
+        (Some(d), Some(e)) => {
+            let (kind, src, dst, vni, label) = match e {
+                Encap::Vxlan { src, dst, vni } => (
+                    ENCAP_VXLAN,
+                    ip_bits(*src),
+                    ip_bits(*dst),
+                    u128::from(*vni),
+                    0,
+                ),
+                Encap::Gre { src, dst } => (ENCAP_GRE, ip_bits(*src), ip_bits(*dst), 0, 0),
+                Encap::Mpls { label, .. } => (ENCAP_MPLS, 0, 0, 0, u128::from(*label)),
+            };
+            d.kind == kind
+                && r(&d.src, src)
+                && r(&d.dst, dst)
+                && r(&d.vni, vni)
+                && r(&d.label, label)
+        }
+        _ => false,
+    }
 }
 
 proptest! {
@@ -563,4 +621,363 @@ proptest! {
             prop_assert!(want.iter().any(|p| member_contains(m, p)), "{:?}", m);
         }
     }
+}
+
+// ------------------------------------------------------------ encapsulation
+
+const VTEPS: [&str; 3] = ["198.51.100.1", "198.51.100.2", "203.0.113.5"];
+const VTEPS6: [&str; 2] = ["2001:db8:ff::1", "2001:db8:ff::2"];
+
+prop_compose! {
+    /// An outer header with one encapsulation and each field stated.
+    fn outer()(
+        v6 in prop::bool::weighted(0.2),
+        src in 0..VTEPS.len(),
+        dst in 0..VTEPS.len(),
+        kind in 0u8..3,
+        sport in unknown_or(prop_oneof![Just(49152u16), Just(50000)]),
+        vni in prop_oneof![Just(10u32), Just(20)],
+        dscp in prop_oneof![Just(0u8), Just(46)],
+        mac in 0u8..2,
+    ) -> Header {
+        let (s, d) = if v6 {
+            (ip(VTEPS6[src % VTEPS6.len()]), ip(VTEPS6[dst % VTEPS6.len()]))
+        } else {
+            (ip(VTEPS[src]), ip(VTEPS[dst]))
+        };
+        let proto = if kind == 1 { 47 } else { PROTO_UDP };
+        let mut h = Header::request(s, d, proto);
+        if proto == PROTO_UDP {
+            h.src_port = sport;
+            h.dst_port = FieldValue::Known(4789);
+        }
+        h.dscp = FieldValue::Known(dscp);
+        h.ecn = FieldValue::Known(0);
+        h.src_mac = FieldValue::Known(Mac([0, 0, 0, 0, 2, mac]));
+        h.dst_mac = FieldValue::Known(Mac([0, 0, 0, 0, 3, mac]));
+        h.vlan = FieldValue::Absent;
+        h.l2_priority = FieldValue::Absent;
+        let e = match kind {
+            0 => Encap::Vxlan { src: s, dst: d, vni },
+            1 => Encap::Gre { src: s, dst: d },
+            _ => {
+                h.mpls_tc = FieldValue::Known(5);
+                Encap::Mpls { label: 100 + vni, traffic_class: FieldValue::Known(5) }
+            }
+        };
+        h.encap = vec![e];
+        h
+    }
+}
+
+/// Pairs of a plain original request and a current header that is the
+/// request itself or the request in an outer header.
+fn pairs() -> impl Strategy<Value = Explicit> {
+    prop::collection::vec((header(), prop::option::weighted(0.5, outer())), 0..6).prop_map(|v| {
+        let mut e: Explicit = v
+            .into_iter()
+            .map(|(h, o)| PacketPair {
+                current: match &o {
+                    Some(o) => h.encapsulate(o).unwrap(),
+                    None => h.clone(),
+                },
+                original: h,
+            })
+            .collect();
+        e.sort();
+        e.dedup();
+        e
+    })
+}
+
+fn is_encapsulated(p: &PacketPair) -> bool {
+    !p.current.encap.is_empty()
+}
+
+fn currents(e: &Explicit) -> Vec<Header> {
+    e.iter().map(|p| p.current.clone()).collect()
+}
+
+fn sorted(mut e: Explicit) -> Explicit {
+    e.sort();
+    e.dedup();
+    e
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+
+    #[test]
+    fn the_set_algebra_agrees_with_lists_of_encapsulated_pairs(ea in pairs(), eb in pairs()) {
+        let ar = arena();
+        let (sa, sb) = (set(&ar, &ea), set(&ar, &eb));
+        let mut union = ea.clone();
+        union.extend(eb.iter().cloned());
+        let union = sorted(union);
+        let inter: Explicit = ea.iter().filter(|p| eb.contains(p)).cloned().collect();
+        let diff: Explicit = ea.iter().filter(|p| !eb.contains(p)).cloned().collect();
+        prop_assert_eq!(sa.union(&sb), set(&ar, &union));
+        prop_assert_eq!(sa.intersect(&sb), set(&ar, &inter));
+        prop_assert_eq!(sa.difference(&sb), set(&ar, &diff));
+        prop_assert_eq!(sa.is_empty(), ea.is_empty());
+        for p in &ea {
+            prop_assert!(sa.contains(p));
+        }
+        for p in &eb {
+            prop_assert_eq!(sa.contains(p), ea.contains(p));
+        }
+        if let Some(w) = sa.witness() {
+            prop_assert!(ea.contains(&w), "{:?}", w);
+        }
+        let originals: Explicit = sorted(ea
+            .iter()
+            .map(|p| PacketPair { original: p.original.clone(), current: p.original.clone() })
+            .collect());
+        let po = sa.project_original();
+        prop_assert_eq!(&po, &set(&ar, &originals));
+        let projected = sa.project(&[rsim_core::HeaderField::DstIp]);
+        for x in [&sa, &po, &projected] {
+            prop_assert!(x.has_free_levels());
+        }
+    }
+
+    #[test]
+    fn an_encapsulation_agrees_with_the_encapsulation_of_each_header(ea in pairs(), o in outer()) {
+        let ar = arena();
+        let s = set(&ar, &ea);
+        let r = s.encapsulate(&o);
+        let done: Explicit = sorted(ea
+            .iter()
+            .filter_map(|p| Some(PacketPair {
+                original: p.original.clone(),
+                current: p.current.encapsulate(&o)?,
+            }))
+            .collect());
+        let nested: Explicit = ea.iter().filter(|p| is_encapsulated(p)).cloned().collect();
+        prop_assert_eq!(&r.done, &set(&ar, &done));
+        prop_assert_eq!(&r.nested, &set(&ar, &nested));
+        prop_assert!(r.done.has_free_levels() && r.nested.has_free_levels());
+        // The 2 parts partition the input.
+        let back = r.done.decapsulate();
+        prop_assert!(back.plain.is_empty());
+        prop_assert!(back.done.intersect(&r.nested).is_empty());
+        prop_assert_eq!(back.done.union(&r.nested), s);
+    }
+
+    #[test]
+    fn a_decapsulation_agrees_with_the_decapsulation_of_each_header(ea in pairs()) {
+        let ar = arena();
+        let s = set(&ar, &ea);
+        let r = s.decapsulate();
+        let done: Explicit = sorted(ea
+            .iter()
+            .filter_map(|p| Some(PacketPair {
+                original: p.original.clone(),
+                current: p.current.decapsulate()?,
+            }))
+            .collect());
+        let plain: Explicit = ea.iter().filter(|p| !is_encapsulated(p)).cloned().collect();
+        prop_assert_eq!(&r.done, &set(&ar, &done));
+        prop_assert_eq!(&r.plain, &set(&ar, &plain));
+        prop_assert!(r.done.has_free_levels() && r.plain.has_free_levels());
+        // The 2 parts partition the input.
+        prop_assert!(r.plain.is_subset(&s));
+        prop_assert!(s.difference(&r.plain).decapsulate().plain.is_empty());
+        prop_assert_eq!(
+            r.done.project_original().union(&r.plain.project_original()),
+            s.project_original()
+        );
+    }
+
+    #[test]
+    fn an_encapsulation_and_then_a_decapsulation_give_the_same_set(
+        a in headers(),
+        rw in rewrite(),
+        o in outer(),
+        v6 in any::<bool>(),
+    ) {
+        prop_assume!(same_family(&rw, &a));
+        let ar = arena();
+        // A set of rewritten pairs, and a request with unstated fields.
+        let (src, dst) = if v6 { ("2001:db8::1", "2001:db8::2") } else { ("10.0.0.1", "10.0.0.2") };
+        let wide = PacketSet::single(&ar, &Header::request(ip(src), ip(dst), PROTO_TCP));
+        let s = set(&ar, &explicit(&a)).rewrite(&rw).union(&wide);
+        let e = s.encapsulate(&o);
+        prop_assert!(e.nested.is_empty());
+        prop_assert!(e.done.has_free_levels());
+        let d = e.done.decapsulate();
+        prop_assert!(d.plain.is_empty());
+        prop_assert_eq!(d.done, s);
+    }
+
+    #[test]
+    fn a_rewrite_of_an_encapsulated_pair_changes_the_outer_header(ea in pairs(), rw in rewrite()) {
+        prop_assume!(same_family(&rw, &currents(&ea)));
+        let ar = arena();
+        let want: Explicit = sorted(ea
+            .iter()
+            .map(|p| {
+                let mut c = p.current.clone();
+                rw.apply_to(&mut c);
+                PacketPair { original: p.original.clone(), current: c }
+            })
+            .collect());
+        // A header with 2 unknown addresses and no encapsulation addresses
+        // does not record the address family, so the explicit model cannot
+        // state it.
+        for p in &want {
+            let c = &p.current;
+            prop_assume!(
+                c.src_ip != FieldValue::Unknown
+                    || c.dst_ip != FieldValue::Unknown
+                    || !matches!(c.encap.first(), Some(Encap::Mpls { .. }))
+            );
+        }
+        let r = set(&ar, &ea).rewrite(&rw);
+        prop_assert_eq!(&r, &set(&ar, &want));
+        prop_assert!(r.has_free_levels());
+    }
+
+    #[test]
+    fn a_split_of_an_encapsulated_pair_reads_the_outer_header(ea in pairs(), pred in predicate()) {
+        let ar = arena();
+        let s = set(&ar, &ea).split(&pred);
+        let class = |c: MatchClass| -> Explicit {
+            ea.iter().filter(|p| pred.classify(&p.current) == c).cloned().collect()
+        };
+        prop_assert_eq!(s.matched, set(&ar, &class(MatchClass::Match)));
+        prop_assert_eq!(s.uncertain, set(&ar, &class(MatchClass::Uncertain)));
+        prop_assert_eq!(s.unmatched, set(&ar, &class(MatchClass::NoMatch)));
+    }
+
+    #[test]
+    fn a_prefix_partition_of_an_encapsulated_pair_reads_the_outer_address(
+        ea in pairs(),
+        ps in prop::sample::subsequence(
+            vec!["10.0.0.0/8", "198.51.100.0/24", "198.51.100.2/32", "0.0.0.0/0", "2001:db8:ff::/48"],
+            0..5
+        ),
+    ) {
+        let ar = arena();
+        let mut t: TriePrefixTable<usize> = TriePrefixTable::new();
+        for (i, p) in ps.iter().enumerate() {
+            t.insert(p.parse::<Prefix>().unwrap(), i);
+        }
+        let part = set(&ar, &ea).partition_by_prefix(AddrField::Dst, &t);
+        let mut want: Vec<(Prefix, Explicit)> = Vec::new();
+        let mut unmatched = Vec::new();
+        for p in &ea {
+            let FieldValue::Known(a) = p.current.dst_ip else {
+                unreachable!("the generated headers have known addresses")
+            };
+            match t.longest_match(a) {
+                Some((pfx, _)) => match want.iter_mut().find(|(q, _)| *q == pfx) {
+                    Some((_, v)) => v.push(p.clone()),
+                    None => want.push((pfx, vec![p.clone()])),
+                },
+                None => unmatched.push(p.clone()),
+            }
+        }
+        want.sort_by_key(|(p, _)| *p);
+        let got: Vec<(Prefix, PacketSet)> = part.matched.iter().map(|(p, _, s)| (*p, s.clone())).collect();
+        let want: Vec<(Prefix, PacketSet)> = want.iter().map(|(p, e)| (*p, set(&ar, e))).collect();
+        prop_assert_eq!(got, want);
+        prop_assert_eq!(part.unmatched, set(&ar, &unmatched));
+        prop_assert!(part.uncertain.is_empty());
+    }
+
+    #[test]
+    fn the_reply_of_an_encapsulated_pair_is_the_reply_of_its_outer_header(ea in pairs()) {
+        let ar = arena();
+        let s = set(&ar, &ea);
+        let mut want = s.empty();
+        for p in &ea {
+            want = want.union(&PacketSet::single(&ar, &p.current.reply()));
+        }
+        let r = s.reply();
+        prop_assert_eq!(&r, &want);
+        prop_assert!(r.has_free_levels());
+    }
+
+    #[test]
+    fn a_session_lookup_of_encapsulated_pairs_reads_the_outer_flow(
+        lookup in pairs(),
+        rw in rewrite(),
+        probe in pairs(),
+    ) {
+        prop_assume!(same_family(&rw, &currents(&lookup)));
+        check_session(lookup, rw, probe)?;
+    }
+
+    /// Each pair of the set is in exactly 1 member of its description, and
+    /// the description has no member outside the set.
+    #[test]
+    fn the_members_of_the_description_of_encapsulated_pairs_are_disjoint_and_cover_the_set(ea in pairs()) {
+        let ar = arena();
+        let s = set(&ar, &ea);
+        let members = s.describe();
+        prop_assert_eq!(members.is_empty(), ea.is_empty());
+        for p in &ea {
+            let n = members.iter().filter(|m| member_contains(m, p)).count();
+            prop_assert_eq!(n, 1, "{:?} in {:?}", p, members);
+        }
+        for m in &members {
+            prop_assert!(ea.iter().any(|p| member_contains(m, p)), "{:?}", m);
+        }
+        prop_assert!(ar.fault().is_none());
+    }
+}
+
+#[test]
+fn a_single_encapsulated_request_has_the_inner_header_as_its_original_request() {
+    let ar = arena();
+    let inner = Header::request(ip("10.0.0.1"), ip("10.0.0.2"), PROTO_TCP).with_dst_port(22);
+    let mut o = Header::request(ip("198.51.100.1"), ip("198.51.100.2"), PROTO_UDP)
+        .with_src_port(49152)
+        .with_dst_port(4789);
+    o.dscp = FieldValue::Known(0);
+    o.ecn = FieldValue::Known(0);
+    o.src_mac = FieldValue::Known(Mac([0, 0, 0, 0, 2, 1]));
+    o.dst_mac = FieldValue::Known(Mac([0, 0, 0, 0, 3, 1]));
+    o.vlan = FieldValue::Absent;
+    o.l2_priority = FieldValue::Absent;
+    o.encap = vec![Encap::Vxlan {
+        src: ip("198.51.100.1"),
+        dst: ip("198.51.100.2"),
+        vni: 10,
+    }];
+    let h = inner.encapsulate(&o).unwrap();
+    let s = PacketSet::single(&ar, &h);
+    assert_eq!(s, PacketSet::single(&ar, &inner).encapsulate(&o).done);
+    let w = s.witness().unwrap();
+    assert_eq!(w.current.encap, o.encap);
+    assert!(PacketSet::single(&ar, &w.original).contains(&PacketPair {
+        original: w.original.clone(),
+        current: w.current.decapsulate().unwrap(),
+    }));
+    assert!(s.has_free_levels());
+}
+
+#[test]
+#[should_panic(expected = "no unstated field")]
+fn an_outer_header_with_an_unstated_field_is_refused() {
+    let ar = arena();
+    let mut o = Header::request(ip("198.51.100.1"), ip("198.51.100.2"), PROTO_UDP);
+    o.encap = vec![Encap::Gre {
+        src: ip("198.51.100.1"),
+        dst: ip("198.51.100.2"),
+    }];
+    let _ = PacketSet::single(&ar, &dummy()).encapsulate(&o);
+}
+
+#[test]
+#[should_panic(expected = "inner header exactly with one encapsulation")]
+fn a_header_with_an_encapsulation_and_no_inner_header_is_refused() {
+    let ar = arena();
+    let mut h = dummy();
+    h.encap = vec![Encap::Gre {
+        src: ip("198.51.100.1"),
+        dst: ip("198.51.100.2"),
+    }];
+    let _ = PacketSet::single(&ar, &h);
 }

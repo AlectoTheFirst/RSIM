@@ -14,16 +14,16 @@ use rsim_dd::{Dd, Edge};
 
 /// The header bits of the bit table.
 const BITS: u32 = 763;
-/// Each bit has 3 levels: the original request, the current header and the
-/// work level.
-const LEVELS: u32 = BITS * 3;
+/// Each bit has 4 levels: the original request, the current header, the
+/// work level and the inner level.
+const LEVELS: u32 = BITS * 4;
 
 /// A field constraint: the bits from `start` have the value `value` in one
-/// of the 3 levels of each bit, as a prefix of `len` bits.
+/// of the 4 levels of each bit, as a prefix of `len` bits.
 fn prefix(start: u32, len: u32, value: u32, bank: u32) -> F {
     let mut f = F::Const(true);
     for i in 0..len {
-        let v = F::Var((start + i) * 3 + bank);
+        let v = F::Var((start + i) * 4 + bank);
         let lit = if value >> i & 1 == 1 {
             v
         } else {
@@ -39,18 +39,18 @@ fn prefix(start: u32, len: u32, value: u32, bank: u32) -> F {
 /// near the end.
 const FIELDS: [u32; 2] = [25, BITS - 64];
 
-/// The levels of the 2 fields: 32 bits each, with their 3 levels.
+/// The levels of the 2 fields: 32 bits each, with their 4 levels.
 fn pool() -> Vec<u32> {
     FIELDS
         .iter()
-        .flat_map(|&start| start * 3..(start + 32) * 3)
+        .flat_map(|&start| start * 4..(start + 32) * 4)
         .collect()
 }
 
 fn leaf() -> BoxedStrategy<F> {
     prop_oneof![
         1 => prop::sample::select(pool()).prop_map(F::Var),
-        4 => (prop::sample::select(FIELDS.to_vec()), 1u32..=32, any::<u32>(), 0u32..3)
+        4 => (prop::sample::select(FIELDS.to_vec()), 1u32..=32, any::<u32>(), 0u32..4)
             .prop_map(|(s, l, v, b)| prefix(s, l, v, b)),
     ]
     .boxed()
