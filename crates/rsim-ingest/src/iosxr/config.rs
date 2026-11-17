@@ -52,6 +52,26 @@ pub struct Interface {
     pub lines: Lines,
 }
 
+/// An IPv4 HSRP group of `router hsrp`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HsrpGroup {
+    /// The interface of the `interface` stanza of `router hsrp`.
+    pub interface: String,
+    pub group: u32,
+    /// The version of `hsrp <group> version <n>`.
+    pub version: Option<(u8, Lines)>,
+    /// The virtual addresses, the primary first.
+    pub addresses: Vec<(std::net::Ipv4Addr, Lines)>,
+    pub priority: Option<(u32, Lines)>,
+    pub preempt: Option<Lines>,
+    /// The virtual MAC of `mac-address`.
+    pub mac: Option<(rsim_core::Mac, Lines)>,
+    /// The masked lines of the group, its interface and `router hsrp` that
+    /// the handlers do not read.
+    pub unhandled: Vec<String>,
+    pub lines: Lines,
+}
+
 /// The typed structures of a running config.
 #[derive(Clone, Debug, Default)]
 pub struct Config {
@@ -62,6 +82,8 @@ pub struct Config {
     pub vrfs: BTreeMap<String, Lines>,
     /// The IPv4 access lists.
     pub acls: BTreeMap<String, Acl>,
+    /// The IPv4 HSRP groups.
+    pub hsrp: Vec<HsrpGroup>,
     /// The first line of each stanza that a handler read.
     pub read: BTreeSet<u32>,
 }
@@ -116,6 +138,10 @@ pub fn read(doc: &Document, table: &Table) -> Config {
                 r.mark(s);
                 let acl = access_list(&mut r, s, name);
                 cfg.acls.insert((*name).to_string(), acl);
+            }
+            ["router", "hsrp"] => {
+                r.mark(s);
+                cfg.hsrp.extend(router_hsrp(&mut r, s));
             }
             _ => {}
         }
@@ -231,6 +257,160 @@ fn interface(r: &mut R, s: &Stanza, name: &str) -> Interface {
         }
     }
     i
+}
+
+/// The masked keys of the stanzas below a stanza, at any depth, that the
+/// table classifies as unhandled. `path` holds the keys from the root to the
+/// stanza.
+fn unhandled_below(r: &R, path: &mut Vec<String>, s: &Stanza, out: &mut Vec<String>) {
+    for c in s.children() {
+        path.push(c.key.clone());
+        let keys: Vec<&str> = path.iter().map(String::as_str).collect();
+        if r.table.state(&keys) == State::Unhandled {
+            out.push(r.table.report_key(&c.key));
+        } else {
+            unhandled_below(r, path, c, out);
+        }
+        path.pop();
+    }
+}
+
+/// The IPv4 groups of `router hsrp`. An unhandled line of a group, of its
+/// interface or of `router hsrp` goes to the unhandled lines of the groups
+/// that it can change.
+fn router_hsrp(r: &mut R, s: &Stanza) -> Vec<HsrpGroup> {
+    let mut out = Vec::new();
+    let mut top = Vec::new();
+    for c in s.children() {
+        let mut path = vec![s.key.clone(), c.key.clone()];
+        let keys: Vec<&str> = path.iter().map(String::as_str).collect();
+        let name = match words(&c.key).as_slice() {
+            ["interface", name] if r.table.state(&keys) == State::Handled => (*name).to_string(),
+            _ => {
+                if r.table.state(&keys) == State::Unhandled {
+                    top.push(r.table.report_key(&c.key));
+                }
+                continue;
+            }
+        };
+        r.mark(c);
+        let mut iface_lines = Vec::new();
+        let mut groups = Vec::new();
+        for af in c.children() {
+            path.push(af.key.clone());
+            let keys: Vec<&str> = path.iter().map(String::as_str).collect();
+            let state = r.table.state(&keys);
+            if words(&af.key).as_slice() != ["address-family", "ipv4"] || state != State::Handled {
+                if state == State::Unhandled {
+                    iface_lines.push(r.table.report_key(&af.key));
+                } else {
+                    unhandled_below(r, &mut path, af, &mut iface_lines);
+                }
+                path.pop();
+                continue;
+            }
+            r.mark(af);
+            for g in af.children() {
+                path.push(g.key.clone());
+                let keys: Vec<&str> = path.iter().map(String::as_str).collect();
+                let handled = r.table.state(&keys) == State::Handled;
+                let w = words(&g.key);
+                let parsed = match w.as_slice() {
+                    ["hsrp", n] => n.parse::<u32>().ok().map(|n| (n, None)),
+                    ["hsrp", n, "version", v] => n
+                        .parse::<u32>()
+                        .ok()
+                        .zip(v.parse::<u8>().ok())
+                        .map(|(n, v)| (n, Some(v))),
+                    _ => None,
+                };
+                match (handled, parsed) {
+                    (true, Some((n, v))) => {
+                        r.mark(g);
+                        groups.push(group(r, &mut path, g, &name, n, v));
+                    }
+                    (true, None) => {
+                        r.mark(g);
+                        iface_lines.push(r.table.report_key(&g.key));
+                    }
+                    (false, _) => {
+                        if r.table.state(&keys) == State::Unhandled {
+                            iface_lines.push(r.table.report_key(&g.key));
+                        } else {
+                            unhandled_below(r, &mut path, g, &mut iface_lines);
+                        }
+                    }
+                }
+                path.pop();
+            }
+            path.pop();
+        }
+        for mut g in groups {
+            g.unhandled.extend(iface_lines.iter().cloned());
+            out.push(g);
+        }
+    }
+    for g in &mut out {
+        g.unhandled.extend(top.iter().cloned());
+    }
+    out
+}
+
+fn group(
+    r: &mut R,
+    path: &mut Vec<String>,
+    s: &Stanza,
+    iface: &str,
+    n: u32,
+    v: Option<u8>,
+) -> HsrpGroup {
+    let mut g = HsrpGroup {
+        interface: iface.to_string(),
+        group: n,
+        version: v.map(|v| (v, lines_of(s))),
+        lines: lines_of(s),
+        ..HsrpGroup::default()
+    };
+    for c in s.children() {
+        path.push(c.key.clone());
+        let keys: Vec<&str> = path.iter().map(String::as_str).collect();
+        let state = r.table.state(&keys);
+        path.pop();
+        if state != State::Handled {
+            if state == State::Unhandled {
+                g.unhandled.push(r.table.report_key(&c.key));
+            }
+            continue;
+        }
+        r.mark(c);
+        let lines = lines_of(c);
+        let read = match words(&c.key).as_slice() {
+            ["address", a] | ["address", a, "secondary"] => match a.parse() {
+                Ok(a) => {
+                    if words(&c.key).len() == 2 {
+                        g.addresses.insert(0, (a, lines));
+                    } else {
+                        g.addresses.push((a, lines));
+                    }
+                    true
+                }
+                Err(_) => false,
+            },
+            ["priority", p] => p.parse().map(|p| g.priority = Some((p, lines))).is_ok(),
+            ["preempt", ..] => {
+                g.preempt = Some(lines);
+                true
+            }
+            ["mac-address", m] => crate::nxos::state::mac(m)
+                .map(|m| g.mac = Some((m, lines)))
+                .is_some(),
+            _ => false,
+        };
+        if !read {
+            g.unhandled.push(r.table.report_key(&c.key));
+        }
+    }
+    g
 }
 
 fn access_list(r: &mut R, s: &Stanza, name: &str) -> Acl {

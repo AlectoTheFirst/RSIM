@@ -13,14 +13,14 @@ use std::collections::BTreeSet;
 use crate::coverage::Table;
 use crate::stanza::{Document, read_indented};
 pub use config::{Config, read};
-pub use lower::lower;
+pub use lower::{device_macs, lower};
 pub use mask::mask;
 pub use profile::profile;
 pub use state::rib_collected;
 pub use table::table;
 
 /// The text sections of a router that the lowering reads.
-pub const SECTIONS: &[&str] = &["interfaces", "vrfs", "rib", "arp"];
+pub const SECTIONS: &[&str] = &["interfaces", "vrfs", "rib", "arp", "lldp", "cdp", "hsrp"];
 
 /// The resolver of the interface names of the sections to the names of the
 /// config.

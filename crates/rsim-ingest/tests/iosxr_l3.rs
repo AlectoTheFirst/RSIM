@@ -445,7 +445,14 @@ fn what_is_not_lowered_gives_unknown() {
 fn a_shut_interface_and_an_interface_with_no_address_are_not_lowered() {
     let doc = iosxr::read_text(CONFIG);
     let cfg = iosxr::read(&doc, &iosxr::table(true));
-    let low = iosxr::lower("pe1", "pe1/config", &iosxr::profile(), &cfg, &sections());
+    let (low, _) = iosxr::lower(
+        "pe1",
+        "pe1/config",
+        &iosxr::profile(),
+        &cfg,
+        &sections(),
+        &Default::default(),
+    );
     let ids: Vec<String> = low.functions.iter().map(|f| f.id().to_string()).collect();
     for i in [
         "Bundle-Ether10",

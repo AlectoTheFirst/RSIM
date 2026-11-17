@@ -83,6 +83,46 @@ const ENTRIES: &[Entry] = &[
     e("ipv6 access-list ..", Irrelevant, Subtree),
 ];
 
+/// The lines of an IPv4 HSRP group: the addresses, the priority, the
+/// preemption and the virtual MAC are read. The timers, the
+/// authentication, the name, the tracking and BFD change no forwarding
+/// state that `show hsrp` does not give.
+const HSRP_GROUP: &[(&str, State)] = &[
+    ("address *", Handled),
+    ("address * secondary", Handled),
+    ("priority *", Handled),
+    ("preempt ..", Handled),
+    ("mac-address *", Handled),
+    ("timers ..", Irrelevant),
+    ("authentication ..", Irrelevant),
+    ("name ..", Irrelevant),
+    ("track ..", Irrelevant),
+    ("bfd ..", Irrelevant),
+];
+
+/// The entries of `router hsrp`. IPv6 groups are known-irrelevant, because
+/// each IPv6 packet is unknown at the route lookup.
+fn push_hsrp(t: &mut Table) {
+    let base = ["router hsrp", "interface *"];
+    t.push_levels(&base[..1], Handled, Node);
+    t.push_levels(&base, Handled, Node);
+    t.push_levels(&[base[0], base[1], "hsrp delay .."], Irrelevant, Subtree);
+    t.push_levels(
+        &[base[0], base[1], "address-family ipv6 .."],
+        Irrelevant,
+        Subtree,
+    );
+    let af = [base[0], base[1], "address-family ipv4"];
+    t.push_levels(&af, Handled, Node);
+    for group in ["hsrp *", "hsrp * version *"] {
+        let g = [af[0], af[1], af[2], group];
+        t.push_levels(&g, Handled, Node);
+        for (line, state) in HSRP_GROUP {
+            t.push_levels(&[g[0], g[1], g[2], g[3], line], *state, Subtree);
+        }
+    }
+}
+
 /// The classification table, with the mask of the secrets. With a collected
 /// route table, the routing protocols, the route policies, the sets and the
 /// routing lines of a VRF are known-irrelevant, because the routes come from
@@ -92,6 +132,7 @@ const ENTRIES: &[Entry] = &[
 /// packet is unknown at the route lookup.
 pub fn table(rib_collected: bool) -> Table {
     let mut t = Table::new(ENTRIES).with_mask(super::mask);
+    push_hsrp(&mut t);
     let routing = if rib_collected {
         Irrelevant
     } else {

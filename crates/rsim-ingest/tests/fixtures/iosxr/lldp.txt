@@ -1,0 +1,43 @@
+Tue Nov 17 10:00:06.000 UTC
+Capability codes:
+        (R) Router, (B) Bridge, (T) Telephone, (C) DOCSIS Cable Device
+        (W) WLAN Access Point, (P) Repeater, (S) Station, (O) Other
+
+------------------------------------------------
+Local Interface: GigabitEthernet0/0/0/1
+Chassis id: 0000.5e00.5351
+Port id: Ethernet1/2
+Port Description: to-pe1-b
+System Name: core1.example.net
+
+System Description: 
+Example NOS Software, Version 10.4(2)
+
+Time remaining: 101 seconds
+Hold Time: 120 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+  IPv4 address: 192.0.2.251
+Peer MAC Address: 00:00:5e:00:53:52
+
+------------------------------------------------
+Local Interface: GigabitEthernet0/0/0/2
+Chassis id: 0000.5e00.5371
+Port id: GigabitEthernet0/0/0/2
+Port Description: to-pe1
+System Name: pe2
+
+System Description: 
+Example XR Software, Version 7.11.2
+
+Time remaining: 97 seconds
+Hold Time: 120 seconds
+System Capabilities: R
+Enabled Capabilities: R
+Management Addresses:
+  IPv4 address: 192.0.2.252
+Peer MAC Address: 00:00:5e:00:53:72
+
+Total entries displayed: 2
+

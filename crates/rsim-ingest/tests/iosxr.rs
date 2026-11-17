@@ -21,6 +21,7 @@ const SECRETS: &[&str] = &[
     "FAKECOMMUNITYHOST",
     "FAKEOSPFKEY",
     "FAKEBGPPASSWORD",
+    "FAKEHSRPKEY",
 ];
 
 fn no_secret(text: &str) {
@@ -52,8 +53,8 @@ fn ranked(rib: bool) -> Vec<(String, u32, u32)> {
 fn the_coverage_shares_of_the_fixture() {
     let doc = iosxr::read_text(CONFIG);
     let cov = classify(&doc, &iosxr::table(true));
-    assert_eq!(cov.lines[&State::Handled], 49);
-    assert_eq!(cov.lines[&State::Irrelevant], 144);
+    assert_eq!(cov.lines[&State::Handled], 65);
+    assert_eq!(cov.lines[&State::Irrelevant], 149);
     assert_eq!(cov.lines[&State::Unhandled], 5);
     assert!(cov.share(State::Unhandled) < 0.05);
 }
@@ -167,7 +168,60 @@ fn the_states_of_key_stanzas() {
         (&["evpn"], Unhandled, Unhandled),
         (&["multicast-routing"], Unhandled, Unhandled),
         (&["router pim"], Unhandled, Unhandled),
-        (&["router hsrp"], Unhandled, Unhandled),
+        (&["router hsrp"], Handled, Handled),
+        (
+            &["router hsrp", "interface Bundle-Ether20.100"],
+            Handled,
+            Handled,
+        ),
+        (
+            &["router hsrp", "interface BE20.100", "address-family ipv4"],
+            Handled,
+            Handled,
+        ),
+        (
+            &["router hsrp", "interface BE20.100", "address-family ipv6"],
+            Irrelevant,
+            Irrelevant,
+        ),
+        (
+            &["router hsrp", "interface BE20.100", "hsrp use-bia"],
+            Unhandled,
+            Unhandled,
+        ),
+        (
+            &[
+                "router hsrp",
+                "interface BE20.100",
+                "address-family ipv4",
+                "hsrp 3 version 2",
+                "address 192.0.2.5",
+            ],
+            Handled,
+            Handled,
+        ),
+        (
+            &[
+                "router hsrp",
+                "interface BE20.100",
+                "address-family ipv4",
+                "hsrp 1",
+                "timers 1 3",
+            ],
+            Irrelevant,
+            Irrelevant,
+        ),
+        (
+            &[
+                "router hsrp",
+                "interface BE20.100",
+                "address-family ipv4",
+                "hsrp 1",
+                "address learn",
+            ],
+            Handled,
+            Handled,
+        ),
         (&["router vrrp"], Unhandled, Unhandled),
     ] {
         assert_eq!(with.state(path), rib, "{path:?} with a route table");
@@ -334,4 +388,54 @@ fn the_typed_config() {
     assert_eq!(deny.protocol, "ipv4");
     assert!(deny.unhandled.is_empty());
     assert_eq!(cfg.acls["RED-OUT"].entries.len(), 2);
+
+    let groups: Vec<(&str, u32, Vec<String>)> = cfg
+        .hsrp
+        .iter()
+        .map(|g| {
+            (
+                g.interface.as_str(),
+                g.group,
+                g.addresses.iter().map(|a| a.0.to_string()).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        groups,
+        [
+            ("Bundle-Ether20.100", 1, vec!["192.0.2.3".to_string()]),
+            ("Bundle-Ether20.100", 2, vec!["192.0.2.4".to_string()]),
+            ("Bundle-Ether20.100", 3, vec!["192.0.2.5".to_string()]),
+        ]
+    );
+    let g1 = &cfg.hsrp[0];
+    assert_eq!(g1.priority.map(|p| p.0), Some(110));
+    assert!(g1.preempt.is_some());
+    assert!(g1.unhandled.is_empty());
+    assert_eq!(
+        cfg.hsrp[1].mac.map(|m| m.0),
+        Some("00:00:5e:00:53:a2".parse().unwrap())
+    );
+    assert_eq!(cfg.hsrp[2].version.map(|v| v.0), Some(2));
+}
+
+#[test]
+fn an_hsrp_line_that_is_not_read_goes_to_the_group() {
+    let text = String::from_utf8_lossy(CONFIG)
+        .replace("    preempt\n", "    preempt\n    address learn\n")
+        .replace(
+            " interface Bundle-Ether20.100\n  address-family ipv4\n",
+            " interface Bundle-Ether20.100\n  hsrp use-bia\n  address-family ipv4\n",
+        );
+    let doc = iosxr::read_text(text.as_bytes());
+    let table = iosxr::table(true);
+    let cfg = iosxr::read(&doc, &table);
+    assert_eq!(
+        cfg.hsrp[0].unhandled,
+        ["address learn", "hsrp use-bia"],
+        "{:?}",
+        cfg.hsrp
+    );
+    assert_eq!(cfg.hsrp[1].unhandled, ["hsrp use-bia"]);
+    assert_eq!(iosxr::unread(&doc, &table, &cfg.read), Vec::<String>::new());
 }

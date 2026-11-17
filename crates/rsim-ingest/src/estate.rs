@@ -1,6 +1,5 @@
-//! The twin of a snapshot: the VyOS routers and the UniFi sites, with the
-//! links between them, the NX-OS switches, and the IOS-XR routers with no
-//! link to another device.
+//! The twin of a snapshot: the VyOS and IOS-XR routers, the UniFi sites and
+//! the NX-OS switches, with the links between them.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
@@ -27,6 +26,9 @@ pub struct Estate {
 fn short(h: &Hash) -> String {
     h.to_string().chars().take(12).collect()
 }
+
+/// The sections of a device, each with its file name.
+type Sections = BTreeMap<String, (Vec<u8>, String)>;
 
 struct Router {
     cfg: vyos::Config,
@@ -159,9 +161,11 @@ pub fn build(store: &Store, snap: &Snapshot) -> Result<Estate, StoreError> {
     Ok(e)
 }
 
-/// Builds the twin of the inputs: the routers, then each UniFi site joined
-/// to the router on its uplink, then each NX-OS switch. An IOS-XR router
-/// gives its layer 3 functions with no link to another device.
+/// Builds the twin of the inputs. The first lowering of each NX-OS switch
+/// and each IOS-XR router gives its summary, and the routers and the root
+/// devices of the UniFi sites give theirs; the link join of the summaries
+/// gives the links. Then each UniFi site, each VyOS router, each NX-OS
+/// switch and each IOS-XR router is lowered with its links.
 pub fn assemble(inputs: Vec<Input>) -> Estate {
     let mut e = Estate {
         builder: TwinBuilder::new(),
@@ -180,6 +184,7 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
             BTreeMap<String, (Vec<u8>, String)>,
         ),
     > = BTreeMap::new();
+    let mut xr: BTreeMap<String, (iosxr::Config, String, Sections)> = BTreeMap::new();
     let mut sites = Vec::new();
     for input in inputs {
         match input {
@@ -234,14 +239,7 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
                     .insert(name.clone(), iosxr::unread(&doc, &table, &cfg.read));
-                let low = iosxr::lower(&name, &file, &iosxr::profile(), &cfg, &sections);
-                e.notes.entry(name).or_default().extend(low.notes);
-                for f in low.functions {
-                    e.builder.add_arc(f);
-                }
-                for x in low.edges {
-                    e.builder.edge_interface(x);
-                }
+                xr.insert(name, (cfg, file, sections));
             }
             Input::Unifi { name, sections } => sites.push((name, sections)),
         }
@@ -270,7 +268,7 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
     // hops join the set, and the summaries give the links and the places of
     // the endpoints.
     let nx_profile = nxos::profile();
-    let summaries: BTreeMap<String, crate::links::Summary> = switches
+    let mut summaries: BTreeMap<String, crate::links::Summary> = switches
         .iter()
         .map(|(d, (cfg, col, file, sections))| {
             let (_, sum) = nxos::lower(
@@ -285,11 +283,24 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
             (d.clone(), sum)
         })
         .collect();
+    // The first lowering of each IOS-XR router gives its summary.
+    let xr_profile = iosxr::profile();
+    for (d, (cfg, file, sections)) in &xr {
+        let (_, sum) = iosxr::lower(
+            d,
+            file,
+            &xr_profile,
+            cfg,
+            sections,
+            &crate::links::External::default(),
+        );
+        summaries.insert(d.clone(), sum);
+    }
     for s in summaries.values() {
         next_hops.extend(s.next_hops.iter().copied());
     }
-    // The routers give their summaries too: the ports that can end a link.
-    let mut summaries = summaries;
+    // The VyOS routers give their summaries too: the ports that can end a
+    // link.
     for (d, r) in &routers {
         summaries.insert(d.clone(), vyos::link_summary(d, &r.cfg, &r.col));
     }
@@ -303,6 +314,9 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
                 .iter()
                 .filter_map(|l| nxos::state::mac(l.mac.as_deref()?)),
         );
+    }
+    for (cfg, _, sections) in xr.values() {
+        device_macs.extend(iosxr::device_macs(cfg, sections));
     }
     for (_, col, _, _) in switches.values() {
         device_macs.extend(
@@ -507,6 +521,19 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         }
         for a in low.attachments {
             e.builder.attachment(a);
+        }
+    }
+
+    // The IOS-XR routers, with their links.
+    for (device, (cfg, file, sections)) in &xr {
+        let ext = joined.devices.remove(device).unwrap_or_default();
+        let (low, _) = iosxr::lower(device, file, &xr_profile, cfg, sections, &ext);
+        e.notes.entry(device.clone()).or_default().extend(low.notes);
+        for f in low.functions {
+            e.builder.add_arc(f);
+        }
+        for x in low.edges {
+            e.builder.edge_interface(x);
         }
     }
     e
