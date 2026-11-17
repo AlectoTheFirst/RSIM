@@ -188,6 +188,43 @@ pub fn path(input: &QueryInput, twin: &Loaded) -> Result<PathAnswerOut, QueryErr
     })
 }
 
+/// The answer of a path query in a brief form, with no description of the
+/// packet sets of the trace steps.
+pub fn path_brief(
+    input: &QueryInput,
+    twin: &Loaded,
+    form: rsim_contract::args::Form,
+) -> Result<rsim_contract::json::PathBriefOut, QueryError> {
+    let answer = run(input, twin)?;
+    Ok(rsim_contract::json::PathBriefOut {
+        rsim_json: VERSION,
+        kind: "path_brief".into(),
+        topology: input.topology.clone(),
+        twin: twin.identity.clone(),
+        form,
+        query: input.echo(),
+        answer: crate::json::brief_json(&answer, form),
+    })
+}
+
+/// The answer of a set query in a brief form.
+pub fn set_brief(
+    input: &SetInput,
+    twin: &Loaded,
+    form: rsim_contract::args::Form,
+) -> Result<rsim_contract::json::SetBriefOut, QueryError> {
+    let answer = run_set(input, twin)?;
+    Ok(rsim_contract::json::SetBriefOut {
+        rsim_json: VERSION,
+        kind: "set_brief".into(),
+        topology: input.topology.clone(),
+        twin: twin.identity.clone(),
+        form,
+        query: input.echo(),
+        answer: crate::json::brief_json(&answer, form),
+    })
+}
+
 /// The indexes of one trace step. With `reply_of`, `branch` and `step` are
 /// indexes in the reply of that forward branch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

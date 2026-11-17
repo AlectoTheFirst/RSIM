@@ -9,7 +9,7 @@ use rsim_cli::commands::{self, Loaded};
 use rsim_cli::{ErrorCode, QueryError, args, claims, tables};
 use rsim_contract::args::Form;
 use rsim_contract::claim::ClaimArgs;
-use rsim_contract::json::{PathBriefOut, SetBriefOut, VERSION, to_text};
+use rsim_contract::json::{VERSION, to_text};
 use rsim_contract::table::Selection;
 use rsim_contract::twin::TwinJson;
 use serde::Serialize;
@@ -552,17 +552,15 @@ fn twin_route(
             let f = form(req)?;
             if set {
                 let input = args::set_query(&a, &[]).map_err(err)?;
-                let o = commands::set(&input, l).map_err(err)?;
                 Ok(match f {
-                    Form::Full => json_response(&o),
-                    f => json_response(&SetBriefOut::from_full(&o, f)),
+                    Form::Full => json_response(&commands::set(&input, l).map_err(err)?),
+                    f => json_response(&commands::set_brief(&input, l, f).map_err(err)?),
                 })
             } else {
                 let input = args::query(&a, &[]).map_err(err)?;
-                let o = commands::path(&input, l).map_err(err)?;
                 Ok(match f {
-                    Form::Full => json_response(&o),
-                    f => json_response(&PathBriefOut::from_full(&o, f)),
+                    Form::Full => json_response(&commands::path(&input, l).map_err(err)?),
+                    f => json_response(&commands::path_brief(&input, l, f).map_err(err)?),
                 })
             }
         }
@@ -612,6 +610,43 @@ fn twin_route(
             };
             Ok(json_response(&claims::run(top, l, &a).map_err(err)?))
         }
+        ["topology"] => {
+            method(req, "GET")?;
+            let list = |k: &str| p.get(k).map(|v| v.split(',').map(str::to_string).collect());
+            let view = rsim_contract::args::TopologyViewArgs {
+                topology: top.to_string(),
+                level: p.get("level").map(|s| s.to_string()),
+                layers: list("layer"),
+                devices: list("device"),
+                around: p.get("around").map(|s| s.to_string()),
+                hops: match p.get("hops") {
+                    Some(h) => Some(h.parse().map_err(|_| {
+                        problem(422, "invalid_filter", format!("hops {h} is not a number"))
+                    })?),
+                    None => None,
+                },
+                claims: list("claims"),
+            };
+            let out = rsim_cli::topology::topology(top, l, &view).map_err(err)?;
+            export(&out, p.get("format").copied())
+        }
+        ["queries", q, "topology"] => {
+            method(req, "GET")?;
+            let (a, set) = query_args(state.recall(q)?, top);
+            let answer = if set {
+                commands::run_set(&args::set_query(&a, &[]).map_err(err)?, l).map_err(err)?
+            } else {
+                commands::run(&args::query(&a, &[]).map_err(err)?, l).map_err(err)?
+            };
+            export(
+                &rsim_cli::topology::drawing(top, l, &answer),
+                p.get("format").copied(),
+            )
+        }
+        ["batch"] => {
+            method(req, "POST")?;
+            batch(state, req, t)
+        }
         ["claims", claim] => {
             method(req, "GET")?;
             let a = ClaimArgs {
@@ -630,4 +665,169 @@ fn twin_route(
             format!("{} is not a resource", req.path),
         )),
     }
+}
+
+/// A topology as JSON, or exported as Mermaid, D2 or GraphML.
+fn export(
+    out: &rsim_contract::topology::TopologyOut,
+    format: Option<&str>,
+) -> Result<Response, Problem> {
+    let (body, kind) = match format.unwrap_or("json") {
+        "json" => return Ok(json_response(out)),
+        "mermaid" => (out.mermaid(), "text/plain; charset=utf-8"),
+        "d2" => (out.d2(), "text/plain; charset=utf-8"),
+        "graphml" => (out.graphml(), "application/graphml+xml"),
+        f => {
+            return Err(problem(
+                422,
+                "invalid_query",
+                format!("format {f} is not json, mermaid, d2 or graphml"),
+            ));
+        }
+    };
+    Ok(Response {
+        status: 200,
+        headers: vec![("content-type".into(), kind.into())],
+        body: body.into_bytes(),
+    })
+}
+
+/// The largest number of items of a batch.
+pub const MAX_BATCH: usize = 100;
+
+/// Runs the items of a batch in order. The body is `{"items": [...]}`;
+/// each item is `{"op": "query", "query": {...}, "form": ...}`, `{"op":
+/// "claim", "claim": ..., "query": {...} | "devices": [...]}` or `{"op":
+/// "table", "table": ..., "verb": ..., ...}`. The answer has one JSON line
+/// for each item: its result, or its problem object.
+fn batch(state: &State, req: &Request, t: &TwinRef) -> Result<Response, Problem> {
+    let top = t.topology.as_str();
+    let l = t.loaded.as_ref();
+    let body: Value = serde_json::from_slice(&req.body)
+        .map_err(|e| problem(400, "invalid_body", format!("the body is not JSON: {e}")))?;
+    let items = body["items"]
+        .as_array()
+        .ok_or_else(|| problem(400, "invalid_body", "the body has no list items".into()))?;
+    if items.len() > MAX_BATCH {
+        return Err(problem(
+            413,
+            "too_large",
+            format!("a batch has at most {MAX_BATCH} items"),
+        ));
+    }
+    let _ = state;
+    let mut out = String::new();
+    for item in items {
+        let line = (|| -> Result<String, Problem> {
+            let err = from_query_error;
+            match item["op"].as_str() {
+                Some("query") => {
+                    let Some(Value::Object(m)) = item.get("query") else {
+                        return Err(problem(
+                            422,
+                            "invalid_query",
+                            "the item has no query".into(),
+                        ));
+                    };
+                    let (a, set) = query_args(m.clone(), top);
+                    let f = match item["form"].as_str() {
+                        None | Some("summary") => Form::Summary,
+                        Some("steps") => Form::Steps,
+                        Some("full") => Form::Full,
+                        Some(f) => {
+                            return Err(problem(
+                                422,
+                                "invalid_query",
+                                format!("form {f} is not summary, steps or full"),
+                            ));
+                        }
+                    };
+                    Ok(if set {
+                        let input = args::set_query(&a, &[]).map_err(err)?;
+                        match f {
+                            Form::Full => to_text(&commands::set(&input, l).map_err(err)?, false),
+                            f => to_text(&commands::set_brief(&input, l, f).map_err(err)?, false),
+                        }
+                    } else {
+                        let input = args::query(&a, &[]).map_err(err)?;
+                        match f {
+                            Form::Full => to_text(&commands::path(&input, l).map_err(err)?, false),
+                            f => to_text(&commands::path_brief(&input, l, f).map_err(err)?, false),
+                        }
+                    })
+                }
+                Some("claim") => {
+                    let mut m = item.as_object().cloned().unwrap_or_default();
+                    m.remove("op");
+                    m.insert("topology".into(), json!(top));
+                    let a: ClaimArgs = serde_json::from_value(Value::Object(m))
+                        .map_err(|e| problem(422, "invalid_query", e.to_string()))?;
+                    Ok(to_text(&claims::run(top, l, &a).map_err(err)?, false))
+                }
+                Some("table") => {
+                    let mut m = item.as_object().cloned().unwrap_or_default();
+                    m.remove("op");
+                    m.insert("topology".into(), json!(top));
+                    let a: rsim_contract::args::TableQueryArgs =
+                        serde_json::from_value(Value::Object(m))
+                            .map_err(|e| problem(422, "invalid_query", e.to_string()))?;
+                    let s = &a.selection;
+                    use rsim_contract::args::TableVerb;
+                    Ok(match a.verb.unwrap_or_default() {
+                        TableVerb::Show => {
+                            to_text(&tables::show(top, l, &a.table, s).map_err(err)?, false)
+                        }
+                        TableVerb::Summarize => {
+                            to_text(&tables::summarize(top, l, &a.table, s).map_err(err)?, false)
+                        }
+                        TableVerb::Unique => {
+                            let mut sel = s.clone();
+                            let cols = sel.columns.take().unwrap_or_default();
+                            to_text(
+                                &tables::unique(top, l, &a.table, &cols, &sel).map_err(err)?,
+                                false,
+                            )
+                        }
+                        TableVerb::Top => to_text(
+                            &tables::top(
+                                top,
+                                l,
+                                &a.table,
+                                a.column.as_deref().unwrap_or_default(),
+                                a.count.unwrap_or(5),
+                                a.ascending.unwrap_or(false),
+                                s,
+                            )
+                            .map_err(err)?,
+                            false,
+                        ),
+                        TableVerb::Lpm => to_text(
+                            &tables::lpm(
+                                top,
+                                l,
+                                &a.table,
+                                a.column.as_deref().unwrap_or("prefix"),
+                                a.address.as_deref().unwrap_or_default(),
+                                s,
+                            )
+                            .map_err(err)?,
+                            false,
+                        ),
+                    })
+                }
+                _ => Err(problem(
+                    422,
+                    "invalid_query",
+                    "op is not query, claim or table".into(),
+                )),
+            }
+        })();
+        out.push_str(&line.unwrap_or_else(|p| to_text(&p, false)));
+        out.push('\n');
+    }
+    Ok(Response {
+        status: 200,
+        headers: vec![("content-type".into(), "application/x-ndjson".into())],
+        body: out.into_bytes(),
+    })
 }

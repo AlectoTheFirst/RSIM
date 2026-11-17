@@ -12,6 +12,7 @@ pub mod query;
 pub mod set_query;
 pub mod tables;
 pub mod text;
+pub mod topology;
 
 pub use commands::StepRef;
 pub use error::{ErrorCode, QueryError};

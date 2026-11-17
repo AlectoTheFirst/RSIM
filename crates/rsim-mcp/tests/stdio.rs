@@ -334,7 +334,8 @@ fn check_tools_list(r: &Value) {
             "list_tables",
             "table_query",
             "list_claims",
-            "run_claim"
+            "run_claim",
+            "get_topology"
         ]
     );
     for t in tools {

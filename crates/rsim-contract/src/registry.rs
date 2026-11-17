@@ -3,7 +3,9 @@
 
 use serde_json::{Value, json};
 
-use crate::args::{PathQueryArgs, SetQueryArgs, StepArgs, TableQueryArgs, TopologyArgs};
+use crate::args::{
+    PathQueryArgs, SetQueryArgs, StepArgs, TableQueryArgs, TopologyArgs, TopologyViewArgs,
+};
 use crate::claim::{ClaimArgs, ClaimOut, ClaimsOut};
 use crate::json::{
     DevicesOut, ErrorOut, PathAnswerOut, PathBriefOut, SetAnswerOut, SetBriefOut, StepOut,
@@ -11,6 +13,7 @@ use crate::json::{
 };
 use crate::schema;
 use crate::table::{SummarizeOut, TableOut, TablesOut, UniqueOut};
+use crate::topology::TopologyOut;
 
 /// What an operation changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,6 +148,16 @@ pub const OPERATIONS: &[Operation] = &[
         http: Some((Method::Get, "/v1/twins/{twin}/claims/{claim}")),
         input: Some(schema::<ClaimArgs>),
         outputs: &[schema::<ClaimOut>],
+    },
+    Operation {
+        id: "getTopology",
+        description: "The topology of a twin for a drawing: the nodes at the level device or function, and the edges of the layers physical and overlay, or function, with the link facts and the result of the claim link-speed-duplex on each edge.",
+        effect: Effect::Read,
+        tool: Some("get_topology"),
+        command: Some("<twin> topology"),
+        http: Some((Method::Get, "/v1/twins/{twin}/topology")),
+        input: Some(schema::<TopologyViewArgs>),
+        outputs: &[schema::<TopologyOut>],
     },
 ];
 

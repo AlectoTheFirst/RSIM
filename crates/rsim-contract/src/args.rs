@@ -262,3 +262,26 @@ pub struct TableQueryArgs {
     /// The address of the verb lpm.
     pub address: Option<String>,
 }
+
+/// The view of a topology.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct TopologyViewArgs {
+    /// A built-in topology, or `store` for the newest snapshot of the store
+    /// of the server. Not used in an HTTP path, which names the twin.
+    #[serde(default)]
+    pub topology: String,
+    /// `device` (the default) or `function`.
+    pub level: Option<String>,
+    /// The layers of the edges: `physical` and `overlay` at the device
+    /// level, `function` at the function level. All layers of the level if
+    /// not given.
+    pub layers: Option<Vec<String>>,
+    /// Only these devices.
+    pub devices: Option<Vec<String>>,
+    /// Only the devices within `hops` links of this device.
+    pub around: Option<String>,
+    /// The number of links of `around`; 1 if not given.
+    pub hops: Option<usize>,
+    /// The claims whose result each edge gets: `link-speed-duplex`.
+    pub claims: Option<Vec<String>>,
+}

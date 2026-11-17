@@ -10,6 +10,7 @@ pub mod json;
 pub mod query;
 pub mod registry;
 pub mod table;
+pub mod topology;
 pub mod twin;
 
 /// The JSON Schema of a contract type, in the dialect of JSON Schema
