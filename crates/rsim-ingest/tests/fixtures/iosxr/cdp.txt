@@ -1,0 +1,33 @@
+Tue Nov 17 10:00:07.000 UTC
+
+-------------------------
+Device ID: core1(FDO00005351)
+SysName : core1
+Entry address(es): 
+  IPv4 address: 192.0.2.251
+Platform: Example NX-9300,  Capabilities: Router Switch IGMP Filtering Supports-STP-Dispute
+Interface: GigabitEthernet0/0/0/0
+Port ID (outgoing port): Ethernet1/1
+Holdtime : 157 sec
+
+Version :
+Example NOS Software, Version 10.4(2)
+
+advertisement version: 2
+Duplex: full
+
+-------------------------
+Device ID: core1(FDO00005351)
+SysName : core1
+Entry address(es): 
+  IPv4 address: 192.0.2.251
+Platform: Example NX-9300,  Capabilities: Router Switch IGMP Filtering Supports-STP-Dispute
+Interface: GigabitEthernet0/0/0/1
+Port ID (outgoing port): Ethernet1/2
+Holdtime : 149 sec
+
+Version :
+Example NOS Software, Version 10.4(2)
+
+advertisement version: 2
+Duplex: full

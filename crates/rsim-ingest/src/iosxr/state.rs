@@ -1,7 +1,7 @@
 //! The collected text sections of an IOS-XR router that the lowering reads,
 //! each parsed by its TextFSM template: the interface state, the VRF
-//! members, the route table and ARP. Each row keeps the line range of its
-//! record in the section.
+//! members, the route table, ARP, the LLDP and CDP neighbours and the HSRP
+//! groups. Each row keeps the line range of its record in the section.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
@@ -11,7 +11,9 @@ use rsim_core::{Mac, Prefix, SourceSpan};
 use rsim_textfsm::{Field, Library, Traced};
 
 use super::profile::{ARP_OWN, BACKUP_MARK, PLATFORM, STATE_ADMIN_DOWN, STATE_DOWN, STATE_UP};
+use crate::links::Neighbour;
 use crate::nxos::names::Names;
+use crate::nxos::state::{mac, neighbour_name};
 
 /// The sections that the lowering reads, each with the command that selects
 /// its template in the index.
@@ -20,6 +22,9 @@ pub const SECTIONS: &[(&str, &str)] = &[
     ("vrfs", "show vrf all detail"),
     ("rib", "show route vrf all ipv4"),
     ("arp", "show arp vrf all"),
+    ("lldp", "show lldp neighbors detail"),
+    ("cdp", "show cdp neighbors detail"),
+    ("hsrp", "show hsrp"),
 ];
 
 /// The state of an interface from `show interfaces`.
@@ -31,6 +36,22 @@ pub struct IfState {
     /// True if the interface state is `administratively down`.
     pub admin_down: bool,
     pub mac: Option<Mac>,
+    /// The speed in Mbit/s and the duplex, if the record prints them.
+    pub speed_mbps: Option<u64>,
+    pub full_duplex: Option<bool>,
+    pub span: SourceSpan,
+}
+
+/// An HSRP group of `show hsrp`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HsrpRow {
+    pub interface: String,
+    pub group: u32,
+    /// The state word as printed, for example `Active`.
+    pub state: String,
+    /// The group address: an IPv4 address, an IPv6 address, or `None` for
+    /// another word.
+    pub address: Option<IpAddr>,
     pub span: SourceSpan,
 }
 
@@ -99,6 +120,9 @@ pub struct State {
     pub vrfs: Section<Vec<VrfMembers>>,
     pub rib: Section<Rib>,
     pub arp: Section<Vec<ArpRow>>,
+    pub lldp: Section<Vec<Neighbour>>,
+    pub cdp: Section<Vec<Neighbour>>,
+    pub hsrp: Section<Vec<HsrpRow>>,
 }
 
 /// The templates that the crate carries.
@@ -218,6 +242,9 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
         vrfs: section(sections, "vrfs", |p| Ok(vrfs(p, names))),
         rib: section(sections, "rib", |p| Ok(rib(p, names))),
         arp: section(sections, "arp", |p| Ok(arp(p, names))),
+        lldp: section(sections, "lldp", |p| Ok(lldp(p, names))),
+        cdp: section(sections, "cdp", |p| Ok(cdp(p, names))),
+        hsrp: section(sections, "hsrp", |p| hsrp(p, names)),
     }
 }
 
@@ -245,7 +272,13 @@ fn interfaces(p: &Parsed, names: &Names) -> BTreeMap<String, IfState> {
             IfState {
                 oper_up,
                 admin_down: link == STATE_ADMIN_DOWN,
-                mac: crate::nxos::state::mac(p.text(r, "MAC_ADDRESS")),
+                mac: mac(p.text(r, "MAC_ADDRESS")),
+                speed_mbps: speed(p.text(r, "SPEED")),
+                full_duplex: match p.text(r, "DUPLEX").trim().to_ascii_lowercase().as_str() {
+                    "full" | "full-duplex" => Some(true),
+                    "half" | "half-duplex" => Some(false),
+                    _ => None,
+                },
                 span,
             },
         );
@@ -274,8 +307,79 @@ fn arp(p: &Parsed, names: &Names) -> Vec<ArpRow> {
         .filter_map(|(r, span)| {
             Some(ArpRow {
                 ip: p.text(r, "IP_ADDRESS").parse().ok()?,
-                mac: crate::nxos::state::mac(p.text(r, "MAC_ADDRESS"))?,
+                mac: mac(p.text(r, "MAC_ADDRESS"))?,
                 interface: names.resolve(p.text(r, "INTERFACE")),
+                span,
+            })
+        })
+        .collect()
+}
+
+/// A speed of `show interfaces`, for example `1000Mb/s` or `10Gb/s`, in
+/// Mbit/s.
+fn speed(s: &str) -> Option<u64> {
+    let s = s.trim();
+    let (n, unit) = s.split_at(s.find(|c: char| !c.is_ascii_digit())?);
+    let n: u64 = n.parse().ok()?;
+    match unit {
+        "Kb/s" => Some(n / 1000),
+        "Mb/s" => Some(n),
+        "Gb/s" => n.checked_mul(1000),
+        _ => None,
+    }
+}
+
+/// The LLDP neighbours. The port ID is the MAC of the far port if it has
+/// the form of a MAC.
+fn lldp(p: &Parsed, names: &Names) -> Vec<Neighbour> {
+    p.records()
+        .filter(|(r, _)| !p.text(r, "LOCAL_INTERFACE").is_empty())
+        .map(|(r, span)| {
+            let remote = p.text(r, "NEIGHBOR_PORT_ID").trim();
+            Neighbour {
+                port: names.resolve(p.text(r, "LOCAL_INTERFACE")),
+                name: neighbour_name(p.text(r, "NEIGHBOR")),
+                remote_port: (!remote.is_empty()).then(|| remote.to_string()),
+                chassis: mac(p.text(r, "CHASSIS_ID")),
+                port_mac: mac(remote),
+                span,
+            }
+        })
+        .collect()
+}
+
+/// The CDP neighbours. The name is the system name, else the device ID.
+fn cdp(p: &Parsed, names: &Names) -> Vec<Neighbour> {
+    p.records()
+        .filter(|(r, _)| !p.text(r, "LOCAL_INTERFACE").trim().is_empty())
+        .map(|(r, span)| {
+            let remote = p.text(r, "NEIGHBOR_INTERFACE").trim();
+            Neighbour {
+                port: names.resolve(p.text(r, "LOCAL_INTERFACE").trim()),
+                name: neighbour_name(p.text(r, "NEIGHBOR_NAME"))
+                    .or_else(|| neighbour_name(p.text(r, "CHASSIS_ID"))),
+                remote_port: (!remote.is_empty()).then(|| remote.to_string()),
+                chassis: None,
+                port_mac: mac(remote),
+                span,
+            }
+        })
+        .collect()
+}
+
+/// The HSRP groups. A record with a group number that is not a number
+/// makes the section unread.
+fn hsrp(p: &Parsed, names: &Names) -> Result<Vec<HsrpRow>, String> {
+    p.records()
+        .map(|(r, span)| {
+            let group = p.text(r, "GROUP");
+            Ok(HsrpRow {
+                interface: names.resolve(p.text(r, "INTERFACE")),
+                group: group
+                    .parse()
+                    .map_err(|_| format!("the group {group:?} is not a number"))?,
+                state: p.text(r, "STATE").to_string(),
+                address: p.text(r, "GROUP_ADDR").parse().ok(),
                 span,
             })
         })
@@ -390,10 +494,20 @@ mod tests {
                 "interfaces" => "cisco_xr_show_interfaces.textfsm",
                 "vrfs" => "cisco_xr_show_vrf_all_detail.textfsm",
                 "rib" => "cisco_xr_show_ip_route.textfsm",
-                _ => "cisco_xr_show_arp.textfsm",
+                "arp" => "cisco_xr_show_arp.textfsm",
+                "lldp" => "cisco_xr_show_lldp_neighbors_detail.textfsm",
+                "cdp" => "cisco_xr_show_cdp_neighbors_detail.textfsm",
+                _ => "cisco_xr_show_hsrp.textfsm",
             };
             assert_eq!(name, want, "{command}");
         }
+    }
+
+    #[test]
+    fn a_speed_in_mbit() {
+        assert_eq!(speed("1000Mb/s"), Some(1000));
+        assert_eq!(speed("10Gb/s"), Some(10_000));
+        assert_eq!(speed("fast"), None);
     }
 
     #[test]

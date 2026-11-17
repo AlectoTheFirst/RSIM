@@ -242,6 +242,33 @@ router bgp 64496
   !
  !
 !
+router hsrp
+ interface Bundle-Ether20.100
+  address-family ipv4
+   hsrp 1
+    address 192.0.2.3
+    priority 110
+    preempt
+    mac-address 0000.5e00.53a1
+    timers 1 3
+    authentication FAKEHSRPKEY
+   !
+   hsrp 2
+    address 192.0.2.4
+    mac-address 0000.5e00.53a2
+   !
+   hsrp 3 version 2
+    address 192.0.2.5
+    mac-address 0000.5e00.53a3
+   !
+  !
+  address-family ipv6
+   hsrp 1
+    address linklocal autoconfig
+   !
+  !
+ !
+!
 mpls ldp
  router-id 203.0.113.1
  interface Bundle-Ether10

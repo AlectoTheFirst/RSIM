@@ -16,6 +16,8 @@ Address         Age        Hardware Addr   State      Type  Interface
 192.0.2.1       -          0000.5e00.5320  Interface  ARPA  BE20.100
 192.0.2.10      00:41:07   0000.5e00.5321  Dynamic    ARPA  BE20.100
 192.0.2.70      00:12:55   0000.5e00.5322  Dynamic    ARPA  BE20.100
+192.0.2.2       00:00:41   0000.5e00.5370  Dynamic    ARPA  BE20.100
+192.0.2.4       00:00:41   0000.5e00.53a2  Dynamic    ARPA  BE20.100
 192.0.2.129     -          0000.5e00.5320  Interface  ARPA  BE20.200
 192.0.2.130     00:03:19   0000.5e00.5323  Dynamic    ARPA  BE20.200
 203.0.113.2     -          0000.5e00.5330  Interface  ARPA  Gi0/0/0/3

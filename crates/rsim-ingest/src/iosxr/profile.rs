@@ -84,3 +84,10 @@ pub const ARP_OWN: &str = "Interface";
 
 /// The platform name of IOS-XR in the template index.
 pub const PLATFORM: &str = "cisco_xr";
+
+/// The HSRP state word of the active router in `show hsrp`, in lower case.
+pub const HSRP_ACTIVE: &str = "active";
+
+/// The HSRP state words of a router that is not the active router, in
+/// lower case. Each other word is a state that is not known.
+pub const HSRP_NOT_ACTIVE: &[&str] = &["standby", "speak", "listen", "init"];
