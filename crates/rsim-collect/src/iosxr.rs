@@ -17,55 +17,103 @@ pub const RULES: CliRules = CliRules::CISCO;
 pub const SHELL_SETUP: [&str; 2] = ["terminal length 0", "terminal width 512"];
 
 /// IOS XR prints the time of the command before each answer, for example
-/// `Tue Nov 17 20:52:43.123 UTC`. These line starts remove it from the
-/// change hash. The configuration has its own time lines.
-const TIME_LINES: &[&str] = &["Mon ", "Tue ", "Wed ", "Thu ", "Fri ", "Sat ", "Sun "];
-const CONFIG_TIME_LINES: &[&str] = &[
-    "Mon ",
-    "Tue ",
-    "Wed ",
-    "Thu ",
-    "Fri ",
-    "Sat ",
-    "Sun ",
+/// `Tue Nov 17 20:52:43.123 UTC`. Each list of volatile parts starts with
+/// these line starts.
+macro_rules! volatile {
+    ($($p:expr),* $(,)?) => {
+        &["Mon ", "Tue ", "Wed ", "Thu ", "Fri ", "Sat ", "Sun ", $($p),*]
+    };
+}
+
+/// The ages of a route, an ARP entry or a timer: `00:01:23`, `1d02h`,
+/// `3w2d` and `1y2w`.
+macro_rules! ages {
+    ($($p:expr),* $(,)?) => {
+        volatile!["~#:#:#", "~#d#h", "~#w#d", "~#y#w", "~#h#m", $($p),*]
+    };
+}
+
+const CONFIG: &[&str] = volatile![
     "Building configuration",
     "!! IOS XR Configuration",
     "!! Last configuration change",
 ];
+const VERSION: &[&str] = volatile!["=*uptime is", "System uptime"];
+/// The counters, the rates and the times of the last packets.
+const INTERFACES: &[&str] = volatile![
+    "=# ",
+    "Received ",
+    "Output ",
+    "Last link flapped",
+    "Last input",
+    "Last clearing",
+];
+const LLDP: &[&str] = volatile!["Time remaining", "Age:"];
+const CDP: &[&str] = volatile!["Holdtime"];
+const AGES: &[&str] = ages![];
+const HSRP: &[&str] = ages![
+    "Next hello",
+    "Last state change",
+    "Last coup",
+    "Last resign"
+];
+const TIME: &[&str] = volatile![];
 
-/// One section of the static list: the name, the command, the class and
-/// whether a device can refuse it.
-const SPECS: &[(&str, &str, Class, bool)] = {
+/// One section of the static list: the name, the command, the class,
+/// whether a device can refuse it and the volatile parts.
+type Spec = (
+    &'static str,
+    &'static str,
+    Class,
+    bool,
+    &'static [&'static str],
+);
+
+const SPECS: &[Spec] = {
     use Class::{Configuration, Observation};
     &[
-        ("config", "show running-config", Configuration, false),
-        ("version", "show version", Configuration, false),
-        ("interfaces", "show interfaces", Observation, false),
-        ("lldp", "show lldp neighbors detail", Observation, true),
-        ("cdp", "show cdp neighbors detail", Observation, true),
-        ("vrfs", "show vrf all detail", Configuration, false),
-        ("rib", "show route vrf all ipv4", Observation, false),
-        ("arp", "show arp vrf all", Observation, true),
-        ("inventory", "show inventory", Configuration, true),
-        ("hsrp", "show hsrp", Observation, true),
+        (
+            "config",
+            "show running-config",
+            Configuration,
+            false,
+            CONFIG,
+        ),
+        ("version", "show version", Configuration, false, VERSION),
+        (
+            "interfaces",
+            "show interfaces",
+            Observation,
+            false,
+            INTERFACES,
+        ),
+        (
+            "lldp",
+            "show lldp neighbors detail",
+            Observation,
+            true,
+            LLDP,
+        ),
+        ("cdp", "show cdp neighbors detail", Observation, true, CDP),
+        ("vrfs", "show vrf all detail", Configuration, false, TIME),
+        ("rib", "show route vrf all ipv4", Observation, false, AGES),
+        ("arp", "show arp vrf all", Observation, true, AGES),
+        ("inventory", "show inventory", Configuration, true, TIME),
+        ("hsrp", "show hsrp", Observation, true, HSRP),
     ]
 };
 
 /// The sections of an IOS XR router. A text answer keeps its raw bytes;
-/// the time lines are volatile.
+/// the change hash leaves out the volatile parts.
 pub fn sections() -> Vec<SectionSpec> {
     SPECS
         .iter()
-        .map(|(name, command, class, optional)| SectionSpec {
+        .map(|(name, command, class, optional, volatile)| SectionSpec {
             name,
             command: (*command).to_string(),
             class: *class,
             format: Format::Text,
-            volatile: if *name == "config" {
-                CONFIG_TIME_LINES
-            } else {
-                TIME_LINES
-            },
+            volatile,
             extracts: &[],
             keep: &[],
             optional: *optional,

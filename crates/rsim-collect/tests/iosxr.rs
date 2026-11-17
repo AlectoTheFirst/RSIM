@@ -128,13 +128,30 @@ async fn the_time_lines_make_no_snapshot_and_a_config_change_makes_one() {
     let mut e = env();
     let first = e.c.run_cycle().await.unwrap().snapshot.unwrap();
     let swap = |f: &str, a: &str, b: &str| fixture(f).replace("HOST", "x1").replace(a, b);
+    let later = |f: &str| {
+        let mut t = swap(f, "10:00:00.000", "10:01:00.000");
+        for (a, b) in [
+            ("3w2d", "3w3d"),
+            ("2 days, 4 hours, 1 minute", "2 days, 4 hours, 2 minutes"),
+            ("123456 packets input", "123999 packets input"),
+            ("3 packets/sec", "7 packets/sec"),
+            ("Received 12 broadcast", "Received 19 broadcast"),
+            ("Output 2 broadcast", "Output 5 broadcast"),
+            ("Last input 00:00:00", "Last input 00:00:01"),
+            ("Age: 17", "Age: 47"),
+        ] {
+            t = t.replace(a, b);
+        }
+        t
+    };
     for (s, f) in [
         ("config", "config.txt"),
         ("version", "version.txt"),
         ("rib", "rib.txt"),
         ("interfaces", "interfaces.txt"),
+        ("lldp", "lldp.txt"),
     ] {
-        set(&e.t, s, &swap(f, "10:00:00.000", "10:01:00.000"));
+        set(&e.t, s, &later(f));
     }
     set(
         &e.t,
@@ -150,6 +167,13 @@ async fn the_time_lines_make_no_snapshot_and_a_config_change_makes_one() {
         &e.t,
         "config",
         &swap("config.txt", "description to-core", "description to-core-2"),
+    );
+    tokio::time::advance(Duration::from_secs(60)).await;
+    assert!(e.c.run_cycle().await.unwrap().snapshot.is_some());
+    set(
+        &e.t,
+        "rib",
+        &swap("rib.txt", "via 198.51.100.254", "via 198.51.100.253"),
     );
     tokio::time::advance(Duration::from_secs(60)).await;
     assert!(e.c.run_cycle().await.unwrap().snapshot.is_some());

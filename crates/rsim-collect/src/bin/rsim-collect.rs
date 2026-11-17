@@ -155,13 +155,15 @@ fn ssh_devices(
             mode,
             ..SshProfile::default()
         };
-        if vendor == Vendor::Nxos {
+        if vendor == Vendor::Nxos || vendor == Vendor::Iosxr {
             profile.max_channels = match get("CHANNELS") {
                 None => 1,
                 Some(n) => n
                     .parse()
                     .map_err(|_| format!("{prefix}_{name}_CHANNELS {n} is not a number"))?,
             };
+        }
+        if vendor == Vendor::Nxos {
             profile.shell_setup = SHELL_SETUP.iter().map(|c| (*c).to_string()).collect();
             match get("JSON") {
                 None | Some("plain") => {}
@@ -170,7 +172,6 @@ fn ssh_devices(
             }
         }
         if vendor == Vendor::Iosxr {
-            profile.max_channels = 1;
             profile.shell_setup = IOSXR_SHELL_SETUP.iter().map(|c| (*c).to_string()).collect();
         }
         if profile != SshProfile::default() {

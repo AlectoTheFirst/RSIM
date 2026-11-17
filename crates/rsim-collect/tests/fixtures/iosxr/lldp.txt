@@ -7,3 +7,6 @@ Chassis id: 0000.5e00.5399
 Port id: Gi0/0/0/1
 Port Description: to-edge
 System Name: core
+
+Hold Time: 120 seconds
+Age: 17 seconds
