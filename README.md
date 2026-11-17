@@ -46,7 +46,7 @@ flowchart LR
 
 ### Generic function sequence of a router
 
-A routed packet goes through these functions in sequence. Lowering leaves out `PolicyRoute` if the device has no policy routes. A function with no rules on a device lets all packets pass.
+A routed packet goes through these functions in sequence.
 
 | Function | What it does with the packet set |
 |---|---|
