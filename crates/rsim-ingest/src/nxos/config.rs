@@ -302,6 +302,8 @@ pub struct Config {
     pub vrf_vnis: BTreeMap<String, (u32, Lines)>,
     /// The MAC of `fabric forwarding anycast-gateway-mac`.
     pub anycast_mac: Option<(String, Lines)>,
+    /// True if `router bgp` has an `advertise-pip` line, with its lines.
+    pub advertise_pip: Option<Lines>,
     /// The name of the line `hostname`.
     pub hostname: Option<String>,
     pub vpc_domain: Option<VpcDomain>,
@@ -456,6 +458,18 @@ pub fn read(doc: &Document, table: &Table) -> Config {
             }
             ["ip", "nat", "translation", ..] => {}
             ["hostname", h] => cfg.hostname = Some((*h).to_string()),
+            ["router", "bgp", ..] => {
+                fn find(s: &Stanza) -> Option<Lines> {
+                    s.children().iter().find_map(|c| {
+                        if c.key == "advertise-pip" {
+                            Some(Lines::of(c))
+                        } else {
+                            find(c)
+                        }
+                    })
+                }
+                cfg.advertise_pip = find(s);
+            }
             ["fabric", "forwarding", "anycast-gateway-mac", m] => {
                 r.mark(s);
                 cfg.anycast_mac = Some(((*m).to_string(), Lines::of(s)));

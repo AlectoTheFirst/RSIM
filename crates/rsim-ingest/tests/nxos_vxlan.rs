@@ -382,7 +382,7 @@ fn the_flood_copies_into_the_tunnel_and_the_far_end_does_not_send_it_back() {
 #[test]
 fn a_tunnel_end_with_an_option_that_is_not_lowered_is_unknown() {
     let o = Opts {
-        nve_extra: "  advertise virtual-rmac\n",
+        nve_extra: "  source-interface hold-down-time 30\n",
         ..Opts::default()
     };
     let e = estate(&o);
@@ -391,7 +391,7 @@ fn a_tunnel_end_with_an_option_that_is_not_lowered_is_unknown() {
     let branches = show(&a);
     assert_eq!(branches[0].0, VerdictKind::Unknown, "{branches:#?}");
     assert!(
-        has(&branches[0].1, "advertise virtual-rmac"),
+        has(&branches[0].1, "source-interface hold-down-time 30"),
         "{branches:#?}"
     );
 }

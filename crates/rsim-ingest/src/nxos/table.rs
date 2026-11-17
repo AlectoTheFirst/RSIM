@@ -159,6 +159,7 @@ const ENTRIES: &[Entry] = &[
     e("interface */member vni */mcast-group ..", Handled, Subtree),
     e("interface */member vni */suppress-arp", Irrelevant, Subtree),
     e("nv overlay evpn", Irrelevant, Subtree),
+    e("interface */advertise virtual-rmac", Irrelevant, Subtree),
     e("interface */member vni * associate-vrf", Handled, Subtree),
     e("interface */ip forward", Handled, Subtree),
     e(

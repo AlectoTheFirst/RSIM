@@ -43,6 +43,9 @@ pub(super) struct Tunnel {
     /// The name of the NVE interface, for example `nve1`.
     pub nve: String,
     pub source: IpAddr,
+    /// The source of a routed packet to a layer 3 VNI: the primary address
+    /// with `advertise-pip` on a vPC switch, else `source`.
+    pub routed_source: IpAddr,
     pub spans: Vec<SourceSpan>,
     /// The layer 2 VNI of each VLAN.
     pub l2: BTreeMap<u16, L2Vni>,
@@ -94,19 +97,29 @@ pub(super) fn plan(cfg: &Config, st: &State, active: &[Interface], l: &mut L<'_>
     let Some((src, src_lines)) = &n.source else {
         return unknown("the NVE interface has no source interface".into());
     };
-    let source = active
-        .iter()
-        .find(|i| i.name.eq_ignore_ascii_case(src))
-        .and_then(|i| {
-            i.addresses
-                .iter()
-                .find(|a| !a.secondary)
-                .and_then(|a| iface_addr(&a.prefix))
-        });
-    let Some((source, _)) = source else {
-        return unknown(format!("the source interface {src} has no active address"));
+    let vpc = super::layer2::vpc_ok(cfg, st);
+    let source = match source_address(active, src, vpc) {
+        Ok(a) => a,
+        Err(why) => return unknown(why),
     };
     let mut spans = vec![l.span(n.lines), l.span(*src_lines)];
+    let routed_source = match (vpc, cfg.advertise_pip) {
+        (true, Some(lines)) => {
+            spans.push(l.span(lines));
+            let primary = active
+                .iter()
+                .find(|i| i.name.eq_ignore_ascii_case(src))
+                .and_then(|i| i.addresses.iter().find(|a| !a.secondary))
+                .and_then(|a| iface_addr(&a.prefix));
+            match primary {
+                Some((a, _)) => a,
+                None => {
+                    return unknown(format!("the source interface {src} has no primary address"));
+                }
+            }
+        }
+        _ => source,
+    };
     if let Some(i) = active.iter().find(|i| i.name.eq_ignore_ascii_case(src)) {
         spans.push(l.span(i.lines));
     }
@@ -224,11 +237,40 @@ pub(super) fn plan(cfg: &Config, st: &State, active: &[Interface], l: &mut L<'_>
     Plan::Exact(Tunnel {
         nve: n.name.clone(),
         source,
+        routed_source,
         spans,
         l2,
         l3,
         peers,
     })
+}
+
+/// The tunnel end address of the source interface `src`. On a switch of a
+/// lowered vPC domain, it is the secondary address, which both switches of
+/// the pair share; else it is the primary address.
+fn source_address(active: &[Interface], src: &str, vpc: bool) -> Result<IpAddr, String> {
+    let i = active
+        .iter()
+        .find(|i| i.name.eq_ignore_ascii_case(src))
+        .ok_or_else(|| format!("the source interface {src} is not active"))?;
+    let first = |secondary: bool| {
+        i.addresses
+            .iter()
+            .find(|a| a.secondary == secondary)
+            .and_then(|a| iface_addr(&a.prefix))
+            .map(|x| x.0)
+    };
+    match (first(false), first(true), vpc) {
+        (_, Some(s), true) => Ok(s),
+        (_, Some(_), false) => Err(format!(
+            "the source interface {src} has a secondary address, and the switch has no lowered vPC domain"
+        )),
+        (Some(_), None, true) => Err(format!(
+            "the source interface {src} of a vPC switch has no secondary address"
+        )),
+        (Some(p), None, false) => Ok(p),
+        (None, None, _) => Err(format!("the source interface {src} has no address")),
+    }
 }
 
 /// The tunnel facts of the switch for the link join: the address of the
@@ -245,11 +287,11 @@ pub(super) fn summary(
     if n.admin_up == Some(false) {
         return None;
     }
-    let address = n.source.as_ref().and_then(|(src, _)| {
-        let i = active.iter().find(|i| i.name.eq_ignore_ascii_case(src))?;
-        let a = i.addresses.iter().find(|a| !a.secondary)?;
-        iface_addr(&a.prefix).map(|x| x.0)
-    });
+    let vpc = super::layer2::vpc_ok(cfg, st);
+    let address = n
+        .source
+        .as_ref()
+        .and_then(|(src, _)| source_address(active, src, vpc).ok());
     let mut peers: BTreeSet<IpAddr> = st
         .nve_peers
         .iter()
@@ -293,7 +335,7 @@ pub(super) fn tunnel_port(nve: &str, port: &str) -> Option<IpAddr> {
 
 /// True for the name of a tunnel port of the NVE interface `nve`: the
 /// interface itself or a port with a peer.
-fn is_tunnel(nve: &str, port: &str) -> bool {
+pub(super) fn is_tunnel(nve: &str, port: &str) -> bool {
     port == nve || tunnel_port(nve, port).is_some()
 }
 
@@ -594,7 +636,7 @@ impl L<'_> {
         let next = self.id(VXLAN_ENTRY);
         self.add(VxlanEncap {
             meta,
-            source: t.source,
+            source: t.routed_source,
             peer: TunnelPeer::NextHop,
             vnis: t
                 .l3
