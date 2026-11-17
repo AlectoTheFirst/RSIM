@@ -1,0 +1,30 @@
+# The server writes only to its sockets, stdout and stderr. It writes no
+# file. It opens only the TCP listener of its loopback address.
+disallowed-methods = [
+    "std::fs::write",
+    "std::fs::copy",
+    "std::fs::rename",
+    "std::fs::hard_link",
+    "std::fs::soft_link",
+    "std::fs::set_permissions",
+    "std::fs::create_dir",
+    "std::fs::create_dir_all",
+    "std::fs::remove_file",
+    "std::fs::remove_dir",
+    "std::fs::remove_dir_all",
+    "std::fs::File::create",
+    "std::fs::File::create_new",
+    "std::fs::File::options",
+    "std::fs::OpenOptions::new",
+    "std::fs::DirBuilder::new",
+    "std::os::unix::fs::symlink",
+    "std::env::temp_dir",
+]
+disallowed-types = [
+    "std::fs::OpenOptions",
+    "std::fs::DirBuilder",
+    "std::net::UdpSocket",
+    "std::os::unix::net::UnixStream",
+    "std::os::unix::net::UnixListener",
+    "std::os::unix::net::UnixDatagram",
+]

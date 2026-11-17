@@ -1,0 +1,3673 @@
+{
+  "components": {
+    "schemas": {
+      "AlternativeJson": {
+        "properties": {
+          "choice": {
+            "type": "string"
+          },
+          "count": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "index": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "choice",
+          "key",
+          "index",
+          "count",
+          "label"
+        ],
+        "type": "object"
+      },
+      "AnswerBriefJson": {
+        "description": "An answer with no packet set in its ingress and its branches. The\nsummary parts keep their packet sets, because each part is a set.",
+        "properties": {
+          "branches": {
+            "items": {
+              "$ref": "#/components/schemas/BranchBriefJson"
+            },
+            "type": "array"
+          },
+          "ingress": {
+            "items": {
+              "$ref": "#/components/schemas/IngressBriefJson"
+            },
+            "type": "array"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "replies": {
+            "items": {
+              "$ref": "#/components/schemas/ReplyBriefJson"
+            },
+            "type": "array"
+          },
+          "summary": {
+            "items": {
+              "$ref": "#/components/schemas/PartJson"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode",
+          "ingress",
+          "summary",
+          "branches",
+          "replies"
+        ],
+        "type": "object"
+      },
+      "AnswerJson": {
+        "properties": {
+          "branches": {
+            "items": {
+              "$ref": "#/components/schemas/BranchJson"
+            },
+            "type": "array"
+          },
+          "ingress": {
+            "items": {
+              "$ref": "#/components/schemas/IngressJson"
+            },
+            "type": "array"
+          },
+          "input": {
+            "$ref": "#/components/schemas/PacketSetJson"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "replies": {
+            "items": {
+              "$ref": "#/components/schemas/ReplyJson"
+            },
+            "type": "array"
+          },
+          "summary": {
+            "items": {
+              "$ref": "#/components/schemas/PartJson"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode",
+          "input",
+          "ingress",
+          "summary",
+          "branches",
+          "replies"
+        ],
+        "type": "object"
+      },
+      "AttrJson": {
+        "description": "A context attribute: {\"known\": number}, \"unset\" or \"unknown\".",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "known": {
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "known"
+            ],
+            "type": "object"
+          },
+          {
+            "enum": [
+              "unset",
+              "unknown"
+            ]
+          }
+        ]
+      },
+      "BranchBriefJson": {
+        "description": "A branch with its verdict, its delay, the number of its steps and, in\nthe form `steps`, one line for each step.",
+        "properties": {
+          "delay": {
+            "$ref": "#/components/schemas/DelayJson"
+          },
+          "index": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "step_count": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/StepLineJson"
+            },
+            "type": "array"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/VerdictJson"
+          }
+        },
+        "required": [
+          "index",
+          "verdict",
+          "delay",
+          "step_count",
+          "steps"
+        ],
+        "type": "object"
+      },
+      "BranchJson": {
+        "properties": {
+          "delay": {
+            "$ref": "#/components/schemas/DelayJson"
+          },
+          "index": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "packets": {
+            "$ref": "#/components/schemas/PacketSetJson"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/TraceStepJson"
+            },
+            "type": "array"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/VerdictJson"
+          }
+        },
+        "required": [
+          "index",
+          "verdict",
+          "packets",
+          "delay",
+          "steps"
+        ],
+        "type": "object"
+      },
+      "ClaimDef": {
+        "description": "One claim of the catalog.",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reads": {
+            "description": "The data that the claim reads.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scopes": {
+            "description": "The scopes on which the claim runs: `twin`, `devices` or `query`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "scopes",
+          "reads"
+        ],
+        "type": "object"
+      },
+      "ClaimOut": {
+        "description": "The result of a claim on a scope.",
+        "properties": {
+          "claim": {
+            "type": "string"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/Counts"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/Evidence"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ClaimResult"
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "scope": {
+            "description": "`twin`, `devices` or `query`.",
+            "type": "string"
+          },
+          "topology": {
+            "type": "string"
+          },
+          "twin": {
+            "$ref": "#/components/schemas/TwinJson"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "topology",
+          "twin",
+          "claim",
+          "scope",
+          "result",
+          "counts",
+          "evidence"
+        ],
+        "title": "ClaimOut",
+        "type": "object"
+      },
+      "ClaimResult": {
+        "description": "The result of a claim or of one evidence row.",
+        "enum": [
+          "confirmed",
+          "refuted",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "ClaimsOut": {
+        "description": "The claim catalog.",
+        "properties": {
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimDef"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "claims"
+        ],
+        "title": "ClaimsOut",
+        "type": "object"
+      },
+      "Column": {
+        "description": "One column of a table.",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "refers_to": {
+            "description": "The table and the column that a value refers to.",
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "semantic": {
+            "description": "The meaning of the values, for example `device`, `interface`, `vrf`.",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ColumnType"
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "type",
+          "semantic"
+        ],
+        "type": "object"
+      },
+      "ColumnSummary": {
+        "description": "The counts of one column.",
+        "properties": {
+          "column": {
+            "type": "string"
+          },
+          "distinct": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "nulls": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "top": {
+            "description": "The most frequent values with their counts, at most 5, the most\nfrequent first.",
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                true,
+                {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "column",
+          "distinct",
+          "nulls",
+          "top"
+        ],
+        "type": "object"
+      },
+      "ColumnType": {
+        "description": "The type of the values of a column.",
+        "oneOf": [
+          {
+            "enum": [
+              "text",
+              "integer",
+              "boolean"
+            ],
+            "type": "string"
+          },
+          {
+            "const": "address",
+            "description": "An IPv4 or IPv6 address.",
+            "type": "string"
+          },
+          {
+            "const": "prefix",
+            "description": "An address with a prefix length.",
+            "type": "string"
+          },
+          {
+            "const": "list",
+            "description": "A list of text values.",
+            "type": "string"
+          }
+        ]
+      },
+      "Counts": {
+        "description": "The number of evidence rows of each result.",
+        "properties": {
+          "confirmed": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "refuted": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unknown": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "confirmed",
+          "refuted",
+          "unknown"
+        ],
+        "type": "object"
+      },
+      "DelayGapJson": {
+        "properties": {
+          "function": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "function"
+        ],
+        "type": "object"
+      },
+      "DelayJson": {
+        "properties": {
+          "known_ns": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "lower_bound": {
+            "type": "boolean"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/DelayGapJson"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "known_ns",
+          "lower_bound",
+          "missing"
+        ],
+        "type": "object"
+      },
+      "DestinationJson": {
+        "properties": {
+          "device": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "endpoint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "EncapJson": {
+        "description": "An encapsulation header. The values are field values.",
+        "properties": {
+          "dst": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Field_string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Field_uint32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "src": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Field_string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vni": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Field_uint32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "Evidence": {
+        "description": "One evidence row.",
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "expected": true,
+          "observed": true,
+          "provenance": {
+            "description": "The source spans of the data: file:first-last.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reason": {
+            "description": "A reason code: `match`, `mismatch`, `not_collected`, `unknown`.",
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ClaimResult"
+          },
+          "subject": {
+            "description": "What the row is about, for example a link or a branch.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "result",
+          "reason",
+          "detail",
+          "provenance"
+        ],
+        "type": "object"
+      },
+      "Field_string": {
+        "description": "A header field value: {\"known\": value}, {\"in\": [...]}, \"unknown\", \"absent\" or \"original\".",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "known": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "known"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "in": {
+                "type": "array"
+              }
+            },
+            "required": [
+              "in"
+            ],
+            "type": "object"
+          },
+          {
+            "enum": [
+              "unknown",
+              "absent",
+              "original"
+            ]
+          }
+        ]
+      },
+      "Field_uint16": {
+        "description": "A header field value: {\"known\": value}, {\"in\": [...]}, \"unknown\", \"absent\" or \"original\".",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "known": {
+                "format": "uint16",
+                "maximum": 65535,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "known"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "in": {
+                "type": "array"
+              }
+            },
+            "required": [
+              "in"
+            ],
+            "type": "object"
+          },
+          {
+            "enum": [
+              "unknown",
+              "absent",
+              "original"
+            ]
+          }
+        ]
+      },
+      "Field_uint32": {
+        "description": "A header field value: {\"known\": value}, {\"in\": [...]}, \"unknown\", \"absent\" or \"original\".",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "known": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "known"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "in": {
+                "type": "array"
+              }
+            },
+            "required": [
+              "in"
+            ],
+            "type": "object"
+          },
+          {
+            "enum": [
+              "unknown",
+              "absent",
+              "original"
+            ]
+          }
+        ]
+      },
+      "Field_uint8": {
+        "description": "A header field value: {\"known\": value}, {\"in\": [...]}, \"unknown\", \"absent\" or \"original\".",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "known": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "known"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "in": {
+                "type": "array"
+              }
+            },
+            "required": [
+              "in"
+            ],
+            "type": "object"
+          },
+          {
+            "enum": [
+              "unknown",
+              "absent",
+              "original"
+            ]
+          }
+        ]
+      },
+      "FloodCopyJson": {
+        "properties": {
+          "count": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "flood": {
+            "type": "string"
+          },
+          "index": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "port": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "flood",
+          "port",
+          "index",
+          "count"
+        ],
+        "type": "object"
+      },
+      "Form": {
+        "description": "The form of an answer.",
+        "oneOf": [
+          {
+            "const": "summary",
+            "description": "The verdicts, the parts and the branches with no trace steps.",
+            "type": "string"
+          },
+          {
+            "const": "steps",
+            "description": "The summary, and one line for each trace step, with no packet sets.",
+            "type": "string"
+          },
+          {
+            "const": "full",
+            "description": "The full answer with each packet set.",
+            "type": "string"
+          }
+        ]
+      },
+      "FragmentName": {
+        "description": "The fragment state of a request.",
+        "enum": [
+          "unfragmented",
+          "first",
+          "later"
+        ],
+        "type": "string"
+      },
+      "HeaderJson": {
+        "properties": {
+          "destination.ip": {
+            "$ref": "#/components/schemas/Field_string"
+          },
+          "destination.mac": {
+            "$ref": "#/components/schemas/Field_string"
+          },
+          "destination.port": {
+            "$ref": "#/components/schemas/Field_uint16"
+          },
+          "dscp": {
+            "$ref": "#/components/schemas/Field_uint8"
+          },
+          "ecn": {
+            "$ref": "#/components/schemas/Field_uint8"
+          },
+          "encap": {
+            "items": {
+              "$ref": "#/components/schemas/EncapJson"
+            },
+            "type": "array"
+          },
+          "fragment": {
+            "$ref": "#/components/schemas/Field_string"
+          },
+          "icmp_code": {
+            "$ref": "#/components/schemas/Field_uint8"
+          },
+          "icmp_type": {
+            "$ref": "#/components/schemas/Field_uint8"
+          },
+          "inner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeaderJson"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The inner header of an encapsulated current header."
+          },
+          "l2_priority": {
+            "$ref": "#/components/schemas/Field_uint8"
+          },
+          "mpls_tc": {
+            "$ref": "#/components/schemas/Field_uint8"
+          },
+          "network.iana_number": {
+            "$ref": "#/components/schemas/Field_uint8"
+          },
+          "network.vlan.id": {
+            "$ref": "#/components/schemas/Field_uint16"
+          },
+          "source.ip": {
+            "$ref": "#/components/schemas/Field_string"
+          },
+          "source.mac": {
+            "$ref": "#/components/schemas/Field_string"
+          },
+          "source.port": {
+            "$ref": "#/components/schemas/Field_uint16"
+          },
+          "tcp_flags": {
+            "$ref": "#/components/schemas/Field_uint8"
+          }
+        },
+        "required": [
+          "source.mac",
+          "destination.mac",
+          "network.vlan.id",
+          "l2_priority",
+          "source.ip",
+          "destination.ip",
+          "network.iana_number",
+          "dscp",
+          "ecn",
+          "fragment",
+          "source.port",
+          "destination.port",
+          "tcp_flags",
+          "icmp_type",
+          "icmp_code",
+          "mpls_tc",
+          "encap"
+        ],
+        "type": "object"
+      },
+      "IcmpName": {
+        "description": "The name of an ICMP echo type.",
+        "enum": [
+          "echo-request",
+          "echo-reply"
+        ],
+        "type": "string"
+      },
+      "IcmpTypeArg": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/IcmpName"
+          },
+          {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          }
+        ],
+        "description": "An ICMP type: a number, or the name of the echo request or the echo\nreply."
+      },
+      "IngressBriefJson": {
+        "description": "The ingress of one run, with no packet set.",
+        "properties": {
+          "device": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "found": {
+            "type": "boolean"
+          },
+          "function": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "interface": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReasonJson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolved_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "found"
+        ],
+        "type": "object"
+      },
+      "IngressJson": {
+        "description": "The ingress of one run of the answer: the packets of the run and the\ninterface where they enter, or the reason why the ingress is not known.",
+        "properties": {
+          "device": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "found": {
+            "type": "boolean"
+          },
+          "function": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "host_confirmed": {
+            "type": "boolean"
+          },
+          "interface": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "network": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "packets": {
+            "$ref": "#/components/schemas/PacketSetJson"
+          },
+          "provenance": {
+            "items": {
+              "$ref": "#/components/schemas/SpanJson"
+            },
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReasonJson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolved_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "packets",
+          "found",
+          "host_confirmed",
+          "provenance"
+        ],
+        "type": "object"
+      },
+      "IngressRef": {
+        "description": "An ingress point as <device>/<interface>.",
+        "pattern": "^[^/]+/.+$",
+        "type": "string"
+      },
+      "MemberJson": {
+        "properties": {
+          "current": {
+            "$ref": "#/components/schemas/HeaderJson"
+          },
+          "original": {
+            "$ref": "#/components/schemas/HeaderJson"
+          }
+        },
+        "required": [
+          "original",
+          "current"
+        ],
+        "type": "object"
+      },
+      "OutcomeJson": {
+        "properties": {
+          "destination": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DestinationJson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "PacketSetJson": {
+        "description": "A packet set: its members. A member is a product of field values. The\nmembers are disjoint and in the fixed order of the bit table.",
+        "properties": {
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/MemberJson"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "members"
+        ],
+        "type": "object"
+      },
+      "PartJson": {
+        "properties": {
+          "packets": {
+            "$ref": "#/components/schemas/PacketSetJson"
+          },
+          "result": {
+            "$ref": "#/components/schemas/SummaryResultJson"
+          }
+        },
+        "required": [
+          "packets",
+          "result"
+        ],
+        "type": "object"
+      },
+      "PathAnswerOut": {
+        "properties": {
+          "answer": {
+            "$ref": "#/components/schemas/AnswerJson"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "query": {
+            "$ref": "#/components/schemas/QueryEcho"
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "topology": {
+            "type": "string"
+          },
+          "twin": {
+            "$ref": "#/components/schemas/TwinJson"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "topology",
+          "twin",
+          "query",
+          "answer"
+        ],
+        "title": "PathAnswerOut",
+        "type": "object"
+      },
+      "PathBriefOut": {
+        "description": "A path answer in the form `summary` or `steps`.",
+        "properties": {
+          "answer": {
+            "$ref": "#/components/schemas/AnswerBriefJson"
+          },
+          "form": {
+            "$ref": "#/components/schemas/Form"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "query": {
+            "$ref": "#/components/schemas/QueryEcho"
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "topology": {
+            "type": "string"
+          },
+          "twin": {
+            "$ref": "#/components/schemas/TwinJson"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "topology",
+          "twin",
+          "form",
+          "query",
+          "answer"
+        ],
+        "title": "PathBriefOut",
+        "type": "object"
+      },
+      "PathQueryArgs": {
+        "additionalProperties": false,
+        "description": "The fields of a path query. A field that the query does not state is\nnot known.",
+        "properties": {
+          "destination.ip": {
+            "description": "The destination IP address.",
+            "type": "string"
+          },
+          "destination.mac": {
+            "description": "The destination MAC address: 6 hexadecimal bytes with colons.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "destination.port": {
+            "description": "The destination port.",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "dscp": {
+            "description": "The DSCP.",
+            "format": "uint8",
+            "maximum": 63,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "ecn": {
+            "description": "The ECN.",
+            "format": "uint8",
+            "maximum": 3,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "form": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Form"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The form of the answer. The default is summary."
+          },
+          "fragment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FragmentName"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The fragment state."
+          },
+          "icmp_code": {
+            "description": "The ICMP code.",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "icmp_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IcmpTypeArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "0 to 255, echo-request or echo-reply."
+          },
+          "ingress": {
+            "description": "The ingress point as <device>/<interface>. Without it, the\nattachment records of the source address give the ingress.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "l2_priority": {
+            "description": "The layer 2 priority. It needs network.vlan.id.",
+            "format": "uint8",
+            "maximum": 7,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "network.iana_number": {
+            "description": "The protocol number.",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "network.transport": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Transport"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The protocol name. Give network.iana_number or network.transport."
+          },
+          "network.vlan.id": {
+            "description": "The VLAN tag.",
+            "format": "uint16",
+            "maximum": 4095,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reply": {
+            "description": "Run the reply. The default is true.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "source.ip": {
+            "description": "The source IP address.",
+            "type": "string"
+          },
+          "source.mac": {
+            "description": "The source MAC address: 6 hexadecimal bytes with colons.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source.port": {
+            "description": "The source port.",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tcp_flags": {
+            "description": "The TCP flags that are set.",
+            "items": {
+              "$ref": "#/components/schemas/TcpFlag"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "topology": {
+            "description": "A built-in topology, or `store` for the newest snapshot of the store\nof the server.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topology",
+          "source.ip",
+          "destination.ip"
+        ],
+        "title": "PathQueryArgs",
+        "type": "object"
+      },
+      "Problem": {
+        "description": "A problem object of RFC 9457 with the rsim error code.",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "rsim_json": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "code",
+          "rsim_json"
+        ],
+        "type": "object"
+      },
+      "QosJson": {
+        "properties": {
+          "drop_precedence": {
+            "$ref": "#/components/schemas/AttrJson"
+          },
+          "dscp": {
+            "$ref": "#/components/schemas/UniformJson"
+          },
+          "ecn": {
+            "$ref": "#/components/schemas/UniformJson"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/AttrJson"
+          },
+          "traffic_class": {
+            "$ref": "#/components/schemas/AttrJson"
+          }
+        },
+        "required": [
+          "dscp",
+          "ecn",
+          "traffic_class",
+          "drop_precedence",
+          "queue"
+        ],
+        "type": "object"
+      },
+      "QueryEcho": {
+        "description": "The query input in the JSON output. Each field is there, and a field\nthat is not given is `null`. The protocol is a number and has its name\nif it has one, the ICMP type is a number, and the TCP flags are in the\norder of their bits with no repeat.",
+        "properties": {
+          "destination.ip": {
+            "type": "string"
+          },
+          "destination.mac": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "destination.port": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "dscp": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "ecn": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "fragment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FragmentName"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "icmp_code": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "icmp_type": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "ingress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IngressRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "l2_priority": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "network.iana_number": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "network.transport": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "network.vlan.id": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reply": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "source.ip": {
+            "type": "string"
+          },
+          "source.mac": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source.port": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tcp_flags": {
+            "items": {
+              "$ref": "#/components/schemas/TcpFlag"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "topology": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "topology",
+          "source.ip",
+          "destination.ip"
+        ],
+        "type": "object"
+      },
+      "QueryJson": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/QueryEcho"
+          },
+          {
+            "$ref": "#/components/schemas/SetEcho"
+          }
+        ],
+        "description": "The query input of an output: of a path query or of a set query."
+      },
+      "RateConditionJson": {
+        "properties": {
+          "evaluated": {
+            "type": "boolean"
+          },
+          "exceed_action": {
+            "type": "string"
+          },
+          "function": {
+            "type": "string"
+          },
+          "rate_bps": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "function",
+          "exceed_action",
+          "evaluated"
+        ],
+        "type": "object"
+      },
+      "ReasonJson": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "ReplyBriefJson": {
+        "description": "The reply of a delivered branch in a brief form.",
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnswerBriefJson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "forward_branch": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "not_run_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ran": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "forward_branch",
+          "ran"
+        ],
+        "type": "object"
+      },
+      "ReplyJson": {
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnswerJson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "forward_branch": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "not_run_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ran": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "forward_branch",
+          "ran"
+        ],
+        "type": "object"
+      },
+      "SetAnswerOut": {
+        "properties": {
+          "answer": {
+            "$ref": "#/components/schemas/AnswerJson"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "query": {
+            "$ref": "#/components/schemas/SetEcho"
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "topology": {
+            "type": "string"
+          },
+          "twin": {
+            "$ref": "#/components/schemas/TwinJson"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "topology",
+          "twin",
+          "query",
+          "answer"
+        ],
+        "title": "SetAnswerOut",
+        "type": "object"
+      },
+      "SetArg": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/SetItem"
+            },
+            "type": "array"
+          }
+        ],
+        "description": "A set: an address, a prefix, a number, a range such as 1-1023, or a\ncomma list. A field that is not given has all values."
+      },
+      "SetBriefOut": {
+        "description": "A set answer in the form `summary` or `steps`.",
+        "properties": {
+          "answer": {
+            "$ref": "#/components/schemas/AnswerBriefJson"
+          },
+          "form": {
+            "$ref": "#/components/schemas/Form"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "query": {
+            "$ref": "#/components/schemas/SetEcho"
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "topology": {
+            "type": "string"
+          },
+          "twin": {
+            "$ref": "#/components/schemas/TwinJson"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "topology",
+          "twin",
+          "form",
+          "query",
+          "answer"
+        ],
+        "title": "SetBriefOut",
+        "type": "object"
+      },
+      "SetEcho": {
+        "description": "The set query input in the JSON output. Each field is the normalized\ntext of its set, or `null` if it is not given.",
+        "properties": {
+          "destination.ip": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "destination.mac": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "destination.port": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dscp": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ecn": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fragment": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "icmp_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "icmp_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ingress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IngressRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "l2_priority": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "network.iana_number": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "network.transport": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "network.vlan.id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reply": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "source.ip": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source.mac": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source.port": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tcp_flags": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "topology": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "topology"
+        ],
+        "type": "object"
+      },
+      "SetItem": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        ],
+        "description": "One item of a set list."
+      },
+      "SetQueryArgs": {
+        "additionalProperties": false,
+        "description": "The fields of a set query. Each field takes a set. A field that is not\ngiven has all values.",
+        "properties": {
+          "destination.ip": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The destination addresses."
+          },
+          "destination.mac": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The destination MAC addresses."
+          },
+          "destination.port": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The destination ports."
+          },
+          "dscp": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The DSCP values."
+          },
+          "ecn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ECN values."
+          },
+          "form": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Form"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The form of the answer. The default is summary."
+          },
+          "fragment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The fragment states."
+          },
+          "icmp_code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ICMP codes."
+          },
+          "icmp_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ICMP types."
+          },
+          "ingress": {
+            "description": "The ingress point as <device>/<interface>. Without it, the\nattachment records of the source addresses give the ingress.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "l2_priority": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The layer 2 priorities."
+          },
+          "network.iana_number": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The protocol numbers."
+          },
+          "network.transport": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The protocol names."
+          },
+          "network.vlan.id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The VLAN tags."
+          },
+          "reply": {
+            "description": "Run the replies. The default is true.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "source.ip": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The source addresses."
+          },
+          "source.mac": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The source MAC addresses."
+          },
+          "source.port": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The source ports."
+          },
+          "tcp_flags": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The TCP flag values: numbers, ranges, or flag names joined with +."
+          },
+          "topology": {
+            "description": "A built-in topology, or `store` for the newest snapshot of the store\nof the server.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topology"
+        ],
+        "title": "SetQueryArgs",
+        "type": "object"
+      },
+      "SpanJson": {
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "first_line": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_line": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file",
+          "first_line",
+          "last_line"
+        ],
+        "type": "object"
+      },
+      "StepLineJson": {
+        "description": "One trace step with no packet set.",
+        "properties": {
+          "device": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "function": {
+            "type": "string"
+          },
+          "index": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/ReasonJson"
+          }
+        },
+        "required": [
+          "index",
+          "function",
+          "outcome",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "StepOut": {
+        "properties": {
+          "branch": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "query": {
+            "$ref": "#/components/schemas/QueryJson"
+          },
+          "reply_of": {
+            "format": "uint",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "step": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "topology": {
+            "type": "string"
+          },
+          "trace_step": {
+            "$ref": "#/components/schemas/TraceStepJson"
+          },
+          "twin": {
+            "$ref": "#/components/schemas/TwinJson"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "topology",
+          "twin",
+          "query",
+          "branch",
+          "step",
+          "trace_step"
+        ],
+        "title": "StepOut",
+        "type": "object"
+      },
+      "SummarizeOut": {
+        "description": "The counts of a table and of each column.",
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/ColumnSummary"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "table": {
+            "type": "string"
+          },
+          "topology": {
+            "type": "string"
+          },
+          "total": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "twin": {
+            "$ref": "#/components/schemas/TwinJson"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "topology",
+          "twin",
+          "table",
+          "total",
+          "columns"
+        ],
+        "title": "SummarizeOut",
+        "type": "object"
+      },
+      "SummaryResultJson": {
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VerdictJson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verdict_kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "TableDef": {
+        "description": "One table of the catalog.",
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/Column"
+            },
+            "type": "array"
+          },
+          "description": {
+            "type": "string"
+          },
+          "key": {
+            "description": "The key columns, which give the default order of the rows.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "needs": {
+            "description": "The data that the table needs, so a client knows why it is empty.",
+            "type": "string"
+          },
+          "verbs": {
+            "description": "The verbs of the table.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "key",
+          "columns",
+          "verbs",
+          "needs"
+        ],
+        "type": "object"
+      },
+      "TableOut": {
+        "description": "The rows of a table.",
+        "properties": {
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "next_cursor": {
+            "description": "The cursor of the next page, or `null` on the last page.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rows": {
+            "items": {
+              "items": true,
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "table": {
+            "type": "string"
+          },
+          "topology": {
+            "type": "string"
+          },
+          "total": {
+            "description": "The number of rows that match the filters, on all pages.",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "twin": {
+            "$ref": "#/components/schemas/TwinJson"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "topology",
+          "twin",
+          "table",
+          "columns",
+          "rows",
+          "total"
+        ],
+        "title": "TableOut",
+        "type": "object"
+      },
+      "TablesOut": {
+        "description": "The table catalog.",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/TableDef"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "tables"
+        ],
+        "title": "TablesOut",
+        "type": "object"
+      },
+      "TcpFlag": {
+        "description": "One TCP flag.",
+        "enum": [
+          "fin",
+          "syn",
+          "rst",
+          "psh",
+          "ack",
+          "urg",
+          "ece",
+          "cwr"
+        ],
+        "type": "string"
+      },
+      "TraceStepJson": {
+        "properties": {
+          "alternative": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AlternativeJson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delay": {
+            "$ref": "#/components/schemas/DelayJson"
+          },
+          "device": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "flood_copy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FloodCopyJson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "function": {
+            "type": "string"
+          },
+          "index": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "input": {
+            "$ref": "#/components/schemas/PacketSetJson"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/OutcomeJson"
+          },
+          "output": {
+            "$ref": "#/components/schemas/PacketSetJson"
+          },
+          "provenance": {
+            "items": {
+              "$ref": "#/components/schemas/SpanJson"
+            },
+            "type": "array"
+          },
+          "qos": {
+            "$ref": "#/components/schemas/QosJson"
+          },
+          "rate_condition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RateConditionJson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "$ref": "#/components/schemas/ReasonJson"
+          },
+          "rib_guard": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "function",
+          "kind",
+          "input",
+          "output",
+          "outcome",
+          "reason",
+          "provenance",
+          "delay",
+          "qos",
+          "rib_guard"
+        ],
+        "type": "object"
+      },
+      "Transport": {
+        "description": "A protocol name.",
+        "enum": [
+          "tcp",
+          "udp",
+          "icmp",
+          "icmpv6"
+        ],
+        "type": "string"
+      },
+      "TwinJson": {
+        "description": "The twin that gave an answer.",
+        "properties": {
+          "base": {
+            "description": "The identifier of the base: a built-in topology or a snapshot.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The twin identifier.",
+            "type": "string"
+          },
+          "layers": {
+            "description": "The what-if layers on the base, in order. Empty with no scenario.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "snapshot": {
+            "description": "The snapshot cycle of the base, or `null` for a built-in topology.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "base",
+          "layers"
+        ],
+        "type": "object"
+      },
+      "UniformJson": {
+        "description": "A QoS header field over the members of a set: {\"value\": field value}, \"varies\" or \"none\".",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "value": {
+                "$ref": "#/components/schemas/Field_uint8"
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "type": "object"
+          },
+          {
+            "enum": [
+              "varies",
+              "none"
+            ]
+          }
+        ]
+      },
+      "UniqueOut": {
+        "description": "The distinct values of columns with their counts.",
+        "properties": {
+          "columns": {
+            "description": "The columns, then `count`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "items": true,
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "table": {
+            "type": "string"
+          },
+          "topology": {
+            "type": "string"
+          },
+          "twin": {
+            "$ref": "#/components/schemas/TwinJson"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "topology",
+          "twin",
+          "table",
+          "columns",
+          "rows"
+        ],
+        "title": "UniqueOut",
+        "type": "object"
+      },
+      "VerdictJson": {
+        "properties": {
+          "destination": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DestinationJson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReasonJson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "rsim": {
+        "description": "Not checked yet: the server listens only on a loopback address. The scope rsim.scenario.write is for the what-if scenarios.",
+        "flows": {
+          "clientCredentials": {
+            "scopes": {
+              "rsim.read": "Read the twins, the tables, the queries and the claims.",
+              "rsim.scenario.write": "Make and change what-if scenarios."
+            },
+            "tokenUrl": "/oauth/token"
+          }
+        },
+        "type": "oauth2"
+      }
+    }
+  },
+  "info": {
+    "description": "The REST API of the rsim network digital twin. Each table, query and claim is below its twin. GraphQL, Cypher and gRPC are not used.",
+    "license": {
+      "identifier": "MIT",
+      "name": "MIT"
+    },
+    "title": "rsim",
+    "version": "0.1.0-json2"
+  },
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1": {
+      "get": {
+        "operationId": "getEntry",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The entry point: the links, the contract version and the limits."
+      }
+    },
+    "/v1/claims": {
+      "get": {
+        "operationId": "listClaims",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimsOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The catalog of the claims."
+      }
+    },
+    "/v1/openapi.json": {
+      "get": {
+        "operationId": "getOpenApi",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "This document."
+      }
+    },
+    "/v1/tables": {
+      "get": {
+        "operationId": "listTables",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TablesOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The catalog of the tables."
+      }
+    },
+    "/v1/twins": {
+      "get": {
+        "operationId": "listTopologies",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The twins of the server: the built-in topologies, and the alias store."
+      }
+    },
+    "/v1/twins/{twin}": {
+      "get": {
+        "operationId": "getTwin",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "A twin: its identity and its links. The alias store redirects to its snapshot."
+      }
+    },
+    "/v1/twins/{twin}/claims/{claim}": {
+      "get": {
+        "operationId": "runClaim",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "claim",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The devices of the scope, separated by commas.",
+            "in": "query",
+            "name": "device",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "A claim on the twin, or on the devices of the parameter device."
+      }
+    },
+    "/v1/twins/{twin}/queries": {
+      "post": {
+        "operationId": "createQuery",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/PathQueryArgs"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SetQueryArgs"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "303": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "Makes a query resource from the arguments of a path query, or of a set query with mode set. The answer is 303 to the resource."
+      }
+    },
+    "/v1/twins/{twin}/queries/{qid}": {
+      "get": {
+        "operationId": "getQuery",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "qid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "summary (the default), steps or full.",
+            "in": "query",
+            "name": "form",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PathBriefOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SetBriefOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PathAnswerOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SetAnswerOut"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The answer of a query. The query runs again on each request."
+      }
+    },
+    "/v1/twins/{twin}/queries/{qid}/branches/{branch}/steps/{step}": {
+      "get": {
+        "operationId": "getStep",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "qid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "branch",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Select the reply of this forward branch.",
+            "in": "query",
+            "name": "reply_of",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "One trace step of the answer of a query."
+      }
+    },
+    "/v1/twins/{twin}/queries/{qid}/claims/{claim}": {
+      "get": {
+        "operationId": "runQueryClaim",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "qid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "claim",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "A claim on the paths of a path query."
+      }
+    },
+    "/v1/twins/{twin}/tables/{table}/lpm": {
+      "get": {
+        "operationId": "lpmTable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The address.",
+            "in": "query",
+            "name": "address",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The prefix column; prefix if not given.",
+            "in": "query",
+            "name": "column",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The rows of the longest prefix that contains an address."
+      }
+    },
+    "/v1/twins/{twin}/tables/{table}/rows": {
+      "get": {
+        "operationId": "queryTable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The columns of the output, separated by commas.",
+            "in": "query",
+            "name": "columns",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The order: column names separated by commas, - before a name for a falling order.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The number of rows of a page.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The cursor of the next page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The rows of a table. Each other parameter <column>=v1,v2 is an equality filter, and <column>.<op>=v a typed filter with the op contains, prefix, gt, lt or in_prefix."
+      }
+    },
+    "/v1/twins/{twin}/tables/{table}/summary": {
+      "get": {
+        "operationId": "summarizeTable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SummarizeOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The counts of a table and of each column, with the filters of the rows."
+      }
+    },
+    "/v1/twins/{twin}/tables/{table}/top": {
+      "get": {
+        "operationId": "topTable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The column.",
+            "in": "query",
+            "name": "column",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The number of rows; 5 if not given.",
+            "in": "query",
+            "name": "count",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "true for the smallest values.",
+            "in": "query",
+            "name": "ascending",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The rows with the largest values of a column."
+      }
+    },
+    "/v1/twins/{twin}/tables/{table}/unique": {
+      "get": {
+        "operationId": "uniqueTable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The columns, separated by commas.",
+            "in": "query",
+            "name": "columns",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UniqueOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The distinct values of the columns with their counts."
+      }
+    }
+  }
+}

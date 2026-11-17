@@ -2598,6 +2598,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "rsim-api"
+version = "0.1.0"
+dependencies = [
+ "boon",
+ "bytes",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "rsim-cli",
+ "rsim-contract",
+ "rsim-store",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "rsim-cli"
 version = "0.1.0"
 dependencies = [
