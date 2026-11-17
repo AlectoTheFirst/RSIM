@@ -12,9 +12,9 @@ use rsim_core::{
 use rsim_engine::EdgeInterface;
 use rsim_functions::{
     AclMatch, DestinationNat, DeviceDelivery, Egress, EgressMode, Fib, Ingress, LocalInput, Meta,
-    NatAction, NatScope, Neighbour, NextHopResolution, PortTranslation, Route, RouteKind,
-    RouteLookup, RouteNextHop, Rule as FRule, RuleAction, SessionCommit, SessionLookup, SourceNat,
-    Tag, VendorProfile, VrfSelection,
+    NatAction, NatScope, Neighbour, NextHopResolution, PortTranslation, QosNotEvaluated, Route,
+    RouteKind, RouteLookup, RouteNextHop, Rule as FRule, RuleAction, SessionCommit, SessionLookup,
+    SourceNat, Tag, VendorProfile, VrfSelection,
 };
 
 use super::config::{
@@ -83,10 +83,18 @@ pub fn lower(
     let names = Names::new(cfg.interfaces.iter().map(|i| i.name.as_str()));
     let mut active: Vec<Interface> = Vec::new();
     for i in &cfg.interfaces {
-        if i.shutdown || (i.addresses.is_empty() && !i.dynamic_address) {
+        if i.admin_up == Some(false) || (i.addresses.is_empty() && !i.dynamic_address) {
             continue;
         }
         let mut i = i.clone();
+        let lower_name = i.name.to_ascii_lowercase();
+        if i.admin_up.is_none()
+            && !lower_name.starts_with("loopback")
+            && !lower_name.starts_with("mgmt")
+        {
+            i.unhandled
+                .push("no shutdown line, so the admin state is not known".into());
+        }
         if i.dynamic_address {
             l.note(format!(
                 "{}: an address that the config does not state is not lowered",
@@ -122,17 +130,25 @@ pub fn lower(
     // Ingress and the input ACLs.
     for i in &active {
         let filtered = i.acl_in.is_some() || !i.unhandled.is_empty();
+        let after_qos = if filtered {
+            format!("acl-in/{}", i.name)
+        } else {
+            "vrf".to_string()
+        };
         let span = l.span(i.lines);
         let meta = l.meta(&format!("in/{}", i.name), vec![span]);
         l.add(Ingress {
             meta,
             interface: InterfaceId::new(&i.name),
-            next: l.id(&if filtered {
-                format!("acl-in/{}", i.name)
-            } else {
-                "vrf".to_string()
+            next: l.id(&match &i.qos_in {
+                Some(_) => format!("qos-in/{}", i.name),
+                None => after_qos.clone(),
             }),
         });
+        if let Some((policy, lines)) = &i.qos_in {
+            let f = l.qos(&format!("qos-in/{}", i.name), policy, *lines, &after_qos);
+            l.add(f);
+        }
         if filtered {
             let f = l.interface_acl(i, i.acl_in.as_ref(), "in", "vrf");
             l.add(f);
@@ -237,6 +253,8 @@ pub fn lower(
             .map(|i| {
                 let f = if filtered_out(i) {
                     format!("acl-out/{}", i.name)
+                } else if i.qos_out.is_some() {
+                    format!("qos-out/{}", i.name)
                 } else {
                     format!("out/{}", i.name)
                 };
@@ -246,9 +264,17 @@ pub fn lower(
         point_to_point: BTreeMap::new(),
     });
     for i in &active {
+        let out = format!("out/{}", i.name);
+        let after_acl = match &i.qos_out {
+            Some(_) => format!("qos-out/{}", i.name),
+            None => out.clone(),
+        };
         if filtered_out(i) {
-            let next = format!("out/{}", i.name);
-            let f = l.interface_acl(i, i.acl_out.as_ref(), "out", &next);
+            let f = l.interface_acl(i, i.acl_out.as_ref(), "out", &after_acl);
+            l.add(f);
+        }
+        if let Some((policy, lines)) = &i.qos_out {
+            let f = l.qos(&after_acl, policy, *lines, &out);
             l.add(f);
         }
         let span = l.span(i.lines);
@@ -589,14 +615,15 @@ impl L<'_> {
     }
 
     /// The rules of an IP ACL, without its implicit rules. An ACL that the
-    /// config does not have, or a line that the handler cannot read, gives
-    /// an unhandled rule.
+    /// config does not have or that has no entry, or a line that the handler
+    /// cannot read, gives an unhandled rule. With no `deny` action, each deny
+    /// entry is an unhandled rule.
     fn acl_rules<A: Clone>(
         &mut self,
         name: &str,
         bind: Lines,
         permit: A,
-        deny: A,
+        deny: Option<A>,
     ) -> Vec<FRule<A>> {
         let Some(acl) = self.cfg.acls.get(name).cloned() else {
             let msg = format!("ACL {name} does not exist");
@@ -604,6 +631,11 @@ impl L<'_> {
             return vec![FRule::unhandled(msg, self.span(bind))];
         };
         let mut out = Vec::new();
+        if acl.entries.is_empty() && acl.unreadable.is_empty() {
+            let msg = format!("ACL {name} has no entry");
+            self.note(msg.clone());
+            return vec![FRule::unhandled(msg, self.span(acl.lines))];
+        }
         if !acl.unreadable.is_empty() {
             let msg = format!("ACL {name}: lines not read: {}", acl.unreadable.join(", "));
             self.note(msg.clone());
@@ -612,13 +644,30 @@ impl L<'_> {
         for e in &acl.entries {
             let rname = format!("{name}/{}", e.seq);
             let p = self.ace_predicate(e, &rname);
-            let action = match e.action {
-                AclAction::Permit => permit.clone(),
-                AclAction::Deny => deny.clone(),
+            let span = self.span(e.lines);
+            let action = match (e.action, &deny) {
+                (AclAction::Permit, _) => permit.clone(),
+                (AclAction::Deny, Some(d)) => d.clone(),
+                (AclAction::Deny, None) => {
+                    let msg = format!("{rname}: a deny of a NAT ACL before another NAT rule");
+                    self.note(msg.clone());
+                    out.push(FRule::unhandled(msg, span));
+                    continue;
+                }
             };
-            out.push(FRule::new(rname, p, action).with_span(self.span(e.lines)));
+            out.push(FRule::new(rname, p, action).with_span(span));
         }
         out
+    }
+
+    /// The function of a QoS policy of an interface. It forwards the
+    /// packets, and the marking and the class become unknown.
+    fn qos(&self, f: &str, policy: &str, lines: Lines, next: &str) -> QosNotEvaluated {
+        QosNotEvaluated {
+            meta: self.meta(f, vec![self.span(lines)]),
+            stanza: ObjectId::new(format!("{}:qos:{policy}", self.dev)),
+            next: self.id(next),
+        }
     }
 
     /// The ACL function of an interface in one direction. The unhandled
@@ -646,7 +695,12 @@ impl L<'_> {
         }
         let default = match bound {
             Some((name, lines)) => {
-                rules.extend(self.acl_rules(name, *lines, RuleAction::Permit, RuleAction::Deny));
+                rules.extend(self.acl_rules(
+                    name,
+                    *lines,
+                    RuleAction::Permit,
+                    Some(RuleAction::Deny),
+                ));
                 let mut v6 = FRule::new(
                     format!("{name}/IPv6 not filtered"),
                     RulePredicate::exact(ipv6()),
@@ -770,8 +824,21 @@ impl L<'_> {
             ingress: Some(inside.clone()),
             egress: Some(outside.clone()),
         };
+        // The unhandled forms come first, then the static rules, then the
+        // list rules in the order of the config. A deny of a list ACL exempts
+        // the packet only from its own rule, so it is exact only in the last
+        // list rule.
+        let mut rules = self.cfg.nat_rules.clone();
+        rules.sort_by_key(|r| match r.kind {
+            NatKind::Other(_) => 0,
+            NatKind::Static { .. } => 1,
+            NatKind::List { .. } => 2,
+        });
+        let last_list = rules
+            .iter()
+            .rposition(|r| matches!(r.kind, NatKind::List { .. }));
         let mut out = Vec::new();
-        for r in self.cfg.nat_rules.clone() {
+        for (index, r) in rules.into_iter().enumerate() {
             let span = self.span(r.lines);
             match &r.kind {
                 NatKind::Static {
@@ -846,8 +913,8 @@ impl L<'_> {
                         self.profile.snat_port
                     };
                     let translate = NatAction::Translate { addr, port };
-                    for mut rule in self.acl_rules(acl, r.lines, translate, NatAction::NoTranslate)
-                    {
+                    let deny = (Some(index) == last_list).then_some(NatAction::NoTranslate);
+                    for mut rule in self.acl_rules(acl, r.lines, translate, deny) {
                         rule = rule.with_span(span.clone());
                         out.push((scope.clone(), rule));
                     }

@@ -42,7 +42,9 @@ pub struct Address {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Interface {
     pub name: String,
-    pub shutdown: bool,
+    /// `Some(false)` with `shutdown`, `Some(true)` with `no shutdown`, and
+    /// `None` if the config has neither line.
+    pub admin_up: Option<bool>,
     pub vrf: Option<String>,
     pub addresses: Vec<Address>,
     /// An address that the config does not state, for example from DHCP.
@@ -51,6 +53,9 @@ pub struct Interface {
     pub acl_in: Option<(String, Lines)>,
     pub acl_out: Option<(String, Lines)>,
     pub nat: Option<(NatRole, Lines)>,
+    /// The QoS policies of the input and the output.
+    pub qos_in: Option<(String, Lines)>,
+    pub qos_out: Option<(String, Lines)>,
     /// The masked lines of the unhandled options of the interface.
     pub unhandled: Vec<String>,
     pub lines: Lines,
@@ -307,10 +312,17 @@ pub fn read(doc: &Document, table: &Table) -> Config {
                     },
                 );
             }
+            ["ip", "nat", "translation", ..] => {}
             ["ip", "nat", "inside", "source", ..] => {
                 r.mark(s);
                 cfg.nat_rules.push(NatRule {
                     kind: nat_rule(&w, table),
+                    lines: Lines::of(s),
+                });
+            }
+            ["ip", "nat", ..] => {
+                cfg.nat_rules.push(NatRule {
+                    kind: NatKind::Other(table.report_key(&s.key)),
                     lines: Lines::of(s),
                 });
             }
@@ -333,10 +345,30 @@ fn interface(r: &mut R, s: &Stanza, name: &str) -> Interface {
         let lines = Lines::of(c);
         let handled = match words(&c.key).as_slice() {
             ["shutdown"] => {
-                i.shutdown = true;
+                i.admin_up = Some(false);
                 true
             }
-            ["no", "shutdown"] | ["no", "switchport"] => true,
+            ["no", "shutdown"] => {
+                i.admin_up = Some(true);
+                true
+            }
+            ["no", "switchport"] => true,
+            [
+                "service-policy",
+                "type",
+                "qos",
+                dir @ ("input" | "output"),
+                name,
+            ]
+            | ["service-policy", dir @ ("input" | "output"), name] => {
+                let q = Some(((*name).to_string(), lines));
+                if *dir == "input" {
+                    i.qos_in = q;
+                } else {
+                    i.qos_out = q;
+                }
+                true
+            }
             ["vrf", "member", v] => {
                 i.vrf = Some((*v).to_string());
                 true

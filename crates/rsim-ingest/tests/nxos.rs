@@ -366,3 +366,161 @@ fn two_builds_give_the_same_answers() {
     };
     assert_eq!(q(&a), q(&b));
 }
+
+/// A small config with the NAT list rules of `lists`. `vlan30` comes at the
+/// end of the stanza of `Vlan30`, and `extra` at the end of the config.
+fn small_with(lists: &[&str], vlan30: &str, extra: &str) -> Twin {
+    let mut cfg = String::from(
+        "interface Vlan30
+  no shutdown
+  ip address 192.0.2.129/26
+  ip nat inside
+interface Vlan40
+  ip address 192.0.2.193/26
+interface Ethernet1/2
+  no switchport
+  no shutdown
+  ip address 198.51.100.1/30
+  ip nat outside
+  service-policy type qos output Q1
+ip access-list A
+  10 deny ip host 192.0.2.131 any
+  20 permit ip 192.0.2.128/26 any
+ip access-list B
+  10 permit ip any any
+",
+    );
+    for l in lists {
+        cfg.push_str(&format!(
+            "ip nat inside source list {l} interface Ethernet1/2 overload\n"
+        ));
+    }
+    cfg.push_str(extra);
+    let cfg = cfg.replacen(
+        "  ip nat inside\n",
+        &format!("  ip nat inside\n{vlan30}"),
+        1,
+    );
+    let e = assemble(vec![Input::Nxos {
+        name: "leaf1".into(),
+        config: cfg.into_bytes(),
+        file: "leaf1/config".into(),
+        collected: collected(),
+    }]);
+    e.builder.build().expect("the twin builds")
+}
+
+fn small(lists: &[&str], extra: &str) -> Twin {
+    small_with(lists, "", extra)
+}
+
+#[test]
+fn a_deny_of_a_nat_acl_is_exact_only_in_the_last_list_rule() {
+    let t = small(&["A"], "");
+    let (_, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.131",
+        "203.0.113.50",
+        PROTO_TCP,
+        443,
+    ));
+    assert!(
+        has(
+            &steps,
+            "snat not translated · source NAT leaf1:nat:inside rule A/10"
+        ),
+        "{steps:#?}"
+    );
+    let (_, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "203.0.113.50",
+        PROTO_TCP,
+        443,
+    ));
+    assert!(has(&steps, "snat translated to 198.51.100.1"), "{steps:#?}");
+    // With another list rule after it, the deny is not lowered.
+    let t = small(&["A", "B"], "");
+    let (verdict, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.131",
+        "203.0.113.50",
+        PROTO_TCP,
+        443,
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown);
+    assert!(
+        has(&steps, "a deny of a NAT ACL before another NAT rule"),
+        "{steps:#?}"
+    );
+}
+
+#[test]
+fn another_nat_form_gives_unknown() {
+    let t = small(
+        &["B"],
+        "ip nat outside source static 203.0.113.9 192.0.2.140\n",
+    );
+    let (verdict, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "203.0.113.50",
+        PROTO_TCP,
+        443,
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown);
+    assert!(has(&steps, "ip nat outside source static"), "{steps:#?}");
+}
+
+#[test]
+fn a_qos_policy_forwards_and_a_missing_admin_state_gives_unknown() {
+    let t = small(&["B"], "");
+    let (_, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "203.0.113.50",
+        PROTO_TCP,
+        443,
+    ));
+    let qos = steps
+        .iter()
+        .position(|s| s.starts_with("leaf1/qos-out/Ethernet1/2"));
+    let out = steps
+        .iter()
+        .position(|s| s.starts_with("leaf1/out/Ethernet1/2"));
+    assert!(qos.is_some() && out.is_some() && qos < out, "{steps:#?}");
+    let (verdict, steps) = only(&run(
+        &t,
+        "Vlan40",
+        "192.0.2.200",
+        "203.0.113.50",
+        PROTO_TCP,
+        443,
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown);
+    assert!(has(&steps, "the admin state is not known"), "{steps:#?}");
+}
+
+#[test]
+fn an_empty_acl_gives_unknown() {
+    let t = small_with(
+        &[],
+        "  ip access-group EMPTY in\n",
+        "ip access-list EMPTY\n",
+    );
+    let (verdict, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "203.0.113.50",
+        PROTO_TCP,
+        443,
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown);
+    assert!(has(&steps, "ACL EMPTY has no entry"), "{steps:#?}");
+}

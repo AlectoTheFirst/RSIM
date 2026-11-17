@@ -62,6 +62,7 @@ const ENTRIES: &[Entry] = &[
     e("interface */ip access-group * out", Handled, Subtree),
     e("interface */ip nat inside", Handled, Subtree),
     e("interface */ip nat outside", Handled, Subtree),
+    e("interface */service-policy ..", Handled, Subtree),
     e("interface */description ..", Irrelevant, Subtree),
     e("interface */mtu ..", Irrelevant, Subtree),
     e("interface */speed ..", Irrelevant, Subtree),
@@ -102,6 +103,7 @@ const ENTRIES: &[Entry] = &[
     e("vrf context */ip name-server ..", Irrelevant, Subtree),
     e("ip nat inside source ..", Handled, Subtree),
     e("ip nat pool ..", Handled, Subtree),
+    e("ip nat translation ..", Irrelevant, Subtree),
     e("ipv6 route ..", Irrelevant, Subtree),
     e("ipv6 access-list ..", Irrelevant, Subtree),
 ];
