@@ -240,9 +240,20 @@ pub struct VxlanDecap {
     /// The port of the tunnel in a bridge domain. A frame out of the tunnel
     /// comes in on it.
     pub port: Option<PortId>,
-    /// The result of a VNI that is not in `vnis`: `None` drops the packets,
-    /// and a text gives `Unknown` with that reason.
-    pub unmatched: Option<String>,
+    /// What happens to the packets of a VNI that is not in `vnis`.
+    pub unmatched: Unmatched,
+}
+
+/// What a decapsulation does with the packets of a VNI that it does not
+/// have.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Unmatched {
+    Drop,
+    /// The packets are `Unknown` with this reason.
+    Unknown(String),
+    /// The packets go on, still encapsulated, to this function, for
+    /// example a decapsulation of the VNIs of another kind.
+    Next(FunctionId),
 }
 
 impl NetFunction for VxlanDecap {
@@ -277,6 +288,10 @@ impl NetFunction for VxlanDecap {
             .values()
             .map(|(_, n)| n.clone())
             .chain(self.plain.clone())
+            .chain(match &self.unmatched {
+                Unmatched::Next(n) => Some(n.clone()),
+                _ => None,
+            })
             .collect();
         v.sort();
         v.dedup();
@@ -316,17 +331,25 @@ impl NetFunction for VxlanDecap {
             ));
         }
         let other = match &self.unmatched {
-            None => self.meta.drop(
+            Unmatched::Drop => self.meta.drop(
                 rest,
                 ReasonCode::NoSegment,
                 format!("no VNI of the packets on {}", self.meta.device),
                 ctx,
                 state,
             ),
-            Some(why) => {
+            Unmatched::Unknown(why) => {
                 self.meta
                     .unknown(rest, ReasonCode::UnhandledStanza, why.clone(), ctx, state)
             }
+            Unmatched::Next(next) => self.meta.forward(
+                rest,
+                next,
+                ReasonCode::Passed,
+                "another VNI",
+                ctx.clone(),
+                state,
+            ),
         };
         push_nonempty(&mut out, other);
         let plain = match &self.plain {

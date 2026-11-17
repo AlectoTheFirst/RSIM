@@ -71,6 +71,11 @@ pub struct Interface {
     pub fhrp: Vec<Fhrp>,
     /// The vPC role of a port channel.
     pub vpc: Option<VpcPort>,
+    /// True with `ip forward`: the interface routes with no address of its
+    /// own, for example the SVI of a layer 3 VNI.
+    pub ip_forward: bool,
+    /// True with `fabric forwarding mode anycast-gateway`.
+    pub anycast_gateway: bool,
     /// The masked lines of the unhandled options of the interface.
     pub unhandled: Vec<String>,
     pub lines: Lines,
@@ -293,6 +298,10 @@ pub struct Config {
     pub segments: BTreeMap<u16, (u32, Lines)>,
     /// The NVE interface.
     pub nve: Option<Nve>,
+    /// The layer 3 VNI of each VRF, from `vrf context */vni`.
+    pub vrf_vnis: BTreeMap<String, (u32, Lines)>,
+    /// The MAC of `fabric forwarding anycast-gateway-mac`.
+    pub anycast_mac: Option<(String, Lines)>,
     /// The name of the line `hostname`.
     pub hostname: Option<String>,
     pub vpc_domain: Option<VpcDomain>,
@@ -417,10 +426,20 @@ pub fn read(doc: &Document, table: &Table) -> Config {
                 r.mark(s);
                 cfg.vrfs.insert((*name).to_string(), Lines::of(s));
                 for c in s.children() {
-                    if let ["ip", "route", rest @ ..] = words(&c.key).as_slice() {
-                        r.mark(c);
-                        cfg.static_routes
-                            .push(static_route(name, rest, Lines::of(c)));
+                    match words(&c.key).as_slice() {
+                        ["ip", "route", rest @ ..] => {
+                            r.mark(c);
+                            cfg.static_routes
+                                .push(static_route(name, rest, Lines::of(c)));
+                        }
+                        ["vni", n] => {
+                            if let Ok(vni) = n.parse::<u32>() {
+                                r.mark(c);
+                                cfg.vrf_vnis
+                                    .insert((*name).to_string(), (vni, Lines::of(c)));
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -437,6 +456,10 @@ pub fn read(doc: &Document, table: &Table) -> Config {
             }
             ["ip", "nat", "translation", ..] => {}
             ["hostname", h] => cfg.hostname = Some((*h).to_string()),
+            ["fabric", "forwarding", "anycast-gateway-mac", m] => {
+                r.mark(s);
+                cfg.anycast_mac = Some(((*m).to_string(), Lines::of(s)));
+            }
             ["vpc", "domain", n] => {
                 r.mark(s);
                 let mut d = VpcDomain {
@@ -672,6 +695,14 @@ fn interface(r: &mut R, s: &Stanza, name: &str) -> Interface {
             }
             ["ip", "nat", "inside"] => {
                 i.nat = Some((NatRole::Inside, lines));
+                true
+            }
+            ["ip", "forward"] => {
+                i.ip_forward = true;
+                true
+            }
+            ["fabric", "forwarding", "mode", "anycast-gateway"] => {
+                i.anycast_gateway = true;
                 true
             }
             ["ip", "nat", "outside"] => {

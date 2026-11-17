@@ -141,6 +141,29 @@ impl L<'_> {
                     }
                 }
             }
+            // An anycast gateway: each leaf has the same address and the MAC
+            // of `fabric forwarding anycast-gateway-mac`, and routes locally.
+            if i.anycast_gateway {
+                let amac = self
+                    .cfg
+                    .anycast_mac
+                    .as_ref()
+                    .and_then(|(m, lines)| Some((state::mac(m)?, *lines)));
+                match amac {
+                    Some((m, lines)) => {
+                        let spans = vec![self.span(i.lines), self.span(lines)];
+                        for a in i.addresses.iter().filter(|a| !a.secondary) {
+                            if let Some((ip, _)) = iface_addr(&a.prefix) {
+                                g.active.push((m, ip, spans.clone()));
+                            }
+                        }
+                        g.vmac.get_or_insert((m, spans));
+                    }
+                    None => {
+                        g.unknown = Some("an anycast gateway with no anycast gateway MAC".into());
+                    }
+                }
+            }
             if let Some(why) = &g.unknown {
                 self.note(format!("{}: {why}", i.name));
             }

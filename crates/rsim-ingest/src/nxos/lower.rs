@@ -29,6 +29,14 @@ use crate::vyos::Lowered;
 /// The VRF of an interface with no `vrf member`.
 pub(super) const DEFAULT_VRF: &str = "default";
 
+/// The VXLAN facts that the FIB build reads: the VXLAN paths of the route
+/// table, the tunnel end and its layer 3 encapsulation.
+pub(super) struct Vx<'a> {
+    pub st: &'a super::state::State,
+    pub tunnel: &'a super::vxlan::Plan,
+    pub encap: Option<&'a FunctionId>,
+}
+
 pub(super) struct L<'a> {
     pub(super) dev: &'a str,
     file: &'a str,
@@ -100,7 +108,7 @@ pub fn lower(
         let oper = collected.and_then(|s| s.oper_up);
         if admin == Some(false)
             || oper == Some(false)
-            || (i.addresses.is_empty() && !i.dynamic_address)
+            || (i.addresses.is_empty() && !i.dynamic_address && !i.ip_forward)
         {
             continue;
         }
@@ -235,6 +243,12 @@ pub fn lower(
     let mut vrfs: BTreeSet<String> = cfg.vrfs.keys().cloned().collect();
     vrfs.insert(DEFAULT_VRF.to_string());
     vrfs.extend(active.iter().map(|i| vrf_of(i).to_string()));
+    let encap_l3 = l.vxlan_encap_l3(&tunnel);
+    let vx = Vx {
+        st: &st,
+        tunnel: &tunnel,
+        encap: encap_l3.as_ref(),
+    };
     let mut tables = BTreeMap::new();
     for v in &vrfs {
         let vips: Vec<(IpAddr, Vec<SourceSpan>)> = active
@@ -243,7 +257,7 @@ pub fn lower(
             .filter_map(|i| gws.get(&i.name))
             .flat_map(|g| g.active.iter().map(|(_, a, s)| (*a, s.clone())))
             .collect();
-        let fib = l.fib(v, &active, col, &names, &vips, "snat");
+        let fib = l.fib(v, &active, col, &names, &vips, "snat", &vx);
         tables.insert(VrfId::new(v), fib);
     }
     l.note("IPv6 is not lowered: each IPv6 packet is unknown at the route lookup".into());
@@ -265,7 +279,7 @@ pub fn lower(
         .iter()
         .any(|f| f.kind() == rsim_core::FunctionKind::Encapsulation);
     if encapsulates {
-        let fib = l.fib(DEFAULT_VRF, &active, col, &names, &[], "vxlan/nexthop");
+        let fib = l.fib(DEFAULT_VRF, &active, col, &names, &[], "vxlan/nexthop", &vx);
         let meta = l.meta(super::profile::VXLAN_ENTRY, Vec::new());
         l.add(RouteLookup {
             meta,
@@ -371,8 +385,19 @@ pub fn lower(
                 };
                 (InterfaceId::new(&i.name), l.id(&f))
             })
+            .chain(match (&tunnel, &encap_l3) {
+                (super::vxlan::Plan::Exact(t), Some(e)) => {
+                    Some((InterfaceId::new(&t.nve), e.clone()))
+                }
+                _ => None,
+            })
             .collect(),
-        point_to_point: BTreeMap::new(),
+        point_to_point: match (&tunnel, &encap_l3) {
+            (super::vxlan::Plan::Exact(t), Some(_)) => {
+                BTreeMap::from([(InterfaceId::new(&t.nve), "the peer tunnel end".to_string())])
+            }
+            _ => BTreeMap::new(),
+        },
     });
     for i in &active {
         let out = format!("out/{}", i.name);
@@ -1115,7 +1140,9 @@ impl L<'_> {
     /// The FIB of a VRF: the collected route table, or else the connected
     /// and static routes of the config. The addresses of the interfaces of
     /// the VRF are local routes. Each IPv6 packet is unknown.
-    /// The FIB of a VRF. Each next hop goes to the function `next`.
+    /// The FIB of a VRF. Each next hop goes to the function `next`, and
+    /// each VXLAN path to the encapsulation of `vx`.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn fib(
         &mut self,
         vrf: &str,
@@ -1124,6 +1151,7 @@ impl L<'_> {
         names: &Names,
         vips: &[(IpAddr, Vec<SourceSpan>)],
         next: &str,
+        vx: &Vx<'_>,
     ) -> Fib {
         let mut t = Fib::new();
         let hop = |l: &L, iface: &str, gw: Option<IpAddr>| RouteNextHop {
@@ -1229,20 +1257,61 @@ impl L<'_> {
                 if vips.iter().any(|(a, _)| Prefix::host(*a) == p) {
                     continue;
                 }
+                // The VNI of each path with a VXLAN encapsulation.
+                let tunnelled: Vec<Option<u32>> = rows
+                    .iter()
+                    .map(|r| {
+                        vx.st
+                            .vxlan_paths
+                            .get(&(vrf.to_string(), prefix.clone(), r.next_hop.clone()?))
+                            .map(|x| x.0)
+                    })
+                    .collect();
+                let vxlan_problem =
+                    tunnelled
+                        .iter()
+                        .flatten()
+                        .find_map(|segid| match (vx.tunnel, vx.encap) {
+                            (super::vxlan::Plan::Exact(t), Some(_)) => match t.l3.get(vrf) {
+                                Some(x) if x.vni == *segid => None,
+                                Some(x) => Some(format!(
+                                    "a VXLAN path with VNI {segid}, and the VNI of the VRF is {}",
+                                    x.vni
+                                )),
+                                None => Some(format!(
+                                    "a VXLAN path with VNI {segid} in a VRF with no layer 3 VNI"
+                                )),
+                            },
+                            _ => {
+                                Some("a VXLAN path, and the tunnel end is not lowered".to_string())
+                            }
+                        });
                 // A route stays in the table with no next hop when one of its
                 // paths cannot be lowered, so its packets are unknown and do
                 // not fall to a shorter prefix.
-                let problem = if rows
+                let problem = if let Some(why) = &vxlan_problem {
+                    Some(why.as_str())
+                } else if rows
                     .iter()
                     .any(|r| matches!(r.protocol.as_str(), "hsrp" | "vrrp"))
                 {
                     Some("a route of a gateway group that is not active on this switch")
+                } else if rows.iter().zip(&tunnelled).any(|(r, t)| {
+                    // The next hop of a VXLAN path can name the VRF of the
+                    // underlay.
+                    r.next_hop
+                        .as_deref()
+                        .is_some_and(|g| match g.split_once('%') {
+                            Some((_, v)) => !(t.is_some() && v == DEFAULT_VRF),
+                            None => false,
+                        })
+                }) {
+                    Some("a next hop in another VRF is not lowered")
                 } else if rows
                     .iter()
-                    .any(|r| r.next_hop.as_deref().is_some_and(|g| g.contains('%')))
+                    .zip(&tunnelled)
+                    .any(|(r, t)| r.interface.is_none() && t.is_none())
                 {
-                    Some("a next hop in another VRF is not lowered")
-                } else if rows.iter().any(|r| r.interface.is_none()) {
                     Some("a next hop with no interface")
                 } else {
                     None
@@ -1254,8 +1323,17 @@ impl L<'_> {
                     }
                     None => rows
                         .iter()
-                        .filter_map(|r| {
-                            let gw = r.next_hop.as_deref().and_then(|g| g.parse().ok());
+                        .zip(&tunnelled)
+                        .filter_map(|(r, t)| {
+                            let gw = r
+                                .next_hop
+                                .as_deref()
+                                .and_then(|g| g.split('%').next()?.parse().ok());
+                            if t.is_some()
+                                && let super::vxlan::Plan::Exact(tun) = vx.tunnel
+                            {
+                                return Some(hop(self, &tun.nve, gw));
+                            }
                             let i = names.resolve(r.interface.as_deref()?);
                             Some(hop(self, &i, gw))
                         })
