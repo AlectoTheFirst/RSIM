@@ -1,8 +1,5 @@
-//! The JSON output, version 2.
-//!
-//! Each type serializes its fields in the order of declaration. An optional
-//! value that is not there is `null`, and no field is left out. Enumeration
-//! values are the Rust names in snake case.
+//! The JSON output, version 2: the types of `rsim-contract` and their
+//! conversions from the engine values.
 
 use std::fmt::Debug;
 
@@ -12,22 +9,13 @@ use rsim_core::{
     Uniform, Values, Verdict, VerdictKind, bits,
 };
 use rsim_engine::{Answer, BranchView, Ingress, IngressBasis, Mode, ReplyResult, Summary};
-use serde::{Serialize, Serializer};
 
-use crate::error::QueryError;
-use crate::query::QueryEcho;
-use crate::set_query::SetEcho;
+pub use rsim_contract::json::*;
 
-/// The query input of an output: of a path query or of a set query.
-#[derive(Clone, Debug, Serialize)]
-#[serde(untagged)]
-pub enum QueryJson {
-    Path(Box<QueryEcho>),
-    Set(Box<SetEcho>),
+/// Makes a JSON output value from an engine value.
+pub trait FromEngine<S: ?Sized> {
+    fn new(s: &S) -> Self;
 }
-
-/// The version number of the JSON output.
-pub const VERSION: u32 = 2;
 
 /// The Rust name of an enumeration value in snake case.
 pub fn snake<T: Debug>(v: &T) -> String {
@@ -46,254 +34,59 @@ pub fn snake<T: Debug>(v: &T) -> String {
     out
 }
 
-// ------------------------------------------------------------ top level
-
-#[derive(Clone, Debug, Serialize)]
-pub struct TopologiesOut {
-    pub rsim_json: u32,
-    pub kind: &'static str,
-    pub topologies: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct DevicesOut {
-    pub rsim_json: u32,
-    pub kind: &'static str,
-    pub topology: String,
-    pub devices: Vec<DeviceJson>,
-    pub endpoints: Vec<EndpointJson>,
-    pub attachments: Vec<AttachmentJson>,
-    pub edge_interfaces: Vec<EdgeInterfaceJson>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct DeviceJson {
-    pub device: String,
-    pub functions: Vec<FunctionJson>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct FunctionJson {
-    pub function: String,
-    pub kind: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct EndpointJson {
-    pub endpoint: String,
-    pub addresses: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct AttachmentJson {
-    pub address: String,
-    pub device: String,
-    pub interface: String,
-    pub kind: String,
-    pub host: String,
-    pub provenance: Vec<SpanJson>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct EdgeInterfaceJson {
-    pub device: String,
-    pub interface: String,
-    pub networks: Vec<String>,
-    pub provenance: Vec<SpanJson>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct PathAnswerOut {
-    pub rsim_json: u32,
-    pub kind: &'static str,
-    pub topology: String,
-    pub query: QueryEcho,
-    pub answer: AnswerJson,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct SetAnswerOut {
-    pub rsim_json: u32,
-    pub kind: &'static str,
-    pub topology: String,
-    pub query: SetEcho,
-    pub answer: AnswerJson,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct StepOut {
-    pub rsim_json: u32,
-    pub kind: &'static str,
-    pub topology: String,
-    pub query: QueryJson,
-    pub reply_of: Option<usize>,
-    pub branch: usize,
-    pub step: usize,
-    pub trace_step: TraceStepJson,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct ErrorOut {
-    pub rsim_json: u32,
-    pub kind: &'static str,
-    pub error: QueryError,
-}
-
-impl ErrorOut {
-    pub fn new(error: QueryError) -> Self {
-        ErrorOut {
-            rsim_json: VERSION,
-            kind: "error",
-            error,
+pub fn ingress_json(packets: &PacketSet, i: &Ingress) -> IngressJson {
+    let mut j = IngressJson {
+        packets: PacketSetJson::new(packets),
+        found: false,
+        device: None,
+        interface: None,
+        function: None,
+        resolved_by: None,
+        network: None,
+        host_confirmed: i.host_confirmed(),
+        provenance: Vec::new(),
+        reason: None,
+    };
+    match i {
+        Ingress::Found {
+            device,
+            interface,
+            function,
+            basis,
+        } => {
+            j.found = true;
+            j.device = Some(device.to_string());
+            j.interface = Some(interface.to_string());
+            j.function = Some(function.to_string());
+            let (by, spans) = match basis {
+                IngressBasis::Explicit => ("explicit", &[][..]),
+                IngressBasis::Attachment(s) => ("attachment", s.as_slice()),
+                IngressBasis::ConnectedNetwork { network, spans } => {
+                    j.network = Some(network.to_string());
+                    ("connected_network", spans.as_slice())
+                }
+                IngressBasis::Reply => ("reply", &[][..]),
+            };
+            j.resolved_by = Some(by.into());
+            j.provenance = spans.iter().map(SpanJson::new).collect();
         }
+        Ingress::NotFound(r) => j.reason = Some(ReasonJson::new(r)),
     }
+    j
 }
 
-// ------------------------------------------------------------ answer
-
-#[derive(Clone, Debug, Serialize)]
-pub struct AnswerJson {
-    pub mode: &'static str,
-    pub input: PacketSetJson,
-    pub ingress: Vec<IngressJson>,
-    pub summary: Vec<PartJson>,
-    pub branches: Vec<BranchJson>,
-    pub replies: Vec<ReplyJson>,
-}
-
-/// The ingress of one run of the answer: the packets of the run and the
-/// interface where they enter, or the reason why the ingress is not known.
-#[derive(Clone, Debug, Serialize)]
-pub struct IngressJson {
-    pub packets: PacketSetJson,
-    pub found: bool,
-    pub device: Option<String>,
-    pub interface: Option<String>,
-    pub function: Option<String>,
-    pub resolved_by: Option<&'static str>,
-    pub network: Option<String>,
-    pub host_confirmed: bool,
-    pub provenance: Vec<SpanJson>,
-    pub reason: Option<ReasonJson>,
-}
-
-impl IngressJson {
-    pub fn new(packets: &PacketSet, i: &Ingress) -> Self {
-        let mut j = IngressJson {
-            packets: PacketSetJson::new(packets),
-            found: false,
-            device: None,
-            interface: None,
-            function: None,
-            resolved_by: None,
-            network: None,
-            host_confirmed: i.host_confirmed(),
-            provenance: Vec::new(),
-            reason: None,
-        };
-        match i {
-            Ingress::Found {
-                device,
-                interface,
-                function,
-                basis,
-            } => {
-                j.found = true;
-                j.device = Some(device.to_string());
-                j.interface = Some(interface.to_string());
-                j.function = Some(function.to_string());
-                let (by, spans) = match basis {
-                    IngressBasis::Explicit => ("explicit", &[][..]),
-                    IngressBasis::Attachment(s) => ("attachment", s.as_slice()),
-                    IngressBasis::ConnectedNetwork { network, spans } => {
-                        j.network = Some(network.to_string());
-                        ("connected_network", spans.as_slice())
-                    }
-                    IngressBasis::Reply => ("reply", &[][..]),
-                };
-                j.resolved_by = Some(by);
-                j.provenance = spans.iter().map(SpanJson::new).collect();
-            }
-            Ingress::NotFound(r) => j.reason = Some(ReasonJson::new(r)),
-        }
-        j
-    }
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct PartJson {
-    pub packets: PacketSetJson,
-    pub result: SummaryResultJson,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct SummaryResultJson {
-    pub kind: &'static str,
-    pub verdict: Option<VerdictJson>,
-    pub verdict_kind: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct VerdictJson {
-    pub kind: String,
-    pub destination: Option<DestinationJson>,
-    pub reason: Option<ReasonJson>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct DestinationJson {
-    pub endpoint: Option<String>,
-    pub device: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct ReasonJson {
-    pub code: String,
-    pub detail: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct BranchJson {
-    pub index: usize,
-    pub verdict: VerdictJson,
-    pub packets: PacketSetJson,
-    pub delay: DelayJson,
-    pub steps: Vec<TraceStepJson>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct ReplyJson {
-    pub forward_branch: usize,
-    pub ran: bool,
-    pub not_run_reason: Option<String>,
-    pub answer: Option<AnswerJson>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct DelayJson {
-    pub known_ns: u64,
-    pub lower_bound: bool,
-    pub missing: Vec<DelayGapJson>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct DelayGapJson {
-    pub kind: &'static str,
-    pub function: String,
-}
-
-impl AnswerJson {
-    pub fn new(a: &Answer) -> Self {
+impl FromEngine<Answer> for AnswerJson {
+    fn new(a: &Answer) -> Self {
         AnswerJson {
             mode: match a.mode {
-                Mode::Path => "path",
-                Mode::Set => "set",
+                Mode::Path => "path".into(),
+                Mode::Set => "set".into(),
             },
             input: PacketSetJson::new(&a.input),
             ingress: a
                 .runs
                 .iter()
-                .map(|r| IngressJson::new(&r.input, &r.ingress))
+                .map(|r| ingress_json(&r.input, &r.ingress))
                 .collect(),
             summary: a
                 .summary
@@ -326,21 +119,21 @@ impl AnswerJson {
     }
 }
 
-impl SummaryResultJson {
-    pub fn new(s: &Summary) -> Self {
+impl FromEngine<Summary> for SummaryResultJson {
+    fn new(s: &Summary) -> Self {
         match s {
             Summary::Same(v) => SummaryResultJson {
-                kind: "same",
+                kind: "same".into(),
                 verdict: Some(VerdictJson::new(v)),
                 verdict_kind: Some(verdict_kind(v.kind())),
             },
             Summary::SameKind(k) => SummaryResultJson {
-                kind: "same_kind",
+                kind: "same_kind".into(),
                 verdict: None,
                 verdict_kind: Some(verdict_kind(*k)),
             },
             Summary::DependsOnPath => SummaryResultJson {
-                kind: "depends_on_path",
+                kind: "depends_on_path".into(),
                 verdict: None,
                 verdict_kind: None,
             },
@@ -352,8 +145,8 @@ fn verdict_kind(k: VerdictKind) -> String {
     snake(&k)
 }
 
-impl VerdictJson {
-    pub fn new(v: &Verdict) -> Self {
+impl FromEngine<Verdict> for VerdictJson {
+    fn new(v: &Verdict) -> Self {
         let (destination, reason) = match v {
             Verdict::Deliver(d) => (Some(DestinationJson::new(d)), None),
             Verdict::Drop(r) | Verdict::Unknown(r) => (None, Some(ReasonJson::new(r))),
@@ -366,8 +159,8 @@ impl VerdictJson {
     }
 }
 
-impl DestinationJson {
-    pub fn new(d: &Destination) -> Self {
+impl FromEngine<Destination> for DestinationJson {
+    fn new(d: &Destination) -> Self {
         match d {
             Destination::Endpoint(e) => DestinationJson {
                 endpoint: Some(e.to_string()),
@@ -381,8 +174,8 @@ impl DestinationJson {
     }
 }
 
-impl ReasonJson {
-    pub fn new(r: &Reason) -> Self {
+impl FromEngine<Reason> for ReasonJson {
+    fn new(r: &Reason) -> Self {
         ReasonJson {
             code: snake(&r.code),
             detail: r.detail.clone(),
@@ -390,8 +183,8 @@ impl ReasonJson {
     }
 }
 
-impl BranchJson {
-    pub fn new(b: &BranchView<'_>) -> Self {
+impl<'a> FromEngine<BranchView<'a>> for BranchJson {
+    fn new(b: &BranchView<'a>) -> Self {
         BranchJson {
             index: b.index,
             verdict: VerdictJson::new(b.verdict),
@@ -401,14 +194,14 @@ impl BranchJson {
                 .steps
                 .iter()
                 .enumerate()
-                .map(|(i, s)| TraceStepJson::new(i, s))
+                .map(|(i, s)| trace_step_json(i, s))
                 .collect(),
         }
     }
 }
 
-impl DelayJson {
-    pub fn new(d: &Delay) -> Self {
+impl FromEngine<Delay> for DelayJson {
+    fn new(d: &Delay) -> Self {
         DelayJson {
             known_ns: d.known_ns(),
             lower_bound: d.is_lower_bound(),
@@ -417,15 +210,15 @@ impl DelayJson {
                 .iter()
                 .map(|g| match g {
                     DelayGap::Processing(f) => DelayGapJson {
-                        kind: "processing",
+                        kind: "processing".into(),
                         function: f.to_string(),
                     },
                     DelayGap::Link(f) => DelayGapJson {
-                        kind: "link",
+                        kind: "link".into(),
                         function: f.to_string(),
                     },
                     DelayGap::Queueing(f) => DelayGapJson {
-                        kind: "queueing",
+                        kind: "queueing".into(),
                         function: f.to_string(),
                     },
                 })
@@ -433,165 +226,46 @@ impl DelayJson {
         }
     }
 }
-
-// ------------------------------------------------------------ trace step
-
-#[derive(Clone, Debug, Serialize)]
-pub struct TraceStepJson {
-    pub index: usize,
-    pub function: String,
-    pub kind: String,
-    pub device: Option<String>,
-    pub input: PacketSetJson,
-    pub output: PacketSetJson,
-    pub outcome: OutcomeJson,
-    pub reason: ReasonJson,
-    pub provenance: Vec<SpanJson>,
-    pub delay: DelayJson,
-    pub alternative: Option<AlternativeJson>,
-    pub flood_copy: Option<FloodCopyJson>,
-    pub qos: QosJson,
-    pub rate_condition: Option<RateConditionJson>,
-    pub rib_guard: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct OutcomeJson {
-    pub kind: &'static str,
-    pub next: Option<String>,
-    pub destination: Option<DestinationJson>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct SpanJson {
-    pub file: String,
-    pub first_line: u32,
-    pub last_line: u32,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct AlternativeJson {
-    pub choice: String,
-    pub key: String,
-    pub index: u32,
-    pub count: u32,
-    pub label: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct FloodCopyJson {
-    pub flood: String,
-    pub port: String,
-    pub index: u32,
-    pub count: u32,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct QosJson {
-    pub dscp: UniformJson,
-    pub ecn: UniformJson,
-    pub traffic_class: AttrJson,
-    pub drop_precedence: AttrJson,
-    pub queue: AttrJson,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct RateConditionJson {
-    pub function: String,
-    pub rate_bps: Option<u64>,
-    pub exceed_action: String,
-    pub evaluated: bool,
-}
-
-/// A QoS header field over the members of a set: `{"value": field value}`,
-/// `"varies"` or `"none"`.
-#[derive(Clone, Debug)]
-pub enum UniformJson {
-    Value(FieldJson<u8>),
-    Varies,
-    None,
-}
-
-#[derive(Serialize)]
-struct ValueWrap<'a, T: Serialize> {
-    value: &'a T,
-}
-
-impl Serialize for UniformJson {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        match self {
-            UniformJson::Value(v) => ValueWrap { value: v }.serialize(s),
-            UniformJson::Varies => s.serialize_str("varies"),
-            UniformJson::None => s.serialize_str("none"),
-        }
+pub fn trace_step_json(index: usize, s: &TraceStep) -> TraceStepJson {
+    TraceStepJson {
+        index,
+        function: s.function.to_string(),
+        kind: snake(&s.kind),
+        device: s.device.as_ref().map(|d| d.to_string()),
+        input: PacketSetJson::new(&s.input),
+        output: PacketSetJson::new(&s.output),
+        outcome: OutcomeJson::new(&s.outcome),
+        reason: ReasonJson::new(&s.reason),
+        provenance: s.provenance.iter().map(SpanJson::new).collect(),
+        delay: DelayJson::new(&s.delay),
+        alternative: s.alternative.as_ref().map(AlternativeJson::new),
+        flood_copy: s.flood_copy.as_ref().map(FloodCopyJson::new),
+        qos: QosJson::new(&s.qos),
+        rate_condition: s.rate_condition.as_ref().map(RateConditionJson::new),
+        rib_guard: snake(&s.rib_guard),
     }
 }
 
-/// A context attribute: `{"known": number}`, `"unset"` or `"unknown"`.
-#[derive(Clone, Debug)]
-pub enum AttrJson {
-    Known(u8),
-    Unset,
-    Unknown,
-}
-
-#[derive(Serialize)]
-struct KnownWrap<'a, T: Serialize> {
-    known: &'a T,
-}
-
-impl Serialize for AttrJson {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        match self {
-            AttrJson::Known(v) => KnownWrap { known: v }.serialize(s),
-            AttrJson::Unset => s.serialize_str("unset"),
-            AttrJson::Unknown => s.serialize_str("unknown"),
-        }
-    }
-}
-
-impl TraceStepJson {
-    pub fn new(index: usize, s: &TraceStep) -> Self {
-        TraceStepJson {
-            index,
-            function: s.function.to_string(),
-            kind: snake(&s.kind),
-            device: s.device.as_ref().map(|d| d.to_string()),
-            input: PacketSetJson::new(&s.input),
-            output: PacketSetJson::new(&s.output),
-            outcome: OutcomeJson::new(&s.outcome),
-            reason: ReasonJson::new(&s.reason),
-            provenance: s.provenance.iter().map(SpanJson::new).collect(),
-            delay: DelayJson::new(&s.delay),
-            alternative: s.alternative.as_ref().map(AlternativeJson::new),
-            flood_copy: s.flood_copy.as_ref().map(FloodCopyJson::new),
-            qos: QosJson::new(&s.qos),
-            rate_condition: s.rate_condition.as_ref().map(RateConditionJson::new),
-            rib_guard: snake(&s.rib_guard),
-        }
-    }
-}
-
-impl OutcomeJson {
-    pub fn new(o: &Outcome) -> Self {
+impl FromEngine<Outcome> for OutcomeJson {
+    fn new(o: &Outcome) -> Self {
         match o {
             Outcome::Forward(f) => OutcomeJson {
-                kind: "forward",
+                kind: "forward".into(),
                 next: Some(f.to_string()),
                 destination: None,
             },
             Outcome::Deliver(d) => OutcomeJson {
-                kind: "deliver",
+                kind: "deliver".into(),
                 next: None,
                 destination: Some(DestinationJson::new(d)),
             },
             Outcome::Drop => OutcomeJson {
-                kind: "drop",
+                kind: "drop".into(),
                 next: None,
                 destination: None,
             },
             Outcome::Unknown => OutcomeJson {
-                kind: "unknown",
+                kind: "unknown".into(),
                 next: None,
                 destination: None,
             },
@@ -599,8 +273,8 @@ impl OutcomeJson {
     }
 }
 
-impl SpanJson {
-    pub fn new(s: &SourceSpan) -> Self {
+impl FromEngine<SourceSpan> for SpanJson {
+    fn new(s: &SourceSpan) -> Self {
         SpanJson {
             file: s.file.to_string(),
             first_line: s.first_line,
@@ -609,8 +283,8 @@ impl SpanJson {
     }
 }
 
-impl AlternativeJson {
-    pub fn new(a: &Alternative) -> Self {
+impl FromEngine<Alternative> for AlternativeJson {
+    fn new(a: &Alternative) -> Self {
         AlternativeJson {
             choice: a.choice.to_string(),
             key: a.key.clone(),
@@ -621,8 +295,8 @@ impl AlternativeJson {
     }
 }
 
-impl FloodCopyJson {
-    pub fn new(f: &FloodCopy) -> Self {
+impl FromEngine<FloodCopy> for FloodCopyJson {
+    fn new(f: &FloodCopy) -> Self {
         FloodCopyJson {
             flood: f.flood.to_string(),
             port: f.port.to_string(),
@@ -632,8 +306,8 @@ impl FloodCopyJson {
     }
 }
 
-impl QosJson {
-    pub fn new(q: &QosView) -> Self {
+impl FromEngine<QosView> for QosJson {
+    fn new(q: &QosView) -> Self {
         QosJson {
             dscp: uniform(&q.dscp),
             ecn: uniform(&q.ecn),
@@ -663,8 +337,8 @@ fn attr(a: &Attr<u8>) -> AttrJson {
     }
 }
 
-impl RateConditionJson {
-    pub fn new(r: &RateCondition) -> Self {
+impl FromEngine<RateCondition> for RateConditionJson {
+    fn new(r: &RateCondition) -> Self {
         RateConditionJson {
             function: r.function.to_string(),
             rate_bps: r.rate_bps,
@@ -673,72 +347,25 @@ impl RateConditionJson {
         }
     }
 }
-
-// ------------------------------------------------------------ packet set
-
-/// A packet set: its members. A member is a product of field values. The
-/// members are disjoint and in the fixed order of the bit table.
-#[derive(Clone, Debug, Serialize)]
-pub struct PacketSetJson {
-    pub members: Vec<MemberJson>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct MemberJson {
-    pub original: HeaderJson,
-    pub current: HeaderJson,
-}
-
-/// A header field value: `{"known": value}`, `{"in": [...]}`, `"unknown"`,
-/// `"absent"` or, in the current header and the inner header, `"original"`.
-#[derive(Clone, Debug)]
-pub enum FieldJson<T> {
-    Known(T),
-    In(Vec<serde_json::Value>),
-    Unknown,
-    Absent,
-    Original,
-}
-
-#[derive(Serialize)]
-struct InWrap<'a> {
-    #[serde(rename = "in")]
-    values: &'a [serde_json::Value],
-}
-
-impl<T: Serialize> Serialize for FieldJson<T> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        match self {
-            FieldJson::Known(v) => KnownWrap { known: v }.serialize(s),
-            FieldJson::In(v) => InWrap { values: v }.serialize(s),
-            FieldJson::Unknown => s.serialize_str("unknown"),
-            FieldJson::Absent => s.serialize_str("absent"),
-            FieldJson::Original => s.serialize_str("original"),
-        }
-    }
-}
-
-impl<T> FieldJson<T> {
-    fn new(f: HeaderField, v: &Values, known: impl Fn(u128) -> T) -> Self {
-        match v {
-            Values::Absent => FieldJson::Absent,
-            Values::Unknown => FieldJson::Unknown,
-            Values::Original => FieldJson::Original,
-            Values::Prefixes(ps) => match ps.as_slice() {
-                [one] if one.len() == if one.is_ipv4() { 32 } else { 128 } => {
-                    FieldJson::Known(known(bits::ip_bits(one.addr())))
-                }
-                _ => FieldJson::In(
-                    ps.iter()
-                        .map(|p| serde_json::Value::String(p.to_string()))
-                        .collect(),
-                ),
-            },
-            Values::Ranges(rs) => match v.single() {
-                Some(x) => FieldJson::Known(known(x)),
-                None => FieldJson::In(rs.iter().map(|&(lo, hi)| range_json(f, lo, hi)).collect()),
-            },
-        }
+fn field_json<T>(f: HeaderField, v: &Values, known: impl Fn(u128) -> T) -> FieldJson<T> {
+    match v {
+        Values::Absent => FieldJson::Absent,
+        Values::Unknown => FieldJson::Unknown,
+        Values::Original => FieldJson::Original,
+        Values::Prefixes(ps) => match ps.as_slice() {
+            [one] if one.len() == if one.is_ipv4() { 32 } else { 128 } => {
+                FieldJson::Known(known(bits::ip_bits(one.addr())))
+            }
+            _ => FieldJson::In(
+                ps.iter()
+                    .map(|p| serde_json::Value::String(p.to_string()))
+                    .collect(),
+            ),
+        },
+        Values::Ranges(rs) => match v.single() {
+            Some(x) => FieldJson::Known(known(x)),
+            None => FieldJson::In(rs.iter().map(|&(lo, hi)| range_json(f, lo, hi)).collect()),
+        },
     }
 }
 
@@ -758,58 +385,15 @@ fn range_json(f: HeaderField, lo: u128, hi: u128) -> serde_json::Value {
         _ => Value::Array(vec![Value::from(lo as u64), Value::from(hi as u64)]),
     }
 }
-
-#[derive(Clone, Debug, Serialize)]
-pub struct HeaderJson {
-    #[serde(rename = "source.mac")]
-    pub source_mac: FieldJson<String>,
-    #[serde(rename = "destination.mac")]
-    pub destination_mac: FieldJson<String>,
-    #[serde(rename = "network.vlan.id")]
-    pub vlan_id: FieldJson<u16>,
-    pub l2_priority: FieldJson<u8>,
-    #[serde(rename = "source.ip")]
-    pub source_ip: FieldJson<String>,
-    #[serde(rename = "destination.ip")]
-    pub destination_ip: FieldJson<String>,
-    #[serde(rename = "network.iana_number")]
-    pub iana_number: FieldJson<u8>,
-    pub dscp: FieldJson<u8>,
-    pub ecn: FieldJson<u8>,
-    pub fragment: FieldJson<&'static str>,
-    #[serde(rename = "source.port")]
-    pub source_port: FieldJson<u16>,
-    #[serde(rename = "destination.port")]
-    pub destination_port: FieldJson<u16>,
-    pub tcp_flags: FieldJson<u8>,
-    pub icmp_type: FieldJson<u8>,
-    pub icmp_code: FieldJson<u8>,
-    pub mpls_tc: FieldJson<u8>,
-    pub encap: Vec<EncapJson>,
-    /// The inner header of an encapsulated current header.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub inner: Option<Box<HeaderJson>>,
-}
-
-/// An encapsulation header. The values are field values.
-#[derive(Clone, Debug, Serialize)]
-pub struct EncapJson {
-    pub kind: &'static str,
-    pub src: Option<FieldJson<String>>,
-    pub dst: Option<FieldJson<String>>,
-    pub vni: Option<FieldJson<u32>>,
-    pub label: Option<FieldJson<u32>>,
-}
-
-impl PacketSetJson {
-    pub fn new(p: &PacketSet) -> Self {
+impl FromEngine<PacketSet> for PacketSetJson {
+    fn new(p: &PacketSet) -> Self {
         PacketSetJson {
             members: p
                 .describe()
                 .iter()
                 .map(|m| MemberJson {
-                    original: HeaderJson::new(&m.original, m.original.encap.as_ref()),
-                    current: HeaderJson::new(&m.current, m.current.encap.as_ref()),
+                    original: header_json(&m.original, m.original.encap.as_ref()),
+                    current: header_json(&m.current, m.current.encap.as_ref()),
                 })
                 .collect(),
         }
@@ -829,96 +413,72 @@ fn fragment_text(x: u128) -> &'static str {
     }
 }
 
-impl HeaderJson {
-    pub fn new(h: &HeaderDesc, encap: Option<&EncapDesc>) -> Self {
-        let v6 = match h.get(HeaderField::SrcIp) {
+pub fn header_json(h: &HeaderDesc, encap: Option<&EncapDesc>) -> HeaderJson {
+    let v6 = match h.get(HeaderField::SrcIp) {
+        Values::Prefixes(ps) => ps.first().is_some_and(|p| !p.is_ipv4()),
+        _ => match h.get(HeaderField::DstIp) {
             Values::Prefixes(ps) => ps.first().is_some_and(|p| !p.is_ipv4()),
-            _ => match h.get(HeaderField::DstIp) {
-                Values::Prefixes(ps) => ps.first().is_some_and(|p| !p.is_ipv4()),
-                _ => false,
-            },
-        };
-        let ip = move |x: u128| bits::bits_ip(v6, x).to_string();
-        let f8 = |f: HeaderField| FieldJson::new(f, h.get(f), |x| x as u8);
-        let f16 = |f: HeaderField| FieldJson::new(f, h.get(f), |x| x as u16);
-        HeaderJson {
-            source_mac: FieldJson::new(HeaderField::SrcMac, h.get(HeaderField::SrcMac), mac_text),
-            destination_mac: FieldJson::new(
-                HeaderField::DstMac,
-                h.get(HeaderField::DstMac),
-                mac_text,
-            ),
-            vlan_id: f16(HeaderField::Vlan),
-            l2_priority: f8(HeaderField::L2Priority),
-            source_ip: FieldJson::new(HeaderField::SrcIp, h.get(HeaderField::SrcIp), ip),
-            destination_ip: FieldJson::new(HeaderField::DstIp, h.get(HeaderField::DstIp), ip),
-            iana_number: f8(HeaderField::Protocol),
-            dscp: f8(HeaderField::Dscp),
-            ecn: f8(HeaderField::Ecn),
-            fragment: FieldJson::new(
-                HeaderField::Fragment,
-                h.get(HeaderField::Fragment),
-                fragment_text,
-            ),
-            source_port: f16(HeaderField::SrcPort),
-            destination_port: f16(HeaderField::DstPort),
-            tcp_flags: f8(HeaderField::TcpFlags),
-            icmp_type: f8(HeaderField::IcmpType),
-            icmp_code: f8(HeaderField::IcmpCode),
-            mpls_tc: f8(HeaderField::MplsTrafficClass),
-            encap: encap.map(EncapJson::new).into_iter().collect(),
-            inner: h
-                .inner
-                .as_deref()
-                .map(|i| Box::new(HeaderJson::new(i, None))),
-        }
+            _ => false,
+        },
+    };
+    let ip = move |x: u128| bits::bits_ip(v6, x).to_string();
+    let f8 = |f: HeaderField| field_json(f, h.get(f), |x| x as u8);
+    let f16 = |f: HeaderField| field_json(f, h.get(f), |x| x as u16);
+    HeaderJson {
+        source_mac: field_json(HeaderField::SrcMac, h.get(HeaderField::SrcMac), mac_text),
+        destination_mac: field_json(HeaderField::DstMac, h.get(HeaderField::DstMac), mac_text),
+        vlan_id: f16(HeaderField::Vlan),
+        l2_priority: f8(HeaderField::L2Priority),
+        source_ip: field_json(HeaderField::SrcIp, h.get(HeaderField::SrcIp), ip),
+        destination_ip: field_json(HeaderField::DstIp, h.get(HeaderField::DstIp), ip),
+        iana_number: f8(HeaderField::Protocol),
+        dscp: f8(HeaderField::Dscp),
+        ecn: f8(HeaderField::Ecn),
+        fragment: field_json(HeaderField::Fragment, h.get(HeaderField::Fragment), |x| {
+            fragment_text(x).to_string()
+        }),
+        source_port: f16(HeaderField::SrcPort),
+        destination_port: f16(HeaderField::DstPort),
+        tcp_flags: f8(HeaderField::TcpFlags),
+        icmp_type: f8(HeaderField::IcmpType),
+        icmp_code: f8(HeaderField::IcmpCode),
+        mpls_tc: f8(HeaderField::MplsTrafficClass),
+        encap: encap.map(EncapJson::new).into_iter().collect(),
+        inner: h.inner.as_deref().map(|i| Box::new(header_json(i, None))),
     }
 }
 
-impl EncapJson {
-    pub fn new(e: &EncapDesc) -> Self {
+impl FromEngine<EncapDesc> for EncapJson {
+    fn new(e: &EncapDesc) -> Self {
         let addr = |v: &Values| {
-            FieldJson::new(HeaderField::SrcIp, v, |x| {
+            field_json(HeaderField::SrcIp, v, |x| {
                 bits::bits_ip(false, x).to_string()
             })
         };
-        let num = |v: &Values| FieldJson::new(HeaderField::Protocol, v, |x| x as u32);
+        let num = |v: &Values| field_json(HeaderField::Protocol, v, |x| x as u32);
         match e.kind {
             bits::ENCAP_GRE => EncapJson {
-                kind: "gre",
+                kind: "gre".into(),
                 src: Some(addr(&e.src)),
                 dst: Some(addr(&e.dst)),
                 vni: None,
                 label: None,
             },
             bits::ENCAP_VXLAN => EncapJson {
-                kind: "vxlan",
+                kind: "vxlan".into(),
                 src: Some(addr(&e.src)),
                 dst: Some(addr(&e.dst)),
                 vni: Some(num(&e.vni)),
                 label: None,
             },
             _ => EncapJson {
-                kind: "mpls",
+                kind: "mpls".into(),
                 src: None,
                 dst: None,
                 vni: None,
                 label: Some(num(&e.label)),
             },
         }
-    }
-}
-
-/// The JSON text of a value: compact on one line, or indented.
-pub fn to_text<T: Serialize>(v: &T, pretty: bool) -> String {
-    let r = if pretty {
-        serde_json::to_string_pretty(v)
-    } else {
-        serde_json::to_string(v)
-    };
-    match r {
-        Ok(s) => s,
-        Err(e) => unreachable!("the view types serialize to JSON without error: {e}"),
     }
 }
 

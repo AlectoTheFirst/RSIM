@@ -157,7 +157,7 @@ fn answer(s: &mut String, a: &AnswerJson, ind: &str) {
                 let _ = write!(
                     s,
                     "{ind}ingress {d}/{f} by {}",
-                    i.resolved_by.unwrap_or("-")
+                    i.resolved_by.as_deref().unwrap_or("-")
                 );
                 if !i.host_confirmed {
                     let _ = write!(s, ", host not confirmed");

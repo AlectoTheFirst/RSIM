@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
+rsim-contract.workspace = true
 rsim-core.workspace = true
 rsim-engine.workspace = true
 rsim-ingest.workspace = true

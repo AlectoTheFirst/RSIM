@@ -3,7 +3,8 @@
 
 use rsim_core::{DeviceId, Fragment, InterfaceId, Mac, PacketSet, Prefix, SetSpec};
 use rsim_engine::{Query, Twin};
-use serde::Serialize;
+
+pub use rsim_contract::query::SetEcho;
 
 use crate::error::{ErrorCode, QueryError};
 use crate::query::{FragmentName, IngressRef, Protocol, TcpFlag, parse_mac};
@@ -154,40 +155,6 @@ pub struct SetInput {
     pub dscp: Option<Ranges>,
     pub ecn: Option<Ranges>,
     pub fragment: Option<Vec<FragmentName>>,
-    pub reply: Option<bool>,
-}
-
-/// The set query input in the JSON output. Each field is the normalized
-/// text of its set, or `null` if it is not given.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct SetEcho {
-    pub topology: String,
-    pub ingress: Option<IngressRef>,
-    #[serde(rename = "source.ip")]
-    pub source_ip: Option<String>,
-    #[serde(rename = "destination.ip")]
-    pub destination_ip: Option<String>,
-    #[serde(rename = "network.iana_number")]
-    pub iana_number: Option<String>,
-    #[serde(rename = "network.transport")]
-    pub transport: Option<String>,
-    #[serde(rename = "source.port")]
-    pub source_port: Option<String>,
-    #[serde(rename = "destination.port")]
-    pub destination_port: Option<String>,
-    #[serde(rename = "source.mac")]
-    pub source_mac: Option<String>,
-    #[serde(rename = "destination.mac")]
-    pub destination_mac: Option<String>,
-    #[serde(rename = "network.vlan.id")]
-    pub vlan_id: Option<String>,
-    pub l2_priority: Option<String>,
-    pub tcp_flags: Option<String>,
-    pub icmp_type: Option<String>,
-    pub icmp_code: Option<String>,
-    pub dscp: Option<String>,
-    pub ecn: Option<String>,
-    pub fragment: Option<String>,
     pub reply: Option<bool>,
 }
 
