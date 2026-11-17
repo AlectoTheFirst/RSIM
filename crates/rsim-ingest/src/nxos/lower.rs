@@ -228,6 +228,20 @@ pub fn lower(
         next: l.id("dnat"),
     });
 
+    // The multicast routes, before the unicast route lookup.
+    let vpc = super::layer2::vpc_ok(cfg, &st);
+    let mcast = l.mcast(&st, &tunnel, &active, vpc);
+    if let Some(m) = &mcast {
+        let meta = l.meta("mroute", Vec::new());
+        l.add(rsim_functions::MulticastLookup {
+            meta,
+            routes: m.received.clone(),
+            unicast: Some(l.id("route")),
+            rpf_interface: None,
+            unknown: m.unknown.clone(),
+        });
+    }
+
     // NAT in the outside to inside direction, before the route lookup.
     let (dnat, dnat_scopes) = l.destination_nat(&outside);
     let meta = l.meta("dnat", Vec::new());
@@ -236,7 +250,7 @@ pub fn lower(
         table: ObjectId::new(format!("{device}:nat:outside")),
         rules: dnat,
         ingress: dnat_scopes,
-        next: l.id("route"),
+        next: l.id(if mcast.is_some() { "mroute" } else { "route" }),
     });
 
     // The route lookup in the FIB of each VRF.
@@ -273,11 +287,13 @@ pub fn lower(
         fallback: None,
         local: Some(local.clone()),
     });
+    // The underlay lookup exists when a function sends packets to it.
+    let entry = l.id(super::profile::VXLAN_ENTRY);
     let encapsulates = l
         .out
         .functions
         .iter()
-        .any(|f| f.kind() == rsim_core::FunctionKind::Encapsulation);
+        .any(|f| f.successors().contains(&entry));
     if encapsulates {
         let fib = l.fib(DEFAULT_VRF, &active, col, &names, &[], "vxlan/nexthop", &vx);
         let meta = l.meta(super::profile::VXLAN_ENTRY, Vec::new());
@@ -286,6 +302,31 @@ pub fn lower(
             tables: [(VrfId::new(DEFAULT_VRF), fib)].into_iter().collect(),
             fallback: None,
             local: Some(local),
+        });
+    }
+    // The multicast lookup of a flood copy that the tunnel end sends to a
+    // group: the reverse path check takes the source interface.
+    let mroute_id = l.id("vxlan/mroute");
+    let sends_to_group = l
+        .out
+        .functions
+        .iter()
+        .any(|f| f.successors().contains(&mroute_id));
+    if let (true, super::vxlan::Plan::Exact(t)) = (sends_to_group, &tunnel) {
+        let meta = l.meta("vxlan/mroute", t.spans.clone());
+        let (routes, unknown) = match &mcast {
+            Some(m) => (m.sent.clone(), m.unknown.clone()),
+            None => (
+                BTreeMap::new(),
+                Some("no multicast route section".to_string()),
+            ),
+        };
+        l.add(rsim_functions::MulticastLookup {
+            meta,
+            routes,
+            unicast: None,
+            rpf_interface: Some(InterfaceId::new(&t.source_if)),
+            unknown,
         });
     }
     let meta = l.meta("local", Vec::new());
@@ -477,6 +518,7 @@ pub fn lower(
                         meta,
                         macs: std::iter::once(*m)
                             .chain(g.active.iter().map(|a| a.0))
+                            .chain(mcast.iter().flat_map(|x| x.macs.iter().copied()))
                             .collect(),
                         untagged: Some(l.id(&format!("in/{}", i.name))),
                         tagged: BTreeMap::new(),
@@ -488,6 +530,17 @@ pub fn lower(
                     l.add(s);
                 }
             }
+        }
+        if mcast.as_ref().is_some_and(|m| m.oifs.contains(&i.name)) {
+            let meta = l.meta(&format!("mcast/out/{}", i.name), vec![l.span(i.lines)]);
+            l.add(Egress {
+                meta,
+                interface: InterfaceId::new(&i.name),
+                mode: EgressMode::Transparent,
+                link: link.clone(),
+                rewrite: rewrite.clone(),
+                tag,
+            });
         }
         l.add(Egress {
             meta,
