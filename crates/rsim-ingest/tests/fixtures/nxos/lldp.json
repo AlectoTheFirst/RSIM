@@ -1,1 +1,1 @@
-{"TABLE_nbor_detail": {"ROW_nbor_detail": [{"l_port_id": "Eth1/1", "sys_name": "spine1", "chassis_id": "0000.5e00.5399", "port_id": "Ethernet1/49"}]}}
+{"TABLE_nbor_detail": {"ROW_nbor_detail": [{"l_port_id": "Eth1/1", "sys_name": "leaf2.example.test", "chassis_id": "0000.5e00.5399", "port_id": "Ethernet1/49"}, {"l_port_id": "Eth1/2", "sys_name": "leaf2", "chassis_id": "0000.5e00.5399", "port_id": "Ethernet1/50"}]}}

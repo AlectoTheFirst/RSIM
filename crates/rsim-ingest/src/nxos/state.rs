@@ -33,6 +33,33 @@ pub struct GroupState {
     pub span: SourceSpan,
 }
 
+/// A neighbour row of LLDP or CDP.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Neighbour {
+    /// The local port, with the config name.
+    pub port: String,
+    /// The name of the neighbour, without the domain and the serial.
+    pub name: Option<String>,
+    /// The port of the neighbour as it sends it.
+    pub remote_port: Option<String>,
+    /// The chassis MAC (LLDP), and the remote port as a MAC if it is one.
+    pub chassis: Option<Mac>,
+    pub port_mac: Option<Mac>,
+    pub span: SourceSpan,
+}
+
+/// The name of a neighbour: the text without a serial number in
+/// parentheses (CDP of NX-OS) and without the domain, in lower case.
+pub fn neighbour_name(s: &str) -> Option<String> {
+    let s = s.trim();
+    let s = match s.find('(') {
+        Some(i) if s.ends_with(')') => s[..i].trim(),
+        _ => s,
+    };
+    let s = s.split('.').next().unwrap_or(s).trim();
+    (!s.is_empty() && s != "null").then(|| s.to_ascii_lowercase())
+}
+
 /// The collected sections of a switch.
 #[derive(Clone, Debug, Default)]
 pub struct State {
@@ -45,6 +72,11 @@ pub struct State {
     pub neighbour_ports: BTreeSet<String>,
     /// True if the LLDP or the CDP section is in the snapshot.
     pub neighbours_collected: bool,
+    /// The LLDP and CDP rows.
+    pub neighbours: Vec<Neighbour>,
+    /// The kept field `host_name` of the version section, as a neighbour
+    /// name.
+    pub host_name: Option<String>,
 }
 
 /// A MAC in the form of NX-OS, `0000.5e00.5301`, or with `:` or `-`.
@@ -72,7 +104,10 @@ fn rows<'a>(v: &'a Value, t: &str) -> &'a [Value] {
 }
 
 fn text<'a>(row: &'a Value, key: &str) -> Option<&'a str> {
-    row.get(key).and_then(Value::as_str).map(str::trim)
+    row.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|t| !t.is_empty() && *t != "null")
 }
 
 fn up(s: Option<&str>) -> Option<bool> {
@@ -163,21 +198,45 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
             });
         }
     }
-    if let Some((v, _)) = json("lldp") {
+    for (section, table, local, name, chassis) in [
+        (
+            "lldp",
+            "nbor_detail",
+            "l_port_id",
+            "sys_name",
+            Some("chassis_id"),
+        ),
+        (
+            "cdp",
+            "cdp_neighbor_brief_info",
+            "intf_id",
+            "device_id",
+            None,
+        ),
+    ] {
+        let Some((v, file)) = json(section) else {
+            continue;
+        };
         st.neighbours_collected = true;
-        for r in rows(&v, "nbor_detail") {
-            if let Some(p) = text(r, "l_port_id") {
-                st.neighbour_ports.insert(names.resolve(p));
-            }
+        for (i, r) in rows(&v, table).iter().enumerate() {
+            let Some(p) = text(r, local) else {
+                continue;
+            };
+            let port = names.resolve(p);
+            st.neighbour_ports.insert(port.clone());
+            let remote_port = text(r, "port_id").map(str::to_string);
+            st.neighbours.push(Neighbour {
+                port,
+                name: text(r, name).and_then(neighbour_name),
+                port_mac: remote_port.as_deref().and_then(mac),
+                remote_port,
+                chassis: chassis.and_then(|k| text(r, k)).and_then(mac),
+                span: line(file, i),
+            });
         }
     }
-    if let Some((v, _)) = json("cdp") {
-        st.neighbours_collected = true;
-        for r in rows(&v, "cdp_neighbor_brief_info") {
-            if let Some(p) = text(r, "intf_id") {
-                st.neighbour_ports.insert(names.resolve(p));
-            }
-        }
+    if let Some((v, _)) = json("version") {
+        st.host_name = text(&v, "host_name").and_then(neighbour_name);
     }
     st
 }
@@ -199,6 +258,16 @@ mod tests {
             assert_eq!(st.interfaces[n].admin_up, Some(true), "{n}");
             assert_eq!(st.interfaces[n].oper_up, Some(true), "{n}");
         }
+    }
+
+    #[test]
+    fn a_neighbour_name_has_no_domain_and_no_serial() {
+        assert_eq!(
+            neighbour_name("leaf2.example.test(FDO1234)"),
+            Some("leaf2".into())
+        );
+        assert_eq!(neighbour_name("Leaf2"), Some("leaf2".into()));
+        assert_eq!(neighbour_name("null"), None);
     }
 
     #[test]
