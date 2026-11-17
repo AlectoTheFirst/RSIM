@@ -21,6 +21,7 @@ use rsim_functions::{
 use super::config::{
     AclAction, AddrSpec, Config, Interface, Lines, NatKind, NatRole, NatTarget, PortSpec,
 };
+use super::links::{External, Summary};
 use super::names::Names;
 use crate::collected::Collected;
 use crate::vyos::Lowered;
@@ -39,6 +40,9 @@ pub(super) struct L<'a> {
 impl L<'_> {
     pub(super) fn id(&self, f: &str) -> FunctionId {
         FunctionId::new(format!("{}/{f}", self.dev))
+    }
+    pub(super) fn file_name(&self) -> &str {
+        self.file
     }
     pub(super) fn span(&self, l: Lines) -> SourceSpan {
         SourceSpan::new(self.file, l.first.max(1), l.last.max(l.first).max(1))
@@ -67,7 +71,9 @@ pub(super) fn iface_addr(s: &str) -> Option<(IpAddr, u8)> {
 }
 
 /// Lowers one NX-OS switch. `sections` holds the JSON sections of
-/// [`super::SECTIONS`], each with its file name.
+/// [`super::SECTIONS`], each with its file name. `ext` gives the links and
+/// the endpoints from the estate. Gives the summary of the switch for the
+/// estate too.
 pub fn lower(
     device: &str,
     file: &str,
@@ -75,7 +81,9 @@ pub fn lower(
     cfg: &Config,
     col: &Collected,
     sections: &BTreeMap<String, (Vec<u8>, String)>,
-) -> Lowered {
+    ext: &External,
+) -> (Lowered, Summary) {
+    let mut sum = Summary::default();
     let mut l = L {
         dev: device,
         file,
@@ -134,7 +142,18 @@ pub fn lower(
             .collect()
     };
     let gws = l.gateways(&active, &st, col, &names);
-    let svi_links = l.layer2(&active, &gws, &st, col, &names);
+    let svi_links = l.layer2(&active, &gws, &st, col, &names, ext, &mut sum);
+    // The routed ports that can end a link: a physical port or a port
+    // channel with a collected MAC.
+    sum.routed = active
+        .iter()
+        .filter(|i| {
+            let n = i.name.to_ascii_lowercase();
+            (n.starts_with("ethernet") || n.starts_with("port-channel"))
+                && gws.get(&i.name).is_some_and(|g| g.svi_mac.is_some())
+        })
+        .map(|i| i.name.clone())
+        .collect();
     let inside = nat_ifs(NatRole::Inside);
     let outside = nat_ifs(NatRole::Outside);
 
@@ -297,23 +316,75 @@ pub fn lower(
         let span = l.span(i.lines);
         let meta = l.meta(&format!("out/{}", i.name), vec![span]);
         // The routed egress of an SVI goes into its VLAN through the SVI
-        // port, with the MAC of the SVI as the source MAC.
-        let (link, rewrite, tag) = match svi_links.get(&i.name) {
-            Some((peer, m)) => (
+        // port, with the MAC of the SVI as the source MAC. A routed port with
+        // a link goes to the far end.
+        let routed_peer = ext
+            .peers
+            .get(&i.name)
+            .filter(|_| sum.routed.contains(&i.name))
+            .and_then(|p| {
+                let m = gws.get(&i.name)?.svi_mac.as_ref()?.0;
+                Some((p, m))
+            });
+        let target = svi_links
+            .get(&i.name)
+            .map(|(peer, m)| (peer.clone(), *m, Vec::new(), None))
+            .or_else(|| {
+                routed_peer.map(|(p, m)| {
+                    (
+                        p.target.clone(),
+                        m,
+                        p.provenance.clone(),
+                        Some(rsim_functions::LinkFacts {
+                            local: sum.facts.get(&i.name).cloned().unwrap_or_default(),
+                            remote: p.remote.clone(),
+                        }),
+                    )
+                })
+            });
+        let (link, rewrite, tag) = match target {
+            Some((peer, m, provenance, facts)) => (
                 Some(Link {
-                    peer: Some(peer.clone()),
+                    peer: Some(peer),
                     delay_ns: None,
-                    provenance: Vec::new(),
-                    facts: None,
+                    provenance,
+                    facts,
                 }),
                 Rewrite {
-                    src_mac: Some(FieldValue::Known(*m)),
+                    src_mac: Some(FieldValue::Known(m)),
                     ..Rewrite::default()
                 },
                 Tag::Untagged,
             ),
             None => (None, Rewrite::default(), Tag::Keep),
         };
+        // The hand-off of a routed port with a link: its MAC and the active
+        // virtual MACs go to its ingress.
+        if routed_peer.is_some() {
+            let g = gws.get(&i.name).cloned().unwrap_or_default();
+            let f = format!("handoff/{}", i.name);
+            let span = l.span(i.lines);
+            match (&g.unknown, &g.svi_mac) {
+                (None, Some((m, mspan))) => {
+                    let mut spans = vec![span, mspan.clone()];
+                    spans.extend(g.active.iter().flat_map(|a| a.2.clone()));
+                    let meta = l.meta(&f, spans);
+                    l.add(rsim_functions::Layer3HandOff {
+                        meta,
+                        macs: std::iter::once(*m)
+                            .chain(g.active.iter().map(|a| a.0))
+                            .collect(),
+                        untagged: Some(l.id(&format!("in/{}", i.name))),
+                        tagged: BTreeMap::new(),
+                    });
+                }
+                (why, _) => {
+                    let why = why.clone().unwrap_or_else(|| "no collected MAC".into());
+                    let s = l.sink(&f, format!("{}: {why}", i.name), span);
+                    l.add(s);
+                }
+            }
+        }
         l.add(Egress {
             meta,
             interface: InterfaceId::new(&i.name),
@@ -342,7 +413,7 @@ pub fn lower(
             });
         }
     }
-    l.out
+    (l.out, sum)
 }
 
 /// The protocol number of a protocol of an ACL entry, or `None` for all

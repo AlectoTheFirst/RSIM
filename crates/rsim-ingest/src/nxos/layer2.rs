@@ -7,15 +7,16 @@ use std::sync::Arc;
 
 use rsim_core::{
     BridgeDomainId, EndpointId, FunctionId, InterfaceId, Mac, ObjectId, PortId, Prefix,
-    PrefixTable, SourceSpan, TriePrefixTable,
+    PrefixTable, SourceSpan,
 };
 use rsim_engine::{AttachmentKind, AttachmentRecord, Endpoint};
 use rsim_functions::{
-    AclMatch, Flood, HostMac, HostResolution, Layer3HandOff, MacEntry, MacLookup, PortEgress,
-    PortIngress, Rule as FRule, RuleAction,
+    AclMatch, Flood, HostMac, HostResolution, Layer3HandOff, LinkEnd, LinkFacts, MacEntry,
+    MacLookup, PortEgress, PortIngress, Rule as FRule, RuleAction,
 };
 
 use super::config::{FhrpKind, Interface, PortMode};
+use super::links::{External, PortVlans, Summary, VlanInfo};
 use super::lower::{L, iface_addr};
 use super::names::Names;
 use super::profile::{ACCESS_VLAN, DEFAULT_MODE_IS_ACCESS, NATIVE_VLAN};
@@ -45,17 +46,6 @@ pub(super) fn svi_vlan(name: &str) -> Option<u16> {
 fn is_switch_port(name: &str) -> bool {
     let l = name.to_ascii_lowercase();
     l.starts_with("ethernet") || l.starts_with("port-channel")
-}
-
-/// An endpoint: its addresses with the span of each ARP row, its MAC, its
-/// port, its VLAN and the span of its MAC table row.
-#[derive(Clone, Debug)]
-struct Ep {
-    addrs: Vec<(IpAddr, SourceSpan)>,
-    mac: Mac,
-    port: String,
-    vlan: u16,
-    mac_span: SourceSpan,
 }
 
 /// The plan of a switch port.
@@ -136,7 +126,7 @@ impl L<'_> {
 
     /// A function that gives `Unknown` for each packet, in place of a port
     /// function that the lowering cannot make exact.
-    fn sink(&self, f: &str, why: String, span: SourceSpan) -> AclMatch {
+    pub(super) fn sink(&self, f: &str, why: String, span: SourceSpan) -> AclMatch {
         AclMatch {
             meta: self.meta(f, vec![span.clone()]),
             acl: ObjectId::new(format!("{}:{f}", self.dev)),
@@ -153,6 +143,7 @@ impl L<'_> {
     /// Lowers the layer 2 part. Gives the ingress function of the SVI port
     /// and the MAC of each SVI that has one, for the routed egress of the
     /// SVI.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn layer2(
         &mut self,
         active: &[Interface],
@@ -160,6 +151,8 @@ impl L<'_> {
         st: &State,
         col: &Collected,
         names: &Names,
+        ext: &External,
+        sum: &mut Summary,
     ) -> BTreeMap<String, (FunctionId, Mac)> {
         let cfg = self.cfg;
         let vlans: BTreeSet<u16> = cfg.vlans.iter().flat_map(|(a, b)| *a..=*b).collect();
@@ -182,6 +175,15 @@ impl L<'_> {
             channel.get(&n).cloned().unwrap_or(n)
         };
         let neighbour: BTreeSet<String> = st.neighbour_ports.iter().map(|p| port_of(p)).collect();
+        sum.names = names.clone();
+        sum.channel = channel.clone();
+        sum.neighbours = st.neighbours.clone();
+        sum.neighbour_section = st.neighbours_collected;
+        sum.host_name = st.host_name.clone().or_else(|| {
+            cfg.hostname
+                .as_deref()
+                .and_then(super::state::neighbour_name)
+        });
         let mac_ports: BTreeSet<String> = col
             .macs
             .iter()
@@ -266,11 +268,15 @@ impl L<'_> {
                                 Some(r) => r.iter().flat_map(|(a, b)| *a..=*b).collect(),
                                 None => vlans.clone(),
                             };
+                            // An explicit list keeps its VLANs with no `vlan`
+                            // line; the flood of such a VLAN gives `Unknown`.
+                            // `all` means the VLANs of the config.
+                            let explicit = i.allowed.as_deref().is_some_and(|r| r != [(1, 4094)]);
                             let native = allowed.contains(&native).then_some(native);
                             let tagged = allowed
                                 .iter()
                                 .copied()
-                                .filter(|v| vlans.contains(v) && Some(*v) != native)
+                                .filter(|v| (explicit || vlans.contains(v)) && Some(*v) != native)
                                 .collect();
                             (native, tagged)
                         }
@@ -335,108 +341,93 @@ impl L<'_> {
             }
         }
 
-        // The addresses that are next hops of a route: a router, not an
-        // endpoint, so a packet to its MAC can go on beyond the estate.
-        let mut next_hops: BTreeSet<IpAddr> = col
+        // The summary: the ports, the next hops, the ARP rows of the SVIs and
+        // the facts of each VLAN with an SVI.
+        for (name, plan) in &plans {
+            let v = match plan {
+                Plan::Exact {
+                    native,
+                    tagged,
+                    edge,
+                    ..
+                } => Some(PortVlans {
+                    native: *native,
+                    tagged: tagged.clone(),
+                    edge: *edge,
+                }),
+                Plan::Unknown(..) => None,
+            };
+            sum.ports.insert(name.clone(), v);
+        }
+        sum.next_hops = col
             .routes
             .iter()
             .filter_map(|r| r.next_hop.as_deref())
             .filter_map(|g| g.split('%').next()?.parse().ok())
             .collect();
-        next_hops.extend(
+        sum.next_hops.extend(
             cfg.static_routes
                 .iter()
                 .filter_map(|r| r.next_hop.as_deref()?.parse::<IpAddr>().ok()),
         );
-
-        // The endpoints: the ARP rows of an SVI whose MAC is on an edge
-        // port, one endpoint for each MAC with all its addresses.
-        let mut endpoints: BTreeMap<String, Ep> = BTreeMap::new();
-        let mut routers: BTreeSet<String> = BTreeSet::new();
         for n in &col.neighbours {
             let iface = names.resolve(&n.interface);
-            let (Some(v), Ok(ip), Some(m)) = (
-                svi_vlan(&iface),
+            if let (Some(v), Ok(ip), Some(m)) = (
+                svi_vlan(&iface).filter(|_| svis.contains_key(&iface)),
                 n.ip.parse::<IpAddr>(),
                 n.mac.as_deref().and_then(state::mac),
-            ) else {
-                continue;
-            };
-            let Some(row) = col
-                .macs
-                .iter()
-                .find(|r| r.vlan == u64::from(v) && state::mac(&r.mac) == Some(m))
-            else {
-                continue;
-            };
-            let Some(port) = row.port.as_deref().map(port_of) else {
-                continue;
-            };
-            if !matches!(plans.get(&port), Some(Plan::Exact { edge: true, .. })) {
-                continue;
-            }
-            let id = format!("{}/vlan{v}/{m:?}", self.dev);
-            if next_hops.contains(&ip) {
-                routers.insert(id);
-                continue;
-            }
-            let e = endpoints.entry(id).or_insert_with(|| Ep {
-                addrs: Vec::new(),
-                mac: m,
-                port,
-                vlan: v,
-                mac_span: row.span.clone(),
-            });
-            e.addrs.push((ip, n.span.clone()));
-        }
-        for id in &routers {
-            endpoints.remove(id);
-            self.note(format!(
-                "{id}: a next hop of a route, so it is not an endpoint"
-            ));
-        }
-
-        // The host table of each VLAN: the endpoints, the SVI addresses and
-        // the active virtual addresses.
-        let mut hosts: BTreeMap<u16, TriePrefixTable<HostMac>> = BTreeMap::new();
-        for e in endpoints.values() {
-            for (ip, span) in &e.addrs {
-                hosts.entry(e.vlan).or_default().insert(
-                    Prefix::host(*ip),
-                    HostMac {
-                        mac: e.mac,
-                        spans: vec![span.clone(), e.mac_span.clone()],
-                    },
-                );
+            ) {
+                sum.arp.push((v, ip, m, n.span.clone()));
             }
         }
         for i in active {
             let Some((v, m, span)) = svis.get(&i.name) else {
                 continue;
             };
-            let t = hosts.entry(*v).or_default();
+            let mut info = VlanInfo::default();
             for a in &i.addresses {
-                if let Some((ip, _)) = iface_addr(&a.prefix) {
-                    t.insert(
+                if let Some((ip, len)) = iface_addr(&a.prefix) {
+                    info.hosts.insert(
                         Prefix::host(ip),
                         HostMac {
                             mac: *m,
                             spans: vec![span.clone()],
                         },
                     );
+                    if len < 32 {
+                        info.local.push(Prefix::new(ip, len));
+                    }
                 }
             }
             if let Some(g) = gws.get(&i.name) {
-                for (m, vip, spans) in &g.active {
-                    t.insert(
+                for (vm, vip, spans) in &g.active {
+                    info.hosts.insert(
                         Prefix::host(*vip),
                         HostMac {
-                            mac: *m,
+                            mac: *vm,
                             spans: spans.clone(),
                         },
                     );
                 }
+                info.gateway = g
+                    .vmac
+                    .clone()
+                    .or_else(|| g.svi_mac.clone().map(|(m, s)| (m, vec![s])))
+                    .map(|(mac, spans)| HostMac { mac, spans });
             }
+            sum.vlans.insert(*v, info);
+        }
+        for r in &col.speeds {
+            let port = names.resolve(&r.interface);
+            sum.facts.insert(
+                port,
+                LinkEnd {
+                    speed_mbps: r.mbps,
+                    full_duplex: r.duplex.as_deref().map(|d| d == "full"),
+                    media: None,
+                    spans: vec![r.span.clone()],
+                },
+            );
         }
 
         let mut tables: BTreeMap<BridgeDomainId, BTreeMap<Mac, MacEntry>> = BTreeMap::new();
@@ -491,20 +482,25 @@ impl L<'_> {
                         let f = self.qos(&qin_f, policy, *l, "mac");
                         self.add(f);
                     }
-                    let port_hosts: BTreeMap<Mac, EndpointId> = endpoints
+                    let port_hosts: BTreeMap<Mac, EndpointId> = ext
+                        .endpoints
                         .iter()
-                        .filter(|(_, e)| e.port == *name)
-                        .map(|(id, e)| (e.mac, EndpointId::new(id)))
+                        .filter(|e| e.port == *name)
+                        .map(|e| (e.mac, EndpointId::new(&e.id)))
                         .collect();
+                    let peer = ext.peers.get(name);
                     let meta = self.meta(&out_f, vec![span.clone()]);
                     self.add(PortEgress {
                         meta,
                         port: pid.clone(),
                         native: native.map(|v| self.bd(v)),
                         tagged: tagged.iter().map(|v| (self.bd(*v), *v)).collect(),
-                        peer: None,
+                        peer: peer.map(|p| p.target.clone()),
                         hosts: port_hosts,
-                        link: None,
+                        link: peer.map(|p| LinkFacts {
+                            local: sum.facts.get(name).cloned().unwrap_or_default(),
+                            remote: p.remote.clone(),
+                        }),
                     });
                     let out_id = match qos_out {
                         Some((policy, l)) => {
@@ -516,7 +512,7 @@ impl L<'_> {
                         None => self.id(&out_f),
                     };
                     egress.insert(pid.clone(), out_id.clone());
-                    let flood_id = if *edge {
+                    let flood_id = if *edge && !ext.peers.contains_key(name) {
                         out_id
                     } else {
                         let f = format!("port/{name}/stp");
@@ -536,6 +532,31 @@ impl L<'_> {
                     }
                 }
             }
+        }
+
+        // A VLAN that a trunk allows and that has no `vlan` line: its flood
+        // gives `Unknown`.
+        let unlisted: BTreeSet<u16> = plans
+            .values()
+            .filter_map(|p| match p {
+                Plan::Exact { tagged, .. } => Some(tagged.iter().copied()),
+                Plan::Unknown(..) => None,
+            })
+            .flatten()
+            .filter(|v| !vlans.contains(v))
+            .collect();
+        for v in unlisted {
+            let f = format!("vlan{v}/unknown");
+            let span = SourceSpan::new(self.file_name(), 1, 1);
+            let sink = self.sink(&f, format!("VLAN {v} has no vlan line"), span);
+            self.add(sink);
+            flood
+                .entry(self.bd(v))
+                .or_default()
+                .push((PortId::new(format!("vlan{v}")), self.id(&f)));
+            self.note(format!(
+                "VLAN {v}: a trunk allows it, and it has no vlan line"
+            ));
         }
 
         // The SVI ports and the hand-off to layer 3.
@@ -618,6 +639,7 @@ impl L<'_> {
             let Some(port) = r.port.as_deref().map(port_of) else {
                 continue;
             };
+            sum.macs.insert((v, m), (port.clone(), r.span.clone()));
             tables.entry(self.bd(v)).or_default().insert(
                 m,
                 MacEntry {
@@ -648,54 +670,43 @@ impl L<'_> {
                 .push(Arc::new(Flood { meta, ports: flood }));
         }
 
-        // The endpoints, their attachment records and the host resolution
-        // of their ports.
+        // The endpoints that the estate placed on the ports of this switch,
+        // their attachment records and the host resolution of their ports.
         let mut points: BTreeSet<String> = BTreeSet::new();
-        for (id, e) in &endpoints {
+        for e in &ext.endpoints {
             self.out.endpoints.push(Endpoint {
-                id: EndpointId::new(id),
+                id: EndpointId::new(&e.id),
                 addresses: e.addrs.iter().map(|a| a.0).collect(),
             });
             for (ip, span) in &e.addrs {
+                let mut provenance = vec![span.clone()];
+                provenance.extend(e.spans.iter().cloned());
                 self.out.attachments.push(AttachmentRecord {
                     address: *ip,
                     device: self.dev.into(),
                     interface: InterfaceId::new(&e.port),
                     kind: AttachmentKind::Client,
-                    host: id.clone(),
-                    provenance: vec![span.clone(), e.mac_span.clone()],
+                    host: e.id.clone(),
+                    provenance,
                 });
             }
             if !points.insert(e.port.clone()) {
                 continue;
             }
-            let svi = active.iter().find(|i| svi_vlan(&i.name) == Some(e.vlan));
-            let local: Vec<Prefix> = svi
-                .into_iter()
-                .flat_map(|i| i.addresses.iter())
-                .filter_map(|a| iface_addr(&a.prefix))
-                .filter(|(_, len)| *len < 32)
-                .map(|(a, len)| Prefix::new(a, len))
-                .collect();
-            let gateway = svi
-                .and_then(|i| gws.get(&i.name))
-                .and_then(|g| {
-                    g.vmac
-                        .clone()
-                        .or_else(|| g.svi_mac.clone().map(|(m, s)| (m, vec![s])))
-                })
-                .map(|(mac, spans)| HostMac { mac, spans });
-            if gateway.is_none() {
-                self.note(format!("{}: no gateway MAC for VLAN {}", e.port, e.vlan));
+            if e.gateway.is_none() {
+                self.note(format!(
+                    "{}: no gateway MAC for the hosts of the port",
+                    e.port
+                ));
             }
-            let meta = self.meta(&format!("host/{}", e.port), vec![e.mac_span.clone()]);
+            let meta = self.meta(&format!("host/{}", e.port), e.spans.clone());
             let next = self.id(&format!("port/{}/in", e.port));
             self.add(HostResolution {
                 meta,
                 interface: InterfaceId::new(&e.port),
-                hosts: hosts.get(&e.vlan).cloned().unwrap_or_default(),
-                local,
-                gateway,
+                hosts: e.hosts.clone(),
+                local: e.local.clone(),
+                gateway: e.gateway.clone(),
                 next,
             });
         }

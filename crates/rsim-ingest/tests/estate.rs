@@ -49,6 +49,15 @@ fn estate() -> Estate {
 /// The estate with each UniFi section changed by `change`, and with the
 /// routes `extra` in the route table of the router.
 fn estate_with(change: impl Fn(&str, Vec<u8>) -> Vec<u8>, extra: Vec<RouteRow>) -> Estate {
+    estate_more(change, extra, Vec::new())
+}
+
+/// The estate with the inputs `more` too.
+fn estate_more(
+    change: impl Fn(&str, Vec<u8>) -> Vec<u8>,
+    extra: Vec<RouteRow>,
+    more: Vec<Input>,
+) -> Estate {
     let collected = Collected {
         addresses: vec![AddressRow {
             interface: "pppoe0".into(),
@@ -87,7 +96,7 @@ fn estate_with(change: impl Fn(&str, Vec<u8>) -> Vec<u8>, extra: Vec<RouteRow>) 
                 (n, (b, f))
             })
             .collect();
-    assemble(vec![
+    let mut inputs = vec![
         Input::Vyos {
             name: "r1".into(),
             config: VYOS.to_vec(),
@@ -98,7 +107,9 @@ fn estate_with(change: impl Fn(&str, Vec<u8>) -> Vec<u8>, extra: Vec<RouteRow>) 
             name: "site1".into(),
             sections,
         },
-    ])
+    ];
+    inputs.extend(more);
+    assemble(inputs)
 }
 
 fn twin() -> Twin {
@@ -315,4 +326,45 @@ fn a_client_that_is_a_next_hop_is_not_an_endpoint() {
         "{:?}",
         a.verdict()
     );
+}
+
+#[test]
+fn a_router_interface_that_a_site_and_a_switch_both_claim_has_no_link() {
+    let config = "hostname leafx
+interface Ethernet1/1
+  no switchport
+  no shutdown
+  ip address 198.51.100.9/30
+";
+    let lldp = r#"{"TABLE_nbor_detail":{"ROW_nbor_detail":[
+        {"l_port_id":"Ethernet1/1","sys_name":"r1","chassis_id":"0000.5e00.5301","port_id":"eth0"}]}}"#;
+    let switch = Input::Nxos {
+        name: "leafx".into(),
+        config: config.as_bytes().to_vec(),
+        file: "leafx/config".into(),
+        collected: Collected {
+            links: vec![LinkRow {
+                interface: "Ethernet1/1".into(),
+                mac: Some("00:00:5e:00:53:e9".into()),
+                parent: None,
+                vlan: None,
+                span: row_span("leafx", "links", "b1", 0),
+            }],
+            ..Collected::default()
+        },
+        sections: BTreeMap::from([(
+            "lldp".to_string(),
+            (lldp.as_bytes().to_vec(), "leafx/lldp".to_string()),
+        )]),
+    };
+    let e = estate_more(|_, b| b, Vec::new(), vec![switch]);
+    assert!(
+        e.notes["r1"].contains(
+            &"eth0: a UniFi site and an NX-OS switch both claim the interface, so it has no link"
+                .to_string()
+        ),
+        "{:#?}",
+        e.notes
+    );
+    e.builder.build().expect("the twin builds");
 }

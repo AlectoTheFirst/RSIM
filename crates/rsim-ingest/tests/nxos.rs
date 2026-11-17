@@ -154,7 +154,7 @@ fn collected() -> Collected {
 
 /// The synthetic JSON sections of the switch.
 fn sections() -> BTreeMap<String, (Vec<u8>, String)> {
-    ["interfaces", "hsrp", "vrrp", "lldp"]
+    ["interfaces", "hsrp", "vrrp", "lldp", "version"]
         .into_iter()
         .map(|n| {
             let path = format!(
@@ -387,8 +387,8 @@ fn what_is_not_lowered_gives_unknown() {
     assert_eq!(
         notes,
         &[
-            "Ethernet1/9: options not lowered: vpc 10",
             "leaf1/vlan10/00:00:5e:00:53:e1: a next hop of a route, so it is not an endpoint",
+            "Ethernet1/9: options not lowered: vpc 10",
             "route 0.0.0.0/0 in VRF RED: a next hop in another VRF is not lowered",
             "IPv6 is not lowered: each IPv6 packet is unknown at the route lookup",
         ]
@@ -904,6 +904,455 @@ fn the_collected_mode_decides_a_port_with_no_switchport_line() {
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(
         has(&steps, "the mode of the port is not known"),
+        "{steps:#?}"
+    );
+}
+
+const LEAF2: &str = "hostname leaf2
+vlan 1,10,20
+interface port-channel20
+  switchport
+  switchport mode trunk
+  switchport trunk allowed vlan 10,20
+  no shutdown
+interface Ethernet1/49
+  switchport
+  switchport mode trunk
+  switchport trunk allowed vlan 10,20
+  channel-group 20 mode active
+  no shutdown
+interface Ethernet1/3
+  switchport
+  switchport access vlan 10
+  no shutdown
+interface Ethernet1/50
+  no switchport
+  ip address 198.51.100.2/30
+  no shutdown
+";
+
+/// The sections of leaf2, with the LLDP rows of `lldp`.
+fn leaf2_sections(lldp: &str) -> BTreeMap<String, (Vec<u8>, String)> {
+    let interfaces = r#"{"TABLE_interface":{"ROW_interface":[
+        {"interface":"Ethernet1/49","admin_state":"up","state":"up"},
+        {"interface":"Ethernet1/3","admin_state":"up","state":"up"},
+        {"interface":"Ethernet1/50","admin_state":"up","state":"up"},
+        {"interface":"port-channel20","admin_state":"up","state":"up"}]}}"#;
+    BTreeMap::from([
+        (
+            "interfaces".to_string(),
+            (
+                interfaces.as_bytes().to_vec(),
+                "leaf2/interfaces".to_string(),
+            ),
+        ),
+        (
+            "lldp".to_string(),
+            (lldp.as_bytes().to_vec(), "leaf2/lldp".to_string()),
+        ),
+        (
+            "version".to_string(),
+            (
+                br#"{"host_name":"leaf2"}"#.to_vec(),
+                "leaf2/version".to_string(),
+            ),
+        ),
+    ])
+}
+
+const LEAF2_LLDP: &str = r#"{"TABLE_nbor_detail":{"ROW_nbor_detail":[
+    {"l_port_id":"Eth1/49","sys_name":"leaf1","port_id":"Ethernet1/1"},
+    {"l_port_id":"Eth1/50","sys_name":"leaf1","port_id":"Ethernet1/2"}]}}"#;
+
+/// leaf1 and leaf2. `extra` adds rows to the MAC tables of both switches.
+fn two_switches(lldp: &str, extra: &[(u64, &str)]) -> Estate {
+    let mut c1 = collected();
+    c1.links.push(link("Ethernet1/2", "00:00:5e:00:53:e2"));
+    c1.neighbours
+        .push(arp("Vlan10", "192.0.2.40", "00:00:5e:00:53:c4", 20));
+    c1.macs.push(mac_row(10, "00:00:5e:00:53:c4", "Eth1/1", 20));
+    let mut c2 = Collected {
+        routes: vec![RouteRow {
+            span: row_span("leaf2", "routes", "b1", 0),
+            ..route("default", "198.51.100.0/30", "direct", "Eth1/50", None)
+        }],
+        macs: vec![
+            mac_row(10, "00:00:5e:00:53:c4", "Eth1/3", 0),
+            mac_row(10, "00:00:0c:9f:f0:0a", "Eth1/49", 1),
+            mac_row(10, "00:00:5e:00:53:10", "Eth1/49", 2),
+        ],
+        links: vec![link("Ethernet1/50", "00:00:5e:00:53:02")],
+        ..Collected::default()
+    };
+    c2.macs.push(mac_row(10, "00:00:5e:00:53:a2", "Eth1/49", 3));
+    c2.macs.push(mac_row(10, "00:00:5e:00:53:a3", "Eth1/49", 4));
+    for (i, (vlan, mac)) in extra.iter().enumerate() {
+        let i = u64::try_from(i).unwrap();
+        c1.neighbours
+            .push(arp("Vlan10", &format!("192.0.2.{}", 41 + i), mac, 30 + i));
+        c1.macs.push(mac_row(*vlan, mac, "Eth1/1", 30 + i));
+        c2.macs.push(mac_row(*vlan, mac, "Eth1/49", 30 + i));
+    }
+    assemble(vec![
+        Input::Nxos {
+            name: "leaf1".into(),
+            config: CONFIG.to_vec(),
+            file: "leaf1/config@000000000000".into(),
+            collected: c1,
+            sections: sections(),
+        },
+        Input::Nxos {
+            name: "leaf2".into(),
+            config: LEAF2.as_bytes().to_vec(),
+            file: "leaf2/config".into(),
+            collected: c2,
+            sections: leaf2_sections(lldp),
+        },
+    ])
+}
+
+#[test]
+fn a_host_on_an_access_switch_reaches_a_host_behind_the_svi_of_the_other_switch() {
+    let e = two_switches(LEAF2_LLDP, &[]);
+    let t = e.builder.build().expect("the twin builds");
+    let a = run_reply(&t, "192.0.2.40", "192.0.2.130", 443);
+    let (verdict, steps) = only(&a);
+    assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
+    for text in [
+        "leaf2/host/Ethernet1/3 from 00:00:5e:00:53:c4 to the gateway 00:00:0c:9f:f0:0a",
+        "leaf2/mac 00:00:0c:9f:f0:0a is on port port-channel20",
+        "leaf2/port/port-channel20/out leave port port-channel20 VLAN 10 to leaf1/port/port-channel10/in",
+        "leaf1/handoff/Vlan10 untagged to leaf1/in/Vlan10",
+        "deliver to leaf1/vlan30/00:00:5e:00:53:a1 on port Ethernet1/5",
+    ] {
+        assert!(has(&steps, text), "{text}: {steps:#?}");
+    }
+    // The reply goes back across the trunk, and the stateless input ACL
+    // of Vlan30 denies it.
+    let (verdict, steps) = only_reply(&a);
+    assert_eq!(verdict, VerdictKind::Drop, "{steps:#?}");
+    assert!(
+        has(
+            &steps,
+            "acl-in/Vlan30 denied · ACL leaf1:acl:FROM30 rule FROM30/40"
+        ),
+        "{steps:#?}"
+    );
+}
+
+#[test]
+fn a_routed_link_joins_two_switches() {
+    let e = two_switches(LEAF2_LLDP, &[]);
+    let t = e.builder.build().expect("the twin builds");
+    let (verdict, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "198.51.100.2",
+        PROTO_TCP,
+        443,
+    ));
+    assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
+    assert!(
+        has(
+            &steps,
+            "leaf1/out/Ethernet1/2 leave on Ethernet1/2 to leaf2/handoff/Ethernet1/50"
+        ),
+        "{steps:#?}"
+    );
+    assert!(has(&steps, "leaf2/in/Ethernet1/50"), "{steps:#?}");
+}
+
+#[test]
+fn rows_that_disagree_give_no_link() {
+    let lldp = r#"{"TABLE_nbor_detail":{"ROW_nbor_detail":[
+        {"l_port_id":"Eth1/49","sys_name":"leaf9","port_id":"Ethernet1/1"}]}}"#;
+    let e = two_switches(lldp, &[]);
+    let notes = &e.notes["leaf1"];
+    assert!(
+        notes.contains(
+            &"port-channel10: the neighbour does not report the link back, so the port has no link"
+                .to_string()
+        ),
+        "{notes:#?}"
+    );
+    let t = e.builder.build().expect("the twin builds");
+    let (verdict, _) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "198.51.100.2",
+        PROTO_TCP,
+        443,
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown);
+}
+
+#[test]
+fn two_mac_tables_that_point_at_each_other_end_the_path() {
+    let e = two_switches(LEAF2_LLDP, &[(10, "00:00:5e:00:53:c9")]);
+    let t = e.builder.build().expect("the twin builds");
+    let a = run(&t, "Vlan30", "192.0.2.130", "192.0.2.41", PROTO_TCP, 443);
+    let all = show(&a);
+    assert!(!all.is_empty());
+    for b in &all {
+        assert_ne!(b.0, VerdictKind::Deliver, "{b:#?}");
+    }
+    // leaf2 has the MAC on the port of the frame, so it filters the frame.
+    let steps: Vec<String> = all.into_iter().flat_map(|b| b.1).collect();
+    assert!(
+        has(
+            &steps,
+            "leaf2/mac 00:00:5e:00:53:c9 is on the ingress port port-channel20"
+        ),
+        "{steps:#?}"
+    );
+}
+
+#[test]
+fn a_host_behind_the_svi_reaches_a_host_on_the_access_switch() {
+    let e = two_switches(LEAF2_LLDP, &[]);
+    let t = e.builder.build().expect("the twin builds");
+    let (verdict, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "192.0.2.40",
+        PROTO_TCP,
+        443,
+    ));
+    assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
+    assert!(
+        has(
+            &steps,
+            "leaf1/port/port-channel10/out leave port port-channel10 VLAN 10 to leaf2/port/port-channel20/in"
+        ),
+        "{steps:#?}"
+    );
+    assert!(has(
+        &steps,
+        "deliver to leaf2/vlan10/00:00:5e:00:53:c4 on port Ethernet1/3"
+    ));
+}
+
+#[test]
+fn one_end_is_enough_for_a_router_with_no_neighbour_section() {
+    let mut c1 = collected();
+    c1.links.push(link("Ethernet1/2", "00:00:5e:00:53:e2"));
+    // The next hop of the default route is the router.
+    for n in &mut c1.neighbours {
+        if n.ip == "198.51.100.2" {
+            n.mac = Some("00:00:5e:00:53:77".into());
+        }
+    }
+    let mut s1 = sections();
+    s1.insert(
+        "lldp".into(),
+        (
+            br#"{"TABLE_nbor_detail":{"ROW_nbor_detail":[
+                {"l_port_id":"Eth1/2","sys_name":"r1","chassis_id":"0000.5e00.5377","port_id":"eth1"}]}}"#
+                .to_vec(),
+            "leaf1/lldp".into(),
+        ),
+    );
+    let router = Collected {
+        links: vec![LinkRow {
+            span: row_span("r1", "links", "b4", 0),
+            ..link("eth1", "00:00:5e:00:53:77")
+        }],
+        ..Collected::default()
+    };
+    let e = assemble(vec![
+        Input::Nxos {
+            name: "leaf1".into(),
+            config: CONFIG.to_vec(),
+            file: "leaf1/config@000000000000".into(),
+            collected: c1,
+            sections: s1,
+        },
+        Input::Vyos {
+            name: "r1".into(),
+            config: include_bytes!("fixtures/vyos/r1-config.json").to_vec(),
+            file: "r1/config".into(),
+            collected: router,
+        },
+    ]);
+    let t = e.builder.build().expect("the twin builds");
+    let a = run(&t, "Vlan30", "192.0.2.130", "203.0.113.200", PROTO_TCP, 443);
+    let all: Vec<String> = show(&a).into_iter().flat_map(|b| b.1).collect();
+    assert!(
+        has(
+            &all,
+            "leaf1/out/Ethernet1/2 leave on Ethernet1/2 to r1/handoff/eth1"
+        ),
+        "{all:#?}"
+    );
+    assert!(has(&all, "r1/handoff/eth1"), "{all:#?}");
+}
+
+#[test]
+fn two_hosts_of_one_vlan_reach_each_other_across_the_trunk() {
+    let e = two_switches(LEAF2_LLDP, &[]);
+    let t = e.builder.build().expect("the twin builds");
+    let a = run_reply(&t, "192.0.2.5", "192.0.2.40", 8080);
+    let (verdict, steps) = only(&a);
+    assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
+    assert!(has(
+        &steps,
+        "deliver to leaf2/vlan10/00:00:5e:00:53:c4 on port Ethernet1/3"
+    ));
+    let (verdict, steps) = only_reply(&a);
+    assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
+    assert!(has(&steps, "leaf2/port/port-channel20/out"), "{steps:#?}");
+    assert!(has(
+        &steps,
+        "deliver to leaf1/vlan10/00:00:5e:00:53:a3 on port Ethernet1/6"
+    ));
+}
+
+#[test]
+fn members_that_name_different_peers_give_no_link() {
+    let leaf1_lldp = r#"{"TABLE_nbor_detail":{"ROW_nbor_detail":[
+        {"l_port_id":"Eth1/1","sys_name":"leaf2","port_id":"Ethernet1/49"},
+        {"l_port_id":"Eth1/1","sys_name":"leaf2","port_id":"Ethernet1/3"}]}}"#;
+    let mut e = two_switches(LEAF2_LLDP, &[]);
+    let _ = &mut e;
+    let mut s1 = sections();
+    s1.insert(
+        "lldp".into(),
+        (leaf1_lldp.as_bytes().to_vec(), "leaf1/lldp".into()),
+    );
+    let e = assemble(vec![
+        Input::Nxos {
+            name: "leaf1".into(),
+            config: CONFIG.to_vec(),
+            file: "leaf1/config".into(),
+            collected: collected(),
+            sections: s1,
+        },
+        Input::Nxos {
+            name: "leaf2".into(),
+            config: LEAF2.as_bytes().to_vec(),
+            file: "leaf2/config".into(),
+            collected: Collected::default(),
+            sections: leaf2_sections(LEAF2_LLDP),
+        },
+    ]);
+    assert!(
+        e.notes["leaf1"].contains(
+            &"port-channel10: the LLDP and CDP rows name more than one neighbour, so the port has no link".to_string()
+        ),
+        "{:#?}",
+        e.notes
+    );
+    e.builder.build().expect("the twin builds");
+}
+
+#[test]
+fn a_cdp_row_proves_a_link_and_two_claims_give_no_link() {
+    // leaf2 reports its link by CDP, with the serial in the device id.
+    let cdp = r#"{"TABLE_cdp_neighbor_brief_info":{"ROW_cdp_neighbor_brief_info":[
+        {"intf_id":"Ethernet1/49","device_id":"leaf1.example.test(FDO0001)","port_id":"Ethernet1/1"},
+        {"intf_id":"Ethernet1/50","device_id":"leaf1(FDO0001)","port_id":"Ethernet1/2"}]}}"#;
+    let mut s2 = leaf2_sections(r#"{}"#);
+    s2.remove("lldp");
+    s2.insert("cdp".into(), (cdp.as_bytes().to_vec(), "leaf2/cdp".into()));
+    let e = assemble(vec![
+        Input::Nxos {
+            name: "leaf1".into(),
+            config: CONFIG.to_vec(),
+            file: "leaf1/config".into(),
+            collected: collected(),
+            sections: sections(),
+        },
+        Input::Nxos {
+            name: "leaf2".into(),
+            config: LEAF2.as_bytes().to_vec(),
+            file: "leaf2/config".into(),
+            collected: Collected::default(),
+            sections: s2,
+        },
+    ]);
+    let t = e.builder.build().expect("the twin builds");
+    let a = run(&t, "Vlan30", "192.0.2.130", "192.0.2.13", PROTO_TCP, 443);
+    let steps: Vec<String> = show(&a).into_iter().flat_map(|b| b.1).collect();
+    assert!(has(&steps, "to leaf2/port/port-channel20/in"), "{steps:#?}");
+
+    // With no neighbour section on leaf1, one end is enough, and leaf2 and
+    // leaf3 both claim port-channel10 of leaf1: it gets no link.
+    let mut s1 = sections();
+    s1.remove("lldp");
+    let leaf3_lldp = br#"{"TABLE_nbor_detail":{"ROW_nbor_detail":[
+        {"l_port_id":"Eth1/49","sys_name":"leaf1","port_id":"Ethernet1/1"}]}}"#;
+    let e = assemble(vec![
+        Input::Nxos {
+            name: "leaf1".into(),
+            config: CONFIG.to_vec(),
+            file: "leaf1/config".into(),
+            collected: collected(),
+            sections: s1,
+        },
+        Input::Nxos {
+            name: "leaf2".into(),
+            config: LEAF2.as_bytes().to_vec(),
+            file: "leaf2/config".into(),
+            collected: Collected::default(),
+            sections: leaf2_sections(LEAF2_LLDP),
+        },
+        Input::Nxos {
+            name: "leaf3".into(),
+            config: LEAF2
+                .replace("hostname leaf2", "hostname leaf3")
+                .into_bytes(),
+            file: "leaf3/config".into(),
+            collected: Collected::default(),
+            sections: BTreeMap::from([(
+                "lldp".to_string(),
+                (leaf3_lldp.to_vec(), "leaf3/lldp".to_string()),
+            )]),
+        },
+    ]);
+    assert!(
+        e.notes["leaf1"]
+            .contains(&"port-channel10: 2 links claim the port, so it has no link".to_string()),
+        "{:#?}",
+        e.notes
+    );
+    let t = e.builder.build().expect("the twin builds");
+    let a = run(&t, "Vlan30", "192.0.2.130", "192.0.2.13", PROTO_TCP, 443);
+    let steps: Vec<String> = show(&a).into_iter().flat_map(|b| b.1).collect();
+    assert!(!has(&steps, "port-channel20/in"), "{steps:#?}");
+}
+
+#[test]
+fn a_trunk_vlan_with_no_vlan_line_floods_to_unknown() {
+    let config = String::from_utf8(CONFIG.to_vec()).unwrap().replace(
+        "switchport trunk allowed vlan add 50",
+        "switchport trunk allowed vlan add 50,70",
+    );
+    let e = assemble(vec![Input::Nxos {
+        name: "leaf1".into(),
+        config: config.into_bytes(),
+        file: "leaf1/config".into(),
+        collected: collected(),
+        sections: sections(),
+    }]);
+    assert!(
+        e.notes["leaf1"]
+            .contains(&"VLAN 70: a trunk allows it, and it has no vlan line".to_string())
+    );
+    let t = e.builder.build().expect("the twin builds");
+    // The rest of the trunk stays exact.
+    let (_, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "192.0.2.11",
+        PROTO_TCP,
+        443,
+    ));
+    assert!(
+        has(&steps, "mac 00:00:5e:00:53:b1 is on port port-channel10"),
         "{steps:#?}"
     );
 }

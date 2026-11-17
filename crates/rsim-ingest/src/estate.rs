@@ -214,6 +214,79 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         );
     }
 
+    // The first lowering of each NX-OS switch gives its summary. Its next
+    // hops join the set, and the summaries give the links and the places of
+    // the endpoints.
+    let nx_profile = nxos::profile();
+    let summaries: BTreeMap<String, nxos::Summary> = switches
+        .iter()
+        .map(|(d, (cfg, col, file, sections))| {
+            let (_, sum) = nxos::lower(
+                d,
+                file,
+                &nx_profile,
+                cfg,
+                col,
+                sections,
+                &nxos::External::default(),
+            );
+            (d.clone(), sum)
+        })
+        .collect();
+    for s in summaries.values() {
+        next_hops.extend(s.next_hops.iter().copied());
+    }
+    let router_ports: BTreeMap<String, Vec<nxos::RouterPort>> = routers
+        .iter()
+        .map(|(d, r)| {
+            let ports = r
+                .col
+                .links
+                .iter()
+                .filter(|l| l.parent.is_none())
+                .filter_map(|l| {
+                    Some(nxos::RouterPort {
+                        interface: l.interface.clone(),
+                        mac: l.mac.as_deref()?.parse().ok()?,
+                        span: l.span.clone(),
+                        facts: vyos::interface_facts(&r.col, &l.interface),
+                    })
+                })
+                .collect();
+            (d.clone(), ports)
+        })
+        .collect();
+    // The MACs of the collected devices: the interfaces of the routers and
+    // of the switches, and the UniFi devices. None of them is an endpoint.
+    let mut device_macs: BTreeSet<rsim_core::Mac> = BTreeSet::new();
+    for r in routers.values() {
+        device_macs.extend(
+            r.col
+                .links
+                .iter()
+                .filter_map(|l| nxos::state::mac(l.mac.as_deref()?)),
+        );
+    }
+    for (_, col, _, _) in switches.values() {
+        device_macs.extend(
+            col.links
+                .iter()
+                .filter_map(|l| nxos::state::mac(l.mac.as_deref()?)),
+        );
+    }
+    for (_, sections) in &sites {
+        let devices = sections
+            .get("devices")
+            .and_then(|(b, _)| serde_json::from_slice::<Value>(b).ok())
+            .unwrap_or(Value::Null);
+        let site = unifi::read(&Value::Null, &Value::Null, &devices, &Value::Null);
+        device_macs.extend(site.devices.iter().filter_map(|d| nxos::state::mac(&d.mac)));
+    }
+    let mut joined = nxos::join(&summaries, &router_ports, &next_hops, &device_macs);
+    for (d, notes) in std::mem::take(&mut joined.notes) {
+        e.notes.entry(d).or_default().extend(notes);
+    }
+
     let mut l2: BTreeMap<String, vyos::Layer2Links> = BTreeMap::new();
     let mut extra: BTreeMap<String, Vec<collected::NeighbourRow>> = BTreeMap::new();
     let profile = unifi_profile();
@@ -253,7 +326,26 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
             networks: file("networks"),
             wlans: file("wlans"),
         };
-        let router = router_port(&site, &routers, &files.devices);
+        let mut router = router_port(&site, &routers, &files.devices);
+        // A router interface that an NX-OS switch claims too gets no link on
+        // either side.
+        if let Some(r) = &router
+            && joined
+                .routers
+                .get_mut(&r.device)
+                .and_then(|m| m.remove(&r.interface))
+                .is_some()
+        {
+            let target = format!("{}/handoff/{}", r.device, r.interface);
+            for ext in joined.switches.values_mut() {
+                ext.peers.retain(|_, p| p.target.as_str() != target);
+            }
+            e.notes.entry(r.device.clone()).or_default().push(format!(
+                "{}: a UniFi site and an NX-OS switch both claim the interface, so it has no link",
+                r.interface
+            ));
+            router = None;
+        }
         let low = unifi::lower(device, &site, &profile, &files, router.as_ref(), &next_hops);
         if let (Some(r), Some((iface, peer, port))) = (&router, &low.router_peer) {
             l2.entry(r.device.clone()).or_default().insert(
@@ -302,6 +394,11 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         }
     }
 
+    // The links of the routers to the NX-OS switches.
+    for (r, links) in std::mem::take(&mut joined.routers) {
+        l2.entry(r).or_default().extend(links);
+    }
+
     // The routers, with the layer 2 links.
     let profile = vyos::profile();
     for (device, r) in &routers {
@@ -334,10 +431,10 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         }
     }
 
-    // The layer 3 part of the NX-OS switches.
-    let profile = nxos::profile();
+    // The NX-OS switches, with their links and endpoints.
     for (device, (cfg, col, file, sections)) in &switches {
-        let low = nxos::lower(device, file, &profile, cfg, col, sections);
+        let ext = joined.switches.remove(device).unwrap_or_default();
+        let (low, _) = nxos::lower(device, file, &nx_profile, cfg, col, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         for f in low.functions {
             e.builder.add_arc(f);
