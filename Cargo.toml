@@ -9,6 +9,7 @@ members = [
     "crates/rsim-contract",
     "crates/rsim-cli",
     "crates/rsim-mcp",
+    "crates/rsim-api",
     "crates/rsim-store",
     "crates/rsim-collect",
     "crates/rsim-ingest",

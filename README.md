@@ -56,6 +56,7 @@ A VXLAN tunnel end uses `VxlanEncap` and `VxlanDecap`. `VxlanEncap` puts the pac
 | `rsim-topologies` | The hand-built topologies |
 | `rsim-contract` | The contract types and the registry of operations, with their JSON Schema; no engine dependency |
 | `rsim-cli` | The command `rsim` |
+| `rsim-api` | The REST API with its OpenAPI 3.1 contract, on a loopback address |
 | `rsim-mcp` | A Model Context Protocol server on stdio |
 
 ## Build
@@ -116,6 +117,25 @@ The JSON output has the field `rsim_json` with the version number 2. A packet se
 | `explain_step` | The query fields, `branch`, `step`, the optional `reply_of` and `mode` (`path` or `set`) | One trace step |
 
 The JSON of a tool result is the same as the output of `rsim` with `--format json`.
+
+## REST API
+
+`rsim-api` serves the twins, tables, queries and claims as REST resources on a loopback address. The contract is the OpenAPI 3.1 document in `crates/rsim-api/openapi.json`.
+
+```
+cargo run -p rsim-api -- --listen 127.0.0.1:8787
+```
+
+| Resource | Request |
+|---|---|
+| The table catalog | `GET /v1/tables` |
+| The rows of a table | `GET /v1/twins/builtin.leaf-spine/tables/fib/rows?device=leaf1&vrf=tenant` |
+| A route lookup | `GET /v1/twins/builtin.leaf-spine/tables/fib/lpm?device=leaf1&address=10.2.0.10` |
+| A query | `POST /v1/twins/builtin.leaf-spine/queries` with the fields of `rsim path` as a JSON object; the answer is 303 to the query resource |
+| The answer | `GET` the query resource, with `?form=summary`, `steps` or `full` |
+| A claim on the paths of the query | `GET <query resource>/claims/no-unknown` |
+
+Add `--store <data folder>` for the twin `store`, which redirects to its snapshot `snap-<cycle>`. A browser needs `--allow-origin <origin>`. The server has no authentication yet, so it accepts only a loopback listen address.
 
 ## License
 

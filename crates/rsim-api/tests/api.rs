@@ -1,0 +1,424 @@
+//! The REST API: the stored answers through the query resources, the
+//! caching, the security checks, the problem details, the store alias, the
+//! OpenAPI document and one real server on a loopback port.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+
+use rsim_api::handler::{Request, Response, Settings, State, handle};
+use serde_json::{Value, json};
+
+#[path = "../../rsim-cli/tests/support/fixture_store.rs"]
+mod fixture_store;
+
+const PORT: u16 = 8787;
+
+fn state(store: Option<String>) -> State {
+    State::new(Settings {
+        listen: ([127, 0, 0, 1], PORT).into(),
+        store,
+        allow_origins: vec!["http://localhost:3000".into()],
+        max_body: 64 * 1024,
+    })
+}
+
+fn req(method: &str, path: &str) -> Request {
+    let (path, q) = path.split_once('?').unwrap_or((path, ""));
+    Request {
+        method: method.into(),
+        path: path.into(),
+        query: q
+            .split('&')
+            .filter(|p| !p.is_empty())
+            .map(|p| {
+                let (k, v) = p.split_once('=').unwrap_or((p, ""));
+                (k.to_string(), v.to_string())
+            })
+            .collect(),
+        headers: BTreeMap::from([("host".to_string(), format!("127.0.0.1:{PORT}"))]),
+        body: Vec::new(),
+    }
+}
+
+fn get(s: &State, path: &str) -> Response {
+    handle(s, &req("GET", path))
+}
+
+fn post(s: &State, path: &str, body: &Value) -> Response {
+    let mut r = req("POST", path);
+    r.body = body.to_string().into_bytes();
+    handle(s, &r)
+}
+
+fn json(r: &Response) -> Value {
+    serde_json::from_slice(&r.body)
+        .unwrap_or_else(|e| panic!("{e}: {:?}", String::from_utf8_lossy(&r.body)))
+}
+
+fn golden() -> Vec<(String, String)> {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../rsim-cli/tests/golden");
+    let mut v: Vec<(String, String)> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            let n = p.file_name().unwrap().to_string_lossy();
+            n.ends_with(".json") && !n.ends_with(".summary.json") && !n.ends_with(".steps.json")
+        })
+        .map(|p| {
+            (
+                p.file_name().unwrap().to_string_lossy().into_owned(),
+                std::fs::read_to_string(&p).unwrap(),
+            )
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+/// The query resource of a stored answer: its location.
+fn make_query(s: &State, stored: &Value) -> String {
+    let mut body = stored["query"].as_object().unwrap().clone();
+    body.retain(|_, v| !v.is_null());
+    body.remove("topology");
+    if stored["kind"] == "set_answer" {
+        body.insert("mode".into(), json!("set"));
+    }
+    let twin = format!("builtin.{}", stored["topology"].as_str().unwrap());
+    let r = post(
+        s,
+        &format!("/v1/twins/{twin}/queries"),
+        &Value::Object(body),
+    );
+    assert_eq!(r.status, 303, "{}", String::from_utf8_lossy(&r.body));
+    r.header("location").unwrap().to_string()
+}
+
+#[test]
+fn each_stored_query_gives_the_stored_bytes_through_its_resource() {
+    let s = state(None);
+    let files = golden();
+    assert!(files.len() >= 10);
+    for (name, text) in files {
+        let stored: Value = serde_json::from_str(&text).unwrap();
+        let location = make_query(&s, &stored);
+        let r = get(&s, &format!("{location}?form=full"));
+        assert_eq!(r.status, 200, "{name}");
+        assert_eq!(r.header("content-type"), Some("application/json"));
+        assert_eq!(
+            String::from_utf8(r.body).unwrap(),
+            text.trim_end_matches('\n'),
+            "{name}"
+        );
+        // The default form is the summary.
+        let r = get(&s, &location);
+        assert!(
+            json(&r)["kind"].as_str().unwrap().ends_with("_brief"),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn a_step_and_a_claim_have_urls_below_their_query() {
+    let s = state(None);
+    let stored: Value = serde_json::from_str(
+        &golden()
+            .into_iter()
+            .find(|(n, _)| n == "leaf-spine.json")
+            .unwrap()
+            .1,
+    )
+    .unwrap();
+    let q = make_query(&s, &stored);
+    let step = json(&get(&s, &format!("{q}/branches/0/steps/3")));
+    assert_eq!(step["kind"], "step");
+    assert_eq!(
+        step["trace_step"],
+        stored["answer"]["branches"][0]["steps"][3]
+    );
+    let claim = json(&get(&s, &format!("{q}/claims/no-unknown")));
+    assert_eq!(
+        (claim["kind"].as_str(), claim["result"].as_str()),
+        (Some("claim"), Some("confirmed"))
+    );
+    let claim = json(&get(&s, "/v1/twins/builtin.leaf-spine/claims/bgp-peers-up"));
+    assert_eq!(claim["result"], "unknown");
+    let rows = json(&get(
+        &s,
+        "/v1/twins/builtin.leaf-spine/tables/fib/lpm?address=10.2.0.10&device=leaf1",
+    ));
+    assert_eq!(rows["rows"][0][2], "10.2.0.0/24");
+    // A long query gets a hash identifier, which the server keeps.
+    let long = json!({
+        "mode": "set",
+        "source.ip": (0..120).map(|i| format!("10.1.{i}.0/24")).collect::<Vec<_>>().join(","),
+        "destination.ip": "10.2.0.10",
+        "network.transport": "tcp"
+    });
+    let r = post(&s, "/v1/twins/builtin.leaf-spine/queries", &long);
+    let loc = r.header("location").unwrap().to_string();
+    assert!(loc.rsplit('/').next().unwrap().starts_with('h'), "{loc}");
+    assert_eq!(get(&s, &loc).status, 200);
+}
+
+#[test]
+fn an_equal_etag_gives_304() {
+    let s = state(None);
+    let r = get(&s, "/v1/twins/builtin.ecmp/tables/devices/rows");
+    assert_eq!(r.status, 200);
+    let tag = r.header("etag").unwrap().to_string();
+    assert!(tag.starts_with("\"builtin.ecmp."), "{tag}");
+    let mut again = req("GET", "/v1/twins/builtin.ecmp/tables/devices/rows");
+    again.headers.insert("if-none-match".into(), tag);
+    let r = handle(&s, &again);
+    assert_eq!(r.status, 304);
+    assert!(r.body.is_empty());
+}
+
+#[test]
+fn the_security_checks_refuse_a_foreign_origin_a_foreign_host_and_a_large_body() {
+    let s = state(None);
+    let mut r = req("GET", "/v1");
+    r.headers
+        .insert("origin".into(), "http://evil.example".into());
+    let res = handle(&s, &r);
+    assert_eq!(
+        (res.status, json(&res)["code"].as_str()),
+        (403, Some("forbidden_origin"))
+    );
+    r.headers
+        .insert("origin".into(), "http://localhost:3000".into());
+    let res = handle(&s, &r);
+    assert_eq!(res.status, 200);
+    assert_eq!(
+        res.header("access-control-allow-origin"),
+        Some("http://localhost:3000")
+    );
+    let mut r = req("GET", "/v1");
+    r.headers
+        .insert("host".into(), "rebind.example:8787".into());
+    let res = handle(&s, &r);
+    assert_eq!(
+        (res.status, json(&res)["code"].as_str()),
+        (403, Some("forbidden_host"))
+    );
+    let mut r = req("POST", "/v1/twins/builtin.ecmp/queries");
+    r.body = vec![b' '; 64 * 1024 + 1];
+    assert_eq!(handle(&s, &r).status, 413);
+}
+
+#[test]
+fn errors_are_problem_objects() {
+    let s = state(None);
+    for (method, path, status, code) in [
+        ("GET", "/v1/nothing", 404, "not_found"),
+        ("GET", "/v1/twins/builtin.nothing", 404, "unknown_twin"),
+        ("GET", "/v1/twins/snap-3", 404, "unknown_twin"),
+        ("GET", "/v1/twins/store", 404, "unknown_twin"),
+        (
+            "GET",
+            "/v1/twins/builtin.ecmp/tables/colours/rows",
+            404,
+            "unknown_table",
+        ),
+        (
+            "GET",
+            "/v1/twins/builtin.ecmp/tables/fib/rows?colour=red",
+            422,
+            "invalid_filter",
+        ),
+        (
+            "GET",
+            "/v1/twins/builtin.ecmp/queries/qnotbase64*",
+            404,
+            "no_such_query",
+        ),
+        ("POST", "/v1/tables", 405, "method_not_allowed"),
+    ] {
+        let r = handle(&s, &req(method, path));
+        assert_eq!(r.status, status, "{path}");
+        assert_eq!(
+            r.header("content-type"),
+            Some("application/problem+json"),
+            "{path}"
+        );
+        let p = json(&r);
+        assert_eq!(p["code"], code, "{path}");
+        assert_eq!(p["type"], format!("urn:rsim:error:{code}"), "{path}");
+        assert_eq!(p["status"], status, "{path}");
+    }
+    let r = post(
+        &s,
+        "/v1/twins/builtin.ecmp/queries",
+        &json!({"source.ip": "x"}),
+    );
+    assert_eq!(
+        (r.status, json(&r)["code"].as_str()),
+        (422, Some("invalid_query"))
+    );
+    let mut r = req("POST", "/v1/twins/builtin.ecmp/queries");
+    r.body = b"not json".to_vec();
+    assert_eq!(handle(&s, &r).status, 400);
+}
+
+#[test]
+fn the_store_alias_redirects_to_its_snapshot() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-api-store");
+    fixture_store::write(&dir);
+    let s = state(Some(dir.display().to_string()));
+    let r = get(&s, "/v1/twins/store/tables/devices/rows");
+    assert_eq!(r.status, 307);
+    let location = r.header("location").unwrap().to_string();
+    assert!(location.starts_with("/v1/twins/snap-"), "{location}");
+    assert!(location.ends_with("/tables/devices/rows"), "{location}");
+    let rows = json(&get(&s, &location));
+    assert_eq!(rows["twin"]["id"], location.split('/').nth(3).unwrap());
+    assert_eq!(rows["topology"], "store");
+    let cov = json(&get(&s, &location.replace("devices", "coverage")));
+    assert!(cov["total"].as_u64().unwrap() > 0);
+    assert_eq!(
+        get(&s, "/v1/twins/snap-999999/tables/devices/rows").status,
+        404
+    );
+}
+
+/// Each `$ref` in `v` names a schema of `components`.
+fn refs(v: &Value, out: &mut BTreeSet<String>) {
+    match v {
+        Value::Object(m) => {
+            if let Some(Value::String(r)) = m.get("$ref") {
+                out.insert(r.clone());
+            }
+            m.values().for_each(|c| refs(c, out));
+        }
+        Value::Array(a) => a.iter().for_each(|c| refs(c, out)),
+        _ => {}
+    }
+}
+
+#[test]
+fn the_openapi_document_is_current_and_consistent() {
+    let doc = rsim_api::openapi::document();
+    let committed =
+        std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("openapi.json"))
+            .unwrap();
+    let text = serde_json::to_string_pretty(&doc).unwrap() + "\n";
+    assert_eq!(
+        text, committed,
+        "the OpenAPI document changed; make crates/rsim-api/openapi.json again with the test output"
+    );
+    assert_eq!(doc["openapi"], "3.1.0");
+    // Each reference resolves.
+    let mut all = BTreeSet::new();
+    refs(&doc, &mut all);
+    let schemas = doc["components"]["schemas"].as_object().unwrap();
+    for r in &all {
+        let name = r
+            .strip_prefix("#/components/schemas/")
+            .unwrap_or_else(|| panic!("{r}"));
+        assert!(schemas.contains_key(name), "{r} does not resolve");
+    }
+    // Each operation identifier is unique.
+    let mut ids = BTreeSet::new();
+    for (_, item) in doc["paths"].as_object().unwrap() {
+        for (_, op) in item.as_object().unwrap() {
+            assert!(ids.insert(op["operationId"].as_str().unwrap().to_string()));
+        }
+    }
+    // Each schema compiles as JSON Schema 2020-12, with the components as
+    // its context.
+    let mut root = json!({"$schema": "https://json-schema.org/draft/2020-12/schema", "components": doc["components"].clone()});
+    root["$id"] = json!("urn:rsim:openapi");
+    for name in schemas.keys() {
+        let mut schemas_c = boon::Schemas::new();
+        let mut compiler = boon::Compiler::new();
+        compiler
+            .add_resource("urn:rsim:openapi", root.clone())
+            .unwrap();
+        compiler
+            .compile(
+                &format!("urn:rsim:openapi#/components/schemas/{name}"),
+                &mut schemas_c,
+            )
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+    }
+    // Each operation of the registry with an HTTP path is in the document.
+    let paths: Vec<(String, Vec<String>)> = doc["paths"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(p, item)| {
+            (
+                p.clone(),
+                item.as_object().unwrap().keys().cloned().collect(),
+            )
+        })
+        .collect();
+    let same = |a: &str, b: &str| {
+        let (x, y): (Vec<&str>, Vec<&str>) = (a.split('/').collect(), b.split('/').collect());
+        x.len() == y.len()
+            && x.iter()
+                .zip(&y)
+                .all(|(s, t)| s == t || s.starts_with('{') || t.starts_with('{'))
+    };
+    for op in rsim_contract::registry::OPERATIONS {
+        let Some((m, p)) = op.http else { continue };
+        let m = format!("{m:?}").to_lowercase();
+        assert!(
+            paths.iter().any(|(dp, ms)| same(dp, p) && ms.contains(&m)),
+            "{} {m} {p} is not in the document",
+            op.id
+        );
+    }
+}
+
+#[test]
+fn a_listen_address_that_is_not_loopback_is_refused() {
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_rsim-api"))
+        .args(["--listen", "0.0.0.0:0"])
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("not a loopback address"));
+}
+
+#[test]
+#[allow(clippy::disallowed_types)]
+fn a_real_server_answers_on_a_loopback_port() {
+    use std::io::{Read, Write};
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_io()
+        .build()
+        .unwrap();
+    let listener = rt
+        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    let s = std::sync::Arc::new(State::new(Settings {
+        listen: addr,
+        store: None,
+        allow_origins: Vec::new(),
+        max_body: 1024,
+    }));
+    rt.spawn(rsim_api::server::serve(listener, s));
+    let ask = |text: String| -> String {
+        let mut c = std::net::TcpStream::connect(addr).unwrap();
+        c.write_all(text.as_bytes()).unwrap();
+        let mut out = String::new();
+        c.read_to_string(&mut out).unwrap();
+        out
+    };
+    let r = ask(format!(
+        "GET /v1/twins/builtin.ecmp/tables/devices/rows?columns=device HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
+    ));
+    assert!(r.starts_with("HTTP/1.1 200"), "{r}");
+    assert!(r.contains("\"columns\":[\"device\"]"), "{r}");
+    let body = "x".repeat(2048);
+    let r = ask(format!(
+        "POST /v1/twins/builtin.ecmp/queries HTTP/1.1\r\nHost: {addr}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    ));
+    assert!(r.starts_with("HTTP/1.1 413"), "{r}");
+    rt.shutdown_background();
+}
