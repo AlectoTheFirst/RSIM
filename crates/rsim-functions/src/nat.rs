@@ -114,22 +114,63 @@ fn nat_apply(
     out
 }
 
-/// Source NAT. A rule can be limited to egress interfaces.
+/// The interfaces of a NAT rule. `None` means any interface.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NatScope {
+    pub ingress: Option<BTreeSet<InterfaceId>>,
+    pub egress: Option<BTreeSet<InterfaceId>>,
+}
+
+/// True if the interface of the context is in the set. An interface that
+/// the context does not know gives `Unknown`.
+fn in_scope(set: Option<&BTreeSet<InterfaceId>>, attr: &Attr<InterfaceId>) -> Tri {
+    match set {
+        None => Tri::True,
+        Some(s) => match attr {
+            Attr::Known(i) => Tri::from(s.contains(i)),
+            _ => Tri::Unknown,
+        },
+    }
+}
+
+/// Source NAT. A rule can be limited to ingress and egress interfaces.
 #[derive(Clone, Debug)]
 pub struct SourceNat {
     pub meta: Meta,
     pub table: ObjectId,
-    /// The egress interfaces of each rule. `None` means any interface.
-    scopes: Vec<Option<BTreeSet<InterfaceId>>>,
+    scopes: Vec<NatScope>,
     rules: Vec<Rule<NatAction>>,
     pub next: FunctionId,
 }
 
 impl SourceNat {
+    /// A source NAT whose rules are limited to egress interfaces.
     pub fn new(
         meta: Meta,
         table: ObjectId,
         rules: Vec<(Option<BTreeSet<InterfaceId>>, Rule<NatAction>)>,
+        next: FunctionId,
+    ) -> Self {
+        let rules = rules
+            .into_iter()
+            .map(|(egress, r)| {
+                (
+                    NatScope {
+                        ingress: None,
+                        egress,
+                    },
+                    r,
+                )
+            })
+            .collect();
+        Self::with_scopes(meta, table, rules, next)
+    }
+
+    /// A source NAT with the ingress and the egress interfaces of each rule.
+    pub fn with_scopes(
+        meta: Meta,
+        table: ObjectId,
+        rules: Vec<(NatScope, Rule<NatAction>)>,
         next: FunctionId,
     ) -> Self {
         let (scopes, rules) = rules.into_iter().unzip();
@@ -147,7 +188,11 @@ impl NetFunction for SourceNat {
     meta_methods!(FunctionKind::SourceNat);
 
     fn requires(&self) -> Vec<ContextAttr> {
-        vec![ContextAttr::Session, ContextAttr::EgressInterface]
+        let mut v = vec![ContextAttr::Session, ContextAttr::EgressInterface];
+        if self.scopes.iter().any(|s| s.ingress.is_some()) {
+            v.push(ContextAttr::IngressInterface);
+        }
+        v
     }
     fn provides(&self) -> Vec<ContextAttr> {
         Vec::new()
@@ -162,12 +207,10 @@ impl NetFunction for SourceNat {
         predicates_of(&self.rules)
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
-        let scope = |i: usize| match &self.scopes[i] {
-            None => Tri::True,
-            Some(s) => match &ctx.egress_interface {
-                Attr::Known(e) => Tri::from(s.contains(e)),
-                _ => Tri::Unknown,
-            },
+        let scope = |i: usize| {
+            let s = &self.scopes[i];
+            in_scope(s.ingress.as_ref(), &ctx.ingress_interface)
+                .and(in_scope(s.egress.as_ref(), &ctx.egress_interface))
         };
         nat_apply(
             &self.meta,
@@ -183,12 +226,15 @@ impl NetFunction for SourceNat {
     }
 }
 
-/// Destination NAT.
+/// Destination NAT. A rule can be limited to ingress interfaces.
 #[derive(Clone, Debug)]
 pub struct DestinationNat {
     pub meta: Meta,
     pub table: ObjectId,
     pub rules: Vec<Rule<NatAction>>,
+    /// The ingress interfaces of each rule, by the index of the rule. A rule
+    /// with no entry, or with `None`, applies on each interface.
+    pub ingress: Vec<Option<BTreeSet<InterfaceId>>>,
     pub next: FunctionId,
 }
 
@@ -196,7 +242,11 @@ impl NetFunction for DestinationNat {
     meta_methods!(FunctionKind::DestinationNat);
 
     fn requires(&self) -> Vec<ContextAttr> {
-        vec![ContextAttr::Session]
+        let mut v = vec![ContextAttr::Session];
+        if self.ingress.iter().any(Option::is_some) {
+            v.push(ContextAttr::IngressInterface);
+        }
+        v
     }
     fn provides(&self) -> Vec<ContextAttr> {
         Vec::new()
@@ -211,12 +261,18 @@ impl NetFunction for DestinationNat {
         predicates_of(&self.rules)
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
+        let scope = |i: usize| {
+            in_scope(
+                self.ingress.get(i).and_then(Option::as_ref),
+                &ctx.ingress_interface,
+            )
+        };
         nat_apply(
             &self.meta,
             Side::Destination,
             &self.table,
             &self.rules,
-            &|_| Tri::True,
+            &scope,
             &self.next,
             input,
             ctx,

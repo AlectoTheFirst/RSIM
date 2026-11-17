@@ -49,6 +49,7 @@ pub fn edge_dnat(opts: EdgeOpts) -> TwinBuilder {
             )
             .with_span(edge.span(31, 36)),
         ],
+        ingress: Vec::new(),
         next: edge.id("acl"),
     });
     b.add(edge.acl(

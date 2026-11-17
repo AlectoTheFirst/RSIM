@@ -68,6 +68,7 @@ pub fn mini_enterprise(opts: MiniOpts) -> TwinBuilder {
         meta: fgt.meta("dnat", 50, 50),
         table: ObjectId::new("fgt:root:vip"),
         rules: Vec::new(),
+        ingress: Vec::new(),
         next: fgt.id("route"),
     });
     let after_route = if opts.skip_dst_zone {

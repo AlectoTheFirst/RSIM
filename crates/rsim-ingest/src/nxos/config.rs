@@ -1,0 +1,769 @@
+//! The handlers of an NX-OS running config: the typed structures of the
+//! lines that the lowering reads.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::coverage::{State, Table};
+use crate::stanza::{Document, Stanza};
+
+/// The first and the last line of a stanza.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Lines {
+    pub first: u32,
+    pub last: u32,
+}
+
+impl Lines {
+    fn of(s: &Stanza) -> Lines {
+        Lines {
+            first: s.first_line,
+            last: s.last_line,
+        }
+    }
+}
+
+/// The NAT role of an interface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NatRole {
+    Inside,
+    Outside,
+}
+
+/// An IPv4 address of an interface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Address {
+    /// The address with its prefix length, for example `192.0.2.1/24`.
+    pub prefix: String,
+    pub secondary: bool,
+    pub lines: Lines,
+}
+
+/// A layer 3 interface.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Interface {
+    pub name: String,
+    pub shutdown: bool,
+    pub vrf: Option<String>,
+    pub addresses: Vec<Address>,
+    /// An address that the config does not state, for example from DHCP.
+    pub dynamic_address: bool,
+    pub ipv6: bool,
+    pub acl_in: Option<(String, Lines)>,
+    pub acl_out: Option<(String, Lines)>,
+    pub nat: Option<(NatRole, Lines)>,
+    /// The masked lines of the unhandled options of the interface.
+    pub unhandled: Vec<String>,
+    pub lines: Lines,
+}
+
+/// The action of an ACL entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AclAction {
+    Permit,
+    Deny,
+}
+
+/// The address of one side of an ACL entry or a member of an address group.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AddrSpec {
+    Any,
+    /// An address with a prefix length, or a host address.
+    Prefix(String),
+    /// An address with a wildcard mask.
+    Wildcard(String, String),
+    /// An address group.
+    Group(String),
+}
+
+/// The port condition of one side of an ACL entry or a member of a port
+/// group. A port is a number or a name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PortSpec {
+    Any,
+    Eq(Vec<String>),
+    Neq(String),
+    Lt(String),
+    Gt(String),
+    Range(String, String),
+    Group(String),
+}
+
+/// An entry of an IP access list.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ace {
+    pub seq: String,
+    pub action: AclAction,
+    /// The protocol as written, for example `tcp`, `ip` or `47`.
+    pub protocol: String,
+    pub source: AddrSpec,
+    pub source_port: PortSpec,
+    pub destination: AddrSpec,
+    pub destination_port: PortSpec,
+    /// The ICMP type as written, with the code if there is one.
+    pub icmp: Option<(String, Option<String>)>,
+    pub established: bool,
+    /// The words of the options that the lowering does not read.
+    pub unhandled: Vec<String>,
+    pub lines: Lines,
+}
+
+/// An IP access list.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Acl {
+    pub name: String,
+    pub entries: Vec<Ace>,
+    /// The masked lines that the handler cannot read.
+    pub unreadable: Vec<String>,
+    pub lines: Lines,
+}
+
+/// A static route.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StaticRoute {
+    pub vrf: String,
+    pub prefix: String,
+    pub interface: Option<String>,
+    pub next_hop: Option<String>,
+    /// The words that the lowering does not read, for example `vrf`.
+    pub unhandled: Vec<String>,
+    pub lines: Lines,
+}
+
+/// The target of a dynamic NAT rule.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NatTarget {
+    Pool(String),
+    Interface(String),
+}
+
+/// A NAT rule.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NatKind {
+    /// `ip nat inside source static [tcp|udp] <local> [<port>] <global> [<port>]`.
+    Static {
+        protocol: Option<String>,
+        local: String,
+        local_port: Option<String>,
+        global: String,
+        global_port: Option<String>,
+    },
+    /// `ip nat inside source list <acl> pool <pool>|interface <if> [overload]`.
+    List {
+        acl: String,
+        target: NatTarget,
+        overload: bool,
+    },
+    /// A form that the lowering does not read, as the masked line.
+    Other(String),
+}
+
+/// A NAT rule with its lines.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NatRule {
+    pub kind: NatKind,
+    pub lines: Lines,
+}
+
+/// A NAT pool.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NatPool {
+    pub start: String,
+    pub end: String,
+    pub lines: Lines,
+}
+
+/// The typed structures of a running config.
+#[derive(Clone, Debug, Default)]
+pub struct Config {
+    pub interfaces: Vec<Interface>,
+    pub acls: BTreeMap<String, Acl>,
+    pub address_groups: BTreeMap<String, Vec<AddrSpec>>,
+    pub port_groups: BTreeMap<String, Vec<PortSpec>>,
+    pub static_routes: Vec<StaticRoute>,
+    /// The VRFs of the config, with the lines of their `vrf context`.
+    pub vrfs: BTreeMap<String, Lines>,
+    pub nat_rules: Vec<NatRule>,
+    pub nat_pools: BTreeMap<String, NatPool>,
+    /// The first line of each stanza that a handler read.
+    pub read: BTreeSet<u32>,
+}
+
+struct R<'a> {
+    table: &'a Table,
+    read: BTreeSet<u32>,
+}
+
+impl R<'_> {
+    fn mark(&mut self, s: &Stanza) {
+        self.read.insert(s.first_line);
+    }
+
+    /// The masked keys of the children of a stanza that the table
+    /// classifies as unhandled.
+    fn unhandled_children(&self, parent: &Stanza) -> Vec<String> {
+        parent
+            .children()
+            .iter()
+            .filter(|c| {
+                self.table.state(&[parent.key.as_str(), c.key.as_str()]) == State::Unhandled
+            })
+            .map(|c| self.table.report_key(&c.key))
+            .collect()
+    }
+}
+
+fn words(s: &str) -> Vec<&str> {
+    s.split_whitespace().collect()
+}
+
+/// Reads the handled lines of a running config. `table` decides which
+/// options of an interface are unhandled.
+pub fn read(doc: &Document, table: &Table) -> Config {
+    let mut r = R {
+        table,
+        read: BTreeSet::new(),
+    };
+    let mut cfg = Config::default();
+    for s in doc.root.children() {
+        let w = words(&s.key);
+        match w.as_slice() {
+            ["interface", name] => {
+                let i = interface(&mut r, s, name);
+                cfg.interfaces.push(i);
+            }
+            ["ip", "access-list", name] => {
+                r.mark(s);
+                let acl = access_list(&mut r, s, name);
+                cfg.acls.insert((*name).to_string(), acl);
+            }
+            ["object-group", "ip", "address", name] => {
+                r.mark(s);
+                let mut members = Vec::new();
+                for c in s.children() {
+                    r.mark(c);
+                    let cw = words(&c.key);
+                    let rest = match cw.first() {
+                        Some(x) if x.parse::<u32>().is_ok() => &cw[1..],
+                        _ => &cw[..],
+                    };
+                    let mut i = 0;
+                    match addr_spec(rest, &mut i) {
+                        Some(a) if i == rest.len() => members.push(a),
+                        _ => members.push(AddrSpec::Group(format!(
+                            "(unreadable member {})",
+                            table.report_key(&c.key)
+                        ))),
+                    }
+                }
+                cfg.address_groups.insert((*name).to_string(), members);
+            }
+            ["object-group", "ip", "port", name] => {
+                r.mark(s);
+                let mut members = Vec::new();
+                for c in s.children() {
+                    r.mark(c);
+                    let cw = words(&c.key);
+                    let rest = match cw.first() {
+                        Some(x) if x.parse::<u32>().is_ok() => &cw[1..],
+                        _ => &cw[..],
+                    };
+                    let mut i = 0;
+                    let p = port_spec(rest, &mut i);
+                    if i == rest.len() && p != PortSpec::Any {
+                        members.push(p);
+                    } else {
+                        members.push(PortSpec::Group(format!(
+                            "(unreadable member {})",
+                            table.report_key(&c.key)
+                        )));
+                    }
+                }
+                cfg.port_groups.insert((*name).to_string(), members);
+            }
+            ["ip", "route", rest @ ..] => {
+                r.mark(s);
+                cfg.static_routes
+                    .push(static_route("default", rest, Lines::of(s)));
+            }
+            ["vrf", "context", name] => {
+                r.mark(s);
+                cfg.vrfs.insert((*name).to_string(), Lines::of(s));
+                for c in s.children() {
+                    if let ["ip", "route", rest @ ..] = words(&c.key).as_slice() {
+                        r.mark(c);
+                        cfg.static_routes
+                            .push(static_route(name, rest, Lines::of(c)));
+                    }
+                }
+            }
+            ["ip", "nat", "pool", name, start, end, ..] => {
+                r.mark(s);
+                cfg.nat_pools.insert(
+                    (*name).to_string(),
+                    NatPool {
+                        start: (*start).to_string(),
+                        end: (*end).to_string(),
+                        lines: Lines::of(s),
+                    },
+                );
+            }
+            ["ip", "nat", "inside", "source", ..] => {
+                r.mark(s);
+                cfg.nat_rules.push(NatRule {
+                    kind: nat_rule(&w, table),
+                    lines: Lines::of(s),
+                });
+            }
+            _ => {}
+        }
+    }
+    cfg.read = r.read;
+    cfg
+}
+
+fn interface(r: &mut R, s: &Stanza, name: &str) -> Interface {
+    r.mark(s);
+    let mut i = Interface {
+        name: name.to_string(),
+        lines: Lines::of(s),
+        unhandled: r.unhandled_children(s),
+        ..Interface::default()
+    };
+    for c in s.children() {
+        let lines = Lines::of(c);
+        let handled = match words(&c.key).as_slice() {
+            ["shutdown"] => {
+                i.shutdown = true;
+                true
+            }
+            ["no", "shutdown"] | ["no", "switchport"] => true,
+            ["vrf", "member", v] => {
+                i.vrf = Some((*v).to_string());
+                true
+            }
+            ["ip", "address", "dhcp"] => {
+                i.dynamic_address = true;
+                true
+            }
+            ["ip", "address", a, rest @ ..] => {
+                let secondary = rest.first() == Some(&"secondary");
+                let prefix = if a.contains('/') {
+                    Some((*a).to_string())
+                } else {
+                    rest.first()
+                        .and_then(|m| mask_len(m))
+                        .map(|l| format!("{a}/{l}"))
+                };
+                match prefix {
+                    Some(prefix) => i.addresses.push(Address {
+                        prefix,
+                        secondary,
+                        lines,
+                    }),
+                    None => i.dynamic_address = true,
+                }
+                true
+            }
+            ["ipv6", "address", ..] | ["ipv6", "link-local", ..] => {
+                i.ipv6 = true;
+                true
+            }
+            ["ip", "access-group", acl, "in"] => {
+                i.acl_in = Some(((*acl).to_string(), lines));
+                true
+            }
+            ["ip", "access-group", acl, "out"] => {
+                i.acl_out = Some(((*acl).to_string(), lines));
+                true
+            }
+            ["ip", "nat", "inside"] => {
+                i.nat = Some((NatRole::Inside, lines));
+                true
+            }
+            ["ip", "nat", "outside"] => {
+                i.nat = Some((NatRole::Outside, lines));
+                true
+            }
+            _ => false,
+        };
+        if handled {
+            r.mark(c);
+        }
+    }
+    i
+}
+
+/// The prefix length of a contiguous dotted mask.
+pub fn mask_len(mask: &str) -> Option<u8> {
+    let m: std::net::Ipv4Addr = mask.parse().ok()?;
+    let v = u32::from(m);
+    let len = v.leading_ones();
+    (v.checked_shl(len).unwrap_or(0) == 0).then(|| u8::try_from(len).unwrap_or(32))
+}
+
+fn access_list(r: &mut R, s: &Stanza, name: &str) -> Acl {
+    let mut acl = Acl {
+        name: name.to_string(),
+        entries: Vec::new(),
+        unreadable: Vec::new(),
+        lines: Lines::of(s),
+    };
+    for c in s.children() {
+        let w = words(&c.key);
+        match w.as_slice() {
+            ["statistics", ..] => {}
+            [seq, "remark", ..] | ["remark", seq, ..] => {
+                let _ = seq;
+                r.mark(c);
+            }
+            [seq, action @ ("permit" | "deny"), rest @ ..] => {
+                r.mark(c);
+                let action = if *action == "permit" {
+                    AclAction::Permit
+                } else {
+                    AclAction::Deny
+                };
+                match ace(seq, action, rest, Lines::of(c)) {
+                    Some(e) => acl.entries.push(e),
+                    None => acl.unreadable.push(r.table.report_key(&c.key)),
+                }
+            }
+            _ => {
+                r.mark(c);
+                acl.unreadable.push(r.table.report_key(&c.key));
+            }
+        }
+    }
+    acl
+}
+
+/// Reads an address of an ACL entry from the words at `i`, and moves `i`
+/// past it.
+fn addr_spec(w: &[&str], i: &mut usize) -> Option<AddrSpec> {
+    let first = *w.get(*i)?;
+    let out = match first {
+        "any" => {
+            *i += 1;
+            AddrSpec::Any
+        }
+        "host" => {
+            let a = w.get(*i + 1)?;
+            *i += 2;
+            AddrSpec::Prefix(format!("{a}/32"))
+        }
+        "addrgroup" => {
+            let g = w.get(*i + 1)?;
+            *i += 2;
+            AddrSpec::Group((*g).to_string())
+        }
+        a if a.contains('/') => {
+            *i += 1;
+            AddrSpec::Prefix(a.to_string())
+        }
+        a if a.parse::<std::net::Ipv4Addr>().is_ok() => {
+            let wc = w.get(*i + 1)?;
+            wc.parse::<std::net::Ipv4Addr>().ok()?;
+            *i += 2;
+            AddrSpec::Wildcard(a.to_string(), (*wc).to_string())
+        }
+        _ => return None,
+    };
+    Some(out)
+}
+
+/// Reads a port condition from the words at `i`, and moves `i` past it. No
+/// port condition gives `Any`.
+fn port_spec(w: &[&str], i: &mut usize) -> PortSpec {
+    let at = |k: usize| w.get(*i + k).map(|s| (*s).to_string());
+    let (spec, n) = match w.get(*i).copied() {
+        Some("eq") => {
+            let mut ports = Vec::new();
+            let mut k = 1;
+            while let Some(p) = at(k) {
+                if is_port(&p) {
+                    ports.push(p);
+                    k += 1;
+                } else {
+                    break;
+                }
+            }
+            if ports.is_empty() {
+                return PortSpec::Any;
+            }
+            (PortSpec::Eq(ports), k)
+        }
+        Some("neq") => match at(1) {
+            Some(p) => (PortSpec::Neq(p), 2),
+            None => return PortSpec::Any,
+        },
+        Some("lt") => match at(1) {
+            Some(p) => (PortSpec::Lt(p), 2),
+            None => return PortSpec::Any,
+        },
+        Some("gt") => match at(1) {
+            Some(p) => (PortSpec::Gt(p), 2),
+            None => return PortSpec::Any,
+        },
+        Some("range") => match (at(1), at(2)) {
+            (Some(a), Some(b)) => (PortSpec::Range(a, b), 3),
+            _ => return PortSpec::Any,
+        },
+        Some("portgroup") => match at(1) {
+            Some(g) => (PortSpec::Group(g), 2),
+            None => return PortSpec::Any,
+        },
+        _ => return PortSpec::Any,
+    };
+    *i += n;
+    spec
+}
+
+/// True for a word that can be a port: a number or a known port name.
+fn is_port(w: &str) -> bool {
+    w.parse::<u16>().is_ok() || super::lower::port_number(w).is_some()
+}
+
+/// The protocols whose entries can have ports.
+const PORT_PROTOCOLS: &[&str] = &["tcp", "udp", "sctp", "6", "17", "132"];
+
+/// Reads an ACL entry: `<protocol> <source> [<port>] <destination> [<port>]
+/// [<options>]`.
+fn ace(seq: &str, action: AclAction, w: &[&str], lines: Lines) -> Option<Ace> {
+    let protocol = (*w.first()?).to_string();
+    let mut i = 1;
+    let ports = PORT_PROTOCOLS.contains(&protocol.as_str());
+    let source = addr_spec(w, &mut i)?;
+    let source_port = if ports {
+        port_spec(w, &mut i)
+    } else {
+        PortSpec::Any
+    };
+    let destination = addr_spec(w, &mut i)?;
+    let destination_port = if ports {
+        port_spec(w, &mut i)
+    } else {
+        PortSpec::Any
+    };
+    let mut e = Ace {
+        seq: seq.to_string(),
+        action,
+        protocol: protocol.clone(),
+        source,
+        source_port,
+        destination,
+        destination_port,
+        icmp: None,
+        established: false,
+        unhandled: Vec::new(),
+        lines,
+    };
+    if protocol == "icmp"
+        && let Some(t) = w.get(i)
+        && super::lower::icmp_type(t).is_some()
+    {
+        let code = w
+            .get(i + 1)
+            .filter(|c| c.parse::<u8>().is_ok())
+            .map(|c| (*c).to_string());
+        i += 1 + usize::from(code.is_some());
+        e.icmp = Some(((*t).to_string(), code));
+    }
+    while let Some(word) = w.get(i) {
+        match *word {
+            "log" => {}
+            "established" if protocol == "tcp" || protocol == "6" => e.established = true,
+            other => e.unhandled.push(other.to_string()),
+        }
+        i += 1;
+    }
+    Some(e)
+}
+
+fn static_route(vrf: &str, w: &[&str], lines: Lines) -> StaticRoute {
+    let mut r = StaticRoute {
+        vrf: vrf.to_string(),
+        prefix: String::new(),
+        interface: None,
+        next_hop: None,
+        unhandled: Vec::new(),
+        lines,
+    };
+    let mut i = 0;
+    match w {
+        [p, m, ..] if !p.contains('/') => {
+            match mask_len(m) {
+                Some(l) => r.prefix = format!("{p}/{l}"),
+                None => r.unhandled.push(format!("mask {m}")),
+            }
+            i = 2;
+        }
+        [p, ..] => {
+            r.prefix = (*p).to_string();
+            i = 1;
+        }
+        [] => r.unhandled.push("no prefix".into()),
+    }
+    while let Some(word) = w.get(i) {
+        match *word {
+            "name" | "tag" => i += 1,
+            a if a.parse::<std::net::Ipv4Addr>().is_ok() && r.next_hop.is_none() => {
+                r.next_hop = Some(a.to_string());
+            }
+            n if n.parse::<u8>().is_ok() && (r.next_hop.is_some() || r.interface.is_some()) => {}
+            n if n.chars().next().is_some_and(char::is_alphabetic)
+                && n.chars().any(|c| c.is_ascii_digit())
+                && r.interface.is_none()
+                && r.next_hop.is_none() =>
+            {
+                r.interface = Some(n.to_string());
+            }
+            other => r.unhandled.push(other.to_string()),
+        }
+        i += 1;
+    }
+    r
+}
+
+fn nat_rule(w: &[&str], table: &Table) -> NatKind {
+    let other = || NatKind::Other(table.report_key(&w.join(" ")));
+    match w {
+        [
+            "ip",
+            "nat",
+            "inside",
+            "source",
+            "static",
+            proto @ ("tcp" | "udp"),
+            local,
+            lp,
+            global,
+            gp,
+            rest @ ..,
+        ] if rest.iter().all(|x| *x == "add-route") => NatKind::Static {
+            protocol: Some((*proto).to_string()),
+            local: (*local).to_string(),
+            local_port: Some((*lp).to_string()),
+            global: (*global).to_string(),
+            global_port: Some((*gp).to_string()),
+        },
+        [
+            "ip",
+            "nat",
+            "inside",
+            "source",
+            "static",
+            local,
+            global,
+            rest @ ..,
+        ] if rest.iter().all(|x| *x == "add-route")
+            && local.parse::<std::net::Ipv4Addr>().is_ok()
+            && global.parse::<std::net::Ipv4Addr>().is_ok() =>
+        {
+            NatKind::Static {
+                protocol: None,
+                local: (*local).to_string(),
+                local_port: None,
+                global: (*global).to_string(),
+                global_port: None,
+            }
+        }
+        [
+            "ip",
+            "nat",
+            "inside",
+            "source",
+            "list",
+            acl,
+            "pool",
+            pool,
+            rest @ ..,
+        ] if rest.iter().all(|x| *x == "overload" || *x == "add-route") => NatKind::List {
+            acl: (*acl).to_string(),
+            target: NatTarget::Pool((*pool).to_string()),
+            overload: rest.contains(&"overload"),
+        },
+        [
+            "ip",
+            "nat",
+            "inside",
+            "source",
+            "list",
+            acl,
+            "interface",
+            iface,
+            "overload",
+        ] => NatKind::List {
+            acl: (*acl).to_string(),
+            target: NatTarget::Interface((*iface).to_string()),
+            overload: true,
+        },
+        _ => other(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_mask_gives_its_length() {
+        assert_eq!(mask_len("255.255.255.0"), Some(24));
+        assert_eq!(mask_len("255.255.255.255"), Some(32));
+        assert_eq!(mask_len("0.0.0.0"), Some(0));
+        assert_eq!(mask_len("255.0.255.0"), None);
+    }
+
+    #[test]
+    fn an_entry_gives_its_parts() {
+        let w = words("tcp 192.0.2.0/26 any eq 443 log");
+        let e = ace("10", AclAction::Permit, &w, Lines::default()).unwrap();
+        assert_eq!(e.source, AddrSpec::Prefix("192.0.2.0/26".into()));
+        assert_eq!(e.destination, AddrSpec::Any);
+        assert_eq!(e.destination_port, PortSpec::Eq(vec!["443".into()]));
+        assert!(e.unhandled.is_empty());
+        let w = words(
+            "tcp host 192.0.2.1 range 1000 2000 addrgroup WEB eq www https established dscp ef",
+        );
+        let e = ace("20", AclAction::Deny, &w, Lines::default()).unwrap();
+        assert_eq!(e.source, AddrSpec::Prefix("192.0.2.1/32".into()));
+        assert_eq!(e.source_port, PortSpec::Range("1000".into(), "2000".into()));
+        assert_eq!(e.destination, AddrSpec::Group("WEB".into()));
+        // A port name that the reader does not know stays an unhandled
+        // option.
+        assert_eq!(e.destination_port, PortSpec::Eq(vec!["www".into()]));
+        assert!(e.established);
+        assert_eq!(e.unhandled, ["https", "dscp", "ef"]);
+        let w = words("icmp any 192.0.2.0 0.0.0.255 echo");
+        let e = ace("30", AclAction::Permit, &w, Lines::default()).unwrap();
+        assert_eq!(
+            e.destination,
+            AddrSpec::Wildcard("192.0.2.0".into(), "0.0.0.255".into())
+        );
+        assert_eq!(e.icmp, Some(("echo".into(), None)));
+        assert!(
+            ace(
+                "40",
+                AclAction::Permit,
+                &words("ip bogus any"),
+                Lines::default()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn a_static_route_gives_its_parts() {
+        let s = Lines::default();
+        let r = static_route("default", &words("10.0.0.0/8 192.0.2.9 name core 5"), s);
+        assert_eq!(r.prefix, "10.0.0.0/8");
+        assert_eq!(r.next_hop.as_deref(), Some("192.0.2.9"));
+        assert!(r.unhandled.is_empty());
+        let r = static_route("default", &words("0.0.0.0/0 Ethernet1/2 198.51.100.2"), s);
+        assert_eq!(r.interface.as_deref(), Some("Ethernet1/2"));
+        assert_eq!(r.next_hop.as_deref(), Some("198.51.100.2"));
+        let r = static_route("default", &words("10.0.0.0/8 192.0.2.9 vrf RED"), s);
+        assert_eq!(r.unhandled, ["vrf", "RED"]);
+        let r = static_route("default", &words("192.0.2.128/25 Null0"), s);
+        assert_eq!(r.interface.as_deref(), Some("Null0"));
+    }
+}

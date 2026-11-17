@@ -58,6 +58,7 @@ pub fn hairpin() -> TwinBuilder {
                 port: PortTranslation::Preserve,
             },
         )],
+        ingress: Vec::new(),
         next: r2.id("route"),
     });
     b.add(r2.routes(

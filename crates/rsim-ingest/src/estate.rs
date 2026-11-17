@@ -1,5 +1,5 @@
 //! The twin of a snapshot: the VyOS routers and the UniFi sites, with the
-//! links between them, and the coverage of the NX-OS switches.
+//! links between them, and the layer 3 part of the NX-OS switches.
 
 use std::collections::BTreeMap;
 
@@ -119,8 +119,8 @@ pub fn build(store: &Store, snap: &Snapshot) -> Result<Estate, StoreError> {
 }
 
 /// Builds the twin of the inputs: the routers, then each UniFi site joined
-/// to the router on its uplink. An NX-OS switch gives its coverage and a
-/// note, and no functions.
+/// to the router on its uplink, then the layer 3 part of each NX-OS
+/// switch.
 pub fn assemble(inputs: Vec<Input>) -> Estate {
     let mut e = Estate {
         builder: TwinBuilder::new(),
@@ -129,6 +129,7 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         notes: BTreeMap::new(),
     };
     let mut routers: BTreeMap<String, Router> = BTreeMap::new();
+    let mut switches: BTreeMap<String, (nxos::Config, Collected, String)> = BTreeMap::new();
     let mut sites = Vec::new();
     for input in inputs {
         match input {
@@ -158,18 +159,16 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
             Input::Nxos {
                 name,
                 config,
-                file: _,
+                file,
                 collected: col,
             } => {
                 let doc = nxos::read_text(&config);
                 let table = nxos::table(!col.routes.is_empty());
+                let cfg = nxos::read(&doc, &table);
                 e.coverage.insert(name.clone(), classify(&doc, &table));
-                let unread = nxos::unread(&doc, &table, &Default::default());
-                e.unread.insert(name.clone(), unread);
-                e.notes.entry(name).or_default().push(
-                    "the NX-OS lowering is not built: the twin has no function of this switch"
-                        .into(),
-                );
+                e.unread
+                    .insert(name.clone(), nxos::unread(&doc, &table, &cfg.read));
+                switches.insert(name, (cfg, col, file));
             }
             Input::Unifi { name, sections } => sites.push((name, sections)),
         }
@@ -286,6 +285,19 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
             col.neighbours.push(row);
         }
         let low = vyos::lower(device, &r.file, &profile, &r.cfg, &col, &links);
+        e.notes.entry(device.clone()).or_default().extend(low.notes);
+        for f in low.functions {
+            e.builder.add_arc(f);
+        }
+        for x in low.edges {
+            e.builder.edge_interface(x);
+        }
+    }
+
+    // The layer 3 part of the NX-OS switches.
+    let profile = nxos::profile();
+    for (device, (cfg, col, file)) in &switches {
+        let low = nxos::lower(device, file, &profile, cfg, col);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         for f in low.functions {
             e.builder.add_arc(f);

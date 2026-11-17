@@ -1,0 +1,41 @@
+//! The vendor behaviour profile of NX-OS.
+
+use rsim_core::{SourceSpan, VrfId};
+use rsim_functions::{PortTranslation, RuleAction, UnzonedInterface, VendorProfile};
+
+/// Cisco NX-OS on a Nexus switch.
+///
+/// - `acl_default`: a packet that matches no entry of an IP ACL is denied.
+///   The section "Implicit Rules for IP and MAC ACLs" of the NX-OS security
+///   configuration guide gives the implicit rules.
+/// - `snat_port`: a NAT rule with no `overload` translates the address and
+///   keeps the port. A rule with `overload` allocates a port; the lowering
+///   sets it for each rule.
+/// - The order of the ACLs, the route lookup and the NAT is the order of the
+///   Cisco IOS document "NAT Order of Operation". No NX-OS document gives
+///   it.
+/// - The VRF of an interface with no `vrf member` is `default`.
+///
+/// None of the values is confirmed against a device.
+pub fn profile() -> VendorProfile {
+    VendorProfile {
+        name: "nxos".to_string(),
+        acl_default: RuleAction::Deny,
+        firewall_default: RuleAction::Deny,
+        unzoned_interface: UnzonedInterface::Unknown,
+        snat_port: PortTranslation::Preserve,
+        intra_zone_default: None,
+        default_vrf: Some(VrfId::new("default")),
+        processing_delay_ns: None,
+        source: vec![
+            SourceSpan::line(
+                "Cisco Nexus 9000 NX-OS Security Configuration Guide: Implicit Rules for IP and MAC ACLs",
+                1,
+            ),
+            SourceSpan::line(
+                "https://www.cisco.com/c/en/us/support/docs/ip/network-address-translation-nat/6209-5.html",
+                1,
+            ),
+        ],
+    }
+}

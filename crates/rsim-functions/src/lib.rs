@@ -24,7 +24,7 @@ pub use layer2::{
     BROADCAST, Flood, HostMac, HostResolution, Layer3HandOff, LinkEnd, LinkFacts, MacEntry,
     MacLookup, PortEgress, PortIngress, WirelessAttachment,
 };
-pub use nat::{DestinationNat, NatAction, SourceNat};
+pub use nat::{DestinationNat, NatAction, NatScope, SourceNat};
 pub use policy::{AclMatch, FirewallPolicy, ZoneScope};
 pub use profile::{PortTranslation, RuleAction, UnzonedInterface, VendorProfile};
 pub use qos::QosNotEvaluated;

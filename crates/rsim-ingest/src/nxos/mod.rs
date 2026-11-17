@@ -1,13 +1,20 @@
 //! Cisco NX-OS: the running config as indented text.
 
+pub mod config;
+pub mod lower;
 mod mask;
+pub mod names;
+mod profile;
 mod table;
 
 use std::collections::BTreeSet;
 
 use crate::coverage::Table;
 use crate::stanza::{Document, read_indented};
+pub use config::{Config, read};
+pub use lower::lower;
 pub use mask::mask;
+pub use profile::profile;
 pub use table::table;
 
 /// Reads the bytes of a running config into a stanza tree. A byte sequence
