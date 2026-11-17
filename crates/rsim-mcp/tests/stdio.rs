@@ -249,7 +249,115 @@ fn check_tools_list(r: &Value) {
         assert!(t["description"].is_string());
         assert_eq!(t["inputSchema"]["type"], "object");
         assert_eq!(t["outputSchema"]["type"], "object");
+        assert_eq!(t["inputSchema"]["additionalProperties"], false);
+        let properties = t["inputSchema"]["properties"].as_object().unwrap();
+        for name in t["inputSchema"]["required"].as_array().unwrap() {
+            let name = name.as_str().unwrap();
+            assert!(
+                properties.contains_key(name),
+                "{}: the required name {name} is not in properties",
+                t["name"]
+            );
+        }
+        for (name, p) in properties {
+            assert!(
+                p["description"].is_string(),
+                "{}: {name} has no description",
+                t["name"]
+            );
+        }
     }
+}
+
+/// Checks that each argument of a call of `tool` is in the input schema of
+/// the tool, with the JSON type of the schema where the schema states one.
+fn check_args_in_schema(list: &Value, tool: &str, args: &Value) {
+    let t = list["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == tool)
+        .unwrap_or_else(|| panic!("no tool {tool}"));
+    let properties = t["inputSchema"]["properties"].as_object().unwrap();
+    for (name, v) in args.as_object().unwrap() {
+        let p = properties
+            .get(name)
+            .unwrap_or_else(|| panic!("{tool}: the argument {name} is not in properties"));
+        let kind = match v {
+            Value::String(_) => "string",
+            Value::Number(_) => "integer",
+            Value::Bool(_) => "boolean",
+            Value::Array(_) => "array",
+            _ => panic!("{tool}: {name} has an unexpected value {v}"),
+        };
+        let types: Vec<&Value> = match p.get("anyOf") {
+            Some(a) => a.as_array().unwrap().iter().map(|x| &x["type"]).collect(),
+            None => vec![&p["type"]],
+        };
+        if types.iter().all(|x| !x.is_null()) {
+            assert!(
+                types.iter().any(|x| *x == kind),
+                "{tool}: {name} is a {kind}, and the schema takes {types:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn each_call_matches_the_listed_input_schema() {
+    let dir = empty_dir("schema");
+    let step = json!({
+        "topology": "mini-enterprise",
+        "source.ip": "172.31.10.20",
+        "destination.ip": "10.20.0.53",
+        "network.transport": "udp",
+        "destination.port": 53,
+        "branch": 0,
+        "step": 7
+    });
+    let mut messages = vec![
+        request(1, "server/discover", json!({}), true),
+        request(2, "tools/list", json!({}), true),
+        call(3, "explain_step", step.clone(), true),
+    ];
+    let calls = tool_calls(true);
+    messages.extend(calls.iter().cloned());
+    let responses = session(&dir, &messages);
+
+    let list = &by_id(&responses, 2)["result"];
+    check_tools_list(list);
+    let explain = &list["tools"][3]["inputSchema"]["properties"];
+    for name in ["branch", "step", "reply_of"] {
+        assert_eq!(explain[name]["type"], "integer", "{name}");
+    }
+    assert_eq!(explain["mode"]["enum"], json!(["path", "set"]));
+    check_args_in_schema(list, "explain_step", &step);
+    for c in &calls {
+        let p = &c["params"];
+        check_args_in_schema(list, p["name"].as_str().unwrap(), &p["arguments"]);
+    }
+
+    let r = &by_id(&responses, 3)["result"];
+    assert_eq!(r["isError"], false, "{r}");
+    assert_eq!(r["structuredContent"]["kind"], "step");
+    let mut args = step.as_object().unwrap().clone();
+    args.remove("branch");
+    args.remove("step");
+    let q = rsim_cli::args::query(&args, &[]).unwrap();
+    let twin = rsim_cli::commands::load("mini-enterprise").unwrap();
+    let answer = rsim_cli::json::to_text(&rsim_cli::commands::path(&q, &twin).unwrap(), false);
+    let answer: Value = serde_json::from_str(&answer).unwrap();
+    assert_eq!(
+        r["structuredContent"]["trace_step"],
+        answer["answer"]["branches"][0]["steps"][7]
+    );
+
+    assert_eq!(
+        std::fs::read_dir(&dir).unwrap().count(),
+        0,
+        "rsim-mcp wrote a file"
+    );
+    remove_dir(&dir);
 }
 
 #[test]
