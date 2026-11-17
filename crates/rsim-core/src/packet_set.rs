@@ -382,7 +382,7 @@ impl PacketSet {
         let o = bits::encode(&p.original);
         let c = bits::encode(&p.current);
         let bit = |l: u32| -> bool {
-            let (x, bank) = (l / 3, l % 3);
+            let (x, bank) = (l / 4, l % 4);
             let v = match bank {
                 0 => o[x as usize],
                 1 => c[x as usize],
@@ -403,9 +403,9 @@ impl PacketSet {
         let mut o = vec![false; bits::BITS as usize];
         let mut c = vec![false; bits::BITS as usize];
         for (l, v) in path {
-            match l % 3 {
-                0 => o[(l / 3) as usize] = v,
-                1 => c[(l / 3) as usize] = v,
+            match l % 4 {
+                0 => o[(l / 4) as usize] = v,
+                1 => c[(l / 4) as usize] = v,
                 _ => {}
             }
         }

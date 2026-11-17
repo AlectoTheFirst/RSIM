@@ -1,8 +1,10 @@
 //! The bit table: the order of the header fields in the decision diagram and
 //! the bit width of each field.
 //!
-//! Each bit has 3 adjacent levels: the original request, the current header
-//! and the work level. Only a relation operation uses the work level.
+//! Each bit has 4 adjacent levels: the original request, the current header,
+//! the work level and the inner level. Only a relation operation uses the
+//! work level. The inner level holds the inner header of an encapsulated
+//! packet; for a packet with no encapsulation it is free.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -12,8 +14,8 @@ use crate::header::{Encap, Fragment, Header, HeaderField};
 
 /// The number of bits of one header.
 pub const BITS: u32 = 763;
-/// The number of levels: 3 for each bit.
-pub const LEVELS: u32 = 3 * BITS;
+/// The number of levels: 4 for each bit.
+pub const LEVELS: u32 = 4 * BITS;
 
 /// One of the 3 levels of a bit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -21,11 +23,12 @@ pub enum Bank {
     Original = 0,
     Current = 1,
     Work = 2,
+    Inner = 3,
 }
 
 /// The level of `bit` in `bank`.
 pub const fn level(bit: u32, bank: Bank) -> u32 {
-    3 * bit + bank as u32
+    4 * bit + bank as u32
 }
 
 // The presence bits.
