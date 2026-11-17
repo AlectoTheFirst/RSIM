@@ -13,6 +13,7 @@ mod edge_dnat;
 mod hairpin;
 mod helpers;
 mod layer2_site;
+mod leaf_spine;
 mod mini_enterprise;
 mod profiles;
 mod routing_loop;
@@ -24,6 +25,7 @@ pub use edge_dnat::{EdgeOpts, edge_dnat};
 pub use hairpin::hairpin;
 pub use helpers::*;
 pub use layer2_site::*;
+pub use leaf_spine::leaf_spine;
 pub use mini_enterprise::{MiniOpts, mini_enterprise};
 pub use profiles::*;
 pub use routing_loop::routing_loop;
@@ -31,13 +33,14 @@ pub use routing_loop::routing_loop;
 use rsim_engine::{Twin, TwinBuilder};
 
 /// The built-in topologies by name, in a fixed order.
-const BUILTIN: [(&str, fn() -> TwinBuilder); 6] = [
+const BUILTIN: [(&str, fn() -> TwinBuilder); 7] = [
     ("mini-enterprise", || mini_enterprise(MiniOpts::default())),
     ("edge-dnat", || edge_dnat(EdgeOpts::default())),
     ("ecmp", ecmp),
     ("routing-loop", routing_loop),
     ("hairpin", hairpin),
     ("chain", || chain(10, 20, 100)),
+    ("leaf-spine", leaf_spine),
 ];
 
 /// The names of the built-in topologies, in a fixed order.

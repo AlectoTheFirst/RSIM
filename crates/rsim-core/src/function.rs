@@ -40,6 +40,9 @@ pub enum FunctionKind {
     PortEgress,
     WirelessAttachment,
     Layer3HandOff,
+    // Tunnels.
+    Encapsulation,
+    Decapsulation,
 }
 
 /// An object that a function reads. Delta recompilation uses it.

@@ -1,6 +1,6 @@
 //! The network function library of rsim: ingress, VRF selection, zone lookup,
 //! ACL match, firewall policy, firewall session, source NAT, destination NAT,
-//! route lookup, next-hop resolution and egress.
+//! route lookup, next-hop resolution, egress and the tunnel ends.
 
 pub mod common;
 pub mod fib;
@@ -13,6 +13,7 @@ pub mod qos;
 pub mod routing;
 pub mod rules;
 pub mod session;
+pub mod tunnel;
 
 pub use common::Meta;
 pub use fib::{Fib, GroupRoutes, NextHopGroup};
@@ -33,3 +34,4 @@ pub use routing::{
 };
 pub use rules::{Rule, RuleBody};
 pub use session::{SessionCommit, SessionLookup};
+pub use tunnel::{OuterFields, Segment, TunnelPeer, VxlanDecap, VxlanEncap};

@@ -40,13 +40,15 @@ Sessions and NAT translations are in a `FlowState` value that the query carries.
 
 A switch uses `PortIngress`, `MacLookup`, and `PortEgress` or `Flood`. `Layer3HandOff` gives the packets from a switch port to a router.
 
+A VXLAN tunnel end uses `VxlanEncap` and `VxlanDecap`. `VxlanEncap` puts the packets of a VRF or a bridge domain in an outer header to the peer tunnel end, and the underlay routes the outer header. `VxlanDecap` takes the packets to a local tunnel end out of the tunnel, and the VNI selects the VRF or the bridge domain.
+
 ## Crates
 
 | Crate | Contents |
 |---|---|
 | `rsim-core` | Packets, packet sets, context, flow state, outcomes, traces |
 | `rsim-dd` | Reduced ordered binary decision diagrams with complement edges, for the packet sets |
-| `rsim-functions` | The network functions: forwarding, layer 2, routing, ACL, firewall policy, NAT, sessions |
+| `rsim-functions` | The network functions: forwarding, layer 2, routing, ACL, firewall policy, NAT, sessions, VXLAN tunnel ends |
 | `rsim-engine` | The twin, the executor, verdict aggregation, the return path |
 | `rsim-store` | The append-only snapshot store: the format, the writer and the reader |
 | `rsim-collect` | The collectors: SSH and HTTPS transports, jump hosts and proxies, the vendor sources |
@@ -73,7 +75,7 @@ You need Rust 1.99 or later.
 
 ## Queries with rsim
 
-The topology is a built-in name or `store:<data folder>`, the newest snapshot of a store. The built-in names are `mini-enterprise`, `edge-dnat`, `ecmp`, `routing-loop`, `hairpin` and `chain`.
+The topology is a built-in name or `store:<data folder>`, the newest snapshot of a store. The built-in names are `mini-enterprise`, `edge-dnat`, `ecmp`, `routing-loop`, `hairpin`, `chain` and `leaf-spine`.
 
 | Task | Command |
 |---|---|
