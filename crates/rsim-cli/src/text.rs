@@ -299,7 +299,8 @@ fn field<T: std::fmt::Display>(f: &FieldJson<T>) -> String {
 }
 
 /// The current header. A field with the value of the original request
-/// shows the original values.
+/// shows the original values. An encapsulated header shows its inner
+/// header after the outer header.
 fn header(h: &HeaderJson, o: &HeaderJson) -> String {
     fn pick<T: std::fmt::Display>(c: &FieldJson<T>, o: &FieldJson<T>) -> String {
         match c {
@@ -307,12 +308,16 @@ fn header(h: &HeaderJson, o: &HeaderJson) -> String {
             c => field(c),
         }
     }
-    format!(
+    let line = format!(
         "{} {}:{} > {}:{}",
         pick(&h.iana_number, &o.iana_number),
         pick(&h.source_ip, &o.source_ip),
         pick(&h.source_port, &o.source_port),
         pick(&h.destination_ip, &o.destination_ip),
         pick(&h.destination_port, &o.destination_port)
-    )
+    );
+    match &h.inner {
+        Some(i) => format!("{line} [inner {}]", header(i, o)),
+        None => line,
+    }
 }

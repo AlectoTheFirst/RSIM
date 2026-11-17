@@ -1,8 +1,10 @@
 //! The bit table: the order of the header fields in the decision diagram and
 //! the bit width of each field.
 //!
-//! Each bit has 3 adjacent levels: the original request, the current header
-//! and the work level. Only a relation operation uses the work level.
+//! Each bit has 4 adjacent levels: the original request, the current header,
+//! the work level and the inner level. Only a relation operation uses the
+//! work level. The inner level holds the inner header of an encapsulated
+//! packet; for a packet with no encapsulation it is free.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -12,20 +14,21 @@ use crate::header::{Encap, Fragment, Header, HeaderField};
 
 /// The number of bits of one header.
 pub const BITS: u32 = 763;
-/// The number of levels: 3 for each bit.
-pub const LEVELS: u32 = 3 * BITS;
+/// The number of levels: 4 for each bit.
+pub const LEVELS: u32 = 4 * BITS;
 
-/// One of the 3 levels of a bit.
+/// One of the 4 levels of a bit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Bank {
     Original = 0,
     Current = 1,
     Work = 2,
+    Inner = 3,
 }
 
 /// The level of `bit` in `bank`.
 pub const fn level(bit: u32, bank: Bank) -> u32 {
-    3 * bit + bank as u32
+    4 * bit + bank as u32
 }
 
 // The presence bits.
@@ -185,8 +188,11 @@ pub(crate) type BitValue = Option<bool>;
 /// header does not state has free value bits.
 pub(crate) fn encode(h: &Header) -> Vec<BitValue> {
     let mut bits: Vec<BitValue> = vec![Some(false); BITS as usize];
-    let v6 = match (h.src_ip, h.dst_ip) {
-        (FieldValue::Known(a), _) | (_, FieldValue::Known(a)) => Some(a.is_ipv6()),
+    // With no known address, the addresses of a GRE or VXLAN encapsulation
+    // give the address family.
+    let v6 = match (h.src_ip, h.dst_ip, h.encap.first()) {
+        (FieldValue::Known(a), _, _) | (_, FieldValue::Known(a), _) => Some(a.is_ipv6()),
+        (_, _, Some(Encap::Gre { src, .. } | Encap::Vxlan { src, .. })) => Some(src.is_ipv6()),
         _ => None,
     };
     bits[AF as usize] = v6;
@@ -332,6 +338,22 @@ fn state(f: FieldBits, bit: &dyn Fn(u32) -> bool) -> FieldValue<u128> {
     FieldValue::Known(value_of(f, bit))
 }
 
+/// The bits of the header below the encapsulation fields. They move to the
+/// inner level when a packet is encapsulated.
+pub fn header_bits() -> std::ops::Range<u32> {
+    0..ENCAP_KIND.start
+}
+
+/// The header of one assignment of the bits. `inner` gives the bits of the
+/// inner level, which hold the inner header of an encapsulated packet.
+pub(crate) fn decode_with(bit: &dyn Fn(u32) -> bool, inner: &dyn Fn(u32) -> bool) -> Header {
+    let mut h = decode(bit);
+    if !h.encap.is_empty() {
+        h.inner = Some(Box::new(decode(inner)));
+    }
+    h
+}
+
 /// The header of one assignment of the bits.
 pub(crate) fn decode(bit: &dyn Fn(u32) -> bool) -> Header {
     let v6 = bit(AF);
@@ -378,6 +400,7 @@ pub(crate) fn decode(bit: &dyn Fn(u32) -> bool) -> Header {
         icmp_code: n8(ICMP_CODE),
         mpls_tc: n8(MPLS_TC),
         encap,
+        inner: None,
     }
 }
 

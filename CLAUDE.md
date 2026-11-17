@@ -82,7 +82,7 @@ The prefix table in `rsim-core/src/prefix_table.rs` is a path-compressed trie wi
 
 `rsim-core` keeps the packet sets in `packet_set.rs`, the bit table in `bits.rs`, the arenas in `set.rs` and the description of a set as members in `describe.rs`. `crates/rsim-core/tests/explicit_oracle.rs` compares each set operation with an explicit list of packet pairs. A path query runs on the set of its packet; the design note gives the rule for an unstated field. The ingress of a query comes from `--ingress` or from the attachment records and edge interfaces of the twin.
 
-The tests of `rsim-dd` turn on the feature `dd-shadow` through a development dependency of the crate on itself. Each public operation then also runs in a plain BDD, and the 2 results must be the same set. A benchmark turns the shadow check off with `Dd::set_shadow(false)`. The OxiDD oracle in `crates/rsim-dd/tests/oracle.rs` compares the results with OxiDD on 2,289 levels. OxiDD is a development dependency only.
+The tests of `rsim-dd` turn on the feature `dd-shadow` through a development dependency of the crate on itself. Each public operation then also runs in a plain BDD, and the 2 results must be the same set. A benchmark turns the shadow check off with `Dd::set_shadow(false)`. The OxiDD oracle in `crates/rsim-dd/tests/oracle.rs` compares the results with OxiDD on 3,052 levels. OxiDD is a development dependency only.
 
 `crates/rsim-cli/clippy.toml` and `crates/rsim-mcp/clippy.toml` deny the file write functions and the network socket types. Only a test helper can allow them.
 

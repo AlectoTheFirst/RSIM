@@ -690,7 +690,7 @@ pub struct MemberJson {
 }
 
 /// A header field value: `{"known": value}`, `{"in": [...]}`, `"unknown"`,
-/// `"absent"` or, in the current header, `"original"`.
+/// `"absent"` or, in the current header and the inner header, `"original"`.
 #[derive(Clone, Debug)]
 pub enum FieldJson<T> {
     Known(T),
@@ -786,6 +786,9 @@ pub struct HeaderJson {
     pub icmp_code: FieldJson<u8>,
     pub mpls_tc: FieldJson<u8>,
     pub encap: Vec<EncapJson>,
+    /// The inner header of an encapsulated current header.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inner: Option<Box<HeaderJson>>,
 }
 
 /// An encapsulation header. The values are field values.
@@ -864,6 +867,10 @@ impl HeaderJson {
             icmp_code: f8(HeaderField::IcmpCode),
             mpls_tc: f8(HeaderField::MplsTrafficClass),
             encap: encap.map(EncapJson::new).into_iter().collect(),
+            inner: h
+                .inner
+                .as_deref()
+                .map(|i| Box::new(HeaderJson::new(i, None))),
         }
     }
 }
@@ -912,5 +919,47 @@ pub fn to_text<T: Serialize>(v: &T, pretty: bool) -> String {
     match r {
         Ok(s) => s,
         Err(e) => unreachable!("the view types serialize to JSON without error: {e}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rsim_core::{Encap, Header, Mac, PROTO_TCP, PROTO_UDP, SetArena};
+
+    fn ip(s: &str) -> std::net::IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn only_an_encapsulated_header_has_an_inner_header() {
+        let a = SetArena::standalone();
+        let req = Header::request(ip("10.0.0.1"), ip("10.0.0.2"), PROTO_TCP).with_dst_port(22);
+        let mut o = Header::request(ip("198.51.100.1"), ip("198.51.100.2"), PROTO_UDP)
+            .with_src_port(49152)
+            .with_dst_port(4789);
+        o.dscp = FieldValue::Known(0);
+        o.ecn = FieldValue::Known(0);
+        o.src_mac = FieldValue::Known(Mac([0, 0, 0, 0, 2, 1]));
+        o.dst_mac = FieldValue::Known(Mac([0, 0, 0, 0, 3, 1]));
+        o.vlan = FieldValue::Absent;
+        o.l2_priority = FieldValue::Absent;
+        o.encap = vec![Encap::Vxlan {
+            src: ip("198.51.100.1"),
+            dst: ip("198.51.100.2"),
+            vni: 10,
+        }];
+        let plain = PacketSet::single(&a, &req);
+        let v = serde_json::to_value(PacketSetJson::new(&plain)).unwrap();
+        assert!(v["members"][0]["current"].get("inner").is_none());
+        let s = plain.encapsulate(&o).done;
+        let v = serde_json::to_value(PacketSetJson::new(&s)).unwrap();
+        let m = &v["members"][0];
+        assert!(m["original"].get("inner").is_none());
+        assert_eq!(m["current"]["destination.port"]["known"], 4789);
+        assert_eq!(m["current"]["encap"][0]["kind"], "vxlan");
+        assert_eq!(m["current"]["inner"]["destination.port"]["known"], 22);
+        assert_eq!(m["current"]["inner"]["dscp"], "original");
+        assert!(m["current"]["inner"].get("inner").is_none());
     }
 }
