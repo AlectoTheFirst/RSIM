@@ -1,0 +1,15 @@
+Load for five secs: 2%/0%; one minute: 2%; five minutes: 2%
+Time source is NTP, 10:57:44.090 UTC Mon Nov 16 2026
+
+  Interface          Grp  A-F Pri  Time Own Pre State   Master addr/Group addr
+  Gi0/0/1             10 IPv4 110     0  N   Y  MASTER  192.0.2.2(local) 192.0.2.1
+  Gi0/0/1             10 IPv6 110     0  N   Y  MASTER  2001:DB8:0:10::2(local) 2001:DB8:0:10::1
+  Gi0/0/2             20 IPv4 100  3609  N   Y  BACKUP  192.0.2.66 192.0.2.65
+  Gi0/0/2             20 IPv6 100  3609  N   Y  BACKUP  2001:DB8:0:20::3 2001:DB8:0:20::1
+  Vl400               40 IPv4 255     0  Y   Y  MASTER  198.51.100.1(local) 198.51.100.1
+  GigabitEthernet0/0/3.1300
+                      30 IPv4 120     0  N   Y  MASTER  203.0.113.2(local) 203.0.113.1
+  GigabitEthernet0/0/3.1301
+                      31 IPv4 100  3609  N   Y  BACKUP  203.0.113.34 203.0.113.33
+  Vl401               41 IPv4 100     0  N   N  INIT    0.0.0.0 198.51.100.129
+

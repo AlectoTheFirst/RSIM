@@ -1,0 +1,11 @@
+{
+ "template": "cisco_xr_admin_show_inventory.textfsm",
+ "header": [
+  "NAME",
+  "DESCR",
+  "PID",
+  "VID",
+  "SN"
+ ],
+ "error": "State Error raised. Rule Line: 15. Input Line: admin show inventory chassis"
+}

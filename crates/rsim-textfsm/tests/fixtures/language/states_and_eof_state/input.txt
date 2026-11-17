@@ -1,0 +1,9 @@
+begin s1
+  item a
+  item b
+next s2
+  item c
+stop
+  item ignored
+begin s3
+  tail last

@@ -1,0 +1,13 @@
+{
+ "template": "cisco_ios_show_vrf_detail.textfsm",
+ "header": [
+  "VRF",
+  "RD",
+  "RT_IMPORT",
+  "RT_EXPORT",
+  "VPN_ID",
+  "DESCRIPTION",
+  "INTERFACES"
+ ],
+ "error": "State Error raised. Rule Line: 29. Input Line: % VRF CUST-Z does not exist"
+}

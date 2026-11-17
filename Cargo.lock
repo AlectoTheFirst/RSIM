@@ -2742,6 +2742,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rsim-textfsm"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "regex",
+ "serde_json",
+]
+
+[[package]]
 name = "rsim-topologies"
 version = "0.1.0"
 dependencies = [

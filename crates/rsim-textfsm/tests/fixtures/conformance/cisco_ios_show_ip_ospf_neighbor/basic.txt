@@ -1,0 +1,22 @@
+Load for five secs: 3%/0%; one minute: 2%; five minutes: 2%
+Time source is NTP, 10:29:40.017 UTC Mon Nov 16 2026
+
+Neighbor ID     Pri   State           Dead Time   Address         Interface
+192.0.2.2         1   FULL/DR         00:00:38    198.51.100.6    GigabitEthernet0/0/1
+192.0.2.3         1   FULL/BDR        00:00:33    198.51.100.10   GigabitEthernet0/0/2
+192.0.2.4         0   FULL/  -        00:00:36    198.51.100.18   Port-channel10.100
+192.0.2.5         0   FULL/  -        00:00:39    198.51.100.22   Port-channel20.100
+192.0.2.6         1   2WAY/DROTHER    00:00:31    198.51.100.30   GigabitEthernet0/0/5
+192.0.2.7         1   2WAY/DROTHER    00:00:35    198.51.100.31   GigabitEthernet0/0/5
+192.0.2.8         1   FULL/DR         00:00:34    198.51.100.29   GigabitEthernet0/0/5
+192.0.2.9         0   INIT/  -        00:00:39    198.51.100.34   GigabitEthernet0/0/6
+192.0.2.10        1   EXSTART/BDR     00:00:37    198.51.100.38   GigabitEthernet0/0/7
+192.0.2.66        1   FULL/DR         00:00:36    203.0.113.254   GigabitEthernet0/0/3.100
+192.0.2.67        1   FULL/DR         00:00:34    203.0.113.250   GigabitEthernet0/0/4.100
+192.0.2.71        0   FULL/  -        00:00:32    203.0.113.246   Tunnel10
+192.0.2.72        0   LOADING/  -     00:00:30    203.0.113.242   Tunnel11
+192.0.2.80        1   FULL/BDR        00:00:39    192.0.2.34      Vlan20
+192.0.2.81        1   FULL/DROTHER    00:00:31    192.0.2.35      Vlan20
+192.0.2.82        1   FULL/DROTHER    00:00:33    192.0.2.36      Vlan20
+192.0.2.83        1   2WAY/DROTHER    00:00:38    192.0.2.37      Vlan20
+192.0.2.84        1   FULL/DR         00:00:35    192.0.2.38      Vlan20

@@ -1,0 +1,4 @@
+Value A (\S+)
+
+Start
+  ^${A} -> Nowhere

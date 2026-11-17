@@ -1,0 +1,137 @@
+
+------------------------------------------------
+Local Intf: Gi1/0/5
+Chassis id: 192.0.2.50
+Port id: 0000.5E00.5322:P1
+Port Description: SW PORT
+System Name: SEP00005E005322
+
+System Description:
+Example IP Phone 7841, firmware 14-2-1
+
+Time remaining: 160 seconds
+System Capabilities: B,T
+Enabled Capabilities: B,T
+Management Addresses:
+    IP: 192.0.2.50
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+    100base-TX(FD)
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+MED Information:
+
+    MED Codes:
+          (NP) Network Policy, (LI) Location Identification
+          (PS) Power Source Entity, (PD) Power Device
+          (IN) Inventory
+
+    H/W revision: 3
+    F/W revision: 1.0.4
+    S/W revision: 14.2.1
+    Serial number: EXA00000001
+    Manufacturer: Example Phones Inc.
+    Model: EP-7841
+    Capabilities: NP, PD, IN
+    Device type: Endpoint Class III
+    Network Policy(Voice): VLAN 110, tagged, Layer-2 priority: 5, DSCP: 46
+    PD device, Power source: Unknown, Power Priority: High, Wattage: 6.3
+    Location - not advertised
+
+------------------------------------------------
+Local Intf: Gi1/0/6
+Chassis id: 192.0.2.51
+Port id: 0000.5E00.5323:P1
+Port Description: SW PORT
+System Name: SEP00005E005323
+
+System Description:
+Example IP Phone 8851, firmware 14-2-1
+
+Time remaining: 151 seconds
+System Capabilities: B,T
+Enabled Capabilities: B,T
+Management Addresses:
+    IP: 192.0.2.51
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+Power via MDI:
+    Power Pair: Signal
+    Power Class: 2
+    Power Device Type: PD
+    Power Source: PSE
+    Power Priority: low
+    Power Requested: 6300 mW
+
+MED Information:
+
+    H/W revision: 5
+    F/W revision: 2.0.1
+    S/W revision: 14.2.1
+    Serial number: EXA00000002
+    Manufacturer: Example Phones Inc.
+    Model: EP-8851
+    Capabilities: NP, PD, IN
+    Device type: Endpoint Class III
+    Location - not advertised
+
+------------------------------------------------
+Local Intf: Gi1/0/2
+Chassis id: 0000.5e00.5302
+Port id: Gi0/2
+Port Description: GigabitEthernet0/2
+System Name: sw-access-02.lab.example
+
+System Description:
+Example Switch Software, Version 17.9.4, RELEASE SOFTWARE (fc2)
+
+Time remaining: 99 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+    IP: 192.0.2.12
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+Media Attachment Unit type: 30
+Vlan ID: 1
+
+------------------------------------------------
+Local Intf: Gi1/0/7
+Chassis id: 192.0.2.52
+Port id: 0000.5E00.5324:P1
+Port Description: SW PORT
+System Name: SEP00005E005324
+
+System Description:
+Example Conference Phone 8832, firmware 12-8-1
+
+Time remaining: 170 seconds
+System Capabilities: B,T
+Enabled Capabilities: T
+Management Addresses:
+    IP: 192.0.2.52
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    100base-TX(FD)
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+MED Information:
+
+    H/W revision: 1
+    F/W revision: 1.1.0
+    S/W revision: 12.8.1
+    Serial number: EXA00000003
+    Manufacturer: Example Phones Inc.
+    Model: EP-8832
+    Device type: Endpoint Class III
+
+Total entries displayed: 4
+

@@ -1,0 +1,64 @@
+# Changed for the Rust regex crate, which has no lookbehind: this template
+# differs from the HST template of the same name in the ACE rule of an extended
+# list. There, SRC_PORT_RANGE_START and DST_PORT_RANGE_START match only after
+# `range\s` (a lookbehind), and SRC_PORT and DST_PORT only elsewhere. Here the
+# rule is four rules, in the order in which the original regex tries the
+# alternatives: a range on the source and the destination, on the source only,
+# on the destination only, and on neither. A range rule names the keyword
+# `range` in an inline group of SRC_PORT_MATCH or DST_PORT_MATCH; the other
+# rules name every keyword but `range`. The records are the same as those of
+# the original template, but for a `range` keyword followed by more than one
+# space, which IOS does not print.
+# ntc-templates 9.3.0 cisco_ios_show_ip_access-lists.textfsm, with ICMP_TYPE
+# widened to every ICMP message name IOS accepts in an ACE, plus a numeric
+# `icmp-type [icmp-code]` that IOS prints when no name fits. The upstream list
+# has 13 names, so an ACE such as `deny icmp any any timestamp-request` falls
+# through to its Error rule and fails the whole command.
+Value Required,Filldown ACL_TYPE (Standard|Extended)
+Value Required,Filldown ACL_NAME (\S+)
+Value LINE_NUM (\d+)
+Value ACTION (permit|deny)
+Value PROTOCOL (\S+)
+Value SRC_HOST (\d+\.\d+\.\d+\.\d+)
+Value SRC_ANY (any)
+Value SRC_NETWORK (\d+\.\d+\.\d+\.\d+)
+Value SRC_WILDCARD (\d+\.\d+\.\d+\.\d+)
+Value SRC_NETWORK_OBJECT_GROUP_NAME (\S+)
+Value SRC_PORT_MATCH (eq|neq|precedence|range|tos|lt|gt)
+Value SRC_PORT (.+?)
+Value SRC_PORT_RANGE_START (\S+)
+Value SRC_PORT_RANGE_END (\S+)
+Value DST_HOST (\d+\.\d+\.\d+\.\d+)
+Value DST_ANY (any)
+Value DST_NETWORK (\d+\.\d+\.\d+\.\d+)
+Value DST_WILDCARD (\d+\.\d+\.\d+\.\d+)
+Value DST_NETWORK_OBJECT_GROUP_NAME (\S+)
+Value DST_PORT_MATCH (eq|neq|precedence|range|tos|lt|gt)
+Value DST_PORT (.+?)
+Value DST_PORT_RANGE_START (\S+)
+Value DST_PORT_RANGE_END (\S+)
+Value SERVICE_OBJECT_GROUP_NAME (\S+)
+Value FLAGS_MATCH (match-all|match-any)
+Value TCP_FLAG (((\+|-|)ack(\s*?)|(\+|-|)established(\s*?)|(\+|-|)fin(\s*?)|(\+|-|)fragments(\s*?)|(\+|-|)psh(\s*?)|(\+|-|)rst(\s*?)|(\+|-|)syn(\s*?)|urg(\s*?))+)
+Value LOG (log-input|log)
+Value LOG_TAG (\S+)
+Value ICMP_TYPE (administratively-prohibited|alternate-address|conversion-error|dod-host-prohibited|dod-net-prohibited|echo|echo-reply|general-parameter-problem|host-isolated|host-precedence-unreachable|host-redirect|host-tos-redirect|host-tos-unreachable|host-unknown|host-unreachable|information-reply|information-request|mask-reply|mask-request|mobile-redirect|net-redirect|net-tos-redirect|net-tos-unreachable|net-unreachable|network-unknown|no-room-for-option|option-missing|packet-too-big|parameter-problem|port-unreachable|precedence-unreachable|protocol-unreachable|reassembly-timeout|redirect|router-advertisement|router-solicitation|source-quench|source-route-failed|time-exceeded|timestamp-reply|timestamp-request|traceroute|ttl-exceeded|unreachable|\d+(?:\s+\d+)?)
+Value TIME (\S+)
+Value STATE (inactive|active)
+Value MATCHES (\d+)
+
+Start
+  ^(Standard|Extended) -> Continue.Clearall
+  ^${ACL_TYPE}\s+IP\s+access\s+list\s+${ACL_NAME}\s* -> Record
+  ^\s+${LINE_NUM}\s+${ACTION}\s+(${PROTOCOL}|${SERVICE_OBJECT_GROUP_NAME})\s+(host\s+${SRC_HOST}|${SRC_ANY}|${SRC_NETWORK}\s+${SRC_WILDCARD}|object-group\s+${SRC_NETWORK_OBJECT_GROUP_NAME})\s+(?P<SRC_PORT_MATCH>range)\s${SRC_PORT_RANGE_START}\s+${SRC_PORT_RANGE_END}\s+(host\s+${DST_HOST}|${DST_ANY}|${DST_NETWORK}\s+${DST_WILDCARD}|object-group\s+${DST_NETWORK_OBJECT_GROUP_NAME})\s+(?P<DST_PORT_MATCH>range)\s${DST_PORT_RANGE_START}\s+${DST_PORT_RANGE_END}(\s+${ICMP_TYPE}|)(\s+${LOG}|)(\s+time-range\s+${TIME}\s+\(${STATE}\)|)(?:\s+\(${MATCHES}\s+\S+\)|)(\s+\(tag\s+=\s+${LOG_TAG}\)|)\s*$$ -> Record
+  ^\s+${LINE_NUM}\s+${ACTION}\s+(${PROTOCOL}|${SERVICE_OBJECT_GROUP_NAME})\s+(host\s+${SRC_HOST}|${SRC_ANY}|${SRC_NETWORK}\s+${SRC_WILDCARD}|object-group\s+${SRC_NETWORK_OBJECT_GROUP_NAME})\s+(?P<SRC_PORT_MATCH>range)\s${SRC_PORT_RANGE_START}\s+${SRC_PORT_RANGE_END}\s+(host\s+${DST_HOST}|${DST_ANY}|${DST_NETWORK}\s+${DST_WILDCARD}|object-group\s+${DST_NETWORK_OBJECT_GROUP_NAME})(\s+(?P<DST_PORT_MATCH>eq|neq|precedence|tos|lt|gt)\s+(${DST_PORT}|)|\s+(${FLAGS_MATCH}\s+|)${TCP_FLAG}|)(\s+${ICMP_TYPE}|)(\s+${LOG}|)(\s+time-range\s+${TIME}\s+\(${STATE}\)|)(?:\s+\(${MATCHES}\s+\S+\)|)(\s+\(tag\s+=\s+${LOG_TAG}\)|)\s*$$ -> Record
+  ^\s+${LINE_NUM}\s+${ACTION}\s+(${PROTOCOL}|${SERVICE_OBJECT_GROUP_NAME})\s+(host\s+${SRC_HOST}|${SRC_ANY}|${SRC_NETWORK}\s+${SRC_WILDCARD}|object-group\s+${SRC_NETWORK_OBJECT_GROUP_NAME})(\s+(?P<SRC_PORT_MATCH>eq|neq|precedence|tos|lt|gt)\s+|)(${SRC_PORT}|)\s+(host\s+${DST_HOST}|${DST_ANY}|${DST_NETWORK}\s+${DST_WILDCARD}|object-group\s+${DST_NETWORK_OBJECT_GROUP_NAME})\s+(?P<DST_PORT_MATCH>range)\s${DST_PORT_RANGE_START}\s+${DST_PORT_RANGE_END}(\s+${ICMP_TYPE}|)(\s+${LOG}|)(\s+time-range\s+${TIME}\s+\(${STATE}\)|)(?:\s+\(${MATCHES}\s+\S+\)|)(\s+\(tag\s+=\s+${LOG_TAG}\)|)\s*$$ -> Record
+  ^\s+${LINE_NUM}\s+${ACTION}\s+(${PROTOCOL}|${SERVICE_OBJECT_GROUP_NAME})\s+(host\s+${SRC_HOST}|${SRC_ANY}|${SRC_NETWORK}\s+${SRC_WILDCARD}|object-group\s+${SRC_NETWORK_OBJECT_GROUP_NAME})(\s+(?P<SRC_PORT_MATCH>eq|neq|precedence|tos|lt|gt)\s+|)(${SRC_PORT}|)\s+(host\s+${DST_HOST}|${DST_ANY}|${DST_NETWORK}\s+${DST_WILDCARD}|object-group\s+${DST_NETWORK_OBJECT_GROUP_NAME})(\s+(?P<DST_PORT_MATCH>eq|neq|precedence|tos|lt|gt)\s+(${DST_PORT}|)|\s+(${FLAGS_MATCH}\s+|)${TCP_FLAG}|)(\s+${ICMP_TYPE}|)(\s+${LOG}|)(\s+time-range\s+${TIME}\s+\(${STATE}\)|)(?:\s+\(${MATCHES}\s+\S+\)|)(\s+\(tag\s+=\s+${LOG_TAG}\)|)\s*$$ -> Record
+  ^\s+${LINE_NUM}\s+${ACTION}\s+(${SRC_NETWORK},\s+wildcard\s+bits\s+${SRC_WILDCARD}|${SRC_HOST}|${SRC_ANY})(\s+${LOG}|)(\s+time-range\s+${TIME}\s+\(${STATE}\)|)(?:\s+\(${MATCHES}\s+\S+\)|)(\s+\(tag\s+=\s+${LOG_TAG}\)|)\s*$$ -> Record
+  ^\s*$$
+  # Capture time-stamp if vty line has command time-stamping turned on
+  ^Load\s+for\s+
+  ^Time\s+source\s+is
+  ^.* -> Error "Could not parse line:"
+
+EOF

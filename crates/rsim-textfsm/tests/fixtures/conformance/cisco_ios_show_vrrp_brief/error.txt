@@ -1,0 +1,3 @@
+Interface          Grp Pri Time  Own Pre State   Master addr     Group addr
+Gi0/0/1            1   110 3570       Y  Master  192.0.2.2       192.0.2.1
+Gi0/0/4            9   100 3609       Y  Init    unknown         unknown

@@ -1,0 +1,8 @@
+Mon Nov 16 10:41:15.006 UTC
+
+IPv4 Groups:
+                     P indicates configured to preempt.
+                     |
+Interface   Grp  Pri P State   Active addr     Standby addr    Group addr
+BE10.200      1  110 P Active  local           198.51.100.2    198.51.100.1
+Gi0/0/0/6    12  100   Init    unknown         unknown         unknown

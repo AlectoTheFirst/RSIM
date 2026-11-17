@@ -1,0 +1,65 @@
+{
+ "template": "cisco_xr_show_lldp_neighbors_detail.textfsm",
+ "header": [
+  "LOCAL_INTERFACE",
+  "CHASSIS_ID",
+  "NEIGHBOR_PORT_DESCRIPTION",
+  "NEIGHBOR_PORT_ID",
+  "NEIGHBOR",
+  "SYSTEM_DESCRIPTION",
+  "CAPABILITIES",
+  "MANAGEMENT_IP",
+  "MANAGEMENT_IPV6",
+  "MAC_ADDRESS"
+ ],
+ "records": [
+  [
+   "HundredGigE0/0/0/0",
+   "0000.5e00.5301",
+   "uplink to pe-east-1 Hu0/0/0/0",
+   "Ethernet1/49",
+   "leaf-01.lab.example",
+   "Example NOS Software, Version 10.4(2), RELEASE SOFTWARE",
+   "B,R",
+   "192.0.2.11",
+   "2001:db8:0:1::11",
+   "00:00:5e:00:53:01"
+  ],
+  [
+   "HundredGigE0/0/0/1",
+   "0000.5e00.5302",
+   "uplink to pe-east-1 Hu0/0/0/1",
+   "Ethernet1/49",
+   "leaf-02.lab.example",
+   "Example NOS Software, Version 10.4(2), RELEASE SOFTWARE",
+   "R",
+   "192.0.2.12",
+   "",
+   "00:00:5e:00:53:02"
+  ],
+  [
+   "TenGigE0/0/0/4",
+   "0000.5e00.5310",
+   "core link to pe-west-2",
+   "TenGigE0/0/0/4",
+   "pe-west-2",
+   "Example XR Software, Version 7.9.2",
+   "R",
+   "198.51.100.2",
+   "2001:db8:100::2",
+   "00:00:5e:00:53:10"
+  ],
+  [
+   "GigabitEthernet0/0/0/9",
+   "0000.5e00.5320",
+   "not advertised",
+   "ge-0/0/1",
+   "oob-sw-03",
+   "OOB switch EX-24, firmware 3.1.7",
+   "B",
+   "203.0.113.9",
+   "",
+   "00:00:5e:00:53:20"
+  ]
+ ]
+}

@@ -1,0 +1,3 @@
+price $12 for apple
+price 3 for pear
+price $5 for kiwi extra

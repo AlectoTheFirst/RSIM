@@ -1,0 +1,8 @@
+Value ITEM (\S+)
+
+Start
+  ^item\s+${ITEM} -> Record
+  ^\s+last\s+${ITEM}
+  ^quit -> End
+
+End

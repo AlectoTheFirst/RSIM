@@ -1,0 +1,16 @@
+Load for five secs: 3%/0%; one minute: 2%; five minutes: 2%
+Time source is NTP, 10:50:31.778 UTC Mon Nov 16 2026
+
+                     P indicates configured to preempt.
+                     |
+Interface   Grp  Pri P State   Active          Standby         Virtual IP
+Vl10        10   110 P Active  local           192.0.2.3       192.0.2.1
+Vl20        20   100   Standby 192.0.2.66      local           192.0.2.65
+Vl30        30   100 P Active  local           unknown         192.0.2.129
+Vl40        40   90    Listen  198.51.100.2    198.51.100.3    198.51.100.1
+Gi0/0/1.100 100  120 P Active  local           198.51.100.67   198.51.100.65
+GigabitEthernet0/0/1.1200
+            200  100 P Standby 203.0.113.2     local           203.0.113.1
+Po10.3001   1    100   Init    unknown         unknown         203.0.113.129
+Po10.3002   2    105 P Speak   unknown         unknown         203.0.113.161
+

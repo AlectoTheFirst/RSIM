@@ -1,0 +1,49 @@
+{
+ "template": "cisco_ios_show_version.textfsm",
+ "header": [
+  "SOFTWARE_IMAGE",
+  "VERSION",
+  "RELEASE",
+  "ROMMON",
+  "HOSTNAME",
+  "UPTIME",
+  "UPTIME_YEARS",
+  "UPTIME_WEEKS",
+  "UPTIME_DAYS",
+  "UPTIME_HOURS",
+  "UPTIME_MINUTES",
+  "RELOAD_REASON",
+  "RUNNING_IMAGE",
+  "HARDWARE",
+  "SERIAL",
+  "CONFIG_REGISTER",
+  "MAC_ADDRESS",
+  "RESTARTED"
+ ],
+ "records": [
+  [
+   "C2900-UNIVERSALK9-M",
+   "15.7(3)M8a",
+   "V157_3_M8A_FC1",
+   "System",
+   "branch-rtr7",
+   "3 years, 51 weeks, 6 days, 23 hours, 59 minutes",
+   "3",
+   "51",
+   "6",
+   "23",
+   "59",
+   "power-on",
+   "c2900-universalk9-mz.SPA.157-3.M8a.bin",
+   [
+    "CISCO2911/K9"
+   ],
+   [
+    "FTX0000A1B2"
+   ],
+   "0x2102",
+   [],
+   "00:01:12 UTC Tue Nov 21 2023"
+  ]
+ ]
+}

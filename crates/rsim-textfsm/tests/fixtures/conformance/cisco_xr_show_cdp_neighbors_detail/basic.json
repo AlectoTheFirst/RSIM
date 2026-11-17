@@ -1,0 +1,55 @@
+{
+ "template": "cisco_xr_show_cdp_neighbors_detail.textfsm",
+ "header": [
+  "CHASSIS_ID",
+  "NEIGHBOR_NAME",
+  "MGMT_ADDRESS",
+  "PLATFORM",
+  "NEIGHBOR_INTERFACE",
+  "LOCAL_INTERFACE",
+  "NEIGHBOR_DESCRIPTION",
+  "CAPABILITIES"
+ ],
+ "records": [
+  [
+   "leaf-01(FDO00000001)",
+   "leaf-01",
+   "192.0.2.11",
+   "Example EX-93180",
+   "Ethernet1/49",
+   "HundredGigE0/0/0/0",
+   "Example NOS Software, Version 10.4(2)",
+   "Router Switch IGMP Filtering Supports-STP-Dispute"
+  ],
+  [
+   "leaf-02(FDO00000002)",
+   "leaf-02",
+   "192.0.2.12",
+   "Example EX-93180",
+   "Ethernet1/49",
+   "HundredGigE0/0/0/1",
+   "Example NOS Software, Version 10.4(2)",
+   "Router Switch IGMP Filtering Supports-STP-Dispute"
+  ],
+  [
+   "pe-west-2",
+   "pe-west-2",
+   "198.51.100.2",
+   "Example ASR-9906",
+   "TenGigE0/0/0/4",
+   "TenGigE0/0/0/4",
+   " 7.9.2",
+   "Router"
+  ],
+  [
+   "rr-01",
+   "rr-01",
+   "192.0.2.250",
+   "Example XRv-9000",
+   "GigabitEthernet0/0/0/0",
+   "GigabitEthernet0/0/0/9",
+   "Example XR Software, Version 7.9.2",
+   "Router"
+  ]
+ ]
+}

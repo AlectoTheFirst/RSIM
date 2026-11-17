@@ -1,0 +1,4 @@
+Value Sticky A (\S+)
+
+Start
+  ^${A} -> Record

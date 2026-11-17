@@ -1,0 +1,121 @@
+# ntc-templates 9.3.0 cisco_ios_show_ip_route.textfsm, changed where upstream
+# passes over a route line of a layout it lacks (a flag it does not list, a
+# column it does not know, an IPv6 next hop), which leaves the route out of
+# the table without a word:
+#   - Each line no rule reads is recorded into UNREAD, by the last rule of each
+#     state. cli_parse counts those records and leaves them out
+#     (`cli_parse._UNREAD`). The lines upstream passes over on purpose are
+#     named instead, after upstream's own rules: blank lines, the code legend,
+#     and the gateway line of each further VRF.
+#   - The two rules that read a network whose route continues on the next line
+#     end at the end of the line, so a route line that holds more after its
+#     network than the other rules read is unread, not taken for such a
+#     network.
+#   - The dots of NETWORK, NEXTHOP_IP and the subnetted line are literal, so
+#     an IPv6 next hop is not read as an IPv4 one.
+#   - A continuation line (another path of the route on the line before) after
+#     an unread line is unread as well (the AfterUnread state), where Routes
+#     would give it to the route read before the unread line.
+#   - A connected or local route whose network is too long for one line
+#     continues with `is directly connected, <interface>` on the next line.
+#     Upstream reads the continuation of a `via` route only.
+#   - Every `via` rule reads the VRF a leaked route's next hop resolves in
+#     (`via 10.0.0.1 (default)`) into NEXTHOP_VRF. Upstream reads it on the
+#     route line with a mask only; its other `via` rules stop at the
+#     parenthesis and drop the rest of the line.
+# Every other rule is upstream's, in upstream's order. A record of an unread
+# line clears the values of the route being read, as any Record does; the
+# Filldown values stay.
+Value Filldown VRF (\S+)
+Value Filldown PROTOCOL (\w)
+Value Filldown TYPE (\w{0,2})
+Value Required,Filldown NETWORK (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})
+Value Filldown PREFIX_LENGTH (\d{1,2})
+Value DISTANCE (\d+)
+Value METRIC (\d+)
+Value NEXTHOP_IP (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})
+Value NEXTHOP_VRF (\S+)
+Value NEXTHOP_IF ([A-Za-z][\w\-\.:/]+)
+Value UPTIME (\d[\w:\.]+)
+Value FLAG ([\*%p])
+Value UNREAD (.+)
+
+Start
+  ^Routing\s+Table:\s${VRF}\s*$$
+  ^Gateway.* -> Routes
+  # Capture time-stamp if vty line has command time-stamping turned on
+  ^Load\s+for\s+
+  ^Time\s+source\s+is
+  ^Codes:
+  ^\s+\S+\s+-\s
+  ^\s*$$
+  ^${UNREAD} -> Record
+
+Routes
+  ^Routing\s+Table: -> Continue.Clearall
+  ^Routing\s+Table:\s+${VRF}\s*$$
+  # For "is (variably )subnetted" line, capture mask, clear all values.
+  ^\s+\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/${PREFIX_LENGTH}\sis -> Clear
+  #
+  # Match directly connected route with explicit mask
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\/${PREFIX_LENGTH}\sis\sdirectly\sconnected(,\s${UPTIME})?(,\s${NEXTHOP_IF})? -> Record
+  #
+  # Match directly connected route (mask is inherited from "is subnetted")
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\sis\sdirectly\sconnected,\s${NEXTHOP_IF} -> Record
+  #
+  # Match regular routes, with mask, where all data in same line
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\/${PREFIX_LENGTH}\s\[${DISTANCE}/${METRIC}\]\svia\s${NEXTHOP_IP}(\s\(${NEXTHOP_VRF}\))?(,\s${UPTIME})?(,\s${NEXTHOP_IF})? -> Record
+  #
+  # Match regular route, all one line, where mask is learned from "is subnetted" line
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\s\[${DISTANCE}\/${METRIC}\]\svia\s${NEXTHOP_IP}(\s\(${NEXTHOP_VRF}\))?(,\s${UPTIME})?(,\s${NEXTHOP_IF})? -> Record
+  #
+  # Match route with no via statement (Null via protocol)
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\/${PREFIX_LENGTH}\s\[${DISTANCE}/${METRIC}\],\s${UPTIME},\s${NEXTHOP_IF} -> Record
+  #
+  # Match "is a summary" routes (often Null0)
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\/${PREFIX_LENGTH}\sis\sa\ssummary,\s${UPTIME},\s${NEXTHOP_IF} -> Record
+  #
+  # Match regular routes where the network/mask is on the line above the rest of the route
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\/${PREFIX_LENGTH}\s*$$
+  #
+  # Match regular routes where the network only (mask from subnetted line) is on the line above the rest of the route
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\s*$$
+  #
+  # Match the rest of the route information on line below network (and possibly mask)
+  ^\s+\[${DISTANCE}\/${METRIC}\]\svia\s${NEXTHOP_IP}(\s\(${NEXTHOP_VRF}\))?(,\s${UPTIME})?(,\s${NEXTHOP_IF})? -> Record
+  #
+  # Match the rest of a directly connected route on the line below network (and possibly mask)
+  ^\s+is\sdirectly\sconnected(,\s${UPTIME})?,\s${NEXTHOP_IF}\s*$$ -> Record
+  #
+  # Match load-balanced routes
+  ^\s+\[${DISTANCE}\/${METRIC}\]\svia\s${NEXTHOP_IP}(\s\(${NEXTHOP_VRF}\))? -> Record
+  #
+  # The lines of each further VRF's header, and blank lines.
+  ^\s*$$
+  ^Codes:
+  ^\s+\S+\s+-\s
+  ^Gateway\s+of\s+last\s+resort
+  ^${UNREAD} -> Record AfterUnread
+
+# The lines after an unread line. Each rule of Routes but the three continuation
+# rules, in Routes' order, returning to Routes; a continuation line matches none
+# of them and is unread, as is every other line none of them reads.
+AfterUnread
+  ^Routing\s+Table: -> Continue.Clearall
+  ^Routing\s+Table:\s+${VRF}\s*$$ -> Routes
+  ^\s+\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/${PREFIX_LENGTH}\sis -> Clear Routes
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\/${PREFIX_LENGTH}\sis\sdirectly\sconnected(,\s${UPTIME})?(,\s${NEXTHOP_IF})? -> Record Routes
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\sis\sdirectly\sconnected,\s${NEXTHOP_IF} -> Record Routes
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\/${PREFIX_LENGTH}\s\[${DISTANCE}/${METRIC}\]\svia\s${NEXTHOP_IP}(\s\(${NEXTHOP_VRF}\))?(,\s${UPTIME})?(,\s${NEXTHOP_IF})? -> Record Routes
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\s\[${DISTANCE}\/${METRIC}\]\svia\s${NEXTHOP_IP}(\s\(${NEXTHOP_VRF}\))?(,\s${UPTIME})?(,\s${NEXTHOP_IF})? -> Record Routes
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\/${PREFIX_LENGTH}\s\[${DISTANCE}/${METRIC}\],\s${UPTIME},\s${NEXTHOP_IF} -> Record Routes
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\/${PREFIX_LENGTH}\sis\sa\ssummary,\s${UPTIME},\s${NEXTHOP_IF} -> Record Routes
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\/${PREFIX_LENGTH}\s*$$ -> Routes
+  ^${PROTOCOL}(\s|${FLAG})${TYPE}\s+${NETWORK}\s*$$ -> Routes
+  ^\s*$$ -> Routes
+  ^Codes: -> Routes
+  ^\s+\S+\s+-\s -> Routes
+  ^Gateway\s+of\s+last\s+resort -> Routes
+  ^${UNREAD} -> Record
+
+EOF

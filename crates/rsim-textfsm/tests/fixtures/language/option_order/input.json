@@ -1,0 +1,38 @@
+{
+ "template": "template.textfsm",
+ "header": [
+  "FIRST",
+  "SECOND",
+  "ID"
+ ],
+ "records": [
+  [
+   [
+    "a"
+   ],
+   [
+    "b"
+   ],
+   "1"
+  ],
+  [
+   [
+    "a",
+    "x"
+   ],
+   [
+    null
+   ],
+   "2"
+  ],
+  [
+   [
+    "a"
+   ],
+   [
+    "b"
+   ],
+   "3"
+  ]
+ ]
+}

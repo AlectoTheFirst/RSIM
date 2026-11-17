@@ -1,0 +1,4 @@
+{
+ "template": "template.textfsm",
+ "template_error": "Duplicate or invalid variable substitution: '^${A}$'. Line: 4."
+}

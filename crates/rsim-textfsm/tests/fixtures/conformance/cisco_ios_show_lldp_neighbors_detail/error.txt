@@ -1,0 +1,26 @@
+
+------------------------------------------------
+Local Intf: Gi1/0/1
+Chassis id: 0000.5e00.5301
+Port id: Gi0/1
+Port Description: GigabitEthernet0/1
+System Name: sw-access-01.lab.example
+
+System Description: 
+Example Switch Software, Version 17.9.4, RELEASE SOFTWARE (fc2)
+
+Time remaining: 98 seconds
+System Capabilities: B,R
+Enabled Capabilities: B
+Management Addresses:
+    IP: 192.0.2.11
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+Media Attachment Unit type: 30
+Vlan ID: 1
+Unknown TLVs:
+    Type 127, OUI 00-00-5E, subtype 1
+
+Total entries displayed: 1
+

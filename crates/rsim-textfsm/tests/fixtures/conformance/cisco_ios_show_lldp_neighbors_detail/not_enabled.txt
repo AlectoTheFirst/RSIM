@@ -1,0 +1,4 @@
+Load for five secs: 2%/0%; one minute: 2%; five minutes: 2%
+Time source is NTP, 09:20:01.004 UTC Wed Nov 17 2026
+
+% LLDP is not enabled

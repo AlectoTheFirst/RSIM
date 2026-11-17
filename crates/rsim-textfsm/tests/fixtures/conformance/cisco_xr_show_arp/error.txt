@@ -1,0 +1,28 @@
+Mon Nov 16 10:22:41.318 UTC
+
+-------------------------------------------------------------------------------
+0/RP0/CPU0
+-------------------------------------------------------------------------------
+Address         Age        Hardware Addr   State      Type  Interface
+192.0.2.1       -          0000.5e00.5301  Interface  ARPA  Bundle-Ether10
+192.0.2.2       00:41:07   0000.5e00.5302  Dynamic    ARPA  Bundle-Ether10
+192.0.2.33      -          0000.5e00.5321  Interface  ARPA  BVI20
+192.0.2.34      00:12:55   0000.5e00.5322  Dynamic    ARPA  BVI20
+192.0.2.200     -          0000.5e00.5330  Interface  ARPA  MgmtEth0/RP0/CPU0/0
+192.0.2.193     01:58:12   0000.5e00.5331  Dynamic    ARPA  MgmtEth0/RP0/CPU0/0
+
+-------------------------------------------------------------------------------
+0/0/CPU0
+-------------------------------------------------------------------------------
+Address         Age        Hardware Addr   State      Type  Interface
+198.51.100.1    -          0000.5e00.5340  Interface  ARPA  GigabitEthernet0/0/0/0
+198.51.100.2    02:10:33   0000.5e00.5341  Dynamic    ARPA  GigabitEthernet0/0/0/0
+198.51.100.5    -          0000.5e00.5342  Interface  ARPA  GigabitEthernet0/0/0/1
+198.51.100.6    00:03:19   0000.5e00.5343  Dynamic    ARPA  GigabitEthernet0/0/0/1
+
+-------------------------------------------------------------------------------
+0/1/CPU0
+-------------------------------------------------------------------------------
+ARP table is not available on this node
+198.51.100.13   -          0000.5e00.5360  Interface  ARPA  Bundle-Ether10
+198.51.100.14   00:15:20   0000.5e00.5361  Dynamic    ARPA  Bundle-Ether10

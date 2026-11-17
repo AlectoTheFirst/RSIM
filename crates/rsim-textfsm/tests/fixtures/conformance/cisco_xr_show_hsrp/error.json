@@ -1,0 +1,14 @@
+{
+ "template": "cisco_xr_show_hsrp.textfsm",
+ "header": [
+  "INTERFACE",
+  "GROUP",
+  "PRIO",
+  "PREEMPT",
+  "STATE",
+  "ACTIVE_ADDR",
+  "STANDBY_ADDR",
+  "GROUP_ADDR"
+ ],
+ "error": "State Error raised. Rule Line: 19. Input Line: Gi0/0/0/6    12  100   Init    unknown         unknown         unknown"
+}

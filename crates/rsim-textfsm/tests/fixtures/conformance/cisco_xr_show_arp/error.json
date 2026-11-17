@@ -1,0 +1,13 @@
+{
+ "template": "cisco_xr_show_arp.textfsm",
+ "header": [
+  "IP_ADDRESS",
+  "AGE",
+  "MAC_ADDRESS",
+  "STATE",
+  "TYPE",
+  "INTERFACE",
+  "CPU"
+ ],
+ "error": "State Error raised. Rule Line: 17. Input Line: ARP table is not available on this node"
+}

@@ -1,0 +1,12 @@
+{
+ "template": "cisco_xr_show_version.textfsm",
+ "header": [
+  "VERSION",
+  "UPTIME",
+  "LOCATION",
+  "HARDWARE",
+  "BUILD_HOST",
+  "LABEL"
+ ],
+ "error": "State Error raised. Rule Line: 37. Input Line:  Commit Id    : 0a1b2c3d"
+}

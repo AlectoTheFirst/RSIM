@@ -1,0 +1,17 @@
+Mon Nov 16 10:20:44.110 UTC
+Cisco IOS XR Software, Version 7.5.2
+Copyright (c) 2013-2022 by Cisco Systems, Inc.
+
+Build Information:
+ Built By     : xrbuilder
+ Built On     : Tue Jun 14 18:01:22 UTC 2022
+ Built Host   : xr-build-host-07
+ Workspace    : /auto/srcarchive/prod/7.5.2/ncs5500/ws
+ Version      : 7.5.2
+ Location     : /opt/cisco/XR/packages/
+ Label        : 7.5.2
+
+cisco NCS-5500 () processor
+System uptime is 4 weeks 1 day 6 hours 18 minutes
+
+Cisco NCS-5501-SE 1RU Chassis

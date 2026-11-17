@@ -1,0 +1,54 @@
+Mon Nov 16 10:31:02.871 UTC
+
+VRF: default
+
+Routing entry for 0.0.0.0/0
+  Known via "static", distance 1, metric 0, candidate default path
+  Installed Nov 13 06:14:51.220 for 3d04h
+  Routing Descriptor Blocks
+    198.51.100.2
+      Route metric is 0
+  No advertising protos.
+
+VRF: BLUE
+
+Routing entry for 0.0.0.0/0
+  Known via "ospf 10", distance 110, metric 1, candidate default path
+  Tag 10, type extern 2
+  Installed Nov 16 09:36:52.004 for 00:44:10
+  Routing Descriptor Blocks
+    203.0.113.254, from 192.0.2.66, via GigabitEthernet0/0/0/3.100
+      Route metric is 1
+    203.0.113.250, from 192.0.2.67, via GigabitEthernet0/0/0/4.100
+      Route metric is 1
+  No advertising protos.
+
+VRF: RED
+
+% Network not in table
+
+VRF: GREEN
+
+% No matching routes found
+
+VRF: MGMT
+
+Routing entry for 192.0.2.192/27
+  Known via "connected", distance 0, metric 0 (connected)
+  Installed Nov 13 06:14:49.881 for 3d04h
+  Routing Descriptor Blocks
+    directly connected, via MgmtEth0/RP0/CPU0/0
+      Route metric is 0
+  No advertising protos.
+
+VRF: ORANGE
+
+Routing entry for 203.0.113.64/26
+  Known via "ospf 20", distance 110, metric 20, type intra area
+  Installed Nov 16 09:01:44.120 for 1d02h
+  Routing Descriptor Blocks
+    198.51.100.38, from 192.0.2.71, via GigabitEthernet0/0/0/5.200
+      Route metric is 20
+    198.51.100.42, from 192.0.2.72, via GigabitEthernet0/0/0/6.200
+      Route metric is 20
+  No advertising protos.

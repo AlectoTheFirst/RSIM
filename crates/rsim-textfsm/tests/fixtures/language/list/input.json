@@ -1,0 +1,56 @@
+{
+ "template": "template.textfsm",
+ "header": [
+  "NAME",
+  "MEMBERS",
+  "PAIRS",
+  "TAGS",
+  "OPTIONAL"
+ ],
+ "records": [
+  [
+   "g1",
+   [
+    "m1",
+    "m2"
+   ],
+   [
+    {
+     "key": "a",
+     "val": "1"
+    },
+    {
+     "key": "b",
+     "val": null
+    }
+   ],
+   [
+    "t1"
+   ],
+   [
+    "5",
+    null
+   ]
+  ],
+  [
+   "g2",
+   [
+    "m3"
+   ],
+   [],
+   [
+    "t1"
+   ],
+   []
+  ],
+  [
+   "",
+   [],
+   [],
+   [
+    "t1"
+   ],
+   []
+  ]
+ ]
+}

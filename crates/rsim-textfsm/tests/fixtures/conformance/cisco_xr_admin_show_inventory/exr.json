@@ -1,0 +1,54 @@
+{
+ "template": "cisco_xr_admin_show_inventory.textfsm",
+ "header": [
+  "NAME",
+  "DESCR",
+  "PID",
+  "VID",
+  "SN"
+ ],
+ "records": [
+  [
+   "Rack 0",
+   "Cisco NCS 5501 Fixed Chassis with 48 SFP+ and 6 QSFP28 ports",
+   "NCS-5501-SE",
+   "V01",
+   "FOC0000B1A2"
+  ],
+  [
+   "0/RP0",
+   "NCS 5501 Fixed Route Processor",
+   "NCS-5501-SE",
+   "V01",
+   "FOC0000B1A3"
+  ],
+  [
+   "0/FT0",
+   "NCS 5501 Fan Tray, Port-side Intake",
+   "NCS-1RU-FAN-FW",
+   "V01",
+   "N/A"
+  ],
+  [
+   "0/FT1",
+   "NCS 5501 Fan Tray, Port-side Intake",
+   "NCS-1RU-FAN-FW",
+   "V01",
+   "N/A"
+  ],
+  [
+   "0/PM0",
+   "1100W AC Power Module, Port-side Intake",
+   "NC55-PWR-1.1KW-AC",
+   "V01",
+   "POG0000B1A4"
+  ],
+  [
+   "0/PM1",
+   "1100W AC Power Module, Port-side Intake",
+   "NC55-PWR-1.1KW-AC",
+   "V01",
+   "POG0000B1A5"
+  ]
+ ]
+}

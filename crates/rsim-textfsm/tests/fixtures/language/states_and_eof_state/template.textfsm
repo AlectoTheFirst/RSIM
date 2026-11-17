@@ -1,0 +1,13 @@
+Value Filldown SECTION (\S+)
+Value ITEM (\S+)
+
+Start
+  ^begin\s+${SECTION} -> Body
+
+Body
+  ^\s+item\s+${ITEM} -> Record
+  ^next\s+${SECTION}
+  ^stop -> Start
+  ^\s+tail\s+${ITEM}
+
+EOF

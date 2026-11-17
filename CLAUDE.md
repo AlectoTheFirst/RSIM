@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-Steps 1, 1b and 2 of the build are complete. Step 3 is in progress: collection, the snapshot store, the snapshot view and ingestion. The collection and the ingestion of VyOS, UniFi and NX-OS are complete, with one link join for all vendors. The current batch is EVPN, VXLAN and the anycast gateway in 7 pull requests; pull request 1, the encapsulation in the core, is complete. Then come the HTTP API parts A1 to A3, the Rust TextFSM engine, IOS-XR and IOS-XE. `../rsim-project/roadmap.md` gives the order. The Cargo workspace has 12 crates in `crates/`: `rsim-core`, `rsim-dd`, `rsim-functions`, `rsim-engine`, `rsim-topologies`, `rsim-contract`, `rsim-cli`, `rsim-mcp`, `rsim-api`, `rsim-store`, `rsim-collect` and `rsim-ingest`. The other crates of section 3 come with their steps.
+Steps 1, 1b and 2 of the build are complete. Step 3 is in progress: collection, the snapshot store, the snapshot view and ingestion. The collection and the ingestion of VyOS, UniFi and NX-OS are complete, with one link join for all vendors. The current batch is EVPN, VXLAN and the anycast gateway in 7 pull requests; pull request 1, the encapsulation in the core, is complete. Then come the HTTP API parts A1 to A3, the Rust TextFSM engine, IOS-XR and IOS-XE. `../rsim-project/roadmap.md` gives the order. The Cargo workspace has 13 crates in `crates/`: `rsim-core`, `rsim-dd`, `rsim-functions`, `rsim-engine`, `rsim-topologies`, `rsim-contract`, `rsim-cli`, `rsim-mcp`, `rsim-api`, `rsim-store`, `rsim-collect`, `rsim-ingest` and `rsim-textfsm`. The other crates of section 3 come with their steps.
 
 The two design documents are in the adjacent folder `../rsim-project/`. This repository is public, so the design documents stay out of it. Do not commit the design documents, real configs or collected state to this repository.
 
@@ -73,6 +73,7 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | HTTPS transport tests | `cargo test -p rsim-collect --test https` |
 | Collection benchmark | `cargo bench -p rsim-collect --bench cycle` |
 | Ingestion tests | `cargo test -p rsim-ingest` |
+| TextFSM tests, with the conformance to Python textfsm | `cargo test -p rsim-textfsm` |
 | Layer 2 tests | `cargo test -p rsim-engine --test layer2` |
 | VXLAN fabric tests | `cargo test -p rsim-engine --test tunnel` |
 | Forwarding table benchmark at internet scale | `cargo bench -p rsim-functions --bench fib`. `RSIM_FIB_SKIP_ALL=1` leaves out the split of all destinations, which does not scale yet. |

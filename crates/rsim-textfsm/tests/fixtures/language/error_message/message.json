@@ -1,0 +1,7 @@
+{
+ "template": "template.textfsm",
+ "header": [
+  "ITEM"
+ ],
+ "error": "Error: \"unexpected line\". Rule Line: 5. Input Line: bad line."
+}

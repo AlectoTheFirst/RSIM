@@ -1,0 +1,86 @@
+
+Wed Nov 17 09:12:44.512 UTC
+Capability codes:
+        (R) Router, (B) Bridge, (T) Telephone, (C) DOCSIS Cable Device
+        (W) WLAN Access Point, (P) Repeater, (S) Station, (O) Other
+
+------------------------------------------------
+Local Interface: HundredGigE0/0/0/0
+Chassis id: 0000.5e00.5301
+Port id: Ethernet1/49
+Port Description: uplink to pe-east-1 Hu0/0/0/0
+System Name: leaf-01.lab.example
+
+System Description: 
+Example NOS Software, Version 10.4(2), RELEASE SOFTWARE
+Copyright (c) 2026 by Example Networks, Inc.
+
+Time remaining: 101 seconds
+Hold Time: 120 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+  IPv4 address: 192.0.2.11
+  IPv6 address: 2001:db8:0:1::11
+Peer MAC Address: 00:00:5e:00:53:01
+
+------------------------------------------------
+Local Interface: HundredGigE0/0/0/1
+Chassis id: 0000.5e00.5302
+Port id: Ethernet1/49
+Port Description: uplink to pe-east-1 Hu0/0/0/1
+System Name: leaf-02.lab.example
+
+System Description: 
+Example NOS Software, Version 10.4(2), RELEASE SOFTWARE
+
+Time remaining: 97 seconds
+Hold Time: 120 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+  IPv4 address: 192.0.2.12
+Peer MAC Address: 00:00:5e:00:53:02
+
+------------------------------------------------
+Local Interface: TenGigE0/0/0/4
+Chassis id: 0000.5e00.5310
+Port id: TenGigE0/0/0/4
+Port Description: core link to pe-west-2
+System Name: pe-west-2
+
+System Description: 
+Example XR Software, Version 7.9.2
+Copyright (c) 2026 by Example Networks, Inc.
+Build host example-build-07
+
+Time remaining: 115 seconds
+Hold Time: 120 seconds
+Age: 5 seconds
+System Capabilities: R
+Enabled Capabilities: R
+Management Addresses:
+  IPv4 address: 198.51.100.2
+  IPv6 address: 2001:db8:100::2
+Peer MAC Address: 00:00:5e:00:53:10
+
+------------------------------------------------
+Local Interface: GigabitEthernet0/0/0/9
+Chassis id: 0000.5e00.5320
+Port id: ge-0/0/1
+Port Description: not advertised
+System Name: oob-sw-03
+
+System Description: 
+OOB switch EX-24, firmware 3.1.7
+
+Time remaining: 88 seconds
+Hold Time: 120 seconds
+System Capabilities: B
+Enabled Capabilities: B
+Management Addresses:
+  IPv4 address: 203.0.113.9
+Peer MAC Address: 00:00:5e:00:53:20
+
+Total entries displayed: 4
+

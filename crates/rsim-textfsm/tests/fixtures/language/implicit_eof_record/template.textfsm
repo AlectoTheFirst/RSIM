@@ -1,0 +1,5 @@
+Value ITEM (\S+)
+
+Start
+  ^item\s+${ITEM}
+  ^done -> EOF

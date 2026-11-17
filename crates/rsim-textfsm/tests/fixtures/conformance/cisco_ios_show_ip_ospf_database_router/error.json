@@ -1,0 +1,25 @@
+{
+ "template": "cisco_ios_show_ip_ospf_database_router.textfsm",
+ "header": [
+  "ROUTER_ID",
+  "PROCESS_ID",
+  "AREA",
+  "LSA_AGE",
+  "LSA_OPTIONS",
+  "LSA_TYPE",
+  "LSA_ID",
+  "LSA_ADV_ROUTER",
+  "LSA_SEQ_NUMBER",
+  "LSA_CHECKSUM",
+  "LSA_LENGTH",
+  "LSA_NUM_LINKS",
+  "LSA_ABR",
+  "LSA_ASBR",
+  "LS_LINK_TYPE",
+  "LS_LINK_ID",
+  "LS_LINK_DATA",
+  "LS_MTID_METRICS",
+  "LS_TOS_0_METRICS"
+ ],
+ "error": "State Error raised. Rule Line: 51. Input Line:   Routing Bit Set on this LSA in topology Base with MTID 0"
+}

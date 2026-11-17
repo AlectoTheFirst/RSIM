@@ -1,0 +1,7 @@
+Value Filldown A (\w+)
+Value B (\w+)
+
+Start
+  ^a=${A}
+  ^(a=${A}|b=${B})! -> Record
+  ^b=${B} -> Record

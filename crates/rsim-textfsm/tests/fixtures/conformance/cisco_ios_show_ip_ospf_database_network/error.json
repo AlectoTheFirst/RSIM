@@ -1,0 +1,21 @@
+{
+ "template": "cisco_ios_show_ip_ospf_database_network.textfsm",
+ "header": [
+  "ROUTER_ID",
+  "PROCESS_ID",
+  "AREA",
+  "LSA_AGE",
+  "LSA_OPTIONS",
+  "LSA_TYPE",
+  "LSA_ID",
+  "LSA_ADV_ROUTER",
+  "LSA_SEQ_NUMBER",
+  "LSA_CHECKSUM",
+  "LSA_LENGTH",
+  "LSA_NETWORK_MASK",
+  "LSA_ABR",
+  "LSA_ASBR",
+  "LS_ATT_ROUTER"
+ ],
+ "error": "State Error raised. Rule Line: 43. Input Line:                 Net Link States (Area 1)"
+}

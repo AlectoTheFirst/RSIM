@@ -1,0 +1,25 @@
+{
+ "template": "template.textfsm",
+ "header": [
+  "HOST",
+  "IF",
+  "STATE"
+ ],
+ "records": [
+  [
+   "",
+   "e0",
+   "up"
+  ],
+  [
+   "",
+   "e1",
+   "down"
+  ],
+  [
+   "",
+   "e4",
+   ""
+  ]
+ ]
+}

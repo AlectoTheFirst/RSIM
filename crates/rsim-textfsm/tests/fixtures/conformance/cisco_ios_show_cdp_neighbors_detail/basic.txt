@@ -1,0 +1,88 @@
+Load for five secs: 3%/0%; one minute: 2%; five minutes: 2%
+Time source is NTP, 09:12:44.512 UTC Wed Nov 17 2026
+
+-------------------------
+Device ID: sw-core-01.lab.example
+Entry address(es): 
+  IP address: 192.0.2.21
+Platform: Example EX-9300-48P,  Capabilities: Router Switch IGMP 
+Interface: TenGigabitEthernet1/1/1,  Port ID (outgoing port): TenGigabitEthernet2/0/48
+Holdtime : 151 sec
+
+Version :
+Example Switch Software, Version 17.9.4, RELEASE SOFTWARE (fc2)
+Copyright (c) 2026 by Example Networks, Inc.
+Compiled Mon 01-Jun-26 10:00 by builder
+
+advertisement version: 2
+VTP Management Domain: ''
+Native VLAN: 1
+Duplex: full
+Management address(es): 
+  IP address: 192.0.2.21
+
+-------------------------
+Device ID: rtr-edge-02
+Entry address(es): 
+  IPv6 address: 2001:db8:0:2::2  (global unicast)
+  IP address: 198.51.100.2
+Platform: Example ER-4451,  Capabilities: Router Source-Route-Bridge
+Interface: GigabitEthernet1/0/48,  Port ID (outgoing port): GigabitEthernet0/0/1
+Holdtime : 128 sec
+
+Version :
+Example Router Software, Version 17.6.5
+
+advertisement version: 2
+Duplex: full
+Management address(es): 
+
+-------------------------
+Device ID: SEP00005E005322
+Entry address(es): 
+Platform: Example IP Phone 7841,  Capabilities: Host Phone Two-port Mac Relay 
+Interface: GigabitEthernet1/0/5,  Port ID (outgoing port): Port 1
+Holdtime : 162 sec
+Second Port Status: Up
+
+Version :
+sip78xx.14-2-1-0001-14
+
+advertisement version: 2
+Duplex: full
+Power drawn: 6.300 Watts
+Power request id: 20145, Power management id: 3
+Power request levels are:6300 0 0 0 0 
+Management address(es): 
+
+-------------------------
+Device ID: ap-floor2-east
+Entry address(es): 
+  IP address: 203.0.113.40
+Platform: Example AP 9100,  Capabilities: Router Trans-Bridge
+Interface: GigabitEthernet1/0/10,  Port ID (outgoing port): GigabitEthernet0
+Holdtime : 170 sec
+
+Version :
+Example Wireless AP Software, Version 17.9.4
+
+advertisement version: 2
+Duplex: full
+Power drawn: 25.500 Watts
+Management address(es): 
+  IP address: 203.0.113.40
+
+-------------------------
+Device ID:
+Entry address(es): 
+Platform: Example Linux host,  Capabilities: Host
+Interface: GigabitEthernet1/0/24,  Port ID (outgoing port): eth0
+Holdtime : 140 sec
+
+Version :
+Example Linux 6.8 x86_64
+
+advertisement version: 2
+
+
+Total cdp entries displayed : 5

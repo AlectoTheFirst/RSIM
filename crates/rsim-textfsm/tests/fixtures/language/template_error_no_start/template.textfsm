@@ -1,0 +1,4 @@
+Value A (\S+)
+
+Begin
+  ^${A} -> Record

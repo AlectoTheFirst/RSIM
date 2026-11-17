@@ -1,0 +1,112 @@
+{
+ "template": "cisco_xr_show_vrf_all_detail.textfsm",
+ "header": [
+  "VRF",
+  "RD",
+  "RT_IMPORT",
+  "RT_EXPORT",
+  "VPN_ID",
+  "MODE",
+  "DESCRIPTION",
+  "INTERFACES"
+ ],
+ "records": [
+  [
+   "CUST-A",
+   "64500:100",
+   [
+    "RT:64500:100",
+    "RT:64500:999",
+    "RT:64500:100"
+   ],
+   [
+    "RT:64500:100",
+    "RT:64500:100"
+   ],
+   "not set",
+   "Regular",
+   "Customer A head office",
+   [
+    "GigabitEthernet0/0/0/1",
+    "GigabitEthernet0/0/0/2.100",
+    "Bundle-Ether10.100"
+   ]
+  ],
+  [
+   "CUST-B",
+   "192.0.2.1:200",
+   [
+    "RT:64501:200",
+    "RT:192.0.2.1:200",
+    "RT:64500:999"
+   ],
+   [
+    "RT:64501:200",
+    "RT:192.0.2.1:200"
+   ],
+   "not set",
+   "Regular",
+   "not set",
+   [
+    "TenGigE0/0/0/5.200"
+   ]
+  ],
+  [
+   "SHARED-SVC",
+   "64500:999",
+   [
+    "RT:64500:100",
+    "RT:64501:200",
+    "RT:64500:999"
+   ],
+   [
+    "RT:64500:999"
+   ],
+   "64500:1",
+   "Regular",
+   "Shared services hub",
+   [
+    "Loopback999",
+    "BVI999"
+   ]
+  ],
+  [
+   "RESERVED",
+   "not set",
+   [],
+   [],
+   "not set",
+   "Regular",
+   "Reserved for migration",
+   []
+  ],
+  [
+   "DMZ-OUT",
+   "64503:30",
+   [],
+   [
+    "RT:64503:30",
+    "RT:64500:999"
+   ],
+   "not set",
+   "Regular",
+   "Extranet export only",
+   [
+    "TenGigE0/0/0/6.30"
+   ]
+  ],
+  [
+   "MGMT",
+   "not set",
+   [],
+   [],
+   "not set",
+   "Regular",
+   "Out-of-band management",
+   [
+    "MgmtEth0/RP0/CPU0/0",
+    "MgmtEth0/RP1/CPU0/0"
+   ]
+  ]
+ ]
+}

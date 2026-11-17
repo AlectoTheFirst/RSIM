@@ -1,0 +1,92 @@
+
+Wed Nov 17 09:12:44.512 UTC
+
+VRF CUST-A; RD 64500:100; VPN ID not set
+VRF mode: Regular
+Description Customer A head office
+Interfaces:
+  GigabitEthernet0/0/0/1
+  GigabitEthernet0/0/0/2.100
+  Bundle-Ether10.100
+Address family IPV4 Unicast
+  Import VPN route-target communities:
+    RT:64500:100
+    RT:64500:999
+  Export VPN route-target communities:
+    RT:64500:100
+  No import route policy
+  No export route policy
+Address family IPV6 Unicast
+  Import VPN route-target communities:
+    RT:64500:100
+  Export VPN route-target communities:
+    RT:64500:100
+  No import route policy
+  No export route policy
+
+VRF CUST-B; RD 192.0.2.1:200; VPN ID not set
+VRF mode: Regular
+Description not set
+Interfaces:
+  TenGigE0/0/0/5.200
+Address family IPV4 Unicast
+  Import VPN route-target communities:
+    RT:64501:200
+    RT:192.0.2.1:200
+    RT:64500:999
+  Export VPN route-target communities:
+    RT:64501:200
+    RT:192.0.2.1:200
+  No import route policy
+  Export route policy: CUST-B-EXPORT
+
+VRF SHARED-SVC; RD 64500:999; VPN ID 64500:1
+VRF mode: Regular
+Description Shared services hub
+Interfaces:
+  Loopback999
+  BVI999
+Address family IPV4 Unicast
+  Import VPN route-target communities:
+    RT:64500:100
+    RT:64501:200
+    RT:64500:999
+  Export VPN route-target communities:
+    RT:64500:999
+  No import route policy
+  No export route policy
+
+VRF RESERVED; RD not set; VPN ID not set
+VRF mode: Regular
+Description Reserved for migration
+Interfaces:
+Address family IPV4 Unicast
+  Import VPN route-target communities:
+  Export VPN route-target communities:
+  No import route policy
+  No export route policy
+
+VRF DMZ-OUT; RD 64503:30; VPN ID not set
+VRF mode: Regular
+Description Extranet export only
+Interfaces:
+  TenGigE0/0/0/6.30
+Address family IPV4 Unicast
+  No import VPN route-target communities
+  Export VPN route-target communities:
+    RT:64503:30
+    RT:64500:999
+  No import route policy
+  No export route policy
+
+VRF MGMT; RD not set; VPN ID not set
+VRF mode: Regular
+Description Out-of-band management
+Interfaces:
+  MgmtEth0/RP0/CPU0/0
+  MgmtEth0/RP1/CPU0/0
+Address family IPV4 Unicast
+  No import VPN route-target communities
+  No export VPN route-target communities
+  No import route policy
+  No export route policy
