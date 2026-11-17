@@ -41,6 +41,9 @@ impl L<'_> {
     pub(super) fn id(&self, f: &str) -> FunctionId {
         FunctionId::new(format!("{}/{f}", self.dev))
     }
+    pub(super) fn file_name(&self) -> &str {
+        self.file
+    }
     pub(super) fn span(&self, l: Lines) -> SourceSpan {
         SourceSpan::new(self.file, l.first.max(1), l.last.max(l.first).max(1))
     }

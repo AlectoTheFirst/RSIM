@@ -179,7 +179,11 @@ impl L<'_> {
         sum.channel = channel.clone();
         sum.neighbours = st.neighbours.clone();
         sum.neighbour_section = st.neighbours_collected;
-        sum.host_name = st.host_name.clone();
+        sum.host_name = st.host_name.clone().or_else(|| {
+            cfg.hostname
+                .as_deref()
+                .and_then(super::state::neighbour_name)
+        });
         let mac_ports: BTreeSet<String> = col
             .macs
             .iter()
@@ -244,7 +248,6 @@ impl L<'_> {
                     )
                 }
                 Some(true) => {
-                    let mut missing_allowed: Option<u16> = None;
                     let from_state = match collected_mode {
                         Some("access") => Some(PortMode::Access),
                         Some("trunk") => Some(PortMode::Trunk),
@@ -265,25 +268,22 @@ impl L<'_> {
                                 Some(r) => r.iter().flat_map(|(a, b)| *a..=*b).collect(),
                                 None => vlans.clone(),
                             };
-                            // An explicit list with a VLAN that has no `vlan`
-                            // line.
-                            if i.allowed.as_deref().is_some_and(|r| r != [(1, 4094)])
-                                && let Some(v) = allowed.iter().find(|v| !vlans.contains(v))
-                            {
-                                missing_allowed = Some(*v);
-                            }
+                            // An explicit list keeps its VLANs with no `vlan`
+                            // line; the flood of such a VLAN gives `Unknown`.
+                            // `all` means the VLANs of the config.
+                            let explicit = i.allowed.as_deref().is_some_and(|r| r != [(1, 4094)]);
                             let native = allowed.contains(&native).then_some(native);
                             let tagged = allowed
                                 .iter()
                                 .copied()
-                                .filter(|v| vlans.contains(v) && Some(*v) != native)
+                                .filter(|v| (explicit || vlans.contains(v)) && Some(*v) != native)
                                 .collect();
                             (native, tagged)
                         }
                     };
                     let used: Vec<u16> = native.into_iter().chain(tagged.iter().copied()).collect();
                     match (
-                        native.filter(|v| !vlans.contains(v)).or(missing_allowed),
+                        native.filter(|v| !vlans.contains(v)),
                         used.iter().find(|v| unknown_vlans.contains(v)),
                     ) {
                         (Some(v), _) => {
@@ -512,7 +512,7 @@ impl L<'_> {
                         None => self.id(&out_f),
                     };
                     egress.insert(pid.clone(), out_id.clone());
-                    let flood_id = if *edge {
+                    let flood_id = if *edge && !ext.peers.contains_key(name) {
                         out_id
                     } else {
                         let f = format!("port/{name}/stp");
@@ -532,6 +532,31 @@ impl L<'_> {
                     }
                 }
             }
+        }
+
+        // A VLAN that a trunk allows and that has no `vlan` line: its flood
+        // gives `Unknown`.
+        let unlisted: BTreeSet<u16> = plans
+            .values()
+            .filter_map(|p| match p {
+                Plan::Exact { tagged, .. } => Some(tagged.iter().copied()),
+                Plan::Unknown(..) => None,
+            })
+            .flatten()
+            .filter(|v| !vlans.contains(v))
+            .collect();
+        for v in unlisted {
+            let f = format!("vlan{v}/unknown");
+            let span = SourceSpan::new(self.file_name(), 1, 1);
+            let sink = self.sink(&f, format!("VLAN {v} has no vlan line"), span);
+            self.add(sink);
+            flood
+                .entry(self.bd(v))
+                .or_default()
+                .push((PortId::new(format!("vlan{v}")), self.id(&f)));
+            self.note(format!(
+                "VLAN {v}: a trunk allows it, and it has no vlan line"
+            ));
         }
 
         // The SVI ports and the hand-off to layer 3.

@@ -147,6 +147,7 @@ pub fn join(
     switches: &BTreeMap<String, Summary>,
     routers: &BTreeMap<String, Vec<RouterPort>>,
     next_hops: &BTreeSet<IpAddr>,
+    device_macs: &BTreeSet<Mac>,
 ) -> Joined {
     let mut out = Joined::default();
     let by_name: BTreeMap<&str, &str> = switches
@@ -167,6 +168,7 @@ pub fn join(
             rows.entry(s.port(&n.port)).or_default().push(n);
         }
         for (port, list) in rows {
+            let mut router_notes: Vec<String> = Vec::new();
             let mut far: BTreeSet<Option<End>> = BTreeSet::new();
             for n in &list {
                 let sw = n
@@ -182,29 +184,42 @@ pub fn join(
                             .map(|rp| End::Switch((*other).to_string(), o.port(rp)))
                     }
                     None => {
-                        let by_port = n.remote_port.as_deref().and_then(|rp| {
-                            routers.iter().find_map(|(r, ports)| {
-                                ports
-                                    .iter()
-                                    .find(|p| p.interface == rp)
-                                    .map(|p| (r.clone(), p))
-                            })
-                        });
-                        let found = n
+                        // The router of the port MAC, else of the chassis
+                        // MAC. The interface of the port MAC, else of the
+                        // port name on that router. A chassis MAC names the
+                        // router, not the interface.
+                        let router = n
                             .port_mac
                             .and_then(router_of)
-                            .or_else(|| n.chassis.and_then(router_of));
-                        match (found, by_port) {
-                            (Some((r, _)), Some((r2, p))) if r == r2 => {
-                                Some(End::Router(r, p.interface.clone()))
+                            .or_else(|| n.chassis.and_then(router_of))
+                            .map(|(r, _)| r);
+                        match router {
+                            Some(r) => {
+                                let ports = &routers[&r];
+                                let iface = n
+                                    .port_mac
+                                    .and_then(|m| ports.iter().find(|p| p.mac == m))
+                                    .or_else(|| {
+                                        let rp = n.remote_port.as_deref()?;
+                                        ports.iter().find(|p| p.interface == rp)
+                                    });
+                                match iface {
+                                    Some(p) => Some(End::Router(r, p.interface.clone())),
+                                    None => {
+                                        router_notes.push(format!(
+                                            "{port}: the neighbour {r} names no interface of its own, so the port has no link"
+                                        ));
+                                        None
+                                    }
+                                }
                             }
-                            (Some((r, p)), _) => Some(End::Router(r, p.interface.clone())),
-                            (None, _) => None,
+                            None => None,
                         }
                     }
                 };
                 far.insert(end);
             }
+            out.notes.entry(d.clone()).or_default().extend(router_notes);
             let spans = list.iter().map(|n| n.span.clone()).collect();
             let here = End::Switch(d.clone(), port.clone());
             if far.len() == 1 {
@@ -322,13 +337,21 @@ pub fn join(
             }
         }
     }
-    place(switches, &mut out, next_hops);
+    place(switches, &mut out, next_hops, device_macs);
     out
 }
 
 /// The places of the endpoints. From an ARP row of an SVI, the MAC table
-/// rows lead across the links of switch ports to an edge access port.
-fn place(switches: &BTreeMap<String, Summary>, out: &mut Joined, next_hops: &BTreeSet<IpAddr>) {
+/// rows lead across the links of switch ports to an edge access port. One
+/// endpoint is one MAC on one port, with the addresses of all ARP rows that
+/// lead there. A MAC with an address that is a next hop, or a MAC of a
+/// collected device, is not an endpoint.
+fn place(
+    switches: &BTreeMap<String, Summary>,
+    out: &mut Joined,
+    next_hops: &BTreeSet<IpAddr>,
+    device_macs: &BTreeSet<Mac>,
+) {
     // The far end of each linked switch port.
     let mut far: BTreeMap<(String, String), (String, String)> = BTreeMap::new();
     for (d, ext) in &out.switches {
@@ -341,26 +364,21 @@ fn place(switches: &BTreeMap<String, Summary>, out: &mut Joined, next_hops: &BTr
             }
         }
     }
-    // The endpoints of each switch with an SVI, by MAC and VLAN.
-    #[allow(clippy::type_complexity)]
-    let mut found: BTreeMap<
-        (String, u16, Mac),
-        (
-            Vec<(IpAddr, SourceSpan)>,
-            Option<(String, String, Vec<SourceSpan>)>,
-        ),
-    > = BTreeMap::new();
+    // Each ARP row leads to a place, or to none.
+    struct At {
+        vlan: u16,
+        addrs: Vec<(IpAddr, SourceSpan)>,
+        spans: Vec<SourceSpan>,
+        /// The switches with an SVI that lead here, with their VLAN.
+        svis: BTreeSet<(String, u16)>,
+    }
+    let mut at: BTreeMap<(String, String, Mac), At> = BTreeMap::new();
     for (s, sum) in switches {
         for (v, ip, m, span) in &sum.arp {
-            let e = found.entry((s.clone(), *v, *m)).or_default();
-            e.0.push((*ip, span.clone()));
-            if e.1.is_some() {
-                continue;
-            }
-            // The walk across the links, at most once through each switch.
             let (mut dev, mut vlan) = (s.clone(), *v);
             let mut seen = BTreeSet::new();
             let mut spans = Vec::new();
+            let mut place = None;
             while seen.insert(dev.clone()) {
                 let here = &switches[&dev];
                 let Some((port, row)) = here.macs.get(&(vlan, *m)) else {
@@ -370,11 +388,11 @@ fn place(switches: &BTreeMap<String, Summary>, out: &mut Joined, next_hops: &BTr
                 let Some(Some(pv)) = here.ports.get(port) else {
                     break;
                 };
-                if pv.edge && pv.native == Some(vlan) {
-                    e.1 = Some((dev.clone(), port.clone(), spans.clone()));
-                    break;
-                }
+                // A port with a link leads on; it is never an edge port.
                 let Some((d2, q)) = far.get(&(dev.clone(), port.clone())) else {
+                    if pv.edge && pv.native == Some(vlan) {
+                        place = Some((dev.clone(), port.clone()));
+                    }
                     break;
                 };
                 let Some(Some(qv)) = switches[d2].ports.get(q) else {
@@ -391,45 +409,79 @@ fn place(switches: &BTreeMap<String, Summary>, out: &mut Joined, next_hops: &BTr
                 };
                 dev = d2.clone();
             }
+            let Some((dev, port)) = place else {
+                continue;
+            };
+            let e = at.entry((dev, port, *m)).or_insert_with(|| At {
+                vlan,
+                addrs: Vec::new(),
+                spans: spans.clone(),
+                svis: BTreeSet::new(),
+            });
+            e.addrs.push((*ip, span.clone()));
+            e.svis.insert((s.clone(), *v));
         }
     }
-    // A MAC with an address that is a next hop is a router.
+    // The host table of each VLAN of a switch with an SVI: its own entries
+    // and the addresses of the endpoints that its VLAN leads to.
     let mut hosts: BTreeMap<(String, u16), TriePrefixTable<HostMac>> = BTreeMap::new();
     let mut keep = Vec::new();
-    for ((s, v, m), (addrs, at)) in found {
-        let id = format!("{s}/vlan{v}/{m:?}");
-        if addrs.iter().any(|(ip, _)| next_hops.contains(ip)) {
-            out.notes.entry(s.clone()).or_default().push(format!(
-                "{id}: a next hop of a route, so it is not an endpoint"
-            ));
+    for ((dev, port, m), a) in at {
+        let id = format!("{dev}/vlan{}/{m:?}", a.vlan);
+        let why = if device_macs.contains(&m) {
+            Some("a MAC of a collected device")
+        } else if a.addrs.iter().any(|(ip, _)| next_hops.contains(ip)) {
+            Some("a next hop of a route")
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            out.notes
+                .entry(dev.clone())
+                .or_default()
+                .push(format!("{id}: {why}, so it is not an endpoint"));
             continue;
         }
-        let Some((dev, port, spans)) = at else {
+        for (s, v) in &a.svis {
+            let t = hosts.entry((s.clone(), *v)).or_insert_with(|| {
+                switches[s]
+                    .vlans
+                    .get(v)
+                    .map(|x| x.hosts.clone())
+                    .unwrap_or_default()
+            });
+            for (ip, span) in &a.addrs {
+                let mut sp = vec![span.clone()];
+                sp.extend(a.spans.iter().cloned());
+                t.insert(Prefix::host(*ip), HostMac { mac: m, spans: sp });
+            }
+        }
+        keep.push((id, dev, port, m, a));
+    }
+    for (id, dev, port, m, a) in keep {
+        // The host table, the networks and the gateway of the first switch
+        // with an SVI, with the endpoints of all of them.
+        let Some((s, v)) = a.svis.iter().next().cloned() else {
             continue;
         };
-        let t = hosts.entry((s.clone(), v)).or_insert_with(|| {
-            switches[&s]
-                .vlans
-                .get(&v)
-                .map(|x| x.hosts.clone())
-                .unwrap_or_default()
-        });
-        for (ip, span) in &addrs {
-            let mut sp = vec![span.clone()];
-            sp.extend(spans.iter().cloned());
-            t.insert(Prefix::host(*ip), HostMac { mac: m, spans: sp });
-        }
-        keep.push((s, v, m, id, addrs, dev, port, spans));
-    }
-    for (s, v, m, id, addrs, dev, port, spans) in keep {
         let info = switches[&s].vlans.get(&v).cloned().unwrap_or_default();
+        let mut table = hosts.get(&(s, v)).cloned().unwrap_or_default();
+        for (s2, v2) in a.svis.iter().skip(1) {
+            if let Some(t) = hosts.get(&(s2.clone(), *v2)) {
+                for (p, h) in t.entries() {
+                    if table.get(&p).is_none() {
+                        table.insert(p, h.clone());
+                    }
+                }
+            }
+        }
         out.switches.entry(dev).or_default().endpoints.push(Placed {
             id,
             port,
             mac: m,
-            addrs,
-            spans,
-            hosts: hosts.get(&(s.clone(), v)).cloned().unwrap_or_default(),
+            addrs: a.addrs,
+            spans: a.spans,
+            hosts: table,
             local: info.local,
             gateway: info.gateway,
         });
