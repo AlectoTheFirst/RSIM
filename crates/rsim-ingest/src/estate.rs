@@ -1,5 +1,5 @@
 //! The twin of a snapshot: the VyOS routers and the UniFi sites, with the
-//! links between them.
+//! links between them, and the coverage of the NX-OS switches.
 
 use std::collections::BTreeMap;
 
@@ -11,7 +11,7 @@ use serde_json::Value;
 use crate::collected::{self, Collected};
 use crate::coverage::{Coverage, classify};
 use crate::stanza::read_json;
-use crate::{unifi, vyos};
+use crate::{nxos, unifi, vyos};
 
 /// The twin builder of a snapshot, with the coverage, the unread handled
 /// stanzas and the lowering notes of each device.
@@ -37,6 +37,14 @@ pub enum Input {
     /// A VyOS router: its config section, the file name of the config for
     /// the provenance, and its collected state.
     Vyos {
+        name: String,
+        config: Vec<u8>,
+        file: String,
+        collected: Collected,
+    },
+    /// An NX-OS switch: its running config, the file name of the config
+    /// for the provenance, and its collected state.
+    Nxos {
         name: String,
         config: Vec<u8>,
         file: String,
@@ -73,6 +81,15 @@ pub fn inputs(store: &Store, snap: &Snapshot) -> Result<(Vec<Input>, Vec<String>
                 }),
                 None => skipped.push(format!("{device}: no config section")),
             },
+            "nxos" => match section("config")? {
+                Some((config, file)) => out.push(Input::Nxos {
+                    name: device.clone(),
+                    config,
+                    file,
+                    collected: collected::read(store, snap, device)?,
+                }),
+                None => skipped.push(format!("{device}: no config section")),
+            },
             "unifi" => {
                 let mut sections = BTreeMap::new();
                 for name in ["networks", "wlans", "devices", "clients", "port_profiles"] {
@@ -102,7 +119,8 @@ pub fn build(store: &Store, snap: &Snapshot) -> Result<Estate, StoreError> {
 }
 
 /// Builds the twin of the inputs: the routers, then each UniFi site joined
-/// to the router on its uplink.
+/// to the router on its uplink. An NX-OS switch gives its coverage and a
+/// note, and no functions.
 pub fn assemble(inputs: Vec<Input>) -> Estate {
     let mut e = Estate {
         builder: TwinBuilder::new(),
@@ -136,6 +154,22 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
                 e.unread
                     .insert(name.clone(), vyos::unread(&doc, &table, &cfg.read));
                 routers.insert(name, Router { cfg, col, file });
+            }
+            Input::Nxos {
+                name,
+                config,
+                file: _,
+                collected: col,
+            } => {
+                let doc = nxos::read_text(&config);
+                let table = nxos::table(!col.routes.is_empty());
+                e.coverage.insert(name.clone(), classify(&doc, &table));
+                let unread = nxos::unread(&doc, &table, &Default::default());
+                e.unread.insert(name.clone(), unread);
+                e.notes.entry(name).or_default().push(
+                    "the NX-OS lowering is not built: the twin has no function of this switch"
+                        .into(),
+                );
             }
             Input::Unifi { name, sections } => sites.push((name, sections)),
         }
