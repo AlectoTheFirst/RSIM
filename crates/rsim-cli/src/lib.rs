@@ -4,6 +4,7 @@
 #![deny(clippy::disallowed_methods, clippy::disallowed_types)]
 
 pub mod args;
+pub mod claims;
 pub mod commands;
 pub mod error;
 pub mod json;

@@ -4,6 +4,7 @@
 use serde_json::{Value, json};
 
 use crate::args::{PathQueryArgs, SetQueryArgs, StepArgs, TableQueryArgs, TopologyArgs};
+use crate::claim::{ClaimArgs, ClaimOut, ClaimsOut};
 use crate::json::{
     DevicesOut, ErrorOut, PathAnswerOut, PathBriefOut, SetAnswerOut, SetBriefOut, StepOut,
     TopologiesOut,
@@ -124,6 +125,26 @@ pub const OPERATIONS: &[Operation] = &[
             schema::<UniqueOut>,
             schema::<SummarizeOut>,
         ],
+    },
+    Operation {
+        id: "listClaims",
+        description: "The catalog of the claims: assessment questions about the network, with their scopes and the data that they read.",
+        effect: Effect::Read,
+        tool: Some("list_claims"),
+        command: Some("<twin> claim list"),
+        http: Some((Method::Get, "/v1/claims")),
+        input: Some(empty),
+        outputs: &[schema::<ClaimsOut>],
+    },
+    Operation {
+        id: "runClaim",
+        description: "A claim on a scope: the whole twin, a set of devices, or the paths of a path query. The result is confirmed, refuted or unknown, with evidence rows; data that is not collected gives unknown.",
+        effect: Effect::Read,
+        tool: Some("run_claim"),
+        command: Some("<twin> claim run"),
+        http: Some((Method::Get, "/v1/twins/{twin}/claims/{claim}")),
+        input: Some(schema::<ClaimArgs>),
+        outputs: &[schema::<ClaimOut>],
     },
 ];
 
