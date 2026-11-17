@@ -90,6 +90,9 @@ pub struct State {
     /// The VNIs of the NVE interface, if the section was collected. An error
     /// names a row that is not read.
     pub nve_vnis: Option<Result<Vec<NveVni>, String>>,
+    /// The VNI of each route path with a VXLAN encapsulation, by VRF,
+    /// prefix and next hop, from the route table section.
+    pub vxlan_paths: BTreeMap<(String, String, String), (u32, SourceSpan)>,
 }
 
 /// The state of a vPC domain from `show vpc`, with the fields that HST
@@ -308,6 +311,39 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
             })
             .collect();
         st.nve_vnis = Some(vnis);
+    }
+    // The keys `segid` and `encap` are not confirmed on a device.
+    if let Some((v, file)) = json("rib") {
+        let mut i = 0usize;
+        for vrf in rows(&v, "vrf") {
+            let Some(name) = text(vrf, "vrf-name-out") else {
+                continue;
+            };
+            for af in rows(vrf, "addrf") {
+                for p in rows(af, "prefix") {
+                    let Some(prefix) = text(p, "ipprefix") else {
+                        continue;
+                    };
+                    for path in rows(p, "path") {
+                        i += 1;
+                        let vxlan =
+                            text(path, "encap").is_some_and(|e| e.eq_ignore_ascii_case("vxlan"));
+                        let segid = path
+                            .get("segid")
+                            .and_then(|g| g.as_u64().or_else(|| g.as_str()?.trim().parse().ok()))
+                            .and_then(|g| u32::try_from(g).ok());
+                        let (Some(nh), Some(segid), true) = (text(path, "ipnexthop"), segid, vxlan)
+                        else {
+                            continue;
+                        };
+                        st.vxlan_paths.insert(
+                            (name.to_string(), prefix.to_string(), nh.to_string()),
+                            (segid, line(file, i - 1)),
+                        );
+                    }
+                }
+            }
+        }
     }
     if let Some((v, _)) = json("version") {
         st.host_name = text(&v, "host_name").and_then(neighbour_name);

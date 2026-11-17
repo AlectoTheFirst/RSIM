@@ -175,7 +175,7 @@ fn leaf(b: &mut TwinBuilder, n: u8) {
         vnis,
         plain: None,
         port: None,
-        unmatched: None,
+        unmatched: rsim_functions::Unmatched::Drop,
     });
     let attach = fid(&format!("{name}/in/eth9"));
     add_host(b, endpoint(&host, &ten, attach));

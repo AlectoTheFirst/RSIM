@@ -31,6 +31,7 @@ pub const SECTIONS: &[&str] = &[
     "vpc",
     "nve_peers",
     "nve_vnis",
+    "rib",
 ];
 
 /// Reads the bytes of a running config into a stanza tree. A byte sequence

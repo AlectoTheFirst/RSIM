@@ -159,6 +159,15 @@ const ENTRIES: &[Entry] = &[
     e("interface */member vni */mcast-group ..", Handled, Subtree),
     e("interface */member vni */suppress-arp", Irrelevant, Subtree),
     e("nv overlay evpn", Irrelevant, Subtree),
+    e("interface */member vni * associate-vrf", Handled, Subtree),
+    e("interface */ip forward", Handled, Subtree),
+    e(
+        "interface */fabric forwarding mode anycast-gateway",
+        Handled,
+        Subtree,
+    ),
+    e("fabric forwarding anycast-gateway-mac *", Handled, Subtree),
+    e("vrf context */vni *", Handled, Subtree),
     e("system default switchport", Handled, Subtree),
     e("no system default switchport", Handled, Subtree),
     e("interface */description ..", Irrelevant, Subtree),
@@ -234,7 +243,7 @@ pub fn table(rib_collected: bool) -> Table {
     for option in ["ip ospf ..", "ip router .."] {
         t.push_levels(&["interface *", option], routing, Subtree);
     }
-    for option in ["rd ..", "vni ..", "address-family .."] {
+    for option in ["rd ..", "address-family .."] {
         t.push_levels(&["vrf context *", option], routing, Subtree);
     }
     t

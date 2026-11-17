@@ -9,7 +9,8 @@ use rsim_core::{
     VrfId,
 };
 use rsim_functions::{
-    AclMatch, OuterFields, Rule as FRule, RuleAction, Segment, TunnelPeer, VxlanDecap, VxlanEncap,
+    AclMatch, OuterFields, Rule as FRule, RuleAction, Segment, TunnelPeer, Unmatched, VxlanDecap,
+    VxlanEncap,
 };
 
 use super::config::{Config, Interface, Lines, Replication};
@@ -26,6 +27,16 @@ pub(super) struct L2Vni {
     pub spans: Vec<SourceSpan>,
 }
 
+/// A layer 3 VNI of the tunnel end: the VNI of a VRF for symmetric routing.
+#[derive(Clone, Debug)]
+pub(super) struct L3Vni {
+    pub vni: u32,
+    /// The SVI of the VLAN of the VNI, where a decapsulated packet enters
+    /// the VRF. `None` if the switch has no such SVI.
+    pub svi: Option<String>,
+    pub spans: Vec<SourceSpan>,
+}
+
 /// The tunnel end of a switch that the lowering makes exact.
 #[derive(Clone, Debug)]
 pub(super) struct Tunnel {
@@ -35,6 +46,8 @@ pub(super) struct Tunnel {
     pub spans: Vec<SourceSpan>,
     /// The layer 2 VNI of each VLAN.
     pub l2: BTreeMap<u16, L2Vni>,
+    /// The layer 3 VNI of each VRF.
+    pub l3: BTreeMap<String, L3Vni>,
     /// The peer tunnel ends that are up, or why they are not known.
     pub peers: Result<Vec<(IpAddr, SourceSpan)>, String>,
 }
@@ -142,6 +155,54 @@ pub(super) fn plan(cfg: &Config, st: &State, active: &[Interface], l: &mut L<'_>
             },
         );
     }
+    let mut l3 = BTreeMap::new();
+    for m in n.members.iter().filter(|m| m.l3) {
+        let Some((vrf, (_, vrf_lines))) = cfg.vrf_vnis.iter().find(|(_, (v, _))| *v == m.vni)
+        else {
+            l.note(format!("VNI {}: no VRF has it as its vni", m.vni));
+            continue;
+        };
+        let mut vspans = vec![l.span(m.lines), l.span(*vrf_lines)];
+        if let Some(vnis) = &st.nve_vnis {
+            let vnis = match vnis {
+                Ok(v) => v,
+                Err(why) => return unknown(why.clone()),
+            };
+            match vnis.iter().find(|r| r.vni == m.vni) {
+                Some(r) if r.up == Some(true) => vspans.push(r.span.clone()),
+                Some(r) if r.up.is_none() => {
+                    return unknown(format!("the state of VNI {} is not known", m.vni));
+                }
+                _ => {
+                    l.note(format!("VNI {}: the collected state is not up", m.vni));
+                    continue;
+                }
+            }
+        }
+        let svi = by_vni.get(&m.vni).and_then(|(v, seg_lines)| {
+            let i = active.iter().find(|i| {
+                super::layer2::svi_vlan(&i.name) == Some(*v)
+                    && i.vrf.as_deref() == Some(vrf.as_str())
+            })?;
+            vspans.push(l.span(*seg_lines));
+            vspans.push(l.span(i.lines));
+            Some(i.name.clone())
+        });
+        if svi.is_none() {
+            l.note(format!(
+                "VNI {}: no active SVI in VRF {vrf} for its VLAN",
+                m.vni
+            ));
+        }
+        l3.insert(
+            vrf.clone(),
+            L3Vni {
+                vni: m.vni,
+                svi,
+                spans: vspans,
+            },
+        );
+    }
     if st.nve_vnis.is_none() {
         l.note("no NVE VNI section, so each member VNI counts as up".into());
     }
@@ -165,6 +226,7 @@ pub(super) fn plan(cfg: &Config, st: &State, active: &[Interface], l: &mut L<'_>
         source,
         spans,
         l2,
+        l3,
         peers,
     })
 }
@@ -427,47 +489,123 @@ impl L<'_> {
 
     /// The decapsulation at the local delivery of the switch, or `None` if
     /// the switch has no tunnel end. `local` is the function of the other
-    /// packets to the switch.
+    /// packets to the switch. The layer 2 VNIs and the layer 3 VNIs have
+    /// one decapsulation each, so each one declares the attribute that it
+    /// sets: the first one gives the packets of the other VNIs to the
+    /// second one.
     pub(super) fn vxlan_decap(
         &mut self,
         plan: &Plan,
         local: &str,
         bd: &dyn Fn(u16) -> BridgeDomainId,
     ) -> Option<FunctionId> {
-        let (vnis, unmatched, spans, port) = match plan {
+        let guide = SourceSpan::line(VXLAN_GUIDE, 1);
+        let t = match plan {
             Plan::None => return None,
-            Plan::Unknown { nve, why, lines } => (
-                BTreeMap::new(),
-                Some(format!("{nve}: {why}")),
-                vec![self.span(*lines)],
-                None,
-            ),
-            Plan::Exact(t) => (
-                t.l2.iter()
-                    .map(|(v, x)| {
-                        (
-                            x.vni,
-                            (Segment::BridgeDomain(bd(*v)), self.id("mac-tunnel")),
-                        )
-                    })
-                    .collect(),
-                None,
-                t.spans.clone(),
-                Some(PortId::new(&t.nve)),
-            ),
+            Plan::Unknown { nve, why, lines } => {
+                let meta = self.meta("vxlan-decap", vec![self.span(*lines), guide]);
+                let plain = Some(self.id(local));
+                self.add(VxlanDecap {
+                    meta,
+                    vnis: BTreeMap::new(),
+                    plain,
+                    port: None,
+                    unmatched: Unmatched::Unknown(format!("{nve}: {why}")),
+                });
+                return Some(self.id("vxlan-decap"));
+            }
+            Plan::Exact(t) => t,
         };
-        let mut spans = spans;
-        spans.push(SourceSpan::line(VXLAN_GUIDE, 1));
-        let meta = self.meta("vxlan-decap", spans);
+        let l2: BTreeMap<u32, (Segment, FunctionId)> =
+            t.l2.iter()
+                .map(|(v, x)| {
+                    (
+                        x.vni,
+                        (Segment::BridgeDomain(bd(*v)), self.id("mac-tunnel")),
+                    )
+                })
+                .collect();
+        let mut l3: BTreeMap<u32, (Segment, FunctionId)> = BTreeMap::new();
+        for (vrf, x) in &t.l3 {
+            let next = match &x.svi {
+                Some(svi) => self.id(&format!("in/{svi}")),
+                None => {
+                    let f = format!("vxlan/l3/{}", x.vni);
+                    let s = self.sink(
+                        &f,
+                        format!("VNI {}: no active SVI in VRF {vrf}", x.vni),
+                        x.spans[0].clone(),
+                    );
+                    self.add(s);
+                    self.id(&f)
+                }
+            };
+            l3.insert(x.vni, (Segment::Vrf(VrfId::new(vrf)), next));
+        }
+        let mut spans = t.spans.clone();
+        spans.push(guide);
         let plain = Some(self.id(local));
+        let (first, second) = match (l2.is_empty(), l3.is_empty()) {
+            (false, false) => (l2, Some(l3)),
+            (true, _) => (l3, None),
+            (false, true) => (l2, None),
+        };
+        let unmatched = match &second {
+            Some(_) => Unmatched::Next(self.id("vxlan-decap-l3")),
+            None => Unmatched::Drop,
+        };
+        let meta = self.meta("vxlan-decap", spans.clone());
         self.add(VxlanDecap {
             meta,
-            vnis,
-            plain,
-            port,
+            vnis: first,
+            plain: plain.clone(),
+            port: Some(PortId::new(&t.nve)),
             unmatched,
         });
+        if let Some(l3) = second {
+            let meta = self.meta("vxlan-decap-l3", spans);
+            self.add(VxlanDecap {
+                meta,
+                vnis: l3,
+                plain,
+                port: None,
+                unmatched: Unmatched::Drop,
+            });
+        }
         Some(self.id("vxlan-decap"))
+    }
+}
+
+impl L<'_> {
+    /// The encapsulation of a routed packet to a VXLAN route: the peer is the
+    /// next hop of the route, and the VRF gives the layer 3 VNI. Gives its
+    /// function, or `None` if the tunnel end has no layer 3 VNI.
+    pub(super) fn vxlan_encap_l3(&mut self, plan: &Plan) -> Option<FunctionId> {
+        let Plan::Exact(t) = plan else {
+            return None;
+        };
+        if t.l3.is_empty() {
+            return None;
+        }
+        let f = "vxlan/encap-l3";
+        let mut spans = t.spans.clone();
+        spans.extend(t.l3.values().flat_map(|x| x.spans.iter().cloned()));
+        let meta = self.meta(f, spans);
+        let next = self.id(VXLAN_ENTRY);
+        self.add(VxlanEncap {
+            meta,
+            source: t.source,
+            peer: TunnelPeer::NextHop,
+            vnis: t
+                .l3
+                .iter()
+                .map(|(v, x)| (Segment::Vrf(VrfId::new(v)), x.vni))
+                .collect(),
+            outer: outer(),
+            underlay: VrfId::new(super::lower::DEFAULT_VRF),
+            next,
+        });
+        Some(self.id(f))
     }
 }
 
