@@ -4,6 +4,7 @@
 //! engine dependency, so a client can use it.
 
 pub mod args;
+pub mod claim;
 pub mod error;
 pub mod json;
 pub mod query;

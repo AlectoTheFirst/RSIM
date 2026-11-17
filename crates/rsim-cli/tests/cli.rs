@@ -768,6 +768,18 @@ fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
     let cov: Value = serde_json::from_slice(&cov.stdout).unwrap();
     assert_eq!(cov["kind"], "table_rows");
     assert!(cov["total"].as_u64().unwrap() > 0, "{cov}");
+    // The links of a store twin have collected facts for the claim.
+    let c = rsim(&[
+        topology.as_str(),
+        "claim",
+        "run",
+        "link-speed-duplex",
+        "--format",
+        "json",
+    ]);
+    let c: Value = serde_json::from_slice(&c.stdout).unwrap();
+    assert_eq!(c["kind"], "claim", "{c}");
+    assert!(!c["evidence"].as_array().unwrap().is_empty(), "{c}");
     let text = v.to_string();
     for f in [
         "ap1/wlan/guest/in",
@@ -865,4 +877,65 @@ fn a_table_query_gives_rows_pages_and_the_bytes_of_the_library() {
     // A built-in topology has no coverage report.
     let o = rsim(&["leaf-spine", "coverage", "--format", "json"]);
     assert_eq!(json_of(&o)["total"], 0);
+}
+
+#[test]
+fn a_claim_gives_its_result_its_evidence_and_its_exit_code() {
+    let path = [
+        "--source.ip",
+        "10.1.0.10",
+        "--destination.ip",
+        "10.2.0.10",
+        "--network.transport",
+        "tcp",
+        "--destination.port",
+        "22",
+    ];
+    let run = |twin: &str, claim: &str, extra: &[&str]| {
+        let mut a = vec![twin, "claim", "run", claim];
+        a.extend_from_slice(extra);
+        a.extend_from_slice(&["--format", "json"]);
+        rsim(&a)
+    };
+    let o = run("leaf-spine", "no-unknown", &path);
+    assert_eq!(o.status.code(), Some(0));
+    let v = json_of(&o);
+    assert_eq!(
+        (v["kind"].as_str(), v["result"].as_str()),
+        (Some("claim"), Some("confirmed"))
+    );
+    assert_eq!(v["scope"], "query");
+    assert_eq!(v["counts"]["confirmed"], 6);
+
+    // With no port, the result of ecmp depends on a field that the query
+    // does not state, so the claim is refuted.
+    let o = run(
+        "ecmp",
+        "no-unknown",
+        &[
+            "--source.ip",
+            "10.1.0.10",
+            "--destination.ip",
+            "10.4.0.10",
+            "--network.transport",
+            "tcp",
+        ],
+    );
+    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(json_of(&o)["result"], "refuted");
+
+    // Data that is not collected gives unknown, never confirmed.
+    for claim in ["bgp-peers-up", "link-speed-duplex"] {
+        let o = run("leaf-spine", claim, &[]);
+        assert_eq!(o.status.code(), Some(3), "{claim}");
+        let v = json_of(&o);
+        assert_eq!(v["result"], "unknown", "{claim}");
+        assert_eq!(v["evidence"][0]["reason"], "not_collected", "{claim}");
+    }
+
+    // The claim no-unknown needs a query.
+    let o = run("leaf-spine", "no-unknown", &[]);
+    assert_eq!(json_of(&o)["error"]["code"], "invalid_query");
+    let o = rsim(&["leaf-spine", "claim", "list", "--format", "json"]);
+    assert_eq!(json_of(&o)["claims"][0]["name"], "link-speed-duplex");
 }

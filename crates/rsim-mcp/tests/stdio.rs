@@ -204,6 +204,22 @@ fn tool_calls(modern: bool) -> Vec<Value> {
         json!({"topology": "leaf-spine", "table": "colours"}),
         modern,
     ));
+    m.push(call(id + 10, "list_claims", json!({}), modern));
+    m.push(call(
+        id + 11,
+        "run_claim",
+        json!({
+            "topology": "leaf-spine",
+            "claim": "no-unknown",
+            "query": {
+                "source.ip": "10.1.0.10",
+                "destination.ip": "10.3.0.10",
+                "network.transport": "udp",
+                "destination.port": 53
+            }
+        }),
+        modern,
+    ));
     m
 }
 
@@ -289,6 +305,11 @@ fn check_tool_results(responses: &[Value], modern: bool) {
     let r = &by_id(responses, id + 9)["result"];
     assert_eq!(r["isError"], true);
     assert_eq!(r["structuredContent"]["error"]["code"], "unknown_table");
+    let r = &by_id(responses, id + 10)["result"]["structuredContent"];
+    assert_eq!(r["kind"], "claims");
+    let r = &by_id(responses, id + 11)["result"]["structuredContent"];
+    assert_eq!(r["kind"], "claim", "{r}");
+    assert_eq!(r["result"], "confirmed", "{r}");
     for (n, file) in [
         (5, "leaf-spine.summary"),
         (6, "set-mini-enterprise.summary"),
@@ -311,7 +332,9 @@ fn check_tools_list(r: &Value) {
             "set_query",
             "explain_step",
             "list_tables",
-            "table_query"
+            "table_query",
+            "list_claims",
+            "run_claim"
         ]
     );
     for t in tools {

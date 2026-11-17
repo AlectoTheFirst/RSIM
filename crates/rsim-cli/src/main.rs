@@ -470,6 +470,9 @@ fn table_command(cli: &Cli, args: &[String]) -> ExitCode {
     }
     let cli = &own;
     let args = &kept[..];
+    if args.get(1).map(String::as_str) == Some("claim") {
+        return claim_command(cli, args);
+    }
     let usage = |d: String| QueryError::new(rsim_cli::ErrorCode::InvalidQuery, d);
     let parsed = (|| -> Result<Parsed, QueryError> {
         let twin = args
@@ -612,4 +615,91 @@ fn table_command(cli: &Cli, args: &[String]) -> ExitCode {
 fn usage_error(detail: &str) -> ExitCode {
     let _ = writeln!(std::io::stderr().lock(), "error: {detail}");
     ExitCode::from(2)
+}
+
+/// `rsim <twin> claim list` and `rsim <twin> claim run <claim> [--device
+/// a,b] [the flags of a path query]`. The exit code of a claim is 0 for
+/// confirmed, 1 for refuted and 3 for unknown.
+fn claim_command(cli: &Cli, args: &[String]) -> ExitCode {
+    use rsim_contract::claim::{ClaimArgs, ClaimResult};
+    let twin = args[0]
+        .strip_prefix("builtin.")
+        .unwrap_or(&args[0])
+        .to_string();
+    match args.get(2).map(String::as_str) {
+        Some("list") => {
+            return emit(cli, Ok(rsim_cli::claims::catalog()), |c| {
+                c.claims
+                    .iter()
+                    .map(|d| format!("{:<20} {}\n", d.name, d.description))
+                    .collect()
+            });
+        }
+        Some("run") => {}
+        _ => return usage_error("use `claim list` or `claim run <claim>`"),
+    }
+    let Some(name) = args.get(3) else {
+        return usage_error("`claim run` needs a claim; `claim list` lists them");
+    };
+    let mut devices = None;
+    let mut query = serde_json::Map::new();
+    let mut rest = args[4..].iter();
+    while let Some(a) = rest.next() {
+        let Some(flag) = a.strip_prefix("--") else {
+            return usage_error(&format!("{a} is not a flag"));
+        };
+        if flag == "no-reply" {
+            query.insert("reply".into(), serde_json::Value::Bool(false));
+            continue;
+        }
+        let Some(v) = rest.next() else {
+            return usage_error(&format!("--{flag} needs a value"));
+        };
+        let value = match flag {
+            "device" => {
+                devices = Some(v.split(',').map(str::to_string).collect::<Vec<_>>());
+                continue;
+            }
+            "tcp_flags" => serde_json::Value::from(v.split(',').collect::<Vec<_>>()),
+            _ => match v.parse::<u64>() {
+                Ok(n) if !["source.ip", "destination.ip", "ingress"].contains(&flag) => {
+                    serde_json::Value::from(n)
+                }
+                _ => serde_json::Value::from(v.as_str()),
+            },
+        };
+        query.insert(flag.to_string(), value);
+    }
+    let a = ClaimArgs {
+        topology: twin.clone(),
+        claim: name.clone(),
+        devices,
+        query: (!query.is_empty()).then_some(query),
+    };
+    let r = commands::load(&twin).and_then(|t| rsim_cli::claims::run(&twin, &t, &a));
+    let code = match &r {
+        Ok(o) => match o.result {
+            ClaimResult::Confirmed => 0,
+            ClaimResult::Refuted => 1,
+            ClaimResult::Unknown => 3,
+        },
+        Err(_) => 1,
+    };
+    let _ = emit(cli, r, |o| {
+        let mut t = format!(
+            "{} {:?} on the scope {}: {} confirmed, {} refuted, {} unknown\n",
+            o.claim, o.result, o.scope, o.counts.confirmed, o.counts.refuted, o.counts.unknown
+        );
+        for e in &o.evidence {
+            t.push_str(&format!(
+                "{:<10} {}  {} {}\n",
+                format!("{:?}", e.result),
+                e.subject,
+                e.reason,
+                e.detail
+            ));
+        }
+        t
+    });
+    ExitCode::from(code)
 }

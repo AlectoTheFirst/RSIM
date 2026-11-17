@@ -7,6 +7,7 @@ use rsim_cli::json::{self, ErrorOut};
 use rsim_cli::{QueryError, args, commands, tables};
 use rsim_contract::args::Form;
 use rsim_contract::args::{TableQueryArgs, TableVerb};
+use rsim_contract::claim::ClaimArgs;
 use rsim_contract::json::{PathBriefOut, SetBriefOut};
 use rsim_contract::registry;
 use serde::Serialize;
@@ -109,6 +110,14 @@ impl Tools {
                 Err(e) => Err(e),
             },
             "list_tables" => Ok(text(&tables::catalog())),
+            "list_claims" => Ok(text(&rsim_cli::claims::catalog())),
+            "run_claim" => serde_json::from_value::<ClaimArgs>(Value::Object(arguments.clone()))
+                .map_err(|e| QueryError::new(rsim_cli::ErrorCode::InvalidQuery, e.to_string()))
+                .and_then(|a| {
+                    let t = a.topology.clone();
+                    let twin = self.twin(&t)?;
+                    rsim_cli::claims::run(&t, twin, &a).map(|o| text(&o))
+                }),
             "table_query" => {
                 serde_json::from_value::<TableQueryArgs>(Value::Object(arguments.clone()))
                     .map_err(|e| QueryError::new(rsim_cli::ErrorCode::InvalidQuery, e.to_string()))
