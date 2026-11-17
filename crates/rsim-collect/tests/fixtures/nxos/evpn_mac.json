@@ -1,0 +1,3 @@
+{"TABLE_l2route_evpn_mac_all": {"ROW_l2route_evpn_mac_all": [
+ {"topo-id": "10", "mac-addr": "0000.5e00.5310", "prod-type": "Local", "flags": "L,", "seq-num": "0", "next-hop1": "Eth1/5"},
+ {"topo-id": "10", "mac-addr": "0000.5e00.5320", "prod-type": "BGP", "flags": "Rcv", "seq-num": "0", "next-hop1": "192.0.2.2"}]}}

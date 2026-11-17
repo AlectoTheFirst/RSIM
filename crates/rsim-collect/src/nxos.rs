@@ -145,6 +145,26 @@ const ROUTE_KEEP: &[&str] = &[
     "/TABLE_vrf/ROW_vrf/*/TABLE_addrf/ROW_addrf/*/TABLE_prefix/ROW_prefix/*/TABLE_path/ROW_path/*/metric",
     "/TABLE_vrf/ROW_vrf/*/TABLE_addrf/ROW_addrf/*/TABLE_prefix/ROW_prefix/*/TABLE_path/ROW_path/*/pref",
     "/TABLE_vrf/ROW_vrf/*/TABLE_addrf/ROW_addrf/*/TABLE_prefix/ROW_prefix/*/TABLE_path/ROW_path/*/ubest",
+    "/TABLE_vrf/ROW_vrf/*/TABLE_addrf/ROW_addrf/*/TABLE_prefix/ROW_prefix/*/TABLE_path/ROW_path/*/segid",
+    "/TABLE_vrf/ROW_vrf/*/TABLE_addrf/ROW_addrf/*/TABLE_prefix/ROW_prefix/*/TABLE_path/ROW_path/*/tunnelid",
+    "/TABLE_vrf/ROW_vrf/*/TABLE_addrf/ROW_addrf/*/TABLE_prefix/ROW_prefix/*/TABLE_path/ROW_path/*/encap",
+];
+
+/// The times and ages of a table with one level of rows, for the sections
+/// whose JSON keys are not confirmed on a device. A removal is used, not a
+/// keep list: a key that does not match then makes more versions, and a
+/// change is never missed.
+const TABLE_TIMES: &[&str] = &["/*/*/*/*uptime*", "/*/*/*/*up-time*", "/*/*/*/*expir*"];
+
+/// The times and ages of `show ip mroute`: the VRF rows, the route rows and
+/// the outgoing interface rows. The keys are not confirmed on a device.
+const MROUTE_TIMES: &[&str] = &[
+    "/*/*/*/*/*/*/*uptime*",
+    "/*/*/*/*/*/*/*expir*",
+    "/*/*/*/*/*/*/*/*/*/*uptime*",
+    "/*/*/*/*/*/*/*/*/*/*expir*",
+    "/*/*/*/*/*/*/*/*/*/*/*/*/*uptime*",
+    "/*/*/*/*/*/*/*/*/*/*/*/*/*expir*",
 ];
 
 const MAC_KEEP: &[&str] = &[
@@ -258,6 +278,47 @@ const SPECS: &[Spec] = {
         row("vrrp", "show vrrp detail | json", Observation, Json, true),
         row("vpc", "show vpc | json", Observation, Json, true),
         row("stp", "show spanning-tree | json", Observation, Json, true).keep(STP_KEEP),
+        row(
+            "nve_peers",
+            "show nve peers | json",
+            Observation,
+            Json,
+            true,
+        )
+        .volatile(TABLE_TIMES),
+        row("nve_vnis", "show nve vni | json", Observation, Json, true).volatile(TABLE_TIMES),
+        row(
+            "evpn_macs",
+            "show l2route evpn mac all | json",
+            Observation,
+            Json,
+            true,
+        )
+        .volatile(TABLE_TIMES),
+        row(
+            "evpn_mac_ips",
+            "show l2route evpn mac-ip all | json",
+            Observation,
+            Json,
+            true,
+        )
+        .volatile(TABLE_TIMES),
+        row(
+            "mroutes",
+            "show ip mroute vrf all | json",
+            Observation,
+            Json,
+            true,
+        )
+        .volatile(MROUTE_TIMES),
+        row(
+            "pim_neighbors",
+            "show ip pim neighbor vrf all | json",
+            Observation,
+            Json,
+            true,
+        )
+        .volatile(MROUTE_TIMES),
     ]
 };
 

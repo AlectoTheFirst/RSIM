@@ -48,6 +48,12 @@ fn file(section: &str) -> Option<&'static str> {
         "arp" => "arp.json",
         "vrf_interfaces" => "vrf_interface.json",
         "stp" => "stp.json",
+        "nve_peers" => "nve_peers.json",
+        "nve_vnis" => "nve_vni.json",
+        "evpn_macs" => "evpn_mac.json",
+        "evpn_mac_ips" => "evpn_mac_ip.json",
+        "mroutes" => "mroute.json",
+        "pim_neighbors" => "pim.json",
         _ => return None,
     })
 }
@@ -270,6 +276,16 @@ async fn the_first_cycle_fills_the_tables() {
                 "-",
                 "Ethernet1/2"
             ]),
+            v(&[
+                "RED",
+                "203.0.113.20/32",
+                "bgp-65001",
+                "true",
+                "200",
+                "0",
+                "192.0.2.2",
+                "-"
+            ]),
         ]
     );
     assert_eq!(
@@ -283,6 +299,68 @@ async fn the_first_cycle_fills_the_tables() {
     let rib = blob(&e, "rib");
     assert!(rib.contains("\"ROW_addrf\":["), "{rib}");
     assert!(!rib.contains("\"ROW_path\":{"), "{rib}");
+    for s in [
+        "nve_peers",
+        "nve_vnis",
+        "evpn_macs",
+        "evpn_mac_ips",
+        "mroutes",
+        "pim_neighbors",
+    ] {
+        assert_eq!(status(&e, s), SectionStatus::Fresh, "{s}");
+    }
+    let one = blob(&e, "evpn_mac_ips");
+    assert!(one.contains("\"ROW_l2route_evpn_mac_ip_all\":["), "{one}");
+    let oif = blob(&e, "mroutes");
+    assert!(oif.contains("\"ROW_oif\":["), "{oif}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_tunnel_and_multicast_state_changes_make_a_snapshot_and_their_times_do_not() {
+    let mut e = env();
+    let first = e.c.run_cycle().await.unwrap().snapshot.unwrap();
+    let swap = |f: &str, a: &str, b: &str| fixture(f).replace("HOST", "n1").replace(a, b);
+    set(&e.t, "nve_peers", &swap("nve_peers.json", "P2D", "P3D"));
+    set(
+        &e.t,
+        "mroutes",
+        &swap(
+            "mroute.json",
+            "\"oif-uptime\": \"P1D\"",
+            "\"oif-uptime\": \"P2D\"",
+        ),
+    );
+    set(&e.t, "pim_neighbors", &swap("pim.json", "PT1M30S", "PT1M"));
+    tokio::time::advance(Duration::from_secs(60)).await;
+    let r = e.c.run_cycle().await.unwrap();
+    assert_eq!(r.snapshot, None, "{r:?}");
+    assert_eq!(latest(&e).manifest.cycle, first);
+
+    for (section, file, a, b) in [
+        (
+            "nve_peers",
+            "nve_peers.json",
+            "\"peer-state\": \"Up\", \"learn-type\": \"CP\", \"uptime\": \"P2D\"",
+            "\"peer-state\": \"Down\", \"learn-type\": \"CP\", \"uptime\": \"P2D\"",
+        ),
+        (
+            "mroutes",
+            "mroute.json",
+            "\"oif-name\": \"nve1\"",
+            "\"oif-name\": \"Ethernet1/2\"",
+        ),
+        (
+            "rib",
+            "route.json",
+            "\"segid\": \"50001\"",
+            "\"segid\": \"50002\"",
+        ),
+    ] {
+        set(&e.t, section, &swap(file, a, b));
+        tokio::time::advance(Duration::from_secs(60)).await;
+        let r = e.c.run_cycle().await.unwrap();
+        assert!(r.snapshot.is_some(), "{section}");
+    }
 }
 
 #[tokio::test(start_paused = true)]
