@@ -1,0 +1,1 @@
+{"TABLE_tree": {"ROW_tree": [{"tree_id": "10", "tree_tree_type": "vlan", "tree_protocol": "rstp", "topology_change": "5", "TABLE_port": {"ROW_port": [{"if_index": "Ethernet1/1"}]}}]}}

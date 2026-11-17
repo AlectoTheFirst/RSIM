@@ -213,7 +213,16 @@ impl L<'_> {
                 continue;
             }
             let relevant = mac_ports.contains(&i.name) || neighbour.contains(&i.name);
-            let l2 = i.switchport.or(cfg.default_switchport);
+            // The mode: the config, else the collected `eth_mode`.
+            let collected_mode = collected.and_then(|s| s.mode.as_deref());
+            let l2 = i
+                .switchport
+                .or(cfg.default_switchport)
+                .or(match collected_mode {
+                    Some("access" | "trunk") => Some(true),
+                    Some("routed") => Some(false),
+                    _ => None,
+                });
             let plan = match l2 {
                 None if !relevant => continue,
                 Some(false) => continue,
@@ -237,7 +246,12 @@ impl L<'_> {
                     )
                 }
                 Some(true) => {
-                    let mode = i.mode.unwrap_or(if DEFAULT_MODE_IS_ACCESS {
+                    let from_state = match collected_mode {
+                        Some("access") => Some(PortMode::Access),
+                        Some("trunk") => Some(PortMode::Trunk),
+                        _ => None,
+                    };
+                    let mode = i.mode.or(from_state).unwrap_or(if DEFAULT_MODE_IS_ACCESS {
                         PortMode::Access
                     } else {
                         PortMode::Trunk

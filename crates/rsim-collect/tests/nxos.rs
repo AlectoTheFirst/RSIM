@@ -47,6 +47,7 @@ fn file(section: &str) -> Option<&'static str> {
         "mac_table" => "mac.json",
         "arp" => "arp.json",
         "vrf_interfaces" => "vrf_interface.json",
+        "stp" => "stp.json",
         _ => return None,
     })
 }
@@ -177,6 +178,7 @@ async fn the_first_cycle_fills_the_tables() {
     assert_eq!(status(&e, "config"), SectionStatus::Fresh);
     assert!(matches!(status(&e, "cdp"), SectionStatus::Absent { .. }));
     assert!(matches!(status(&e, "hsrp"), SectionStatus::Absent { .. }));
+    assert_eq!(status(&e, "stp"), SectionStatus::Fresh);
     assert_eq!(status(&e, "acl"), SectionStatus::Fresh);
     assert_eq!(blob(&e, "acl").trim(), "{}");
     assert_eq!(
@@ -311,6 +313,15 @@ async fn counters_and_ages_make_no_snapshot() {
     set(&e.t, "arp", &swap("arp.json", "00:01:02", "00:02:02"));
     set(&e.t, "lldp", &swap("lldp.json", "120", "90"));
     set(&e.t, "config", &swap("config.txt", "10:01:00", "10:02:00"));
+    set(
+        &e.t,
+        "stp",
+        &swap(
+            "stp.json",
+            "\"topology_change\": \"5\"",
+            "\"topology_change\": \"6\"",
+        ),
+    );
     tokio::time::advance(Duration::from_secs(60)).await;
     let r = e.c.run_cycle().await.unwrap();
     assert_eq!(r.snapshot, None, "{r:?}");
@@ -329,6 +340,20 @@ async fn counters_and_ages_make_no_snapshot() {
     let r = e.c.run_cycle().await.unwrap();
     assert!(r.snapshot.is_some());
     assert_eq!(rows(&e, &LINKS)[0][4], "down");
+
+    // The mode of a port is a kept field.
+    set(
+        &e.t,
+        "interfaces",
+        &swap(
+            "interface.json",
+            "\"eth_mode\": \"trunk\"",
+            "\"eth_mode\": \"access\"",
+        ),
+    );
+    tokio::time::advance(Duration::from_secs(60)).await;
+    let r = e.c.run_cycle().await.unwrap();
+    assert!(r.snapshot.is_some());
 }
 
 #[tokio::test(start_paused = true)]

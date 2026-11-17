@@ -15,6 +15,9 @@ use super::names::Names;
 pub struct IfState {
     pub admin_up: Option<bool>,
     pub oper_up: Option<bool>,
+    /// The kept field `eth_mode`, for example `access`, `trunk` or
+    /// `routed`, in lower case.
+    pub mode: Option<String>,
     pub span: Option<SourceSpan>,
 }
 
@@ -107,6 +110,7 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
                 IfState {
                     admin_up: admin,
                     oper_up: oper,
+                    mode: text(r, "eth_mode").map(str::to_ascii_lowercase),
                     span: Some(line(file, i)),
                 },
             );
