@@ -1,0 +1,1 @@
+{"TABLE_l2route_evpn_mac_ip_all": {"ROW_l2route_evpn_mac_ip_all": {"topo-id": "10", "mac-addr": "0000.5e00.5320", "host-ip": "198.51.100.20", "prod-type": "BGP", "flags": "--", "seq-num": "0", "next-hop1": "192.0.2.2"}}}

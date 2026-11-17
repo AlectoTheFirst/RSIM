@@ -1,0 +1,3 @@
+{"TABLE_nve_peers": {"ROW_nve_peers": [
+ {"if-name": "nve1", "peer-ip": "192.0.2.2", "peer-state": "Up", "learn-type": "CP", "uptime": "P1D", "router-mac": "0000.5e00.5302"},
+ {"if-name": "nve1", "peer-ip": "192.0.2.3", "peer-state": "Up", "learn-type": "CP", "uptime": "P2D", "router-mac": "0000.5e00.5303"}]}}

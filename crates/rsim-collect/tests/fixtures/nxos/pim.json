@@ -1,0 +1,2 @@
+{"TABLE_vrf": {"ROW_vrf": {"vrf-name": "default", "TABLE_neighbor": {"ROW_neighbor": [
+ {"nbr-addr": "172.16.1.2", "if-name": "Ethernet1/1", "uptime": "P1D", "expires": "PT1M30S", "dr-priority": "1"}]}}}}

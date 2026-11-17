@@ -1,0 +1,2 @@
+{"TABLE_vrf": {"ROW_vrf": {"vrf-name": "default", "TABLE_one_route": {"ROW_one_route": [
+ {"mcast-addrs": "(*, 233.252.0.20/32)", "source-addr": "*", "group-addr": "233.252.0.20/32", "uptime": "P1D", "route-iif": "Ethernet1/1", "rpf-nbr": "172.16.1.2", "oif-count": "1", "TABLE_oif": {"ROW_oif": {"oif-name": "nve1", "oif-uptime": "P1D"}}}]}}}}
