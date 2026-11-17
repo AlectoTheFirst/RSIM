@@ -43,11 +43,12 @@ fn link(iface: &str, parent: Option<&str>) -> LinkRow {
 }
 
 fn estate() -> Estate {
-    estate_with(|_, b| b)
+    estate_with(|_, b| b, Vec::new())
 }
 
-/// The estate with each UniFi section changed by `change`.
-fn estate_with(change: impl Fn(&str, Vec<u8>) -> Vec<u8>) -> Estate {
+/// The estate with each UniFi section changed by `change`, and with the
+/// routes `extra` in the route table of the router.
+fn estate_with(change: impl Fn(&str, Vec<u8>) -> Vec<u8>, extra: Vec<RouteRow>) -> Estate {
     let collected = Collected {
         addresses: vec![AddressRow {
             interface: "pppoe0".into(),
@@ -59,7 +60,10 @@ fn estate_with(change: impl Fn(&str, Vec<u8>) -> Vec<u8>) -> Estate {
             route("192.0.2.0/26", "connected", "eth0.10"),
             route("192.0.2.64/26", "connected", "eth0.110"),
             route("192.0.2.192/27", "connected", "eth0"),
-        ],
+        ]
+        .into_iter()
+        .chain(extra)
+        .collect(),
         neighbours: Vec::new(),
         links: vec![
             link("eth0", None),
@@ -208,16 +212,19 @@ fn two_clients_of_one_ssid_reach_each_other_unless_the_ssid_isolates_them() {
             "g2-005354"
         ))))
     );
-    let isolated = estate_with(|n, b| {
-        if n == "wlans" {
-            String::from_utf8(b)
-                .unwrap()
-                .replace("\"l2_isolation\": false", "\"l2_isolation\": true")
-                .into_bytes()
-        } else {
-            b
-        }
-    });
+    let isolated = estate_with(
+        |n, b| {
+            if n == "wlans" {
+                String::from_utf8(b)
+                    .unwrap()
+                    .replace("\"l2_isolation\": false", "\"l2_isolation\": true")
+                    .into_bytes()
+            } else {
+                b
+            }
+        },
+        Vec::new(),
+    );
     let t = isolated.builder.build().unwrap();
     let a = run(&t, "192.0.2.70", "192.0.2.71", 443);
     match a.verdict() {
@@ -282,5 +289,30 @@ fn each_link_step_shows_the_speed_duplex_and_media_of_both_ends() {
     assert!(
         router.contains("link 1000 Mbit/s full duplex to 1000 Mbit/s full duplex GE"),
         "{router}"
+    );
+}
+
+#[test]
+fn a_client_that_is_a_next_hop_is_not_an_endpoint() {
+    let mut via_h1 = route("10.0.0.0/8", "static", "eth0.10");
+    via_h1.next_hop = Some("192.0.2.50".into());
+    let e = estate_with(|_, b| b, vec![via_h1]);
+    assert!(
+        e.notes["site1"]
+            .contains(&"client h1: a next hop of a route, so it is not an endpoint".to_string()),
+        "{:?}",
+        e.notes
+    );
+    let t = e.builder.build().expect("the twin builds");
+    // A packet to h1 reaches the port of h1 and is not delivered there,
+    // because it can go on beyond h1.
+    let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
+    let b = &a.branches()[0];
+    let f: Vec<&str> = b.steps.iter().map(|s| s.function.as_str()).collect();
+    assert!(f.contains(&"sw1/port/2/out"), "{f:?}");
+    assert!(
+        matches!(a.verdict(), Some(Verdict::Unknown(_))),
+        "{:?}",
+        a.verdict()
     );
 }

@@ -220,13 +220,17 @@ fn ports(d: &Device) -> Vec<Port> {
 }
 
 /// Lowers a site. `prefix` names the bridge domains, for example the
-/// device of the site in the store.
+/// device of the site in the store. A client whose address is in
+/// `next_hops`, a next hop of a route, is a router and not an endpoint: it
+/// keeps its MAC table entries, and a packet to its MAC gives `Unknown` at
+/// its port.
 pub fn lower(
     prefix: &str,
     site: &Site,
     profile: &VendorProfile,
     files: &Files,
     router: Option<&RouterPort>,
+    next_hops: &BTreeSet<IpAddr>,
 ) -> Lowered {
     let mut l = L {
         site,
@@ -281,6 +285,19 @@ pub fn lower(
             continue;
         };
         located.push((c, loc, net));
+    }
+
+    // The clients that are next hops of a route.
+    let is_router = |c: &Client| {
+        c.ip.as_deref()
+            .and_then(|i| i.parse::<IpAddr>().ok())
+            .is_some_and(|ip| next_hops.contains(&ip))
+    };
+    for (c, _, _) in located.iter().filter(|(c, _, _)| is_router(c)) {
+        l.out.notes.push(format!(
+            "client {}: a next hop of a route, so it is not an endpoint",
+            c.name
+        ));
     }
 
     // The global host table: the client addresses and the router addresses.
@@ -382,6 +399,7 @@ pub fn lower(
             let link = peer.as_ref().map(|_| LinkFacts { local, remote });
             let port_hosts: BTreeMap<Mac, EndpointId> = located
                 .iter()
+                .filter(|(c, _, _)| !is_router(c))
                 .filter(|(_, loc, _)| loc.0 == d.mac && loc.1 == pid.to_string())
                 .filter_map(|(c, _, _)| Some((mac(&c.mac)?, EndpointId::new(endpoint_id(c)))))
                 .collect();
@@ -433,6 +451,7 @@ pub fn lower(
             }));
             let hosts_on: BTreeMap<Mac, EndpointId> = located
                 .iter()
+                .filter(|(c, _, _)| !is_router(c))
                 .filter(|(_, loc, _)| loc.0 == d.mac && loc.1 == pid.to_string())
                 .filter_map(|(c, _, _)| Some((mac(&c.mac)?, EndpointId::new(endpoint_id(c)))))
                 .collect();
@@ -518,7 +537,7 @@ pub fn lower(
     // Host attachment points, endpoints and attachment records.
     let mut points: BTreeSet<(String, String)> = BTreeSet::new();
     let mut ids: BTreeSet<String> = BTreeSet::new();
-    for (c, loc, net) in &located {
+    for (c, loc, net) in located.iter().filter(|(c, _, _)| !is_router(c)) {
         let Some(d) = site.device(&loc.0) else {
             continue;
         };
