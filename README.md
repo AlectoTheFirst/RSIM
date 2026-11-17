@@ -98,7 +98,7 @@ If the engine cannot be sure, the result is `Unknown` with a reason. This occurs
 | `rsim-ingest` | The stanza reader, the coverage report and the lowering of each vendor into functions |
 | `rsim-topologies` | The hand-built topologies for the tests, the benchmarks, `rsim` and `rsim-mcp` |
 | `rsim-cli` | The command `rsim`: path queries and set queries with text output and versioned JSON output |
-| `rsim-mcp` | A Model Context Protocol server on stdio with the tools `list_devices`, `path_query` and `explain_step` |
+| `rsim-mcp` | A Model Context Protocol server on stdio with the tools `list_devices`, `path_query`, `set_query` and `explain_step` |
 
 ## Build
 
