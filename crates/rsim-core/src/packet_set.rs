@@ -364,7 +364,9 @@ impl PacketSet {
 
     /// The set of one pair of headers. Each header must state all fields.
     /// A header with no known address has the address family of the other
-    /// header. The original request has no encapsulation.
+    /// header; an inner header with no known address has the address
+    /// family of the original request. The original request has no
+    /// encapsulation.
     pub fn pair(arena: &Arc<SetArena>, p: &PacketPair) -> PacketSet {
         assert!(
             p.original.encap.is_empty()
@@ -372,16 +374,7 @@ impl PacketSet {
                 && p.current.has_valid_encap(),
             "the original request has no encapsulation, and a header has an inner header exactly with one encapsulation"
         );
-        let mut o = bits::encode(&p.original);
-        let mut c = bits::encode(&p.current);
-        let i = p.current.inner.as_deref().map(bits::encode);
-        let af = bits::AF as usize;
-        if c[af].is_none() {
-            c[af] = o[af];
-        }
-        if o[af].is_none() {
-            o[af] = c[af];
-        }
+        let (o, c, i) = pair_bits(p);
         let e = arena
             .run(|ops| {
                 let mut lits = Vec::new();
@@ -434,9 +427,7 @@ impl PacketSet {
             p.current.has_valid_encap(),
             "a header has an inner header exactly with one encapsulation"
         );
-        let o = bits::encode(&p.original);
-        let c = bits::encode(&p.current);
-        let i = p.current.inner.as_deref().map(bits::encode);
+        let (o, c, i) = pair_bits(p);
         let bit = |l: u32| -> bool {
             let (x, bank) = (l / 4, l % 4);
             let v = match bank {
@@ -1305,6 +1296,35 @@ impl PacketSet {
     pub(crate) fn edge(&self) -> Edge {
         self.edge
     }
+}
+
+/// The bits of the original request, the current header and the inner
+/// header of a pair. A header with no known address has the address family
+/// of the other header, and an inner header with no known address has the
+/// address family of the original request.
+fn pair_bits(
+    p: &PacketPair,
+) -> (
+    Vec<bits::BitValue>,
+    Vec<bits::BitValue>,
+    Option<Vec<bits::BitValue>>,
+) {
+    let mut o = bits::encode(&p.original);
+    let mut c = bits::encode(&p.current);
+    let mut i = p.current.inner.as_deref().map(bits::encode);
+    let af = bits::AF as usize;
+    if c[af].is_none() {
+        c[af] = o[af];
+    }
+    if o[af].is_none() {
+        o[af] = c[af];
+    }
+    if let Some(i) = i.as_mut()
+        && i[af].is_none()
+    {
+        i[af] = o[af];
+    }
+    (o, c, i)
 }
 
 /// Rewrites one field of the current header of the set `s`.

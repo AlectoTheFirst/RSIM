@@ -670,18 +670,29 @@ prop_compose! {
     }
 }
 
-/// Pairs of a plain original request and a current header that is the
-/// request itself or the request in an outer header.
+/// Pairs of a plain original request and a current header: the request,
+/// with a rewrite or not, and then in an outer header or not.
 fn pairs() -> impl Strategy<Value = Explicit> {
-    prop::collection::vec((header(), prop::option::weighted(0.5, outer())), 0..6).prop_map(|v| {
+    let item = (
+        header(),
+        prop::option::weighted(0.4, rewrite()),
+        prop::option::weighted(0.5, outer()),
+    );
+    prop::collection::vec(item, 0..6).prop_map(|v| {
         let mut e: Explicit = v
             .into_iter()
-            .map(|(h, o)| PacketPair {
-                current: match &o {
-                    Some(o) => h.encapsulate(o).unwrap(),
-                    None => h.clone(),
-                },
-                original: h,
+            .map(|(h, rw, o)| {
+                let mut c = h.clone();
+                if let Some(rw) = rw.filter(|rw| same_family(rw, std::slice::from_ref(&h))) {
+                    rw.apply_to(&mut c);
+                }
+                PacketPair {
+                    current: match &o {
+                        Some(o) => c.encapsulate(o).unwrap(),
+                        None => c,
+                    },
+                    original: h,
+                }
             })
             .collect();
         e.sort();
@@ -812,7 +823,10 @@ proptest! {
 
     #[test]
     fn a_rewrite_of_an_encapsulated_pair_changes_the_outer_header(ea in pairs(), rw in rewrite()) {
-        prop_assume!(same_family(&rw, &currents(&ea)));
+        // A plain current header has the address family of its original
+        // request, also with unknown addresses.
+        let plain: Vec<Header> = ea.iter().filter(|p| !is_encapsulated(p)).map(|p| p.original.clone()).collect();
+        prop_assume!(same_family(&rw, &currents(&ea)) && same_family(&rw, &plain));
         let ar = arena();
         let want: Explicit = sorted(ea
             .iter()
@@ -866,9 +880,11 @@ proptest! {
         let part = set(&ar, &ea).partition_by_prefix(AddrField::Dst, &t);
         let mut want: Vec<(Prefix, Explicit)> = Vec::new();
         let mut unmatched = Vec::new();
+        let mut uncertain = Vec::new();
         for p in &ea {
             let FieldValue::Known(a) = p.current.dst_ip else {
-                unreachable!("the generated headers have known addresses")
+                uncertain.push(p.clone());
+                continue;
             };
             match t.longest_match(a) {
                 Some((pfx, _)) => match want.iter_mut().find(|(q, _)| *q == pfx) {
@@ -883,7 +899,7 @@ proptest! {
         let want: Vec<(Prefix, PacketSet)> = want.iter().map(|(p, e)| (*p, set(&ar, e))).collect();
         prop_assert_eq!(got, want);
         prop_assert_eq!(part.unmatched, set(&ar, &unmatched));
-        prop_assert!(part.uncertain.is_empty());
+        prop_assert_eq!(part.uncertain, set(&ar, &uncertain));
     }
 
     #[test]
@@ -892,7 +908,11 @@ proptest! {
         let s = set(&ar, &ea);
         let mut want = s.empty();
         for p in &ea {
-            want = want.union(&PacketSet::single(&ar, &p.current.reply()));
+            // A reply with 2 unknown addresses does not record the address
+            // family, so the explicit model cannot state it.
+            let r = p.current.reply();
+            prop_assume!(r.src_ip != FieldValue::Unknown || r.dst_ip != FieldValue::Unknown);
+            want = want.union(&PacketSet::single(&ar, &r));
         }
         let r = s.reply();
         prop_assert_eq!(&r, &want);
@@ -906,6 +926,11 @@ proptest! {
         probe in pairs(),
     ) {
         prop_assume!(same_family(&rw, &currents(&lookup)));
+        // The relation joins the lookup and the commit by the original
+        // request, so the explicit model needs 1 pair for each original
+        // request.
+        let mut lookup = lookup;
+        lookup.dedup_by(|a, b| a.original == b.original);
         check_session(lookup, rw, probe)?;
     }
 

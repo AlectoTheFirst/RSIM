@@ -670,6 +670,49 @@ mod tests {
     }
 
     #[test]
+    fn an_inner_header_that_is_not_a_product_gives_a_member_for_each_group() {
+        use crate::header::{Encap, PROTO_UDP};
+        let a = SetArena::standalone();
+        let vtep = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+        let mut o = Header::request(vtep("198.51.100.1"), vtep("198.51.100.2"), PROTO_UDP)
+            .with_src_port(49152)
+            .with_dst_port(4789);
+        o.dscp = FieldValue::Known(0);
+        o.ecn = FieldValue::Known(0);
+        o.src_mac = FieldValue::Unknown;
+        o.dst_mac = FieldValue::Unknown;
+        o.vlan = FieldValue::Absent;
+        o.l2_priority = FieldValue::Absent;
+        o.encap = vec![Encap::Gre {
+            src: vtep("198.51.100.1"),
+            dst: vtep("198.51.100.2"),
+        }];
+        // Port 22 goes to port 80 and port 23 goes to port 81: the inner
+        // ports are not a product with the original ports.
+        let to = |from: u16, to: u16| {
+            PacketSet::single(&a, &h().with_dst_port(from)).rewrite(&Rewrite {
+                dst_port: Some(FieldValue::Known(to)),
+                ..Rewrite::default()
+            })
+        };
+        let s = to(22, 80).union(&to(23, 81)).encapsulate(&o).done;
+        let m = s.describe();
+        assert_eq!(m.len(), 2);
+        for (member, (from, to)) in m.iter().zip([(22, 80), (23, 81)]) {
+            assert_eq!(
+                member.original.get(HeaderField::DstPort).single(),
+                Some(from)
+            );
+            assert_eq!(
+                member.current.get(HeaderField::DstPort).single(),
+                Some(4789)
+            );
+            let i = member.current.inner.as_deref().unwrap();
+            assert_eq!(i.get(HeaderField::DstPort).single(), Some(to));
+        }
+    }
+
+    #[test]
     fn a_union_of_two_requests_has_two_members_in_bit_order() {
         let a = SetArena::standalone();
         let x = PacketSet::single(&a, &h().with_dst_port(80));
