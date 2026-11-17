@@ -3,8 +3,12 @@
 
 #![deny(clippy::disallowed_methods, clippy::disallowed_types)]
 
+use std::collections::BTreeMap;
+
+use rsim_cli::tables;
 use rsim_contract::args::Form;
 use rsim_contract::json::{PathBriefOut, SetBriefOut};
+use rsim_contract::table::Selection;
 use std::io::Write;
 use std::net::IpAddr;
 use std::process::ExitCode;
@@ -21,7 +25,7 @@ use rsim_core::{Mac, Prefix};
 use serde::Serialize;
 
 /// Path queries and set queries on the built-in topologies of rsim.
-#[derive(Parser)]
+#[derive(Parser, Clone)]
 #[command(name = "rsim", version)]
 struct Cli {
     /// The output format.
@@ -63,8 +67,13 @@ impl Cli {
     }
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 enum Command {
+    /// The catalog of the tables: their columns and verbs.
+    Tables,
+    /// A table of a twin: `rsim <twin> <table> [show|summarize|unique|top|lpm|describe] [--<column> <values>] [--<column>.<op> <value>] [--columns a,b] [--sort a,-b] [--limit n] [--cursor c]`.
+    #[command(external_subcommand)]
+    Table(Vec<String>),
     /// The names of the built-in topologies.
     Topologies,
     /// The devices, the functions and the endpoints of a topology.
@@ -313,6 +322,13 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match &cli.command {
         Command::Topologies => emit(&cli, Ok(commands::topologies()), text::topologies),
+        Command::Tables => emit(&cli, Ok(tables::catalog()), |c| {
+            c.tables
+                .iter()
+                .map(|t| format!("{:<16} {}\n", t.name, t.description))
+                .collect()
+        }),
+        Command::Table(args) => table_command(&cli, args),
         Command::Devices { topology } => {
             let r = commands::load(topology).map(|t| commands::devices(topology, &t));
             emit(&cli, r, text::devices)
@@ -369,4 +385,231 @@ fn main() -> ExitCode {
             emit(&cli, r, text::step)
         }
     }
+}
+
+/// The value of a flag of a table command.
+fn flag_value<'a>(
+    it: &mut std::slice::Iter<'a, String>,
+    flag: &str,
+) -> Result<&'a String, QueryError> {
+    it.next().ok_or_else(|| {
+        QueryError::new(
+            rsim_cli::ErrorCode::InvalidQuery,
+            format!("--{flag} needs a value"),
+        )
+    })
+}
+
+/// The text form of table rows: one line for each row, with aligned
+/// columns.
+fn rows_text(columns: &[String], rows: &[Vec<serde_json::Value>]) -> String {
+    let cell = |v: &serde_json::Value| match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(a) => a
+            .iter()
+            .map(|x| x.as_str().map_or_else(|| x.to_string(), str::to_string))
+            .collect::<Vec<_>>()
+            .join(" "),
+        serde_json::Value::Null => "-".into(),
+        other => other.to_string(),
+    };
+    let cells: Vec<Vec<String>> = rows.iter().map(|r| r.iter().map(cell).collect()).collect();
+    let mut width: Vec<usize> = columns.iter().map(String::len).collect();
+    for r in &cells {
+        for (i, c) in r.iter().enumerate() {
+            width[i] = width[i].max(c.chars().count());
+        }
+    }
+    let line = |r: &[String]| -> String {
+        let parts: Vec<String> = r
+            .iter()
+            .enumerate()
+            .map(|(i, c)| format!("{c:<w$}", w = width[i]))
+            .collect();
+        parts.join("  ").trim_end().to_string() + "\n"
+    };
+    let mut out = line(columns);
+    for r in &cells {
+        out.push_str(&line(r));
+    }
+    out
+}
+
+/// The parts of a table command: the twin, the table, the verb, the
+/// positional arguments, the selection and the other options.
+type Parsed = (
+    String,
+    String,
+    String,
+    Vec<String>,
+    Selection,
+    BTreeMap<String, String>,
+);
+
+/// `rsim <twin> <table> [verb] [flags]`.
+fn table_command(cli: &Cli, args: &[String]) -> ExitCode {
+    // The global output flags can also follow the twin.
+    let mut own = cli.clone();
+    let mut kept = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--pretty" => own.pretty = true,
+            "--format" => match it.next().map(String::as_str) {
+                Some("json") => own.format = Format::Json,
+                Some("text") => own.format = Format::Text,
+                other => {
+                    return usage_error(&format!(
+                        "--format {} is not text or json",
+                        other.unwrap_or("")
+                    ));
+                }
+            },
+            _ => kept.push(a.clone()),
+        }
+    }
+    let cli = &own;
+    let args = &kept[..];
+    let usage = |d: String| QueryError::new(rsim_cli::ErrorCode::InvalidQuery, d);
+    let parsed = (|| -> Result<Parsed, QueryError> {
+        let twin = args
+            .first()
+            .ok_or_else(|| usage("a twin is needed".into()))?;
+        let twin = twin.strip_prefix("builtin.").unwrap_or(twin).to_string();
+        let table = args
+            .get(1)
+            .ok_or_else(|| usage("a table is needed; `rsim tables` lists them".into()))?
+            .clone();
+        let mut rest = args[2..].iter();
+        let mut verb = "show".to_string();
+        let mut positional = Vec::new();
+        let mut sel = Selection::default();
+        let mut opts = BTreeMap::new();
+        let mut first = true;
+        while let Some(a) = rest.next() {
+            match a.strip_prefix("--") {
+                Some("columns") => {
+                    sel.columns = Some(
+                        flag_value(&mut rest, "columns")?
+                            .split(',')
+                            .map(str::to_string)
+                            .collect(),
+                    );
+                }
+                Some("sort") => {
+                    sel.sort = Some(
+                        flag_value(&mut rest, "sort")?
+                            .split(',')
+                            .map(str::to_string)
+                            .collect(),
+                    );
+                }
+                Some("limit") => {
+                    let v = flag_value(&mut rest, "limit")?;
+                    sel.limit = Some(
+                        v.parse()
+                            .map_err(|_| usage(format!("--limit {v} is not a number")))?,
+                    );
+                }
+                Some("cursor") => sel.cursor = Some(flag_value(&mut rest, "cursor")?.clone()),
+                Some(k @ ("column" | "count")) => {
+                    opts.insert(k.to_string(), flag_value(&mut rest, k)?.clone());
+                }
+                Some("ascending") => {
+                    opts.insert("ascending".into(), "true".into());
+                }
+                Some(k) if k.contains('.') => {
+                    sel.typed
+                        .insert(k.to_string(), flag_value(&mut rest, k)?.clone());
+                }
+                Some(k) => {
+                    let v = flag_value(&mut rest, k)?;
+                    sel.filters
+                        .insert(k.to_string(), v.split(',').map(str::to_string).collect());
+                }
+                None if first => verb = a.clone(),
+                None => positional.push(a.clone()),
+            }
+            first = false;
+        }
+        Ok((twin, table, verb, positional, sel, opts))
+    })();
+    let (twin, table, verb, positional, sel, opts) = match parsed {
+        Ok(p) => p,
+        Err(e) => return usage_error(&e.detail),
+    };
+    let loaded = match commands::load(&twin) {
+        Ok(l) => l,
+        Err(e) => return emit::<()>(cli, Err(e), |_| String::new()),
+    };
+    match verb.as_str() {
+        "show" => emit(cli, tables::show(&twin, &loaded, &table, &sel), |o| {
+            rows_text(&o.columns, &o.rows)
+        }),
+        "top" => {
+            let column = opts.get("column").cloned().unwrap_or_default();
+            let n = opts.get("count").and_then(|c| c.parse().ok()).unwrap_or(5);
+            emit(
+                cli,
+                tables::top(
+                    &twin,
+                    &loaded,
+                    &table,
+                    &column,
+                    n,
+                    opts.contains_key("ascending"),
+                    &sel,
+                ),
+                |o| rows_text(&o.columns, &o.rows),
+            )
+        }
+        "lpm" => {
+            let column = opts
+                .get("column")
+                .cloned()
+                .unwrap_or_else(|| "prefix".into());
+            let address = positional.first().cloned().unwrap_or_default();
+            emit(
+                cli,
+                tables::lpm(&twin, &loaded, &table, &column, &address, &sel),
+                |o| rows_text(&o.columns, &o.rows),
+            )
+        }
+        "unique" => {
+            let columns = sel.columns.clone().unwrap_or_default();
+            let mut s = sel.clone();
+            s.columns = None;
+            emit(
+                cli,
+                tables::unique(&twin, &loaded, &table, &columns, &s),
+                |o| rows_text(&o.columns, &o.rows),
+            )
+        }
+        "summarize" => emit(cli, tables::summarize(&twin, &loaded, &table, &sel), |o| {
+            let mut t = format!("{} rows\n", o.total);
+            for c in &o.columns {
+                t.push_str(&format!(
+                    "{:<16} distinct {:<6} nulls {}\n",
+                    c.column, c.distinct, c.nulls
+                ));
+            }
+            t
+        }),
+        "describe" => emit(cli, tables::def(&table), |d| {
+            d.columns
+                .iter()
+                .map(|c| format!("{:<12} {:?}  {}\n", c.name, c.kind, c.description))
+                .collect()
+        }),
+        v => usage_error(&format!(
+            "{v} is not a verb; the verbs are show, summarize, unique, top, lpm and describe"
+        )),
+    }
+}
+
+/// A usage error of a table command: the text on stderr and the exit code
+/// 2, as for the other usage errors.
+fn usage_error(detail: &str) -> ExitCode {
+    let _ = writeln!(std::io::stderr().lock(), "error: {detail}");
+    ExitCode::from(2)
 }

@@ -185,6 +185,25 @@ fn tool_calls(modern: bool) -> Vec<Value> {
         stored_args("set-mini-enterprise"),
         modern,
     ));
+    m.push(call(id + 7, "list_tables", json!({}), modern));
+    m.push(call(
+        id + 8,
+        "table_query",
+        json!({
+            "topology": "leaf-spine",
+            "table": "fib",
+            "verb": "lpm",
+            "address": "10.2.0.10",
+            "filters": {"device": ["leaf1"]}
+        }),
+        modern,
+    ));
+    m.push(call(
+        id + 9,
+        "table_query",
+        json!({"topology": "leaf-spine", "table": "colours"}),
+        modern,
+    ));
     m
 }
 
@@ -254,6 +273,22 @@ fn check_tool_results(responses: &[Value], modern: bool) {
     let r = &by_id(responses, id + 4)["result"]["structuredContent"];
     assert_eq!(r["kind"], "step");
     assert_eq!(r["trace_step"], set["answer"]["branches"][1]["steps"][7]);
+    let r = &by_id(responses, id + 7)["result"]["structuredContent"];
+    assert_eq!(r["kind"], "tables");
+    assert!(
+        r["tables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["name"] == "fib")
+    );
+    let r = &by_id(responses, id + 8)["result"]["structuredContent"];
+    assert_eq!(r["kind"], "table_rows", "{r}");
+    assert_eq!(r["rows"][0][2], "10.2.0.0/24");
+    assert_eq!(r["rows"][0][5], json!(["192.0.2.2@nve1"]));
+    let r = &by_id(responses, id + 9)["result"];
+    assert_eq!(r["isError"], true);
+    assert_eq!(r["structuredContent"]["error"]["code"], "unknown_table");
     for (n, file) in [
         (5, "leaf-spine.summary"),
         (6, "set-mini-enterprise.summary"),
@@ -270,7 +305,14 @@ fn check_tools_list(r: &Value) {
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert_eq!(
         names,
-        ["list_devices", "path_query", "set_query", "explain_step"]
+        [
+            "list_devices",
+            "path_query",
+            "set_query",
+            "explain_step",
+            "list_tables",
+            "table_query"
+        ]
     );
     for t in tools {
         assert!(t["description"].is_string());
@@ -278,7 +320,8 @@ fn check_tools_list(r: &Value) {
         assert_eq!(t["outputSchema"]["type"], "object");
         assert_eq!(t["inputSchema"]["additionalProperties"], false);
         let properties = t["inputSchema"]["properties"].as_object().unwrap();
-        for name in t["inputSchema"]["required"].as_array().unwrap() {
+        let required = t["inputSchema"]["required"].as_array().cloned();
+        for name in required.unwrap_or_default().iter() {
             let name = name.as_str().unwrap();
             assert!(
                 properties.contains_key(name),

@@ -4,8 +4,9 @@ use std::collections::BTreeMap;
 
 use rsim_cli::commands::Loaded;
 use rsim_cli::json::{self, ErrorOut};
-use rsim_cli::{QueryError, args, commands};
+use rsim_cli::{QueryError, args, commands, tables};
 use rsim_contract::args::Form;
+use rsim_contract::args::{TableQueryArgs, TableVerb};
 use rsim_contract::json::{PathBriefOut, SetBriefOut};
 use rsim_contract::registry;
 use serde::Serialize;
@@ -107,6 +108,47 @@ impl Tools {
                     .map(|o| text(&o)),
                 Err(e) => Err(e),
             },
+            "list_tables" => Ok(text(&tables::catalog())),
+            "table_query" => {
+                serde_json::from_value::<TableQueryArgs>(Value::Object(arguments.clone()))
+                    .map_err(|e| QueryError::new(rsim_cli::ErrorCode::InvalidQuery, e.to_string()))
+                    .and_then(|a| {
+                        let t = a.topology.clone();
+                        let twin = self.twin(&t)?;
+                        let s = &a.selection;
+                        let name = a.table.as_str();
+                        match a.verb.unwrap_or_default() {
+                            TableVerb::Show => tables::show(&t, twin, name, s).map(|o| text(&o)),
+                            TableVerb::Top => tables::top(
+                                &t,
+                                twin,
+                                name,
+                                a.column.as_deref().unwrap_or_default(),
+                                a.count.unwrap_or(5),
+                                a.ascending.unwrap_or(false),
+                                s,
+                            )
+                            .map(|o| text(&o)),
+                            TableVerb::Lpm => tables::lpm(
+                                &t,
+                                twin,
+                                name,
+                                a.column.as_deref().unwrap_or("prefix"),
+                                a.address.as_deref().unwrap_or_default(),
+                                s,
+                            )
+                            .map(|o| text(&o)),
+                            TableVerb::Unique => {
+                                let mut sel = s.clone();
+                                let columns = sel.columns.take().unwrap_or_default();
+                                tables::unique(&t, twin, name, &columns, &sel).map(|o| text(&o))
+                            }
+                            TableVerb::Summarize => {
+                                tables::summarize(&t, twin, name, s).map(|o| text(&o))
+                            }
+                        }
+                    })
+            }
             _ => return None,
         };
         Some(match r {

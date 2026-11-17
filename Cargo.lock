@@ -2606,6 +2606,7 @@ dependencies = [
  "rsim-contract",
  "rsim-core",
  "rsim-engine",
+ "rsim-functions",
  "rsim-ingest",
  "rsim-store",
  "rsim-topologies",
