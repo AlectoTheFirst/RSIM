@@ -55,3 +55,10 @@ pub const NATIVE_VLAN: u16 = 1;
 /// allowed. No source states these 2 rules; they are not confirmed against
 /// a device.
 pub const DEFAULT_MODE_IS_ACCESS: bool = true;
+
+/// The Cisco guide "Design and Configuration Guide: Best Practices for
+/// Virtual Port Channels (vPC) on Cisco Nexus Series Switches", the source of
+/// the vPC rules: the loop avoidance rule (page 7), HSRP and VRRP in the
+/// active-active mode of the data plane (page 86), and `peer-gateway`
+/// (page 118). Not confirmed against a device.
+pub const VPC_GUIDE: &str = "https://www.cisco.com/c/dam/en/us/td/docs/switches/datacenter/sw/design/vpc_design/vpc_best_practices_design_guide.pdf";

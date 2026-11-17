@@ -6,8 +6,8 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use rsim_core::{
-    BridgeDomainId, EndpointId, FunctionId, InterfaceId, Mac, ObjectId, PortId, Prefix,
-    PrefixTable, SourceSpan,
+    BridgeDomainId, EndpointId, FunctionId, InterfaceId, Mac, Match, ObjectId, PortId, Prefix,
+    PrefixTable, RulePredicate, SourceSpan,
 };
 use rsim_engine::{AttachmentKind, AttachmentRecord, Endpoint};
 use rsim_functions::{
@@ -15,11 +15,11 @@ use rsim_functions::{
     MacLookup, PortEgress, PortIngress, PortPeer, Rule as FRule, RuleAction,
 };
 
-use super::config::{FhrpKind, Interface, PortMode};
-use super::links::{External, PortVlans, Summary, VlanInfo};
+use super::config::{FhrpKind, Interface, PortMode, VpcPort};
+use super::links::{External, PortVlans, Summary, VlanInfo, VpcSummary};
 use super::lower::{L, iface_addr};
 use super::names::Names;
-use super::profile::{ACCESS_VLAN, DEFAULT_MODE_IS_ACCESS, NATIVE_VLAN};
+use super::profile::{ACCESS_VLAN, DEFAULT_MODE_IS_ACCESS, NATIVE_VLAN, VPC_GUIDE};
 use super::state::{self, State};
 use crate::collected::Collected;
 
@@ -30,6 +30,9 @@ pub(super) struct Gateway {
     pub svi_mac: Option<(Mac, SourceSpan)>,
     /// The virtual MAC and the virtual address of each active group.
     pub active: Vec<(Mac, IpAddr, Vec<SourceSpan>)>,
+    /// The virtual MAC of each group in the standby or backup state on a
+    /// vPC pair, which forwards in the data plane too.
+    pub passive: Vec<(Mac, Vec<SourceSpan>)>,
     /// A virtual MAC of a group of the interface, active or not.
     pub vmac: Option<(Mac, Vec<SourceSpan>)>,
     /// Why the hand-off of the interface is not known.
@@ -63,6 +66,19 @@ enum Plan {
     Unknown(String, super::config::Lines),
 }
 
+/// True if the vPC domain of the switch is lowered: the config has a domain
+/// with no unhandled line, and the vPC section gives the peer status
+/// `peer-ok` for the same domain.
+pub(super) fn vpc_ok(cfg: &super::config::Config, st: &State) -> bool {
+    cfg.vpc_domain.as_ref().is_some_and(|d| {
+        d.unhandled.is_empty()
+            && st
+                .vpc
+                .as_ref()
+                .is_some_and(|v| v.peer_ok == Some(true) && v.domain.is_none_or(|x| x == d.id))
+    })
+}
+
 /// The state words of a group that are neither active nor unknown.
 const HSRP_OTHER: &[&str] = &["standby", "listen", "speak", "init", "initial", "learn"];
 const VRRP_OTHER: &[&str] = &["backup", "init", "initialize"];
@@ -75,6 +91,7 @@ impl L<'_> {
         st: &State,
         col: &Collected,
         names: &Names,
+        vpc_ok: bool,
     ) -> BTreeMap<String, Gateway> {
         let mut out = BTreeMap::new();
         for i in active {
@@ -107,6 +124,9 @@ impl L<'_> {
                 let vip = r.vip.as_deref().and_then(|v| v.parse::<IpAddr>().ok());
                 match (state.as_str(), vip, r.vmac) {
                     (s, Some(vip), Some(m)) if s == word => g.active.push((m, vip, spans)),
+                    (s, _, Some(m)) if vpc_ok && (s == "standby" || s == "backup") => {
+                        g.passive.push((m, spans));
+                    }
                     (s, _, _) if others.contains(&s) => {}
                     (s, _, _) => {
                         g.unknown = Some(format!(
@@ -175,6 +195,21 @@ impl L<'_> {
             channel.get(&n).cloned().unwrap_or(n)
         };
         let neighbour: BTreeSet<String> = st.neighbour_ports.iter().map(|p| port_of(p)).collect();
+        let vpc_ok = vpc_ok(cfg, st);
+        let peer_links: BTreeSet<String> = cfg
+            .interfaces
+            .iter()
+            .filter(|i| i.vpc == Some(VpcPort::PeerLink))
+            .map(|i| i.name.clone())
+            .collect();
+        let members: BTreeMap<String, u32> = cfg
+            .interfaces
+            .iter()
+            .filter_map(|i| match i.vpc {
+                Some(VpcPort::Member(n)) => Some((i.name.clone(), n)),
+                _ => None,
+            })
+            .collect();
         sum.names = names.clone();
         sum.channel = channel.clone();
         sum.neighbours = st.neighbours.clone();
@@ -229,6 +264,9 @@ impl L<'_> {
                 None if !relevant => continue,
                 Some(false) => continue,
                 None => Plan::Unknown("the mode of the port is not known".into(), i.lines),
+                Some(true) if i.vpc.is_some() && !vpc_ok => {
+                    Plan::Unknown("the vPC domain is not known".into(), i.lines)
+                }
                 Some(true) if admin.is_none() => {
                     Plan::Unknown("the admin state of the port is not known".into(), i.lines)
                 }
@@ -310,6 +348,15 @@ impl L<'_> {
             plans.insert(i.name.clone(), plan);
         }
 
+        // The MAC of the SVI of the vPC peer, which `peer-gateway` hands to
+        // layer 3 too.
+        let peer_gateway = |name: &str| -> Option<Mac> {
+            cfg.vpc_domain
+                .as_ref()
+                .filter(|d| d.peer_gateway && vpc_ok)?;
+            ext.vpc_peer.as_ref()?.svi_macs.get(name).copied()
+        };
+
         // The SVIs and their MACs.
         let mut svis: BTreeMap<String, (u16, Mac, SourceSpan)> = BTreeMap::new();
         for i in active {
@@ -338,6 +385,10 @@ impl L<'_> {
             own.insert((*v, *m));
             if let Some(g) = gws.get(name) {
                 own.extend(g.active.iter().map(|a| (*v, a.0)));
+                own.extend(g.passive.iter().map(|a| (*v, a.0)));
+            }
+            if let Some(pm) = peer_gateway(name) {
+                own.insert((*v, pm));
             }
         }
 
@@ -474,12 +525,19 @@ impl L<'_> {
                         tagged: tagged.iter().map(|v| (*v, self.bd(*v))).collect(),
                         next: if qos_in.is_some() {
                             self.id(&qin_f)
+                        } else if peer_links.contains(name) {
+                            self.id("mac-peer")
                         } else {
                             mac_id.clone()
                         },
                     });
                     if let Some((policy, l)) = qos_in {
-                        let f = self.qos(&qin_f, policy, *l, "mac");
+                        let next = if peer_links.contains(name) {
+                            "mac-peer"
+                        } else {
+                            "mac"
+                        };
+                        let f = self.qos(&qin_f, policy, *l, next);
                         self.add(f);
                     }
                     let port_hosts: BTreeMap<Mac, EndpointId> = ext
@@ -496,6 +554,8 @@ impl L<'_> {
                         native: native.map(|v| self.bd(v)),
                         tagged: tagged.iter().map(|v| (self.bd(*v), *v)).collect(),
                         peers: peer
+                            .into_iter()
+                            .flatten()
                             .map(|p| PortPeer {
                                 target: p.target.clone(),
                                 link: Some(LinkFacts {
@@ -503,7 +563,6 @@ impl L<'_> {
                                     remote: p.remote.clone(),
                                 }),
                             })
-                            .into_iter()
                             .collect(),
                         hosts: port_hosts,
                     });
@@ -605,6 +664,8 @@ impl L<'_> {
                         meta,
                         macs: std::iter::once(*m)
                             .chain(g.active.iter().map(|a| a.0))
+                            .chain(g.passive.iter().map(|a| a.0))
+                            .chain(peer_gateway(name))
                             .collect(),
                         untagged: Some(self.id(&format!("in/{name}"))),
                         tagged: BTreeMap::new(),
@@ -618,7 +679,11 @@ impl L<'_> {
                 .or_default()
                 .push((pid.clone(), out_id));
             let table = tables.entry(self.bd(*v)).or_default();
-            for mac in std::iter::once(*m).chain(g.active.iter().map(|a| a.0)) {
+            for mac in std::iter::once(*m)
+                .chain(g.active.iter().map(|a| a.0))
+                .chain(g.passive.iter().map(|a| a.0))
+                .chain(peer_gateway(name))
+            {
                 table.insert(
                     mac,
                     MacEntry {
@@ -660,6 +725,89 @@ impl L<'_> {
             self.note(format!(
                 "the MAC table has VLAN {v}, which is not in the config"
             ));
+        }
+        // A frame from the peer link does not leave on a vPC member port,
+        // unless the member port of that vPC is down on the peer: the vPC
+        // loop avoidance rule. It has its own MAC lookup and flood.
+        if peer_links
+            .iter()
+            .any(|p| matches!(plans.get(p), Some(Plan::Exact { .. })))
+        {
+            let peer_down = ext
+                .vpc_peer
+                .as_ref()
+                .map(|p| p.down.clone())
+                .unwrap_or_default();
+            let blocked: BTreeSet<String> = members
+                .iter()
+                .filter(|(p, n)| !peer_down.contains(n) && plans.contains_key(*p))
+                .map(|(p, _)| p.clone())
+                .collect();
+            let mut egress_peer = egress.clone();
+            for p in &blocked {
+                let f = format!("vpc/loop/{p}");
+                let span = SourceSpan::line(VPC_GUIDE, 7);
+                let rule = FRule::new(
+                    "vPC loop avoidance",
+                    RulePredicate::exact(Match::any()),
+                    RuleAction::Deny,
+                )
+                .with_span(span.clone());
+                self.add(AclMatch {
+                    meta: self.meta(&f, vec![span]),
+                    acl: ObjectId::new(format!("{}:vpc:loop", self.dev)),
+                    rules: vec![rule],
+                    default: RuleAction::Deny,
+                    next: self.id(&f),
+                });
+                egress_peer.insert(PortId::new(p), self.id(&f));
+            }
+            let flood_peer: BTreeMap<BridgeDomainId, Vec<(PortId, FunctionId)>> = flood
+                .iter()
+                .map(|(bd, ports)| {
+                    let kept = ports
+                        .iter()
+                        .filter(|(p, _)| !blocked.contains(&p.to_string()))
+                        .cloned()
+                        .collect();
+                    (bd.clone(), kept)
+                })
+                .collect();
+            let meta = self.meta("mac-peer", vec![SourceSpan::line(VPC_GUIDE, 7)]);
+            self.out.functions.push(Arc::new(MacLookup {
+                meta,
+                tables: tables.clone(),
+                egress: egress_peer,
+                flood: self.id("flood-peer"),
+                hairpin: BTreeSet::new(),
+                blocked: BTreeMap::new(),
+            }));
+            let meta = self.meta("flood-peer", Vec::new());
+            self.out.functions.push(Arc::new(Flood {
+                meta,
+                ports: flood_peer,
+            }));
+        }
+        if let Some(d) = &cfg.vpc_domain {
+            sum.vpc = Some(VpcSummary {
+                domain: d.id,
+                ok: vpc_ok,
+                members: members
+                    .iter()
+                    .filter(|(p, _)| plans.contains_key(*p))
+                    .map(|(p, n)| (p.clone(), *n))
+                    .collect(),
+                down: members
+                    .iter()
+                    .filter(|(p, _)| {
+                        let st = st.interfaces.get(*p);
+                        st.and_then(|s| s.oper_up) == Some(false)
+                            || st.and_then(|s| s.admin_up) == Some(false)
+                    })
+                    .map(|(_, n)| *n)
+                    .collect(),
+                svi_macs: svis.iter().map(|(n, (_, m, _))| (n.clone(), *m)).collect(),
+            });
         }
         if !plans.is_empty() || !svis.is_empty() {
             let meta = self.meta("mac", Vec::new());

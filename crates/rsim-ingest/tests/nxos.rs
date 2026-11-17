@@ -228,10 +228,7 @@ fn the_coverage_lists_the_unhandled_lines() {
     let cov = classify(&doc, &nxos::table(true));
     let mut paths: Vec<&str> = cov.ranked().iter().map(|r| r.0).collect();
     paths.sort_unstable();
-    assert_eq!(
-        paths,
-        ["interface */vpc 10", "ip ospf authentication-key <secret>"]
-    );
+    assert_eq!(paths, ["ip ospf authentication-key <secret>"]);
     assert!(cov.lines[&State::Handled] > 0);
 }
 
@@ -388,7 +385,7 @@ fn what_is_not_lowered_gives_unknown() {
         notes,
         &[
             "leaf1/vlan10/00:00:5e:00:53:e1: a next hop of a route, so it is not an endpoint",
-            "Ethernet1/9: options not lowered: vpc 10",
+            "Ethernet1/9: the vPC domain is not known",
             "route 0.0.0.0/0 in VRF RED: a next hop in another VRF is not lowered",
             "IPv6 is not lowered: each IPv6 packet is unknown at the route lookup",
         ]
@@ -798,7 +795,7 @@ fn a_port_with_an_unhandled_line_gives_unknown() {
     ));
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(has(&steps, "port/Ethernet1/9/out"), "{steps:#?}");
-    assert!(has(&steps, "options not lowered: vpc 10"), "{steps:#?}");
+    assert!(has(&steps, "the vPC domain is not known"), "{steps:#?}");
 }
 
 #[test]

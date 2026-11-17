@@ -69,7 +69,26 @@ pub struct Interface {
     pub channel_group: Option<u32>,
     /// The HSRP and VRRP groups.
     pub fhrp: Vec<Fhrp>,
+    /// The vPC role of a port channel.
+    pub vpc: Option<VpcPort>,
     /// The masked lines of the unhandled options of the interface.
+    pub unhandled: Vec<String>,
+    pub lines: Lines,
+}
+
+/// The vPC role of a port channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VpcPort {
+    PeerLink,
+    Member(u32),
+}
+
+/// The vPC domain of a switch.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VpcDomain {
+    pub id: u32,
+    pub peer_gateway: bool,
+    /// The masked lines of the domain that the lowering does not read.
     pub unhandled: Vec<String>,
     pub lines: Lines,
 }
@@ -233,6 +252,7 @@ pub struct Config {
     pub unknown_vlans: Vec<(u16, u16)>,
     /// The name of the line `hostname`.
     pub hostname: Option<String>,
+    pub vpc_domain: Option<VpcDomain>,
     /// The masked `vlan` lines whose list the handler cannot read.
     pub unreadable_vlans: Vec<String>,
     /// `Some(true)` with `system default switchport`, `Some(false)` with
@@ -371,6 +391,22 @@ pub fn read(doc: &Document, table: &Table) -> Config {
             }
             ["ip", "nat", "translation", ..] => {}
             ["hostname", h] => cfg.hostname = Some((*h).to_string()),
+            ["vpc", "domain", n] => {
+                r.mark(s);
+                let mut d = VpcDomain {
+                    id: n.parse().unwrap_or(u32::MAX),
+                    lines: Lines::of(s),
+                    unhandled: r.unhandled_children(s),
+                    ..VpcDomain::default()
+                };
+                for c in s.children() {
+                    if c.key == "peer-gateway" {
+                        r.mark(c);
+                        d.peer_gateway = true;
+                    }
+                }
+                cfg.vpc_domain = Some(d);
+            }
             ["vlan", list] => {
                 r.mark(s);
                 let Some(ranges) = vlan_list(list) else {
@@ -490,6 +526,17 @@ fn interface(r: &mut R, s: &Stanza, name: &str) -> Interface {
                 true
             }
             ["hsrp", "version", _] => true,
+            ["vpc", "peer-link"] => {
+                i.vpc = Some(VpcPort::PeerLink);
+                true
+            }
+            ["vpc", n] => {
+                match n.parse() {
+                    Ok(n) => i.vpc = Some(VpcPort::Member(n)),
+                    Err(_) => i.unhandled.push(r.table.report_key(&c.key)),
+                }
+                true
+            }
             [kind @ ("hsrp" | "vrrp"), n] => {
                 let kind = if *kind == "hsrp" {
                     FhrpKind::Hsrp

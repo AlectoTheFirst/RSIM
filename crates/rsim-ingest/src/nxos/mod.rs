@@ -22,7 +22,15 @@ pub use profile::profile;
 pub use table::table;
 
 /// The JSON sections of a switch that the lowering reads.
-pub const SECTIONS: &[&str] = &["interfaces", "hsrp", "vrrp", "lldp", "cdp", "version"];
+pub const SECTIONS: &[&str] = &[
+    "interfaces",
+    "hsrp",
+    "vrrp",
+    "lldp",
+    "cdp",
+    "version",
+    "vpc",
+];
 
 /// Reads the bytes of a running config into a stanza tree. A byte sequence
 /// that is not UTF-8 becomes the replacement character.
