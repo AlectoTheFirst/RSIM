@@ -16,12 +16,12 @@ use rsim_functions::{
 };
 
 use super::config::{FhrpKind, Interface, PortMode, VpcPort};
-use super::links::{External, PortVlans, Summary, VlanInfo, VpcSummary};
 use super::lower::{L, iface_addr};
 use super::names::Names;
 use super::profile::{ACCESS_VLAN, DEFAULT_MODE_IS_ACCESS, NATIVE_VLAN, STATE_WORDS, VPC_GUIDE};
 use super::state::{self, State};
 use crate::collected::Collected;
+use crate::links::{External, PortVlans, Summary, VlanInfo, VpcSummary};
 
 /// The gateway facts of a layer 3 interface.
 #[derive(Clone, Debug, Default)]

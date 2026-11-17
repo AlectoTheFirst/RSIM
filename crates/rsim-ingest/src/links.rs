@@ -1,7 +1,9 @@
-//! The links between NX-OS switches and to VyOS routers from LLDP and CDP,
-//! and the place of each NX-OS endpoint across these links. Both need all
+//! The links between the devices of the estate from their neighbour
+//! records, and the place of each endpoint across these links. The join
+//! knows no vendor: each device gives a summary of its ports, its
+//! neighbours, its MAC table, its ARP rows and its next hops. Both need all
 //! devices of the estate, so the estate runs them between a first lowering
-//! of each switch, which gives its summary, and the final lowering.
+//! of each device, which gives its summary, and the final lowering.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
@@ -9,8 +11,22 @@ use std::net::IpAddr;
 use rsim_core::{FunctionId, Mac, Prefix, PrefixTable, SourceSpan, TriePrefixTable};
 use rsim_functions::{HostMac, LinkEnd};
 
-use super::names::Names;
-use super::state::Neighbour;
+use crate::nxos::names::Names;
+
+/// A neighbour record of a port, from LLDP, CDP or an uplink record.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Neighbour {
+    /// The local port, with the name of the device.
+    pub port: String,
+    /// The name of the neighbour, without the domain and the serial.
+    pub name: Option<String>,
+    /// The port of the neighbour as it sends it.
+    pub remote_port: Option<String>,
+    /// The chassis MAC, and the remote port as a MAC if it is one.
+    pub chassis: Option<Mac>,
+    pub port_mac: Option<Mac>,
+    pub span: SourceSpan,
+}
 
 /// The VLANs of a switch port.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -54,6 +70,10 @@ pub struct Summary {
     /// The physical facts of each port.
     pub facts: BTreeMap<String, LinkEnd>,
     pub vpc: Option<VpcSummary>,
+    /// The function that a frame enters on each port that can end a link.
+    pub entries: BTreeMap<String, FunctionId>,
+    /// The MAC of each port, for a neighbour that names a port by its MAC.
+    pub port_macs: BTreeMap<String, Mac>,
 }
 
 /// The vPC facts of a switch.
@@ -95,16 +115,6 @@ impl Summary {
     }
 }
 
-/// An interface of a VyOS router that can end a link: the physical
-/// interface, its MAC, the span of its row and its physical facts.
-#[derive(Clone, Debug)]
-pub struct RouterPort {
-    pub interface: String,
-    pub mac: Mac,
-    pub span: SourceSpan,
-    pub facts: Option<LinkEnd>,
-}
-
 /// The far end of a link from a port.
 #[derive(Clone, Debug)]
 pub struct Peer {
@@ -140,58 +150,46 @@ pub struct External {
     pub vpc_peer: Option<VpcPeer>,
 }
 
-/// One end of a link.
+/// One end of a link: a device and a port.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum End {
-    Switch(String, String),
-    Router(String, String),
-}
+struct End(String, String);
 
-/// The ends and the facts that the estate gives the lowerings.
+/// The facts that the estate gives the lowering of each device.
 #[derive(Default)]
 pub struct Joined {
-    pub switches: BTreeMap<String, External>,
-    /// The peer of each physical interface of each VyOS router, in the form
-    /// of `vyos::Layer2Links`.
-    pub routers: BTreeMap<String, crate::vyos::Layer2Links>,
+    pub devices: BTreeMap<String, External>,
     pub notes: BTreeMap<String, Vec<String>>,
 }
 
-fn target(switches: &BTreeMap<String, Summary>, end: &End) -> Option<FunctionId> {
-    match end {
-        End::Switch(d, p) => {
-            let s = switches.get(d)?;
-            if s.ports.contains_key(p) {
-                Some(FunctionId::new(format!("{d}/port/{p}/in")))
-            } else if s.routed.contains(p) {
-                Some(FunctionId::new(format!("{d}/handoff/{p}")))
-            } else {
-                None
-            }
-        }
-        End::Router(r, i) => Some(FunctionId::new(format!("{r}/handoff/{i}"))),
-    }
+fn target(devices: &BTreeMap<String, Summary>, end: &End) -> Option<FunctionId> {
+    devices.get(&end.0)?.entries.get(&end.1).cloned()
 }
 
-/// The links of the estate. A link needs one far end for all LLDP and CDP
-/// rows of a port. When the far end is a switch with a neighbour section,
-/// that switch must report the link too. An end that 2 links claim gets no
+/// The links of the estate. A link needs one far end for all neighbour
+/// records of a port. A record names the far device by its name, else by
+/// the MAC of the far port, else by its chassis MAC; the far port is the
+/// port of the name or of the MAC. When the far device has a neighbour
+/// section, it must report the link too. An end that 2 links claim gets no
 /// link.
 pub fn join(
-    switches: &BTreeMap<String, Summary>,
-    routers: &BTreeMap<String, Vec<RouterPort>>,
+    devices: &BTreeMap<String, Summary>,
     next_hops: &BTreeSet<IpAddr>,
     device_macs: &BTreeSet<Mac>,
 ) -> Joined {
+    let switches = devices;
     let mut out = Joined::default();
     let by_name: BTreeMap<&str, &str> = switches
         .iter()
         .filter_map(|(d, s)| Some((s.host_name.as_deref()?, d.as_str())))
         .collect();
-    let router_of = |m: Mac| -> Option<(String, &RouterPort)> {
-        routers
-            .iter()
-            .find_map(|(r, ports)| ports.iter().find(|p| p.mac == m).map(|p| (r.clone(), p)))
+    // The device and the port of a port MAC.
+    let port_of_mac = |m: Mac| -> Option<(String, String)> {
+        switches.iter().find_map(|(d, s)| {
+            s.port_macs
+                .iter()
+                .find(|(_, x)| **x == m)
+                .map(|(p, _)| (d.clone(), p.clone()))
+        })
     };
 
     // The far end that each switch port names.
@@ -216,39 +214,34 @@ pub fn join(
                         let o = &switches[*other];
                         n.remote_port
                             .as_deref()
-                            .map(|rp| End::Switch((*other).to_string(), o.port(rp)))
+                            .map(|rp| End((*other).to_string(), o.port(rp)))
                     }
                     None => {
-                        // The router of the port MAC, else of the chassis
-                        // MAC. The interface of the port MAC, else of the
-                        // port name on that router. A chassis MAC names the
-                        // router, not the interface.
-                        let router = n
-                            .port_mac
-                            .and_then(router_of)
-                            .or_else(|| n.chassis.and_then(router_of))
-                            .map(|(r, _)| r);
-                        match router {
-                            Some(r) => {
-                                let ports = &routers[&r];
-                                let iface = n
-                                    .port_mac
-                                    .and_then(|m| ports.iter().find(|p| p.mac == m))
-                                    .or_else(|| {
-                                        let rp = n.remote_port.as_deref()?;
-                                        ports.iter().find(|p| p.interface == rp)
-                                    });
-                                match iface {
-                                    Some(p) => Some(End::Router(r, p.interface.clone())),
-                                    None => {
-                                        router_notes.push(format!(
-                                            "{port}: the neighbour {r} names no interface of its own, so the port has no link"
-                                        ));
-                                        None
-                                    }
+                        // The port of the port MAC, else the device of the
+                        // chassis MAC and its port of the port name. A
+                        // chassis MAC names the device, not the port.
+                        let by_port = n.port_mac.and_then(port_of_mac).filter(|(o, _)| o != d);
+                        let mut by_chassis = || {
+                            let (o, _) = n.chassis.and_then(port_of_mac)?;
+                            if o == *d {
+                                return None;
+                            }
+                            let os = &switches[&o];
+                            match n.remote_port.as_deref() {
+                                Some(rp) if os.entries.contains_key(&os.port(rp)) => {
+                                    Some(Some(End(o.clone(), os.port(rp))))
+                                }
+                                _ => {
+                                    router_notes.push(format!(
+                                        "{port}: the neighbour {o} names no port of its own, so the port has no link"
+                                    ));
+                                    Some(None)
                                 }
                             }
-                            None => None,
+                        };
+                        match by_port {
+                            Some((o, p)) => Some(End(o, p)),
+                            None => by_chassis().flatten(),
                         }
                     }
                 };
@@ -256,7 +249,7 @@ pub fn join(
             }
             out.notes.entry(d.clone()).or_default().extend(router_notes);
             let spans = list.iter().map(|n| n.span.clone()).collect();
-            let here = End::Switch(d.clone(), port.clone());
+            let here = End(d.clone(), port.clone());
             // The member ports of one vPC on the 2 switches of a vPC pair.
             let vpc_ends: Option<Vec<End>> = (far.len() == 2)
                 .then(|| far.iter().cloned().collect::<Option<Vec<End>>>())
@@ -264,21 +257,12 @@ pub fn join(
                 .filter(|ends| {
                     let ids: BTreeSet<(u32, u32)> = ends
                         .iter()
-                        .filter_map(|e| match e {
-                            End::Switch(o, p) => {
-                                let v = switches[o].vpc.as_ref().filter(|v| v.ok)?;
-                                Some((v.domain, *v.members.get(p)?))
-                            }
-                            End::Router(..) => None,
+                        .filter_map(|End(o, p)| {
+                            let v = switches[o].vpc.as_ref().filter(|v| v.ok)?;
+                            Some((v.domain, *v.members.get(p)?))
                         })
                         .collect();
-                    let devs: BTreeSet<&str> = ends
-                        .iter()
-                        .filter_map(|e| match e {
-                            End::Switch(o, _) => Some(o.as_str()),
-                            End::Router(..) => None,
-                        })
-                        .collect();
+                    let devs: BTreeSet<&str> = ends.iter().map(|End(o, _)| o.as_str()).collect();
                     ids.len() == 1 && devs.len() == 2
                 });
             if far.len() == 1 {
@@ -305,31 +289,23 @@ pub fn join(
         if vpc_named.get(far).is_some_and(|(e, _)| e.contains(here)) {
             continue;
         }
-        let confirmed = match far {
-            End::Switch(o, _) => {
-                if !switches[o].neighbour_section {
-                    true
-                } else {
-                    match named.get(far) {
-                        Some((Some(back), _)) => back == here,
-                        _ => false,
-                    }
-                }
+        let confirmed = if !switches[&far.0].neighbour_section {
+            true
+        } else {
+            match named.get(far) {
+                Some((Some(back), _)) => back == here,
+                _ => false,
             }
-            End::Router(..) => true,
         };
         if !confirmed {
-            let End::Switch(d, p) = here else { continue };
+            let End(d, p) = here;
             out.notes.entry(d.clone()).or_default().push(format!(
                 "{p}: the neighbour does not report the link back, so the port has no link"
             ));
             continue;
         }
         // Each link once: from the smaller end of 2 switches.
-        if let End::Switch(..) = far
-            && named.get(far).and_then(|x| x.0.as_ref()) == Some(here)
-            && far < here
-        {
+        if named.get(far).and_then(|x| x.0.as_ref()) == Some(here) && far < here {
             continue;
         }
         let mut spans = spans.clone();
@@ -342,7 +318,7 @@ pub fn join(
     // The vPC pairs: 2 switches of one lowered domain whose peer-link port
     // channels a link joins.
     let peer_link = |e: &End| -> Option<(String, u32)> {
-        let End::Switch(d, p) = e else { return None };
+        let End(d, p) = e;
         let v = switches[d].vpc.as_ref().filter(|v| v.ok)?;
         (v.peer_link.as_deref() == Some(p.as_str())).then(|| (d.clone(), v.domain))
     };
@@ -361,24 +337,15 @@ pub fn join(
     // report the link back if its switch has a neighbour section.
     let mut vpc_links: Vec<(End, Vec<End>, Vec<SourceSpan>)> = Vec::new();
     for (here, (ends, spans)) in &vpc_named {
-        let devs: Vec<&str> = ends
-            .iter()
-            .filter_map(|e| match e {
-                End::Switch(d, _) => Some(d.as_str()),
-                End::Router(..) => None,
-            })
-            .collect();
+        let devs: Vec<&str> = ends.iter().map(|End(d, _)| d.as_str()).collect();
         let paired = matches!(devs.as_slice(), [a, b] if pairs.contains(&((*a).to_string(), (*b).to_string())));
         let confirmed = paired
-            && ends.iter().all(|f| match f {
-                End::Switch(o, _) => {
-                    !switches[o].neighbour_section
-                        || matches!(named.get(f), Some((Some(back), _)) if back == here)
-                }
-                End::Router(..) => false,
+            && ends.iter().all(|f| {
+                !switches[&f.0].neighbour_section
+                    || matches!(named.get(f), Some((Some(back), _)) if back == here)
             });
         if !confirmed {
-            let End::Switch(d, p) = here else { continue };
+            let End(d, p) = here;
             out.notes.entry(d.clone()).or_default().push(format!(
                 "{p}: the vPC pair does not report the link back, so the port has no link"
             ));
@@ -414,59 +381,44 @@ pub fn join(
         .map(|(e, _)| (*e).clone())
         .collect();
     for e in &doubled {
-        let (dev, what) = match e {
-            End::Switch(d, p) | End::Router(d, p) => (d.clone(), p.clone()),
-        };
+        let End(dev, what) = e.clone();
         out.notes
             .entry(dev)
             .or_default()
             .push(format!("{what}: 2 links claim the port, so it has no link"));
     }
 
-    let facts = |e: &End| -> Option<LinkEnd> {
-        match e {
-            End::Switch(d, p) => switches.get(d)?.facts.get(p).cloned(),
-            End::Router(r, i) => routers
-                .get(r)?
-                .iter()
-                .find(|p| p.interface == *i)?
-                .facts
-                .clone(),
-        }
-    };
+    let mut l2_far: BTreeMap<(String, String), (String, String)> = BTreeMap::new();
+    let facts = |e: &End| -> Option<LinkEnd> { switches.get(&e.0)?.facts.get(&e.1).cloned() };
     for (a, b, spans) in links {
         if doubled.contains(&a) || doubled.contains(&b) {
             continue;
         }
         let (Some(ta), Some(tb)) = (target(switches, &a), target(switches, &b)) else {
-            let End::Switch(d, p) = &a else { continue };
+            let End(d, p) = &a;
             out.notes.entry(d.clone()).or_default().push(format!(
                 "{p}: an end of the link is not a lowered port, so the port has no link"
             ));
             continue;
         };
-        for (from, to, t) in [(&a, &b, tb), (&b, &a, ta)] {
-            match from {
-                End::Switch(d, p) => {
-                    out.switches
-                        .entry(d.clone())
-                        .or_default()
-                        .peers
-                        .entry(p.clone())
-                        .or_default()
-                        .push(Peer {
-                            target: t,
-                            provenance: spans.clone(),
-                            remote: facts(to),
-                        });
-                }
-                End::Router(r, i) => {
-                    out.routers
-                        .entry(r.clone())
-                        .or_default()
-                        .insert(i.clone(), (t, spans.clone(), facts(to)));
-                }
-            }
+        // The far end of each switch port with a link, for the placement of
+        // the endpoints.
+        if switches[&a.0].ports.contains_key(&a.1) && switches[&b.0].ports.contains_key(&b.1) {
+            l2_far.insert((a.0.clone(), a.1.clone()), (b.0.clone(), b.1.clone()));
+            l2_far.insert((b.0.clone(), b.1.clone()), (a.0.clone(), a.1.clone()));
+        }
+        for (End(d, p), to, t) in [(&a, &b, tb), (&b, &a, ta)] {
+            out.devices
+                .entry(d.clone())
+                .or_default()
+                .peers
+                .entry(p.clone())
+                .or_default()
+                .push(Peer {
+                    target: t,
+                    provenance: spans.clone(),
+                    remote: facts(to),
+                });
         }
     }
     for (a, ends, spans) in vpc_links {
@@ -475,11 +427,11 @@ pub fn join(
         }
         let ta = target(switches, &a);
         let tb: Option<Vec<FunctionId>> = ends.iter().map(|e| target(switches, e)).collect();
-        let (Some(ta), Some(tb), End::Switch(d, p)) = (ta, tb, &a) else {
+        let (Some(ta), Some(tb), End(d, p)) = (ta, tb, &a) else {
             continue;
         };
         for (e, t) in ends.iter().zip(tb) {
-            out.switches
+            out.devices
                 .entry(d.clone())
                 .or_default()
                 .peers
@@ -490,8 +442,12 @@ pub fn join(
                     provenance: spans.clone(),
                     remote: facts(e),
                 });
-            if let End::Switch(d2, p2) = e {
-                out.switches
+            {
+                let End(d2, p2) = e;
+                if switches[&a.0].ports.contains_key(&a.1) && switches[d2].ports.contains_key(p2) {
+                    l2_far.insert((d2.clone(), p2.clone()), (a.0.clone(), a.1.clone()));
+                }
+                out.devices
                     .entry(d2.clone())
                     .or_default()
                     .peers
@@ -509,13 +465,13 @@ pub fn join(
     // The vPC peer of each switch of a pair.
     for (a, b) in &pairs {
         let v = switches[b].vpc.as_ref().expect("a domain");
-        out.switches.entry(a.clone()).or_default().vpc_peer = Some(VpcPeer {
+        out.devices.entry(a.clone()).or_default().vpc_peer = Some(VpcPeer {
             down: v.down.clone(),
             up: v.up.clone(),
             svi_macs: v.svi_macs.clone(),
         });
     }
-    place(switches, &mut out, next_hops, device_macs);
+    place(switches, &mut out, &l2_far, next_hops, device_macs);
     out
 }
 
@@ -527,24 +483,10 @@ pub fn join(
 fn place(
     switches: &BTreeMap<String, Summary>,
     out: &mut Joined,
+    far: &BTreeMap<(String, String), (String, String)>,
     next_hops: &BTreeSet<IpAddr>,
     device_macs: &BTreeSet<Mac>,
 ) {
-    // The far end of each linked switch port.
-    let mut far: BTreeMap<(String, String), (String, String)> = BTreeMap::new();
-    for (d, ext) in &out.switches {
-        for (p, list) in &ext.peers {
-            let [peer] = list.as_slice() else {
-                continue;
-            };
-            let t = peer.target.as_str();
-            if let Some((dev, rest)) = t.split_once("/port/")
-                && let Some(port) = rest.strip_suffix("/in")
-            {
-                far.insert((d.clone(), p.clone()), (dev.to_string(), port.to_string()));
-            }
-        }
-    }
     // Each ARP row leads to a place, or to none.
     struct At {
         vlan: u16,
@@ -658,7 +600,7 @@ fn place(
                 }
             }
         }
-        out.switches.entry(dev).or_default().endpoints.push(Placed {
+        out.devices.entry(dev).or_default().endpoints.push(Placed {
             id,
             port,
             mac: m,
