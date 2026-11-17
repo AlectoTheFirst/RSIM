@@ -70,6 +70,7 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | Coverage of a VyOS config | `cargo run -p rsim-ingest --example vyos_coverage < config.json` |
 | Coverage of an NX-OS running config | `cargo run -p rsim-ingest --example nxos_coverage < running-config.txt`. Each printed line goes through the mask of the secrets. |
 | NX-OS ingestion tests | `cargo test -p rsim-ingest --test nxos` |
+| NX-OS vPC tests | `cargo test -p rsim-ingest --test nxos_vpc` |
 | Twin of a VyOS device of a store | `cargo run -p rsim-ingest --example vyos_snapshot -- <data folder> <device>`. Add `<ingress interface> <source> <destination> tcp\|udp <port>` for a path query. |
 
 The hand-built topologies are in the crate `rsim-topologies`, with one module for each topology in `crates/rsim-topologies/src/`. `layer2_site()` is a switched site behind a router for the layer 2 tests; it is not a built-in topology. The tests and the benchmarks of `rsim-engine` use it as a development dependency. `rsim-topologies::builtin(name)` gives the twin of a built-in topology.

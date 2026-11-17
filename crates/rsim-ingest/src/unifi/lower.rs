@@ -12,7 +12,7 @@ use rsim_core::{
 use rsim_engine::{AttachmentKind, AttachmentRecord, Endpoint};
 use rsim_functions::{
     Flood, HostMac, HostResolution, LinkEnd, LinkFacts, MacEntry, MacLookup, Meta, PortEgress,
-    PortIngress, VendorProfile, WirelessAttachment,
+    PortIngress, PortPeer, VendorProfile, WirelessAttachment,
 };
 
 use crate::unifi::site::{Client, Device, DeviceKind, Forward, Network, Port, Site};
@@ -413,9 +413,11 @@ pub fn lower(
                     .iter()
                     .filter_map(|n| n.vlan.map(|v| (l.bd(n), v)))
                     .collect(),
-                peer,
+                peers: peer
+                    .map(|target| PortPeer { target, link })
+                    .into_iter()
+                    .collect(),
                 hosts: port_hosts,
-                link,
             }));
             let out_id = l.id(d, &out_name);
             egress.insert(pid.clone(), out_id.clone());
@@ -462,9 +464,8 @@ pub fn lower(
                 port: pid.clone(),
                 native: Some(l.bd(n)),
                 tagged: BTreeMap::new(),
-                peer: None,
+                peers: Vec::new(),
                 hosts: hosts_on,
-                link: None,
             }));
             let out_id = l.id(d, &out_name);
             egress.insert(pid.clone(), out_id.clone());

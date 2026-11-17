@@ -141,7 +141,7 @@ pub fn lower(
             .map(|i| InterfaceId::new(&i.name))
             .collect()
     };
-    let gws = l.gateways(&active, &st, col, &names);
+    let gws = l.gateways(&active, &st, col, &names, super::layer2::vpc_ok(cfg, &st));
     let svi_links = l.layer2(&active, &gws, &st, col, &names, ext, &mut sum);
     // The routed ports that can end a link: a physical port or a port
     // channel with a collected MAC.
@@ -154,6 +154,10 @@ pub fn lower(
         })
         .map(|i| i.name.clone())
         .collect();
+    // A switch with no layer 3 interface has no layer 3 chain.
+    if active.is_empty() {
+        return (l.out, sum);
+    }
     let inside = nat_ifs(NatRole::Inside);
     let outside = nat_ifs(NatRole::Outside);
 
@@ -322,6 +326,10 @@ pub fn lower(
             .peers
             .get(&i.name)
             .filter(|_| sum.routed.contains(&i.name))
+            .and_then(|list| match list.as_slice() {
+                [p] => Some(p),
+                _ => None,
+            })
             .and_then(|p| {
                 let m = gws.get(&i.name)?.svi_mac.as_ref()?.0;
                 Some((p, m))

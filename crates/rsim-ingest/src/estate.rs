@@ -338,7 +338,10 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         {
             let target = format!("{}/handoff/{}", r.device, r.interface);
             for ext in joined.switches.values_mut() {
-                ext.peers.retain(|_, p| p.target.as_str() != target);
+                for list in ext.peers.values_mut() {
+                    list.retain(|p| p.target.as_str() != target);
+                }
+                ext.peers.retain(|_, list| !list.is_empty());
             }
             e.notes.entry(r.device.clone()).or_default().push(format!(
                 "{}: a UniFi site and an NX-OS switch both claim the interface, so it has no link",

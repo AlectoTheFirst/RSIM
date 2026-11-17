@@ -77,6 +77,19 @@ pub struct State {
     /// The kept field `host_name` of the version section, as a neighbour
     /// name.
     pub host_name: Option<String>,
+    /// The state of the vPC domain, if the section is in the snapshot.
+    pub vpc: Option<VpcState>,
+}
+
+/// The state of a vPC domain from `show vpc`, with the fields that HST
+/// reads. HST marks these names as not confirmed on a device.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VpcState {
+    pub domain: Option<u32>,
+    /// True for the peer status `peer-ok`.
+    pub peer_ok: Option<bool>,
+    pub peer_link: Option<String>,
+    pub span: Option<SourceSpan>,
 }
 
 /// A MAC in the form of NX-OS, `0000.5e00.5301`, or with `:` or `-`.
@@ -234,6 +247,21 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
                 span: line(file, i),
             });
         }
+    }
+    if let Some((v, file)) = json("vpc") {
+        st.vpc = Some(VpcState {
+            domain: v
+                .get("vpc-domain-id")
+                .and_then(|d| d.as_u64().or_else(|| d.as_str()?.trim().parse().ok()))
+                .and_then(|d| u32::try_from(d).ok()),
+            peer_ok: text(&v, "vpc-peer-status")
+                .map(|t| t.eq_ignore_ascii_case(super::profile::STATE_WORDS[0])),
+            peer_link: rows(&v, "peerlink")
+                .first()
+                .and_then(|r| text(r, "peerlink-ifindex"))
+                .map(|p| names.resolve(p)),
+            span: Some(line(file, 0)),
+        });
     }
     if let Some((v, _)) = json("version") {
         st.host_name = text(&v, "host_name").and_then(neighbour_name);
