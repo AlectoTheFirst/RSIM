@@ -128,6 +128,18 @@ impl Context {
         }
     }
 
+    /// The context with only the attributes in
+    /// [`ContextAttr::CROSS_DEVICE`]: the context of packets that leave a
+    /// device on a link.
+    pub fn cross_device(&self) -> Context {
+        Context {
+            traffic_class: self.traffic_class.clone(),
+            drop_precedence: self.drop_precedence.clone(),
+            queue: self.queue.clone(),
+            ..Context::default()
+        }
+    }
+
     /// True if the attribute has a value or is unknown.
     pub fn is_set(&self, a: ContextAttr) -> bool {
         match a {

@@ -800,7 +800,7 @@ impl NetFunction for Layer3HandOff {
             ),
         );
         let mut rest = s.matched;
-        let fresh = Context::default();
+        let fresh = ctx.cross_device();
         for (v, next) in &self.tagged {
             let t = rest.split(&vlan_is(*v));
             rest = t.unmatched.union(&t.uncertain);
@@ -861,5 +861,48 @@ impl NetFunction for Layer3HandOff {
             ),
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rsim_core::{Attr, DeviceId, SetArena, SetSpec};
+
+    #[test]
+    fn the_hand_off_keeps_the_qos_class_and_clears_the_rest() {
+        let mac = Mac([0x00, 0x00, 0x5e, 0x00, 0x53, 0x01]);
+        let f = Layer3HandOff {
+            meta: Meta {
+                id: FunctionId::new("r1/handoff"),
+                device: "r1".into(),
+                provenance: Vec::new(),
+                processing_delay_ns: None,
+                profile: "test".into(),
+            },
+            macs: BTreeSet::from([mac]),
+            untagged: None,
+            tagged: BTreeMap::from([(20, FunctionId::new("r1/in/eth0.20"))]),
+        };
+        let spec = SetSpec {
+            dst_mac: Some(vec![mac]),
+            vlan: Some(vec![(20, 20)]),
+            ..SetSpec::default()
+        };
+        let input = PacketSet::from_spec(&SetArena::standalone(), &spec);
+        let ctx = Context {
+            device: Attr::Known(DeviceId::new("sw1")),
+            traffic_class: Attr::Known(3),
+            drop_precedence: Attr::Unknown,
+            queue: Attr::Known(2),
+            ..Context::default()
+        };
+        let out = f.apply(&input, &ctx, &FlowState::default());
+        assert_eq!(out.len(), 1);
+        let c = &out[0].ctx;
+        assert_eq!(c.traffic_class, Attr::Known(3));
+        assert_eq!(c.drop_precedence, Attr::Unknown);
+        assert_eq!(c.queue, Attr::Known(2));
+        assert_eq!(c.device, Attr::Unset);
     }
 }

@@ -538,28 +538,9 @@ fn a_sub_interface_sends_its_dot1q_vlan_to_the_active_router_of_the_group() {
     assert!(!has(&steps, "pe1/handoff/Bundle-Ether20"), "{steps:#?}");
 }
 
-/// The estate with pe1 without the QoS policies of its sub-interface
-/// `Bundle-Ether20.100`.
-fn twin_without_qos_out() -> Twin {
-    let config = String::from_utf8_lossy(CONFIG)
-        .replace(" service-policy input QOS-IN\n", "")
-        .replace(" service-policy output QOS-OUT\n", "");
-    twin_of(assemble(vec![
-        core1(),
-        Input::Iosxr {
-            name: "pe1".into(),
-            config: config.into_bytes(),
-            file: "pe1/config".into(),
-            collected: Collected::default(),
-            sections: sections(),
-        },
-        pe2(),
-    ]))
-}
-
 #[test]
 fn the_standby_router_sends_to_the_virtual_mac_of_the_active_router() {
-    let t = twin_without_qos_out();
+    let t = twin_of(estate());
     let (verdict, steps) = only(&query(
         &t,
         "pe1",
@@ -570,6 +551,7 @@ fn the_standby_router_sends_to_the_virtual_mac_of_the_active_router() {
     ));
     assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
     for f in [
+        "pe1/qos-out/Bundle-Ether20.100",
         "pe1/out/Bundle-Ether20.100",
         "pe2/handoff/Bundle-Ether20",
         "pe2/in/Bundle-Ether20.100",
