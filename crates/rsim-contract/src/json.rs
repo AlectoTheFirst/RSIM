@@ -570,3 +570,168 @@ impl<T: JsonSchema> JsonSchema for FieldJson<T> {
         })
     }
 }
+
+// ------------------------------------------------------------ brief forms
+
+/// A path answer in the form `summary` or `steps`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct PathBriefOut {
+    pub rsim_json: u32,
+    pub kind: String,
+    pub topology: String,
+    pub form: crate::args::Form,
+    pub query: QueryEcho,
+    pub answer: AnswerBriefJson,
+}
+
+/// A set answer in the form `summary` or `steps`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SetBriefOut {
+    pub rsim_json: u32,
+    pub kind: String,
+    pub topology: String,
+    pub form: crate::args::Form,
+    pub query: SetEcho,
+    pub answer: AnswerBriefJson,
+}
+
+/// An answer with no packet set in its ingress and its branches. The
+/// summary parts keep their packet sets, because each part is a set.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AnswerBriefJson {
+    pub mode: String,
+    pub ingress: Vec<IngressBriefJson>,
+    pub summary: Vec<PartJson>,
+    pub branches: Vec<BranchBriefJson>,
+    pub replies: Vec<ReplyBriefJson>,
+}
+
+/// The ingress of one run, with no packet set.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct IngressBriefJson {
+    pub found: bool,
+    pub device: Option<String>,
+    pub interface: Option<String>,
+    pub function: Option<String>,
+    pub resolved_by: Option<String>,
+    pub reason: Option<ReasonJson>,
+}
+
+/// A branch with its verdict, its delay, the number of its steps and, in
+/// the form `steps`, one line for each step.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct BranchBriefJson {
+    pub index: usize,
+    pub verdict: VerdictJson,
+    pub delay: DelayJson,
+    pub step_count: usize,
+    pub steps: Vec<StepLineJson>,
+}
+
+/// One trace step with no packet set.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct StepLineJson {
+    pub index: usize,
+    pub function: String,
+    pub device: Option<String>,
+    pub outcome: String,
+    pub reason: ReasonJson,
+}
+
+/// The reply of a delivered branch in a brief form.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ReplyBriefJson {
+    pub forward_branch: usize,
+    pub ran: bool,
+    pub not_run_reason: Option<String>,
+    pub answer: Option<Box<AnswerBriefJson>>,
+}
+
+impl AnswerBriefJson {
+    /// The brief form of a full answer. With `Form::Summary`, a branch has
+    /// no step lines; with `Form::Steps`, it has one for each step.
+    pub fn from_answer(a: &AnswerJson, form: crate::args::Form) -> Self {
+        let lines = form == crate::args::Form::Steps;
+        AnswerBriefJson {
+            mode: a.mode.clone(),
+            ingress: a
+                .ingress
+                .iter()
+                .map(|i| IngressBriefJson {
+                    found: i.found,
+                    device: i.device.clone(),
+                    interface: i.interface.clone(),
+                    function: i.function.clone(),
+                    resolved_by: i.resolved_by.clone(),
+                    reason: i.reason.clone(),
+                })
+                .collect(),
+            summary: a.summary.clone(),
+            branches: a
+                .branches
+                .iter()
+                .map(|b| BranchBriefJson {
+                    index: b.index,
+                    verdict: b.verdict.clone(),
+                    delay: b.delay.clone(),
+                    step_count: b.steps.len(),
+                    steps: if lines {
+                        b.steps
+                            .iter()
+                            .map(|s| StepLineJson {
+                                index: s.index,
+                                function: s.function.clone(),
+                                device: s.device.clone(),
+                                outcome: s.outcome.kind.clone(),
+                                reason: s.reason.clone(),
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    },
+                })
+                .collect(),
+            replies: a
+                .replies
+                .iter()
+                .map(|r| ReplyBriefJson {
+                    forward_branch: r.forward_branch,
+                    ran: r.ran,
+                    not_run_reason: r.not_run_reason.clone(),
+                    answer: r
+                        .answer
+                        .as_ref()
+                        .map(|x| Box::new(AnswerBriefJson::from_answer(x, form))),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl PathBriefOut {
+    /// The brief form of a full path answer.
+    pub fn from_full(o: &PathAnswerOut, form: crate::args::Form) -> Self {
+        PathBriefOut {
+            rsim_json: o.rsim_json,
+            kind: "path_brief".into(),
+            topology: o.topology.clone(),
+            form,
+            query: o.query.clone(),
+            answer: AnswerBriefJson::from_answer(&o.answer, form),
+        }
+    }
+}
+
+impl SetBriefOut {
+    /// The brief form of a full set answer.
+    pub fn from_full(o: &SetAnswerOut, form: crate::args::Form) -> Self {
+        SetBriefOut {
+            rsim_json: o.rsim_json,
+            kind: "set_brief".into(),
+            topology: o.topology.clone(),
+            form,
+            query: o.query.clone(),
+            answer: AnswerBriefJson::from_answer(&o.answer, form),
+        }
+    }
+}

@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use rsim_cli::json::{PathAnswerOut, SetAnswerOut, to_text};
+use rsim_cli::json::{PathAnswerOut, PathBriefOut, SetAnswerOut, SetBriefOut, to_text};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -67,6 +67,14 @@ fn each_stored_answer_is_valid_and_keeps_its_bytes() {
                 validate(rsim_contract::schema::<SetAnswerOut>(), &v, &name);
                 round_trip::<SetAnswerOut>(&text, &name);
             }
+            Some("path_brief") => {
+                validate(rsim_contract::schema::<PathBriefOut>(), &v, &name);
+                round_trip::<PathBriefOut>(&text, &name);
+            }
+            Some("set_brief") => {
+                validate(rsim_contract::schema::<SetBriefOut>(), &v, &name);
+                round_trip::<SetBriefOut>(&text, &name);
+            }
             k => panic!("{name}: kind {k:?}"),
         }
     }
@@ -88,4 +96,56 @@ fn a_changed_answer_is_not_valid() {
     let mut v: Value = serde_json::from_str(&text).unwrap();
     v["answer"]["input"]["members"][0]["original"]["dscp"] = serde_json::json!({"known": "x"});
     assert!(check(schema, &v, &name).is_err());
+}
+
+/// The flags of a command, from its help text.
+fn flags(command: &str) -> Vec<String> {
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_rsim"))
+        .args([command, "--help"])
+        .output()
+        .unwrap();
+    let mut v: Vec<String> = String::from_utf8(o.stdout)
+        .unwrap()
+        .lines()
+        .filter_map(|l| l.trim_start().strip_prefix("--"))
+        .map(|l| l.split_whitespace().next().unwrap().to_string())
+        .collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn the_flags_of_the_query_commands_are_the_fields_of_the_registry() {
+    for (command, schema) in [
+        (
+            "path",
+            rsim_contract::schema::<rsim_contract::args::PathQueryArgs>(),
+        ),
+        (
+            "set",
+            rsim_contract::schema::<rsim_contract::args::SetQueryArgs>(),
+        ),
+    ] {
+        let op = rsim_contract::registry::OPERATIONS
+            .iter()
+            .find(|o| o.command == Some(command))
+            .unwrap();
+        assert!(op.input.is_some(), "{command}");
+        let mut fields: Vec<String> = schema["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| match k.as_str() {
+                // The topology is the positional argument, and the reply
+                // is on unless --no-reply is given.
+                "reply" => "no-reply".to_string(),
+                k => k.to_string(),
+            })
+            .filter(|k| k != "topology")
+            .collect();
+        // The output flags of the command line.
+        fields.extend(["format".to_string(), "pretty".to_string()]);
+        fields.sort();
+        assert_eq!(flags(command), fields, "{command}");
+    }
 }

@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 use rsim_cli::json::{self, ErrorOut};
 use rsim_cli::{QueryError, Twin, args, commands};
+use rsim_contract::args::Form;
+use rsim_contract::json::{PathBriefOut, SetBriefOut};
 use rsim_contract::registry;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -73,12 +75,22 @@ impl Tools {
             "list_devices" => args::topology(arguments)
                 .and_then(|t| self.twin(&t).map(|twin| commands::devices(&t, twin)))
                 .map(|o| text(&o)),
-            "path_query" => args::query(arguments, &[])
-                .and_then(|q| self.twin(&q.topology).and_then(|t| commands::path(&q, t)))
-                .map(|o| text(&o)),
-            "set_query" => args::set_query(arguments, &[])
-                .and_then(|q| self.twin(&q.topology).and_then(|t| commands::set(&q, t)))
-                .map(|o| text(&o)),
+            "path_query" => args::form(arguments).and_then(|form| {
+                args::query(arguments, &["form"])
+                    .and_then(|q| self.twin(&q.topology).and_then(|t| commands::path(&q, t)))
+                    .map(|o| match form {
+                        Form::Full => text(&o),
+                        f => text(&PathBriefOut::from_full(&o, f)),
+                    })
+            }),
+            "set_query" => args::form(arguments).and_then(|form| {
+                args::set_query(arguments, &["form"])
+                    .and_then(|q| self.twin(&q.topology).and_then(|t| commands::set(&q, t)))
+                    .map(|o| match form {
+                        Form::Full => text(&o),
+                        f => text(&SetBriefOut::from_full(&o, f)),
+                    })
+            }),
             "explain_step" => match args::mode(arguments) {
                 Ok(false) => args::step(arguments)
                     .and_then(|(q, at)| {

@@ -243,6 +243,21 @@ fn a_path_query_with_its_reply_gives_the_stored_json() {
 }
 
 #[test]
+fn the_brief_forms_give_the_stored_json() {
+    let (_, flags) = QUERIES.iter().find(|(t, _)| *t == "leaf-spine").unwrap();
+    for form in ["summary", "steps"] {
+        let mut a = path_args("leaf-spine", flags);
+        a.extend_from_slice(&["--form", form]);
+        let o = rsim(&a);
+        assert_eq!(o.status.code(), Some(0), "{form}");
+        assert_eq!(stdout(&o), stored(&format!("leaf-spine.{form}")), "{form}");
+    }
+    let a = set_args(&["--format", "json", "--form", "summary"]);
+    let o = rsim(&a);
+    assert_eq!(stdout(&o), stored("set-mini-enterprise.summary"));
+}
+
+#[test]
 fn the_fabric_queries_give_the_stored_json() {
     for (file, flags) in FABRIC_QUERIES {
         let o = rsim(&path_args("leaf-spine", flags));

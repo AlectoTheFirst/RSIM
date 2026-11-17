@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-Steps 1, 1b and 2 of the build are complete. Step 3 is in progress: collection, the snapshot store, the snapshot view and ingestion. The collection and the ingestion of VyOS, UniFi and NX-OS are complete, with one link join for all vendors. The current batch is EVPN, VXLAN and the anycast gateway in 7 pull requests; pull request 1, the encapsulation in the core, is complete. Then come the HTTP API parts A1 to A3, the Rust TextFSM engine, IOS-XR and IOS-XE. `../rsim-project/roadmap.md` gives the order. The Cargo workspace has 10 crates in `crates/`: `rsim-core`, `rsim-dd`, `rsim-functions`, `rsim-engine`, `rsim-topologies`, `rsim-cli`, `rsim-mcp`, `rsim-store`, `rsim-collect` and `rsim-ingest`. The other crates of section 3 come with their steps.
+Steps 1, 1b and 2 of the build are complete. Step 3 is in progress: collection, the snapshot store, the snapshot view and ingestion. The collection and the ingestion of VyOS, UniFi and NX-OS are complete, with one link join for all vendors. The current batch is EVPN, VXLAN and the anycast gateway in 7 pull requests; pull request 1, the encapsulation in the core, is complete. Then come the HTTP API parts A1 to A3, the Rust TextFSM engine, IOS-XR and IOS-XE. `../rsim-project/roadmap.md` gives the order. The Cargo workspace has 11 crates in `crates/`: `rsim-core`, `rsim-dd`, `rsim-functions`, `rsim-engine`, `rsim-topologies`, `rsim-contract`, `rsim-cli`, `rsim-mcp`, `rsim-store`, `rsim-collect` and `rsim-ingest`. The other crates of section 3 come with their steps.
 
 The two design documents are in the adjacent folder `../rsim-project/`. This repository is public, so the design documents stay out of it. Do not commit the design documents, real configs or collected state to this repository.
 
@@ -43,9 +43,10 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | Memory per device | `cargo bench -p rsim-engine --bench memory` |
 | CLI tests | `cargo test -p rsim-cli --test cli` |
 | MCP stdio tests | `cargo test -p rsim-mcp --test stdio` |
+| Schema tests of the stored answers | `cargo test -p rsim-cli --test schema` |
 | List the built-in topologies | `cargo run -p rsim-cli -- topologies` |
 | Path query with its reply | `cargo run -p rsim-cli -- path mini-enterprise --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --source.port 40000 --destination.port 53` |
-| Path query as JSON | Add `--format json` to the `path` command. Add `--pretty` for indented JSON. |
+| Path query as JSON | Add `--format json` to the `path` command. Add `--pretty` for indented JSON, and `--form summary` or `--form steps` for a brief form. |
 | Set query | `cargo run -p rsim-cli -- set mini-enterprise --source.ip 172.31.10.0/24 --destination.ip 10.20.0.53 --network.transport udp,tcp` |
 | One trace step of a set query | `cargo run -p rsim-cli -- explain-set mini-enterprise --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --destination.port 53,80 --branch 1 --step 7` |
 | Set query benchmark | `cargo bench -p rsim-engine --bench set_query` |
@@ -83,7 +84,9 @@ The hand-built topologies are in the crate `rsim-topologies`, with one module fo
 
 `leaf_spine()` is a VXLAN fabric of 4 leaves and 2 spines with symmetric routing in one tenant VRF; `rsim-functions/src/tunnel.rs` holds its tunnel ends `VxlanEncap` and `VxlanDecap`.
 
-The stored JSON answers of the CLI tests are in `crates/rsim-cli/tests/golden/`. `leaf-spine-acl.json` and `leaf-spine-no-route.json` are the answers of `FABRIC_QUERIES` in `crates/rsim-cli/tests/cli.rs`. `set-mini-enterprise.json` is the answer of the set query `SET_QUERY` in `crates/rsim-cli/tests/cli.rs`; make it again with `rsim set` and these flags. The CLI test and the MCP stdio test compare their outputs with these files. If an intended change alters the JSON output, make the files again with `rsim path <topology> <flags> --format json`. The flags of each file are in `QUERIES` in `crates/rsim-cli/tests/cli.rs`.
+`rsim-contract` has no engine dependency. It holds the JSON output types, the query echo and error types, the typed arguments of the operations, the brief forms `summary` and `steps`, and the registry of operations in `registry.rs`; `rsim-mcp` makes its tools and their schemas from the registry. `rsim-cli` converts the engine values with the trait `json::FromEngine`. `crates/rsim-cli/tests/schema.rs` checks each stored answer against the schema of its kind and through a round trip, and the flags of `rsim path` and `rsim set` against the registry. `../rsim-project/design/http-api.md` is the API specification.
+
+The stored JSON answers of the CLI tests are in `crates/rsim-cli/tests/golden/`. `<name>.summary.json` and `<name>.steps.json` are the brief forms of `--form summary` and `--form steps`. `leaf-spine-acl.json` and `leaf-spine-no-route.json` are the answers of `FABRIC_QUERIES` in `crates/rsim-cli/tests/cli.rs`. `set-mini-enterprise.json` is the answer of the set query `SET_QUERY` in `crates/rsim-cli/tests/cli.rs`; make it again with `rsim set` and these flags. The CLI test and the MCP stdio test compare their outputs with these files. If an intended change alters the JSON output, make the files again with `rsim path <topology> <flags> --format json`. The flags of each file are in `QUERIES` in `crates/rsim-cli/tests/cli.rs`.
 
 The prefix table in `rsim-core/src/prefix_table.rs` is a path-compressed trie with a read-only walk; `PacketSet::partition_by_prefix` and `PacketSet::partition_by_group` use the walk. `rsim-functions/src/fib.rs` holds the forwarding table `Fib`: the trie, the interned next-hop groups and compact spans. `RouteLookup` splits a packet set by next-hop group, so a set query gives one branch for each forwarding result. `crates/rsim-core/tests/prefix_oracle.rs` compares the trie and both partitions with a brute-force longest-prefix match. `../rsim-project/design/rib-fib.md` gives the design.
 

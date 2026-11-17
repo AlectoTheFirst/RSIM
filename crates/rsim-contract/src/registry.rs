@@ -4,7 +4,10 @@
 use serde_json::{Value, json};
 
 use crate::args::{PathQueryArgs, SetQueryArgs, StepArgs, TopologyArgs};
-use crate::json::{DevicesOut, ErrorOut, PathAnswerOut, SetAnswerOut, StepOut, TopologiesOut};
+use crate::json::{
+    DevicesOut, ErrorOut, PathAnswerOut, PathBriefOut, SetAnswerOut, SetBriefOut, StepOut,
+    TopologiesOut,
+};
 use crate::schema;
 
 /// What an operation changes.
@@ -72,7 +75,7 @@ pub const OPERATIONS: &[Operation] = &[
         command: Some("path"),
         http: Some((Method::Post, "/v1/twins/{twin}/queries")),
         input: Some(schema::<PathQueryArgs>),
-        outputs: &[schema::<PathAnswerOut>],
+        outputs: &[schema::<PathBriefOut>, schema::<PathAnswerOut>],
     },
     Operation {
         id: "runSetQuery",
@@ -82,7 +85,7 @@ pub const OPERATIONS: &[Operation] = &[
         command: Some("set"),
         http: Some((Method::Post, "/v1/twins/{twin}/queries")),
         input: Some(schema::<SetQueryArgs>),
-        outputs: &[schema::<SetAnswerOut>],
+        outputs: &[schema::<SetBriefOut>, schema::<SetAnswerOut>],
     },
     Operation {
         id: "getStep",

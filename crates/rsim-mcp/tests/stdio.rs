@@ -148,7 +148,9 @@ fn tool_calls(modern: bool) -> Vec<Value> {
         id += 1;
     }
     for t in TOPOLOGIES {
-        m.push(call(id, "path_query", stored_args(t), modern));
+        let mut args = stored_args(t);
+        args["form"] = json!("full");
+        m.push(call(id, "path_query", args, modern));
         id += 1;
     }
     let mut step = stored_args("edge-dnat");
@@ -162,12 +164,27 @@ fn tool_calls(modern: bool) -> Vec<Value> {
     bad["ingress"] = json!("nobody/eth0");
     m.push(call(id + 2, "path_query", bad, modern));
     let set = stored_args("set-mini-enterprise");
-    m.push(call(id + 3, "set_query", set.clone(), modern));
+    let mut full = set.clone();
+    full["form"] = json!("full");
+    m.push(call(id + 3, "set_query", full, modern));
     let mut step = set;
     step["mode"] = json!("set");
     step["branch"] = json!(1);
     step["step"] = json!(7);
     m.push(call(id + 4, "explain_step", step, modern));
+    // With no form, a query gives the summary.
+    m.push(call(
+        id + 5,
+        "path_query",
+        stored_args("leaf-spine"),
+        modern,
+    ));
+    m.push(call(
+        id + 6,
+        "set_query",
+        stored_args("set-mini-enterprise"),
+        modern,
+    ));
     m
 }
 
@@ -237,6 +254,15 @@ fn check_tool_results(responses: &[Value], modern: bool) {
     let r = &by_id(responses, id + 4)["result"]["structuredContent"];
     assert_eq!(r["kind"], "step");
     assert_eq!(r["trace_step"], set["answer"]["branches"][1]["steps"][7]);
+    for (n, file) in [
+        (5, "leaf-spine.summary"),
+        (6, "set-mini-enterprise.summary"),
+    ] {
+        let r = &by_id(responses, id + n)["result"];
+        assert_eq!(r["isError"], false, "{file}");
+        let text = r["content"][0]["text"].as_str().unwrap();
+        assert_eq!(format!("{text}\n"), stored(file), "{file}");
+    }
 }
 
 fn check_tools_list(r: &Value) {
