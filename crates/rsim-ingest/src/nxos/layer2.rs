@@ -844,9 +844,15 @@ impl L<'_> {
             let flood_peer: BTreeMap<BridgeDomainId, Vec<(PortId, FunctionId)>> = flood
                 .iter()
                 .map(|(bd, ports)| {
+                    // The vPC peer sent its own copy into the tunnel.
                     let kept = ports
                         .iter()
                         .filter(|(p, _)| !blocked.contains(&p.to_string()))
+                        .filter(|(p, _)| {
+                            !cfg.nve
+                                .as_ref()
+                                .is_some_and(|n| super::vxlan::is_tunnel(&n.name, p.as_str()))
+                        })
                         .map(|(p, f)| {
                             let name = p.to_string();
                             let to = if unsure.contains(&name) {
