@@ -12,7 +12,7 @@ use rsim_core::{
 use rsim_engine::{AttachmentKind, AttachmentRecord, Endpoint};
 use rsim_functions::{
     AclMatch, Flood, HostMac, HostResolution, Layer3HandOff, LinkEnd, LinkFacts, MacEntry,
-    MacLookup, PortEgress, PortIngress, Rule as FRule, RuleAction,
+    MacLookup, PortEgress, PortIngress, PortPeer, Rule as FRule, RuleAction,
 };
 
 use super::config::{FhrpKind, Interface, PortMode};
@@ -495,12 +495,17 @@ impl L<'_> {
                         port: pid.clone(),
                         native: native.map(|v| self.bd(v)),
                         tagged: tagged.iter().map(|v| (self.bd(*v), *v)).collect(),
-                        peer: peer.map(|p| p.target.clone()),
+                        peers: peer
+                            .map(|p| PortPeer {
+                                target: p.target.clone(),
+                                link: Some(LinkFacts {
+                                    local: sum.facts.get(name).cloned().unwrap_or_default(),
+                                    remote: p.remote.clone(),
+                                }),
+                            })
+                            .into_iter()
+                            .collect(),
                         hosts: port_hosts,
-                        link: peer.map(|p| LinkFacts {
-                            local: sum.facts.get(name).cloned().unwrap_or_default(),
-                            remote: p.remote.clone(),
-                        }),
                     });
                     let out_id = match qos_out {
                         Some((policy, l)) => {
@@ -587,9 +592,11 @@ impl L<'_> {
                         port: pid.clone(),
                         native: Some(self.bd(*v)),
                         tagged: BTreeMap::new(),
-                        peer: Some(self.id(&handoff)),
+                        peers: vec![PortPeer {
+                            target: self.id(&handoff),
+                            link: None,
+                        }],
                         hosts: BTreeMap::new(),
-                        link: None,
                     });
                     let mut spans = vec![span.clone()];
                     spans.extend(g.active.iter().flat_map(|a| a.2.clone()));

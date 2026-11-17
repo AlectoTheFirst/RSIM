@@ -9,7 +9,7 @@ use rsim_core::{
 use rsim_engine::{AttachmentKind, AttachmentRecord, Endpoint, TwinBuilder};
 use rsim_functions::{
     EgressMode, Flood, HostMac, HostResolution, Layer3HandOff, MacEntry, MacLookup, Neighbour,
-    PortEgress, PortIngress, RouteKind, Tag, WirelessAttachment,
+    PortEgress, PortIngress, PortPeer, RouteKind, Tag, WirelessAttachment,
 };
 
 use crate::builders::*;
@@ -157,12 +157,17 @@ pub fn layer2_site() -> TwinBuilder {
             port: p.clone(),
             native: native.clone(),
             tagged: tagged.iter().map(|(v, b)| (b.clone(), *v)).collect(),
-            peer: peer.map(fid),
+            peers: peer
+                .map(|p| PortPeer {
+                    target: fid(p),
+                    link: None,
+                })
+                .into_iter()
+                .collect(),
             hosts: hosts_on
                 .get(n)
                 .map(|(m, h)| BTreeMap::from([(*m, EndpointId::new(*h))]))
                 .unwrap_or_default(),
-            link: None,
         });
         let out = sw.id(&format!("port/{n}/out"));
         egress.insert(p.clone(), out.clone());
@@ -218,9 +223,11 @@ pub fn layer2_site() -> TwinBuilder {
         port: port("port/1"),
         native: Some(lan.clone()),
         tagged: BTreeMap::from([(v20.clone(), 20)]),
-        peer: Some(fid("sw1/port/3/in")),
+        peers: vec![PortPeer {
+            target: fid("sw1/port/3/in"),
+            link: None,
+        }],
         hosts: BTreeMap::new(),
-        link: None,
     });
     add!(WirelessAttachment {
         meta: ap.meta("wlan/office/in", 62, 62),
@@ -233,9 +240,8 @@ pub fn layer2_site() -> TwinBuilder {
         port: port("wlan/office"),
         native: Some(v20.clone()),
         tagged: BTreeMap::new(),
-        peer: None,
+        peers: Vec::new(),
         hosts: BTreeMap::from([(W1_MAC, EndpointId::new("w1"))]),
-        link: None,
     });
     let ap_entry = |p: &str| MacEntry {
         port: port(p),

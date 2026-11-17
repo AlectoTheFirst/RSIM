@@ -4,10 +4,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rsim_core::{
-    AddrField, Attr, Branch, BridgeDomainId, Context, ContextAttr, Dependency, Destination,
-    EndpointId, FieldValue, FloodCopy, FlowState, FunctionId, FunctionKind, InterfaceId, Mac,
-    MacCond, Match, NetFunction, Outcome, PacketSet, PortCond, PortId, Prefix, PrefixTable, Reason,
-    ReasonCode, Rewrite, RulePredicate, SourceSpan, TriePrefixTable,
+    AddrField, Alternative, Attr, Branch, BridgeDomainId, Context, ContextAttr, Dependency,
+    Destination, EndpointId, FieldValue, FloodCopy, FlowState, FunctionId, FunctionKind,
+    InterfaceId, Mac, MacCond, Match, NetFunction, Outcome, PacketSet, PortCond, PortId, Prefix,
+    PrefixTable, Reason, ReasonCode, Rewrite, RulePredicate, SourceSpan, TriePrefixTable,
 };
 
 use crate::common::{Meta, push_nonempty};
@@ -599,8 +599,20 @@ impl NetFunction for Flood {
     }
 }
 
+/// The far end of the link of a switch port.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PortPeer {
+    /// The ingress function of the far end.
+    pub target: FunctionId,
+    /// The physical facts of the link.
+    pub link: Option<LinkFacts>,
+}
+
 /// A frame leaves a switch port. It sets the tag of the bridge domain, then
 /// goes to the peer of the link, or to the host with its destination MAC.
+/// A port with more than one peer, for example a port channel to 2 switches,
+/// is a forwarding choice: one alternative for each peer, in the order of
+/// the target.
 #[derive(Clone, Debug)]
 pub struct PortEgress {
     pub meta: Meta,
@@ -608,12 +620,10 @@ pub struct PortEgress {
     pub native: Option<BridgeDomainId>,
     /// The tag of each tagged bridge domain.
     pub tagged: BTreeMap<BridgeDomainId, u16>,
-    /// The ingress function of the peer port of the link.
-    pub peer: Option<FunctionId>,
+    /// The peers of the link of the port.
+    pub peers: Vec<PortPeer>,
     /// The hosts on the port.
     pub hosts: BTreeMap<Mac, EndpointId>,
-    /// The physical facts of the link of the port.
-    pub link: Option<LinkFacts>,
 }
 
 impl NetFunction for PortEgress {
@@ -629,7 +639,7 @@ impl NetFunction for PortEgress {
         Vec::new()
     }
     fn successors(&self) -> Vec<FunctionId> {
-        self.peer.iter().cloned().collect()
+        self.peers.iter().map(|p| p.target.clone()).collect()
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
         let Some(bd) = ctx.bridge_domain.known() else {
@@ -659,21 +669,38 @@ impl NetFunction for PortEgress {
             Some(v) => format!("VLAN {v}"),
             None => "untagged".to_string(),
         };
-        if let Some(peer) = &self.peer {
-            let facts = self
-                .link
-                .as_ref()
-                .map_or(String::new(), |l| format!(" · {}", l.text()));
-            let b = self.meta.forward(
-                set,
-                peer,
-                ReasonCode::LinkHandOff,
-                format!("leave port {} {shown} to {peer}{facts}", self.port),
-                ctx.clone(),
-                state,
-            );
-            let spans = self.link.as_ref().map(LinkFacts::spans).unwrap_or_default();
-            return vec![b.with_spans(spans)];
+        if !self.peers.is_empty() {
+            let mut peers: Vec<&PortPeer> = self.peers.iter().collect();
+            peers.sort_by(|a, b| a.target.cmp(&b.target));
+            let count = u32::try_from(peers.len()).expect("too many peers");
+            let mut out = Vec::new();
+            for (i, p) in peers.into_iter().enumerate() {
+                let facts = p
+                    .link
+                    .as_ref()
+                    .map_or(String::new(), |l| format!(" · {}", l.text()));
+                let mut b = self.meta.forward(
+                    set.clone(),
+                    &p.target,
+                    ReasonCode::LinkHandOff,
+                    format!("leave port {} {shown} to {}{facts}", self.port, p.target),
+                    ctx.clone(),
+                    state,
+                );
+                let spans = p.link.as_ref().map(LinkFacts::spans).unwrap_or_default();
+                b = b.with_spans(spans);
+                if count > 1 {
+                    b = b.with_alternative(Alternative {
+                        choice: self.meta.id.clone(),
+                        key: self.port.to_string(),
+                        index: u32::try_from(i).expect("too many peers"),
+                        count,
+                        label: p.target.to_string(),
+                    });
+                }
+                out.push(b);
+            }
+            return out;
         }
         // The reply of a host starts on the port, which is also the
         // interface of the attachment point of the host.
