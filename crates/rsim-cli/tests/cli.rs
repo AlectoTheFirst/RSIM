@@ -751,6 +751,17 @@ fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
     let b = rsim(&args);
     assert_eq!(a.stdout, b.stdout);
     let v: Value = serde_json::from_slice(&a.stdout).unwrap();
+    // The answer names the snapshot cycle of the store.
+    let cycle = v["twin"]["snapshot"].as_u64().expect("a snapshot cycle");
+    assert_eq!(
+        v["twin"],
+        serde_json::json!({
+            "id": format!("snap-{cycle}"),
+            "base": format!("snap-{cycle}"),
+            "snapshot": cycle,
+            "layers": []
+        })
+    );
     let text = v.to_string();
     for f in [
         "ap1/wlan/guest/in",

@@ -2,8 +2,9 @@
 
 use std::collections::BTreeMap;
 
+use rsim_cli::commands::Loaded;
 use rsim_cli::json::{self, ErrorOut};
-use rsim_cli::{QueryError, Twin, args, commands};
+use rsim_cli::{QueryError, args, commands};
 use rsim_contract::args::Form;
 use rsim_contract::json::{PathBriefOut, SetBriefOut};
 use rsim_contract::registry;
@@ -25,7 +26,7 @@ pub const STORE: &str = "store";
 /// store when the first call names it.
 #[derive(Default)]
 pub struct Tools {
-    twins: BTreeMap<String, Twin>,
+    twins: BTreeMap<String, Loaded>,
     store: Option<String>,
 }
 
@@ -48,7 +49,7 @@ impl Tools {
         v
     }
 
-    fn twin(&mut self, topology: &str) -> Result<&Twin, QueryError> {
+    fn twin(&mut self, topology: &str) -> Result<&Loaded, QueryError> {
         if !self.twins.contains_key(topology) {
             let source = match (&self.store, topology) {
                 (Some(folder), STORE) => format!("{}{folder}", commands::STORE_PREFIX),
