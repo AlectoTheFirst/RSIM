@@ -1,5 +1,6 @@
 //! The twin of a snapshot: the VyOS routers and the UniFi sites, with the
-//! links between them, and the NX-OS switches.
+//! links between them, and the NX-OS switches. An IOS-XR router gives its
+//! coverage and no function.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
@@ -12,7 +13,7 @@ use serde_json::Value;
 use crate::collected::{self, Collected};
 use crate::coverage::{Coverage, classify};
 use crate::stanza::read_json;
-use crate::{nxos, unifi, vyos};
+use crate::{iosxr, nxos, unifi, vyos};
 
 /// The twin builder of a snapshot, with the coverage, the unread handled
 /// stanzas and the lowering notes of each device.
@@ -52,6 +53,15 @@ pub enum Input {
         file: String,
         collected: Collected,
         sections: BTreeMap<String, (Vec<u8>, String)>,
+    },
+    /// An IOS-XR router: its running config, the file name of the config
+    /// for the provenance, and its collected state. It gives its coverage
+    /// and its unread handled stanzas, and no function.
+    Iosxr {
+        name: String,
+        config: Vec<u8>,
+        file: String,
+        collected: Collected,
     },
     /// A UniFi site: each section with its file name.
     Unifi {
@@ -102,6 +112,15 @@ pub fn inputs(store: &Store, snap: &Snapshot) -> Result<(Vec<Input>, Vec<String>
                 }
                 None => skipped.push(format!("{device}: no config section")),
             },
+            "iosxr" => match section("config")? {
+                Some((config, file)) => out.push(Input::Iosxr {
+                    name: device.clone(),
+                    config,
+                    file,
+                    collected: collected::read(store, snap, device)?,
+                }),
+                None => skipped.push(format!("{device}: no config section")),
+            },
             "unifi" => {
                 let mut sections = BTreeMap::new();
                 for name in ["networks", "wlans", "devices", "clients", "port_profiles"] {
@@ -131,7 +150,8 @@ pub fn build(store: &Store, snap: &Snapshot) -> Result<Estate, StoreError> {
 }
 
 /// Builds the twin of the inputs: the routers, then each UniFi site joined
-/// to the router on its uplink, then each NX-OS switch.
+/// to the router on its uplink, then each NX-OS switch. An IOS-XR router
+/// gives its coverage and its unread handled stanzas.
 pub fn assemble(inputs: Vec<Input>) -> Estate {
     let mut e = Estate {
         builder: TwinBuilder::new(),
@@ -190,6 +210,23 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
                 e.unread
                     .insert(name.clone(), nxos::unread(&doc, &table, &cfg.read));
                 switches.insert(name, (cfg, col, file, sections));
+            }
+            Input::Iosxr {
+                name,
+                config,
+                collected: col,
+                ..
+            } => {
+                let doc = iosxr::read_text(&config);
+                let table = iosxr::table(!col.routes.is_empty());
+                let cfg = iosxr::read(&doc, &table);
+                e.coverage.insert(name.clone(), classify(&doc, &table));
+                e.unread
+                    .insert(name.clone(), iosxr::unread(&doc, &table, &cfg.read));
+                e.notes
+                    .entry(name)
+                    .or_default()
+                    .push("the IOS-XR config gives the coverage and no function".into());
             }
             Input::Unifi { name, sections } => sites.push((name, sections)),
         }
