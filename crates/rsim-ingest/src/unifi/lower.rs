@@ -615,6 +615,55 @@ pub fn lower(
     l.out
 }
 
+/// The summaries of the root devices of a site for the join of the links:
+/// a root device has no uplink peer in the site. Each port can end a link,
+/// and a frame enters it at its port ingress. The uplink record is the
+/// neighbour record of the uplink port, with the gateway MAC as the MAC of
+/// the far port. The links between the devices of the site come from the
+/// uplink topology of the controller, not from the join.
+pub fn link_summary(site: &Site, files: &Files) -> BTreeMap<String, crate::links::Summary> {
+    let mut out = BTreeMap::new();
+    for d in site
+        .devices
+        .iter()
+        .filter(|d| d.uplink_peer.is_none() && d.kind != DeviceKind::Other)
+    {
+        let span = SourceSpan::line(
+            &files.devices,
+            u32::try_from(d.index + 1).unwrap_or(u32::MAX),
+        );
+        let mut s = crate::links::Summary::default();
+        for p in ports(d) {
+            let name = format!("port/{}", p.idx);
+            s.entries.insert(
+                name.clone(),
+                FunctionId::new(format!("{}/port/{}/in", d.name, p.idx)),
+            );
+            s.facts.insert(
+                name,
+                LinkEnd {
+                    speed_mbps: p.speed,
+                    full_duplex: p.full_duplex,
+                    media: p.media.clone(),
+                    spans: vec![span.clone()],
+                },
+            );
+        }
+        if let (Some(port), Some(gw)) = (d.uplink_port, d.gateway_mac.as_deref().and_then(mac)) {
+            s.neighbours.push(crate::links::Neighbour {
+                port: format!("port/{port}"),
+                name: None,
+                remote_port: None,
+                chassis: None,
+                port_mac: Some(gw),
+                span,
+            });
+        }
+        out.insert(d.name.clone(), s);
+    }
+    out
+}
+
 /// The endpoint name of a client: its name and the end of its MAC.
 pub fn endpoint_id(c: &Client) -> String {
     let tail: String = c.mac.chars().filter(|x| *x != ':').skip(6).collect();

@@ -200,3 +200,35 @@ fn a_neighbour_that_does_not_report_back_gives_no_link() {
         &"p1: the neighbour does not report the link back, so the port has no link".to_string()
     ));
 }
+
+#[test]
+fn a_mac_on_more_than_one_port_proves_no_link() {
+    // An anycast gateway MAC on 2 leaf switches.
+    let devices = BTreeMap::from([
+        (
+            "s".to_string(),
+            device(
+                "s",
+                &[("port/1", "00:00:5e:00:53:01")],
+                &[("port/1", None, "00:00:5e:00:53:aa", None)],
+                false,
+            ),
+        ),
+        (
+            "l1".to_string(),
+            device("l1", &[("e1", "00:00:5e:00:53:aa")], &[], false),
+        ),
+        (
+            "l2".to_string(),
+            device("l2", &[("e1", "00:00:5e:00:53:aa")], &[], false),
+        ),
+    ]);
+    let (p, notes) = peers(&devices);
+    assert!(p.is_empty(), "{p:?}");
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("is on more than one port, so it proves no link")),
+        "{notes:?}"
+    );
+}

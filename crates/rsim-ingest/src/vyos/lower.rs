@@ -558,21 +558,41 @@ pub fn interface_addresses(cfg: &Config, col: &Collected) -> BTreeMap<String, Ve
 
 /// The summary of a router for the join of the links: each physical
 /// interface with a collected MAC can end a link, and a frame enters it at
-/// its layer 3 hand-off. A router has no neighbour section.
-pub fn link_summary(device: &str, col: &Collected) -> crate::links::Summary {
+/// its layer 3 hand-off. The source row of an interface is the first row of
+/// the links table with its MAC. Its layer 3 addresses are the addresses of
+/// the interface and of its VLAN subinterfaces. A router has no neighbour
+/// section.
+pub fn link_summary(device: &str, cfg: &Config, col: &Collected) -> crate::links::Summary {
     let mut s = crate::links::Summary::default();
+    let addrs = interface_addresses(cfg, col);
     for l in col.links.iter().filter(|l| l.parent.is_none()) {
-        let Some(m) = l.mac.as_deref().and_then(|m| m.parse().ok()) else {
+        let Some(m) = l.mac.as_deref().and_then(|m| m.parse::<Mac>().ok()) else {
             continue;
         };
+        let iface = l.interface.clone();
         s.entries.insert(
-            l.interface.clone(),
-            FunctionId::new(format!("{device}/handoff/{}", l.interface)),
+            iface.clone(),
+            FunctionId::new(format!("{device}/handoff/{iface}")),
         );
-        s.port_macs.insert(l.interface.clone(), m);
-        if let Some(f) = interface_facts(col, &l.interface) {
-            s.facts.insert(l.interface.clone(), f);
+        s.port_macs.insert(iface.clone(), m);
+        if let Some(row) = col
+            .links
+            .iter()
+            .find(|r| r.mac.as_deref().and_then(|x| x.parse::<Mac>().ok()) == Some(m))
+        {
+            s.port_spans.insert(iface.clone(), row.span.clone());
         }
+        if let Some(f) = interface_facts(col, &iface) {
+            s.facts.insert(iface.clone(), f);
+        }
+        let mut vlans = BTreeMap::new();
+        for (i, list) in &addrs {
+            let (p, vlan) = physical(i);
+            if p == iface {
+                vlans.insert(vlan, list.clone());
+            }
+        }
+        s.l3.insert(iface, vlans);
     }
     s
 }

@@ -28,6 +28,9 @@ pub struct Neighbour {
     pub span: SourceSpan,
 }
 
+/// The layer 3 addresses of a port by VLAN, with their prefix lengths.
+pub type VlanAddrs = BTreeMap<Option<u16>, Vec<(IpAddr, u8)>>;
+
 /// The VLANs of a switch port.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PortVlans {
@@ -74,6 +77,11 @@ pub struct Summary {
     pub entries: BTreeMap<String, FunctionId>,
     /// The MAC of each port, for a neighbour that names a port by its MAC.
     pub port_macs: BTreeMap<String, Mac>,
+    /// The source row of a port, for the provenance of its links.
+    pub port_spans: BTreeMap<String, SourceSpan>,
+    /// The layer 3 addresses of a port by VLAN, `None` for the untagged
+    /// interface.
+    pub l3: BTreeMap<String, VlanAddrs>,
 }
 
 /// The vPC facts of a switch.
@@ -120,6 +128,8 @@ impl Summary {
 pub struct Peer {
     /// The ingress or the hand-off function of the far end.
     pub target: FunctionId,
+    /// The device and the port of the far end.
+    pub far: (String, String),
     pub provenance: Vec<SourceSpan>,
     pub remote: Option<LinkEnd>,
 }
@@ -182,14 +192,28 @@ pub fn join(
         .iter()
         .filter_map(|(d, s)| Some((s.host_name.as_deref()?, d.as_str())))
         .collect();
-    // The device and the port of a port MAC.
+    // The device and the port of a port MAC. A MAC that more than one port
+    // has, for example an anycast gateway MAC, proves no port.
+    let mut owners: BTreeMap<Mac, Vec<(String, String)>> = BTreeMap::new();
+    for (d, s) in switches {
+        for (p, m) in &s.port_macs {
+            owners.entry(*m).or_default().push((d.clone(), p.clone()));
+        }
+    }
+    for (m, list) in &owners {
+        if list.len() > 1 {
+            for (d, p) in list {
+                out.notes.entry(d.clone()).or_default().push(format!(
+                    "{p}: its MAC {m:?} is on more than one port, so it proves no link"
+                ));
+            }
+        }
+    }
     let port_of_mac = |m: Mac| -> Option<(String, String)> {
-        switches.iter().find_map(|(d, s)| {
-            s.port_macs
-                .iter()
-                .find(|(_, x)| **x == m)
-                .map(|(p, _)| (d.clone(), p.clone()))
-        })
+        match owners.get(&m).map(Vec::as_slice) {
+            Some([one]) => Some(one.clone()),
+            _ => None,
+        }
     };
 
     // The far end that each switch port names.
@@ -312,6 +336,11 @@ pub fn join(
         if let Some((_, back)) = named.get(far) {
             spans.extend(back.iter().cloned());
         }
+        for e in [here, far] {
+            if let Some(sp) = switches[&e.0].port_spans.get(&e.1) {
+                spans.push(sp.clone());
+            }
+        }
         links.push((here.clone(), far.clone(), spans));
     }
 
@@ -416,6 +445,7 @@ pub fn join(
                 .or_default()
                 .push(Peer {
                     target: t,
+                    far: (to.0.clone(), to.1.clone()),
                     provenance: spans.clone(),
                     remote: facts(to),
                 });
@@ -439,6 +469,7 @@ pub fn join(
                 .or_default()
                 .push(Peer {
                     target: t,
+                    far: (e.0.clone(), e.1.clone()),
                     provenance: spans.clone(),
                     remote: facts(e),
                 });
@@ -455,6 +486,7 @@ pub fn join(
                     .or_default()
                     .push(Peer {
                         target: ta.clone(),
+                        far: (a.0.clone(), a.1.clone()),
                         provenance: spans.clone(),
                         remote: facts(&a),
                     });
