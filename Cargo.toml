@@ -39,3 +39,9 @@ all = { level = "warn", priority = -1 }
 
 [profile.bench]
 debug = true
+
+[profile.test]
+opt-level = 1
+
+[profile.test.package."*"]
+opt-level = 2
