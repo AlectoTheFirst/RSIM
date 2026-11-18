@@ -111,4 +111,8 @@ pub struct SnapshotManifest {
     /// manifest lists them again.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub removed: BTreeSet<String>,
+    /// The version of the inventory database that the cycle read. `None`
+    /// for a cycle with no inventory database.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory_version: Option<u64>,
 }
