@@ -106,6 +106,8 @@ pub enum CollectError {
     Store(StoreError),
     /// A stage task stopped with a fault.
     Stage(String),
+    /// The inventory has two devices with one id.
+    Inventory(String),
 }
 
 impl fmt::Display for CollectError {
@@ -113,6 +115,7 @@ impl fmt::Display for CollectError {
         match self {
             CollectError::Store(e) => write!(f, "store: {e}"),
             CollectError::Stage(e) => write!(f, "stage: {e}"),
+            CollectError::Inventory(e) => write!(f, "inventory: {e}"),
         }
     }
 }
@@ -233,6 +236,13 @@ impl Collector {
     pub async fn run_cycle(&mut self) -> Result<CycleReport, CollectError> {
         let now = self.clock.now_ms();
         let devices = self.inventory.devices();
+        let mut ids = std::collections::BTreeSet::new();
+        if let Some(d) = devices.iter().find(|d| !ids.insert(d.id.as_str())) {
+            return Err(CollectError::Inventory(format!(
+                "two devices have the id {}",
+                d.id
+            )));
+        }
         let due = self.scheduler.due(now, &devices);
         let mut report = CycleReport {
             time: now,

@@ -39,9 +39,12 @@ const CONFIG: &[&str] = volatile![
     "!! Last configuration change",
 ];
 const VERSION: &[&str] = volatile!["=*uptime is", "System uptime"];
-/// The counters, the rates and the times of the last packets.
+/// The counters, the rates, the load and reliability and the times of the
+/// last packets.
 const INTERFACES: &[&str] = volatile![
     "=# ",
+    "reliability ",
+    "Reliability ",
     "Received ",
     "Output ",
     "Last link flapped",
