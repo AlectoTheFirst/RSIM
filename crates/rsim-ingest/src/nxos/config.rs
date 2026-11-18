@@ -252,6 +252,10 @@ pub enum NatKind {
         local_port: Option<String>,
         global: String,
         global_port: Option<String>,
+        /// The word of the line that the lowering does not model, for
+        /// example `extendable`. The packets that the rule can translate
+        /// are then `Unknown`.
+        uncertain: Option<String>,
     },
     /// `ip nat inside source list <acl> pool <pool>|interface <if> [overload]`.
     List {
@@ -1078,6 +1082,7 @@ pub(crate) fn nat_rule(w: &[&str], table: &Table) -> NatKind {
             local_port: Some((*lp).to_string()),
             global: (*global).to_string(),
             global_port: Some((*gp).to_string()),
+            uncertain: None,
         },
         [
             "ip",
@@ -1098,6 +1103,7 @@ pub(crate) fn nat_rule(w: &[&str], table: &Table) -> NatKind {
                 local_port: None,
                 global: (*global).to_string(),
                 global_port: None,
+                uncertain: None,
             }
         }
         [

@@ -201,6 +201,31 @@ interface GigabitEthernet0
  ip address 203.0.113.10 255.255.255.0
  negotiation auto
 !
+interface GigabitEthernet0/0/4
+ description second provider uplink
+ ip address 198.51.100.6 255.255.255.252
+ ip access-group WAN2-IN in
+ ip nat outside
+ negotiation auto
+!
+interface GigabitEthernet0/0/5
+ description office users
+ ip address 192.0.2.193 255.255.255.224
+ ip nat inside
+ negotiation auto
+!
+interface GigabitEthernet0/0/6
+ description lab uplink
+ ip address 198.51.100.17 255.255.255.252
+ shutdown
+ negotiation auto
+!
+interface GigabitEthernet0/0/7
+ description BLUE storage
+ ip vrf forwarding BLUE
+ ip address 198.51.100.33 255.255.255.240
+ negotiation auto
+!
 router bgp 64496
  bgp router-id 192.0.2.255
  bgp log-neighbor-changes
@@ -224,17 +249,20 @@ no ip http secure-server
 ip ssh version 2
 ip tftp source-interface GigabitEthernet0
 !
-ip nat pool PUBLIC 203.0.113.32 203.0.113.47 netmask 255.255.255.240
+ip nat pool PUBLIC 203.0.113.32 203.0.113.32 prefix-length 32
 ip nat inside source list NAT-INSIDE pool PUBLIC overload
 ip nat inside source list 10 interface GigabitEthernet0/0/3 overload
 ip nat inside source static tcp 192.0.2.10 443 198.51.100.2 443 extendable
-ip nat inside source static 192.0.2.20 203.0.113.20
+ip nat inside source static 192.0.2.220 203.0.113.20
 ip nat translation timeout 3600
 ip route 0.0.0.0 0.0.0.0 198.51.100.1 name DEFAULT
 ip route 0.0.0.0 0.0.0.0 GigabitEthernet0/0/3 198.51.100.9 250
 ip route 203.0.113.128 255.255.255.128 Null0
 ip route vrf RED 0.0.0.0 0.0.0.0 198.51.100.1 global
 ip route vrf MGMT 0.0.0.0 0.0.0.0 203.0.113.1
+ip route 198.51.100.64 255.255.255.192 198.51.100.5
+ip route 198.51.100.128 255.255.255.128 198.51.100.1
+ip route 198.51.100.128 255.255.255.128 198.51.100.5
 !
 ip access-list standard NAT-INSIDE
  10 permit 192.0.2.0 0.0.0.127
@@ -251,6 +279,11 @@ ip access-list extended EDGE-IN
 ip access-list extended VPN-TRAFFIC
  remark the traffic of the tunnel
  permit ip 192.0.2.0 0.0.0.255 203.0.113.0 0.0.0.255
+ip access-list extended WAN2-IN
+ 10 deny   tcp any host 203.0.113.20 eq 22
+ 20 permit tcp any host 203.0.113.20 eq 443
+ 30 permit tcp any eq 443 host 203.0.113.20
+ 40 permit tcp any eq 443 host 203.0.113.32
 !
 ip prefix-list DEFAULT-ONLY seq 5 permit 0.0.0.0/0
 ip prefix-list OUR-NETS seq 5 permit 192.0.2.0/24

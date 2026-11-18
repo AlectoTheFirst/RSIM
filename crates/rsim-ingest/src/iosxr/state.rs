@@ -126,7 +126,7 @@ pub struct State {
 }
 
 /// The templates that the crate carries.
-fn library() -> Result<&'static Library, String> {
+pub(crate) fn library() -> Result<&'static Library, String> {
     static LIB: OnceLock<Result<Library, String>> = OnceLock::new();
     LIB.get_or_init(|| Library::builtin().map_err(|e| e.to_string()))
         .as_ref()
@@ -145,19 +145,19 @@ fn is_time_line(line: &str) -> bool {
 }
 
 /// The records of a section with the line ranges in the section.
-struct Parsed {
-    traced: Traced,
+pub(crate) struct Parsed {
+    pub(crate) traced: Traced,
     /// The number of lines before the text that the template read.
     offset: usize,
     file: String,
 }
 
 impl Parsed {
-    fn column(&self, name: &str) -> Option<usize> {
+    pub(crate) fn column(&self, name: &str) -> Option<usize> {
         self.traced.table.header.iter().position(|h| h == name)
     }
 
-    fn text<'a>(&self, record: &'a [Field], name: &str) -> &'a str {
+    pub(crate) fn text<'a>(&self, record: &'a [Field], name: &str) -> &'a str {
         self.column(name)
             .and_then(|i| record.get(i))
             .and_then(Field::as_text)
@@ -177,13 +177,13 @@ impl Parsed {
         }
     }
 
-    fn span(&self, first: usize, last: usize) -> SourceSpan {
+    pub(crate) fn span(&self, first: usize, last: usize) -> SourceSpan {
         let n = |x: usize| u32::try_from(x + self.offset).unwrap_or(u32::MAX);
         SourceSpan::new(&self.file, n(first), n(last.max(first)))
     }
 
     /// Each record with its span.
-    fn records(&self) -> impl Iterator<Item = (&[Field], SourceSpan)> {
+    pub(crate) fn records(&self) -> impl Iterator<Item = (&[Field], SourceSpan)> {
         self.traced
             .table
             .records
@@ -196,13 +196,25 @@ impl Parsed {
 /// Parses a section with the template of its command. The time line before
 /// the answer is removed first.
 fn parse(command: &str, bytes: &[u8], file: &str) -> Result<Parsed, String> {
+    parse_on(PLATFORM, command, bytes, file, is_time_line)
+}
+
+/// Parses a section with the template of a platform and a command. A first
+/// line for which `skip` is true is removed first.
+pub(crate) fn parse_on(
+    platform: &str,
+    command: &str,
+    bytes: &[u8],
+    file: &str,
+    skip: fn(&str) -> bool,
+) -> Result<Parsed, String> {
     let lib = library()?;
     let (name, template) = lib
-        .find(PLATFORM, command)
+        .find(platform, command)
         .ok_or_else(|| format!("no template for {command}"))?;
     let text = String::from_utf8_lossy(bytes);
     let first = text.lines().next().unwrap_or_default();
-    let (body, offset) = if is_time_line(first) {
+    let (body, offset) = if skip(first) {
         (text.split_once('\n').map_or("", |x| x.1), 1)
     } else {
         (&text[..], 0)
@@ -315,16 +327,16 @@ fn arp(p: &Parsed, names: &Names) -> Vec<ArpRow> {
         .collect()
 }
 
-/// A speed of `show interfaces`, for example `1000Mb/s` or `10Gb/s`, in
-/// Mbit/s.
-fn speed(s: &str) -> Option<u64> {
+/// A speed of `show interfaces`, for example `1000Mb/s`, `10Gb/s` or
+/// `1000Mbps`, in Mbit/s.
+pub(crate) fn speed(s: &str) -> Option<u64> {
     let s = s.trim();
     let (n, unit) = s.split_at(s.find(|c: char| !c.is_ascii_digit())?);
     let n: u64 = n.parse().ok()?;
     match unit {
-        "Kb/s" => Some(n / 1000),
-        "Mb/s" => Some(n),
-        "Gb/s" => n.checked_mul(1000),
+        "Kb/s" | "Kbps" => Some(n / 1000),
+        "Mb/s" | "Mbps" => Some(n),
+        "Gb/s" | "Gbps" => n.checked_mul(1000),
         _ => None,
     }
 }
@@ -387,7 +399,7 @@ fn hsrp(p: &Parsed, names: &Names) -> Result<Vec<HsrpRow>, String> {
 }
 
 /// The first IPv4 prefix among the first 3 words of a line.
-fn prefix_on(line: &str) -> Option<Prefix> {
+pub(crate) fn prefix_on(line: &str) -> Option<Prefix> {
     line.split_whitespace().take(3).find_map(|w| {
         let (a, l) = w.split_once('/')?;
         a.parse::<std::net::Ipv4Addr>().ok()?;

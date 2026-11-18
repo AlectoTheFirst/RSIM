@@ -1,0 +1,8 @@
+Protocol  Address          Age (min)  Hardware Addr   Type   Interface
+Internet  192.0.2.193             -   0000.5e00.5315  ARPA   GigabitEthernet0/0/5
+Internet  192.0.2.200             3   0000.5e00.53c8  ARPA   GigabitEthernet0/0/5
+Internet  192.0.2.220             1   0000.5e00.53dc  ARPA   GigabitEthernet0/0/5
+Internet  198.51.100.1            0   0000.5e00.5301  ARPA   GigabitEthernet0/0/0
+Internet  198.51.100.2            -   0000.5e00.5310  ARPA   GigabitEthernet0/0/0
+Internet  198.51.100.5            2   0000.5e00.5305  ARPA   GigabitEthernet0/0/4
+Internet  198.51.100.6            -   0000.5e00.5314  ARPA   GigabitEthernet0/0/4

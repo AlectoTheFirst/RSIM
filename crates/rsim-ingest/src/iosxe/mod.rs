@@ -1,7 +1,11 @@
-//! Cisco IOS-XE: the running config as indented text.
+//! Cisco IOS-XE: the running config as indented text, and the collected
+//! text sections through the TextFSM templates.
 
 pub mod config;
+pub mod lower;
 mod mask;
+mod profile;
+pub mod state;
 mod table;
 
 use std::collections::BTreeSet;
@@ -9,8 +13,23 @@ use std::collections::BTreeSet;
 use crate::coverage::Table;
 use crate::stanza::{Document, read_indented};
 pub use config::{Config, read};
+pub use lower::lower;
 pub use mask::mask;
+pub use profile::profile;
+pub use state::rib_collected;
 pub use table::table;
+
+/// The text sections of a router that the lowering reads.
+pub const SECTIONS: &[&str] = &["interfaces", "rib", "arp", "acls"];
+
+/// The resolver of the interface names of the sections to the names of the
+/// config.
+pub fn names(cfg: &Config) -> crate::nxos::names::Names {
+    crate::nxos::names::Names::with_types(
+        profile::INTERFACE_TYPES,
+        cfg.interfaces.iter().map(|i| i.name.as_str()),
+    )
+}
 
 /// Reads the bytes of a running config into a stanza tree. A byte sequence
 /// that is not UTF-8 becomes the replacement character. The text lines of a

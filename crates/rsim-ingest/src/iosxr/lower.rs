@@ -36,20 +36,20 @@ const SHARED_ALL_IP: &str = "ip";
 
 /// A layer 3 interface that is lowered, in the form of the shared ACL
 /// functions.
-struct Port {
-    i: nxos::config::Interface,
+pub(crate) struct Port {
+    pub(crate) i: nxos::config::Interface,
     /// The span of its record in `show interfaces`.
-    state: Option<SourceSpan>,
+    pub(crate) state: Option<SourceSpan>,
     /// The VLAN of `encapsulation dot1q` of a sub-interface.
-    dot1q: Option<u16>,
+    pub(crate) dot1q: Option<u16>,
     /// The IPv6 addresses of the config.
-    ipv6: Vec<String>,
+    pub(crate) ipv6: Vec<String>,
     /// The MAC of `show interfaces`.
-    mac: Option<Mac>,
+    pub(crate) mac: Option<Mac>,
 }
 
 impl Port {
-    fn vrf(&self) -> &str {
+    pub(crate) fn vrf(&self) -> &str {
         self.i.vrf.as_deref().unwrap_or(DEFAULT_VRF)
     }
 }
@@ -81,11 +81,18 @@ struct Group<'a> {
 
 /// A virtual address in the route table: a local route of an active group,
 /// or a route with no next hop of a group whose state is not known.
-struct Vip {
-    vrf: String,
-    ip: IpAddr,
-    local: bool,
-    spans: Vec<SourceSpan>,
+pub(crate) struct Vip {
+    pub(crate) vrf: String,
+    pub(crate) ip: IpAddr,
+    pub(crate) local: bool,
+    pub(crate) spans: Vec<SourceSpan>,
+}
+
+/// Where the routes of a VRF go: the function of each next hop, and the
+/// reason of a path whose next hop is in another VRF.
+pub(crate) struct Hops<'a> {
+    pub(crate) next: &'a str,
+    pub(crate) other_vrf: &'a dyn Fn(&str) -> String,
 }
 
 fn port(i: &Interface) -> nxos::config::Interface {
@@ -112,12 +119,9 @@ fn port(i: &Interface) -> nxos::config::Interface {
     }
 }
 
-/// The IPv4 ACLs in the form of the shared ACL functions. An entry that the
-/// config reader cannot read and that starts with a sequence number and an
-/// action stays at its place as an entry whose match set is not known, so
-/// the match bounds decide the packets that reach it.
+/// The IPv4 ACLs in the form of the shared ACL functions, with the entries
+/// that the config reader cannot read placed by [`place_unreadable`].
 fn acls(cfg: &Config) -> BTreeMap<String, nxos::config::Acl> {
-    let seq = |s: &str| s.parse::<u64>().ok();
     cfg.acls
         .iter()
         .map(|(name, acl)| {
@@ -127,52 +131,61 @@ fn acls(cfg: &Config) -> BTreeMap<String, nxos::config::Acl> {
                     e.protocol = SHARED_ALL_IP.to_string();
                 }
             }
-            let mut rest = Vec::new();
-            for text in std::mem::take(&mut acl.unreadable) {
-                let w: Vec<&str> = text.split_whitespace().collect();
-                let (n, action) = match w.as_slice() {
-                    [s, a @ ("permit" | "deny"), ..] if seq(s).is_some() => (
-                        seq(s).unwrap_or_default(),
-                        if *a == "permit" {
-                            AclAction::Permit
-                        } else {
-                            AclAction::Deny
-                        },
-                    ),
-                    _ => {
-                        rest.push(text);
-                        continue;
-                    }
-                };
-                let at = acl
-                    .entries
-                    .iter()
-                    .position(|e| seq(&e.seq).is_some_and(|s| s > n))
-                    .unwrap_or(acl.entries.len());
-                acl.entries.insert(
-                    at,
-                    Ace {
-                        seq: n.to_string(),
-                        action,
-                        protocol: SHARED_ALL_IP.to_string(),
-                        source: AddrSpec::Any,
-                        source_port: PortSpec::Any,
-                        destination: AddrSpec::Any,
-                        destination_port: PortSpec::Any,
-                        icmp: None,
-                        established: false,
-                        unhandled: vec![format!("the entry is not read: {text}")],
-                        lines: acl.lines,
-                    },
-                );
-            }
-            acl.unreadable = rest;
+            place_unreadable(&mut acl);
             (name.clone(), acl)
         })
         .collect()
 }
 
-fn error<T>(s: &Section<T>) -> Option<&str> {
+/// Places each entry of an ACL that the config reader cannot read and that
+/// starts with a sequence number and an action at its place, as an entry
+/// whose match set is not known, so the match bounds decide the packets
+/// that reach it. The other unreadable lines stay unreadable.
+pub(crate) fn place_unreadable(acl: &mut nxos::config::Acl) {
+    let seq = |s: &str| s.parse::<u64>().ok();
+    let mut rest = Vec::new();
+    for text in std::mem::take(&mut acl.unreadable) {
+        let w: Vec<&str> = text.split_whitespace().collect();
+        let (n, action) = match w.as_slice() {
+            [s, a @ ("permit" | "deny"), ..] if seq(s).is_some() => (
+                seq(s).unwrap_or_default(),
+                if *a == "permit" {
+                    AclAction::Permit
+                } else {
+                    AclAction::Deny
+                },
+            ),
+            _ => {
+                rest.push(text);
+                continue;
+            }
+        };
+        let at = acl
+            .entries
+            .iter()
+            .position(|e| seq(&e.seq).is_some_and(|s| s > n))
+            .unwrap_or(acl.entries.len());
+        acl.entries.insert(
+            at,
+            Ace {
+                seq: n.to_string(),
+                action,
+                protocol: SHARED_ALL_IP.to_string(),
+                source: AddrSpec::Any,
+                source_port: PortSpec::Any,
+                destination: AddrSpec::Any,
+                destination_port: PortSpec::Any,
+                icmp: None,
+                established: false,
+                unhandled: vec![format!("the entry is not read: {text}")],
+                lines: acl.lines,
+            },
+        );
+    }
+    acl.unreadable = rest;
+}
+
+pub(crate) fn error<T>(s: &Section<T>) -> Option<&str> {
     match s {
         Some(Err(e)) => Some(e),
         _ => None,
@@ -266,45 +279,7 @@ pub fn lower(
         return (l.out, sum);
     }
 
-    // Ingress, the input QoS and the input ACLs.
-    for p in &active {
-        let i = &p.i;
-        let filtered = i.acl_in.is_some() || !i.unhandled.is_empty();
-        let after_qos = if filtered {
-            format!("acl-in/{}", i.name)
-        } else {
-            "vrf".to_string()
-        };
-        let mut spans = vec![l.span(i.lines)];
-        spans.extend(p.state.clone());
-        let meta = l.meta(&format!("in/{}", i.name), spans);
-        l.add(Ingress {
-            meta,
-            interface: InterfaceId::new(&i.name),
-            next: l.id(&match &i.qos_in {
-                Some(_) => format!("qos-in/{}", i.name),
-                None => after_qos.clone(),
-            }),
-        });
-        if let Some((policy, lines)) = &i.qos_in {
-            let f = l.qos(&format!("qos-in/{}", i.name), policy, *lines, &after_qos);
-            l.add(f);
-        }
-        if filtered {
-            let f = l.interface_acl(i, i.acl_in.as_ref(), "in", "vrf");
-            l.add(f);
-        }
-    }
-    let meta = l.meta("vrf", Vec::new());
-    l.add(VrfSelection {
-        meta,
-        by_interface: active
-            .iter()
-            .map(|p| (InterfaceId::new(&p.i.name), VrfId::new(p.vrf())))
-            .collect(),
-        default_vrf: profile.default_vrf.clone(),
-        next: l.id("route"),
-    });
+    inputs(&mut l, &active, profile.default_vrf.clone(), "route");
 
     // The route lookup in the table of each VRF.
     let rib = st.rib.as_ref().and_then(|x| x.as_ref().ok());
@@ -341,9 +316,18 @@ pub fn lower(
                 .collect()
         })
         .collect();
+    let other_vrf = |v: &str| {
+        format!(
+            "a next hop in VRF {v} is reached through a label switched path, which is not lowered"
+        )
+    };
+    let hops = Hops {
+        next: "nexthop",
+        other_vrf: &other_vrf,
+    };
     let mut tables = BTreeMap::new();
     for v in &vrfs {
-        let t = fib(&mut l, v, &active, rib, &vips);
+        let t = fib(&mut l, v, &active, rib, &vips, &hops);
         tables.insert(VrfId::new(v), t);
     }
     l.note("IPv6 is not lowered: each IPv6 packet is unknown at the route lookup".into());
@@ -374,6 +358,49 @@ pub fn lower(
     handoffs(&mut l, &active, &groups, &sum, ext);
     edges(&mut l, device, &active);
     (l.out, sum)
+}
+
+/// The ingress of each lowered interface, its input QoS and its input ACL,
+/// and the VRF selection, which goes to `next`.
+pub(crate) fn inputs(l: &mut L, active: &[Port], default_vrf: Option<VrfId>, next: &str) {
+    for p in active {
+        let i = &p.i;
+        let filtered = i.acl_in.is_some() || !i.unhandled.is_empty();
+        let after_qos = if filtered {
+            format!("acl-in/{}", i.name)
+        } else {
+            "vrf".to_string()
+        };
+        let mut spans = vec![l.span(i.lines)];
+        spans.extend(p.state.clone());
+        let meta = l.meta(&format!("in/{}", i.name), spans);
+        l.add(Ingress {
+            meta,
+            interface: InterfaceId::new(&i.name),
+            next: l.id(&match &i.qos_in {
+                Some(_) => format!("qos-in/{}", i.name),
+                None => after_qos.clone(),
+            }),
+        });
+        if let Some((policy, lines)) = &i.qos_in {
+            let f = l.qos(&format!("qos-in/{}", i.name), policy, *lines, &after_qos);
+            l.add(f);
+        }
+        if filtered {
+            let f = l.interface_acl(i, i.acl_in.as_ref(), "in", "vrf");
+            l.add(f);
+        }
+    }
+    let meta = l.meta("vrf", Vec::new());
+    l.add(VrfSelection {
+        meta,
+        by_interface: active
+            .iter()
+            .map(|p| (InterfaceId::new(&p.i.name), VrfId::new(p.vrf())))
+            .collect(),
+        default_vrf,
+        next: l.id(next),
+    });
 }
 
 /// The summary of the router for the link join. A port that can end a
@@ -681,7 +708,7 @@ fn handoffs(l: &mut L, active: &[Port], groups: &[Group], sum: &Summary, ext: &E
 /// An egress whose port has one peer goes over the link, with the MAC of
 /// the interface as the source MAC and the dot1q VLAN of a sub-interface as
 /// the tag.
-fn next_hops(l: &mut L, active: &[Port], st: &state::State, ext: &External) {
+pub(crate) fn next_hops(l: &mut L, active: &[Port], st: &state::State, ext: &External) {
     let mut neighbours: TriePrefixTable<Vec<Neighbour>> = TriePrefixTable::new();
     for a in st.arp.iter().flatten().flatten() {
         let p = Prefix::host(a.ip);
@@ -816,7 +843,7 @@ fn link_end(st: &state::State, port: &str) -> Option<LinkEnd> {
 }
 
 /// The edge interfaces: each interface with a connected network.
-fn edges(l: &mut L, device: &str, active: &[Port]) {
+pub(crate) fn edges(l: &mut L, device: &str, active: &[Port]) {
     for p in active {
         let nets: Vec<Prefix> =
             p.i.addresses
@@ -898,8 +925,15 @@ fn line_of(s: &SourceSpan) -> String {
 /// section does not have. The addresses of the interfaces of the VRF are
 /// local routes, as are the virtual addresses of the active HSRP groups; the
 /// virtual address of a group whose state is not known has no next hop.
-/// Each IPv6 packet is unknown.
-fn fib(l: &mut L, vrf: &str, active: &[Port], rib: Option<&Rib>, vips: &[Vip]) -> Fib {
+/// Each IPv6 packet is unknown. The next hops go to the function of `hops`.
+pub(crate) fn fib(
+    l: &mut L,
+    vrf: &str,
+    active: &[Port],
+    rib: Option<&Rib>,
+    vips: &[Vip],
+    hops: &Hops,
+) -> Fib {
     let mut t = Fib::new();
     let all: Prefix = "0.0.0.0/0".parse().expect("a valid prefix");
     let unknown_all = |spans: Vec<SourceSpan>| Route::new(RouteKind::Static, Vec::new(), spans);
@@ -932,7 +966,7 @@ fn fib(l: &mut L, vrf: &str, active: &[Port], rib: Option<&Rib>, vips: &[Vip]) -
                 ));
                 t.insert(all, unknown_all(Vec::new()));
             } else {
-                routes(l, &mut t, vrf, rib, &mine);
+                routes(l, &mut t, vrf, rib, &mine, hops);
             }
         }
     }
@@ -964,7 +998,14 @@ fn fib(l: &mut L, vrf: &str, active: &[Port], rib: Option<&Rib>, vips: &[Vip]) -
 
 /// The routes of the paths of a VRF, and the routes of the lines that are
 /// not read.
-fn routes(l: &mut L, t: &mut Fib, vrf: &str, rib: &Rib, mine: &dyn Fn(&Option<String>) -> bool) {
+fn routes(
+    l: &mut L,
+    t: &mut Fib,
+    vrf: &str,
+    rib: &Rib,
+    mine: &dyn Fn(&Option<String>) -> bool,
+    to: &Hops,
+) {
     let mut unread: BTreeMap<Prefix, Vec<&UnreadRoute>> = BTreeMap::new();
     for u in rib.unread.iter().filter(|u| mine(&u.vrf)) {
         if let Some(p) = u.prefix {
@@ -1007,7 +1048,7 @@ fn routes(l: &mut L, t: &mut Fib, vrf: &str, rib: &Rib, mine: &dyn Fn(&Option<St
     let hop = |l: &L, iface: &str, gw: Option<IpAddr>| RouteNextHop {
         interface: InterfaceId::new(iface),
         gateway: gw,
-        next: l.id("nexthop"),
+        next: l.id(to.next),
     };
     let mut out: Vec<(Prefix, Route)> = Vec::new();
     let mut notes = Vec::new();
@@ -1046,9 +1087,7 @@ fn routes(l: &mut L, t: &mut Fib, vrf: &str, rib: &Rib, mine: &dyn Fn(&Option<St
         let mut problem = None;
         for p in &first {
             if let Some(v) = &p.other_vrf {
-                problem = Some(format!(
-                    "a next hop in VRF {v} is reached through a label switched path, which is not lowered"
-                ));
+                problem = Some((to.other_vrf)(v));
                 break;
             }
             match (&p.interface, p.gateway) {
