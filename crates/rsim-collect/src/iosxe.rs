@@ -191,7 +191,9 @@ impl Source for IosxeSource {
 
     /// Reads the sections of the static list, then the ARP table of each
     /// VRF of the answer of `show vrf detail` in name order. A failed or
-    /// absent answer of the VRFs makes the section [`ARP_VRFS`] absent.
+    /// absent answer of the VRFs makes the section [`ARP_VRFS`] absent,
+    /// except a connect error or a timeout, which the section takes as its
+    /// error, as it does when each command of the VRFs ends in one.
     fn fetch<'a>(
         &'a self,
         device: &'a Device,
@@ -216,7 +218,9 @@ impl Source for IosxeSource {
             let names = out
                 .iter()
                 .find(|s| s.spec.name == VRFS)
-                .ok_or_else(|| "the section of the VRFs is not read".to_string())
+                .ok_or_else(|| {
+                    TransportError::NotFound("the section of the VRFs is not read".into())
+                })
                 .and_then(vrf_names);
             let per_vrf = match &names {
                 Ok(names) => {
@@ -237,9 +241,27 @@ impl Source for IosxeSource {
             out.extend(per_vrf);
             RULES.apply(&mut out, banner_each);
             let answers = out.split_off(fixed_len);
+            // A device that cannot be reached gives the error of the
+            // connection, so the section keeps its last blob; another
+            // failure of the VRFs makes the section absent.
+            let unreachable = |e: &TransportError| {
+                matches!(e, TransportError::Connect(_) | TransportError::Timeout)
+            };
             let result = match names {
-                Ok(names) => Ok(combine(&names, &answers)),
-                Err(why) => Err(TransportError::NotFound(why)),
+                Err(e) if unreachable(&e) => Err(e),
+                Err(e) => Err(TransportError::NotFound(format!(
+                    "the section of the VRFs failed: {e}"
+                ))),
+                Ok(names) => match answers.first().map(|a| &a.result) {
+                    Some(Err(e))
+                        if answers
+                            .iter()
+                            .all(|a| a.result.as_ref().is_err_and(unreachable)) =>
+                    {
+                        Err(e.clone())
+                    }
+                    _ => Ok(combine(&names, &answers)),
+                },
             };
             out.push(RawSection { spec, result });
             out
@@ -249,14 +271,11 @@ impl Source for IosxeSource {
 
 /// The names of the VRFs in the answer of `show vrf detail`, in name order:
 /// the word after `VRF` on each line `VRF <name> (VRF Id = <n>); ...`. A
-/// failed answer gives an error.
-fn vrf_names(vrfs: &RawSection) -> Result<BTreeSet<String>, String> {
+/// failed answer gives its error.
+fn vrf_names(vrfs: &RawSection) -> Result<BTreeSet<String>, TransportError> {
     let mut probe = [vrfs.clone()];
     RULES.apply(&mut probe, false);
-    let bytes = probe[0]
-        .result
-        .as_ref()
-        .map_err(|e| format!("the section of the VRFs failed: {e}"))?;
+    let bytes = probe[0].result.as_ref().map_err(Clone::clone)?;
     Ok(String::from_utf8_lossy(bytes)
         .lines()
         .filter_map(|line| {

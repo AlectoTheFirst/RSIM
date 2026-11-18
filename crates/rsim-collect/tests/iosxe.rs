@@ -480,3 +480,43 @@ async fn a_change_of_each_new_section_makes_a_snapshot() {
     tokio::time::advance(Duration::from_secs(60)).await;
     assert!(e.c.run_cycle().await.unwrap().snapshot.is_some());
 }
+
+#[tokio::test(start_paused = true)]
+async fn an_unreachable_router_fails_and_its_arp_of_the_vrfs_keeps_its_blob() {
+    let mut e = env();
+    e.c.run_cycle().await.unwrap().snapshot.unwrap();
+    let before = blob(&e, ARP_VRFS);
+    e.t.clear("e1");
+    tokio::time::advance(Duration::from_secs(60)).await;
+    let r = e.c.run_cycle().await.unwrap();
+    assert_eq!(r.failed, ["e1"], "{r:?}");
+    assert!(r.changed.is_empty(), "{r:?}");
+    assert!(
+        matches!(status(&e, ARP_VRFS), SectionStatus::Old { .. }),
+        "{:?}",
+        status(&e, ARP_VRFS)
+    );
+    assert_eq!(blob(&e, ARP_VRFS), before);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_lost_connection_after_the_vrfs_keeps_the_blob_of_the_arp_of_the_vrfs() {
+    let mut e = env();
+    e.c.run_cycle().await.unwrap().snapshot.unwrap();
+    let before = blob(&e, ARP_VRFS);
+    for (vrf, _) in VRF_ARP {
+        e.t.reply(
+            "e1",
+            &arp_vrf_command(vrf),
+            Err(TransportError::Connect("closed".into())),
+        );
+    }
+    tokio::time::advance(Duration::from_secs(60)).await;
+    e.c.run_cycle().await.unwrap();
+    assert!(
+        matches!(status(&e, ARP_VRFS), SectionStatus::Old { .. }),
+        "{:?}",
+        status(&e, ARP_VRFS)
+    );
+    assert_eq!(blob(&e, ARP_VRFS), before);
+}
