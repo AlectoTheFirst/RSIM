@@ -1,0 +1,9 @@
+Codes: L - local, C - connected, S - static, R - RIP, M - mobile, B - BGP
+
+Gateway of last resort is 198.51.100.254 to network 0.0.0.0
+
+S*    0.0.0.0/0 [1/0] via 198.51.100.254
+      198.51.100.0/24 is variably subnetted, 2 subnets, 2 masks
+C        198.51.100.0/24 is directly connected, GigabitEthernet1
+L        198.51.100.2/32 is directly connected, GigabitEthernet1
+B        192.0.2.0/24 [20/0] via 198.51.100.254, 3w2d
