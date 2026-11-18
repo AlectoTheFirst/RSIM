@@ -23,6 +23,7 @@ const SECRET_WORDS: &[&str] = &[
     "password",
     "pre-shared-key",
     "priv",
+    "pin",
     "private-key",
     "psk",
     "secret",
@@ -31,26 +32,23 @@ const SECRET_WORDS: &[&str] = &[
     "sha1",
     "sha256",
     "text-authentication",
+    "user-pin",
 ];
 
 /// The text that takes the place of the masked words.
 const MASKED: &str = "<secret>";
 
 /// The report form of a line of an IOS-XR config. The words up to the first
-/// secret word stay, and the rest becomes `<secret>`. In a line that starts
-/// with `snmp-server host`, the words after the host become `<secret>`,
-/// because the community follows them. Each word with the form of a hash
-/// becomes `<secret>` too, and the password of a URL in a word that stays
-/// (`scheme://user:<secret>@host`). The words of the result have 1 space
+/// secret word stay, and the rest becomes `<secret>`. In a line of
+/// `crate::mask::cisco_kept_words`, such as `snmp-server host`, a trap host
+/// of `snmp-server vrf` or `event manager environment`, the words after its
+/// kept words become `<secret>`. Each word with the form of a hash becomes
+/// `<secret>` too, and the secrets of a URL in a word that stays
+/// (`crate::mask::url_secrets`). The words of the result have 1 space
 /// between them.
 pub fn mask(line: &str) -> String {
     let words: Vec<&str> = line.split_whitespace().collect();
-    let keep = if words.len() > 3
-        && words[0].eq_ignore_ascii_case("snmp-server")
-        && words[1].eq_ignore_ascii_case("host")
-    {
-        3
-    } else {
+    let keep = crate::mask::cisco_kept_words(&words).unwrap_or_else(|| {
         words
             .iter()
             .position(|w| {
@@ -58,14 +56,14 @@ pub fn mask(line: &str) -> String {
                 SECRET_WORDS.contains(&w.as_str())
             })
             .map_or(words.len(), |i| i + 1)
-    };
+    });
     let mut out: Vec<String> = words[..keep]
         .iter()
         .map(|w| {
             if hash_like(w) {
                 MASKED.to_string()
             } else {
-                crate::mask::url_password(w).unwrap_or_else(|| w.to_string())
+                crate::mask::url_secrets(w).unwrap_or_else(|| w.to_string())
             }
         })
         .collect();
@@ -192,6 +190,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_hosts_of_submodes_eem_values_and_pins_are_masked() {
+        let cases = [
+            (
+                "host 192.0.2.7 traps version 2c FAKECOMMUNITY",
+                "host 192.0.2.7 <secret>",
+            ),
+            (
+                "event manager environment _email_pass FAKEEEMPW",
+                "event manager environment _email_pass <secret>",
+            ),
+            (
+                "event manager environment _email_server admin:FAKEMAILPW@192.0.2.25",
+                "event manager environment _email_server <secret>",
+            ),
+            (
+                "action 1.0 mail server \"admin:FAKEMAILPW@192.0.2.25\" to a@example.com from b@example.com subject x body y",
+                "action 1.0 mail server \"<secret>@192.0.2.25\" to a@example.com from b@example.com subject x body y",
+            ),
+            (
+                "crypto pki token default user-pin 0 FAKEPIN",
+                "crypto pki token default user-pin <secret>",
+            ),
+            ("pin 1234", "pin <secret>"),
+        ];
+        for (line, want) in cases {
+            assert_eq!(mask(line), want, "{line}");
+        }
+    }
+
     /// An IOS-XR running config with fake secrets in each listed place.
     const CONFIG: &str = "\
 username admin
@@ -235,6 +263,11 @@ router bgp 65000
   password encrypted FAKEBGP
 crypto ca trustpoint tp1
  enrollment url http://u:FAKEENR@192.0.2.9
+snmp-server vrf MGMT
+ host 192.0.2.7 traps version 2c FAKEVRFCOMMUNITY
+event manager environment _email_pass FAKEEEMPW
+event manager environment _email_server admin:FAKEMAILPW@192.0.2.25
+crypto pki token default user-pin 0 FAKEPIN
 ";
 
     #[test]
@@ -251,7 +284,9 @@ crypto ca trustpoint tp1
             &[
                 " ipv4 address 192.0.2.1 255.255.255.0",
                 "    text-authentication <secret>",
-                " enrollment url http://u:<secret>@192.0.2.9",
+                " enrollment url http://<secret>@192.0.2.9",
+                " host 192.0.2.7 <secret>",
+                "event manager environment _email_pass <secret>",
             ],
         );
     }
@@ -271,6 +306,11 @@ crypto ca trustpoint tp1
             "snmp-server host 192.0.2.7"
         );
         assert_eq!(mask("router bgp 4200000000"), "router bgp 4200000000");
+        assert_eq!(mask("host 192.0.2.7"), "host 192.0.2.7");
+        assert_eq!(
+            mask("event manager environment _email_to"),
+            "event manager environment _email_to"
+        );
         assert_eq!(
             mask("mac-address 0000.5e00.5301"),
             "mac-address 0000.5e00.5301"

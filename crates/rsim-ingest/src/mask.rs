@@ -7,9 +7,12 @@
 //! key) goes with it. The masked lines keep the lines of the canonical form
 //! of `rsim-store`: a line with no secret is the same text. Below a subtree
 //! of the mask of a vendor, a part of the config in which the user names
-//! the secret, each value is masked and the keys stay. The password of a
-//! URL (`scheme://user:password@host`) is masked in each key and value. A
-//! text section is masked line by line by the line mask of its vendor.
+//! the secret, each value is masked and the keys stay. A record below a
+//! key of the value records of a mask has its `value` masked. The userinfo
+//! of a URL (`scheme://user:password@host`), the form `user:password@host`
+//! and the value of a secret query parameter are masked in each key and
+//! value (`url_secrets`). A text section is masked line by line by the line
+//! mask of its vendor.
 
 use rsim_store::Format;
 use serde_json::Value;
@@ -58,42 +61,117 @@ pub struct JsonMask {
     /// object keys from the root; `*` is any key. The keys below a subtree
     /// stay.
     pub subtrees: &'static [&'static [&'static str]],
+    /// True for the key of a list of records, or of one record, whose
+    /// `value` is a secret, such as the UniFi WAN DHCP options.
+    pub value_records: fn(key: &str) -> bool,
 }
 
-/// The text with the password of each URL masked: in `scheme://user:pw@`,
-/// the `pw` becomes `<secret>`. The user is the text after `://` with no
-/// `/`, `:`, `@` or white space, and the password the text after its `:` up
-/// to the next `@`, with no `/` or white space. `None` for a text with no
-/// such password.
-pub fn url_password(text: &str) -> Option<String> {
-    let mut out = String::new();
-    let mut done = 0;
-    let mut from = 0;
-    while let Some(i) = text[from..].find("://") {
-        let start = from + i + 3;
-        from = start;
-        let rest = &text[start..];
-        let Some(colon) = rest.find(|c: char| matches!(c, '/' | ':' | '@') || c.is_whitespace())
-        else {
-            break;
-        };
-        if !rest[colon..].starts_with(':') {
-            continue;
-        }
-        let pw = &rest[colon + 1..];
-        let end = pw.find(|c: char| matches!(c, '/' | '@') || c.is_whitespace());
-        if let Some(end) = end.filter(|&e| e > 0 && pw[e..].starts_with('@')) {
-            let pw_start = start + colon + 1;
-            out.push_str(&text[done..pw_start]);
-            out.push_str(MASKED);
-            done = pw_start + end;
-            from = done;
+/// The rule of a mask with no value records.
+pub fn no_value_records(_key: &str) -> bool {
+    false
+}
+
+/// The schemes whose user name with no `:` stays, such as `ssh://git@host`.
+const USER_SCHEMES: &[&str] = &["ssh", "git"];
+
+/// The names of query parameters whose value is a secret, besides the
+/// secret keys of the common rule.
+const SECRET_PARAMS: &[&str] = &[
+    "access_token",
+    "apikey",
+    "auth",
+    "key",
+    "pass",
+    "password",
+    "pwd",
+    "secret",
+    "sig",
+    "signature",
+    "token",
+];
+
+/// The text with the secrets of each URL masked, or `None` for a text with
+/// none. A word is a run of text with no white space and no quote. In a
+/// word with `scheme://`, the userinfo up to the last `@` of the word
+/// becomes `<secret>`, except a user name with no `:` for the schemes
+/// `ssh` and `git`. In a word with no `://`, the text before the last `@`
+/// becomes `<secret>` when it holds a `:`, the form `user:password@host`.
+/// In each word, the value of a query parameter after the first `?` past
+/// the userinfo, whose name is a word of `SECRET_PARAMS` or a secret key of
+/// the common rule, becomes `<secret>` up to the next `&`, `;` or `#`.
+pub fn url_secrets(text: &str) -> Option<String> {
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut start = None;
+    for (i, c) in text.char_indices().chain([(text.len(), ' ')]) {
+        let delim = c.is_whitespace() || matches!(c, '"' | '\'');
+        match (start, delim) {
+            (None, false) => start = Some(i),
+            (Some(s), true) => {
+                word_secrets(text, s, i, &mut ranges);
+                start = None;
+            }
+            _ => {}
         }
     }
-    (done > 0).then(|| {
-        out.push_str(&text[done..]);
-        out
-    })
+    if ranges.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    let mut done = 0;
+    for (a, b) in ranges {
+        out.push_str(&text[done..a]);
+        out.push_str(MASKED);
+        done = b;
+    }
+    out.push_str(&text[done..]);
+    Some(out)
+}
+
+/// Adds the ranges of the secrets of the word `text[s..e]`, in order.
+fn word_secrets(text: &str, s: usize, e: usize, ranges: &mut Vec<(usize, usize)>) {
+    let word = &text[s..e];
+    let mut host = 0;
+    if let Some(i) = word.find("://") {
+        let scheme = word[..i]
+            .rsplit(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')))
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let from = i + 3;
+        if let Some(at) = word[from..].rfind('@').map(|a| from + a) {
+            let user = &word[from..at];
+            let kept = !user.contains(':') && USER_SCHEMES.contains(&scheme.as_str());
+            if !user.is_empty() && !kept {
+                ranges.push((s + from, s + at));
+            }
+            host = at + 1;
+        }
+    } else if let Some(at) = word.rfind('@')
+        && word[..at].contains(':')
+    {
+        ranges.push((s, s + at));
+        host = at + 1;
+    }
+    let Some(q) = word[host..].find('?').map(|q| host + q) else {
+        return;
+    };
+    let mut p = q + 1;
+    while p < word.len() {
+        let end = word[p..]
+            .find(['&', ';', '#'])
+            .map_or(word.len(), |x| p + x);
+        if let Some(eq) = word[p..end].find('=') {
+            let name = word[p..p + eq].to_ascii_lowercase();
+            let secret = SECRET_PARAMS.contains(&name.as_str()) || secret_key(&name, false);
+            if secret && p + eq + 1 < end {
+                ranges.push((s + p + eq + 1, s + end));
+            }
+        }
+        if word[end..].starts_with('#') {
+            break;
+        }
+        p = end + 1;
+    }
 }
 
 /// The masked lines of the canonical form of a section of a vendor, from
@@ -233,7 +311,7 @@ fn masked_text() -> String {
 
 /// The JSON text of a string, with the password of each URL masked.
 fn plain_text(s: &str) -> String {
-    Value::String(url_password(s).unwrap_or_else(|| s.to_string())).to_string()
+    Value::String(url_secrets(s).unwrap_or_else(|| s.to_string())).to_string()
 }
 
 /// The writer of the masked canonical form of a JSON value.
@@ -262,11 +340,15 @@ impl<'a> Writer<'a> {
             Value::Array(a) if a.is_empty() => self.out.push_str("[]"),
             Value::Object(m) => {
                 let named = m.contains_key("value")
-                    && SETTING_NAMES.iter().any(|f| {
-                        m.get(*f)
-                            .and_then(Value::as_str)
-                            .is_some_and(|s| rule(s, snmp))
-                    });
+                    && (self
+                        .path
+                        .last()
+                        .is_some_and(|k| (self.mask.value_records)(k))
+                        || SETTING_NAMES.iter().any(|f| {
+                            m.get(*f)
+                                .and_then(Value::as_str)
+                                .is_some_and(|s| rule(s, snmp))
+                        }));
                 let mut keys: Vec<&String> = m.keys().collect();
                 keys.sort();
                 self.out.push_str("{\n");
@@ -336,6 +418,25 @@ pub fn text_lines(bytes: &[u8], mask: fn(&str) -> String) -> Result<Vec<String>,
     Ok(text.lines().map(|l| masked_line(l, mask)).collect())
 }
 
+/// The number of words that stay in a Cisco config line whose secret
+/// follows words that are not secret words, or `None` for another line:
+/// 3 in a line that starts with `snmp-server host`, 2 in a line that starts
+/// with `host`, the trap host of the `snmp-server vrf` submode of IOS-XR,
+/// because the community follows the host, and 4 in a line that starts with
+/// `event manager environment`, whose value can be a credential.
+pub fn cisco_kept_words(words: &[&str]) -> Option<usize> {
+    let is = |i: usize, w: &str| words.get(i).is_some_and(|x| x.eq_ignore_ascii_case(w));
+    if words.len() > 3 && is(0, "snmp-server") && is(1, "host") {
+        Some(3)
+    } else if words.len() > 2 && is(0, "host") {
+        Some(2)
+    } else if words.len() > 4 && is(0, "event") && is(1, "manager") && is(2, "environment") {
+        Some(4)
+    } else {
+        None
+    }
+}
+
 fn masked_line(line: &str, mask: fn(&str) -> String) -> String {
     let m = mask(line);
     let plain = line.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -382,92 +483,132 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// The URLs with a fake secret in each form of `url_secrets`.
+    const URLS: &[(&str, &str)] = &[
+        (
+            "sftp://backup:FAKEURLPW@192.0.2.5/cfg",
+            "sftp://<secret>@192.0.2.5/cfg",
+        ),
+        (
+            "https://ghp_FAKETOKEN@github.com/org/cfg.git",
+            "https://<secret>@github.com/org/cfg.git",
+        ),
+        ("ftp://u:p@FAKEAT@192.0.2.5/x", "ftp://<secret>@192.0.2.5/x"),
+        (
+            "sftp://backup:ab/FAKE+cd@192.0.2.5/cfg",
+            "sftp://<secret>@192.0.2.5/cfg",
+        ),
+        (
+            "https://192.0.2.5/upload?token=FAKEQTOKEN&password=FAKEQPW&mode=x",
+            "https://192.0.2.5/upload?token=<secret>&password=<secret>&mode=x",
+        ),
+        (
+            "ssh://git:FAKESSHPW@192.0.2.10/repo",
+            "ssh://<secret>@192.0.2.10/repo",
+        ),
+        ("admin:FAKEMAILPW@192.0.2.25", "<secret>@192.0.2.25"),
+    ];
+
     #[test]
-    fn the_password_of_a_url_is_masked_in_each_json_mask() {
+    fn the_secrets_of_a_url_are_masked_in_each_json_mask() {
         let v = json!({
             "system": {"config-management": {"commit-archive": {
-                "location": ["sftp://backup:FAKEURLPW@192.0.2.5/cfg", "ftp://u:FAKEFTP@192.0.2.6/a ftp://v:FAKESECOND@192.0.2.7/b"],
-                "source": {"scp://w:FAKEKEYURL@192.0.2.8/c": {"url": "scp://backup:FAKEURL15@192.0.2.5/archive"}}
+                "location": URLS.iter().map(|(u, _)| *u).collect::<Vec<_>>(),
+                "source": {"scp://w:FAKEKEYURL@192.0.2.8/c": {"url": "ftp://u:FAKEFTP@192.0.2.6/a ftp://v:FAKESECOND@192.0.2.7/b"}}
             }}},
-            "kept": ["http://192.0.2.9:8080/path", "http://[2001:db8::1]:80/", "ssh://git@192.0.2.10/repo"]
+            "kept": ["http://192.0.2.9:8080/path", "http://[2001:db8::1]:80/", "ssh://git@192.0.2.10/repo", "a@example.com"]
         });
         let bytes = v.to_string();
+        let mut kept: Vec<&str> = URLS.iter().map(|(_, m)| *m).collect();
+        kept.extend([
+            "ftp://<secret>@192.0.2.6/a ftp://<secret>@192.0.2.7/b",
+            "scp://<secret>@192.0.2.8/c",
+            "http://192.0.2.9:8080/path",
+            "http://[2001:db8::1]:80/",
+            "ssh://git@192.0.2.10/repo",
+            "a@example.com",
+        ]);
         for vendor in ["vyos", "unifi", "nxos"] {
-            let got = check::masked(
-                vendor,
-                Format::Json,
-                bytes.as_bytes(),
-                &[],
-                &[
-                    "sftp://backup:<secret>@192.0.2.5/cfg",
-                    "ftp://u:<secret>@192.0.2.6/a ftp://v:<secret>@192.0.2.7/b",
-                    "http://192.0.2.9:8080/path",
-                    "http://[2001:db8::1]:80/",
-                    "ssh://git@192.0.2.10/repo",
-                ],
-            );
-            assert!(
-                got.join("\n").contains("scp://w:<secret>@192.0.2.8/c"),
-                "{vendor}"
-            );
+            check::masked(vendor, Format::Json, bytes.as_bytes(), &["ghp_"], &kept);
         }
     }
 
     #[test]
-    fn a_url_password_is_found_by_the_pattern_of_hst() {
+    fn the_userinfo_and_secret_parameters_of_a_url_are_masked() {
         let masked = [
-            (
-                "sftp://backup:FAKE@192.0.2.5/cfg",
-                "sftp://backup:<secret>@192.0.2.5/cfg",
-            ),
-            ("ftp://:FAKE@192.0.2.5", "ftp://:<secret>@192.0.2.5"),
-            ("x http://u:FA:KE@h", "x http://u:<secret>@h"),
+            ("ftp://:FAKE@192.0.2.5", "ftp://<secret>@192.0.2.5"),
+            ("x http://u:FA:KE@h", "x http://<secret>@h"),
+            ("http://u:@h", "http://<secret>@h"),
+            ("http://u:p/x@h", "http://<secret>@h"),
+            ("http://token@h/x", "http://<secret>@h/x"),
+            ("tftp://FAKE@h", "tftp://<secret>@h"),
+            ("git+https://FAKE@h", "git+https://<secret>@h"),
+            ("scp://u:FA@KE@h/x", "scp://<secret>@h/x"),
             (
                 "http://h:80/ and ftp://u:FAKE@h",
-                "http://h:80/ and ftp://u:<secret>@h",
+                "http://h:80/ and ftp://<secret>@h",
             ),
             (
                 "a://u:FAKE1@h b://v:FAKE2@k",
-                "a://u:<secret>@h b://v:<secret>@k",
+                "a://<secret>@h b://<secret>@k",
+            ),
+            (
+                "\"admin:FAKE@192.0.2.25\" to a@example.com",
+                "\"<secret>@192.0.2.25\" to a@example.com",
+            ),
+            (
+                "http://h/x?key=FAKE1;sig=FAKE2#f",
+                "http://h/x?key=<secret>;sig=<secret>#f",
+            ),
+            (
+                "http://h/x?a=1&API_KEY=FAKE&Signature=FAKE&access_token=FAKE",
+                "http://h/x?a=1&API_KEY=<secret>&Signature=<secret>&access_token=<secret>",
+            ),
+            (
+                "http://h/x?auth=FAKE&pwd=FAKE&pass=FAKE&secret=FAKE&apikey=FAKE",
+                "http://h/x?auth=<secret>&pwd=<secret>&pass=<secret>&secret=<secret>&apikey=<secret>",
             ),
         ];
-        for (text, want) in masked {
-            assert_eq!(url_password(text).as_deref(), Some(want), "{text}");
+        for (text, want) in URLS.iter().copied().chain(masked) {
+            assert_eq!(url_secrets(text).as_deref(), Some(want), "{text}");
         }
         for text in [
             "http://192.0.2.9:8080/path",
             "http://[2001:db8::1]:80/",
             "ssh://git@192.0.2.10",
-            "http://u:@h",
-            "http://u:p/x@h",
+            "git://anonymous@192.0.2.10/repo",
+            "SSH://git@192.0.2.10",
+            "http://h/x?mode=1&id=2",
+            "a@example.com",
+            "git@github.com:org/repo.git",
             "no url",
             "://",
         ] {
-            assert_eq!(url_password(text), None, "{text}");
+            assert_eq!(url_secrets(text), None, "{text}");
         }
     }
 
     #[test]
-    fn the_password_of_a_url_is_masked_in_each_text_mask() {
-        let t = "archive\n path scp://admin:FAKEURLPW@192.0.2.5/backup/$h\ncrypto pki trustpoint tp1\n enrollment url http://u:FAKEENR@192.0.2.9\n url http://192.0.2.9:8080/x\n";
+    fn the_secrets_of_a_url_are_masked_in_each_text_mask() {
+        let mut t = String::from("archive\n url http://192.0.2.9:8080/x\n");
+        for (u, _) in URLS {
+            t.push_str(&format!(" path {u}\n"));
+        }
+        let kept: Vec<String> = URLS
+            .iter()
+            .map(|(_, m)| format!(" path {m}"))
+            .chain([" url http://192.0.2.9:8080/x".to_string()])
+            .collect();
+        let kept: Vec<&str> = kept.iter().map(String::as_str).collect();
         for vendor in ["nxos", "iosxr", "iosxe"] {
-            check::masked(
-                vendor,
-                Format::Text,
-                t.as_bytes(),
-                &[],
-                &[
-                    " path scp://admin:<secret>@192.0.2.5/backup/$h",
-                    " enrollment url http://u:<secret>@192.0.2.9",
-                    " url http://192.0.2.9:8080/x",
-                ],
-            );
+            check::masked(vendor, Format::Text, t.as_bytes(), &["ghp_"], &kept);
         }
     }
 
     const COMMON: JsonMask = JsonMask {
         key: secret_key,
         subtrees: &[],
+        value_records: no_value_records,
     };
 
     fn lines(v: &Value) -> Vec<String> {

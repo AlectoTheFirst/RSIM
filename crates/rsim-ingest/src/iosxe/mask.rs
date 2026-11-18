@@ -121,6 +121,14 @@ crypto pki trustpoint tp1
  enrollment url http://u:FAKEENR@192.0.2.9
 router bgp 65000
  neighbor 198.51.100.1 password 7 FAKEBGPPASSWORD
+crypto pki token default user-pin 0 FAKEPIN
+crypto pki token usb0 user-pin 7 0822455D0A
+event manager environment _email_pass FAKEEEMPW
+event manager environment _email_server admin:FAKEMAILPW@192.0.2.25
+event manager applet MAIL
+ action 1.0 mail server \"admin:FAKEAPPLETPW@192.0.2.25\" to a@example.com from b@example.com subject x body y
+snmp-server vrf MGMT
+ host 192.0.2.8 version 2c FAKEVRFCOMMUNITY
 ";
 
     #[test]
@@ -135,7 +143,10 @@ router bgp 65000
                 " area-password <secret>",
                 " client 192.0.2.2 server-key <secret>",
                 "snmp mib community-map <secret>",
-                " path scp://admin:<secret>@192.0.2.5/backup/$h",
+                " path scp://<secret>@192.0.2.5/backup/$h",
+                "crypto pki token default user-pin <secret>",
+                "event manager environment _email_server <secret>",
+                " action 1.0 mail server \"<secret>@192.0.2.25\" to a@example.com",
             ],
         );
     }

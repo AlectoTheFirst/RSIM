@@ -6,7 +6,16 @@ use crate::mask::{JsonMask, key_like, normalized, secret_key as common};
 pub const MASK: JsonMask = JsonMask {
     key: secret_key,
     subtrees: &[],
+    value_records,
 };
+
+/// True for the key of a list of DHCP options, such as `wan_dhcp_options`
+/// with its `{optionNumber, value}` records: the value of an option can be
+/// the credential of an ISP.
+pub fn value_records(key: &str) -> bool {
+    let n = normalized(key);
+    n.contains("dhcp") && n.contains("option")
+}
 
 /// The words of UniFi keys that name a secret anywhere in a key, in lower
 /// case without `_`, `-`, `.` and spaces: the WLAN passphrases, the
@@ -137,6 +146,14 @@ mod tests {
             listed.insert(k.to_string(), json!(format!("FAKEX{i}")));
         }
         listed.insert("url".into(), json!("https://admin:FAKEURLPW@192.0.2.5/x"));
+        listed.insert(
+            "wan_dhcp_options".into(),
+            json!([{"optionNumber": 90, "value": "FAKEOPT90AUTH"}]),
+        );
+        listed.insert(
+            "dhcpd_options".into(),
+            json!([{"optionNumber": 43, "value": "FAKEOPT43"}]),
+        );
         listed.insert("x_fingerprint".into(), json!("kept-fingerprint"));
         v["data"]
             .as_array_mut()
@@ -151,8 +168,29 @@ mod tests {
             &[
                 "kept-fingerprint",
                 "192.0.2.1/24",
-                "https://admin:<secret>@192.0.2.5/x",
+                "https://<secret>@192.0.2.5/x",
+                "\"optionNumber\": 90",
             ],
+        );
+    }
+
+    #[test]
+    fn the_value_of_a_wan_dhcp_option_is_masked() {
+        let v = json!({"data": [{
+            "name": "wan",
+            "wan_dhcp_options": [
+                {"optionNumber": 90, "value": "FAKEOPT90AUTH"},
+                {"optionNumber": 60, "value": "FAKEVENDORCLASS"}
+            ],
+            "dhcpd_enabled": true
+        }]});
+        let bytes = v.to_string();
+        check::masked(
+            "unifi",
+            Format::Json,
+            bytes.as_bytes(),
+            &[],
+            &["\"optionNumber\": 90", "\"dhcpd_enabled\": true"],
         );
     }
 

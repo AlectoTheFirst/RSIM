@@ -6,13 +6,15 @@ use crate::mask::{JsonMask, key_like, normalized, secret_key as common};
 pub const MASK: JsonMask = JsonMask {
     key: secret_key,
     subtrees: SUBTREES,
+    value_records: crate::mask::no_value_records,
 };
 
 /// The parts of a VyOS config in which the user names the secret, so its
 /// values are all masked: the environment variables, the arguments, the
 /// command and the entry point of a container, the environment variables
 /// and the arguments of the script of an event handler, the arguments of a
-/// scheduled task and the free options of an OpenVPN interface.
+/// scheduled task, the free options of an OpenVPN interface and the
+/// authentication secret of an NHRP tunnel of VyOS 1.5.
 pub const SUBTREES: &[&[&str]] = &[
     &["container", "name", "*", "environment"],
     &["container", "name", "*", "arguments"],
@@ -43,13 +45,15 @@ pub const SUBTREES: &[&[&str]] = &[
         "arguments",
     ],
     &["interfaces", "openvpn", "*", "openvpn-option"],
+    &["protocols", "nhrp", "tunnel", "*", "authentication"],
 ];
 
 /// The words of VyOS keys that name a secret anywhere in a key, in lower
 /// case without `_`, `-`, `.` and spaces: the WireGuard private and
 /// pre-shared keys, the PPPoE and authentication passwords, the encrypted
 /// and plaintext passwords of the users, the RADIUS and TACACS keys, the
-/// IPsec pre-shared secrets, the NHRP secrets and the OSPF and VRRP keys.
+/// IPsec pre-shared secrets, the NHRP secrets of VyOS 1.4 and the OSPF and
+/// VRRP keys.
 pub const SECRET_WORDS: &[&str] = &[
     "authenticationkey",
     "ciscoauthentication",
@@ -112,9 +116,12 @@ mod tests {
             "vpn": {"ipsec": {"authentication": {"psk": {"FAKEPSKNAME": {"id": ["198.51.100.1"], "secret": "FAKEIPSEC"}}}}},
             "protocols": {
                 "ospf": {"interface": {"eth0": {"authentication": {"md5": {"key-id": {"1": {"md5-key": "FAKEOSPF"}}}}}}},
-                "bgp": {"neighbor": {"192.0.2.2": {"password": "FAKEBGP", "remote-as": "65001"}}}
+                "bgp": {"neighbor": {"192.0.2.2": {"password": "FAKEBGP", "remote-as": "65001"}}},
+                "nhrp": {"tunnel": {
+                    "tun0": {"cisco-authentication": "FAKENHRP", "holding-time": "300"},
+                    "tun1": {"authentication": "FAKENHRP15", "holding-time": "600"}
+                }}
             },
-            "protocols-nhrp": {"tunnel": {"tun0": {"cisco-authentication": "FAKENHRP"}}},
             "high-availability": {"vrrp": {"group": {"g1": {"authentication": {"password": "FAKEVRRP", "type": "plaintext-password"}}}}}
         })
     }
@@ -129,6 +136,8 @@ mod tests {
         assert!(text.contains("192.0.2.65/26"), "{text}");
         assert!(text.contains("PUBLICKEY"), "{text}");
         assert!(text.contains("\"remote-as\": \"65001\""), "{text}");
+        assert!(text.contains("\"username\": \"user\""), "{text}");
+        assert!(text.contains("\"holding-time\": \"600\""), "{text}");
     }
 
     /// The places of a VyOS config in which the user names the secret.
@@ -179,7 +188,7 @@ mod tests {
                 "registry.example/db:1",
                 "kept-pattern",
                 "/config/scripts/t1.sh",
-                "sftp://backup:<secret>@192.0.2.5/cfg",
+                "sftp://<secret>@192.0.2.5/cfg",
                 "\"mode\": \"client\"",
             ],
         );
@@ -211,6 +220,21 @@ mod tests {
             );
         }
         v["listed"] = serde_json::Value::Object(listed);
+        for (i, path) in SUBTREES.iter().enumerate() {
+            let mut at = &mut v;
+            for k in *path {
+                let k = if *k == "*" { "x" } else { k };
+                if !at.is_object() {
+                    *at = json!({});
+                }
+                at = at
+                    .as_object_mut()
+                    .unwrap()
+                    .entry(k.to_string())
+                    .or_insert(json!({}));
+            }
+            *at = json!(format!("FAKESUB{i}"));
+        }
         let bytes = v.to_string();
         check::masked(
             "vyos",
