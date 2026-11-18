@@ -49,7 +49,10 @@ pub struct Interface {
     pub addresses: Vec<Address>,
     /// An address that the config does not state, for example from DHCP.
     pub dynamic_address: bool,
-    pub ipv6: bool,
+    /// The IPv6 addresses of the `ipv6 address` lines with their prefix
+    /// length, for example `2001:db8::1/64`. An address that the config
+    /// does not state in full, as with `eui64`, is not listed.
+    pub ipv6: Vec<(String, Lines)>,
     pub acl_in: Option<(String, Lines)>,
     pub acl_out: Option<(String, Lines)>,
     pub nat: Option<(NatRole, Lines)>,
@@ -706,10 +709,13 @@ fn interface(r: &mut R, s: &Stanza, name: &str) -> Interface {
                 }
                 true
             }
-            ["ipv6", "address", ..] | ["ipv6", "link-local", ..] => {
-                i.ipv6 = true;
+            ["ipv6", "address", a, rest @ ..] => {
+                if a.contains(':') && !rest.contains(&"eui64") {
+                    i.ipv6.push(((*a).to_string(), lines));
+                }
                 true
             }
+            ["ipv6", "address", ..] | ["ipv6", "link-local", ..] => true,
             ["ip", "access-group", acl, "in"] => {
                 i.acl_in = Some(((*acl).to_string(), lines));
                 true

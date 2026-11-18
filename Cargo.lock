@@ -235,6 +235,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrow-ord"
+version = "60.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c58f2ae6dd1480fc413f7320a547e39dcc499c23d4f36ca19572b685811e6e4"
+dependencies = [
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-cmp",
+ "arrow-data",
+ "arrow-schema",
+ "arrow-select",
+]
+
+[[package]]
 name = "arrow-schema"
 version = "60.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2608,6 +2622,7 @@ dependencies = [
  "hyper-util",
  "rsim-cli",
  "rsim-contract",
+ "rsim-ingest",
  "rsim-mcp",
  "rsim-store",
  "serde",
@@ -2619,8 +2634,11 @@ dependencies = [
 name = "rsim-cli"
 version = "0.1.0"
 dependencies = [
+ "arrow-array",
+ "arrow-ord",
  "boon",
  "clap",
+ "rayon",
  "rsim-contract",
  "rsim-core",
  "rsim-engine",

@@ -650,6 +650,11 @@ pub fn interface_addresses(cfg: &Config, col: &Collected) -> BTreeMap<String, Ve
 pub fn link_summary(device: &str, cfg: &Config, col: &Collected) -> crate::links::Summary {
     let mut s = crate::links::Summary::default();
     let addrs = interface_addresses(cfg, col);
+    let mut by_prefix: BTreeMap<String, Vec<&crate::collected::RouteRow>> = BTreeMap::new();
+    for r in col.routes.iter().filter(|r| r.selected && r.vrf == VRF) {
+        by_prefix.entry(r.prefix.clone()).or_default().push(r);
+    }
+    s.routes = resolver(&by_prefix, &[]);
     for l in col.links.iter().filter(|l| l.parent.is_none()) {
         let Some(m) = l.mac.as_deref().and_then(|m| m.parse::<Mac>().ok()) else {
             continue;

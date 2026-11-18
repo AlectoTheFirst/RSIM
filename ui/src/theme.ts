@@ -52,14 +52,14 @@ const MONO = '"Martian Mono", ui-monospace, monospace';
 /** The type styles: family, size, line height, weight and width. */
 export const TYPE = {
   headline: { family: SANS, size: 20, line: 24, weight: 700, stretch: "88%", spacing: "normal" },
-  section: { family: SANS, size: 14, line: 18, weight: 700, stretch: "100%", spacing: "normal" },
-  wordmark: { family: SANS, size: 15, line: 18, weight: 700, stretch: "100%", spacing: "0.08em" },
-  body: { family: SANS, size: 12, line: 18, weight: 400, stretch: "100%", spacing: "normal" },
-  label: { family: SANS, size: 11, line: 18, weight: 400, stretch: "100%", spacing: "normal" },
+  section: { family: SANS, size: 14, line: 18, weight: 700, stretch: "88%", spacing: "normal" },
+  wordmark: { family: SANS, size: 15, line: 18, weight: 700, stretch: "88%", spacing: "0.08em" },
+  body: { family: SANS, size: 12, line: 18, weight: 400, stretch: "88%", spacing: "normal" },
+  label: { family: SANS, size: 11, line: 18, weight: 400, stretch: "88%", spacing: "normal" },
   value: { family: MONO, size: 11, line: 18, weight: 400, stretch: "75%", spacing: "normal" },
-  "value-changed": { family: MONO, size: 11, line: 18, weight: 600, stretch: "100%", spacing: "normal" },
-  query: { family: MONO, size: 13, line: 18, weight: 400, stretch: "100%", spacing: "normal" },
-  index: { family: MONO, size: 10, line: 18, weight: 400, stretch: "100%", spacing: "normal" },
+  "value-changed": { family: MONO, size: 11, line: 18, weight: 600, stretch: "75%", spacing: "normal" },
+  query: { family: MONO, size: 13, line: 18, weight: 400, stretch: "75%", spacing: "normal" },
+  index: { family: MONO, size: 10, line: 18, weight: 400, stretch: "75%", spacing: "normal" },
 } as const;
 
 export type TypeStyle = keyof typeof TYPE;
@@ -80,31 +80,50 @@ export const SIZE = {
   partColumn: 176,
   endSquare: 9,
   deviceSquare: 12,
-  ring: 4,
-  ringStroke: 2,
+  ring: 3.75,
+  ringStroke: 2.5,
   account: 24,
   accountRadius: 12,
   hairline: 1,
   hatchPitch: 5,
   hatchLine: 1,
   hatchMark: 22,
+  markGap: 6,
   selectedBar: 3,
   focusRing: 2,
   focusOffset: 2,
-  colStep: 44,
-  colFunction: 200,
+  topBarPad: 8,
+  topBarGap: 20,
+  queryBarPad: 10,
+  queryBarGap: 18,
+  resultPad: 12,
+  lineGap: 6,
+  colStep: 30,
+  colFunction: 150,
   colReason: 280,
+  colReasonSet: 260,
   colIp: 104,
   colPort: 52,
   colTransport: 64,
-  colRib: 52,
+  colRib: 30,
   colSource: 132,
+  cellPad: 10,
+  ribPadX: 6,
+  ribPadY: 2,
+  partGap: 5,
+  partPad: 6,
+  detailGap: 28,
+  factLabel: 120,
+  codeNumber: 34,
   menu: 288,
   dash: 2,
 } as const;
 
 /** The share of the direction colour in the band of a part of a set query. */
 export const BAND_SHARE = "26%";
+
+/** The share of `rule` in the lane guides. */
+export const GUIDE_SHARE = "55%";
 
 export interface Prefs {
   theme: ThemePref;
@@ -163,6 +182,7 @@ export function properties(s: Scheme, p: Prefs): Record<string, string> {
     if (typeof v === "number") out[`--${kebab(k)}`] = `${v}px`;
   }
   out["--band"] = `color-mix(in srgb, ${c.forward} ${BAND_SHARE}, transparent)`;
+  out["--guide"] = `color-mix(in srgb, ${c.rule} ${GUIDE_SHARE}, transparent)`;
   out["--row"] = `${p.row}px`;
   out["color-scheme"] = s;
   return out;

@@ -1,8 +1,9 @@
 // The Trace view: the query bar, the result line and the ladder of the
 // answer of a path query or a set query.
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { ApiProblem, type TwinRef, createQuery, getQuery, getTwin, listTwins, stepUrl } from "./api/client";
-import type { Answer, PathAnswer, SetAnswer, Twin } from "./api/types";
+import { ApiProblem, type ServerTiming, type TwinRef, createQuery, getCatalog, getQuery, getTwin, listTwins, stepUrl } from "./api/client";
+import type { Answer, PathAnswer, SetAnswer, TableDef, Twin } from "./api/types";
+import { CoverageView } from "./coverage/CoverageView";
 import { OutcomeWord, PathLadder, VerdictText } from "./ladder/Ladder";
 import { SetLadder } from "./ladder/SetLadder";
 import {
@@ -14,16 +15,29 @@ import {
   notStated,
   partCounts,
   ribNotChecked,
+  verdictWord,
 } from "./ladder/layout";
 import { HatchMark } from "./page/Hatch";
 import { KeyLine, LEVELS, QueryBar, ResultLine, TopBar } from "./page/Parts";
+import { viewOf, viewSearch, withTwin } from "./page/url";
 import { type Fields, type Mode, explainCommand, fieldsOf, mcpCall, requestBody, rsimCommand } from "./page/query";
+import { TablesView } from "./tables/TablesView";
 import { type Prefs, applyTheme, loadPrefs, savePrefs } from "./theme";
 
 interface Result {
   twin: string;
   qid: string;
   out: PathAnswer | SetAnswer;
+  /** The round trip of the query in ms, and the timing that the server gives. */
+  ms: number;
+  timing: ServerTiming;
+}
+
+/** The time of a query: the round trip, then the engine time or a cache hit. */
+export function timingText(ms: number, t: ServerTiming): string {
+  const fmt = (x: number) => (x < 10 ? x.toFixed(1) : String(Math.round(x)));
+  const server = t.engineMs !== null ? ` · engine ${fmt(t.engineMs)} ms` : t.cacheHit ? " · from the cache" : "";
+  return `answered in ${fmt(ms)} ms${server}`;
 }
 
 const isSet = (out: PathAnswer | SetAnswer) => out.kind === "set_answer";
@@ -116,7 +130,7 @@ function SetFacts(props: { a: Answer }) {
         <OutcomeWord kind="drop" /> {n.drop}
       </span>
       <span>
-        <OutcomeWord kind="unknown" /> {n.unknown}
+        <span class="strong">{verdictWord("unknown")}</span> {n.unknown}
       </span>
       {n.dependsOnPath ? <span class="muted">{n.dependsOnPath} parts depend on the path</span> : null}
     </>
@@ -143,6 +157,23 @@ export function App() {
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const firstInput = useRef<HTMLInputElement | null>(null);
+  // The view of the URL: Trace with no view parameter, else Tables or Coverage.
+  const [search, setSearch] = useState(window.location.search);
+  const [catalog, setCatalog] = useState<TableDef[] | null>(null);
+  const view = viewOf(search);
+
+  useEffect(() => {
+    if (view === "Trace" || catalog) return;
+    getCatalog()
+      .then((c) => setCatalog(c.tables))
+      .catch((e: unknown) => setProblem(String(e instanceof Error ? e.message : e)));
+  }, [view]);
+
+  function navigate(next: string) {
+    if (next === window.location.search) return;
+    window.history.pushState(null, "", next || "/");
+    setSearch(next);
+  }
 
   useEffect(() => {
     applyTheme(prefs);
@@ -170,12 +201,12 @@ export function App() {
       .catch(() => setInfo(null));
   }, [twin]);
 
-  async function load(t: string, qid: string) {
+  async function load(t: string, qid: string, since: number = performance.now()) {
     setBusy(true);
     setProblem(null);
     try {
-      const out = await getQuery(t, qid);
-      setResult({ twin: t, qid, out });
+      const { out, timing } = await getQuery(t, qid);
+      setResult({ twin: t, qid, out, ms: performance.now() - since, timing });
       setFields(fieldsOf(out.query as unknown as Record<string, unknown>));
       setMode(isSet(out) ? "set" : "path");
       setSelected(null);
@@ -192,6 +223,7 @@ export function App() {
     const { twin: t, q } = readUrl();
     if (t && q) void load(t, q);
     const onPop = () => {
+      setSearch(window.location.search);
       const u = readUrl();
       if (u.twin) setTwin(u.twin);
       if (u.twin && u.q) void load(u.twin, u.q);
@@ -204,11 +236,12 @@ export function App() {
     if (!twin) return;
     setBusy(true);
     setProblem(null);
+    const since = performance.now();
     try {
       const made = await createQuery(twin, requestBody(mode, fields));
       const search = `?twin=${encodeURIComponent(twin)}&q=${encodeURIComponent(made.qid)}`;
       window.history.pushState(null, "", search);
-      await load(made.twin, made.qid);
+      await load(made.twin, made.qid, since);
     } catch (e) {
       setResult(null);
       setProblem(e instanceof ApiProblem ? `The query is refused: ${e.detail}` : String(e));
@@ -254,6 +287,7 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (view !== "Trace") return;
       const t = e.target as HTMLElement | null;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) {
@@ -329,11 +363,24 @@ export function App() {
         onTwin={(t) => {
           setTwin(t);
           setResult(null);
-          window.history.pushState(null, "", `?twin=${encodeURIComponent(t)}`);
+          if (view === "Trace") window.history.pushState(null, "", `?twin=${encodeURIComponent(t)}`);
+          else navigate(withTwin(search, t));
         }}
+        view={view}
+        onView={(v) => navigate(viewSearch(v, twin, search))}
         prefs={prefs}
         onPrefs={setPrefs}
       />
+      {view === "Tables" ? (
+        <div class="grid-page">
+          <TablesView twin={twin} row={prefs.row} catalog={catalog} search={search} navigate={navigate} />
+        </div>
+      ) : view === "Coverage" ? (
+        <div class="grid-page">
+          <CoverageView twin={twin} row={prefs.row} catalog={catalog} search={search} navigate={navigate} />
+        </div>
+      ) : (
+      <>
       <QueryBar
         mode={mode}
         fields={fields}
@@ -375,7 +422,9 @@ export function App() {
           <SetLadder answer={answer} level={level} h={prefs.row} />
         ) : null}
       </main>
-      <KeyLine keys={notice ? [...keys, ["", notice]] : keys} />
+      <KeyLine keys={notice ? [...keys, ["", notice]] : keys} timing={result && !busy ? timingText(result.ms, result.timing) : null} />
+      </>
+      )}
     </>
   );
 }

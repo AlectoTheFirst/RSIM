@@ -62,7 +62,10 @@ fn golden() -> Vec<(String, String)> {
         .map(|e| e.unwrap().path())
         .filter(|p| {
             let n = p.file_name().unwrap().to_string_lossy();
-            n.ends_with(".json") && !n.ends_with(".summary.json") && !n.ends_with(".steps.json")
+            n.ends_with(".json")
+                && !n.ends_with(".summary.json")
+                && !n.ends_with(".steps.json")
+                && !n.starts_with("claim-")
         })
         .map(|p| {
             (
@@ -176,6 +179,55 @@ fn an_equal_etag_gives_304() {
 }
 
 #[test]
+fn a_query_answer_has_its_server_timing_and_the_same_body() {
+    use rsim_api::server::add_server_timing;
+    use std::time::Duration;
+    let s = state(None);
+    let stored: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../rsim-cli/tests/golden/mini-enterprise.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let location = make_query(&s, &stored);
+    let plain = get(&s, &location);
+    let mut timed = get(&s, &location);
+    add_server_timing(
+        &req("GET", &location),
+        &mut timed,
+        Duration::from_micros(4500),
+    );
+    assert_eq!(timed.status, 200);
+    assert_eq!(timed.header("server-timing"), Some("engine;dur=4.5"));
+    assert_eq!(timed.body, plain.body);
+    assert_eq!(plain.header("server-timing"), None);
+    // A 304 comes from the cache of the client and has no engine time.
+    let mut again = req("GET", &location);
+    again
+        .headers
+        .insert("if-none-match".into(), plain.header("etag").unwrap().into());
+    let mut hit = handle(&s, &again);
+    add_server_timing(&again, &mut hit, Duration::from_micros(10));
+    assert_eq!(hit.status, 304);
+    assert_eq!(hit.header("server-timing"), Some("cache;desc=hit"));
+    // Another resource has no server timing.
+    let path = "/v1/twins/builtin.ecmp/tables/devices/rows";
+    let mut rows = get(&s, path);
+    add_server_timing(&req("GET", path), &mut rows, Duration::from_millis(1));
+    assert_eq!(rows.header("server-timing"), None);
+    // An allowed origin can read the header.
+    let mut r = req("GET", &location);
+    r.headers
+        .insert("origin".into(), "http://localhost:3000".into());
+    assert_eq!(
+        handle(&s, &r).header("access-control-expose-headers"),
+        Some("Server-Timing")
+    );
+}
+
+#[test]
 fn the_security_checks_refuse_a_foreign_origin_a_foreign_host_and_a_large_body() {
     let s = state(None);
     let mut r = req("GET", "/v1");
@@ -279,6 +331,75 @@ fn the_store_alias_redirects_to_its_snapshot() {
     assert_eq!(
         get(&s, "/v1/twins/snap-999999/tables/devices/rows").status,
         404
+    );
+}
+
+#[test]
+fn the_coverage_report_gives_the_lines_of_each_state_in_pages() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-api-coverage");
+    fixture_store::write(&dir);
+    let s = state(Some(dir.display().to_string()));
+    let r = get(&s, "/v1/twins/store/coverage");
+    assert_eq!(r.status, 307);
+    let location = r.header("location").unwrap().to_string();
+    let all = json(&get(&s, &location));
+    assert_eq!(all["kind"], "coverage_report");
+    assert_eq!(
+        all["columns"],
+        json!([
+            "device",
+            "handled",
+            "irrelevant",
+            "unhandled",
+            "unhandled_paths",
+            "unhandled_stanzas"
+        ])
+    );
+    let rows = all["rows"].as_array().unwrap().clone();
+    assert!(!rows.is_empty());
+    assert_eq!(all["total"].as_u64().unwrap() as usize, rows.len());
+    assert_eq!(all["next_cursor"], Value::Null);
+    // The unhandled paths and stanzas of a row agree with the table coverage.
+    let table = json(&get(
+        &s,
+        &location.replace("coverage", "tables/coverage/rows"),
+    ));
+    for row in &rows {
+        let d = &row[0];
+        let mine: Vec<&Value> = table["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|r| &r[0] == d)
+            .collect();
+        assert_eq!(row[4].as_u64().unwrap() as usize, mine.len(), "{d}");
+        let stanzas: u64 = mine.iter().map(|r| r[2].as_u64().unwrap()).sum();
+        assert_eq!(row[5].as_u64().unwrap(), stanzas, "{d}");
+        assert!(row[1].as_u64().unwrap() > 0, "{d}");
+    }
+    // The joined pages are the rows with no pages.
+    let mut joined = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut q = format!("{location}?limit=1");
+        if let Some(c) = &cursor {
+            q.push_str(&format!("&cursor={c}"));
+        }
+        let page = json(&get(&s, &q));
+        joined.extend(page["rows"].as_array().unwrap().iter().cloned());
+        match page["next_cursor"].as_str() {
+            Some(c) => cursor = Some(c.to_string()),
+            None => break,
+        }
+    }
+    assert_eq!(joined, rows);
+    assert_eq!(get(&s, &format!("{location}?cursor=x")).status, 422);
+    assert_eq!(get(&s, &format!("{location}?limit=0")).status, 422);
+    // A built-in topology has no report.
+    let b = json(&get(&s, "/v1/twins/builtin.leaf-spine/coverage"));
+    assert_eq!(
+        (b["total"].as_u64(), b["rows"].as_array().map(Vec::len)),
+        (Some(0), Some(0))
     );
 }
 
@@ -425,6 +546,22 @@ fn a_real_server_answers_on_a_loopback_port() {
         "GET /v1/twins/builtin.ecmp/tables/devices/rows?x=%1\u{e9} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
     ));
     assert!(r.starts_with("HTTP/1.1 422"), "{r}");
+    let q = r#"{"source.ip":"10.1.0.10","destination.ip":"10.4.0.10","network.transport":"tcp","source.port":40000,"destination.port":22}"#;
+    let r = ask(format!(
+        "POST /v1/twins/builtin.ecmp/queries HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{q}",
+        q.len()
+    ));
+    assert!(r.starts_with("HTTP/1.1 303"), "{r}");
+    let location = r
+        .lines()
+        .find_map(|l| l.strip_prefix("location: "))
+        .unwrap()
+        .to_string();
+    let r = ask(format!(
+        "GET {location} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
+    ));
+    assert!(r.starts_with("HTTP/1.1 200"), "{r}");
+    assert!(r.contains("server-timing: engine;dur="), "{r}");
     rt.shutdown_background();
 }
 

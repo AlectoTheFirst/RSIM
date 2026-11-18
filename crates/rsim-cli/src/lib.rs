@@ -7,6 +7,7 @@ pub mod args;
 pub mod claims;
 pub mod commands;
 pub mod error;
+pub mod frame;
 pub mod json;
 pub mod query;
 pub mod set_query;

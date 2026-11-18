@@ -1,8 +1,10 @@
-//! The table providers: all rows of each table of a loaded twin, in key
-//! order, and the table commands.
+//! The table providers: the rows of each table of a loaded twin as columns,
+//! built once for each twin and table, and the table commands.
 
 use std::any::Any;
 use std::collections::BTreeMap;
+use std::fmt::Write;
+use std::sync::OnceLock;
 
 use rsim_contract::table::{
     self, Selection, SummarizeOut, TableDef, TableOut, TablesOut, UniqueOut,
@@ -14,14 +16,13 @@ use serde_json::{Value, json};
 
 use crate::commands::Loaded;
 use crate::error::{ErrorCode, QueryError};
+use crate::frame::{self, Cell, Frame, FrameBuilder};
 use crate::json::{VERSION, snake};
 
-fn spans(s: &[SourceSpan]) -> Value {
-    Value::from(
-        s.iter()
-            .map(|s| format!("{}:{}-{}", s.file, s.first_line, s.last_line))
-            .collect::<Vec<_>>(),
-    )
+fn spans(s: &[SourceSpan]) -> Vec<String> {
+    s.iter()
+        .map(|s| format!("{}:{}-{}", s.file, s.first_line, s.last_line))
+        .collect()
 }
 
 /// The catalog of the tables.
@@ -44,9 +45,41 @@ pub fn def(name: &str) -> Result<&'static TableDef, QueryError> {
     })
 }
 
-/// All rows of a table, in key order.
-pub fn rows(t: &Loaded, def: &TableDef) -> Vec<Vec<Value>> {
-    let mut rows: Vec<Vec<Value>> = match def.name {
+/// The columns of each table of a twin, built when a request first names
+/// the table and kept with the twin.
+pub struct TableCache(Vec<OnceLock<Frame>>);
+
+impl Default for TableCache {
+    fn default() -> Self {
+        TableCache(table::TABLES.iter().map(|_| OnceLock::new()).collect())
+    }
+}
+
+/// The columns of a table of a loaded twin.
+pub fn frame<'a>(t: &'a Loaded, def: &'static TableDef) -> &'a Frame {
+    let i = table::TABLES
+        .iter()
+        .position(|d| d.name == def.name)
+        .expect("a table of the catalog");
+    t.tables.0[i].get_or_init(|| build(t, def))
+}
+
+/// The text by which a prefix sorts in the key order: its family, its
+/// address bits and its length, so the order of the prefixes is numeric.
+pub fn key_text(s: &str) -> Option<String> {
+    let p = s.parse::<rsim_core::Prefix>().ok()?;
+    Some(format!(
+        "{}{:039}/{:03}",
+        if p.is_ipv4() { 4 } else { 6 },
+        rsim_core::bits::ip_bits(p.addr()),
+        p.len()
+    ))
+}
+
+/// All rows of a table as columns, in key order.
+fn build(t: &Loaded, def: &'static TableDef) -> Frame {
+    let mut b = FrameBuilder::new(def);
+    match def.name {
         "devices" => {
             let mut count: BTreeMap<String, usize> = BTreeMap::new();
             for f in t.functions() {
@@ -54,80 +87,63 @@ pub fn rows(t: &Loaded, def: &TableDef) -> Vec<Vec<Value>> {
                     *count.entry(d.to_string()).or_default() += 1;
                 }
             }
-            t.devices()
-                .iter()
-                .map(|d| {
-                    vec![
-                        json!(d.to_string()),
-                        json!(count.get(d.as_str()).copied().unwrap_or(0)),
-                    ]
-                })
-                .collect()
+            for d in t.devices() {
+                let n = count.get(d.as_str()).copied().unwrap_or(0);
+                b.push(&[Cell::Text(d.as_str()), Cell::Integer(n as u64)]);
+            }
         }
-        "functions" => t
-            .functions()
-            .map(|f| {
-                vec![
-                    json!(f.id().to_string()),
-                    f.device().map_or(Value::Null, |d| json!(d.to_string())),
-                    json!(snake(&f.kind())),
-                    spans(f.provenance()),
-                ]
-            })
-            .collect(),
-        "endpoints" => t
-            .endpoints()
-            .map(|e| {
-                vec![
-                    json!(e.id.to_string()),
-                    Value::from(
-                        e.addresses
-                            .iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>(),
-                    ),
-                ]
-            })
-            .collect(),
-        "attachments" => t
-            .attachments()
-            .iter()
-            .map(|a| {
-                vec![
+        "functions" => {
+            for f in t.functions() {
+                let device = f.device().map(|d| d.to_string());
+                b.push(&[
+                    Cell::Text(&f.id().to_string()),
+                    device.as_deref().map_or(Cell::Null, Cell::Text),
+                    Cell::Text(&snake(&f.kind())),
+                    Cell::List(&spans(f.provenance())),
+                ]);
+            }
+        }
+        "endpoints" => {
+            for e in t.endpoints() {
+                let addresses: Vec<String> = e.addresses.iter().map(ToString::to_string).collect();
+                b.push(&[Cell::Text(&e.id.to_string()), Cell::List(&addresses)]);
+            }
+        }
+        "attachments" => {
+            for a in t.attachments() {
+                b.push_values(&[
                     json!(a.address.to_string()),
                     json!(a.device.to_string()),
                     json!(a.interface.to_string()),
                     json!(snake(&a.kind)),
                     json!(a.host),
-                ]
-            })
-            .collect(),
-        "edge-interfaces" => t
-            .edge_interfaces()
-            .iter()
-            .map(|e| {
-                vec![
-                    json!(e.device.to_string()),
-                    json!(e.interface.to_string()),
-                    Value::from(
-                        e.networks
-                            .iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>(),
-                    ),
-                ]
-            })
-            .collect(),
+                ]);
+            }
+        }
+        "edge-interfaces" => {
+            for e in t.edge_interfaces() {
+                let networks: Vec<String> = e.networks.iter().map(ToString::to_string).collect();
+                b.push(&[
+                    Cell::Text(&e.device.to_string()),
+                    Cell::Text(&e.interface.to_string()),
+                    Cell::List(&networks),
+                ]);
+            }
+        }
         "fib" => {
-            let mut v = Vec::new();
+            let mut prefix = String::new();
             for f in t.functions() {
                 let any: &dyn Any = f.as_ref();
                 let Some(rl) = any.downcast_ref::<RouteLookup>() else {
                     continue;
                 };
-                let device = f.device().map_or(Value::Null, |d| json!(d.to_string()));
+                let device = f.device().map(|d| d.to_string());
+                let id = f.id().to_string();
                 for (vrf, fib) in &rl.tables {
-                    for (prefix, route) in fib.entries() {
+                    let vrf = vrf.to_string();
+                    for (p, route) in fib.entries() {
+                        prefix.clear();
+                        let _ = write!(prefix, "{p}");
                         let hops: Vec<String> = route
                             .next_hops()
                             .iter()
@@ -136,59 +152,36 @@ pub fn rows(t: &Loaded, def: &TableDef) -> Vec<Vec<Value>> {
                                 None => h.interface.to_string(),
                             })
                             .collect();
-                        v.push(vec![
-                            device.clone(),
-                            json!(vrf.to_string()),
-                            json!(prefix.to_string()),
-                            json!(route.kind.name()),
-                            json!(f.id().to_string()),
-                            Value::from(hops),
-                            spans(&route.spans),
+                        b.push(&[
+                            device.as_deref().map_or(Cell::Null, Cell::Text),
+                            Cell::Text(&vrf),
+                            Cell::Text(&prefix),
+                            Cell::Text(route.kind.name()),
+                            Cell::Text(&id),
+                            Cell::List(&hops),
+                            Cell::List(&spans(&route.spans)),
                         ]);
                     }
                 }
             }
-            v
         }
-        "coverage" => t
-            .coverage
-            .iter()
-            .flat_map(|(d, c)| {
-                c.unhandled.iter().map(move |(path, (stanzas, lines))| {
-                    vec![json!(d), json!(path), json!(stanzas), json!(lines)]
-                })
-            })
-            .collect(),
-        "bgp-sessions" => t
-            .bgp
-            .values()
-            .flat_map(|facts| facts.iter().map(bgp_row))
-            .collect(),
-        _ => Vec::new(),
-    };
-    // The key order. A prefix sorts by its address bits and its length, so
-    // the order of the prefixes is numeric.
-    let key: Vec<usize> = def
-        .key
-        .iter()
-        .filter_map(|k| def.columns.iter().position(|c| c.name == *k))
-        .collect();
-    let sort_text = |v: &Value| -> String {
-        match v.as_str().and_then(|s| s.parse::<rsim_core::Prefix>().ok()) {
-            Some(p) => format!(
-                "{}{:039}/{:03}",
-                if p.is_ipv4() { 4 } else { 6 },
-                rsim_core::bits::ip_bits(p.addr()),
-                p.len()
-            ),
-            None => match v {
-                Value::String(s) => s.clone(),
-                other => other.to_string(),
-            },
+        "coverage" => {
+            for (d, c) in &t.coverage {
+                for (path, (stanzas, lines)) in &c.unhandled {
+                    b.push_values(&[json!(d), json!(path), json!(stanzas), json!(lines)]);
+                }
+            }
         }
-    };
-    rows.sort_by_cached_key(|r| key.iter().map(|i| sort_text(&r[*i])).collect::<Vec<_>>());
-    rows
+        "bgp-sessions" => {
+            for facts in t.bgp.values() {
+                for f in facts {
+                    b.push_values(&bgp_row(f));
+                }
+            }
+        }
+        _ => {}
+    }
+    b.finish(&key_text)
 }
 
 /// The row of a BGP peer fact.
@@ -258,12 +251,27 @@ fn bgp_row(f: &BgpPeerFact) -> Vec<Value> {
         opt(f.router_id.map(|a| a.to_string())),
         json!(f.section.outcome.name()),
         json!(f.in_scope()),
-        spans(&provenance),
+        Value::from(spans(&provenance)),
     ]
 }
 
 fn invalid(e: String) -> QueryError {
     QueryError::new(ErrorCode::InvalidFilter, e)
+}
+
+/// The rows of a page as the output of a table request.
+fn rows_out(topology: &str, t: &Loaded, d: &TableDef, p: frame::Page) -> TableOut {
+    TableOut {
+        rsim_json: VERSION,
+        kind: "table_rows".into(),
+        topology: topology.to_string(),
+        twin: t.identity.clone(),
+        table: d.name.to_string(),
+        columns: p.columns,
+        rows: p.rows,
+        total: p.total,
+        next_cursor: p.next,
+    }
 }
 
 /// The verb `show`: the selected rows.
@@ -274,19 +282,8 @@ pub fn show(
     sel: &Selection,
 ) -> Result<TableOut, QueryError> {
     let d = def(name)?;
-    let m = table::filter(d, &rows(t, d), sel).map_err(invalid)?;
-    let (columns, rows, total, next) = table::page(d, m, sel).map_err(invalid)?;
-    Ok(TableOut {
-        rsim_json: VERSION,
-        kind: "table_rows".into(),
-        topology: topology.to_string(),
-        twin: t.identity.clone(),
-        table: d.name.to_string(),
-        columns,
-        rows,
-        total,
-        next_cursor: next,
-    })
+    let p = frame::show(d, frame(t, d), sel).map_err(invalid)?;
+    Ok(rows_out(topology, t, d, p))
 }
 
 /// The verb `top`: the `n` rows with the largest values of a column, or
@@ -322,20 +319,8 @@ pub fn lpm(
     sel: &Selection,
 ) -> Result<TableOut, QueryError> {
     let d = def(name)?;
-    let m = table::filter(d, &rows(t, d), sel).map_err(invalid)?;
-    let m = table::lpm(d, &m, column, address).map_err(invalid)?;
-    let (columns, rows, total, next) = table::page(d, m, sel).map_err(invalid)?;
-    Ok(TableOut {
-        rsim_json: VERSION,
-        kind: "table_rows".into(),
-        topology: topology.to_string(),
-        twin: t.identity.clone(),
-        table: d.name.to_string(),
-        columns,
-        rows,
-        total,
-        next_cursor: next,
-    })
+    let p = frame::lpm(d, frame(t, d), sel, column, address).map_err(invalid)?;
+    Ok(rows_out(topology, t, d, p))
 }
 
 /// The verb `unique`: the distinct values of columns with their counts.
@@ -347,8 +332,7 @@ pub fn unique(
     sel: &Selection,
 ) -> Result<UniqueOut, QueryError> {
     let d = def(name)?;
-    let m = table::filter(d, &rows(t, d), sel).map_err(invalid)?;
-    let rows = table::unique(d, &m, columns).map_err(invalid)?;
+    let rows = frame::unique(d, frame(t, d), sel, columns).map_err(invalid)?;
     let mut cols = columns.to_vec();
     cols.push("count".into());
     Ok(UniqueOut {
@@ -370,14 +354,14 @@ pub fn summarize(
     sel: &Selection,
 ) -> Result<SummarizeOut, QueryError> {
     let d = def(name)?;
-    let m = table::filter(d, &rows(t, d), sel).map_err(invalid)?;
+    let (total, columns) = frame::summarize(d, frame(t, d), sel).map_err(invalid)?;
     Ok(SummarizeOut {
         rsim_json: VERSION,
         kind: "table_summary".into(),
         topology: topology.to_string(),
         twin: t.identity.clone(),
         table: d.name.to_string(),
-        total: m.len(),
-        columns: table::summarize(d, &m),
+        total,
+        columns,
     })
 }
