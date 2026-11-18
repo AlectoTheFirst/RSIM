@@ -7,7 +7,7 @@ use rsim_core::{FunctionId, InterfaceId, Mac, SourceSpan, VrfId};
 use rsim_functions::{McastRoute, group_mac};
 
 use super::config::Interface;
-use super::lower::L;
+use super::lower::{DEFAULT_VRF, L};
 use super::profile::VXLAN_GUIDE;
 use super::state::State;
 use super::vxlan::Plan;
@@ -56,6 +56,14 @@ impl L<'_> {
         let mut sorted: Vec<&super::state::MrouteRow> = rows.iter().collect();
         // The (S,G) routes first, then the longer group prefix first.
         sorted.sort_by_key(|r| (r.source.is_none(), std::cmp::Reverse(r.group.len())));
+        // The functions that give `Unknown`, each with its reason and the span
+        // of the first route that names it.
+        let mut sinks: BTreeMap<String, (String, SourceSpan)> = BTreeMap::new();
+        let mut sink = |l: &L, f: String, why: String, span: SourceSpan| -> FunctionId {
+            let id = l.id(&f);
+            sinks.entry(f).or_insert((why, span));
+            id
+        };
         for r in sorted {
             if let Some(mac) = group_mac(r.group.addr()).filter(|_| r.group.len() == 32) {
                 m.macs.insert(mac);
@@ -64,43 +72,43 @@ impl L<'_> {
             let mut sent = Vec::new();
             for o in &r.oifs {
                 let to_nve = nve.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(o));
-                let next: FunctionId = if to_nve {
+                let next: FunctionId = if to_nve && r.vrf != DEFAULT_VRF {
+                    sink(
+                        self,
+                        format!("mcast/tenant/{}", r.vrf),
+                        format!(
+                            "{o}: the copy of a route of the VRF {} into the tunnel is not lowered",
+                            r.vrf
+                        ),
+                        r.span.clone(),
+                    )
+                } else if to_nve {
                     match tunnel {
-                        Plan::Exact(_) if vpc => {
-                            let f = "mcast/vpc";
-                            let s = self.sink(
-                                f,
-                                "the forwarder of a vPC pair for a multicast flood is not lowered"
-                                    .into(),
-                                SourceSpan::line(VXLAN_GUIDE, 1),
-                            );
-                            self.add(s);
-                            self.id(f)
-                        }
-                        Plan::None => {
-                            let f = "mcast/nve";
-                            let s = self.sink(
-                                f,
-                                format!("{o}: no tunnel end that forwards"),
-                                r.span.clone(),
-                            );
-                            self.add(s);
-                            self.id(f)
-                        }
+                        Plan::Exact(_) if vpc => sink(
+                            self,
+                            "mcast/vpc".into(),
+                            "the forwarder of a vPC pair for a multicast flood is not lowered"
+                                .into(),
+                            SourceSpan::line(VXLAN_GUIDE, 1),
+                        ),
+                        Plan::None => sink(
+                            self,
+                            "mcast/nve".into(),
+                            format!("{o}: no tunnel end that forwards"),
+                            r.span.clone(),
+                        ),
                         _ => self.id("vxlan-decap"),
                     }
                 } else if active.iter().any(|i| i.name == *o) {
                     m.oifs.insert(o.clone());
                     self.id(&format!("mcast/out/{o}"))
                 } else {
-                    let f = format!("mcast/unknown/{o}");
-                    let s = self.sink(
-                        &f,
+                    sink(
+                        self,
+                        format!("mcast/unknown/{o}"),
                         format!("the outgoing interface {o} is not lowered"),
                         r.span.clone(),
-                    );
-                    self.add(s);
-                    self.id(&f)
+                    )
                 };
                 received.push((InterfaceId::new(o), next.clone()));
                 if !to_nve {
@@ -122,6 +130,10 @@ impl L<'_> {
                 .entry(VrfId::new(&r.vrf))
                 .or_default()
                 .push(route(sent));
+        }
+        for (f, (why, span)) in sinks {
+            let s = self.sink(&f, why, span);
+            self.add(s);
         }
         Some(m)
     }

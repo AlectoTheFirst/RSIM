@@ -205,10 +205,29 @@ pub fn join(
 ) -> Joined {
     let switches = devices;
     let mut out = Joined::default();
-    let by_name: BTreeMap<&str, &str> = switches
-        .iter()
-        .filter_map(|(d, s)| Some((s.host_name.as_deref()?, d.as_str())))
-        .collect();
+    // The device of each host name. A host name that more than one device
+    // has names no device.
+    let mut name_owners: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (d, s) in switches {
+        if let Some(n) = s.host_name.as_deref() {
+            name_owners.entry(n).or_default().push(d.as_str());
+        }
+    }
+    let mut by_name: BTreeMap<&str, &str> = BTreeMap::new();
+    for (n, list) in &name_owners {
+        match list.as_slice() {
+            [one] => {
+                by_name.insert(n, one);
+            }
+            _ => {
+                for d in list {
+                    out.notes.entry((*d).to_string()).or_default().push(format!(
+                        "the host name {n} is on more than one device, so it names no neighbour"
+                    ));
+                }
+            }
+        }
+    }
     // The device and the port of a port MAC. A MAC that more than one port
     // has, for example an anycast gateway MAC, proves no port.
     let mut owners: BTreeMap<Mac, Vec<(String, String)>> = BTreeMap::new();

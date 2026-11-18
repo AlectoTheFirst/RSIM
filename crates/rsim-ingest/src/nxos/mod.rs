@@ -34,6 +34,7 @@ pub const SECTIONS: &[&str] = &[
     "nve_vnis",
     "rib",
     "mroutes",
+    "mac_table",
 ];
 
 /// Reads the bytes of a running config into a stanza tree. A byte sequence
