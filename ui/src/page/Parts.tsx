@@ -56,7 +56,6 @@ function AccountMenu(props: { prefs: Prefs; onPrefs: (p: Prefs) => void }) {
     <span class="account" ref={ref}>
       <button
         type="button"
-        class="t-index"
         aria-label={`Account of ${USER.name}`}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -104,9 +103,9 @@ export function TopBar(props: {
 }) {
   const info = props.info;
   return (
-    <header class="bar">
+    <header class="bar top">
       <span class="t-wordmark">RSIM</span>
-      <select class="t-value" aria-label="Twin" value={twinOption(props.twins.map((t) => t.id), props.twin)} onChange={(e) => props.onTwin(e.currentTarget.value)}>
+      <select class="t-value twin" aria-label="Twin" value={twinOption(props.twins.map((t) => t.id), props.twin)} onChange={(e) => props.onTwin(e.currentTarget.value)}>
         {props.twins.map((t) => (
           <option value={t.id}>{t.id}</option>
         ))}
@@ -135,6 +134,43 @@ export function TopBar(props: {
   );
 }
 
+/**
+ * One field of the query bar: its name and its value, which a click edits
+ * in place. The input takes the width of its text.
+ */
+function QueryValue(props: {
+  name: QueryField;
+  value: string;
+  onInput: (v: string) => void;
+  onRun: () => void;
+  inputRef?: { current: HTMLInputElement | null };
+}) {
+  const shown = props.value || "not stated";
+  return (
+    <label class="qfield">
+      <span class="muted">{props.name} </span>
+      <span class="autosize t-query" data-value={shown}>
+        <input
+          ref={props.inputRef}
+          class="t-query"
+          size={1}
+          value={props.value}
+          placeholder="not stated"
+          spellcheck={false}
+          autocomplete="off"
+          onInput={(e) => props.onInput(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              props.onRun();
+            }
+          }}
+        />
+      </span>
+    </label>
+  );
+}
+
 export function QueryBar(props: {
   mode: Mode;
   fields: Fields;
@@ -146,44 +182,46 @@ export function QueryBar(props: {
   onCopyMcp: () => void;
   firstInput: { current: HTMLInputElement | null };
 }) {
+  const [editing, setEditing] = useState(false);
+  // A field shows when it has a value or the bar is being edited; with no
+  // stated field, each field of a query shows so that a click can edit it.
+  const none = QUERY_FIELDS.every((k) => (props.fields[k] ?? "").trim() === "");
   return (
     <form
-      class="bar"
+      class="bar query"
       aria-label="Query"
       onSubmit={(e) => {
         e.preventDefault();
         props.onRun();
       }}
+      onFocusIn={(e) => setEditing((e.target as HTMLElement).tagName === "INPUT")}
+      onFocusOut={(e) => {
+        const next = e.relatedTarget as Node | null;
+        if (!next || !e.currentTarget.contains(next) || (next as HTMLElement).tagName !== "INPUT") setEditing(false);
+      }}
     >
       <Choice<Mode> value={props.mode} options={["path", "set"]} onChange={props.onMode} />
-      {QUERY_FIELDS.map((k, i) => (
-        <label class="field">
-          <span class="t-label">{k}</span>
-          <input
-            ref={i === 0 ? props.firstInput : undefined}
-            class={`t-query${k.endsWith("port") || k === "network.transport" ? " short" : ""}`}
-            value={props.fields[k] ?? ""}
-            spellcheck={false}
-            autocomplete="off"
-            onInput={(e) => props.onField(k, e.currentTarget.value)}
-          />
-        </label>
+      {QUERY_FIELDS.filter((k) => editing || (props.fields[k] ?? "") !== "" || (k !== "ingress" && none)).map((k, i) => (
+        <QueryValue
+          name={k}
+          value={props.fields[k] ?? ""}
+          onInput={(v) => props.onField(k, v)}
+          onRun={props.onRun}
+          inputRef={i === 0 ? props.firstInput : undefined}
+        />
       ))}
-      <button type="submit">Run the query</button>
       {props.mode === "set" ? (
         <span class="muted">Fields not stated have all values.</span>
       ) : props.notStated ? (
         <HatchMark>{props.notStated} fields not stated, so not known</HatchMark>
       ) : null}
       <span class="grow" />
-      <span class="group">
-        <button type="button" onClick={props.onCopyCommand}>
-          Copy as rsim command
-        </button>
-        <button type="button" onClick={props.onCopyMcp}>
-          Copy as MCP call
-        </button>
-      </span>
+      <button type="button" onClick={props.onCopyCommand}>
+        Copy as rsim command
+      </button>
+      <button type="button" onClick={props.onCopyMcp}>
+        Copy as MCP call
+      </button>
     </form>
   );
 }
@@ -193,7 +231,7 @@ export const LEVELS: readonly Level[] = ["device", "function"];
 export function LevelControl(props: { level: Level; onLevel: (l: Level) => void }) {
   return (
     <span class="group" role="group" aria-label="Level">
-      <span class="t-label">Level</span>
+      <span class="muted">Level</span>
       {(["estate", "site"] as const).map((l) => (
         <button type="button" disabled title="Not in this build">
           {l}
@@ -219,7 +257,7 @@ export function ResultLine(props: { children: ComponentChildren; level?: Level; 
   );
 }
 
-export function KeyLine(props: { keys: [string, string][] }) {
+export function KeyLine(props: { keys: [string, string][]; timing?: string | null }) {
   return (
     <footer class="keyline t-index" aria-label="Keys">
       {props.keys.map(([k, what]) => (
@@ -227,6 +265,7 @@ export function KeyLine(props: { keys: [string, string][] }) {
           {k} {what}
         </span>
       ))}
+      {props.timing ? <span class="timing">{props.timing}</span> : null}
     </footer>
   );
 }

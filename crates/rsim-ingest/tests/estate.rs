@@ -713,3 +713,31 @@ fn a_vap_with_no_radio_leaves_the_radio_of_a_client_unmatched() {
     let r = unknown_reason(&a);
     assert!(r.detail.contains("client g1 is not placed"), "{r:?}");
 }
+
+#[test]
+fn a_bgp_stanza_that_can_hold_a_neighbour_makes_the_bgp_config_not_read() {
+    use rsim_ingest::estate::hides_peers;
+    for p in [
+        "router bgp *",
+        "router bgp */vrf *",
+        "router bgp */neighbor *",
+        "router bgp */bgp listen range ..",
+        "protocols/bgp/*",
+        "protocols/bgp/neighbor/*",
+        "vrf/name/*/protocols/bgp",
+    ] {
+        assert!(hides_peers(p), "{p}");
+    }
+    for p in [
+        "router bgp */neighbor */password <secret>",
+        "router bgp */neighbor 198.51.100.1 password <secret>",
+        "router bgp */address-family ../neighbor 198.51.100.1 prefix-list OUR-NETS out",
+        "router bgp */bgp router-id 203.0.113.1",
+        "router bgp */vrf */rd 64496:100",
+        "protocols/bgp/neighbor/*/password",
+        "protocols/bgp/parameters/router-id",
+        "interface */description",
+    ] {
+        assert!(!hides_peers(p), "{p}");
+    }
+}

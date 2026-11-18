@@ -109,12 +109,8 @@ body,
   margin-top: var(--button-pad);
 }
 
-.lanes.head {
-  min-height: calc(2 * var(--index-line));
-}
-
-.lanes.head svg {
-  position: static;
+.ink {
+  color: var(--ink);
 }
 
 .c-forward {
@@ -212,6 +208,7 @@ select:focus-visible,
   height: var(--account);
   padding: 0;
   border-radius: var(--account-radius);
+  font-size: var(--index-size);
   font-weight: var(--headline-weight);
 }
 
@@ -243,22 +240,72 @@ select:focus-visible,
   margin: 0;
 }
 
-.field {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--button-gap);
+.bar.top {
+  padding: var(--top-bar-pad) var(--margin);
+  column-gap: var(--top-bar-gap);
+  row-gap: var(--top-bar-pad);
 }
 
-.field input {
-  width: calc(var(--col-ip) + var(--col-port));
+/* The twin of the top bar: a value that a click changes. */
+select.twin {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  height: auto;
+  cursor: pointer;
 }
 
-.field input.short {
-  width: calc(var(--col-port) + var(--col-step));
+.bar.query {
+  padding: var(--query-bar-pad) var(--margin);
+  column-gap: var(--query-bar-gap);
+  row-gap: var(--line-gap);
 }
 
-.result {
-  padding: var(--button-pad) var(--margin);
+/* A field of the query bar: its name, then its value, which edits in place. */
+.qfield {
+  white-space: nowrap;
+  cursor: text;
+}
+
+.autosize {
+  display: inline-grid;
+  vertical-align: baseline;
+}
+
+.autosize::after,
+.autosize input {
+  grid-area: 1 / 1;
+  font: inherit;
+  font-stretch: inherit;
+  letter-spacing: inherit;
+}
+
+.autosize::after {
+  content: attr(data-value) " ";
+  visibility: hidden;
+  white-space: pre;
+}
+
+.autosize input {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+}
+
+.autosize input::placeholder {
+  color: var(--ink-muted);
+}
+
+.bar.result {
+  padding: var(--result-pad) var(--margin);
+  column-gap: var(--fact-gap);
+  row-gap: var(--line-gap);
   border-bottom: 0;
 }
 
@@ -267,12 +314,13 @@ select:focus-visible,
 .mark {
   display: inline-flex;
   align-items: center;
-  gap: var(--button-gap);
+  gap: var(--mark-gap);
   border: var(--hairline) dashed var(--ink-muted);
   border-radius: var(--button-radius);
   padding-right: var(--button-pad);
-  height: var(--hatch-mark);
+  height: calc(var(--hatch-mark) + 2 * var(--hairline));
   white-space: nowrap;
+  color: var(--ink);
 }
 
 .hatch line {
@@ -282,7 +330,7 @@ select:focus-visible,
 
 .body {
   overflow-x: auto;
-  padding: 0 var(--margin) var(--margin);
+  padding: 0 var(--margin);
 }
 
 .note {
@@ -293,20 +341,24 @@ select:focus-visible,
   display: flex;
   flex-wrap: wrap;
   column-gap: var(--fact-gap);
-  padding: var(--button-pad) var(--margin);
+  row-gap: var(--button-gap);
+  padding: var(--result-pad) var(--margin);
   color: var(--ink-muted);
 }
 
 /* The ladder */
 
+/* The ladder is one grid; each row takes its columns, so that the reason
+   column has the width of the longest reason where the page has room. */
 .ladder {
-  width: max-content;
-  min-width: 100%;
+  display: grid;
+  grid-template-columns: var(--ladder-columns);
 }
 
 .ladder-row {
   display: grid;
-  grid-template-columns: var(--ladder-columns);
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
   min-height: var(--row);
   align-items: stretch;
   position: relative;
@@ -342,10 +394,17 @@ select:focus-visible,
 .ladder-head {
   border-bottom: var(--hairline) solid var(--rule);
   align-items: end;
+  padding-bottom: var(--button-gap);
 }
 
 .ladder-head > * {
   line-height: var(--label-line);
+}
+
+.ladder-reply {
+  border-top: var(--hairline) solid var(--rule);
+  margin-top: var(--line-gap);
+  padding-top: var(--button-gap);
 }
 
 .ladder-section {
@@ -355,11 +414,18 @@ select:focus-visible,
 
 .ladder-section .title {
   grid-column: 3 / -1;
+  contain: inline-size;
+}
+
+.title {
   font-weight: var(--value-changed-weight);
 }
 
-.ix {
-  text-align: right;
+/* The step number aligns right and runs into the margin when it is long. */
+.ladder-row > .ix {
+  display: flex;
+  justify-content: flex-end;
+  overflow: visible;
   padding-right: var(--button-pad);
   color: var(--ink-muted);
 }
@@ -377,7 +443,7 @@ select:focus-visible,
 }
 
 .lane-guide {
-  stroke: var(--rule);
+  stroke: var(--guide);
   stroke-width: var(--hairline);
 }
 
@@ -393,10 +459,6 @@ select:focus-visible,
   fill: var(--ground);
   stroke-width: var(--ring-stroke);
 }
-.selected .ring,
-.ladder-row.step:hover .ring {
-  fill: var(--raise);
-}
 .end-deliver {
   fill: var(--deliver);
 }
@@ -410,89 +472,125 @@ select:focus-visible,
   stroke-dasharray: var(--dash) var(--dash);
 }
 
-.lane-names text {
-  fill: var(--ink-muted);
-  text-anchor: middle;
+/* The lane names: one for each lane, centred over it. */
+.lane-names {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: var(--lane);
+  color: var(--ink-muted);
 }
 
+.lane-names > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  padding: 0 var(--hairline);
+}
+
+/* A header cell: the value starts after the cell padding, and the hairline
+   of a value that stays runs at the start of the value. */
 .cell {
   position: relative;
-  padding-left: var(--button-pad);
+  padding-left: var(--cell-pad);
 }
 
 .cell.same::before {
   content: "";
   position: absolute;
-  left: calc(var(--button-pad) + var(--button-gap));
+  left: calc(var(--cell-pad) + var(--button-gap));
   top: 0;
   bottom: 0;
   width: var(--hairline);
   background: var(--rule);
 }
 
-.cell.hatched {
+.cell.hatched,
+.rib.hatched {
   display: flex;
   align-items: center;
 }
 
-.num {
+.rib.hatched {
+  padding: var(--rib-pad-y) var(--rib-pad-x);
+}
+
+.cell.num {
   text-align: right;
+  padding-left: 0;
   padding-right: var(--button-pad);
+}
+
+.cell.num.same::before {
+  left: auto;
+  right: calc(var(--button-pad) + var(--button-gap));
 }
 
 /* The opened row */
 
 .ladder-detail {
   display: grid;
-  grid-template-columns: var(--ladder-columns);
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
   border-bottom: var(--hairline) solid var(--rule);
+  position: relative;
 }
 
 .ladder-detail .lanes svg {
   height: 100%;
 }
 
+/* The opened row: source, parameters, QoS. It does not widen the columns. */
 .detail {
   grid-column: 3 / -1;
+  contain: inline-size;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(calc(var(--col-reason) + var(--col-ip)), 1fr));
-  gap: var(--fact-gap);
-  padding: var(--button-pad) var(--margin) var(--margin) 0;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 4fr) minmax(0, 4fr);
+  gap: var(--detail-gap);
+  padding: var(--button-pad) var(--margin) var(--result-pad) 0;
   white-space: normal;
+}
+
+.detail .head {
+  margin-bottom: var(--button-gap);
 }
 
 .facts {
   display: grid;
-  grid-template-columns: max-content 1fr;
-  column-gap: var(--button-pad);
-  align-items: baseline;
+  grid-template-columns: var(--fact-label) 1fr;
+  gap: var(--button-gap) var(--cell-pad);
+  align-items: center;
 }
 
 .facts > * {
   overflow-wrap: anywhere;
 }
 
-.spans {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  overflow-wrap: anywhere;
+.code {
+  display: grid;
+  grid-template-columns: var(--code-number) 1fr;
+  column-gap: var(--cell-pad);
+}
+
+.code > :nth-child(odd) {
+  text-align: right;
 }
 
 /* The set page */
 
 .part {
   position: relative;
-  margin: 0 var(--button-gap);
+  padding-left: var(--part-gap);
 }
 
 .part.band {
   background: var(--band);
+  padding: 0;
 }
 
 .part.end {
   border: var(--hairline) solid var(--drop);
-  padding: 0 var(--button-gap);
+  padding: 0 var(--part-pad);
   line-height: calc(var(--row) - 2 * var(--hairline));
   height: var(--row);
 }
@@ -518,6 +616,25 @@ select:focus-visible,
 }
 
 .part-head {
-  white-space: normal !important;
-  padding: 0 var(--button-gap);
+  padding-left: var(--part-gap);
+}
+
+.part-head:nth-child(5) {
+  padding-left: 0;
+}
+
+/* A hatch mark in a fact of the opened row wraps its text. */
+.facts .mark {
+  height: auto;
+  min-height: calc(var(--hatch-mark) + 2 * var(--hairline));
+  white-space: normal;
+  align-items: flex-start;
+}
+
+.mark > svg {
+  flex-shrink: 0;
+}
+
+.facts .mark > span {
+  align-self: center;
 }

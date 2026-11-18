@@ -321,6 +321,10 @@ pub fn handle(state: &State, req: &Request) -> Response {
     };
     if let Some(o) = origin {
         res.headers.push(("access-control-allow-origin".into(), o));
+        res.headers.push((
+            "access-control-expose-headers".into(),
+            "Server-Timing".into(),
+        ));
         res.headers.push(("vary".into(), "Origin".into()));
     }
     res.headers

@@ -283,6 +283,7 @@ pub fn lower(
     vrfs.extend(active.iter().map(|i| vrf_of(i).to_string()));
     let encap_l3 = l.vxlan_encap_l3(&tunnel);
     let resolver = resolver(col, &names, &st);
+    sum.routes = resolver.clone();
     let vx = Vx {
         st: &st,
         tunnel: &tunnel,

@@ -816,6 +816,44 @@ fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
             spans.iter().map(Value::to_string).collect();
         assert_eq!(unique.len(), spans.len(), "{r}");
     }
+    // The BGP claims of a store twin: the peers of the one router are
+    // outside the twin, except the dynamic peer of the listen range, and a
+    // neighbour has shutdown. bgp-peers-up checks the peers outside the twin
+    // from the session state: 198.51.100.6 is not in the complete session
+    // table.
+    let claim = |name: &str| {
+        let c = rsim(&[topology.as_str(), "claim", "run", name, "--format", "json"]);
+        serde_json::from_slice::<Value>(&c.stdout).unwrap()
+    };
+    let up = claim("bgp-peers-up");
+    assert_eq!(up["result"], "refuted", "{up}");
+    let rows: Vec<(&str, &str)> = up["evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            (
+                e["subject"].as_str().unwrap(),
+                e["result"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("r1 vrf default neighbour 192.0.2.2", "confirmed"),
+            ("r1 vrf default neighbour 198.51.100.6", "refuted"),
+            ("r1 vrf default neighbour 203.0.113.5", "confirmed"),
+        ]
+    );
+    assert_eq!(up["evidence"][1]["detail"], "not in session table");
+    assert_eq!(up["detail"], "left out: 1 with shutdown");
+    let agree = claim("bgp-peers-agree");
+    assert_eq!(agree["result"], "unknown", "{agree}");
+    assert_eq!(
+        agree["detail"],
+        "no BGP neighbour in scope; left out: 1 with shutdown, 2 with the peer outside the twin"
+    );
     // The links of a store twin have collected facts for the claim.
     let c = rsim(&[
         topology.as_str(),
@@ -973,12 +1011,20 @@ fn a_claim_gives_its_result_its_evidence_and_its_exit_code() {
     assert_eq!(json_of(&o)["result"], "refuted");
 
     // Data that is not collected gives unknown, never confirmed.
-    for claim in ["bgp-peers-up", "link-speed-duplex"] {
+    let o = run("leaf-spine", "link-speed-duplex", &[]);
+    assert_eq!(o.status.code(), Some(3));
+    let v = json_of(&o);
+    assert_eq!(v["result"], "unknown");
+    assert_eq!(v["evidence"][0]["reason"], "not_collected");
+    // A built-in topology has no BGP neighbour, so the BGP claims are
+    // unknown with no row.
+    for claim in ["bgp-peers-up", "bgp-peers-agree"] {
         let o = run("leaf-spine", claim, &[]);
         assert_eq!(o.status.code(), Some(3), "{claim}");
         let v = json_of(&o);
         assert_eq!(v["result"], "unknown", "{claim}");
-        assert_eq!(v["evidence"][0]["reason"], "not_collected", "{claim}");
+        assert_eq!(v["evidence"], serde_json::json!([]), "{claim}");
+        assert_eq!(v["detail"], "no BGP neighbour in scope", "{claim}");
     }
 
     // The claim no-unknown needs a query.

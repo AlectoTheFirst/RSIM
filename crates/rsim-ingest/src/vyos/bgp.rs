@@ -92,6 +92,7 @@ fn settings(s: &Stanza, read: &mut BTreeSet<u32>) -> Settings {
                 read.insert(c.first_line);
                 for f in c.children() {
                     let Some(name) = family(&[f.key.as_str()]) else {
+                        out.unread_families.insert(f.key.clone());
                         continue;
                     };
                     read.insert(f.first_line);
