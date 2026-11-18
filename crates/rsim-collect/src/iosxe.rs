@@ -30,16 +30,21 @@ const CONFIG: &[&str] = &[
     "! NVRAM config last updated",
     "! No configuration change since last restart",
 ];
+/// The uptimes of the device, of its control processor and of each stack
+/// member, and the times of the last reload.
 const VERSION: &[&str] = &[
     "=*uptime is",
     "Uptime for this control processor",
+    "Switch uptime",
     "System returned to ROM",
     "System restarted at",
     "Last reload",
 ];
-/// The counters, the rates and the times of the last packets.
+/// The counters, the rates, the load and reliability, and the times of the
+/// last packets.
 const INTERFACES: &[&str] = &[
     "=# ",
+    "reliability ",
     "Received ",
     "Output ",
     "Last input",

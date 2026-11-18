@@ -375,6 +375,7 @@ fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
             name: t.name.clone(),
             vlan: t.dot1q,
             routed: false,
+            untagged: false,
             reason: format!("{} is not lowered", t.key),
             lines: t.lines,
         })
@@ -387,6 +388,7 @@ fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
                 name: p.i.name.clone(),
                 vlan: None,
                 routed: true,
+                untagged: false,
                 reason: format!("the dot1q VLAN of {} is not read", p.i.name),
                 lines: p.i.lines,
             }),
@@ -401,6 +403,8 @@ pub(crate) struct Unlowered {
     pub(crate) vlan: Option<u16>,
     /// True when only its frames to a MAC of the router are affected.
     pub(crate) routed: bool,
+    /// True when it can take an untagged frame too.
+    pub(crate) untagged: bool,
     pub(crate) reason: String,
     pub(crate) lines: nxos::config::Lines,
 }
@@ -753,7 +757,8 @@ fn hsrp(
 /// of the sub-interface of the dot1q VLAN. A frame to the virtual MAC of a
 /// group whose state is not known gives `Unknown`, as does a frame of a
 /// sub-interface in `unlowered`: each frame of its VLAN, or of a routed
-/// sub-interface each frame of its VLAN to a MAC of the router. If an active
+/// sub-interface each frame of its VLAN to a MAC of the router, and the
+/// untagged frames of a sub-interface that can take them. If an active
 /// group or a group whose state is not known has no known virtual MAC, each
 /// frame of the port gives `Unknown`.
 pub(crate) fn handoffs(
@@ -829,6 +834,44 @@ pub(crate) fn handoffs(
                     Match {
                         dst_mac,
                         vlan: PortCond::In(vlans),
+                        ..Match::any()
+                    },
+                ),
+                RuleAction::Deny,
+            );
+            rule.spans = vec![l.span(u.lines)];
+            rules.push(rule);
+        }
+        // The untagged frames come after each tagged frame.
+        let open: Vec<&Unlowered> = unlowered
+            .iter()
+            .filter(|u| parent(&u.name) == port && u.untagged)
+            .collect();
+        if !open.is_empty() {
+            rules.push(FRule::new(
+                format!("{port}: a tagged frame"),
+                RulePredicate::exact(Match {
+                    vlan: PortCond::In(vec![(0, 4095)]),
+                    ..Match::any()
+                }),
+                RuleAction::Permit,
+            ));
+        }
+        for u in open {
+            let dst_mac = if u.routed {
+                MacCond::In(macs.union(&unknown).copied().collect())
+            } else {
+                MacCond::Any
+            };
+            let mut rule = FRule::new(
+                format!("{port}: {}", u.reason),
+                RulePredicate::bounded(
+                    Match {
+                        dst_mac: MacCond::In(BTreeSet::new()),
+                        ..Match::any()
+                    },
+                    Match {
+                        dst_mac,
                         ..Match::any()
                     },
                 ),

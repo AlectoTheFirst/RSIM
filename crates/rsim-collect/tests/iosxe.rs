@@ -340,6 +340,10 @@ async fn the_ages_and_counters_make_no_snapshot_and_a_config_change_makes_one() 
             ("Received 12 broadcast", "Received 19 broadcast"),
             ("Output 2 broadcast", "Output 5 broadcast"),
             ("Last input 00:00:00", "Last input 00:00:01"),
+            (
+                "reliability 255/255, txload 1/255, rxload 1/255",
+                "reliability 254/255, txload 3/255, rxload 2/255",
+            ),
         ] {
             t = t.replace(a, b);
         }
@@ -375,6 +379,32 @@ async fn the_ages_and_counters_make_no_snapshot_and_a_config_change_makes_one() 
     );
     tokio::time::advance(Duration::from_secs(60)).await;
     assert!(e.c.run_cycle().await.unwrap().snapshot.is_some());
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_uptime_of_a_stack_member_makes_no_snapshot() {
+    let mut e = env();
+    let stack = |uptime: &str| {
+        format!(
+            "{}\nSwitch 02\n---------\nSwitch uptime                      : {uptime}\nBase Ethernet MAC Address          : 00:00:5e:00:53:02\n",
+            fixture("version.txt").replace("HOST", "e1")
+        )
+    };
+    set(
+        &e.t,
+        "version",
+        &stack("1 week, 2 days, 3 hours, 4 minutes"),
+    );
+    let first = e.c.run_cycle().await.unwrap().snapshot.unwrap();
+    set(
+        &e.t,
+        "version",
+        &stack("1 week, 2 days, 3 hours, 5 minutes"),
+    );
+    tokio::time::advance(Duration::from_secs(60)).await;
+    let r = e.c.run_cycle().await.unwrap();
+    assert_eq!(r.snapshot, None, "{r:?}");
+    assert_eq!(latest(&e).manifest.cycle, first);
 }
 
 #[tokio::test(start_paused = true)]
