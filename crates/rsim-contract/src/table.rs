@@ -266,7 +266,7 @@ pub const TABLES: &[TableDef] = &[
         needs: "a twin of a store snapshot; a built-in topology has no coverage report",
     },
     TableDef {
-        name: "bgp_sessions",
+        name: "bgp-sessions",
         description: "The BGP peers of each device: each configured neighbour and listen range after the inheritance, joined with the session rows of the device, and each observed peer with no neighbour.",
         key: &["device", "vrf", "peer"],
         columns: &[

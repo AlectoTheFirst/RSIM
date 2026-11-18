@@ -653,3 +653,151 @@ fn the_masks_hide_each_password_form_of_the_neighbours_and_their_groups() {
         }
     }
 }
+
+/// The facts of a config that replaces each text with its replacement.
+fn replaced(vendor: &str, path: &str, edits: &[(&str, &str)]) -> Vec<BgpPeerFact> {
+    let mut config = String::from_utf8(fixture(path)).unwrap();
+    for (from, to) in edits {
+        assert!(config.contains(from), "{from}");
+        config = config.replacen(from, to, 1);
+    }
+    let e = estate(vendor, config.into_bytes(), SessionSections::new());
+    e.bgp["d1"].clone()
+}
+
+#[test]
+fn a_gap_before_a_source_hides_the_settings_of_that_source() {
+    // The missing neighbor-group comes before the session-group, so the
+    // session-group gives no remote-as and no shutdown.
+    let xr = edited(
+        "iosxr",
+        IOSXR,
+        "router bgp 64496\n",
+        " session-group SG\n  remote-as 64502\n  shutdown\n !\n neighbor 192.0.2.82\n  use neighbor-group NG\n  use session-group SG\n !\n",
+        "192.0.2.82",
+    );
+    assert!(
+        unknown_starts(&xr.peer_asn.value, "inheritance gap"),
+        "{:?}",
+        xr.peer_asn
+    );
+    assert_eq!(xr.shutdown, None);
+    // The missing template comes before the peer group.
+    let xe = edited(
+        "iosxe",
+        IOSXE,
+        "router bgp 64496\n",
+        " neighbor G2 peer-group\n neighbor G2 remote-as 64502\n neighbor 192.0.2.83 inherit peer-session NOWHERE\n neighbor 192.0.2.83 peer-group G2\n",
+        "192.0.2.83",
+    );
+    assert!(
+        unknown_starts(&xe.peer_asn.value, "inheritance gap"),
+        "{:?}",
+        xe.peer_asn
+    );
+}
+
+#[test]
+fn iosxr_shutdown_inheritance_disable_keeps_the_session_up() {
+    let add = " neighbor-group NGS\n  remote-as 64496\n  shutdown\n !\n neighbor 192.0.2.84\n  use neighbor-group NGS\n  shutdown inheritance-disable\n !\n";
+    let f = edited("iosxr", IOSXR, "router bgp 64496\n", add, "192.0.2.84");
+    assert_eq!(f.peer_asn.value, known(&[64496]));
+    assert_eq!(f.shutdown, Some(false));
+    let config = String::from_utf8(fixture(IOSXR)).unwrap().replacen(
+        "router bgp 64496\n",
+        &format!("router bgp 64496\n{add}"),
+        1,
+    );
+    let (cov, unread) = coverage("iosxr", config.as_bytes(), Rows::All);
+    assert!(
+        cov.unhandled
+            .keys()
+            .all(|k| !k.contains("inheritance-disable")),
+        "{:?}",
+        cov.unhandled
+    );
+    assert!(
+        unread.iter().all(|k| !k.contains("inheritance-disable")),
+        "{unread:?}"
+    );
+}
+
+#[test]
+fn iosxe_peer_groups_of_the_same_name_belong_to_their_vrf() {
+    // The VRF `RED` sorts before `default` and `zed` after it.
+    for vrf in ["RED", "zed"] {
+        let in_vrf = format!(
+            " address-family ipv4 vrf {vrf}\n  neighbor G peer-group\n  neighbor G remote-as 64502\n  neighbor G inherit peer-policy VRF-POLICY\n  neighbor 203.0.113.9 peer-group G\n"
+        );
+        let f = replaced(
+            "iosxe",
+            IOSXE,
+            &[
+                (
+                    "router bgp 64496\n",
+                    "router bgp 64496\n template peer-policy VRF-POLICY\n  route-map VRF-IN in\n exit-peer-policy\n",
+                ),
+                (
+                    "  network 192.0.2.0 mask 255.255.255.0\n",
+                    "  network 192.0.2.0 mask 255.255.255.0\n  neighbor G peer-group\n  neighbor G remote-as 64501\n  neighbor 192.0.2.85 peer-group G\n",
+                ),
+                (" address-family ipv4 vrf RED\n", &in_vrf),
+            ],
+        );
+        let global = peer(&f, "default", "192.0.2.85");
+        assert_eq!(global.peer_asn.value, known(&[64501]), "{vrf}");
+        assert_eq!(global.policy_in, None, "{vrf}");
+        let member = peer(&f, vrf, "203.0.113.9");
+        assert_eq!(member.peer_asn.value, known(&[64502]), "{vrf}");
+        assert_eq!(member.policy_in.as_deref(), Some("VRF-IN"), "{vrf}");
+    }
+}
+
+#[test]
+fn a_peer_policy_of_another_family_gives_no_ipv4_unicast_policy() {
+    let nxos = edited(
+        "nxos",
+        NXOS,
+        "router bgp 65000\n",
+        "  template peer-policy EVPN\n    route-map EVPN-OUT out\n  neighbor 192.0.2.86\n    remote-as 65000\n    address-family l2vpn evpn\n      inherit peer-policy EVPN 10\n",
+        "192.0.2.86",
+    );
+    assert_eq!(nxos.policy_out, None);
+    assert_eq!(nxos.inherits, ["template peer-policy EVPN"]);
+    // A peer-policy of VPNv4 and of a family that the reader does not name
+    // gives no policy; one of IPv4 unicast gives its policy.
+    let f = replaced(
+        "iosxe",
+        IOSXE,
+        &[(
+            "router bgp 64496\n",
+            "router bgp 64496\n template peer-policy VPN\n  route-map VPN-OUT out\n exit-peer-policy\n neighbor 192.0.2.87 remote-as 64496\n neighbor 192.0.2.88 remote-as 64496\n neighbor 192.0.2.89 remote-as 64496\n address-family vpnv4\n  neighbor 192.0.2.87 activate\n  neighbor 192.0.2.87 inherit peer-policy VPN\n exit-address-family\n address-family rtfilter unicast\n  neighbor 192.0.2.88 inherit peer-policy VPN\n exit-address-family\n address-family ipv4 unicast\n  neighbor 192.0.2.89 inherit peer-policy VPN\n exit-address-family\n",
+        )],
+    );
+    assert_eq!(peer(&f, "default", "192.0.2.87").policy_out, None);
+    assert_eq!(peer(&f, "default", "192.0.2.88").policy_out, None);
+    assert_eq!(
+        peer(&f, "default", "192.0.2.89").policy_out.as_deref(),
+        Some("VPN-OUT")
+    );
+}
+
+#[test]
+fn the_local_address_of_an_update_source_has_the_family_of_the_peer() {
+    let f = replaced(
+        "iosxr",
+        IOSXR,
+        &[(
+            "router bgp 64496\n",
+            "router bgp 64496\n neighbor 2001:db8::2\n  remote-as 64496\n  update-source Loopback0\n !\n",
+        )],
+    );
+    assert_eq!(
+        peer(&f, "default", "2001:db8::2").local_address,
+        Some(addr("2001:db8::1"))
+    );
+    assert_eq!(
+        peer(&f, "default", "203.0.113.9").local_address,
+        Some(addr("203.0.113.1"))
+    );
+}

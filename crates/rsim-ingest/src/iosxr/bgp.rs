@@ -28,6 +28,7 @@ const BODY: &[&str] = &[
     "use session-group *",
     "update-source *",
     "shutdown",
+    "shutdown inheritance-disable",
     "local-as ..",
 ];
 

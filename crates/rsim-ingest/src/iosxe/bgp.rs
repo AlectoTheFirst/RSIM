@@ -4,9 +4,11 @@
 //! and `template peer-policy` stanzas, and the listen ranges.
 //!
 //! A line of the global part belongs to the default VRF, and a line of
-//! `address-family <family> vrf <name>` to that VRF. A neighbour takes each
-//! setting that it does not state from its `inherit` templates in their
-//! order, then from its peer group. A neighbour of the default VRF is
+//! `address-family <family> vrf <name>` to that VRF. A peer group belongs to
+//! the VRF of its lines. A neighbour takes each setting that it does not
+//! state from its `inherit` templates in their order, then from the peer
+//! group of its VRF. A peer-policy that an address family other than IPv4
+//! unicast inherits gives no policy. A neighbour of the default VRF is
 //! active in IPv4 unicast by the default of the profile, unless `no bgp
 //! default ipv4-unicast` or `no neighbor <peer> activate`; a neighbour of a
 //! VRF is active in the family of the stanza that gives its remote AS.
@@ -130,8 +132,9 @@ impl Reader<'_> {
     }
 
     /// Reads one `neighbor` line, or a `bgp listen range` line, of the
-    /// global part or of an address family of `fam` in `vrf`.
-    fn line(&mut self, c: &Stanza, vrf: &str, fam: Option<&str>) {
+    /// global part or of an address family of `fam` in `vrf`. `ipv4` is
+    /// true for the global part and an address family of IPv4 unicast.
+    fn line(&mut self, c: &Stanza, vrf: &str, fam: Option<&str>, ipv4: bool) {
         let w: Vec<&str> = c.key.split_whitespace().collect();
         let lines = (c.first_line, c.last_line);
         let mask = self.mask;
@@ -190,7 +193,7 @@ impl Reader<'_> {
                     }
                     ["inherit", kind, name, seq @ ..] => match inherit(kind, name, seq) {
                         Some(p) => {
-                            e.parents.push(p);
+                            e.parents.push(p.with_ipv4_policy(ipv4));
                             true
                         }
                         None => false,
@@ -346,32 +349,34 @@ pub fn read(s: &Stanza, read: &mut BTreeSet<u32>, mask: &dyn Fn(&str) -> String)
             ["address-family", rest @ ..] => {
                 r.read.insert(c.first_line);
                 let (vrf, fam) = af_scope(rest);
+                let ipv4 = fam.as_deref() == Some(IPV4_UNICAST);
                 for l in c.children() {
-                    r.line(l, &vrf, fam.as_deref());
+                    r.line(l, &vrf, fam.as_deref(), ipv4);
                 }
             }
-            _ => r.line(c, DEFAULT_VRF, None),
+            _ => r.line(c, DEFAULT_VRF, None, true),
         }
     }
     let default_on = BGP_DEFAULT_IPV4_UNICAST && r.default_ipv4.is_none();
-    // The peer groups are templates of the kind `peer-group`; a group of
-    // the global part and of a VRF with the same name are one group.
+    // The templates of each VRF: the session and policy templates and the
+    // peer groups of that VRF, as templates of the kind `peer-group`.
+    let mut scoped: BTreeMap<String, Templates> = BTreeMap::new();
     for (vrf, names) in &r.entries {
+        let t = scoped
+            .entry(vrf.clone())
+            .or_insert_with(|| templates.clone());
         for (name, e) in names.iter().filter(|(_, e)| e.group) {
-            let t = templates
-                .entry((PEER_GROUP.to_string(), name.clone()))
-                .or_insert_with(|| Template {
+            t.insert(
+                (PEER_GROUP.to_string(), name.clone()),
+                Template {
+                    settings: e.settings.clone(),
+                    parents: e.parents.clone(),
                     lines: e.lines,
-                    ..Template::default()
-                });
-            let mut own = e.settings.clone();
-            own.inherit(&t.settings);
-            t.settings = own;
-            if vrf == DEFAULT_VRF {
-                t.parents.extend(e.parents.iter().cloned());
-            }
+                },
+            );
         }
     }
+    let of_vrf = |vrf: &str| scoped.get(vrf).unwrap_or(&templates);
     let mut cfg = BgpConfig::default();
     let vrfs: BTreeSet<String> = std::iter::once(DEFAULT_VRF.to_string())
         .chain(r.entries.keys().cloned())
@@ -403,7 +408,7 @@ pub fn read(s: &Stanza, read: &mut BTreeSet<u32>, mask: &dyn Fn(&str) -> String)
             cfg.neighbours.push(Neighbour {
                 vrf: vrf.clone(),
                 peer,
-                resolved: resolve(&own, &e.parents, &templates),
+                resolved: resolve(&own, &e.parents, of_vrf(vrf)),
                 lines: e.lines.unwrap_or((s.first_line, s.first_line)),
             });
         }
@@ -418,7 +423,7 @@ pub fn read(s: &Stanza, read: &mut BTreeSet<u32>, mask: &dyn Fn(&str) -> String)
             resolved: resolve(
                 &Settings::default(),
                 &[Parent::new(PEER_GROUP, group, 0)],
-                &templates,
+                of_vrf(vrf),
             ),
             lines: *lines,
         });

@@ -159,7 +159,7 @@ pub fn rows(t: &Loaded, def: &TableDef) -> Vec<Vec<Value>> {
                 })
             })
             .collect(),
-        "bgp_sessions" => t
+        "bgp-sessions" => t
             .bgp
             .values()
             .flat_map(|facts| facts.iter().map(bgp_row))
@@ -218,7 +218,11 @@ fn bgp_row(f: &BgpPeerFact) -> Vec<Value> {
         _ => Value::Null,
     };
     let mut provenance: Vec<SourceSpan> = f.spans.clone();
-    provenance.extend(f.sessions.iter().map(|r| r.span.clone()));
+    for r in &f.sessions {
+        if !provenance.contains(&r.span) {
+            provenance.push(r.span.clone());
+        }
+    }
     vec![
         json!(f.device),
         json!(f.vrf),

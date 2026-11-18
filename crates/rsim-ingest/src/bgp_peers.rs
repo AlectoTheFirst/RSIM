@@ -4,10 +4,11 @@
 //! and each observed peer with no neighbour, joined with the session rows.
 //!
 //! An inheritance that names a source that the config does not define, or
-//! that comes back to a source on its own path, is a gap. A setting that the
-//! neighbour does not state itself is then not known, because the missing
-//! source can state it: the AS of the peer, the presented local AS and the
-//! shutdown state are `Unknown` with the reason of the gap.
+//! that comes back to a source on its own path, is a gap. A setting is known
+//! only if the neighbour states it or a source taken before the first gap
+//! states it, because the missing source can state it: else the AS of the
+//! peer, the presented local AS and the shutdown state are `Unknown` with
+//! the reason of the gap.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
@@ -129,8 +130,9 @@ pub struct Settings {
 }
 
 impl Settings {
-    /// Takes each setting of `parent` that this stanza does not state.
-    pub fn inherit(&mut self, parent: &Settings) {
+    /// Takes each setting of `parent` that this stanza does not state; the
+    /// policies only with `policies`.
+    pub fn inherit(&mut self, parent: &Settings, policies: bool) {
         fn fill<T: Clone>(own: &mut Option<T>, p: &Option<T>) {
             if own.is_none() {
                 own.clone_from(p);
@@ -140,8 +142,10 @@ impl Settings {
         fill(&mut self.local_as, &parent.local_as);
         fill(&mut self.update_source, &parent.update_source);
         fill(&mut self.shutdown, &parent.shutdown);
-        fill(&mut self.policy_in, &parent.policy_in);
-        fill(&mut self.policy_out, &parent.policy_out);
+        if policies {
+            fill(&mut self.policy_in, &parent.policy_in);
+            fill(&mut self.policy_out, &parent.policy_out);
+        }
         for (f, v) in &parent.families {
             self.families.entry(f.clone()).or_insert_with(|| v.clone());
         }
@@ -149,13 +153,17 @@ impl Settings {
 }
 
 /// A source of the inheritance that a stanza names: its kind, for example
-/// `peer-group` or `template peer-session`, its name and its order among
-/// the sources of the stanza, lower first.
+/// `peer-group` or `template peer-session`, its name, its order among the
+/// sources of the stanza, lower first, and whether it gives the policies of
+/// IPv4 unicast.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Parent {
     pub kind: String,
     pub name: String,
     pub order: u32,
+    /// False for a source that an address family other than IPv4 unicast
+    /// inherits: it and its own sources give no policy of IPv4 unicast.
+    pub ipv4_policy: bool,
 }
 
 impl Parent {
@@ -164,7 +172,14 @@ impl Parent {
             kind: kind.to_string(),
             name: name.to_string(),
             order,
+            ipv4_policy: true,
         }
+    }
+
+    /// The source with `ipv4_policy` set to `v`.
+    pub fn with_ipv4_policy(mut self, v: bool) -> Parent {
+        self.ipv4_policy = v;
+        self
     }
 }
 
@@ -194,14 +209,15 @@ pub struct Resolved {
 /// Resolves the settings of a stanza. The sources are taken in their order;
 /// a source gives each setting that the stanza and the sources before it do
 /// not state, and its own sources follow it. A source that is not defined,
-/// or that is on its own path, is a gap.
+/// or that is on its own path, is a gap, and no source after the first gap
+/// gives a setting; each source is still listed in `inherits`.
 pub fn resolve(own: &Settings, parents: &[Parent], templates: &Templates) -> Resolved {
     let mut out = Resolved {
         settings: own.clone(),
         ..Resolved::default()
     };
     let mut path = Vec::new();
-    walk(parents, templates, &mut path, &mut out);
+    walk(parents, templates, &mut path, &mut out, true);
     out
 }
 
@@ -210,6 +226,7 @@ fn walk(
     templates: &Templates,
     path: &mut Vec<(String, String)>,
     out: &mut Resolved,
+    policies: bool,
 ) {
     let mut ordered: Vec<&Parent> = parents.iter().collect();
     ordered.sort_by_key(|p| p.order);
@@ -234,9 +251,12 @@ fn walk(
         {
             out.lines.push(l);
         }
-        out.settings.inherit(&t.settings);
+        let policies = policies && p.ipv4_policy;
+        if out.gaps.is_empty() {
+            out.settings.inherit(&t.settings, policies);
+        }
         path.push(key);
-        walk(&t.parents, templates, path, out);
+        walk(&t.parents, templates, path, out, policies);
         path.pop();
     }
 }
@@ -487,16 +507,17 @@ impl Ctx<'_> {
             None if n.resolved.gaps.is_empty() => Some(false),
             None => None,
         };
+        let local = s
+            .update_source
+            .as_ref()
+            .and_then(|u| local_address(&u.value, self.interfaces, &peer, &n.vrf));
         BgpPeerFact {
             device: self.device.to_string(),
             vrf: n.vrf.clone(),
             peer,
             source,
             update_source: s.update_source.as_ref().map(|u| u.value.clone()),
-            local_address: s
-                .update_source
-                .as_ref()
-                .and_then(|u| local_address(&u.value, self.interfaces)),
+            local_address: local,
             local_asn,
             peer_asn,
             observed_asn: observed_asn(&rows),
@@ -519,8 +540,16 @@ impl Ctx<'_> {
     }
 
     /// The fact of an observed peer with no neighbour and no single listen
-    /// range.
-    fn observed(&self, vrf: &str, peer: IpAddr, rows: Vec<SessionRow>) -> BgpPeerFact {
+    /// range that resolves. `ranges` is the reason why the listen ranges
+    /// that hold the peer do not resolve, if one or more hold it; the local
+    /// AS is then not known, because a range can state a local-as.
+    fn observed(
+        &self,
+        vrf: &str,
+        peer: IpAddr,
+        rows: Vec<SessionRow>,
+        ranges: Option<String>,
+    ) -> BgpPeerFact {
         let row_spans: Vec<SourceSpan> = rows.iter().map(|r| r.span.clone()).collect();
         let observed_asn = observed_asn(&rows);
         let peer_asn = match observed_asn {
@@ -529,15 +558,12 @@ impl Ctx<'_> {
                 "{ASN_NOT_RESOLVED}: the session rows state no single AS"
             )),
         };
-        let local_asn = match self.cfg.processes.get(vrf).map(|p| &p.asn) {
-            Some(Sourced {
-                value: Ok(a),
-                lines,
-            }) => asn(AsnValue::Known(vec![*a]), vec![self.span(*lines)]),
-            Some(Sourced { value: Err(e), .. }) => unknown(format!("{ASN_NOT_RESOLVED}: {e}")),
-            None => unknown(format!(
+        let local_asn = match (self.cfg.processes.get(vrf), ranges) {
+            (None, _) => unknown(format!(
                 "{ASN_NOT_RESOLVED}: no BGP process for the VRF {vrf} in the config"
             )),
+            (Some(_), Some(reason)) => unknown(reason),
+            (Some(p), None) => self.outward(p, &peer_asn),
         };
         BgpPeerFact {
             device: self.device.to_string(),
@@ -563,19 +589,41 @@ impl Ctx<'_> {
     }
 }
 
-/// The local address of an update-source: the address itself, or the first
-/// address of the named interface.
-fn local_address(source: &str, interfaces: &InterfaceAddresses) -> Option<IpAddr> {
+/// The local address of an update-source toward a peer address in a VRF:
+/// the address itself, or the one address of the family of the peer of the
+/// named interface of that VRF. `None` for a peer that is not an address,
+/// an address of another family, an interface of another VRF, and an
+/// interface with no address or more than one address of the family.
+fn local_address(
+    source: &str,
+    interfaces: &InterfaceAddresses,
+    peer: &BgpPeer,
+    vrf: &str,
+) -> Option<IpAddr> {
+    let BgpPeer::Address(p) = peer else {
+        return None;
+    };
     if let Some(a) = address_of(source) {
-        return Some(a);
+        return (a.is_ipv4() == p.is_ipv4()).then_some(a);
     }
-    let found = interfaces.get(source).or_else(|| {
+    let (in_vrf, addrs) = interfaces.get(source).or_else(|| {
         interfaces
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(source))
             .map(|(_, v)| v)
     })?;
-    found.1.first().copied()
+    if in_vrf != vrf {
+        return None;
+    }
+    match addrs
+        .iter()
+        .filter(|a| a.is_ipv4() == p.is_ipv4())
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        [a] => Some(**a),
+        _ => None,
+    }
 }
 
 /// The AS of the peer that the session rows state, when they state one.
@@ -594,8 +642,9 @@ fn observed_asn(rows: &[SessionRow]) -> Option<u32> {
 /// joined with its session rows, and of its observed peers with no
 /// neighbour. `file` names the config for the spans. An observed peer in
 /// exactly one listen range of its VRF whose inheritance resolves takes the
-/// settings of the range. The facts are in the order of the VRF and the
-/// peer.
+/// settings of the range; an observed peer in a range with a gap or in more
+/// than one range has no known local AS. The facts are in the order of the
+/// VRF and the peer.
 pub fn facts(
     device: &str,
     file: &str,
@@ -639,10 +688,24 @@ pub fn facts(
             })
             .collect();
         match ranges.as_slice() {
-            [(n, range)] if n.resolved.gaps.is_empty() => {
-                out.push(f.configured(n, BgpPeer::Address(peer), PeerSource::Dynamic(*range), r))
+            [] => out.push(f.observed(&vrf, peer, r, None)),
+            [(n, range)] => match gap_reason(&n.resolved) {
+                None => out.push(f.configured(
+                    n,
+                    BgpPeer::Address(peer),
+                    PeerSource::Dynamic(*range),
+                    r,
+                )),
+                Some(g) => out.push(f.observed(&vrf, peer, r, Some(g))),
+            },
+            more => {
+                let names: Vec<String> = more.iter().map(|(_, p)| p.to_string()).collect();
+                let reason = format!(
+                    "{ASN_NOT_RESOLVED}: the peer is in more than one listen range: {}",
+                    names.join(", ")
+                );
+                out.push(f.observed(&vrf, peer, r, Some(reason)));
             }
-            _ => out.push(f.observed(&vrf, peer, r)),
         }
     }
     out.sort_by(|a, b| (&a.vrf, &a.peer, a.source.name()).cmp(&(&b.vrf, &b.peer, b.source.name())));
@@ -683,13 +746,15 @@ pub fn remote_as(words: &[&str], mask: &dyn Fn(&str) -> String) -> RemoteAs {
 
 /// Reads the settings and the inheritance of a neighbour, a template or a
 /// group of a config with a stanza for each neighbour, as NX-OS and IOS-XR
-/// write it: `remote-as`, `update-source`, `shutdown`, `local-as`, the lines
-/// that `inherit` gives a source for, and each `address-family` stanza that
-/// names a family, with the inheritance lines below it and the `<policy>
-/// <name> in` and `out` lines of IPv4 unicast. A `<policy> <name> in` or
-/// `out` line of the stanza itself, as in an NX-OS peer-policy template,
-/// is a policy of IPv4 unicast. Each line that it reads goes into `read`;
-/// the policy lines keep the state of the routing lines.
+/// write it: `remote-as`, `update-source`, `shutdown`, `shutdown
+/// inheritance-disable` as no shutdown, `local-as`, the lines that `inherit`
+/// gives a source for, and each `address-family` stanza that names a family,
+/// with the inheritance lines below it and the `<policy> <name> in` and
+/// `out` lines of IPv4 unicast. A source inherited below a family other
+/// than IPv4 unicast gives no policy. A `<policy> <name> in` or `out` line
+/// of the stanza itself, as in an NX-OS peer-policy template, is a policy
+/// of IPv4 unicast. Each line that it reads goes into `read`; the policy
+/// lines keep the state of the routing lines.
 pub fn block(
     s: &Stanza,
     read: &mut BTreeSet<u32>,
@@ -725,6 +790,10 @@ pub fn block(
                 read.insert(c.first_line);
                 settings.shutdown = Some(Sourced::new(true, lines));
             }
+            ["shutdown", "inheritance-disable"] => {
+                read.insert(c.first_line);
+                settings.shutdown = Some(Sourced::new(false, lines));
+            }
             ["local-as", rest @ ..] => {
                 read.insert(c.first_line);
                 settings.local_as = Some(Sourced::new(LocalAs::parse(rest, mask(&c.key)), lines));
@@ -748,7 +817,7 @@ pub fn block(
                     let aw: Vec<&str> = a.key.split_whitespace().collect();
                     if let Some(p) = inherit(&aw) {
                         read.insert(a.first_line);
-                        parents.push(p);
+                        parents.push(p.with_ipv4_policy(f == crate::bgp::IPV4_UNICAST));
                         continue;
                     }
                     if let [word, m, dir] = aw.as_slice()
@@ -893,9 +962,215 @@ mod tests {
             BTreeSet::from([a("192.0.2.1"), a("198.51.100.1")])
         );
         assert_eq!(l["RED"].len(), 2);
-        assert_eq!(local_address("loopback0", &i), Some(a("192.0.2.1")));
-        assert_eq!(local_address("192.0.2.9", &i), Some(a("192.0.2.9")));
-        assert_eq!(local_address("Gi9", &i), None);
+        let v4 = BgpPeer::Address(a("198.51.100.9"));
+        assert_eq!(
+            local_address("loopback0", &i, &v4, "default"),
+            Some(a("192.0.2.1"))
+        );
+        assert_eq!(local_address("Gi9", &i, &v4, "default"), None);
+    }
+
+    #[test]
+    fn a_gap_hides_the_settings_of_the_sources_after_it() {
+        let mut templates = Templates::new();
+        templates.insert(
+            ("t".into(), "BEFORE".into()),
+            Template {
+                settings: Settings {
+                    update_source: Some(Sourced::new("Loopback0".into(), span(1))),
+                    ..Settings::default()
+                },
+                ..Template::default()
+            },
+        );
+        let mut after = remote(64502, 5);
+        after.shutdown = Some(Sourced::new(true, span(6)));
+        templates.insert(
+            ("t".into(), "AFTER".into()),
+            Template {
+                settings: after,
+                ..Template::default()
+            },
+        );
+        let r = resolve(
+            &Settings::default(),
+            &[
+                Parent::new("t", "BEFORE", 0),
+                Parent::new("t", "MISSING", 1),
+                Parent::new("t", "AFTER", 2),
+            ],
+            &templates,
+        );
+        assert_eq!(r.gaps, ["inheritance gap: t MISSING is not defined"]);
+        // The source before the gap gives its setting; the source after it
+        // gives none.
+        assert_eq!(
+            r.settings.update_source.as_ref().map(|u| u.value.as_str()),
+            Some("Loopback0")
+        );
+        assert_eq!(r.settings.remote_as, None);
+        assert_eq!(r.settings.shutdown, None);
+    }
+
+    fn row(vrf: &str, peer: &str, asn: Option<&str>, line: u32) -> SessionRow {
+        SessionRow {
+            vrf: vrf.into(),
+            peer: peer.parse().unwrap(),
+            family: None,
+            peer_asn: asn.map(Into::into),
+            state: "Established".into(),
+            established: true,
+            prefixes_received: None,
+            prefixes_sent: None,
+            span: SourceSpan::new("r1/bgp_sessions@0", line, line),
+        }
+    }
+
+    fn sessions(rows: Vec<SessionRow>) -> Sessions {
+        Sessions {
+            rows,
+            outcome: crate::bgp::SectionOutcome {
+                outcome: crate::bgp::Outcome::Complete,
+                scope: crate::bgp::Scope::default(),
+                detail: None,
+            },
+        }
+    }
+
+    fn process(asn: u32, confederation: Option<(u32, &[u32])>) -> Process {
+        Process {
+            asn: Sourced::new(Ok(asn), span(1)),
+            confederation: Confederation {
+                identifier: confederation.map(|(id, _)| Sourced::new(Ok(id), span(2))),
+                peers: confederation
+                    .map(|(_, m)| Sourced::new(Ok(m.iter().copied().collect()), span(3))),
+            },
+        }
+    }
+
+    fn observed_fact(cfg: &BgpConfig, rows: Vec<SessionRow>, peer: &str) -> BgpPeerFact {
+        let f = facts("r1", "r1/config@0", cfg, &sessions(rows), &BTreeMap::new());
+        f.into_iter()
+            .find(|f| f.peer.to_string() == peer)
+            .unwrap_or_else(|| panic!("no fact of {peer}"))
+    }
+
+    #[test]
+    fn an_observed_peer_takes_the_as_that_the_confederation_presents() {
+        let cfg = BgpConfig {
+            processes: BTreeMap::from([(
+                DEFAULT_VRF.to_string(),
+                process(65001, Some((100, &[65002]))),
+            )]),
+            neighbours: Vec::new(),
+        };
+        let outside = observed_fact(
+            &cfg,
+            vec![row("default", "198.51.100.9", Some("200"), 12)],
+            "198.51.100.9",
+        );
+        assert_eq!(outside.source, PeerSource::Observed);
+        assert_eq!(outside.local_asn.value, AsnValue::Known(vec![100]));
+        let member = observed_fact(
+            &cfg,
+            vec![row("default", "198.51.100.10", Some("65002"), 13)],
+            "198.51.100.10",
+        );
+        assert_eq!(member.local_asn.value, AsnValue::Known(vec![65001]));
+        // With no single AS of the peer, the presented AS is not known.
+        let none = observed_fact(
+            &cfg,
+            vec![row("default", "198.51.100.11", None, 14)],
+            "198.51.100.11",
+        );
+        assert!(matches!(none.local_asn.value, AsnValue::Unknown(_)));
+        // With no process of the VRF, the presented AS is not known.
+        let red = observed_fact(
+            &cfg,
+            vec![row("RED", "198.51.100.12", Some("200"), 15)],
+            "198.51.100.12",
+        );
+        assert!(matches!(red.local_asn.value, AsnValue::Unknown(_)));
+    }
+
+    #[test]
+    fn an_observed_peer_in_listen_ranges_that_do_not_resolve_has_no_known_local_as() {
+        let range = |p: &str, gaps: Vec<String>| Neighbour {
+            vrf: DEFAULT_VRF.into(),
+            peer: BgpPeer::Range(p.parse().unwrap()),
+            resolved: Resolved {
+                settings: remote(64510, 20),
+                gaps,
+                ..Resolved::default()
+            },
+            lines: (20, 20),
+        };
+        let gap = format!("{INHERITANCE_GAP}: template peer-session MISSING is not defined");
+        let cfg = |neighbours| BgpConfig {
+            processes: BTreeMap::from([(DEFAULT_VRF.to_string(), process(65001, None))]),
+            neighbours,
+        };
+        let rows = || vec![row("default", "198.51.100.5", Some("64510"), 12)];
+        let gapped = observed_fact(
+            &cfg(vec![range("198.51.100.0/24", vec![gap.clone()])]),
+            rows(),
+            "198.51.100.5",
+        );
+        assert_eq!(gapped.source, PeerSource::Observed);
+        assert_eq!(gapped.local_asn.value, AsnValue::Unknown(gap));
+        assert_eq!(gapped.shutdown, None);
+        let two = observed_fact(
+            &cfg(vec![
+                range("198.51.100.0/24", Vec::new()),
+                range("198.51.100.0/25", Vec::new()),
+            ]),
+            rows(),
+            "198.51.100.5",
+        );
+        assert_eq!(two.source, PeerSource::Observed);
+        assert!(
+            matches!(&two.local_asn.value, AsnValue::Unknown(r) if r.contains("more than one listen range")),
+            "{:?}",
+            two.local_asn
+        );
+        // The provenance lists each session row once.
+        assert_eq!(two.spans.len(), 1);
+    }
+
+    #[test]
+    fn the_local_address_of_an_interface_has_the_family_of_the_peer() {
+        let a = |s: &str| s.parse::<IpAddr>().unwrap();
+        let i = InterfaceAddresses::from([
+            (
+                "Loopback0".to_string(),
+                (
+                    "default".to_string(),
+                    vec![a("192.0.2.1"), a("2001:db8::1")],
+                ),
+            ),
+            (
+                "Loopback1".to_string(),
+                ("default".to_string(), vec![a("192.0.2.2"), a("192.0.2.3")]),
+            ),
+            (
+                "Loopback2".to_string(),
+                ("RED".to_string(), vec![a("203.0.113.1")]),
+            ),
+        ]);
+        let v4 = BgpPeer::Address(a("198.51.100.2"));
+        let v6 = BgpPeer::Address(a("2001:db8::2"));
+        let at = |s: &str, p: &BgpPeer, vrf: &str| local_address(s, &i, p, vrf);
+        assert_eq!(at("Loopback0", &v4, "default"), Some(a("192.0.2.1")));
+        assert_eq!(at("Loopback0", &v6, "default"), Some(a("2001:db8::1")));
+        // No address of the family, more than one, another VRF, a range.
+        assert_eq!(at("Loopback1", &v6, "default"), None);
+        assert_eq!(at("Loopback1", &v4, "default"), None);
+        assert_eq!(at("Loopback2", &v4, "default"), None);
+        assert_eq!(at("Loopback2", &v4, "RED"), Some(a("203.0.113.1")));
+        let range = BgpPeer::Range("198.51.100.0/24".parse().unwrap());
+        assert_eq!(at("Loopback0", &range, "default"), None);
+        assert_eq!(at("192.0.2.9", &v4, "default"), Some(a("192.0.2.9")));
+        assert_eq!(at("192.0.2.9", &v6, "default"), None);
     }
 
     #[test]
