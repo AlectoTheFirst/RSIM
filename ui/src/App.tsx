@@ -41,9 +41,9 @@ function PathFacts(props: { a: Answer }) {
         {one ? (
           <VerdictText v={one} headline />
         ) : (
-          <span class="t-headline">{(s[0]?.result.kind ?? "no answer").replace(/_/g, " ")}</span>
+          <span class="t-headline">{s[0]?.result.kind ?? "no answer"}</span>
         )}
-        {!multi && b0 ? (
+        {!multi && b0 && b0.steps.length ? (
           <span class="muted">
             , {b0.steps.length} functions on {devicesOnPath(b0).length} devices
           </span>

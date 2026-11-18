@@ -91,7 +91,7 @@ export const SIZE = {
   selectedBar: 3,
   focusRing: 2,
   focusOffset: 2,
-  colStep: 30,
+  colStep: 44,
   colFunction: 200,
   colReason: 280,
   colIp: 104,
@@ -100,7 +100,11 @@ export const SIZE = {
   colRib: 52,
   colSource: 132,
   menu: 288,
+  dash: 2,
 } as const;
+
+/** The share of the direction colour in the band of a part of a set query. */
+export const BAND_SHARE = "26%";
 
 export interface Prefs {
   theme: ThemePref;
@@ -158,6 +162,7 @@ export function properties(s: Scheme, p: Prefs): Record<string, string> {
   for (const [k, v] of Object.entries(SIZE)) {
     if (typeof v === "number") out[`--${kebab(k)}`] = `${v}px`;
   }
+  out["--band"] = `color-mix(in srgb, ${c.forward} ${BAND_SHARE}, transparent)`;
   out["--row"] = `${p.row}px`;
   out["color-scheme"] = s;
   return out;

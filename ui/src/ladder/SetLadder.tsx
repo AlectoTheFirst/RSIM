@@ -2,20 +2,29 @@
 // for each part.
 import type { Answer } from "../api/types";
 import { SIZE, TYPE } from "../theme";
+import { Hatch } from "../page/Hatch";
 import { LaneNames, Lanes } from "./Lanes";
 import { RibCell, SectionLine, ladderColumns } from "./Ladder";
 import { type Level, verdictWord } from "./layout";
 import { type PartCell, setLadder } from "./setLayout";
 
-function PartView(props: { c: PartCell }) {
+function PartView(props: { c: PartCell; h: number }) {
   const c = props.c;
+  const sq = props.h - 2 * SIZE.buttonGap;
   switch (c.kind) {
     case "band":
       return <span class="part band" />;
     case "end":
       return (
         <span class={`part end ${c.end}`}>
-          <span class={`strong${c.end === "unknown" ? "" : ` c-${c.end}`}`}>{verdictWord(c.verdict.kind)}</span>{" "}
+          {c.end === "unknown" ? (
+            <span class="verdict-unknown">
+              <Hatch w={sq} h={sq} />
+              <span class="strong">{verdictWord(c.verdict.kind)}</span>
+            </span>
+          ) : (
+            <span class={`strong c-${c.end}`}>{verdictWord(c.verdict.kind)}</span>
+          )}{" "}
           <span class="t-value">{c.verdict.reason?.detail ?? c.verdict.destination?.endpoint ?? c.verdict.destination?.device ?? ""}</span>
         </span>
       );
@@ -69,7 +78,7 @@ export function SetLadder(props: { answer: Answer; level: Level; h: number }) {
           <span class="t-value">{r.fn}</span>
           <span class="t-body">{r.reason}</span>
           {r.cells.map((c) => (
-            <PartView c={c} />
+            <PartView c={c} h={h} />
           ))}
           <RibCell rib={r.rib} h={h} />
           <span class="t-value muted">{r.source}</span>

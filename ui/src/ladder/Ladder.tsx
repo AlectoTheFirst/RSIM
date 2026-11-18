@@ -2,7 +2,7 @@
 // device at the level device, with the forward path and the replies.
 import type { JSX } from "preact";
 import type { Answer, Qos, TraceStep, Verdict } from "../api/types";
-import { Hatch } from "../page/Hatch";
+import { Hatch, HatchMark } from "../page/Hatch";
 import { SIZE, TYPE } from "../theme";
 import { LaneNames, Lanes, laneX } from "./Lanes";
 import {
@@ -40,13 +40,14 @@ const IS_NUMBER = [false, true, false, true, false];
 
 export function VerdictText(props: { v: Verdict; headline?: boolean }) {
   const { v } = props;
-  const cls = v.kind === "deliver" ? "c-deliver" : v.kind === "drop" ? "c-drop" : "";
+  const known = v.kind === "deliver" || v.kind === "drop";
   const dest = destinationOf(v);
+  const word = (
+    <span class={`${props.headline ? "t-headline" : "strong"}${known ? ` c-${v.kind}` : ""}`}>{verdictWord(v.kind)}</span>
+  );
   return (
     <>
-      <span class={`${props.headline ? "t-headline" : "strong"} ${cls}`}>
-        {verdictWord(v.kind)}
-      </span>
+      {known ? word : <HatchMark>{word}</HatchMark>}
       {dest ? (
         <>
           {" to "}

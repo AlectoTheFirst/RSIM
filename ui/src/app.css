@@ -102,7 +102,7 @@ body,
 }
 
 .strong {
-  font-weight: 700;
+  font-weight: var(--headline-weight);
 }
 
 .actions {
@@ -155,7 +155,7 @@ button[aria-current="page"] {
 button:disabled {
   cursor: default;
   color: var(--ink-muted);
-  border-style: dashed;
+  border-color: var(--rule);
 }
 
 button.plain {
@@ -212,7 +212,7 @@ select:focus-visible,
   height: var(--account);
   padding: 0;
   border-radius: var(--account-radius);
-  font-weight: 700;
+  font-weight: var(--headline-weight);
 }
 
 .menu {
@@ -355,7 +355,7 @@ select:focus-visible,
 
 .ladder-section .title {
   grid-column: 3 / -1;
-  font-weight: 600;
+  font-weight: var(--value-changed-weight);
 }
 
 .ix {
@@ -407,7 +407,7 @@ select:focus-visible,
   fill: none;
   stroke: var(--ink-muted);
   stroke-width: var(--hairline);
-  stroke-dasharray: 2 2;
+  stroke-dasharray: var(--dash) var(--dash);
 }
 
 .lane-names text {
@@ -480,13 +480,18 @@ select:focus-visible,
 }
 
 .part.band {
-  background: color-mix(in srgb, var(--forward) 26%, transparent);
+  background: var(--band);
 }
 
 .part.end {
   border: var(--hairline) solid var(--drop);
   padding: 0 var(--button-gap);
   line-height: calc(var(--row) - 2 * var(--hairline));
+  height: var(--row);
+}
+
+.part.end * {
+  line-height: inherit;
 }
 
 .part.end.deliver {
@@ -496,6 +501,13 @@ select:focus-visible,
 .part.end.unknown {
   border-style: dashed;
   border-color: var(--ink-muted);
+}
+
+.verdict-unknown {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--button-gap);
+  vertical-align: middle;
 }
 
 .part-head {
