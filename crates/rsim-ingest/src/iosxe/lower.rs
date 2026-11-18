@@ -297,6 +297,7 @@ pub fn lower(
     }
     let other_vrf = |v: &str| format!("a next hop in VRF {v} is not lowered");
     let resolver = crate::iosxr::lower::resolver(rib, &vrfs);
+    sum.routes = resolver.clone();
     let mut tables = BTreeMap::new();
     let mut forwards = false;
     let mut vrf_forwards = false;

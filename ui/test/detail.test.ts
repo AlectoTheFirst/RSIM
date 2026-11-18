@@ -3,8 +3,17 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { SetAnswer, TraceStep } from "../src/api/types";
-import { sourceUrl } from "../src/api/client";
+import { serverTiming, sourceUrl } from "../src/api/client";
 import { delayShown, detailSources, outcomeKnown, partCounts, qosShown, rateShown } from "../src/ladder/layout";
+
+describe("server timing", () => {
+  it("reads the engine time and a cache hit of the Server-Timing header", () => {
+    expect(serverTiming("engine;dur=4.5")).toEqual({ engineMs: 4.5, cacheHit: false });
+    expect(serverTiming("cache;desc=hit")).toEqual({ engineMs: null, cacheHit: true });
+    expect(serverTiming('db;dur=1, engine;desc="run";dur=12')).toEqual({ engineMs: 12, cacheHit: false });
+    expect(serverTiming(null)).toEqual({ engineMs: null, cacheHit: false });
+  });
+});
 
 describe("set result line", () => {
   it("counts a same_kind part once, by its kind, and only depends_on_path parts as depending on the path", () => {

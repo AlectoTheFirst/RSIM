@@ -18,9 +18,9 @@ pub const SECRET_WORDS: &[&str] = &[
 
 /// True for a UniFi key whose value is a secret: a key of the common rule
 /// of `crate::mask`, a key with a word of `SECRET_WORDS`, a key that ends
-/// with `key` or `keys` and is not a public key, or an `x_` key other than
-/// `x_fingerprint` and the `x_has_` keys, in which the controller keeps its
-/// credentials.
+/// with `key` or `keys` and is not a public key, or an `x_` key, in which
+/// the controller keeps its credentials. `x_fingerprint` and the `x_has_`
+/// keys are secrets only by the other rules.
 pub fn secret_key(key: &str, snmp: bool) -> bool {
     let n = normalized(key);
     let lower = key.to_lowercase();

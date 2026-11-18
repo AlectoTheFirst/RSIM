@@ -1,14 +1,15 @@
 // The ladder of a path query: one row for each function, or for each
 // device at the level device, with the forward path and the replies.
 import type { JSX } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
 import type { Answer, SourceText, Span, TraceStep, Verdict } from "../api/types";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Hatch, HatchMark } from "../page/Hatch";
-import { SIZE, TYPE } from "../theme";
+import { SIZE } from "../theme";
 import { LaneNames, Lanes, laneX } from "./Lanes";
 import {
   type Cell,
   delayShown,
+  type DetailSource,
   destinationOf,
   detailSources,
   type Ladder as LadderModel,
@@ -22,25 +23,30 @@ import {
   verdictWord,
 } from "./layout";
 
-export function ladderColumns(lanes: number, fields: string[]): string {
-  return [
-    `${SIZE.colStep}px`,
-    `${Math.max(1, lanes) * SIZE.lane}px`,
-    `${SIZE.colFunction}px`,
-    `minmax(${SIZE.colReason}px, 1fr)`,
-    ...fields,
-    `${SIZE.colRib}px`,
-    `${SIZE.colSource}px`,
-  ].join(" ");
+/**
+ * The columns of a ladder: step, lanes, function, reason, the given
+ * columns, rib, source lines, and the spare width at the end. The reason
+ * takes the width of its longest text where the page has room, so that the
+ * columns after it follow it directly.
+ */
+export function ladderColumns(lanes: number, fields: number[], reasonMin: number): { columns: string; min: number } {
+  const lw = Math.max(1, lanes) * SIZE.lane;
+  const fixed = [SIZE.colStep, lw, SIZE.colFunction, ...fields, SIZE.colRib, SIZE.colSource];
+  return {
+    columns: [
+      `${SIZE.colStep}px`,
+      `${lw}px`,
+      `${SIZE.colFunction}px`,
+      `minmax(${reasonMin}px, max-content)`,
+      ...fields.map((f) => `${f}px`),
+      `${SIZE.colRib}px`,
+      `${SIZE.colSource}px`,
+      "minmax(0, 1fr)",
+    ].join(" "),
+    min: fixed.reduce((a, b) => a + b, 0) + reasonMin,
+  };
 }
 
-const FIELD_COLUMNS = [
-  `${SIZE.colIp}px`,
-  `${SIZE.colPort}px`,
-  `${SIZE.colIp}px`,
-  `${SIZE.colPort}px`,
-  `${SIZE.colTransport}px`,
-];
 const FIELD_WIDTHS = [SIZE.colIp, SIZE.colPort, SIZE.colIp, SIZE.colPort, SIZE.colTransport];
 const IS_NUMBER = [false, true, false, true, false];
 
@@ -90,7 +96,7 @@ function CellView(props: { c: Cell; dir: StepRow["dir"]; i: number; h: number })
     case "hatch":
       return (
         <span class="cell hatched">
-          <Hatch w={FIELD_WIDTHS[i]! - 2 * SIZE.buttonPad} h={h - SIZE.buttonGap * 2} title={`not known: ${c.text}`} />
+          <Hatch w={FIELD_WIDTHS[i]! - 2 * SIZE.cellPad} h={h - SIZE.ribPadY * 2} title={`not known: ${c.text}`} />
         </span>
       );
   }
@@ -100,16 +106,16 @@ export function RibCell(props: { rib: Rib; h: number }) {
   switch (props.rib) {
     case "hatch":
       return (
-        <span class="cell hatched">
-          <Hatch w={SIZE.colRib - 2 * SIZE.buttonPad} h={props.h - SIZE.buttonGap * 2} title="not checked against a collected RIB" />
+        <span class="rib hatched">
+          <Hatch w={SIZE.colRib - 2 * SIZE.ribPadX} h={props.h - SIZE.ribPadY * 2} title="not checked against a collected RIB" />
         </span>
       );
     case "matches":
-      return <span class="cell t-value c-deliver">matches</span>;
+      return <span class="rib t-value c-deliver" title="matches the collected RIB">matches</span>;
     case "differs":
-      return <span class="cell t-value c-drop">differs</span>;
+      return <span class="rib t-value c-drop" title="differs from the collected RIB">differs</span>;
     default:
-      return <span class="cell" />;
+      return <span class="rib" />;
   }
 }
 
@@ -135,19 +141,31 @@ export function SectionLine(props: { row: SectionRow; lanes: number; h: number }
   );
 }
 
-function Facts(props: { rows: [string, JSX.Element | string | null][] }) {
+/** Facts as label and value; facts with the same value share one row. */
+function Facts(props: { rows: [string, Shown | JSX.Element | null][] }) {
+  const out: [string[], Shown | JSX.Element][] = [];
+  for (const [k, v] of props.rows) {
+    if (v === null) continue;
+    const prev = out[out.length - 1];
+    const same =
+      prev && !isElement(v) && !isElement(prev[1]) && prev[1].text === v.text && prev[1].known === v.known;
+    if (same) prev[0].push(k);
+    else out.push([[k], v]);
+  }
   return (
     <div class="facts">
-      {props.rows
-        .filter(([, v]) => v !== null && v !== "")
-        .map(([k, v]) => (
-          <>
-            <span class="t-label">{k}</span>
-            <span>{v}</span>
-          </>
-        ))}
+      {out.map(([k, v]) => (
+        <>
+          <span class="muted">{k.join(", ")}</span>
+          <span>{isElement(v) ? v : <ShownValue s={v} />}</span>
+        </>
+      ))}
     </div>
   );
+}
+
+function isElement(v: Shown | JSX.Element): v is JSX.Element {
+  return !("known" in v && "text" in v);
 }
 
 export interface DetailActions {
@@ -173,13 +191,20 @@ function CodeLines(props: { t: SourceText }) {
 }
 
 /**
- * The source spans of the opened row: the lines of the open span, first
- * the most specific one, and the other spans as labels that open their
- * lines. A span whose lines the API refuses shows its label only.
+ * The source spans of the opened row by file: the lines of the open span,
+ * first the most specific one, and the other spans as labels that open
+ * their lines. A span whose lines the API refuses, or a twin with no
+ * source text, shows the label only.
  */
 function SourceLines(props: { steps: readonly TraceStep[]; load: DetailActions["sourceLines"] }) {
   const { load } = props;
   const sources = detailSources(props.steps);
+  const files: [string, DetailSource[]][] = [];
+  for (const e of sources) {
+    const f = files.find(([file]) => file === e.span.file);
+    if (f) f[1].push(e);
+    else files.push([e.span.file, [e]]);
+  }
   const [open, setOpen] = useState<string | null>(sources[0]?.key ?? null);
   const [text, setText] = useState<Record<string, SourceText | null>>({});
   const asked = useRef(new Set<string>());
@@ -194,29 +219,24 @@ function SourceLines(props: { steps: readonly TraceStep[]; load: DetailActions["
   }, [open, load]);
   return (
     <div>
-      <div class="t-label">source lines</div>
-      <ul class="spans">
-        {sources.map((e) => {
-          const t = e.key === open ? text[e.key] : null;
-          return (
-            <li>
-              {load ? (
-                <button
-                  type="button"
-                  class="plain span-label t-value"
-                  aria-expanded={e.key === open}
-                  onClick={() => setOpen(e.key === open ? null : e.key)}
-                >
-                  {e.label}
-                </button>
-              ) : (
-                <span class="t-value">{e.label}</span>
-              )}
-              {t ? <CodeLines t={t} /> : null}
-            </li>
-          );
-        })}
-      </ul>
+      {files.map(([file, spans]) => (
+        <>
+          <div class="muted head">
+            Source <span class="t-value">{file}</span>
+          </div>
+          {spans.map((e) => {
+            const t = e.key === open ? text[e.key] : null;
+            if (t) return <CodeLines t={t} />;
+            return load ? (
+              <button type="button" class="plain span-label t-value" onClick={() => setOpen(e.key)}>
+                {e.label}
+              </button>
+            ) : (
+              <span class="span-label t-value">{e.label}</span>
+            );
+          })}
+        </>
+      ))}
     </div>
   );
 }
@@ -228,6 +248,13 @@ function Detail(props: { row: StepRow; lanes: number; actions: DetailActions }) 
   const x = laneX(row.lane);
   const cls = row.dir === "forward" ? "path-forward" : "path-reply";
   const rate = last.rate_condition ? rateShown(last.rate_condition) : null;
+  const v = (t: string) => <span class="t-value">{t}</span>;
+  // The full reason, only where the row cuts it.
+  const [cut, setCut] = useState(false);
+  useLayoutEffect(() => {
+    const el = document.querySelector(`[id="row-${row.key}"] > .reason`);
+    setCut(!!el && el.scrollWidth > el.clientWidth);
+  });
   return (
     <div class="ladder-detail" role="row">
       <span />
@@ -242,37 +269,36 @@ function Detail(props: { row: StepRow; lanes: number; actions: DetailActions }) 
       <div class="detail">
         <SourceLines key={row.key} steps={row.steps} load={actions.sourceLines} />
         <div>
-          <div class="t-label">function</div>
+          <div class="muted head">
+            Parameters of <span class="t-value">{last.function}</span>
+          </div>
           <Facts
             rows={[
-              ["function", <span class="t-value">{last.function}</span>],
-              ["kind", <span class="t-value">{last.kind}</span>],
-              ["outcome", <span class="t-value">{last.outcome.kind}{last.outcome.next ? ` to ${last.outcome.next}` : ""}</span>],
-              ["reason", <span class="t-value">{last.reason.code}</span>],
-              ["delay", <ShownValue s={delayShown(last.delay)} />],
-              ["alternative", last.alternative ? <span class="t-value">{`${last.alternative.index + 1} of ${last.alternative.count}: ${last.alternative.label}`}</span> : null],
-              ["flood copy", last.flood_copy ? <span class="t-value">{`${last.flood_copy.index + 1} of ${last.flood_copy.count} to ${last.flood_copy.port}`}</span> : null],
+              ["reason", cut ? <span class="t-body">{row.reason}</span> : null],
+              ["kind", v(last.kind)],
+              ["delay", delayShown(last.delay)],
+              ["alternative", last.alternative ? v(`${last.alternative.index + 1} of ${last.alternative.count}: ${last.alternative.label}`) : null],
+              ["flood copy", last.flood_copy ? v(`${last.flood_copy.index + 1} of ${last.flood_copy.count} to ${last.flood_copy.port}`) : null],
               [
                 "rate",
                 rate ? (
                   <span>
-                    <span class="t-value">{rate.action}</span> <ShownValue s={rate.rate} />
+                    {v(rate.action)} <ShownValue s={rate.rate} />
                   </span>
                 ) : null,
               ],
-              ["rib guard", <span class="t-value">{last.rib_guard}</span>],
             ]}
           />
         </div>
         <div>
-          <div class="t-label">QoS at this function</div>
+          <div class="muted head">QoS at this function</div>
           <Facts
             rows={[
-              ["dscp", <ShownValue s={qosShown(last.qos.dscp)} />],
-              ["ecn", <ShownValue s={qosShown(last.qos.ecn)} />],
-              ["traffic class", <ShownValue s={qosShown(last.qos.traffic_class)} />],
-              ["drop precedence", <ShownValue s={qosShown(last.qos.drop_precedence)} />],
-              ["queue", <ShownValue s={qosShown(last.qos.queue)} />],
+              ["dscp", qosShown(last.qos.dscp)],
+              ["ecn", qosShown(last.qos.ecn)],
+              ["traffic class", qosShown(last.qos.traffic_class)],
+              ["drop precedence", qosShown(last.qos.drop_precedence)],
+              ["queue", qosShown(last.qos.queue)],
             ]}
           />
           <div class="group actions">
@@ -289,18 +315,17 @@ function Detail(props: { row: StepRow; lanes: number; actions: DetailActions }) 
   );
 }
 
-export function LadderHead(props: { model: LadderModel; fieldHeads: JSX.Element[] }) {
-  const { model } = props;
+export function LadderHead(props: { model: Pick<LadderModel, "lanes">; fieldHeads: JSX.Element[]; reason: string }) {
   return (
     <div class="ladder-row ladder-head t-label" role="row">
       <span />
       <span class="lanes head">
-        <LaneNames lanes={model.lanes} line={TYPE.index.line} />
+        <LaneNames lanes={props.model.lanes} />
       </span>
       <span>function</span>
-      <span>reason</span>
+      <span>{props.reason}</span>
       {props.fieldHeads}
-      <span class="cell">rib</span>
+      <span>rib</span>
       <span>source lines</span>
     </div>
   );
@@ -309,12 +334,12 @@ export function LadderHead(props: { model: LadderModel; fieldHeads: JSX.Element[
 export function pathFieldHeads(): JSX.Element[] {
   const two = (a: string, b: string, num = false) => (
     <span class={`cell${num ? " num" : ""}`}>
-      {a}
+      {a || " "}
       <br />
       {b}
     </span>
   );
-  return [two("source", "ip"), two("", "port", true), two("destination", "ip"), two("", "port", true), two("network", "transport")];
+  return [two("source", "ip"), two("", "port", true), two("destination", "ip"), two("", "port", true), two("", "transport")];
 }
 
 export function PathLadder(props: {
@@ -328,9 +353,10 @@ export function PathLadder(props: {
 }) {
   const { model, h, selected, open, onSelect, actions } = props;
   const n = model.lanes.length;
+  const grid = ladderColumns(n, FIELD_WIDTHS, SIZE.colReason);
   return (
-    <div class="ladder" role="table" style={{ "--ladder-columns": ladderColumns(n, FIELD_COLUMNS) }}>
-      <LadderHead model={model} fieldHeads={pathFieldHeads()} />
+    <div class="ladder" role="table" style={{ "--ladder-columns": grid.columns, minWidth: `${grid.min}px` }}>
+      <LadderHead model={model} fieldHeads={pathFieldHeads()} reason="reason" />
       {model.rows.map((row) => {
         if (row.type === "section") return <SectionLine key={row.key} row={row} lanes={n} h={h} />;
         const sel = row.key === selected;
@@ -349,12 +375,16 @@ export function PathLadder(props: {
                 <Lanes lanes={n} h={h} marks={row} />
               </span>
               <span class="t-value">{row.fn}</span>
-              <span class="t-body">{row.reason}</span>
+              <span class="t-body reason" title={row.reason}>
+                {row.reason}
+              </span>
               {row.cells.map((c, i) => (
                 <CellView c={c} dir={row.dir} i={i} h={h} />
               ))}
               <RibCell rib={row.rib} h={h} />
-              <span class="t-value muted">{row.source}</span>
+              <span class="t-value muted" title={row.steps.flatMap((s) => s.provenance.map((p) => `${p.file}:${p.first_line}-${p.last_line}`)).join("\n")}>
+                {row.source}
+              </span>
             </div>
             {sel && open ? <Detail row={row} lanes={n} actions={actions} /> : null}
           </>

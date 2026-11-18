@@ -6,9 +6,10 @@ use crate::mask::{key_like, normalized, secret_key as common};
 /// case without `_`, `-`, `.` and spaces: the WireGuard private and
 /// pre-shared keys, the PPPoE and authentication passwords, the encrypted
 /// and plaintext passwords of the users, the RADIUS and TACACS keys, the
-/// IPsec pre-shared secrets and the OSPF and VRRP keys.
+/// IPsec pre-shared secrets, the NHRP secrets and the OSPF and VRRP keys.
 pub const SECRET_WORDS: &[&str] = &[
     "authenticationkey",
+    "ciscoauthentication",
     "encryptedpassword",
     "md5key",
     "password",
@@ -69,6 +70,7 @@ mod tests {
                 "ospf": {"interface": {"eth0": {"authentication": {"md5": {"key-id": {"1": {"md5-key": "FAKEOSPF"}}}}}}},
                 "bgp": {"neighbor": {"192.0.2.2": {"password": "FAKEBGP", "remote-as": "65001"}}}
             },
+            "protocols-nhrp": {"tunnel": {"tun0": {"cisco-authentication": "FAKENHRP"}}},
             "high-availability": {"vrrp": {"group": {"g1": {"authentication": {"password": "FAKEVRRP", "type": "plaintext-password"}}}}}
         })
     }

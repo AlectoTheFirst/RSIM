@@ -9,7 +9,7 @@ use rsim_ingest::bgp::{self, Outcome, SessionSections};
 use rsim_ingest::collected::Collected;
 use rsim_ingest::coverage::Coverage;
 use rsim_ingest::estate::{Estate, Input, assemble_with};
-use rsim_ingest::links::{AsnValue, BgpPeerFact, PeerSource};
+use rsim_ingest::links::{AddressValue, AsnValue, BgpFar, BgpPeerFact, FarSide, PeerSource};
 use rsim_ingest::route_tables::RouteTables;
 use rsim_ingest::{classify, iosxe, iosxr, nxos, read_json, vyos};
 
@@ -137,6 +137,14 @@ fn the_neighbour_lines_are_handled_and_read_in_each_vrf_state() {
                 .keys()
                 .filter(|p| p.starts_with("router bgp") || p.contains("protocols/bgp"))
                 .count();
+            // No unhandled stanza can hold a neighbour, so the BGP config of
+            // each fixture is read in full.
+            let hidden: Vec<&String> = cov
+                .unhandled
+                .keys()
+                .filter(|p| rsim_ingest::estate::hides_peers(p))
+                .collect();
+            assert!(hidden.is_empty(), "{vendor} {rows:?}: {hidden:?}");
             match rows {
                 Rows::All => assert_eq!(bgp_lines, 0, "{vendor}: {:?}", cov.unhandled),
                 Rows::None => assert!(bgp_lines > 0, "{vendor}: {:?}", cov.unhandled),
@@ -799,5 +807,160 @@ fn the_local_address_of_an_update_source_has_the_family_of_the_peer() {
     assert_eq!(
         peer(&f, "default", "203.0.113.9").local_address,
         Some(addr("203.0.113.1"))
+    );
+}
+
+#[test]
+fn an_iosxe_listen_range_takes_the_default_activation_of_ipv4_unicast() {
+    let f = replaced(
+        "iosxe",
+        IOSXE,
+        &[
+            (" neighbor DYNAMIC activate\n", ""),
+            (
+                " address-family ipv4 vrf RED\n",
+                " address-family ipv6\n  neighbor DYNAMIC activate\n exit-address-family\n !\n address-family ipv4 vrf RED\n",
+            ),
+        ],
+    );
+    assert_eq!(
+        families(peer(&f, "default", "198.51.100.128/26")),
+        ["ipv4-unicast", "ipv6-unicast"]
+    );
+}
+
+#[test]
+fn an_address_family_that_the_reader_does_not_name_leaves_the_families_open() {
+    let nxos = edited(
+        "nxos",
+        NXOS,
+        "router bgp 65000\n",
+        "  neighbor 192.0.2.90\n    remote-as 64500\n    address-family ipv4 mvpn\n    address-family ipv4 unicast\n",
+        "192.0.2.90",
+    );
+    assert_eq!(families(&nxos), ["ipv4-unicast"]);
+    let iosxe = edited(
+        "iosxe",
+        IOSXE,
+        " address-family ipv4 vrf RED\n",
+        " address-family ipv4 mvpn\n  neighbor 198.51.100.1 activate\n exit-address-family\n !\n address-family ipv4 vrf RED\n",
+        "198.51.100.1",
+    );
+    for f in [&nxos, &iosxe] {
+        assert!(
+            f.families_open
+                .as_deref()
+                .is_some_and(|r| r.contains("ipv4 mvpn")),
+            "{:?}",
+            f.families_open
+        );
+    }
+    // A gap can hide an activation.
+    let gap = edited(
+        "iosxe",
+        IOSXE,
+        "router bgp 64496\n",
+        " neighbor 192.0.2.91 remote-as 64499\n neighbor 192.0.2.91 inherit peer-session NOWHERE\n",
+        "192.0.2.91",
+    );
+    assert!(
+        gap.families_open
+            .as_deref()
+            .is_some_and(|r| r.starts_with("inheritance gap")),
+        "{:?}",
+        gap.families_open
+    );
+    let plain = edited(
+        "iosxe",
+        IOSXE,
+        "router bgp 64496\n",
+        " neighbor 192.0.2.92 remote-as 64499\n",
+        "192.0.2.92",
+    );
+    assert_eq!(plain.families_open, None);
+}
+
+/// The sections of the IOS-XR fixture, with the route table.
+fn iosxr_sections(device: &str) -> BTreeMap<String, (Vec<u8>, String)> {
+    iosxr::SECTIONS
+        .iter()
+        .map(|n| {
+            (
+                n.to_string(),
+                (fixture(&format!("iosxr/{n}.txt")), format!("{device}/{n}")),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_bgp_stanza_that_the_route_rows_make_irrelevant_makes_the_config_not_read() {
+    // r1 peers with the loopback of xr from 203.0.113.129. With the
+    // instance, xr has the neighbour only in a BGP instance that the reader
+    // does not read.
+    let far_side = |instance: bool| {
+        let mut xr = String::from_utf8(fixture(IOSXR)).unwrap();
+        if instance {
+            xr = xr.replacen(
+                "router bgp 64496\n",
+                "router bgp 64496 instance CORE\n neighbor 203.0.113.129\n  remote-as 64496\n !\n!\nrouter bgp 64496\n",
+                1,
+            );
+        }
+        let vyos = String::from_utf8(fixture(VYOS)).unwrap().replacen(
+            r#""198.51.100.6": {"#,
+            r#""203.0.113.1": {"remote-as": "64496", "update-source": "203.0.113.129"},
+        "198.51.100.6": {"#,
+            1,
+        );
+        let e = assemble_with(
+            vec![
+                input("vyos", "r1", vyos.into_bytes()),
+                Input::Iosxr {
+                    name: "xr".into(),
+                    config: xr.into_bytes(),
+                    file: "xr/config@000000000000".into(),
+                    collected: Collected::default(),
+                    sections: iosxr_sections("xr"),
+                },
+            ],
+            &BTreeMap::new(),
+        );
+        let f = peer(&e.bgp["r1"], "default", "203.0.113.1");
+        assert_eq!(f.source_address, AddressValue::Known(addr("203.0.113.129")));
+        match &f.far {
+            Some(BgpFar::Device { device, side, .. }) if device == "xr" => side.clone(),
+            other => panic!("{other:?}"),
+        }
+    };
+    assert_eq!(far_side(false), FarSide::Absent { read: true });
+    assert_eq!(far_side(true), FarSide::Absent { read: false });
+}
+
+#[test]
+fn an_ipv6_address_of_an_nxos_switch_is_an_address_of_the_twin() {
+    let nxos = String::from_utf8(fixture(NXOS)).unwrap().replacen(
+        "  ip address 198.51.100.1/30\n",
+        "  ip address 198.51.100.1/30\n  ipv6 address 2001:db8:5::1/64\n",
+        1,
+    );
+    let vyos = String::from_utf8(fixture(VYOS)).unwrap().replacen(
+        r#""198.51.100.6": {"#,
+        r#""2001:db8:5::1": {"remote-as": "64500"},
+        "198.51.100.6": {"#,
+        1,
+    );
+    let e = assemble_with(
+        vec![
+            input("vyos", "r1", vyos.into_bytes()),
+            input("nxos", "sw", nxos.into_bytes()),
+        ],
+        &BTreeMap::new(),
+    );
+    let f = peer(&e.bgp["r1"], "default", "2001:db8:5::1");
+    assert!(
+        matches!(&f.far, Some(BgpFar::Device { device, .. }) if device == "sw"),
+        "{:?}",
+        f.far
     );
 }

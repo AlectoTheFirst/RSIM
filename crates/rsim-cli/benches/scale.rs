@@ -5,8 +5,10 @@
 //!
 //! The benchmark prints the generation and build times and the heap of the
 //! twin, the time of a path query and of a set query, and the time and
-//! peak heap of 2 requests of the table `fib`: a page of 100 rows, and all
-//! rows as JSON. `RSIM_SCALE_PHASES` selects the parts, a list of `twin`,
+//! peak heap of requests of the table `fib`: a first page of 100 rows with
+//! the build of the columns and the heap that the columns hold, a page of
+//! 100 rows, a page of the rows of one device, a page sorted by prefix, and
+//! all rows as JSON. `RSIM_SCALE_PHASES` selects the parts, a list of `twin`,
 //! `path`, `set`, `table` and `fulltable` (the heap of one full table
 //! alone); the default is all. `RSIM_SCALE_FILL=0` builds the route tables
 //! with only the routes of the estate. When the live heap passes
@@ -281,6 +283,7 @@ fn main() {
             identity: TwinJson::builtin("scale").unwrap(),
             coverage: BTreeMap::new(),
             bgp: BTreeMap::new(),
+            tables: Default::default(),
             source: None,
         };
         let page = Selection {
@@ -292,15 +295,47 @@ fn main() {
         let r = tables::show("scale", &loaded, "fib", &page).unwrap();
         let took = t.elapsed();
         let peak = PEAK.load(Ordering::Relaxed) - before;
+        let held = live() - before;
         out(format!(
-            "fib table, a page of 100 rows: {} rows of {}, {:.2} s, peak heap {:.1} MiB ({:.0} B per row of the table)",
+            "fib table, a first page of 100 rows with the build of the columns: {} rows of {}, {:.2} s, peak heap {:.1} MiB ({:.0} B per row of the table), columns held {:.1} MiB ({:.0} B per row)",
             r.rows.len(),
             r.total,
             took.as_secs_f64(),
             mib(peak),
-            peak as f64 / r.total as f64
+            peak as f64 / r.total as f64,
+            mib(held),
+            held as f64 / r.total as f64
         ));
+        let device = r.rows[0][0].as_str().unwrap_or_default().to_string();
         drop(r);
+        let mut device_page = page.clone();
+        device_page
+            .filters
+            .insert("device".into(), vec![device.clone()]);
+        let sorted = Selection {
+            sort: Some(vec!["-prefix".into()]),
+            ..page.clone()
+        };
+        for (what, sel) in [
+            ("a page of 100 rows".to_string(), &page),
+            (
+                format!("a page of 100 rows of the device {device}"),
+                &device_page,
+            ),
+            ("a page of 100 rows sorted by -prefix".to_string(), &sorted),
+        ] {
+            let before = reset_peak();
+            let t = Instant::now();
+            let r = tables::show("scale", &loaded, "fib", sel).unwrap();
+            let took = t.elapsed();
+            out(format!(
+                "fib table, {what}: {} rows of {}, {:.3} s, peak heap {:.1} MiB",
+                r.rows.len(),
+                r.total,
+                took.as_secs_f64(),
+                mib(PEAK.load(Ordering::Relaxed) - before)
+            ));
+        }
         let before = reset_peak();
         let t = Instant::now();
         let r = tables::show("scale", &loaded, "fib", &Selection::default()).unwrap();

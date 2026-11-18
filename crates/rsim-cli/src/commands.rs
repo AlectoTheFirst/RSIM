@@ -29,6 +29,9 @@ pub struct Loaded {
     /// The BGP peer facts of each device of a store twin; empty for a
     /// built-in topology.
     pub bgp: BTreeMap<String, Vec<rsim_ingest::links::BgpPeerFact>>,
+    /// The columns of the tables of the twin, built when a request first
+    /// names a table.
+    pub tables: crate::tables::TableCache,
     /// The store and the snapshot of a store twin, for the text of its
     /// source lines; none for a built-in topology.
     pub source: Option<crate::sources::SourceStore>,
@@ -64,6 +67,7 @@ pub fn load(topology: &str) -> Result<Loaded, QueryError> {
         identity,
         coverage: BTreeMap::new(),
         bgp: BTreeMap::new(),
+        tables: Default::default(),
         source: None,
     })
 }
@@ -97,6 +101,7 @@ pub fn load_store(folder: &str) -> Result<Loaded, QueryError> {
         identity: TwinJson::snapshot(snap.manifest.cycle),
         coverage,
         bgp,
+        tables: Default::default(),
         source: Some(crate::sources::SourceStore {
             store,
             snapshot: snap,
