@@ -117,7 +117,8 @@ pub fn lower(
         out: Lowered::default(),
     };
     let names = Names::new(cfg.interfaces.iter().map(|i| i.name.as_str()));
-    let st = super::state::read(sections, &names);
+    let mut st = super::state::read(sections, &names);
+    st.no_mac_table = !super::state::mac_table_collected(sections, !col.macs.is_empty());
     let mut active: Vec<Interface> = Vec::new();
     for i in &cfg.interfaces {
         let collected = st.interfaces.get(&i.name);
@@ -476,10 +477,11 @@ pub fn lower(
         // The routed egress of an SVI goes into its VLAN through the SVI
         // port, with the MAC of the SVI as the source MAC. A routed port with
         // a link goes to the far end.
-        let routed_peer = ext
+        let routed_peers = ext
             .peers
             .get(&i.name)
-            .filter(|_| sum.routed.contains(&i.name))
+            .filter(|_| sum.routed.contains(&i.name));
+        let routed_peer = routed_peers
             .and_then(|list| match list.as_slice() {
                 [p] => Some(p),
                 _ => None,
@@ -520,9 +522,9 @@ pub fn lower(
             ),
             None => (None, Rewrite::default(), Tag::Keep),
         };
-        // The hand-off of a routed port with a link: its MAC and the active
-        // virtual MACs go to its ingress.
-        if routed_peer.is_some() {
+        // The hand-off of a routed port with one or more links: its MAC and
+        // the active virtual MACs go to its ingress.
+        if routed_peers.is_some_and(|list| !list.is_empty()) {
             let g = gws.get(&i.name).cloned().unwrap_or_default();
             let f = format!("handoff/{}", i.name);
             let span = l.span(i.lines);

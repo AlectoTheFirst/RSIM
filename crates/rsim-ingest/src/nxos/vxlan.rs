@@ -500,7 +500,9 @@ impl L<'_> {
 
     /// The MAC lookup and the flood of a frame out of the tunnel: a frame
     /// does not go back into the tunnel. Gives the decapsulation of the
-    /// tunnel end, or `None` if the switch has no tunnel end.
+    /// tunnel end, or `None` if the switch has no tunnel end. With
+    /// `no_mac_table`, a frame that the MAC lookup does not find gives
+    /// `Unknown`, except a broadcast frame.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn vxlan_split_horizon(
         &mut self,
@@ -509,6 +511,7 @@ impl L<'_> {
         egress: &BTreeMap<PortId, FunctionId>,
         flood: &BTreeMap<BridgeDomainId, Vec<(PortId, FunctionId)>>,
         bd: &dyn Fn(u16) -> BridgeDomainId,
+        no_mac_table: bool,
     ) {
         let Plan::Exact(t) = plan else {
             return;
@@ -548,12 +551,17 @@ impl L<'_> {
                     (bd(*v), ports)
                 })
                 .collect();
+        let miss = if no_mac_table {
+            self.mac_miss("flood-tunnel")
+        } else {
+            self.id("flood-tunnel")
+        };
         let meta = self.meta("mac-tunnel", t.spans.clone());
         self.add(rsim_functions::MacLookup {
             meta,
             tables: tables.clone(),
             egress: egress_t,
-            flood: self.id("flood-tunnel"),
+            flood: miss,
             hairpin: BTreeSet::new(),
             blocked: BTreeMap::new(),
         });

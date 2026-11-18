@@ -37,6 +37,14 @@ struct Opts {
     leaf1_knows_host2: bool,
     /// More lines of Ethernet1/49 of leaf1.
     uplink_extra: &'static str,
+    /// The bytes of the NVE VNI section of leaf2 in place of the fixture.
+    leaf2_vnis: Option<&'static str>,
+    /// The bytes of the NVE peer section of leaf1 in place of the fixture.
+    leaf1_peers: Option<&'static str>,
+    /// True if leaf2 has no MAC table rows.
+    leaf2_no_macs: bool,
+    /// The bytes of the MAC table section of leaf2, if it has one.
+    leaf2_mac_section: Option<&'static str>,
 }
 
 impl Default for Opts {
@@ -48,6 +56,10 @@ impl Default for Opts {
             vni_state: "Up",
             leaf1_knows_host2: true,
             uplink_extra: "",
+            leaf2_vnis: None,
+            leaf1_peers: None,
+            leaf2_no_macs: false,
+            leaf2_mac_section: None,
         }
     }
 }
@@ -200,6 +212,7 @@ fn collected(n: u8, o: &Opts) -> Collected {
         ]
         .into_iter()
         .flatten()
+        .filter(|_| n == 1 || !o.leaf2_no_macs)
         .collect(),
         ..Collected::default()
     }
@@ -246,6 +259,15 @@ fn sections(n: u8, o: &Opts) -> BTreeMap<String, (Vec<u8>, String)> {
                 r#"{{"TABLE_nve_peers":{{"ROW_nve_peers":[{{"if-name":"nve1","peer-ip":"192.0.2.{peer}","peer-state":"{p}"}}]}}}}"#
             ),
         );
+    }
+    if let (2, Some(raw)) = (n, o.leaf2_vnis) {
+        m.insert("nve_vnis".into(), raw.into());
+    }
+    if let (1, Some(raw)) = (n, o.leaf1_peers) {
+        m.insert("nve_peers".into(), raw.into());
+    }
+    if let (2, Some(raw)) = (n, o.leaf2_mac_section) {
+        m.insert("mac_table".into(), raw.into());
     }
     m.into_iter()
         .map(|(k, v)| (k.clone(), (v.into_bytes(), format!("{host}/{k}"))))
@@ -473,4 +495,120 @@ fn an_output_acl_on_the_egress_of_the_outer_header_is_unknown() {
         has(&branches[0].1, "leaf1/vxlan/acl-out/Ethernet1/49"),
         "{branches:#?}"
     );
+}
+
+#[test]
+fn a_vni_section_with_no_vni_table_makes_the_tunnel_end_unknown() {
+    let o = Opts {
+        leaf2_vnis: Some(r#"{"TABLE_vni":{"ROW_vni":[]}}"#),
+        ..Opts::default()
+    };
+    let t = estate(&o).builder.build().expect("the twin builds");
+    let a = run(&t, "198.51.100.11", "198.51.100.12");
+    let branches = show(&a);
+    assert_eq!(branches.len(), 1, "{branches:#?}");
+    let (verdict, steps) = &branches[0];
+    assert_eq!(*verdict, VerdictKind::Unknown, "{steps:#?}");
+    assert!(has(steps, "has no TABLE_nve_vni"), "{steps:#?}");
+}
+
+#[test]
+fn an_empty_vni_section_is_an_empty_table() {
+    let o = Opts {
+        leaf2_vnis: Some("{}"),
+        ..Opts::default()
+    };
+    let e = estate(&o);
+    assert!(
+        e.notes["leaf2"]
+            .iter()
+            .any(|n| n.contains("VNI 10010: not in the collected VNIs")),
+        "{:?}",
+        e.notes["leaf2"]
+    );
+}
+
+#[test]
+fn a_peer_section_with_no_peer_table_makes_the_flood_unknown() {
+    let o = Opts {
+        leaf1_knows_host2: false,
+        leaf1_peers: Some(r#"{"TABLE_peers":{"ROW_peers":[]}}"#),
+        ..Opts::default()
+    };
+    let t = estate(&o).builder.build().expect("the twin builds");
+    let a = run(&t, "198.51.100.11", "198.51.100.12");
+    let branches = show(&a);
+    assert!(
+        branches
+            .iter()
+            .any(|(v, s)| *v == VerdictKind::Unknown && has(s, "has no TABLE_nve_peers")),
+        "{branches:#?}"
+    );
+}
+
+/// The run of a packet that leaf2 routes into VLAN 10 from its uplink.
+fn routed_by_leaf2(t: &Twin) -> Vec<(VerdictKind, Vec<String>)> {
+    let h = Header::request(ip("172.16.0.0"), ip("198.51.100.12"), PROTO_TCP)
+        .with_src_port(40000)
+        .with_dst_port(443);
+    let a = Executor::new(t)
+        .run(
+            &Query::path(t, &h)
+                .with_ingress("leaf2", "Ethernet1/49")
+                .without_reply(),
+        )
+        .expect("the query runs");
+    show(&a)
+}
+
+#[test]
+fn a_switch_with_no_mac_table_section_gives_unknown_for_a_unicast_frame() {
+    let o = Opts {
+        leaf2_no_macs: true,
+        ..Opts::default()
+    };
+    let t = estate(&o).builder.build().expect("the twin builds");
+    let branches = routed_by_leaf2(&t);
+    assert!(!branches.is_empty());
+    for (verdict, steps) in &branches {
+        assert_eq!(*verdict, VerdictKind::Unknown, "{steps:#?}");
+        assert!(has(steps, "the MAC table is not collected"), "{steps:#?}");
+    }
+    // A frame out of the tunnel that the MAC lookup does not find.
+    assert_eq!(miss_of(&t, "leaf2/mac-tunnel"), ["leaf2/mac-miss-tunnel"]);
+}
+
+/// The successors of a MAC lookup that are not a port egress.
+fn miss_of(t: &Twin, f: &str) -> Vec<String> {
+    t.function(&rsim_core::FunctionId::new(f))
+        .expect("the MAC lookup")
+        .successors()
+        .iter()
+        .map(ToString::to_string)
+        .filter(|s| !s.contains("/port/") && !s.contains("/svi/") && !s.contains("vxlan/"))
+        .collect()
+}
+
+#[test]
+fn an_empty_mac_table_section_is_an_empty_table() {
+    let o = Opts {
+        leaf2_no_macs: true,
+        leaf2_mac_section: Some("{}"),
+        ..Opts::default()
+    };
+    let t = estate(&o).builder.build().expect("the twin builds");
+    let branches = routed_by_leaf2(&t);
+    assert!(
+        branches
+            .iter()
+            .any(|(_, s)| has(s, "flood copy to port Ethernet1/5")),
+        "{branches:#?}"
+    );
+    assert!(
+        branches
+            .iter()
+            .all(|(_, s)| !has(s, "the MAC table is not collected")),
+        "{branches:#?}"
+    );
+    assert_eq!(miss_of(&t, "leaf2/mac-tunnel"), ["leaf2/flood-tunnel"]);
 }

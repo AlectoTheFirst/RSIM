@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
-use rsim_core::{Header, PROTO_TCP, VerdictKind};
+use rsim_core::{Header, PROTO_TCP, PROTO_UDP, VerdictKind};
 use rsim_engine::{Answer, Executor, Query, Twin};
 use rsim_ingest::collected::{Collected, LinkRow, MacRow, NeighbourRow, RouteRow, row_span};
 use rsim_ingest::estate::{Estate, Input, assemble};
@@ -20,7 +20,23 @@ struct Opts {
     spine_iif: Option<&'static str>,
     /// True if the spine has only the (*,G) route.
     spine_star_only: bool,
+    /// True if both routes of the spine also name the outgoing interface
+    /// Ethernet1/3, which has no config.
+    spine_unlowered_oif: bool,
+    /// True if leaf2 has the routed port Ethernet1/6 in the VRF TENANT and
+    /// 2 routes of a group of that VRF with nve1 as an outgoing interface.
+    tenant: bool,
 }
+
+const TENANT_GROUP: &str = "233.252.0.30";
+
+const TENANT: &str = "vrf context TENANT
+interface Ethernet1/6
+  no switchport
+  vrf member TENANT
+  ip address 203.0.113.1/24
+  no shutdown
+";
 
 fn leaf_config(n: u8) -> String {
     format!(
@@ -209,12 +225,17 @@ fn spine_collected() -> Collected {
 
 /// A route row of the multicast section.
 fn mroute(source: &str, iif: &str, oifs: &[&str]) -> String {
+    mroute_of(source, GROUP, iif, oifs)
+}
+
+/// A route row of the multicast section for a group.
+fn mroute_of(source: &str, group: &str, iif: &str, oifs: &[&str]) -> String {
     let oifs: Vec<String> = oifs
         .iter()
         .map(|o| format!(r#"{{"oif-name":"{o}"}}"#))
         .collect();
     format!(
-        r#"{{"source-addr":"{source}","group-addr":"{GROUP}/32","route-iif":"{iif}","TABLE_oif":{{"ROW_oif":[{}]}}}}"#,
+        r#"{{"source-addr":"{source}","group-addr":"{group}/32","route-iif":"{iif}","TABLE_oif":{{"ROW_oif":[{}]}}}}"#,
         oifs.join(",")
     )
 }
@@ -224,8 +245,19 @@ fn sections(
     lldp: &[(&str, &str, &str)],
     up: &[&str],
     mroutes: &[String],
+    tenant_mroutes: &[String],
     peer: Option<&str>,
 ) -> BTreeMap<String, (Vec<u8>, String)> {
+    let mut vrfs = vec![format!(
+        r#"{{"vrf-name":"default","TABLE_one_route":{{"ROW_one_route":[{}]}}}}"#,
+        mroutes.join(",")
+    )];
+    if !tenant_mroutes.is_empty() {
+        vrfs.push(format!(
+            r#"{{"vrf-name":"TENANT","TABLE_one_route":{{"ROW_one_route":[{}]}}}}"#,
+            tenant_mroutes.join(",")
+        ));
+    }
     let rows: Vec<String> = lldp
         .iter()
         .map(|(l, n, p)| format!(r#"{{"l_port_id":"{l}","sys_name":"{n}","port_id":"{p}"}}"#))
@@ -255,10 +287,7 @@ fn sections(
         ),
         (
             "mroutes".to_string(),
-            format!(
-                r#"{{"TABLE_vrf":{{"ROW_vrf":[{{"vrf-name":"default","TABLE_one_route":{{"ROW_one_route":[{}]}}}}]}}}}"#,
-                mroutes.join(",")
-            ),
+            format!(r#"{{"TABLE_vrf":{{"ROW_vrf":[{}]}}}}"#, vrfs.join(",")),
         ),
     ]);
     if let Some(peer) = peer {
@@ -293,29 +322,52 @@ fn estate(o: &Opts) -> Estate {
                 mroute("*", "Ethernet1/49", &["nve1"]),
             ]
         };
+        let tenant = o.tenant && n == 2;
+        let mut config = leaf_config(n);
+        let mut up = vec!["Ethernet1/49", "Ethernet1/5", "Vlan10", "loopback1", "nve1"];
+        let mut tenant_mroutes = Vec::new();
+        if tenant {
+            config.push_str(TENANT);
+            up.push("Ethernet1/6");
+            tenant_mroutes = vec![
+                mroute_of("203.0.113.10", TENANT_GROUP, "Ethernet1/6", &["nve1"]),
+                mroute_of("*", TENANT_GROUP, "nve1", &["nve1"]),
+            ];
+        }
         inputs.push(Input::Nxos {
             name: name.clone(),
-            config: leaf_config(n).into_bytes(),
+            config: config.into_bytes(),
             file: format!("{name}/config"),
             collected: leaf_collected(n),
             sections: sections(
                 &name,
                 &[("Eth1/49", "spine", &format!("Ethernet1/{n}"))],
-                &["Ethernet1/49", "Ethernet1/5", "Vlan10", "loopback1", "nve1"],
+                &up,
                 &mroutes,
+                &tenant_mroutes,
                 Some(&format!("192.0.2.{}", 3 - n)),
             ),
         });
     }
+    let extra: &[&str] = if o.spine_unlowered_oif {
+        &["Ethernet1/3"]
+    } else {
+        &[]
+    };
+    let oifs = |base: &[&'static str]| -> Vec<&str> { base.iter().chain(extra).copied().collect() };
     let mut spine_routes = Vec::new();
     if !o.spine_star_only {
         spine_routes.push(mroute(
             "192.0.2.1",
             o.spine_iif.unwrap_or("Ethernet1/1"),
-            &["Ethernet1/2"],
+            &oifs(&["Ethernet1/2"]),
         ));
     }
-    spine_routes.push(mroute("*", "loopback254", &["Ethernet1/1", "Ethernet1/2"]));
+    spine_routes.push(mroute(
+        "*",
+        "loopback254",
+        &oifs(&["Ethernet1/1", "Ethernet1/2"]),
+    ));
     inputs.push(Input::Nxos {
         name: "spine".into(),
         config: SPINE.as_bytes().to_vec(),
@@ -329,6 +381,7 @@ fn estate(o: &Opts) -> Estate {
             ],
             &["Ethernet1/1", "Ethernet1/2", "loopback254"],
             &spine_routes,
+            &[],
             None,
         ),
     });
@@ -434,5 +487,60 @@ fn a_copy_that_only_a_shared_tree_route_matches_off_its_path_is_unknown() {
     assert!(
         has(steps, "spine/mroute (*, 233.252.0.20/32)"),
         "{steps:#?}"
+    );
+}
+
+#[test]
+fn an_outgoing_interface_that_is_not_lowered_in_2_routes_gives_unknown() {
+    let o = Opts {
+        spine_unlowered_oif: true,
+        ..Opts::default()
+    };
+    let t = estate(&o).builder.build().expect("the twin builds");
+    let branches = show(&run(&t));
+    let found: Vec<&(VerdictKind, Vec<String>)> = branches
+        .iter()
+        .filter(|(_, s)| has(s, "spine/mcast/unknown/Ethernet1/3"))
+        .collect();
+    assert_eq!(found.len(), 1, "{branches:#?}");
+    assert_eq!(found[0].0, VerdictKind::Unknown, "{:#?}", found[0].1);
+    assert!(
+        has(
+            &found[0].1,
+            "the outgoing interface Ethernet1/3 is not lowered"
+        ),
+        "{:#?}",
+        found[0].1
+    );
+}
+
+#[test]
+fn a_copy_to_the_tunnel_end_in_a_tenant_vrf_gives_unknown() {
+    let o = Opts {
+        tenant: true,
+        ..Opts::default()
+    };
+    let t = estate(&o).builder.build().expect("the twin builds");
+    let h = Header::request(ip("203.0.113.10"), ip(TENANT_GROUP), PROTO_UDP)
+        .with_src_port(40000)
+        .with_dst_port(5000);
+    let a = Executor::new(&t)
+        .run(
+            &Query::path(&t, &h)
+                .with_ingress("leaf2", "Ethernet1/6")
+                .without_reply(),
+        )
+        .expect("the query runs");
+    let branches = show(&a);
+    assert!(!branches.is_empty());
+    for (verdict, steps) in &branches {
+        assert!(!has(steps, "leaf2/vxlan-decap"), "{steps:#?}");
+        assert_eq!(*verdict, VerdictKind::Unknown, "{steps:#?}");
+    }
+    assert!(
+        branches
+            .iter()
+            .any(|(_, s)| has(s, "in VRF TENANT copy to nve1") && has(s, "leaf2/mcast/tenant")),
+        "{branches:#?}"
     );
 }

@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
-use rsim_core::{Header, PROTO_TCP, VerdictKind};
+use rsim_core::{FunctionId, Header, PROTO_TCP, VerdictKind};
 use rsim_engine::{Answer, Executor, Query, Twin};
 use rsim_ingest::collected::{Collected, LinkRow, MacRow, NeighbourRow, RouteRow, row_span};
 use rsim_ingest::estate::{Estate, Input, assemble};
@@ -82,6 +82,22 @@ interface Ethernet1/2
 interface Ethernet1/3
   switchport
   switchport access vlan 10
+  no shutdown
+";
+
+/// acc1 with a routed port channel to the pair.
+const ACC1_ROUTED: &str = "hostname acc1
+interface port-channel30
+  no switchport
+  ip address 192.0.2.50/26
+  no shutdown
+interface Ethernet1/1
+  no switchport
+  channel-group 30 mode active
+  no shutdown
+interface Ethernet1/2
+  no switchport
+  channel-group 30 mode active
   no shutdown
 ";
 
@@ -217,6 +233,8 @@ struct Opts {
     peer_link: bool,
     /// The interface rows of vpcb with the state down.
     b_down: Vec<&'static str>,
+    /// True if acc1 has a routed port channel to the pair.
+    acc_routed: bool,
 }
 
 impl Default for Opts {
@@ -228,6 +246,7 @@ impl Default for Opts {
             b_up: UP.to_vec(),
             peer_link: true,
             b_down: Vec::new(),
+            acc_routed: false,
         }
     }
 }
@@ -275,15 +294,28 @@ fn estate_with(o: &Opts) -> Estate {
         .collect(),
         ..Collected::default()
     };
-    let c = Collected {
-        macs: vec![
-            mac_row("acc1", HOST, "Eth1/3", 0),
-            mac_row("acc1", ORPHAN, "Po30", 1),
-            mac_row("acc1", "00:00:0c:9f:f0:0a", "Po30", 2),
-            mac_row("acc1", "00:00:5e:00:53:1a", "Po30", 3),
-        ],
-        ..Collected::default()
+    let c = if o.acc_routed {
+        Collected {
+            routes: vec![RouteRow {
+                interface: Some("port-channel30".into()),
+                ..route("acc1")
+            }],
+            links: vec![link("acc1", "port-channel30", "00:00:5e:00:53:30")],
+            neighbours: vec![arp("acc1", "port-channel30", "192.0.2.1", VMAC, 0)],
+            ..Collected::default()
+        }
+    } else {
+        Collected {
+            macs: vec![
+                mac_row("acc1", HOST, "Eth1/3", 0),
+                mac_row("acc1", ORPHAN, "Po30", 1),
+                mac_row("acc1", "00:00:0c:9f:f0:0a", "Po30", 2),
+                mac_row("acc1", "00:00:5e:00:53:1a", "Po30", 3),
+            ],
+            ..Collected::default()
+        }
     };
+    let acc1 = if o.acc_routed { ACC1_ROUTED } else { ACC1 };
     let hsrp_a = hsrp("Active");
     let hsrp_b = hsrp("Standby");
     let extra_a: Vec<(&str, &str)> = if o.hsrp {
@@ -329,7 +361,7 @@ fn estate_with(o: &Opts) -> Estate {
         },
         Input::Nxos {
             name: "acc1".into(),
-            config: ACC1.as_bytes().to_vec(),
+            config: acc1.as_bytes().to_vec(),
             file: "acc1/config".into(),
             collected: c,
             sections: sections(
@@ -647,4 +679,17 @@ fn a_domain_id_alone_makes_no_pair() {
         e.notes
     );
     e.builder.build().expect("the twin builds");
+}
+
+#[test]
+fn a_routed_port_channel_to_the_pair_has_its_hand_off() {
+    let o = Opts {
+        acc_routed: true,
+        ..Opts::default()
+    };
+    let t = estate_with(&o).builder.build().expect("the twin builds");
+    assert!(
+        t.function(&FunctionId::new("acc1/handoff/port-channel30"))
+            .is_some()
+    );
 }
