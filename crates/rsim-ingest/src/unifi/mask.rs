@@ -11,7 +11,7 @@ pub const MASK: JsonMask = JsonMask {
 
 /// True for the key of a list of DHCP options, such as `wan_dhcp_options`
 /// with its `{optionNumber, value}` records: the value of an option can be
-/// the credential of an ISP.
+/// the credential of an ISP. Each string below such a key is masked.
 pub fn value_records(key: &str) -> bool {
     let n = normalized(key);
     n.contains("dhcp") && n.contains("option")
@@ -180,8 +180,11 @@ mod tests {
             "name": "wan",
             "wan_dhcp_options": [
                 {"optionNumber": 90, "value": "FAKEOPT90AUTH"},
-                {"optionNumber": 60, "value": "FAKEVENDORCLASS"}
+                {"optionNumber": 60, "value": "FAKEVENDORCLASS"},
+                {"optionNumber": 61, "optionValue": "FAKEOPTVALUE"}
             ],
+            "dhcp_option_list": ["FAKEPLAINOPT"],
+            "dhcpd_options": {"x": "FAKEOBJOPT", "number": 77},
             "dhcpd_enabled": true
         }]});
         let bytes = v.to_string();
@@ -190,7 +193,12 @@ mod tests {
             Format::Json,
             bytes.as_bytes(),
             &[],
-            &["\"optionNumber\": 90", "\"dhcpd_enabled\": true"],
+            &[
+                "\"optionNumber\": 90",
+                "\"optionNumber\": 61",
+                "\"number\": 77",
+                "\"dhcpd_enabled\": true",
+            ],
         );
     }
 

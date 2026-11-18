@@ -62,7 +62,9 @@ pub struct JsonMask {
     /// stay.
     pub subtrees: &'static [&'static [&'static str]],
     /// True for the key of a list of records, or of one record, whose
-    /// `value` is a secret, such as the UniFi WAN DHCP options.
+    /// `value` is a secret, such as the UniFi WAN DHCP options. Below such
+    /// a key, the `value` of each record and each string are masked; the
+    /// keys, the numbers and the booleans stay.
     pub value_records: fn(key: &str) -> bool,
 }
 
@@ -91,20 +93,20 @@ const SECRET_PARAMS: &[&str] = &[
 ];
 
 /// The text with the secrets of each URL masked, or `None` for a text with
-/// none. A word is a run of text with no white space and no quote. In a
+/// none. A word is a run of text with no white space, with no quote at
+/// its ends. In a
 /// word with `scheme://`, the userinfo up to the last `@` of the word
 /// becomes `<secret>`, except a user name with no `:` for the schemes
 /// `ssh` and `git`. In a word with no `://`, the text before the last `@`
 /// becomes `<secret>` when it holds a `:`, the form `user:password@host`.
 /// In each word, the value of a query parameter after the first `?` past
-/// the userinfo, whose name is a word of `SECRET_PARAMS` or a secret key of
-/// the common rule, becomes `<secret>` up to the next `&`, `;` or `#`.
+/// the userinfo, whose name is a word of `SECRET_PARAMS`, ends with `sig`
+/// or `signature`, or is a secret key of the common rule, becomes `<secret>` up to the next `&`, `;` or `#`.
 pub fn url_secrets(text: &str) -> Option<String> {
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     let mut start = None;
     for (i, c) in text.char_indices().chain([(text.len(), ' ')]) {
-        let delim = c.is_whitespace() || matches!(c, '"' | '\'');
-        match (start, delim) {
+        match (start, c.is_whitespace()) {
             (None, false) => start = Some(i),
             (Some(s), true) => {
                 word_secrets(text, s, i, &mut ranges);
@@ -129,6 +131,9 @@ pub fn url_secrets(text: &str) -> Option<String> {
 
 /// Adds the ranges of the secrets of the word `text[s..e]`, in order.
 fn word_secrets(text: &str, s: usize, e: usize, ranges: &mut Vec<(usize, usize)>) {
+    let quote = |c: char| matches!(c, '"' | '\'');
+    let s = s + (text[s..e].len() - text[s..e].trim_start_matches(quote).len());
+    let e = s + text[s..e].trim_end_matches(quote).len();
     let word = &text[s..e];
     let mut host = 0;
     if let Some(i) = word.find("://") {
@@ -162,7 +167,10 @@ fn word_secrets(text: &str, s: usize, e: usize, ranges: &mut Vec<(usize, usize)>
             .map_or(word.len(), |x| p + x);
         if let Some(eq) = word[p..end].find('=') {
             let name = word[p..p + eq].to_ascii_lowercase();
-            let secret = SECRET_PARAMS.contains(&name.as_str()) || secret_key(&name, false);
+            let secret = SECRET_PARAMS.contains(&name.as_str())
+                || name.ends_with("signature")
+                || name.ends_with("sig")
+                || secret_key(&name, false);
             if secret && p + eq + 1 < end {
                 ranges.push((s + p + eq + 1, s + end));
             }
@@ -293,6 +301,8 @@ pub fn json_lines(bytes: &[u8], mask: &JsonMask) -> Result<Vec<String>, Refusal>
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Masked {
     No,
+    /// Each string; the keys and the other values stay.
+    Strings,
     /// Each value; the keys stay.
     Values,
     /// Each key and each value.
@@ -368,6 +378,8 @@ impl<'a> Writer<'a> {
                         Masked::All
                     } else if masked == Masked::Values || self.in_subtree() {
                         Masked::Values
+                    } else if masked == Masked::Strings || (self.mask.value_records)(k) {
+                        Masked::Strings
                     } else {
                         Masked::No
                     };
@@ -396,7 +408,10 @@ impl<'a> Writer<'a> {
                 self.out.push(']');
             }
             Value::String(s) if hash_like(s) => self.out.push_str(&masked_text()),
-            _ if masked != Masked::No => self.out.push_str(&masked_text()),
+            Value::String(_) if masked != Masked::No => self.out.push_str(&masked_text()),
+            _ if matches!(masked, Masked::Values | Masked::All) => {
+                self.out.push_str(&masked_text())
+            }
             Value::String(s) => self.out.push_str(&plain_text(s)),
             other => self.out.push_str(&other.to_string()),
         }
@@ -543,6 +558,16 @@ mod tests {
             ("http://token@h/x", "http://<secret>@h/x"),
             ("tftp://FAKE@h", "tftp://<secret>@h"),
             ("git+https://FAKE@h", "git+https://<secret>@h"),
+            (
+                "sftp://backup:FA'KE@192.0.2.5/cfg",
+                "sftp://<secret>@192.0.2.5/cfg",
+            ),
+            ("scp://u:FA\"KE@h", "scp://<secret>@h"),
+            ("'scp://u:FAKE@h'", "'scp://<secret>@h'"),
+            (
+                "http://h/x?X-Amz-Signature=FAKE&auth_sig=FAKE",
+                "http://h/x?X-Amz-Signature=<secret>&auth_sig=<secret>",
+            ),
             ("scp://u:FA@KE@h/x", "scp://<secret>@h/x"),
             (
                 "http://h:80/ and ftp://u:FAKE@h",
