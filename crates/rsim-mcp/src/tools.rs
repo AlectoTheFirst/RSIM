@@ -91,7 +91,7 @@ impl Tools {
     }
 
     /// The twin of a topology name: a built-in topology, or `store` for the
-    /// store of the server.
+    /// store of the server. Only the names of `names` go into the cache.
     pub fn twin(&self, topology: &str) -> Result<Arc<Loaded>, QueryError> {
         let source = match (&self.store, topology) {
             (Some(folder), STORE) => format!("{}{folder}", commands::STORE_PREFIX),
@@ -103,6 +103,9 @@ impl Tools {
             }
             _ => topology.to_string(),
         };
+        if !self.names().contains(&topology) {
+            return commands::load(&source).map(Arc::new);
+        }
         self.twins.get_or_load(topology, || commands::load(&source))
     }
 
@@ -280,6 +283,14 @@ mod tests {
         assert_eq!(got, Ok(Ok(1)), "the cached key waited for the build");
         fast.join().unwrap();
         assert_eq!(slow.join().unwrap(), Ok(2));
+    }
+
+    #[test]
+    fn a_name_that_is_not_a_topology_takes_no_slot() {
+        let tools = super::Tools::default();
+        assert!(tools.twin("nothing").is_err());
+        let slots = tools.twins.slots.lock().unwrap();
+        assert!(slots.is_empty(), "{:?}", slots.keys().collect::<Vec<_>>());
     }
 
     #[test]
