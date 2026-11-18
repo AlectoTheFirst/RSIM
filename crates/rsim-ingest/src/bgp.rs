@@ -39,6 +39,20 @@ pub enum Outcome {
     NotCaptured,
 }
 
+impl Outcome {
+    /// The name of the outcome: `complete`, `complete-empty`, `partial`,
+    /// `failed` or `not-captured`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Outcome::Complete => "complete",
+            Outcome::CompleteEmpty => "complete-empty",
+            Outcome::Partial => "partial",
+            Outcome::Failed => "failed",
+            Outcome::NotCaptured => "not-captured",
+        }
+    }
+}
+
 /// The pairs of a VRF and an address family that a read covers: the listed
 /// pairs only.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

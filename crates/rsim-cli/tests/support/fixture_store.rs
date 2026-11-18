@@ -1,6 +1,6 @@
-//! Writes a store with the synthetic VyOS router `r1` and the synthetic
-//! UniFi site `site1` of `rsim-ingest`, for the tests of `rsim` and
-//! `rsim-mcp`.
+//! Writes a store with the synthetic VyOS router `r1`, with its BGP session
+//! section, and the synthetic UniFi site `site1` of `rsim-ingest`, for the
+//! tests of `rsim` and `rsim-mcp`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -65,6 +65,7 @@ pub fn write(dir: &Path) {
     let routes = put(b"routes");
     let links = put(b"links");
     let addresses = put(b"addresses");
+    let sessions = put(&fixture("vyos/r1-bgp-sessions.json"));
     let route = |p: &str, proto: &str, i: &str| -> Row {
         vec![
             s("default"),
@@ -97,6 +98,7 @@ pub fn write(dir: &Path) {
             entry("routes_ipv4", routes, Class::Observation),
             entry("links", links, Class::Observation),
             entry("addresses", addresses, Class::Observation),
+            entry("bgp_sessions", sessions, Class::Observation),
         ],
         tables: BTreeMap::from([
             (

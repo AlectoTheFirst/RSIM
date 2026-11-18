@@ -1,0 +1,77 @@
+{
+  "default": {
+    "ipv4Unicast": {
+      "routerId": "192.0.2.254",
+      "as": 64496,
+      "vrfId": 0,
+      "vrfName": "default",
+      "peers": {
+        "192.0.2.2": {
+          "remoteAs": 64501,
+          "localAs": 64505,
+          "version": 4,
+          "peerUptime": "20:01:02",
+          "pfxRcd": 3,
+          "pfxSnt": 2,
+          "state": "Established",
+          "peerState": "OK",
+          "idType": "ipv4"
+        },
+        "198.51.100.2": {
+          "remoteAs": 64502,
+          "localAs": 64496,
+          "version": 4,
+          "peerUptime": "never",
+          "pfxRcd": 0,
+          "pfxSnt": 0,
+          "state": "Idle (Admin)",
+          "peerState": "Policy",
+          "idType": "ipv4"
+        },
+        "203.0.113.5": {
+          "remoteAs": 64510,
+          "localAs": 64496,
+          "version": 4,
+          "peerUptime": "01:00:00",
+          "pfxRcd": 4,
+          "pfxSnt": 1,
+          "state": "Established",
+          "peerState": "OK",
+          "idType": "ipv4"
+        },
+        "192.0.2.9": {
+          "remoteAs": 64496,
+          "localAs": 64496,
+          "version": 4,
+          "peerUptime": "05:00:00",
+          "pfxRcd": 8,
+          "pfxSnt": 6,
+          "state": "Established",
+          "peerState": "OK",
+          "idType": "ipv4"
+        }
+      },
+      "totalPeers": 4
+    },
+    "ipv6Unicast": {
+      "routerId": "192.0.2.254",
+      "as": 64496,
+      "vrfId": 0,
+      "vrfName": "default",
+      "peers": {
+        "2001:db8::2": {
+          "remoteAs": 64501,
+          "localAs": 64496,
+          "version": 4,
+          "peerUptime": "20:00:58",
+          "pfxRcd": 1,
+          "pfxSnt": 1,
+          "state": "Established",
+          "peerState": "OK",
+          "idType": "ipv6"
+        }
+      },
+      "totalPeers": 1
+    }
+  }
+}

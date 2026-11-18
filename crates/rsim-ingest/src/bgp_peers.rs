@@ -700,8 +700,10 @@ pub fn remote_as(words: &[&str], mask: &dyn Fn(&str) -> String) -> RemoteAs {
 /// write it: `remote-as`, `update-source`, `shutdown`, `local-as`, the lines
 /// that `inherit` gives a source for, and each `address-family` stanza that
 /// names a family, with the inheritance lines below it and the `<policy>
-/// <name> in` and `out` lines of IPv4 unicast. Each line that it reads goes
-/// into `read`; the policy lines keep the state of the routing lines.
+/// <name> in` and `out` lines of IPv4 unicast. A `<policy> <name> in` or
+/// `out` line of the stanza itself, as in an NX-OS peer-policy template,
+/// is a policy of IPv4 unicast. Each line that it reads goes into `read`;
+/// the policy lines keep the state of the routing lines.
 pub fn block(
     s: &Stanza,
     read: &mut BTreeSet<u32>,
@@ -740,6 +742,13 @@ pub fn block(
             ["local-as", rest @ ..] => {
                 read.insert(c.first_line);
                 settings.local_as = Some(Sourced::new(LocalAs::parse(rest, mask(&c.key)), lines));
+            }
+            [word, m, dir @ ("in" | "out")] if *word == policy => {
+                let v = Some(Sourced::new((*m).to_string(), lines));
+                match *dir {
+                    "in" => settings.policy_in = v,
+                    _ => settings.policy_out = v,
+                }
             }
             ["address-family", fam @ ..] => {
                 let Some(f) = family(fam) else {
@@ -873,6 +882,34 @@ mod tests {
                 "inheritance gap: t C is not defined"
             ]
         );
+    }
+
+    #[test]
+    fn the_local_addresses_of_each_vrf_hold_the_loopbacks() {
+        let a = |s: &str| s.parse::<IpAddr>().unwrap();
+        let i = InterfaceAddresses::from([
+            (
+                "Loopback0".to_string(),
+                ("default".to_string(), vec![a("192.0.2.1")]),
+            ),
+            (
+                "Gi1".to_string(),
+                ("default".to_string(), vec![a("198.51.100.1")]),
+            ),
+            (
+                "Gi2".to_string(),
+                ("RED".to_string(), vec![a("203.0.113.1"), a("2001:db8::1")]),
+            ),
+        ]);
+        let l = local_addresses(&i);
+        assert_eq!(
+            l["default"],
+            BTreeSet::from([a("192.0.2.1"), a("198.51.100.1")])
+        );
+        assert_eq!(l["RED"].len(), 2);
+        assert_eq!(local_address("loopback0", &i), Some(a("192.0.2.1")));
+        assert_eq!(local_address("192.0.2.9", &i), Some(a("192.0.2.9")));
+        assert_eq!(local_address("Gi9", &i), None);
     }
 
     #[test]
