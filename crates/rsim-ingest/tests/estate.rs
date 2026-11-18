@@ -393,31 +393,39 @@ fn estate_replacing(name: &str, from: &str, to: &str) -> Estate {
     )
 }
 
+/// The verdict of a query that must be unknown, with its reason.
+fn unknown_reason(a: &Answer) -> rsim_core::Reason {
+    match a.verdict() {
+        Some(Verdict::Unknown(r)) => r.clone(),
+        v => panic!("{v:?}"),
+    }
+}
+
 #[test]
 fn a_wired_client_of_another_network_than_its_port_is_not_placed() {
     // h1 is on an access port of LAN, with the network of GUEST.
-    let e = estate_replacing(
-        "clients",
-        r#""name": "h1", "ip": "192.0.2.50", "network_id": "n-lan""#,
-        r#""name": "h1", "ip": "192.0.2.50", "network_id": "n-guest""#,
-    );
-    let notes = &e.notes["site1"];
-    assert!(
-        notes.iter().any(|n| n.starts_with("client h1:")),
-        "{notes:?}"
-    );
-    let t = e.builder.build().unwrap();
-    let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
-    assert!(
-        matches!(a.verdict(), Some(Verdict::Unknown(_))),
-        "{:?}",
-        a.verdict()
-    );
-    // A query from h1 does not start at a port of the site: h1 has no
-    // attachment point there.
-    let a = run(&t, "192.0.2.50", "192.0.2.70", 443);
-    let first = a.branches()[0].steps[0].function.to_string();
-    assert!(first.starts_with("r1/"), "{first}");
+    for ip in ["192.0.2.50", "192.0.2.72"] {
+        let e = estate_replacing(
+            "clients",
+            r#""name": "h1", "ip": "192.0.2.50", "network_id": "n-lan""#,
+            &format!(r#""name": "h1", "ip": "{ip}", "network_id": "n-guest""#),
+        );
+        let notes = &e.notes["site1"];
+        assert!(
+            notes
+                .iter()
+                .any(|n| n.starts_with("client h1: its network n-guest")),
+            "{notes:?}"
+        );
+        let t = e.builder.build().unwrap();
+        let a = run(&t, "192.0.2.70", ip, 8123);
+        unknown_reason(&a);
+        let a = run(&t, ip, "192.0.2.70", 443);
+        let r = unknown_reason(&a);
+        assert!(r.detail.contains("client h1 is not placed"), "{r:?}");
+        let first = a.branches()[0].steps[0].function.to_string();
+        assert_eq!(first, "sw1/unplaced/h1-005351");
+    }
 }
 
 /// A second WLAN `guest` of the network LAN.
@@ -564,4 +572,81 @@ fn an_accepted_session_packet_skips_the_state_rules() {
     let rules = serde_json::json!({"5": {"action": "drop", "state": "established"}});
     let (_, v) = reply_with(Some(sp), Some(rules));
     delivered_to_g1(&v);
+}
+
+/// The guest SSID of the access point with the network LAN on the radio
+/// `na`, the client g2 on LAN, and LAN on the port of the access point.
+fn two_radios(g1_radio: &str) -> Estate {
+    estate_with(
+        |n, b| {
+            let s = String::from_utf8(b).unwrap();
+            let s = match n {
+                "wlans" => s.replace(SECOND_GUEST.0, SECOND_GUEST.1),
+                "devices" => s
+                    .replace(
+                        r#""wlanconf_id": "w-guest", "radio": "na""#,
+                        r#""wlanconf_id": "w-guest2", "radio": "na""#,
+                    )
+                    .replace(r#""excluded_networkconf_ids": ["n-lan"]"#, r#""excluded_networkconf_ids": []"#),
+                "clients" => s
+                    .replace(
+                        r#""name": "g2", "ip": "192.0.2.71", "network_id": "n-guest","#,
+                        r#""name": "g2", "ip": "192.0.2.51", "network_id": "n-lan", "radio": "na","#,
+                    )
+                    .replace(
+                        r#""name": "g1", "ip": "192.0.2.70", "network_id": "n-guest","#,
+                        &format!(
+                            r#""name": "g1", "ip": "192.0.2.70", "network_id": "n-guest"{g1_radio},"#
+                        ),
+                    ),
+                _ => s,
+            };
+            s.into_bytes()
+        },
+        Vec::new(),
+    )
+}
+
+#[test]
+fn each_radio_of_an_ssid_has_the_network_of_its_wlan() {
+    let e = two_radios(r#", "radio": "ng""#);
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.50", "192.0.2.51", 443);
+    assert_eq!(
+        a.verdict(),
+        Some(&Verdict::Deliver(Destination::Endpoint(EndpointId::new(
+            "g2-005354"
+        ))))
+    );
+    let a = run(&t, "192.0.2.50", "192.0.2.70", 443);
+    assert_eq!(
+        a.verdict(),
+        Some(&Verdict::Deliver(Destination::Endpoint(EndpointId::new(
+            "g1-005352"
+        ))))
+    );
+}
+
+#[test]
+fn a_client_of_an_ssid_with_a_network_on_each_radio_needs_its_radio() {
+    let e = two_radios("");
+    let notes = &e.notes["site1"];
+    assert!(
+        notes.iter().any(|n| n.starts_with("client g1:")),
+        "{notes:?}"
+    );
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
+    let r = unknown_reason(&a);
+    assert!(r.detail.contains("client g1 is not placed"), "{r:?}");
+    let a = run(&t, "192.0.2.50", "192.0.2.70", 443);
+    unknown_reason(&a);
+    // g2 names its radio.
+    let a = run(&t, "192.0.2.50", "192.0.2.51", 443);
+    assert_eq!(
+        a.verdict(),
+        Some(&Verdict::Deliver(Destination::Endpoint(EndpointId::new(
+            "g2-005354"
+        ))))
+    );
 }

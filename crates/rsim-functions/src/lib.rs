@@ -24,7 +24,7 @@ pub use forwarding::{
 };
 pub use layer2::{
     BROADCAST, Flood, HostMac, HostResolution, Layer3HandOff, LinkEnd, LinkFacts, MacEntry,
-    MacLookup, PortEgress, PortIngress, PortPeer, WirelessAttachment,
+    MacLookup, PortEgress, PortIngress, PortPeer, Unplaced, WirelessAttachment,
 };
 pub use multicast::{McastRoute, MulticastLookup, group_mac};
 pub use nat::{DestinationNat, NatAction, NatScope, SourceNat};
