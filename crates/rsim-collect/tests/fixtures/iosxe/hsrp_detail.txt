@@ -1,0 +1,13 @@
+GigabitEthernet1.100 - Group 1
+  State is Active
+    2 state changes, last state change 1w2d
+  Virtual IP address is 192.0.2.1
+  Active virtual MAC address is 0000.0c07.ac01 (MAC In Use)
+    Local virtual MAC address is 0000.0c07.ac01 (v1 default)
+  Hello time 3 sec, hold time 10 sec
+    Next hello sent in 1.264 secs
+  Preemption enabled
+  Active router is local
+  Standby router is 192.0.2.3, priority 100 (expires in 9.808 sec)
+  Priority 110 (configured 110)
+  Group name is "hsrp-Gi1.100-1" (default)
