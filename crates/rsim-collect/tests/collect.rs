@@ -571,6 +571,20 @@ async fn the_limits_bound_the_devices_in_flight() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn two_devices_with_one_id_stop_the_cycle_before_a_fetch() {
+    let other = Device {
+        address: "192.0.2.2".into(),
+        ..vyos("r1")
+    };
+    let mut e = env(vec![vyos("r1"), other], Limits::default());
+    let err = e.c.run_cycle().await.unwrap_err();
+    assert!(matches!(err, CollectError::Inventory(_)), "{err}");
+    assert!(err.to_string().contains("r1"), "{err}");
+    assert_eq!(e.t.max_devices(), 0);
+    assert!(e.c.store().latest().unwrap().is_none());
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_collector_continues_from_the_store() {
     let mut e = env(vec![vyos("r1")], Limits::default());
     e.c.run_cycle().await.unwrap();

@@ -205,7 +205,6 @@ fn remove(v: &mut Value, segs: &[&str]) {
     }
 }
 
-/// True if `key` matches `pattern`, in which `*` matches any text.
 /// True if the whole text is the shape: `#` is one or more digits, `*` is
 /// any text and each other byte is itself.
 fn shape_is(shape: &[u8], text: &[u8]) -> bool {
@@ -227,6 +226,7 @@ fn starts_with_shape(shape: &[u8], text: &[u8]) -> bool {
     shape_is(&open, text)
 }
 
+/// True if `key` matches `pattern`, in which `*` matches any text.
 fn glob(pattern: &str, key: &str) -> bool {
     let parts: Vec<&str> = pattern.split('*').collect();
     if parts.len() == 1 {

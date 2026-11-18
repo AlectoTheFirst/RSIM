@@ -184,14 +184,16 @@ impl TrustStore {
                 kind.name()
             )),
             None => {
-                pins.insert(id, key.to_string());
+                pins.insert(id.clone(), key.to_string());
                 if let Some(path) = &self.path {
                     let mut text = String::new();
                     for ((k, a), v) in pins.iter() {
                         text.push_str(&format!("{} {a} {v}\n", k.name()));
                     }
-                    write_atomic(path, text.as_bytes())
-                        .map_err(|e| format!("{}: {e}", path.display()))?;
+                    if let Err(e) = write_atomic(path, text.as_bytes()) {
+                        pins.remove(&id);
+                        return Err(format!("{}: {e}", path.display()));
+                    }
                 }
                 Ok(())
             }
@@ -299,6 +301,30 @@ mod tests {
             Some("ab12")
         );
         assert_eq!(again.to_text(), "tls unifi.example:8443 ab12\n");
+    }
+
+    #[test]
+    fn accept_new_keeps_no_pin_that_the_file_did_not_get() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing").join("pins");
+        let t = TrustStore::open(&path, PinPolicy::AcceptNew).unwrap();
+        assert!(
+            t.check(PinKind::Ssh, "192.0.2.1", "ssh-ed25519 AAAA")
+                .is_err()
+        );
+        assert!(
+            t.check(PinKind::Ssh, "192.0.2.1", "ssh-ed25519 AAAA")
+                .is_err()
+        );
+        assert_eq!(t.get(PinKind::Ssh, "192.0.2.1"), None);
+
+        std::fs::create_dir(dir.path().join("missing")).unwrap();
+        t.check(PinKind::Ssh, "192.0.2.1", "ssh-ed25519 AAAA")
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "ssh 192.0.2.1 ssh-ed25519 AAAA\n"
+        );
     }
 
     #[test]
