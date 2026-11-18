@@ -7,8 +7,9 @@
 //! that comes back to a source on its own path, is a gap. A setting is known
 //! only if the neighbour states it or a source taken before the first gap
 //! states it, because the missing source can state it: else the AS of the
-//! peer, the presented local AS and the shutdown state are `Unknown` with
-//! the reason of the gap.
+//! peer, the presented local AS, the shutdown state and the source address
+//! are `Unknown` with the reason of the gap, and the activated address
+//! families are not known in full.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
@@ -128,6 +129,9 @@ pub struct Settings {
     /// Each address family with true for an activation and false for a
     /// deactivation.
     pub families: BTreeMap<String, Sourced<bool>>,
+    /// The words of each address family that the stanza names and that
+    /// `family` does not name, through the mask of the vendor.
+    pub unread_families: BTreeSet<String>,
     pub policy_in: Option<Sourced<String>>,
     pub policy_out: Option<Sourced<String>>,
 }
@@ -152,6 +156,8 @@ impl Settings {
         for (f, v) in &parent.families {
             self.families.entry(f.clone()).or_insert_with(|| v.clone());
         }
+        self.unread_families
+            .extend(parent.unread_families.iter().cloned());
     }
 }
 
@@ -528,7 +534,12 @@ impl Ctx<'_> {
                         "{SOURCE_NOT_RESOLVED}: the update-source {} gives no one address of the family of the peer in VRF {}",
                         u.value, n.vrf
                     ),
-                    None => format!("{SOURCE_NOT_RESOLVED}: no route lookup on the peer address"),
+                    None => match gap_reason(&n.resolved) {
+                        Some(g) => format!("{SOURCE_NOT_RESOLVED}: {g}"),
+                        None => {
+                            format!("{SOURCE_NOT_RESOLVED}: no route lookup on the peer address")
+                        }
+                    },
                 }),
             },
             source_spans: Vec::new(),
@@ -542,6 +553,12 @@ impl Ctx<'_> {
                 .filter(|(_, v)| v.value)
                 .map(|(f, _)| f.clone())
                 .collect(),
+            families_open: gap_reason(&n.resolved).or_else(|| {
+                (!s.unread_families.is_empty()).then(|| {
+                    let names: Vec<&str> = s.unread_families.iter().map(String::as_str).collect();
+                    format!("the address family {} is not read", names.join(", "))
+                })
+            }),
             policy_in: s.policy_in.as_ref().map(|p| p.value.clone()),
             policy_out: s.policy_out.as_ref().map(|p| p.value.clone()),
             inherits: n.resolved.inherits.clone(),
@@ -596,6 +613,7 @@ impl Ctx<'_> {
             observed_asn,
             shutdown: None,
             families: rows.iter().filter_map(|r| r.family.clone()).collect(),
+            families_open: None,
             policy_in: None,
             policy_out: None,
             inherits: Vec::new(),
@@ -646,8 +664,9 @@ fn local_address(
     }
 }
 
-/// Gives each configured neighbour with a peer address and no update-source
-/// the source address of the route lookup on its peer address: the one
+/// Gives each configured neighbour with a peer address, no update-source
+/// and no inheritance gap, which can hide an update-source, the source
+/// address of the route lookup on its peer address: the one
 /// address of the family of the peer of the egress interfaces of the
 /// lookup in the VRF of the neighbour, with the spans of the routes of the
 /// lookup. A lookup with no route, a route that is not known, an egress
@@ -664,6 +683,9 @@ pub fn lookup_sources(
         else {
             continue;
         };
+        if !f.gaps.is_empty() {
+            continue;
+        }
         let path = Path {
             interface: None,
             gateway: Some(*peer),
@@ -885,6 +907,7 @@ pub fn block(
             }
             ["address-family", fam @ ..] => {
                 let Some(f) = family(fam) else {
+                    settings.unread_families.insert(mask(&fam.join(" ")));
                     continue;
                 };
                 read.insert(c.first_line);
@@ -1311,12 +1334,17 @@ mod tests {
             },
             lines: (20, 20),
         };
+        // A gap can hide the update-source of the neighbour.
+        let gap = format!("{INHERITANCE_GAP}: template peer-session MISSING is not defined");
+        let mut gapped = neighbour("198.51.100.3");
+        gapped.resolved.gaps = vec![gap.clone()];
         let cfg = BgpConfig {
             processes: BTreeMap::from([(DEFAULT_VRF.to_string(), process(64496, None))]),
             neighbours: vec![
                 neighbour("198.51.100.2"),
                 neighbour("203.0.113.9"),
                 neighbour("192.0.2.9"),
+                gapped,
             ],
         };
         let mut f = facts("r1", "r1/config@0", &cfg, &sessions(Vec::new()), &i);
@@ -1335,5 +1363,9 @@ mod tests {
                 at(p).source_address
             );
         }
+        assert_eq!(
+            at("198.51.100.3").source_address,
+            AddressValue::Unknown(format!("{SOURCE_NOT_RESOLVED}: {gap}"))
+        );
     }
 }

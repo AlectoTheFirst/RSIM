@@ -207,17 +207,22 @@ struct LeftOut {
 
 impl LeftOut {
     /// The detail of the claim: the words `no BGP neighbour in scope` for a
-    /// claim with no row, and the number of neighbours left out.
+    /// claim with no row, and the number of neighbours left out of each
+    /// kind that the claim leaves out.
     fn detail(&self, rows: usize) -> String {
         let mut parts = Vec::new();
         if rows == 0 {
             parts.push("no BGP neighbour in scope".to_string());
         }
-        if self.shutdown > 0 || self.outside > 0 {
-            parts.push(format!(
-                "left out: {} with shutdown, {} with the peer outside the twin",
-                self.shutdown, self.outside
-            ));
+        let mut left = Vec::new();
+        if self.shutdown > 0 {
+            left.push(format!("{} with shutdown", self.shutdown));
+        }
+        if self.outside > 0 {
+            left.push(format!("{} with the peer outside the twin", self.outside));
+        }
+        if !left.is_empty() {
+            parts.push(format!("left out: {}", left.join(", ")));
         }
         parts.join("; ")
     }
@@ -245,7 +250,8 @@ fn states(f: &BgpPeerFact) -> Vec<String> {
 
 /// The rows of the claim `bgp-peers-up` on the devices that `keep`
 /// selects: one for each configured neighbour and each dynamic peer of a
-/// listen range, and the detail of the claim.
+/// listen range, a peer outside the twin included, and the detail of the
+/// claim. A neighbour with shutdown gives no row.
 pub fn bgp_peers_up(bgp: &BgpFacts, keep: &dyn Fn(&str) -> bool) -> (Vec<Evidence>, String) {
     let mut left = LeftOut::default();
     let mut out = Vec::new();
@@ -258,10 +264,6 @@ pub fn bgp_peers_up(bgp: &BgpFacts, keep: &dyn Fn(&str) -> bool) -> (Vec<Evidenc
     {
         if f.shutdown == Some(true) {
             left.shutdown += 1;
-            continue;
-        }
-        if f.far == Some(BgpFar::Outside) {
-            left.outside += 1;
             continue;
         }
         let section = f.section.outcome;
@@ -381,6 +383,8 @@ impl Findings {
         }
     }
 
+    /// The activated address families of the 2 sides: no common member
+    /// refutes only when both sets are known in full.
     fn families(&mut self, a: &BgpPeerFact, b: &BgpPeerFact) {
         let list = |s: &BTreeSet<String>| s.iter().cloned().collect::<Vec<_>>().join(", ");
         if a.families.is_empty() || b.families.is_empty() {
@@ -390,13 +394,25 @@ impl Findings {
                 d.device
             ));
         } else if a.families.is_disjoint(&b.families) {
-            self.refuted.push(format!(
+            let text = format!(
                 "no common address family: {} has {}, {} has {}",
                 a.device,
                 list(&a.families),
                 b.device,
                 list(&b.families)
-            ));
+            );
+            let open: Vec<String> = [a, b]
+                .iter()
+                .filter_map(|f| f.open_families().map(|r| format!("{}: {r}", f.device)))
+                .collect();
+            if open.is_empty() {
+                self.refuted.push(text);
+            } else {
+                self.unknown.push(format!(
+                    "{text}; the address families are not known in full: {}",
+                    open.join("; ")
+                ));
+            }
         } else if a.families != b.families {
             self.notes.push(format!(
                 "the address families differ: {} has {}, {} has {}",
@@ -509,6 +525,26 @@ pub fn bgp_peers_agree(bgp: &BgpFacts, keep: &dyn Fn(&str) -> bool) -> (Vec<Evid
                         }
                         None => f.unknown.push(format!("{device} has no such BGP peer")),
                     },
+                    FarSide::SourceMismatch(i) => match far_fact(*i) {
+                        Some(b) => {
+                            bgp_spans(b, &mut provenance);
+                            let from = match &b.source_address {
+                                AddressValue::Known(x) => x.to_string(),
+                                AddressValue::Unknown(r) => r.clone(),
+                            };
+                            observed = Some(json!({
+                                "device": device,
+                                "vrf": vrf,
+                                "peer": b.peer.to_string(),
+                                "source": from,
+                            }));
+                            f.refuted.push(format!(
+                                "source address mismatch: the neighbour {} of {device} sends from {from}, and {} peers with {}",
+                                b.peer, a.device, a.peer
+                            ));
+                        }
+                        None => f.unknown.push(format!("{device} has no such BGP peer")),
+                    },
                     FarSide::Paired(i) => match far_fact(*i) {
                         Some(b) => {
                             bgp_spans(b, &mut provenance);
@@ -531,6 +567,14 @@ pub fn bgp_peers_agree(bgp: &BgpFacts, keep: &dyn Fn(&str) -> bool) -> (Vec<Evid
                         None => f.unknown.push(format!("{device} has no such BGP peer")),
                     },
                 }
+            }
+        }
+        // A gap can hide a shutdown line, and a neighbour with shutdown
+        // gives no row.
+        if a.shutdown.is_none() {
+            for r in std::mem::take(&mut f.refuted) {
+                f.unknown
+                    .push(format!("{r}; an inheritance gap can hide a shutdown line"));
             }
         }
         let (result, reason) = if !f.refuted.is_empty() {

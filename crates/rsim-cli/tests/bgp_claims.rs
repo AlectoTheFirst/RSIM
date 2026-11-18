@@ -66,6 +66,7 @@ fn neighbour(
         observed_asn: None,
         shutdown: Some(false),
         families: BTreeSet::from(["ipv4-unicast".to_string()]),
+        families_open: None,
         policy_in: None,
         policy_out: None,
         inherits: Vec::new(),
@@ -552,11 +553,18 @@ fn bgp_peers_up_refutes_idle_and_is_unknown_outside_the_scope_of_the_read() {
     let (res, detail) = r("r14 vrf default neighbour 198.51.100.54");
     assert_eq!(res, ClaimResult::Unknown);
     assert!(detail.starts_with("not collected"), "{detail}");
+    // A peer outside the twin gives a row from its session state; the
+    // neighbour with shutdown gives no row.
+    assert_eq!(
+        r("r1 vrf default neighbour 203.0.113.200").0,
+        ClaimResult::Confirmed
+    );
     assert!(
         o.evidence
             .iter()
-            .all(|e| !e.subject.contains("203.0.113.200") && !e.subject.contains("198.51.100.30"))
+            .all(|e| !e.subject.contains("198.51.100.30"))
     );
+    assert_eq!(o.detail, "left out: 1 with shutdown");
     stored("claim-bgp-peers-up.json", &o);
 
     // A scope with no BGP neighbour is unknown.
@@ -657,4 +665,196 @@ fn a_far_side_that_is_not_known_is_unknown_and_never_refuted() {
     for r in &rows {
         assert_eq!(r.result, ClaimResult::Unknown, "{r:?}");
     }
+}
+
+#[test]
+fn the_far_neighbour_must_send_from_the_peer_address_of_the_near_side() {
+    let mut d = BTreeMap::new();
+    // a1 peers with 198.51.100.2 from 198.51.100.1; b1 names 198.51.100.1
+    // and sends from its loopback 192.0.2.2.
+    d.insert(
+        "a1".to_string(),
+        device(
+            &["198.51.100.1"],
+            vec![neighbour(
+                "a1",
+                10,
+                "198.51.100.2",
+                64496,
+                64497,
+                "198.51.100.1",
+            )],
+        ),
+    );
+    d.insert(
+        "b1".to_string(),
+        device(
+            &["198.51.100.2", "192.0.2.2"],
+            vec![loopback(
+                neighbour("b1", 10, "198.51.100.1", 64497, 64496, "192.0.2.2"),
+                "Loopback0",
+            )],
+        ),
+    );
+    // a2 peers with b2, whose source address toward a2 is not known.
+    let mut lost = neighbour("b2", 10, "198.51.100.5", 64497, 64496, "198.51.100.6");
+    lost.source_address =
+        AddressValue::Unknown("source address not resolved: no route".to_string());
+    d.insert(
+        "a2".to_string(),
+        device(
+            &["198.51.100.5"],
+            vec![neighbour(
+                "a2",
+                10,
+                "198.51.100.6",
+                64496,
+                64497,
+                "198.51.100.5",
+            )],
+        ),
+    );
+    d.insert("b2".to_string(), device(&["198.51.100.6"], vec![lost]));
+    let bgp = join(&d, &BTreeSet::new(), &BTreeSet::new()).bgp;
+    let only = |dev: &str| {
+        let (rows, _) = claims::bgp_peers_agree(&bgp, &|d| d == dev);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        rows.into_iter().next().unwrap()
+    };
+    let a1 = only("a1");
+    assert_eq!(a1.result, ClaimResult::Refuted, "{a1:?}");
+    assert!(a1.detail.starts_with("source address mismatch"), "{a1:?}");
+    let a2 = only("a2");
+    assert_eq!(a2.result, ClaimResult::Unknown, "{a2:?}");
+    assert!(a2.detail.contains("no route"), "{a2:?}");
+}
+
+#[test]
+fn a_far_neighbour_of_another_session_is_no_source_address_mismatch() {
+    // a has 2 sessions with b: 198.51.100.1 to 198.51.100.2 and
+    // 198.51.100.5 to 198.51.100.6. b names only 198.51.100.1.
+    let row = |read: bool, observed: bool| {
+        let mut d = BTreeMap::new();
+        d.insert(
+            "a".to_string(),
+            device(
+                &["198.51.100.1", "198.51.100.5"],
+                vec![
+                    neighbour("a", 10, "198.51.100.2", 64496, 64497, "198.51.100.1"),
+                    neighbour("a", 20, "198.51.100.6", 64496, 64497, "198.51.100.5"),
+                ],
+            ),
+        );
+        let mut peers = vec![neighbour(
+            "b",
+            10,
+            "198.51.100.1",
+            64497,
+            64496,
+            "198.51.100.2",
+        )];
+        if observed {
+            let mut o = neighbour("b", 20, "198.51.100.5", 64497, 64496, "198.51.100.6");
+            o.source = PeerSource::Observed;
+            peers.push(o);
+        }
+        let mut b = device(&["198.51.100.2", "198.51.100.6"], peers);
+        b.bgp_read = read;
+        d.insert("b".to_string(), b);
+        let bgp = join(&d, &BTreeSet::new(), &BTreeSet::new()).bgp;
+        let (rows, _) = claims::bgp_peers_agree(&bgp, &|d| d == "a");
+        let first = rows
+            .iter()
+            .find(|r| r.subject == "a vrf default neighbour 198.51.100.2")
+            .unwrap();
+        assert_eq!(first.result, ClaimResult::Confirmed, "{first:?}");
+        rows.into_iter()
+            .find(|r| r.subject == "a vrf default neighbour 198.51.100.6")
+            .unwrap()
+    };
+    // The config of b is not read in full.
+    let r = row(false, false);
+    assert_eq!(r.result, ClaimResult::Unknown, "{r:?}");
+    // b has a session with 198.51.100.5.
+    let r = row(true, true);
+    assert_eq!(r.result, ClaimResult::Unknown, "{r:?}");
+    // b is read in full: its only neighbour is the far side of the other
+    // session, so the peering is one-sided.
+    let r = row(true, false);
+    assert_eq!(r.result, ClaimResult::Refuted, "{r:?}");
+    assert!(r.detail.starts_with("one-sided peering"), "{r:?}");
+}
+
+#[test]
+fn disjoint_address_families_refute_only_when_both_sets_are_known_in_full() {
+    let row = |gap: bool| {
+        let mut d = BTreeMap::new();
+        d.insert(
+            "a".to_string(),
+            device(
+                &["198.51.100.1"],
+                vec![neighbour(
+                    "a",
+                    10,
+                    "198.51.100.2",
+                    64496,
+                    64497,
+                    "198.51.100.1",
+                )],
+            ),
+        );
+        let mut b = neighbour("b", 10, "198.51.100.1", 64497, 64496, "198.51.100.2");
+        b.families = BTreeSet::from(["ipv4-vpn".to_string()]);
+        if gap {
+            b.gaps = vec!["inheritance gap: template peer-policy MISSING is not defined".into()];
+        }
+        d.insert("b".to_string(), device(&["198.51.100.2"], vec![b]));
+        let bgp = join(&d, &BTreeSet::new(), &BTreeSet::new()).bgp;
+        let (rows, _) = claims::bgp_peers_agree(&bgp, &|d| d == "a");
+        rows.into_iter().next().unwrap()
+    };
+    let r = row(false);
+    assert_eq!(r.result, ClaimResult::Refuted, "{r:?}");
+    assert!(r.detail.starts_with("no common address family"), "{r:?}");
+    // A gap of b can hide an activation of IPv4 unicast.
+    let r = row(true);
+    assert_eq!(r.result, ClaimResult::Unknown, "{r:?}");
+    assert!(r.detail.contains("inheritance gap"), "{r:?}");
+}
+
+#[test]
+fn bgp_peers_up_checks_a_peer_outside_the_twin_from_its_session_state() {
+    let mut d = BTreeMap::new();
+    // r1 peers with 2 routers of an ISP that the twin does not collect.
+    let idle = session(
+        neighbour("r1", 10, "203.0.113.200", 64496, 64510, "203.0.113.1"),
+        "Idle",
+        None,
+        None,
+    );
+    let missing = neighbour("r1", 20, "203.0.113.201", 64496, 64510, "203.0.113.1");
+    d.insert(
+        "r1".to_string(),
+        device(&["203.0.113.1"], vec![idle, missing]),
+    );
+    let bgp = join(&d, &BTreeSet::new(), &BTreeSet::new()).bgp;
+    let (rows, detail) = claims::bgp_peers_up(&bgp, &|_| true);
+    let r = |s: &str| rows.iter().find(|e| e.subject == s).unwrap();
+    let idle = r("r1 vrf default neighbour 203.0.113.200");
+    assert_eq!(
+        (idle.result, idle.detail.as_str()),
+        (ClaimResult::Refuted, "state Idle")
+    );
+    let missing = r("r1 vrf default neighbour 203.0.113.201");
+    assert_eq!(
+        (missing.result, missing.detail.as_str()),
+        (ClaimResult::Refuted, "not in session table")
+    );
+    assert_eq!(detail, "");
+    let (rows, detail) = claims::bgp_peers_agree(&bgp, &|_| true);
+    assert!(rows.is_empty(), "{rows:?}");
+    assert_eq!(
+        detail,
+        "no BGP neighbour in scope; left out: 2 with the peer outside the twin"
+    );
 }

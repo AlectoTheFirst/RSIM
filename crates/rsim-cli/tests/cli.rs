@@ -818,21 +818,36 @@ fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
     }
     // The BGP claims of a store twin: the peers of the one router are
     // outside the twin, except the dynamic peer of the listen range, and a
-    // neighbour has shutdown.
+    // neighbour has shutdown. bgp-peers-up checks the peers outside the twin
+    // from the session state: 198.51.100.6 is not in the complete session
+    // table.
     let claim = |name: &str| {
         let c = rsim(&[topology.as_str(), "claim", "run", name, "--format", "json"]);
         serde_json::from_slice::<Value>(&c.stdout).unwrap()
     };
     let up = claim("bgp-peers-up");
-    assert_eq!(up["result"], "confirmed", "{up}");
+    assert_eq!(up["result"], "refuted", "{up}");
+    let rows: Vec<(&str, &str)> = up["evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            (
+                e["subject"].as_str().unwrap(),
+                e["result"].as_str().unwrap(),
+            )
+        })
+        .collect();
     assert_eq!(
-        up["evidence"][0]["subject"],
-        "r1 vrf default neighbour 203.0.113.5"
+        rows,
+        [
+            ("r1 vrf default neighbour 192.0.2.2", "confirmed"),
+            ("r1 vrf default neighbour 198.51.100.6", "refuted"),
+            ("r1 vrf default neighbour 203.0.113.5", "confirmed"),
+        ]
     );
-    assert_eq!(
-        up["detail"],
-        "left out: 1 with shutdown, 2 with the peer outside the twin"
-    );
+    assert_eq!(up["evidence"][1]["detail"], "not in session table");
+    assert_eq!(up["detail"], "left out: 1 with shutdown");
     let agree = claim("bgp-peers-agree");
     assert_eq!(agree["result"], "unknown", "{agree}");
     assert_eq!(

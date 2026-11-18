@@ -89,9 +89,10 @@ pub struct Summary {
     pub bgp_peers: Vec<BgpPeerFact>,
     /// All local addresses of the device for each VRF, loopbacks included.
     pub local_addresses: BTreeMap<String, BTreeSet<IpAddr>>,
-    /// True if each BGP line of the config of the device is handled, so a
-    /// neighbour or a listen range that the peer facts do not hold is not
-    /// in the config.
+    /// True if no BGP stanza that can hold a neighbour or a listen range is
+    /// unhandled or not read, also where the collected route rows make the
+    /// routing lines known-irrelevant, so a neighbour or a listen range that
+    /// the peer facts do not hold is not in the config.
     pub bgp_read: bool,
     /// The collected routes of each VRF, for the egress interface of the
     /// route lookup on the address of a BGP peer. The estate takes them out
@@ -191,6 +192,10 @@ pub struct BgpPeerFact {
     /// The activated address families after the inheritance and the
     /// defaults of the vendor, for example `ipv4-unicast`.
     pub families: BTreeSet<String>,
+    /// The reason why `families` can miss an activated family: an
+    /// inheritance gap, or an address family that the reader does not name.
+    /// `None` when the set is known in full.
+    pub families_open: Option<String>,
     pub policy_in: Option<String>,
     pub policy_out: Option<String>,
     /// The peer groups, templates and session groups of the inheritance.
@@ -240,11 +245,19 @@ pub enum BgpFar {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FarSide {
     /// The fact of the far device for the source address of the near side:
-    /// a neighbour of that address, or the listen range that holds it. The
-    /// index is the place of the fact in the BGP peers of the far device.
+    /// a neighbour of that address whose own source address is the peer
+    /// address of the near side, a dynamic peer with no known other source
+    /// address, or the listen range that holds it. The index is the place of
+    /// the fact in the BGP peers of the far device.
     Paired(usize),
+    /// The neighbour of the far device for the source address of the near
+    /// side, whose own source address is known and is not the peer address
+    /// of the near side.
+    SourceMismatch(usize),
     /// A neighbour of the far device that names another local address of
-    /// the near device than the source address.
+    /// the near device than the source address, while the BGP config of the
+    /// far device is read in full and no other neighbour of the near device
+    /// can be the far side of that neighbour.
     OtherAddress(usize),
     /// The far device has no neighbour and no listen range for the source
     /// address. `read` is true if the BGP config of the far device is read
@@ -258,6 +271,14 @@ pub enum FarSide {
 pub const SOURCE_NOT_RESOLVED: &str = "source address not resolved";
 
 impl BgpPeerFact {
+    /// The reason why the activated address families can be more than
+    /// `families`: `families_open`, else the first inheritance gap.
+    pub fn open_families(&self) -> Option<&str> {
+        self.families_open
+            .as_deref()
+            .or_else(|| self.gaps.first().map(String::as_str))
+    }
+
     /// True if the scope of the session section covers each activated
     /// address family of the peer in its VRF. A configured peer with no
     /// activated family is not covered. An observed peer is covered.
@@ -767,8 +788,9 @@ pub fn join(
 /// with a peer address with its far end. Two neighbours pair on the exact
 /// transport addresses: the far device holds the peer address of the near
 /// neighbour in a VRF, and in that VRF it has a neighbour whose peer
-/// address is the source address of the near neighbour, or one listen
-/// range that holds it. The VRF names of the 2 devices are not compared,
+/// address is the source address of the near neighbour and whose source
+/// address is the peer address of the near neighbour, or one listen range
+/// that holds the source address. The VRF names of the 2 devices are not compared,
 /// and the AS numbers are not part of the pairing.
 pub fn bgp_pairs(devices: &BTreeMap<String, Summary>) -> BTreeMap<String, Vec<BgpPeerFact>> {
     let mut owners: BTreeMap<IpAddr, Vec<(&str, &str)>> = BTreeMap::new();
@@ -842,8 +864,14 @@ fn far_end(
     };
     let at_src = BgpPeer::Address(src);
     for kind in ["configured", "dynamic"] {
-        if let Some((i, _)) = in_vrf().find(|(_, g)| g.source.name() == kind && g.peer == at_src) {
-            return side(FarSide::Paired(i));
+        if let Some((i, g)) = in_vrf().find(|(_, g)| g.source.name() == kind && g.peer == at_src) {
+            return side(match (&g.source, &g.source_address) {
+                (_, AddressValue::Known(x)) if *x != peer => FarSide::SourceMismatch(i),
+                (PeerSource::Configured, AddressValue::Unknown(r)) => FarSide::Unresolved(format!(
+                    "the source address of the neighbour {src} of {b} is not known: {r}"
+                )),
+                _ => FarSide::Paired(i),
+            });
         }
     }
     let ranges: Vec<usize> = in_vrf()
@@ -862,20 +890,64 @@ fn far_end(
             )));
         }
     }
-    let mine = devices[near].local_addresses.get(&f.vrf);
-    if let Some((i, _)) = in_vrf().find(|(_, g)| {
-        g.source == PeerSource::Configured
-            && matches!(&g.peer, BgpPeer::Address(x) if *x != src && mine.is_some_and(|m| m.contains(x)))
-    }) {
-        return side(FarSide::OtherAddress(i));
-    }
     if in_vrf().any(|(_, g)| g.source == PeerSource::Observed && g.peer == at_src) {
         return side(FarSide::Unresolved(format!(
             "{b} has a session with {src} and no neighbour or listen range for it"
         )));
     }
     let read = far.bgp_read && !in_vrf().any(|(_, g)| matches!(g.peer, BgpPeer::Interface(_)));
-    side(FarSide::Absent { read })
+    if !read {
+        return side(FarSide::Absent { read });
+    }
+    // The other configured neighbours of the near device in the VRF whose
+    // peer is an address of the far device in its VRF.
+    let near_sum = &devices[near];
+    let mine = near_sum.local_addresses.get(&f.vrf);
+    let theirs = far.local_addresses.get(vrf);
+    let others: Vec<&BgpPeerFact> = near_sum
+        .bgp_peers
+        .iter()
+        .filter(|h| {
+            h.source == PeerSource::Configured
+                && h.vrf == f.vrf
+                && h.peer != f.peer
+                && matches!(&h.peer, BgpPeer::Address(p) if theirs.is_some_and(|t| t.contains(p)))
+        })
+        .collect();
+    let mut unsure = None;
+    for (i, g) in in_vrf() {
+        let BgpPeer::Address(x) = g.peer else {
+            continue;
+        };
+        if g.source != PeerSource::Configured || x == src || !mine.is_some_and(|m| m.contains(&x)) {
+            continue;
+        }
+        // A neighbour of the far device for the source address of another
+        // session of the near device belongs to that session.
+        if others
+            .iter()
+            .any(|h| h.source_address == AddressValue::Known(x))
+        {
+            continue;
+        }
+        if let Some(h) = others
+            .iter()
+            .find(|h| matches!(h.source_address, AddressValue::Unknown(_)))
+        {
+            unsure.get_or_insert_with(|| {
+                format!(
+                    "the neighbour {x} of {b} can belong to the neighbour {} of {near}, whose source address is not known",
+                    h.peer
+                )
+            });
+            continue;
+        }
+        return side(FarSide::OtherAddress(i));
+    }
+    match unsure {
+        Some(r) => side(FarSide::Unresolved(r)),
+        None => side(FarSide::Absent { read: true }),
+    }
 }
 
 /// The places of the endpoints. From an ARP row of an SVI, the MAC table

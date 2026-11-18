@@ -46,7 +46,7 @@ pub const CLAIMS: &[ClaimDef] = &[
     },
     ClaimDef {
         name: "bgp-peers-up",
-        description: "Each configured BGP neighbour of the scope is established. A neighbour with no session row is refuted only when the session section was read in full and its scope covers the VRF and each address family of the neighbour; else it is unknown. A neighbour with shutdown and a neighbour whose peer is outside the twin give no row, and the detail counts them. A scope with no BGP neighbour is unknown.",
+        description: "Each configured BGP neighbour of the scope is established. A neighbour with no session row is refuted only when the session section was read in full and its scope covers the VRF and each address family of the neighbour; else it is unknown. A neighbour whose peer is outside the twin gives a row from its session state. A neighbour with shutdown gives no row, and the detail counts it. A scope with no BGP neighbour is unknown.",
         scopes: &["twin", "devices", "query"],
         reads: &[
             "the BGP neighbours of the config after the inheritance",
@@ -55,7 +55,7 @@ pub const CLAIMS: &[ClaimDef] = &[
     },
     ClaimDef {
         name: "bgp-peers-agree",
-        description: "The 2 sides of each configured BGP neighbour whose peer is a device of the twin agree. They pair on the exact transport addresses: the far device has a neighbour for the source address of the near side, or a listen range that holds it. A one-sided peering, a neighbour of the far side that names another address of the near device, an AS of the peer that is not the AS that the other side presents, and 2 sides with no common address family refute. An AS or a source address that does not resolve, different session states and different prefix counts give unknown. A neighbour with shutdown and a neighbour whose peer is outside the twin give no row, and the detail counts them. A scope with no BGP neighbour is unknown.",
+        description: "The 2 sides of each configured BGP neighbour whose peer is a device of the twin agree. They pair on the exact transport addresses in both directions: the far device has a neighbour for the source address of the near side that sends from the peer address of the near side, or a listen range that holds the source address. A one-sided peering, a far neighbour that sends from another address, a neighbour of the far side that names another address of the near device, an AS of the peer that is not the AS that the other side presents, and 2 sides with no common address family, when both sets are known in full, refute. An AS or a source address that does not resolve, different session states and different prefix counts give unknown. A neighbour with shutdown and a neighbour whose peer is outside the twin give no row, and the detail counts them. A scope with no BGP neighbour is unknown.",
         scopes: &["twin", "devices", "query"],
         reads: &[
             "the BGP neighbours and listen ranges of the config after the inheritance, with the presented local AS",

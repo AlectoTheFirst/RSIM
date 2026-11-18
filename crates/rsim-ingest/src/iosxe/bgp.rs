@@ -10,7 +10,9 @@
 //! group of its VRF. A peer-policy that an address family other than IPv4
 //! unicast inherits gives no policy. A neighbour of the default VRF is
 //! active in IPv4 unicast by the default of the profile, unless `no bgp
-//! default ipv4-unicast` or `no neighbor <peer> activate`; a neighbour of a
+//! default ipv4-unicast` or `no neighbor <peer> activate`, and so is a
+//! listen range of the default VRF unless its peer group has `no neighbor
+//! <group> activate`; a neighbour of a
 //! VRF is active in the family of the stanza that gives its remote AS.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -117,6 +119,9 @@ struct Reader<'a> {
     /// The listen ranges of each VRF with their peer group.
     ranges: Vec<(String, String, String, (u32, u32))>,
     default_ipv4: Option<(u32, u32)>,
+    /// The masked words of the address family of the lines that `line`
+    /// reads when `family` does not name it.
+    unread_family: Option<String>,
 }
 
 impl Reader<'_> {
@@ -138,6 +143,7 @@ impl Reader<'_> {
         let w: Vec<&str> = c.key.split_whitespace().collect();
         let lines = (c.first_line, c.last_line);
         let mask = self.mask;
+        let unread_family = self.unread_family.clone();
         match w.as_slice() {
             ["bgp", "listen", "range", range, "peer-group", g] => {
                 self.read.insert(c.first_line);
@@ -203,7 +209,10 @@ impl Reader<'_> {
                             s.families.insert(f.to_string(), Sourced::new(true, lines));
                             true
                         }
-                        None => false,
+                        None => {
+                            s.unread_families.extend(unread_family);
+                            false
+                        }
                     },
                     ["route-map", m, dir] if fam == Some(IPV4_UNICAST) => {
                         let v = Some(Sourced::new((*m).to_string(), lines));
@@ -317,6 +326,7 @@ pub fn read(s: &Stanza, read: &mut BTreeSet<u32>, mask: &dyn Fn(&str) -> String)
         entries: BTreeMap::new(),
         ranges: Vec::new(),
         default_ipv4: None,
+        unread_family: None,
     };
     for c in s.children() {
         let w: Vec<&str> = c.key.split_whitespace().collect();
@@ -350,9 +360,11 @@ pub fn read(s: &Stanza, read: &mut BTreeSet<u32>, mask: &dyn Fn(&str) -> String)
                 r.read.insert(c.first_line);
                 let (vrf, fam) = af_scope(rest);
                 let ipv4 = fam.as_deref() == Some(IPV4_UNICAST);
+                r.unread_family = fam.is_none().then(|| mask(&rest.join(" ")));
                 for l in c.children() {
                     r.line(l, &vrf, fam.as_deref(), ipv4);
                 }
+                r.unread_family = None;
             }
             _ => r.line(c, DEFAULT_VRF, None, true),
         }
@@ -417,14 +429,22 @@ pub fn read(s: &Stanza, read: &mut BTreeSet<u32>, mask: &dyn Fn(&str) -> String)
         let Some(peer @ BgpPeer::Range(_)) = peer_of(range) else {
             continue;
         };
+        let mut resolved = resolve(
+            &Settings::default(),
+            &[Parent::new(PEER_GROUP, group, 0)],
+            of_vrf(vrf),
+        );
+        if vrf == DEFAULT_VRF && default_on {
+            resolved
+                .settings
+                .families
+                .entry(IPV4_UNICAST.to_string())
+                .or_insert(Sourced::new(true, *lines));
+        }
         cfg.neighbours.push(Neighbour {
             vrf: vrf.clone(),
             peer,
-            resolved: resolve(
-                &Settings::default(),
-                &[Parent::new(PEER_GROUP, group, 0)],
-                of_vrf(vrf),
-            ),
+            resolved,
             lines: *lines,
         });
     }
