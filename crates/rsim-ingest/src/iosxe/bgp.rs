@@ -146,8 +146,8 @@ impl Reader<'_> {
                 ));
             }
             ["no", "neighbor", n, "activate"] => {
-                self.read.insert(c.first_line);
                 if let Some(f) = fam {
+                    self.read.insert(c.first_line);
                     let e = self.entry(vrf, n, lines);
                     e.settings
                         .families
@@ -392,12 +392,13 @@ pub fn read(s: &Stanza, read: &mut BTreeSet<u32>, mask: &dyn Fn(&str) -> String)
                 continue;
             };
             let mut own = e.settings.clone();
-            if vrf == DEFAULT_VRF && default_on {
-                if let Some(l) = e.lines {
-                    own.families
-                        .entry(IPV4_UNICAST.to_string())
-                        .or_insert(Sourced::new(true, l));
-                }
+            if vrf == DEFAULT_VRF
+                && default_on
+                && let Some(l) = e.lines
+            {
+                own.families
+                    .entry(IPV4_UNICAST.to_string())
+                    .or_insert(Sourced::new(true, l));
             }
             cfg.neighbours.push(Neighbour {
                 vrf: vrf.clone(),

@@ -124,7 +124,7 @@ fn the_neighbour_lines_are_handled_and_read_in_each_vrf_state() {
         for rows in [Rows::All, Rows::None, Rows::DefaultOnly] {
             let (cov, unread) = coverage(vendor, &config, rows);
             assert_eq!(unread, Vec::<String>::new(), "{vendor} {rows:?}");
-            for (p, _) in &cov.unhandled {
+            for p in cov.unhandled.keys() {
                 let last = p.rsplit('/').next().unwrap_or_default();
                 for w in HANDLED_WORDS {
                     assert!(!last.contains(w), "{vendor} {rows:?}: {p} is unhandled");

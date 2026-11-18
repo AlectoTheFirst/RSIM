@@ -229,10 +229,10 @@ fn walk(
         if !out.inherits.contains(&label) {
             out.inherits.push(label);
         }
-        if let Some(l) = t.lines {
-            if !out.lines.contains(&l) {
-                out.lines.push(l);
-            }
+        if let Some(l) = t.lines
+            && !out.lines.contains(&l)
+        {
+            out.lines.push(l);
         }
         out.settings.inherit(&t.settings);
         path.push(key);
@@ -310,12 +310,20 @@ fn gap_reason(r: &Resolved) -> Option<String> {
     r.gaps.first().cloned()
 }
 
-/// The spans of the lines of one config file.
-struct File<'a>(&'a str);
+/// The facts of one device: its name, the file of its config for the
+/// spans, its BGP config, its sessions and the addresses of its
+/// interfaces.
+struct Ctx<'a> {
+    device: &'a str,
+    file: &'a str,
+    cfg: &'a BgpConfig,
+    sessions: &'a Sessions,
+    interfaces: &'a InterfaceAddresses,
+}
 
-impl File<'_> {
+impl Ctx<'_> {
     fn span(&self, l: Lines) -> SourceSpan {
-        SourceSpan::new(self.0, l.0, l.1.max(l.0))
+        SourceSpan::new(self.file, l.0, l.1.max(l.0))
     }
 
     /// The AS of the peer of a configured neighbour.
@@ -447,16 +455,12 @@ impl File<'_> {
     /// rows of its peer.
     fn configured(
         &self,
-        device: &str,
-        cfg: &BgpConfig,
-        sessions: &Sessions,
-        interfaces: &InterfaceAddresses,
         n: &Neighbour,
         peer: BgpPeer,
         source: PeerSource,
         rows: Vec<SessionRow>,
     ) -> BgpPeerFact {
-        let process = cfg.processes.get(&n.vrf);
+        let process = self.cfg.processes.get(&n.vrf);
         let s = &n.resolved.settings;
         let peer_asn = self.peer_asn(n, process);
         let local_asn = self.local_asn(n, process, &peer_asn);
@@ -484,7 +488,7 @@ impl File<'_> {
             None => None,
         };
         BgpPeerFact {
-            device: device.to_string(),
+            device: self.device.to_string(),
             vrf: n.vrf.clone(),
             peer,
             source,
@@ -492,7 +496,7 @@ impl File<'_> {
             local_address: s
                 .update_source
                 .as_ref()
-                .and_then(|u| local_address(&u.value, interfaces)),
+                .and_then(|u| local_address(&u.value, self.interfaces)),
             local_asn,
             peer_asn,
             observed_asn: observed_asn(&rows),
@@ -509,22 +513,14 @@ impl File<'_> {
             gaps: n.resolved.gaps.clone(),
             sessions: rows,
             router_id: None,
-            section: sessions.outcome.clone(),
+            section: self.sessions.outcome.clone(),
             spans: lines.into_iter().map(|l| self.span(l)).collect(),
         }
     }
 
     /// The fact of an observed peer with no neighbour and no single listen
     /// range.
-    fn observed(
-        &self,
-        device: &str,
-        vrf: &str,
-        peer: IpAddr,
-        rows: Vec<SessionRow>,
-        cfg: &BgpConfig,
-        sessions: &Sessions,
-    ) -> BgpPeerFact {
+    fn observed(&self, vrf: &str, peer: IpAddr, rows: Vec<SessionRow>) -> BgpPeerFact {
         let row_spans: Vec<SourceSpan> = rows.iter().map(|r| r.span.clone()).collect();
         let observed_asn = observed_asn(&rows);
         let peer_asn = match observed_asn {
@@ -533,7 +529,7 @@ impl File<'_> {
                 "{ASN_NOT_RESOLVED}: the session rows state no single AS"
             )),
         };
-        let local_asn = match cfg.processes.get(vrf).map(|p| &p.asn) {
+        let local_asn = match self.cfg.processes.get(vrf).map(|p| &p.asn) {
             Some(Sourced {
                 value: Ok(a),
                 lines,
@@ -544,7 +540,7 @@ impl File<'_> {
             )),
         };
         BgpPeerFact {
-            device: device.to_string(),
+            device: self.device.to_string(),
             vrf: vrf.to_string(),
             peer: BgpPeer::Address(peer),
             source: PeerSource::Observed,
@@ -561,7 +557,7 @@ impl File<'_> {
             gaps: Vec::new(),
             sessions: rows,
             router_id: None,
-            section: sessions.outcome.clone(),
+            section: self.sessions.outcome.clone(),
             spans: row_spans,
         }
     }
@@ -607,7 +603,13 @@ pub fn facts(
     sessions: &Sessions,
     interfaces: &InterfaceAddresses,
 ) -> Vec<BgpPeerFact> {
-    let f = File(file);
+    let f = Ctx {
+        device,
+        file,
+        cfg,
+        sessions,
+        interfaces,
+    };
     let mut rows: BTreeMap<(String, IpAddr), Vec<SessionRow>> = BTreeMap::new();
     for r in &sessions.rows {
         rows.entry((r.vrf.clone(), r.peer))
@@ -624,16 +626,7 @@ pub fn facts(
             BgpPeer::Range(_) => (PeerSource::ListenRange, Vec::new()),
             BgpPeer::Interface(_) => (PeerSource::Configured, Vec::new()),
         };
-        out.push(f.configured(
-            device,
-            cfg,
-            sessions,
-            interfaces,
-            n,
-            n.peer.clone(),
-            source,
-            r,
-        ));
+        out.push(f.configured(n, n.peer.clone(), source, r));
     }
     for ((vrf, peer), r) in rows {
         let ranges: Vec<(&Neighbour, Prefix)> = cfg
@@ -646,17 +639,10 @@ pub fn facts(
             })
             .collect();
         match ranges.as_slice() {
-            [(n, range)] if n.resolved.gaps.is_empty() => out.push(f.configured(
-                device,
-                cfg,
-                sessions,
-                interfaces,
-                n,
-                BgpPeer::Address(peer),
-                PeerSource::Dynamic(*range),
-                r,
-            )),
-            _ => out.push(f.observed(device, &vrf, peer, r, cfg, sessions)),
+            [(n, range)] if n.resolved.gaps.is_empty() => {
+                out.push(f.configured(n, BgpPeer::Address(peer), PeerSource::Dynamic(*range), r))
+            }
+            _ => out.push(f.observed(&vrf, peer, r)),
         }
     }
     out.sort_by(|a, b| (&a.vrf, &a.peer, a.source.name()).cmp(&(&b.vrf, &b.peer, b.source.name())));
@@ -765,15 +751,15 @@ pub fn block(
                         parents.push(p);
                         continue;
                     }
-                    if let [word, m, dir] = aw.as_slice() {
-                        if *word == policy && f == crate::bgp::IPV4_UNICAST {
-                            let v =
-                                Some(Sourced::new((*m).to_string(), (a.first_line, a.last_line)));
-                            match *dir {
-                                "in" => settings.policy_in = v,
-                                "out" => settings.policy_out = v,
-                                _ => {}
-                            }
+                    if let [word, m, dir] = aw.as_slice()
+                        && *word == policy
+                        && f == crate::bgp::IPV4_UNICAST
+                    {
+                        let v = Some(Sourced::new((*m).to_string(), (a.first_line, a.last_line)));
+                        match *dir {
+                            "in" => settings.policy_in = v,
+                            "out" => settings.policy_out = v,
+                            _ => {}
                         }
                     }
                 }
