@@ -242,6 +242,7 @@ pub enum TableVerb {
 
 /// A query of a table of a twin.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TableQueryArgs {
     /// A built-in topology, or `store` for the newest snapshot of the store
     /// of the server.
@@ -265,6 +266,7 @@ pub struct TableQueryArgs {
 
 /// The view of a topology.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TopologyViewArgs {
     /// A built-in topology, or `store` for the newest snapshot of the store
     /// of the server. Not used in an HTTP path, which names the twin.
