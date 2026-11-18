@@ -403,6 +403,11 @@ fn a_wired_client_of_another_network_than_its_port_is_not_placed() {
         "{:?}",
         a.verdict()
     );
+    // A query from h1 does not start at a port of the site: h1 has no
+    // attachment point there.
+    let a = run(&t, "192.0.2.50", "192.0.2.70", 443);
+    let first = a.branches()[0].steps[0].function.to_string();
+    assert!(first.starts_with("r1/"), "{first}");
 }
 
 /// A second WLAN `guest` of the network LAN.
