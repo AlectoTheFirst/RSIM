@@ -9,7 +9,11 @@ import { type ColourPref, type Prefs, ROW_HEIGHTS, type RowHeight, type ThemePre
 import { HatchMark } from "./Hatch";
 import { type Fields, type Mode, QUERY_FIELDS, type QueryField } from "./query";
 
-const VIEWS = ["Trace", "Tables", "Coverage", "Compare", "Inventory", "Admin"];
+export const VIEWS = ["Trace", "Tables", "Coverage", "Compare", "Inventory", "Admin"] as const;
+export type View = (typeof VIEWS)[number];
+
+/** The views of this build. */
+export const BUILT: readonly View[] = ["Trace", "Tables", "Coverage"];
 
 /** The user of the page. The server has no sign-in on loopback. */
 const USER = { name: "Local user", initials: "LU", how: "no sign-in on a loopback address" };
@@ -92,6 +96,8 @@ export function TopBar(props: {
   twin: string;
   info: Twin | null;
   onTwin: (id: string) => void;
+  view: View;
+  onView: (v: View) => void;
   prefs: Prefs;
   onPrefs: (p: Prefs) => void;
 }) {
@@ -112,8 +118,8 @@ export function TopBar(props: {
       <span class="grow" />
       <nav class="group" aria-label="Views">
         {VIEWS.map((v) =>
-          v === "Trace" ? (
-            <button type="button" aria-current="page">
+          BUILT.includes(v) ? (
+            <button type="button" aria-current={v === props.view ? "page" : undefined} onClick={() => props.onView(v)}>
               {v}
             </button>
           ) : (
@@ -201,12 +207,13 @@ export function LevelControl(props: { level: Level; onLevel: (l: Level) => void 
   );
 }
 
-export function ResultLine(props: { children: ComponentChildren; level: Level; onLevel: (l: Level) => void }) {
+/** The result line. The Level control shows on the views that have levels. */
+export function ResultLine(props: { children: ComponentChildren; level?: Level; onLevel?: (l: Level) => void }) {
   return (
     <div class="bar result" aria-live="polite">
       {props.children}
       <span class="grow" />
-      <LevelControl level={props.level} onLevel={props.onLevel} />
+      {props.level && props.onLevel ? <LevelControl level={props.level} onLevel={props.onLevel} /> : null}
     </div>
   );
 }

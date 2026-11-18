@@ -282,6 +282,75 @@ fn the_store_alias_redirects_to_its_snapshot() {
     );
 }
 
+#[test]
+fn the_coverage_report_gives_the_lines_of_each_state_in_pages() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-api-coverage");
+    fixture_store::write(&dir);
+    let s = state(Some(dir.display().to_string()));
+    let r = get(&s, "/v1/twins/store/coverage");
+    assert_eq!(r.status, 307);
+    let location = r.header("location").unwrap().to_string();
+    let all = json(&get(&s, &location));
+    assert_eq!(all["kind"], "coverage_report");
+    assert_eq!(
+        all["columns"],
+        json!([
+            "device",
+            "handled",
+            "irrelevant",
+            "unhandled",
+            "unhandled_paths",
+            "unhandled_stanzas"
+        ])
+    );
+    let rows = all["rows"].as_array().unwrap().clone();
+    assert!(!rows.is_empty());
+    assert_eq!(all["total"].as_u64().unwrap() as usize, rows.len());
+    assert_eq!(all["next_cursor"], Value::Null);
+    // The unhandled paths and stanzas of a row agree with the table coverage.
+    let table = json(&get(
+        &s,
+        &location.replace("coverage", "tables/coverage/rows"),
+    ));
+    for row in &rows {
+        let d = &row[0];
+        let mine: Vec<&Value> = table["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|r| &r[0] == d)
+            .collect();
+        assert_eq!(row[4].as_u64().unwrap() as usize, mine.len(), "{d}");
+        let stanzas: u64 = mine.iter().map(|r| r[2].as_u64().unwrap()).sum();
+        assert_eq!(row[5].as_u64().unwrap(), stanzas, "{d}");
+        assert!(row[1].as_u64().unwrap() > 0, "{d}");
+    }
+    // The joined pages are the rows with no pages.
+    let mut joined = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut q = format!("{location}?limit=1");
+        if let Some(c) = &cursor {
+            q.push_str(&format!("&cursor={c}"));
+        }
+        let page = json(&get(&s, &q));
+        joined.extend(page["rows"].as_array().unwrap().iter().cloned());
+        match page["next_cursor"].as_str() {
+            Some(c) => cursor = Some(c.to_string()),
+            None => break,
+        }
+    }
+    assert_eq!(joined, rows);
+    assert_eq!(get(&s, &format!("{location}?cursor=x")).status, 422);
+    assert_eq!(get(&s, &format!("{location}?limit=0")).status, 422);
+    // A built-in topology has no report.
+    let b = json(&get(&s, "/v1/twins/builtin.leaf-spine/coverage"));
+    assert_eq!(
+        (b["total"].as_u64(), b["rows"].as_array().map(Vec::len)),
+        (Some(0), Some(0))
+    );
+}
+
 /// Each `$ref` in `v` names a schema of `components`.
 fn refs(v: &Value, out: &mut BTreeSet<String>) {
     match v {

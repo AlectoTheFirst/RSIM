@@ -1,8 +1,9 @@
 // The Trace view: the query bar, the result line and the ladder of the
 // answer of a path query or a set query.
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { ApiProblem, type TwinRef, createQuery, getQuery, getTwin, listTwins, stepUrl } from "./api/client";
-import type { Answer, PathAnswer, SetAnswer, Twin } from "./api/types";
+import { ApiProblem, type TwinRef, createQuery, getCatalog, getQuery, getTwin, listTwins, stepUrl } from "./api/client";
+import type { Answer, PathAnswer, SetAnswer, TableDef, Twin } from "./api/types";
+import { CoverageView } from "./coverage/CoverageView";
 import { OutcomeWord, PathLadder, VerdictText } from "./ladder/Ladder";
 import { SetLadder } from "./ladder/SetLadder";
 import {
@@ -17,7 +18,9 @@ import {
 } from "./ladder/layout";
 import { HatchMark } from "./page/Hatch";
 import { KeyLine, LEVELS, QueryBar, ResultLine, TopBar } from "./page/Parts";
+import { viewOf, viewSearch, withTwin } from "./page/url";
 import { type Fields, type Mode, explainCommand, fieldsOf, mcpCall, requestBody, rsimCommand } from "./page/query";
+import { TablesView } from "./tables/TablesView";
 import { type Prefs, applyTheme, loadPrefs, savePrefs } from "./theme";
 
 interface Result {
@@ -138,6 +141,23 @@ export function App() {
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const firstInput = useRef<HTMLInputElement | null>(null);
+  // The view of the URL: Trace with no view parameter, else Tables or Coverage.
+  const [search, setSearch] = useState(window.location.search);
+  const [catalog, setCatalog] = useState<TableDef[] | null>(null);
+  const view = viewOf(search);
+
+  useEffect(() => {
+    if (view === "Trace" || catalog) return;
+    getCatalog()
+      .then((c) => setCatalog(c.tables))
+      .catch((e: unknown) => setProblem(String(e instanceof Error ? e.message : e)));
+  }, [view]);
+
+  function navigate(next: string) {
+    if (next === window.location.search) return;
+    window.history.pushState(null, "", next || "/");
+    setSearch(next);
+  }
 
   useEffect(() => {
     applyTheme(prefs);
@@ -187,6 +207,7 @@ export function App() {
     const { twin: t, q } = readUrl();
     if (t && q) void load(t, q);
     const onPop = () => {
+      setSearch(window.location.search);
       const u = readUrl();
       if (u.twin) setTwin(u.twin);
       if (u.twin && u.q) void load(u.twin, u.q);
@@ -249,6 +270,7 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (view !== "Trace") return;
       const t = e.target as HTMLElement | null;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) {
@@ -324,11 +346,24 @@ export function App() {
         onTwin={(t) => {
           setTwin(t);
           setResult(null);
-          window.history.pushState(null, "", `?twin=${encodeURIComponent(t)}`);
+          if (view === "Trace") window.history.pushState(null, "", `?twin=${encodeURIComponent(t)}`);
+          else navigate(withTwin(search, t));
         }}
+        view={view}
+        onView={(v) => navigate(viewSearch(v, twin, search))}
         prefs={prefs}
         onPrefs={setPrefs}
       />
+      {view === "Tables" ? (
+        <div class="grid-page">
+          <TablesView twin={twin} row={prefs.row} catalog={catalog} search={search} navigate={navigate} />
+        </div>
+      ) : view === "Coverage" ? (
+        <div class="grid-page">
+          <CoverageView twin={twin} row={prefs.row} catalog={catalog} search={search} navigate={navigate} />
+        </div>
+      ) : (
+      <>
       <QueryBar
         mode={mode}
         fields={fields}
@@ -371,6 +406,8 @@ export function App() {
         ) : null}
       </main>
       <KeyLine keys={notice ? [...keys, ["", notice]] : keys} />
+      </>
+      )}
     </>
   );
 }

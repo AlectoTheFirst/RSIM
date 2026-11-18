@@ -1,0 +1,192 @@
+/* The styles of the Tables and Coverage pages: a dense table with virtual
+   rows in a box that fills the window below the bars. Each colour, font
+   and size is a custom property of the theme. */
+
+#app:has(.grid-page) {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+
+.grid-page {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Sans text at the width 88% and mono text at the width 75%. */
+.grid-page,
+.grid-page .t-body,
+.grid-page .t-label,
+.grid-page .t-headline,
+.grid-page button {
+  font-stretch: 88%;
+}
+
+.grid-page .t-value,
+.grid-page .t-query,
+.grid-page .t-index,
+.grid-page .grid {
+  font-stretch: 75%;
+}
+
+.grid-page > .bar,
+.grid-page > .keyline {
+  flex: none;
+}
+
+.body.grid-body {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+.grid-box {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.grid {
+  width: max-content;
+  min-width: 100%;
+}
+
+.grid-row {
+  display: grid;
+  grid-template-columns: var(--grid-columns);
+  min-height: var(--row);
+  align-items: stretch;
+  position: relative;
+}
+
+.grid-row > * {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: var(--row);
+}
+
+.grid-row.step {
+  cursor: pointer;
+}
+
+.grid-row.step:hover,
+.grid-row.selected,
+.grid-detail {
+  background: var(--raise);
+}
+
+.grid-row.selected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--selected-bar);
+  background: var(--forward);
+}
+
+.grid-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--ground);
+  border-bottom: var(--hairline) solid var(--rule);
+  align-items: end;
+}
+
+.grid-head > * {
+  line-height: var(--label-line);
+}
+
+.grid-head button.head {
+  height: var(--label-line);
+  padding: 0;
+  border: 0;
+  color: inherit;
+  font: inherit;
+}
+
+.grid-head button.head .t-index {
+  color: var(--forward);
+}
+
+.grid-filters {
+  position: sticky;
+  top: calc(var(--label-line) + var(--hairline));
+  z-index: 1;
+  background: var(--ground);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.grid-filters > .cell {
+  padding: var(--hairline) var(--button-gap) var(--hairline) 0;
+  line-height: var(--input);
+}
+
+.grid-filters input {
+  width: 100%;
+  padding: 0 var(--button-gap);
+}
+
+.grid-detail {
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.grid-row .cell.hatched svg {
+  flex: none;
+}
+
+/* The opened row has the width of the window, so its text does not widen
+   the table. */
+.grid-detail .detail {
+  position: sticky;
+  left: 0;
+  width: calc(100vw - 3 * var(--margin));
+  padding-left: var(--margin);
+  font-family: var(--body-family);
+  font-size: var(--body-size);
+  font-stretch: 88%;
+}
+
+.cell.num.unhandled {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--button-gap);
+}
+
+.unhandled {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--button-gap);
+}
+
+.group.wrap {
+  flex-wrap: wrap;
+}
+
+.paths {
+  border-collapse: collapse;
+}
+
+.paths th {
+  font-weight: inherit;
+  text-align: left;
+  padding-right: var(--button-pad);
+}
+
+.paths td {
+  padding-right: var(--button-pad);
+  line-height: var(--row);
+  white-space: nowrap;
+}
+
+.paths .num {
+  text-align: right;
+}

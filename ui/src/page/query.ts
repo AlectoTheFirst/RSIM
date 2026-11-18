@@ -40,11 +40,13 @@ export function topologyOf(twin: string): string {
   return twin.startsWith("builtin.") ? twin.slice("builtin.".length) : "store";
 }
 
-function shellWord(s: string): string {
+/** A shell word, quoted when it has a character that the shell reads. */
+export function shellWord(s: string): string {
   return /^[A-Za-z0-9_./:,@%+=-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-function cliTopology(twin: string): string {
+/** The topology argument of an rsim command for a twin. */
+export function cliTopology(twin: string): string {
   return twin.startsWith("builtin.") ? topologyOf(twin) : "store:<data folder>";
 }
 

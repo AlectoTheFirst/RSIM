@@ -10,8 +10,9 @@ use rsim_cli::{ErrorCode, QueryError, args, claims, tables};
 use rsim_contract::args::Form;
 use rsim_contract::claim::ClaimArgs;
 use rsim_contract::json::{VERSION, to_text};
-use rsim_contract::table::Selection;
+use rsim_contract::table::{Selection, TableOut};
 use rsim_contract::twin::TwinJson;
+use rsim_ingest::coverage::State as CoverageState;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
@@ -496,6 +497,71 @@ fn route(state: &State, req: &Request) -> Result<Response, Problem> {
     }
 }
 
+/// The columns of the coverage report: the lines of each state and the
+/// unhandled paths of each device.
+pub const COVERAGE_COLUMNS: [&str; 6] = [
+    "device",
+    "handled",
+    "irrelevant",
+    "unhandled",
+    "unhandled_paths",
+    "unhandled_stanzas",
+];
+
+/// The coverage report of a twin: one row for each device in name order, a
+/// page of `limit` rows after `cursor`.
+fn coverage_report(top: &str, l: &Loaded, req: &Request) -> Result<TableOut, Problem> {
+    let p = params(req);
+    let invalid = |m: String| problem(422, "invalid_filter", m);
+    let limit = match p.get("limit") {
+        None => None,
+        Some(v) => match v.parse::<usize>() {
+            Ok(0) => return Err(invalid("the limit is 0".into())),
+            Ok(n) => Some(n),
+            Err(_) => return Err(invalid(format!("limit {v} is not a number"))),
+        },
+    };
+    let total = l.coverage.len();
+    let start = match p.get("cursor") {
+        None => 0,
+        Some(c) => c
+            .strip_prefix('o')
+            .and_then(|n| n.parse::<usize>().ok())
+            .filter(|n| *n <= total)
+            .ok_or_else(|| invalid(format!("{c} is not a cursor of the coverage report")))?,
+    };
+    let end = limit.map_or(total, |n| start.saturating_add(n).min(total));
+    let rows = l
+        .coverage
+        .iter()
+        .skip(start)
+        .take(end - start)
+        .map(|(device, c)| {
+            let lines = |s: CoverageState| c.lines.get(&s).copied().unwrap_or(0);
+            let stanzas: u32 = c.unhandled.values().map(|(n, _)| n).sum();
+            vec![
+                json!(device),
+                json!(lines(CoverageState::Handled)),
+                json!(lines(CoverageState::Irrelevant)),
+                json!(lines(CoverageState::Unhandled)),
+                json!(c.unhandled.len()),
+                json!(stanzas),
+            ]
+        })
+        .collect();
+    Ok(TableOut {
+        rsim_json: VERSION,
+        kind: "coverage_report".into(),
+        topology: top.to_string(),
+        twin: l.identity.clone(),
+        table: "coverage".into(),
+        columns: COVERAGE_COLUMNS.iter().map(|c| c.to_string()).collect(),
+        rows,
+        total,
+        next_cursor: (end < total).then(|| format!("o{end}")),
+    })
+}
+
 fn twin_route(
     state: &State,
     req: &Request,
@@ -518,10 +584,15 @@ fn twin_route(
                 "links": {
                     "tables": format!("/v1/twins/{id}/tables/{{table}}/rows"),
                     "claims": format!("/v1/twins/{id}/claims/{{claim}}"),
-                    "queries": format!("/v1/twins/{id}/queries")
+                    "queries": format!("/v1/twins/{id}/queries"),
+                    "coverage": format!("/v1/twins/{id}/coverage")
                 }
             });
             Ok(json_response(&body))
+        }
+        ["coverage"] => {
+            method(req, "GET")?;
+            Ok(json_response(&coverage_report(top, l, req)?))
         }
         ["tables", table, verb] => {
             method(req, "GET")?;
