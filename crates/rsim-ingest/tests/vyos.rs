@@ -181,7 +181,31 @@ fn the_handlers_give_typed_structures() {
     assert_eq!(ppp.source_interface.as_deref(), Some("eth2"));
     assert!(ppp.dynamic.contains(&"pppoe".to_string()));
     let wg = cfg.interfaces.iter().find(|i| i.name == "wg0").unwrap();
-    assert_eq!(wg.allowed_ips, ["0.0.0.0/0"]);
+    assert_eq!(wg.port.as_deref(), Some("51821"));
+    let peers: Vec<_> = wg
+        .peers
+        .iter()
+        .map(|p| {
+            (
+                p.name.as_str(),
+                p.allowed_ips.clone(),
+                p.address.as_deref(),
+                p.port.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        peers,
+        [
+            ("roam", vec!["198.51.100.64/26".to_string()], None, None),
+            (
+                "vpn",
+                vec!["0.0.0.0/0".to_string()],
+                Some("198.51.100.1"),
+                Some("51820")
+            ),
+        ]
+    );
 
     let local = cfg.zones.iter().find(|z| z.name == "LOCAL").unwrap();
     assert!(local.local && local.members.is_empty());
@@ -224,14 +248,14 @@ mod twin {
     use std::net::IpAddr;
 
     use rsim_core::{
-        Destination, ExitPoint, FieldValue, Header, PROTO_TCP, PROTO_UDP, PacketSet, Prefix,
+        Destination, Encap, ExitPoint, FieldValue, Header, PROTO_TCP, PROTO_UDP, PacketSet, Prefix,
         ReasonCode, SetSpec, Verdict,
     };
     use rsim_engine::{Answer, Executor, Query, Summary, Twin, TwinBuilder};
     use rsim_ingest::collected::{AddressRow, Collected, NeighbourRow, RouteRow, row_span};
     use rsim_ingest::{read_json, vyos};
 
-    use super::CONFIG;
+    use super::{CONFIG, edited, put};
 
     fn route(prefix: &str, protocol: &str, iface: &str) -> RouteRow {
         RouteRow {
@@ -337,24 +361,141 @@ mod twin {
     }
 
     #[test]
-    fn a_vpn_client_takes_table_100_and_wireguard_with_masquerade() {
+    fn a_vpn_client_takes_table_100_and_wireguard_with_masquerade_then_leaves_on_pppoe() {
         let (t, _) = build();
         let a = run(&t, "eth0.10", tcp("192.0.2.10", "203.0.113.99", 443));
         let (path, v) = first(&a);
-        assert!(path.contains(&"r1/pbr".to_string()), "{path:?}");
-        assert!(path.contains(&"r1/route-table-100".to_string()), "{path:?}");
-        assert!(path.contains(&"r1/out/wg0".to_string()), "{path:?}");
+        let at = |f: &str| {
+            path.iter()
+                .position(|p| p == f)
+                .unwrap_or_else(|| panic!("{f} not in {path:?}"))
+        };
+        // The inner packets: policy route, table 100, zone policy, the
+        // masquerade of wg0, then the tunnel; the outer packets: the main
+        // table, the zone policy from the local zone, the masquerade of
+        // pppoe0 and the exit.
+        assert!(at("r1/pbr") < at("r1/route-table-100"));
+        assert!(at("r1/route-table-100") < at("r1/wireguard/wg0"));
+        assert!(at("r1/wireguard/wg0") < at("r1/route"));
+        assert!(!path.contains(&"r1/out/wg0".to_string()), "{path:?}");
+        assert_eq!(path.last().map(String::as_str), Some("r1/out/pppoe0"));
+        assert_eq!(v, exit("pppoe0"));
         let b = &a.branches()[0];
-        let snat = b
-            .steps
-            .iter()
-            .find(|s| s.function.as_str() == "r1/snat")
-            .unwrap();
+        let step = |f: &str, n: usize| {
+            b.steps
+                .iter()
+                .filter(|s| s.function.as_str() == f)
+                .nth(n)
+                .unwrap_or_else(|| panic!("{f} {n}"))
+        };
         assert_eq!(
-            snat.output.witness().unwrap().current.src_ip,
+            step("r1/snat", 0).output.witness().unwrap().current.src_ip,
             FieldValue::Known(ip("198.51.100.2"))
         );
-        assert!(matches!(v, Verdict::Unknown(_)), "{v:?}");
+        let wg = step("r1/wireguard/wg0", 0);
+        assert_eq!(wg.reason.code, ReasonCode::Encapsulated);
+        let w = wg.output.witness().unwrap().current;
+        assert_eq!(w.src_ip, FieldValue::Known(ip("203.0.113.10")));
+        assert_eq!(w.dst_ip, FieldValue::Known(ip("198.51.100.1")));
+        assert_eq!(w.protocol, FieldValue::Known(PROTO_UDP));
+        assert_eq!(w.src_port, FieldValue::Known(51821));
+        assert_eq!(w.dst_port, FieldValue::Known(51820));
+        assert_eq!(
+            w.encap,
+            [Encap::Wireguard {
+                src: ip("203.0.113.10"),
+                dst: ip("198.51.100.1"),
+            }]
+        );
+        let inner = w.inner.expect("the inner header");
+        assert_eq!(inner.src_ip, FieldValue::Known(ip("198.51.100.2")));
+        assert_eq!(inner.dst_ip, FieldValue::Known(ip("203.0.113.99")));
+        let policy = step("r1/policy", 1);
+        assert_eq!(policy.reason.code, ReasonCode::Permitted);
+        assert!(
+            policy.reason.detail.contains("LOCAL-WAN"),
+            "{}",
+            policy.reason.detail
+        );
+        let out = b.steps.last().unwrap().output.witness().unwrap().current;
+        assert_eq!(out.src_ip, FieldValue::Known(ip("203.0.113.10")));
+        assert!(out.inner.is_some());
+    }
+
+    #[test]
+    fn a_peer_with_no_endpoint_is_unknown() {
+        let (t, _) = build();
+        let (path, v) = first(&run(&t, "eth0.10", tcp("192.0.2.10", "198.51.100.70", 443)));
+        assert_eq!(path.last().map(String::as_str), Some("r1/wireguard/wg0"));
+        match v {
+            Verdict::Unknown(r) => {
+                assert_eq!(r.detail, "WireGuard peer endpoint not known · peer roam")
+            }
+            v => panic!("{v:?}"),
+        }
+    }
+
+    #[test]
+    fn a_destination_that_no_peer_allows_is_dropped() {
+        let config = edited(|v| {
+            put(
+                v,
+                &[
+                    "interfaces",
+                    "wireguard",
+                    "wg0",
+                    "peer",
+                    "vpn",
+                    "allowed-ips",
+                ],
+                serde_json::json!("198.51.100.0/26"),
+            )
+        });
+        let (t, _) = build_from(&config);
+        let (path, v) = first(&run(&t, "eth0.10", tcp("192.0.2.10", "203.0.113.99", 443)));
+        assert_eq!(path.last().map(String::as_str), Some("r1/wireguard/wg0"));
+        assert_eq!(code(&v), Some(ReasonCode::NoRoute), "{v:?}");
+        assert!(matches!(v, Verdict::Drop(_)), "{v:?}");
+    }
+
+    #[test]
+    fn an_output_filter_that_is_not_lowered_makes_the_tunnel_unknown() {
+        let config = edited(|v| {
+            put(
+                v,
+                &["firewall", "ipv4", "output", "filter", "default-action"],
+                serde_json::json!("drop"),
+            )
+        });
+        let (t, _) = build_from(&config);
+        let (path, v) = first(&run(&t, "eth0.10", tcp("192.0.2.10", "203.0.113.99", 443)));
+        assert_eq!(path.last().map(String::as_str), Some("r1/wireguard/wg0"));
+        match v {
+            Verdict::Unknown(r) => assert!(r.detail.contains("output filter"), "{}", r.detail),
+            v => panic!("{v:?}"),
+        }
+    }
+
+    #[test]
+    fn the_private_key_stays_out_of_the_functions_and_the_notes() {
+        let config = edited(|v| {
+            put(
+                v,
+                &["interfaces", "wireguard", "wg0", "private-key"],
+                serde_json::json!("FAKEWGPRIVATEKEY"),
+            )
+        });
+        let cfg = vyos::read(&read_json(&config).unwrap());
+        let low = vyos::lower(
+            "r1",
+            "r1/config",
+            &vyos::profile(),
+            &cfg,
+            &collected(),
+            &Default::default(),
+        );
+        let text = format!("{:?} {:?} {:?}", cfg, low.functions, low.notes);
+        assert!(!text.contains("FAKEWGPRIVATEKEY"));
     }
 
     #[test]
@@ -407,11 +548,6 @@ mod twin {
         let (path, v) = first(&run(&t, "eth0.110", tcp("192.0.2.70", "192.0.2.50", 8123)));
         assert!(path.ends_with(&["r1/out/eth0.10".to_string()]), "{path:?}");
         assert_eq!(code(&v), Some(ReasonCode::NoLink));
-        // wg0 carries the default route of table 100 only, so it is not an
-        // edge.
-        let (path, v) = first(&run(&t, "eth0.10", tcp("192.0.2.10", "203.0.113.99", 443)));
-        assert!(path.ends_with(&["r1/out/wg0".to_string()]), "{path:?}");
-        assert_eq!(code(&v), Some(ReasonCode::NoLink));
     }
 
     #[test]
@@ -438,20 +574,21 @@ mod twin {
         );
     }
 
-    #[test]
-    fn set_mode_agrees_with_path_mode_on_an_exit() {
-        let (t, _) = build();
+    /// The set answer of a set of destinations from `src` on `eth0.10`,
+    /// with a check that the path query of a member of each part gives the
+    /// result of the part.
+    fn set_agrees_with_path(t: &Twin, src: &str, dsts: &[&str]) -> Answer {
         let arena = t.arena(None);
         let pfx = |s: &str| s.parse::<Prefix>().unwrap();
         let spec = SetSpec {
-            src_ip: Some(vec![pfx("192.0.2.30/32")]),
-            dst_ip: Some(vec![pfx("203.0.113.0/26"), pfx("192.0.2.64/30")]),
+            src_ip: Some(vec![pfx(src)]),
+            dst_ip: Some(dsts.iter().map(|d| pfx(d)).collect()),
             protocol: Some(vec![(PROTO_TCP, PROTO_TCP)]),
             src_port: Some(vec![(40000, 40000)]),
             dst_port: Some(vec![(443, 443)]),
             ..SetSpec::default()
         };
-        let ex = Executor::new(&t);
+        let ex = Executor::new(t);
         let set = ex
             .run(
                 &Query::set(PacketSet::from_spec(&arena, &spec))
@@ -459,6 +596,24 @@ mod twin {
                     .without_reply(),
             )
             .unwrap();
+        for p in &set.summary {
+            let w = p.packets.witness().unwrap();
+            let one = ex
+                .run(
+                    &Query::path(t, &w.original)
+                        .with_ingress("r1", "eth0.10")
+                        .without_reply(),
+                )
+                .unwrap();
+            assert_eq!(one.single_summary(), Some(&p.summary), "{:?}", w.original);
+        }
+        set
+    }
+
+    #[test]
+    fn set_mode_agrees_with_path_mode_on_an_exit() {
+        let (t, _) = build();
+        let set = set_agrees_with_path(&t, "192.0.2.30/32", &["203.0.113.0/26", "192.0.2.64/30"]);
         assert!(
             set.summary
                 .iter()
@@ -466,17 +621,22 @@ mod twin {
             "{:?}",
             set.summary
         );
-        for p in &set.summary {
-            let w = p.packets.witness().unwrap();
-            let one = ex
-                .run(
-                    &Query::path(&t, &w.original)
-                        .with_ingress("r1", "eth0.10")
-                        .without_reply(),
-                )
-                .unwrap();
-            assert_eq!(one.single_summary(), Some(&p.summary), "{:?}", w.original);
-        }
+    }
+
+    #[test]
+    fn set_mode_agrees_with_path_mode_through_the_tunnel() {
+        let (t, _) = build();
+        let set =
+            set_agrees_with_path(&t, "192.0.2.10/32", &["203.0.113.0/26", "198.51.100.64/27"]);
+        let kinds: Vec<_> = set.summary.iter().map(|p| p.summary.kind()).collect();
+        assert!(
+            kinds.contains(&Some(rsim_core::VerdictKind::Exit)),
+            "{kinds:?}"
+        );
+        assert!(
+            kinds.contains(&Some(rsim_core::VerdictKind::Unknown)),
+            "{kinds:?}"
+        );
     }
 
     #[test]

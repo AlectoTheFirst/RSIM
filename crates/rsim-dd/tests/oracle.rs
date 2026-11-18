@@ -13,7 +13,7 @@ use proptest::prelude::*;
 use rsim_dd::{Dd, Edge};
 
 /// The header bits of the bit table.
-const BITS: u32 = 763;
+const BITS: u32 = 764;
 /// Each bit has 4 levels: the original request, the current header, the
 /// work level and the inner level.
 const LEVELS: u32 = BITS * 4;

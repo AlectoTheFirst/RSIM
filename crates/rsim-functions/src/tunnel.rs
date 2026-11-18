@@ -1,12 +1,13 @@
-//! VXLAN encapsulation and decapsulation.
+//! VXLAN encapsulation and decapsulation, and the WireGuard encapsulation.
 
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
 use rsim_core::{
-    Attr, Branch, BridgeDomainId, Context, ContextAttr, Dependency, Destination, Encap, FieldValue,
-    FlowState, Fragment, FunctionId, FunctionKind, Header, HeaderField, NetFunction, NextHop,
-    Outcome, PROTO_UDP, PacketSet, PortId, Reason, ReasonCode, VrfId,
+    AddrField, Attr, Branch, BridgeDomainId, Context, ContextAttr, Dependency, Destination, Encap,
+    FieldValue, FlowState, Fragment, FunctionId, FunctionKind, Header, HeaderField, InterfaceId,
+    NetFunction, NextHop, Outcome, PROTO_UDP, PacketSet, PortId, Prefix, PrefixTable, Reason,
+    ReasonCode, SessionMatch, SourceSpan, TriePrefixTable, VrfId, ZoneId,
 };
 
 use crate::common::{Meta, push_nonempty};
@@ -370,6 +371,257 @@ impl NetFunction for VxlanDecap {
             ),
         };
         push_nonempty(&mut out, plain);
+        out
+    }
+}
+
+/// A peer of a WireGuard interface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WireguardPeer {
+    pub name: String,
+    /// The allowed IPs of the peer.
+    pub allowed: Vec<Prefix>,
+    /// The address and the UDP port of the endpoint of the peer. `None` for
+    /// a peer whose endpoint the device learns at run time.
+    pub endpoint: Option<(IpAddr, u16)>,
+    /// The source address of the outer header toward the endpoint, or the
+    /// reason why it is not known.
+    pub source: Result<IpAddr, String>,
+    pub spans: Vec<SourceSpan>,
+}
+
+/// Puts the packets that a device routes to a WireGuard interface into the
+/// tunnel to one peer. The peer is the peer with the longest allowed IP
+/// that contains the destination; of 2 peers with the same allowed IP, the
+/// peer that is last in the order of `peers` has it. A destination that no
+/// allowed IP contains is dropped. The encapsulated packets are packets of
+/// the device itself: they continue at the route lookup of the underlay
+/// with the source zone of the device, and the inner header stays as the
+/// inner level.
+#[derive(Clone, Debug)]
+pub struct WireguardEncap {
+    pub meta: Meta,
+    pub interface: InterfaceId,
+    peers: Vec<WireguardPeer>,
+    allowed: TriePrefixTable<usize>,
+    /// The UDP source port of the outer header: the listen port of the
+    /// interface. `None` if the device picks it at run time.
+    pub listen_port: Option<u16>,
+    /// A reason that makes each encapsulated packet `Unknown`, for example
+    /// a filter of the packets of the device itself that is not lowered.
+    pub unknown: Option<String>,
+    /// The source zone of the packets of the device itself.
+    pub src_zone: Attr<ZoneId>,
+    /// The VRF of the underlay.
+    pub underlay: VrfId,
+    /// The route lookup of the underlay.
+    pub next: FunctionId,
+}
+
+/// The settings of a WireGuard encapsulation other than its peers.
+#[derive(Clone, Debug)]
+pub struct WireguardSettings {
+    pub listen_port: Option<u16>,
+    pub unknown: Option<String>,
+    pub src_zone: Attr<ZoneId>,
+    pub underlay: VrfId,
+    pub next: FunctionId,
+}
+
+impl WireguardEncap {
+    pub fn new(
+        meta: Meta,
+        interface: InterfaceId,
+        peers: Vec<WireguardPeer>,
+        s: WireguardSettings,
+    ) -> Self {
+        let mut allowed = TriePrefixTable::new();
+        for (i, p) in peers.iter().enumerate() {
+            for a in &p.allowed {
+                allowed.insert(*a, i);
+            }
+        }
+        WireguardEncap {
+            meta,
+            interface,
+            peers,
+            allowed,
+            listen_port: s.listen_port,
+            unknown: s.unknown,
+            src_zone: s.src_zone,
+            underlay: s.underlay,
+            next: s.next,
+        }
+    }
+
+    pub fn peers(&self) -> &[WireguardPeer] {
+        &self.peers
+    }
+
+    fn outer(&self, src: IpAddr, dst: IpAddr, port: u16) -> Header {
+        let mut h = Header::request(src, dst, PROTO_UDP).with_dst_port(port);
+        h.src_port = self
+            .listen_port
+            .map_or(FieldValue::Unknown, FieldValue::Known);
+        // The outer header has DSCP 0 and the ECN of the inner header.
+        h.dscp = FieldValue::Known(0);
+        h.ecn = FieldValue::Unknown;
+        h.fragment = FieldValue::Known(Fragment::Unfragmented);
+        h.src_mac = FieldValue::Unknown;
+        h.dst_mac = FieldValue::Unknown;
+        h.vlan = FieldValue::Absent;
+        h.l2_priority = FieldValue::Absent;
+        h.encap = vec![Encap::Wireguard { src, dst }];
+        h
+    }
+
+    fn to_peer(
+        &self,
+        out: &mut Vec<Branch>,
+        peer: &WireguardPeer,
+        set: PacketSet,
+        ctx: &Context,
+        state: &FlowState,
+    ) {
+        let unknown = |out: &mut Vec<Branch>, set: PacketSet, code: ReasonCode, why: String| {
+            let mut b = self.meta.unknown(set, code, why, ctx, state);
+            b.spans = peer.spans.clone();
+            push_nonempty(out, b);
+        };
+        let Some((dst, port)) = peer.endpoint else {
+            unknown(
+                out,
+                set,
+                ReasonCode::IncompleteTable,
+                format!("WireGuard peer endpoint not known · peer {}", peer.name),
+            );
+            return;
+        };
+        let src = match &peer.source {
+            Ok(s) if s.is_ipv6() == dst.is_ipv6() => *s,
+            Ok(s) => {
+                let why = format!(
+                    "the source {s} and the endpoint {dst} have different address families"
+                );
+                unknown(out, set, ReasonCode::IncompleteTable, why);
+                return;
+            }
+            Err(why) => {
+                unknown(out, set, ReasonCode::IncompleteTable, why.clone());
+                return;
+            }
+        };
+        let e = set.encapsulate(&self.outer(src, dst, port));
+        let detail = format!(
+            "WireGuard {} peer {} from {src} to {dst} port {port}",
+            self.interface, peer.name
+        );
+        match &self.unknown {
+            Some(why) => unknown(
+                out,
+                e.done,
+                ReasonCode::UnhandledStanza,
+                format!("{detail} · {why}"),
+            ),
+            None => {
+                let mut c = ctx.clone();
+                c.device = Attr::Known(self.meta.device.clone());
+                c.ingress_interface = Attr::Unset;
+                c.vrf = Attr::Known(self.underlay.clone());
+                c.src_zone = self.src_zone.clone();
+                c.dst_zone = Attr::Unset;
+                c.session = Attr::Known(SessionMatch::New {
+                    entry: e.done.clone(),
+                });
+                c.egress_interface = Attr::Unset;
+                c.next_hop = Attr::Unset;
+                c.neighbour = Attr::Unset;
+                c.ingress_port = Attr::Unset;
+                c.bridge_domain = Attr::Unset;
+                let mut b = self.meta.forward(
+                    e.done,
+                    &self.next,
+                    ReasonCode::Encapsulated,
+                    detail,
+                    c,
+                    state,
+                );
+                b.spans = peer.spans.clone();
+                push_nonempty(out, b);
+            }
+        }
+        push_nonempty(
+            out,
+            self.meta.unknown(
+                e.nested,
+                ReasonCode::Nested,
+                "the packets have an encapsulation already",
+                ctx,
+                state,
+            ),
+        );
+    }
+}
+
+impl NetFunction for WireguardEncap {
+    tunnel_methods!(FunctionKind::Encapsulation);
+    fn requires(&self) -> Vec<ContextAttr> {
+        Vec::new()
+    }
+    fn provides(&self) -> Vec<ContextAttr> {
+        vec![
+            ContextAttr::Device,
+            ContextAttr::Vrf,
+            ContextAttr::SrcZone,
+            ContextAttr::Session,
+        ]
+    }
+    fn reads(&self) -> Vec<Dependency> {
+        vec![Dependency::Interface(
+            self.meta.device.clone(),
+            self.interface.clone(),
+        )]
+    }
+    fn successors(&self) -> Vec<FunctionId> {
+        vec![self.next.clone()]
+    }
+    fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
+        let part = input.partition_by_prefix(AddrField::Dst, &self.allowed);
+        let mut by_peer: BTreeMap<usize, PacketSet> = BTreeMap::new();
+        for (_, &i, set) in part.matched {
+            let s = match by_peer.remove(&i) {
+                Some(s) => s.union(&set),
+                None => set,
+            };
+            by_peer.insert(i, s);
+        }
+        let mut out = Vec::new();
+        for (i, set) in by_peer {
+            self.to_peer(&mut out, &self.peers[i], set, ctx, state);
+        }
+        push_nonempty(
+            &mut out,
+            self.meta.drop(
+                part.unmatched,
+                ReasonCode::NoRoute,
+                format!(
+                    "no WireGuard peer of {} allows the destination",
+                    self.interface
+                ),
+                ctx,
+                state,
+            ),
+        );
+        push_nonempty(
+            &mut out,
+            self.meta.unknown(
+                part.uncertain,
+                ReasonCode::UnknownAttribute,
+                "the destination address is not known",
+                ctx,
+                state,
+            ),
+        );
         out
     }
 }

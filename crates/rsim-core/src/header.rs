@@ -42,6 +42,12 @@ pub enum Encap {
         label: u32,
         traffic_class: FieldValue<u8>,
     },
+    /// A WireGuard transport packet: UDP from the local tunnel end to the
+    /// endpoint of the peer.
+    Wireguard {
+        src: IpAddr,
+        dst: IpAddr,
+    },
 }
 
 /// The names of the header fields. Functions declare which fields they read

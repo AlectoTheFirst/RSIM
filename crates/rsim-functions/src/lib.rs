@@ -37,4 +37,7 @@ pub use routing::{
 };
 pub use rules::{Rule, RuleBody};
 pub use session::{SessionCommit, SessionLookup, StateAction, StateActions};
-pub use tunnel::{OuterFields, Segment, TunnelPeer, Unmatched, VxlanDecap, VxlanEncap};
+pub use tunnel::{
+    OuterFields, Segment, TunnelPeer, Unmatched, VxlanDecap, VxlanEncap, WireguardEncap,
+    WireguardPeer, WireguardSettings,
+};

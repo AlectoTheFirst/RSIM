@@ -13,7 +13,7 @@ use crate::field::FieldValue;
 use crate::header::{Encap, Fragment, Header, HeaderField};
 
 /// The number of bits of one header.
-pub const BITS: u32 = 763;
+pub const BITS: u32 = 764;
 /// The number of levels: 4 for each bit.
 pub const LEVELS: u32 = 4 * BITS;
 
@@ -104,17 +104,18 @@ pub const L2_PRIORITY: FieldBits = FieldBits::new(359, 3, Some(P_VLAN), Some(U_L
 pub const DST_MAC: FieldBits = FieldBits::new(362, 48, None, Some(U_DST_MAC));
 pub const SRC_MAC: FieldBits = FieldBits::new(410, 48, None, Some(U_SRC_MAC));
 pub const MPLS_TC: FieldBits = FieldBits::new(458, 3, Some(P_MPLS), Some(U_MPLS_TC));
-pub const ENCAP_KIND: FieldBits = FieldBits::new(461, 2, None, None);
-pub const ENCAP_SRC: FieldBits = FieldBits::new(463, 128, None, None);
-pub const ENCAP_DST: FieldBits = FieldBits::new(591, 128, None, None);
-pub const ENCAP_VNI: FieldBits = FieldBits::new(719, 24, None, None);
-pub const ENCAP_LABEL: FieldBits = FieldBits::new(743, 20, None, None);
+pub const ENCAP_KIND: FieldBits = FieldBits::new(461, 3, None, None);
+pub const ENCAP_SRC: FieldBits = FieldBits::new(464, 128, None, None);
+pub const ENCAP_DST: FieldBits = FieldBits::new(592, 128, None, None);
+pub const ENCAP_VNI: FieldBits = FieldBits::new(720, 24, None, None);
+pub const ENCAP_LABEL: FieldBits = FieldBits::new(744, 20, None, None);
 
 /// The encapsulation kinds in [`ENCAP_KIND`].
 pub const ENCAP_NONE: u128 = 0;
 pub const ENCAP_GRE: u128 = 1;
 pub const ENCAP_VXLAN: u128 = 2;
 pub const ENCAP_MPLS: u128 = 3;
+pub const ENCAP_WIREGUARD: u128 = 4;
 
 /// The fragment states in [`FRAGMENT`].
 pub const FRAGMENT_UNFRAGMENTED: u128 = 0;
@@ -188,11 +189,15 @@ pub(crate) type BitValue = Option<bool>;
 /// header does not state has free value bits.
 pub(crate) fn encode(h: &Header) -> Vec<BitValue> {
     let mut bits: Vec<BitValue> = vec![Some(false); BITS as usize];
-    // With no known address, the addresses of a GRE or VXLAN encapsulation
-    // give the address family.
+    // With no known address, the addresses of a GRE, VXLAN or WireGuard
+    // encapsulation give the address family.
     let v6 = match (h.src_ip, h.dst_ip, h.encap.first()) {
         (FieldValue::Known(a), _, _) | (_, FieldValue::Known(a), _) => Some(a.is_ipv6()),
-        (_, _, Some(Encap::Gre { src, .. } | Encap::Vxlan { src, .. })) => Some(src.is_ipv6()),
+        (
+            _,
+            _,
+            Some(Encap::Gre { src, .. } | Encap::Vxlan { src, .. } | Encap::Wireguard { src, .. }),
+        ) => Some(src.is_ipv6()),
         _ => None,
     };
     bits[AF as usize] = v6;
@@ -243,6 +248,7 @@ pub(crate) fn encode(h: &Header) -> Vec<BitValue> {
                 0,
             ),
             Encap::Mpls { label, .. } => (ENCAP_MPLS, 0, 0, 0, u128::from(*label)),
+            Encap::Wireguard { src, dst } => (ENCAP_WIREGUARD, ip_bits(*src), ip_bits(*dst), 0, 0),
         };
         for (f, v) in [
             (ENCAP_KIND, kind),
@@ -380,6 +386,10 @@ pub(crate) fn decode(bit: &dyn Fn(u32) -> bool) -> Header {
             dst: bits_ip(v6, value_of(ENCAP_DST, bit)),
             vni: value_of(ENCAP_VNI, bit) as u32,
         }],
+        ENCAP_WIREGUARD => vec![Encap::Wireguard {
+            src: bits_ip(v6, value_of(ENCAP_SRC, bit)),
+            dst: bits_ip(v6, value_of(ENCAP_DST, bit)),
+        }],
         ENCAP_MPLS => vec![Encap::Mpls {
             label: value_of(ENCAP_LABEL, bit) as u32,
             traffic_class: n8(MPLS_TC),
@@ -419,7 +429,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_table_has_763_bits_in_order() {
+    fn the_table_has_764_bits_in_order() {
         let fields = [
             PROTOCOL,
             DST_IP,
