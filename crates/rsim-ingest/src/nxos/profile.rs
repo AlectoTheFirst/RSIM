@@ -117,3 +117,9 @@ pub const STATIC_WORDS: &[&str] = &["static", "am", "hsrp", "vrrp", "broadcast",
 pub fn protocol_word(clientname: &str) -> &str {
     clientname.split('-').next().unwrap_or_default()
 }
+
+/// True if the next hop of a computed route resolves through a default
+/// route. No document or device confirms the value for NX-OS; with no
+/// resolution, such a route is unknown. A collected route resolves the way
+/// the device shows it.
+pub const COMPUTED_THROUGH_DEFAULT: bool = false;

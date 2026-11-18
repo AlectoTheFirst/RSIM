@@ -5,7 +5,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use rsim_core::{
-    AddrField, GroupPartition, PacketSet, Prefix, PrefixTable, SetSpec, SourceSpan, TriePrefixTable,
+    AddrField, GroupPartition, PacketSet, Prefix, PrefixTable, ReasonCode, SetSpec, SourceSpan,
+    TriePrefixTable,
 };
 
 use crate::routing::{Route, RouteKind, RouteNextHop, RouteProtocol};
@@ -20,7 +21,7 @@ use crate::routing::{Route, RouteKind, RouteNextHop, RouteProtocol};
 pub struct NextHopGroup {
     pub kind: RouteKind,
     pub next_hops: Vec<RouteNextHop>,
-    pub unknown: Option<String>,
+    pub unknown: Option<(ReasonCode, String)>,
 }
 
 const NONE: u32 = u32::MAX;
@@ -138,7 +139,7 @@ impl Fib {
         let group = self.intern_group(NextHopGroup {
             kind: route.kind.forwarding(),
             next_hops: route.next_hops().to_vec(),
-            unknown: route.unknown_reason().map(str::to_string),
+            unknown: route.unknown_code().map(|(c, why)| (c, why.to_string())),
         });
         let protocol = route.kind.protocol();
         let mut spans = route.spans.into_iter();
@@ -222,7 +223,7 @@ impl Fib {
             None => g.kind,
         };
         match &g.unknown {
-            Some(why) => Route::unknown(kind, why.clone(), self.spans_of(id)),
+            Some((code, why)) => Route::unknown_with(kind, *code, why.clone(), self.spans_of(id)),
             None => Route::new(kind, g.next_hops.clone(), self.spans_of(id)),
         }
     }

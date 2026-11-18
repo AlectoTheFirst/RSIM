@@ -101,9 +101,9 @@ pub struct Route {
     /// interface, then by gateway.
     next_hops: Vec<RouteNextHop>,
     pub spans: Vec<SourceSpan>,
-    /// Why a route with no next hop is unknown, for the reason of the
-    /// lookup. `None` gives the reason that the route has no next hop.
-    unknown: Option<String>,
+    /// The code and the text of the reason of a route with no next hop.
+    /// `None` gives the reason that the route has no next hop.
+    unknown: Option<(ReasonCode, String)>,
 }
 
 impl Route {
@@ -119,13 +119,24 @@ impl Route {
     }
 
     /// A route with no next hop whose packets are unknown for the reason
-    /// `why`.
+    /// `why`, with the code `IncompleteTable`.
     pub fn unknown(kind: RouteKind, why: impl Into<String>, spans: Vec<SourceSpan>) -> Self {
+        Route::unknown_with(kind, ReasonCode::IncompleteTable, why, spans)
+    }
+
+    /// A route with no next hop whose packets are unknown for the reason
+    /// `why`, with the code `code`.
+    pub fn unknown_with(
+        kind: RouteKind,
+        code: ReasonCode,
+        why: impl Into<String>,
+        spans: Vec<SourceSpan>,
+    ) -> Self {
         Route {
             kind,
             next_hops: Vec::new(),
             spans,
-            unknown: Some(why.into()),
+            unknown: Some((code, why.into())),
         }
     }
 
@@ -135,7 +146,13 @@ impl Route {
 
     /// The reason of a route with no next hop, if it has one.
     pub fn unknown_reason(&self) -> Option<&str> {
-        self.unknown.as_deref()
+        self.unknown.as_ref().map(|(_, why)| why.as_str())
+    }
+
+    /// The code and the text of the reason of a route with no next hop, if
+    /// it has one.
+    pub fn unknown_code(&self) -> Option<(ReasonCode, &str)> {
+        self.unknown.as_ref().map(|(c, why)| (*c, why.as_str()))
     }
 }
 
@@ -329,13 +346,16 @@ impl RouteLookup {
         let hops = &g.group.next_hops;
         let count = u32::try_from(hops.len()).expect("too many next hops");
         if count == 0 {
-            let detail = match &g.group.unknown {
-                Some(why) => format!("route {what} in VRF {vrf}: {why}"),
-                None => format!("route {what} in VRF {vrf} has no next hop"),
+            let (code, detail) = match &g.group.unknown {
+                Some((code, why)) => (*code, format!("route {what} in VRF {vrf}: {why}")),
+                None => (
+                    ReasonCode::IncompleteTable,
+                    format!("route {what} in VRF {vrf} has no next hop"),
+                ),
             };
             out.push(
                 self.meta
-                    .unknown(set, ReasonCode::IncompleteTable, detail, ctx, state)
+                    .unknown(set, code, detail, ctx, state)
                     .with_spans(spans),
             );
             return;

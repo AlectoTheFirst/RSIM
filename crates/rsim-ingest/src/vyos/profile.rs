@@ -62,3 +62,10 @@ pub const LEARNED_WORDS: &[(&str, RouteProtocol)] = &[
 /// `static`, `kernel` for a route that another process installed, for
 /// example PPPoE or DHCP, and `table` for a route of another kernel table.
 pub const STATIC_WORDS: &[&str] = &["static", "kernel", "table"];
+
+/// True if the next hop of a computed route resolves through a default
+/// route. The value comes from the name of the VyOS command `system ip nht
+/// no-resolve-via-default`, which turns the resolution off; no document or
+/// device confirms it. A collected route resolves the way the device shows
+/// it.
+pub const COMPUTED_THROUGH_DEFAULT: bool = true;

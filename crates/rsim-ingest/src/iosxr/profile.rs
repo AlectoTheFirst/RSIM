@@ -106,3 +106,10 @@ pub const LEARNED_CODES: &[(&str, RouteProtocol)] = &[
 /// The route codes of a route that no routing protocol gave: `S`, a static
 /// route, and `U`, a per-user static route.
 pub const STATIC_CODES: &[&str] = &["S", "U"];
+
+/// True if the next hop of a computed route resolves through a default
+/// route. The value comes from the name of the IOS-XR command `nexthop
+/// resolution allow-default`, which turns the resolution on; no document or
+/// device confirms it. A collected route resolves the way the device shows
+/// it.
+pub const COMPUTED_THROUGH_DEFAULT: bool = false;

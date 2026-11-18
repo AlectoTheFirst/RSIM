@@ -296,6 +296,7 @@ pub fn lower(
         vrfs.extend(r.unread.iter().filter_map(|u| u.vrf.clone()));
     }
     let other_vrf = |v: &str| format!("a next hop in VRF {v} is not lowered");
+    let resolver = crate::iosxr::lower::resolver(rib, &vrfs);
     let mut tables = BTreeMap::new();
     let mut forwards = false;
     let mut vrf_forwards = false;
@@ -314,6 +315,8 @@ pub fn lower(
             learned: super::profile::LEARNED_CODES,
             statics: super::profile::STATIC_CODES,
             dynamic: &cfg.dynamic_vrfs,
+            resolver: &resolver,
+            computed_through_default: super::profile::COMPUTED_THROUGH_DEFAULT,
         };
         let t = fib(&mut l, v, &active, rib, &vips, &hops);
         let has_hops = t.groups().iter().any(|g| !g.next_hops.is_empty());

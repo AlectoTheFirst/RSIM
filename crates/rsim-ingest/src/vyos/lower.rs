@@ -20,6 +20,7 @@ use rsim_functions::{
 };
 
 use crate::collected::Collected;
+use crate::resolve::{Origin, Path, Resolver, Target, through_default};
 use crate::route_tables::{TABLE_NOT_COLLECTED, route_kind};
 use crate::vyos::config::{Action, Config, Family, Interface, Kind, Lines, RuleMatch, Side};
 
@@ -742,7 +743,15 @@ impl L<'_> {
                     if r.kind != RouteKind::Connected {
                         let mut s = r.spans.clone();
                         s.extend(spans.iter().cloned());
-                        t.insert(p, Route::unknown(RouteKind::Static, TABLE_NOT_COLLECTED, s));
+                        t.insert(
+                            p,
+                            Route::unknown_with(
+                                RouteKind::Static,
+                                rsim_core::ReasonCode::NotCollected,
+                                TABLE_NOT_COLLECTED,
+                                s,
+                            ),
+                        );
                     }
                 }
                 for all in ["0.0.0.0/0", "::/0"] {
@@ -750,7 +759,12 @@ impl L<'_> {
                     if t.get(&p).is_none() {
                         t.insert(
                             p,
-                            Route::unknown(RouteKind::Static, TABLE_NOT_COLLECTED, spans.clone()),
+                            Route::unknown_with(
+                                RouteKind::Static,
+                                rsim_core::ReasonCode::NotCollected,
+                                TABLE_NOT_COLLECTED,
+                                spans.clone(),
+                            ),
                         );
                     }
                 }
@@ -760,6 +774,7 @@ impl L<'_> {
             for r in rib {
                 by_prefix.entry(r.prefix.clone()).or_default().push(r);
             }
+            let resolver = resolver(&by_prefix, locals);
             for (prefix, rows) in by_prefix {
                 let Ok(p) = prefix.parse::<Prefix>() else {
                     self.note(format!("route {prefix}: the prefix is not valid"));
@@ -779,20 +794,29 @@ impl L<'_> {
                     t.insert(p, Route::new(kind, Vec::new(), spans));
                     continue;
                 }
-                let hops: Vec<RouteNextHop> = rows
-                    .iter()
-                    .filter_map(|r| {
-                        let gw = r.next_hop.as_deref().and_then(|g| g.parse().ok());
-                        r.interface.as_deref().map(|i| self.hop(i, gw))
-                    })
-                    .collect();
-                if hops.is_empty() {
-                    // The route stays in the table with no next hop, so its
-                    // packets are unknown and do not fall to a shorter
-                    // prefix.
-                    self.note(format!("route {prefix}: no next hop with an interface"));
+                // A route whose next hop does not resolve stays in the table
+                // with no next hop, so its packets are unknown and do not
+                // fall to a shorter prefix.
+                let paths: Vec<Path> = forwarding_rows(&rows).iter().map(|r| path_of(r)).collect();
+                let through =
+                    through_default(Origin::Collected, super::profile::COMPUTED_THROUGH_DEFAULT);
+                match resolver.resolve(VRF, &paths, through) {
+                    Ok((found, more)) => {
+                        let hops: Vec<RouteNextHop> = found
+                            .iter()
+                            .map(|h| self.hop(&h.interface, h.gateway))
+                            .collect();
+                        let mut all = spans;
+                        all.extend(more);
+                        t.insert(p, Route::new(kind, hops, all));
+                    }
+                    Err(u) => {
+                        self.note(format!("route {prefix}: {}", u.why));
+                        let mut all = spans;
+                        all.extend(u.spans);
+                        t.insert(p, Route::unknown(kind, u.reason, all));
+                    }
                 }
-                t.insert(p, Route::new(kind, hops, spans));
             }
         }
         for (p, r) in locals {
@@ -1368,6 +1392,58 @@ fn range_prefixes(a: IpAddr, b: IpAddr) -> Option<Vec<Prefix>> {
         }
     }
     Some(out)
+}
+
+/// The path of a collected route row: its interface and its next hop.
+fn path_of(r: &crate::collected::RouteRow) -> Path {
+    Path {
+        interface: r.interface.clone(),
+        gateway: r.next_hop.as_deref().and_then(|g| g.parse().ok()),
+        vrf: None,
+    }
+}
+
+/// The rows of a route that forward. FRR gives a recursive next hop as a
+/// row with no interface, followed by a row with an interface for each
+/// next hop that resolves it; the rows with an interface are the next hops
+/// that the device uses. Only a route with no such row resolves its next
+/// hops.
+fn forwarding_rows<'a>(
+    rows: &[&'a crate::collected::RouteRow],
+) -> Vec<&'a crate::collected::RouteRow> {
+    if rows.iter().any(|r| r.interface.is_some()) {
+        rows.iter()
+            .copied()
+            .filter(|r| r.interface.is_some())
+            .collect()
+    } else {
+        rows.to_vec()
+    }
+}
+
+/// The collected routes of the main VRF and the addresses of the device for
+/// the resolution of a next hop: a local route gives no next hop.
+fn resolver(
+    by_prefix: &BTreeMap<String, Vec<&crate::collected::RouteRow>>,
+    locals: &[(Prefix, Route)],
+) -> Resolver {
+    let mut out = Resolver::new();
+    for (p, r) in locals {
+        out.add(VRF, *p, Target::Local, r.spans.clone());
+    }
+    for (prefix, rows) in by_prefix {
+        let Ok(p) = prefix.parse::<Prefix>() else {
+            continue;
+        };
+        let spans: Vec<SourceSpan> = rows.iter().map(|r| r.span.clone()).collect();
+        let target = if rows[0].protocol == "local" {
+            Target::Local
+        } else {
+            Target::Paths(forwarding_rows(rows).iter().map(|r| path_of(r)).collect())
+        };
+        out.add(VRF, p, target, spans);
+    }
+    out
 }
 
 #[cfg(test)]
