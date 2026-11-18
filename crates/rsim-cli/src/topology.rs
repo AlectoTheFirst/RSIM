@@ -164,26 +164,50 @@ fn overlay(t: &Loaded) -> Vec<TopoEdge> {
         }
     }
     let mut out: BTreeMap<String, TopoEdge> = BTreeMap::new();
+    // The tunnels of each edge, keyed by the encapsulation function and the
+    // peer address, so each edge lists each tunnel once and in order.
+    let mut tunnels: BTreeMap<String, BTreeMap<(String, String), serde_json::Value>> =
+        BTreeMap::new();
     let pairs = encaps.iter().flat_map(|(d, id, e)| {
         let peers: Vec<std::net::IpAddr> = match e.peer {
             TunnelPeer::Fixed(p) => vec![p],
             TunnelPeer::NextHop => gateways.get(id).into_iter().flatten().copied().collect(),
         };
-        peers.into_iter().map(move |p| (d.clone(), *e, p))
+        peers
+            .into_iter()
+            .map(move |p| (d.clone(), id.clone(), *e, p))
     });
-    for (d, e, peer) in pairs {
+    for (d, encap, e, peer) in pairs {
         for pd in ends.get(&peer).into_iter().flatten() {
             if *pd == d {
                 continue;
             }
             let id = format!("overlay:{d}>{pd}");
-            let x = out
-                .entry(id.clone())
-                .or_insert_with(|| edge(id, "overlay", d.clone(), pd.clone()));
+            out.entry(id.clone())
+                .or_insert_with(|| edge(id.clone(), "overlay", d.clone(), pd.clone()));
             let vnis: BTreeSet<u32> = e.vnis.values().copied().collect();
-            x.facts =
-                json!({"source": e.source.to_string(), "peer": peer.to_string(), "vnis": vnis});
+            let mode = match e.peer {
+                TunnelPeer::Fixed(_) => "fixed",
+                TunnelPeer::NextHop => "next-hop",
+            };
+            tunnels.entry(id).or_default().insert(
+                (encap.clone(), peer.to_string()),
+                json!({
+                    "encap": encap,
+                    "peer_from": mode,
+                    "source": e.source.to_string(),
+                    "peer": peer.to_string(),
+                    "vnis": vnis,
+                }),
+            );
         }
+    }
+    for (id, x) in &mut out {
+        let list: Vec<serde_json::Value> = tunnels
+            .remove(id)
+            .map(|m| m.into_values().collect())
+            .unwrap_or_default();
+        x.facts = json!({ "tunnels": list });
     }
     out.into_values().collect()
 }
