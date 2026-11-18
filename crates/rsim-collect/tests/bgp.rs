@@ -69,8 +69,7 @@ impl Ssh for Logged {
 
 impl Logged {
     fn reply(&self, command: &str, text: &str) {
-        self.fake
-            .reply("r1", command, Ok(text.as_bytes().to_vec()));
+        self.fake.reply("r1", command, Ok(text.as_bytes().to_vec()));
     }
 
     fn fail(&self, command: &str, error: TransportError) {
@@ -176,13 +175,25 @@ fn hash(vendor: Vendor, capture: CaptureBgp, section: &str, answer: &str) -> rsi
     };
     let spec = specs.into_iter().find(|s| s.name == section).unwrap();
     let keys = Keys::new([1; 32], [2; 32]);
-    rsim_store::change_hash_kept(&keys, spec.format, answer.as_bytes(), spec.volatile, spec.keep)
-        .unwrap()
+    rsim_store::change_hash_kept(
+        &keys,
+        spec.format,
+        answer.as_bytes(),
+        spec.volatile,
+        spec.keep,
+    )
+    .unwrap()
 }
 
 /// Checks that each counter edit keeps the change hash and that each state
 /// edit changes it.
-fn check_hash(vendor: Vendor, section: &str, answer: &str, counters: &[(&str, &str)], states: &[(&str, &str)]) {
+fn check_hash(
+    vendor: Vendor,
+    section: &str,
+    answer: &str,
+    counters: &[(&str, &str)],
+    states: &[(&str, &str)],
+) {
     let h = |a: &str| hash(vendor, CaptureBgp::Sessions, section, a);
     let first = h(answer);
     let mut later = answer.to_string();
@@ -213,7 +224,10 @@ async fn vyos_stores_the_sessions_and_a_router_with_no_bgp_has_none() {
     let summary = fixture("vyos/bgp_sessions.json");
     e.t.reply(rsim_collect::vyos::BGP_SESSIONS_COMMAND, &summary);
     e.c.run_cycle().await.unwrap();
-    assert_eq!(entry(&e, bgp::SESSIONS).unwrap().status, SectionStatus::Fresh);
+    assert_eq!(
+        entry(&e, bgp::SESSIONS).unwrap().status,
+        SectionStatus::Fresh
+    );
     assert_eq!(bytes(&e, bgp::SESSIONS), summary);
     assert!(entry(&e, bgp::ROUTES).is_none());
 
@@ -234,8 +248,14 @@ fn a_state_change_alters_the_hash_of_the_sessions_and_a_counter_change_does_not(
         &fixture("vyos/bgp_sessions.json"),
         &[
             ("\"msgRcvd\": 1201", "\"msgRcvd\": 1301"),
-            ("\"peerUptime\": \"20:01:02\"", "\"peerUptime\": \"21:01:02\""),
-            ("\"peerUptimeMsec\": 72062000", "\"peerUptimeMsec\": 75662000"),
+            (
+                "\"peerUptime\": \"20:01:02\"",
+                "\"peerUptime\": \"21:01:02\"",
+            ),
+            (
+                "\"peerUptimeMsec\": 72062000",
+                "\"peerUptimeMsec\": 75662000",
+            ),
             ("\"pfxRcd\": 3", "\"pfxRcd\": 4"),
             ("\"tableVersion\": 12", "\"tableVersion\": 13"),
         ],
@@ -253,8 +273,14 @@ fn a_state_change_alters_the_hash_of_the_sessions_and_a_counter_change_does_not(
             ("\"lastflap\": \"PT20H1M2S\"", "\"lastflap\": \"PT21H1M2S\""),
             ("\"lastread\": \"PT10S\"", "\"lastread\": \"PT11S\""),
             ("\"remoteport\": \"51234\"", "\"remoteport\": \"51299\""),
-            ("\"connectionsdropped\": \"2\"", "\"connectionsdropped\": \"3\""),
-            ("\"notificationssent\": \"1\"", "\"notificationssent\": \"2\""),
+            (
+                "\"connectionsdropped\": \"2\"",
+                "\"connectionsdropped\": \"3\"",
+            ),
+            (
+                "\"notificationssent\": \"1\"",
+                "\"notificationssent\": \"2\"",
+            ),
         ],
         &[
             ("\"state\": \"Idle\"", "\"state\": \"Active\""),
@@ -266,7 +292,10 @@ fn a_state_change_alters_the_hash_of_the_sessions_and_a_counter_change_does_not(
         ("10:00:00.000", "10:01:00.000"),
         ("RD version: 12", "RD version: 13"),
         ("table version 12", "table version 13"),
-        ("Speaker              12         12", "Speaker              13         13"),
+        (
+            "Speaker              12         12",
+            "Speaker              13         13",
+        ),
         ("1201    1199       12", "1261    1259       13"),
         ("1d02h             3", "1d03h             4"),
         ("00:10:02", "00:11:02"),
@@ -288,10 +317,19 @@ fn a_state_change_alters_the_hash_of_the_sessions_and_a_counter_change_does_not(
         bgp::SESSIONS,
         &fixture("iosxe/bgp_sessions.txt"),
         &[
-            ("table version is 12, main routing table version 12", "table version is 15, main routing table version 15"),
-            ("5 network entries using 1240", "6 network entries using 1488"),
+            (
+                "table version is 12, main routing table version 12",
+                "table version is 15, main routing table version 15",
+            ),
+            (
+                "5 network entries using 1240",
+                "6 network entries using 1488",
+            ),
             ("BGP activity 7/2", "BGP activity 8/2"),
-            ("10:01:02 Nov 17 2026 (1d02h ago)", "10:01:02 Nov 17 2026 (1d03h ago)"),
+            (
+                "10:01:02 Nov 17 2026 (1d02h ago)",
+                "10:01:02 Nov 17 2026 (1d03h ago)",
+            ),
             ("1201    1199       12", "1261    1259       15"),
             ("1d02h           3", "1d03h           4"),
             ("00:20:00        1", "00:21:00        2"),
@@ -310,7 +348,10 @@ async fn nxos_reads_the_global_table_when_the_switch_refuses_the_form_of_all_vrf
     let summary = fixture("nxos/bgp_sessions.json");
     e.t.reply(rsim_collect::nxos::BGP_SESSIONS_COMMAND, &summary);
     e.c.run_cycle().await.unwrap();
-    assert_eq!(entry(&e, bgp::SESSIONS).unwrap().status, SectionStatus::Fresh);
+    assert_eq!(
+        entry(&e, bgp::SESSIONS).unwrap().status,
+        SectionStatus::Fresh
+    );
     assert!(bytes(&e, bgp::SESSIONS).contains("\"ROW_neighbor\":[{"));
     assert!(absent(&e, BGP_SESSIONS_DEFAULT));
     assert!(!e.t.sent(rsim_collect::nxos::BGP_SESSIONS_DEFAULT_COMMAND));
@@ -361,7 +402,10 @@ async fn nxos_with_all_reads_the_tables_of_each_ipv4_neighbour_with_native_json(
     let mut c = collector(dir.path(), Vendor::Nxos, Arc::new(s));
     c.run_cycle().await.unwrap();
     let log = t.log.lock().unwrap().clone();
-    let routes: Vec<&String> = log.iter().filter(|c| c.contains("unicast neighbors")).collect();
+    let routes: Vec<&String> = log
+        .iter()
+        .filter(|c| c.contains("unicast neighbors"))
+        .collect();
     assert_eq!(routes.len(), 3 * 3, "{routes:?}");
     assert!(routes.iter().all(|c| c.ends_with("| json native")));
     assert!(!log.iter().any(|c| c.contains("2001:db8::2")));
@@ -371,8 +415,7 @@ async fn nxos_with_all_reads_the_tables_of_each_ipv4_neighbour_with_native_json(
     let v: serde_json::Value =
         serde_json::from_slice(&c.store().read_blob(&e.blob.unwrap()).unwrap()).unwrap();
     assert_eq!(
-        v["RED"]["203.0.113.2"]["routes"]["answer"]["TABLE_vrf"]["ROW_vrf"][0]["TABLE_afi"]
-            ["ROW_afi"],
+        v["RED"]["203.0.113.2"]["routes"]["answer"]["TABLE_vrf"]["ROW_vrf"][0]["TABLE_afi"]["ROW_afi"],
         serde_json::json!([])
     );
     assert!(matches!(
@@ -393,13 +436,18 @@ async fn iosxr_reads_the_summary_of_each_vrf_of_the_bgp_block() {
         TransportError::Command("rejected".into()),
     );
     e.c.run_cycle().await.unwrap();
-    assert_eq!(entry(&e, bgp::SESSIONS).unwrap().status, SectionStatus::Fresh);
+    assert_eq!(
+        entry(&e, bgp::SESSIONS).unwrap().status,
+        SectionStatus::Fresh
+    );
     let vrfs = bytes(&e, rsim_collect::iosxr::BGP_VRF_SESSIONS);
     assert_eq!(vrfs, format!("VRF: BLUE failed\nVRF: RED\n{red}"));
     let log = e.t.log.lock().unwrap().clone();
     let at = |c: &str| log.iter().position(|x| x == c).unwrap();
     assert!(at("show running-config") < at("show bgp vrf BLUE ipv4 unicast summary"));
-    assert!(at("show bgp vrf BLUE ipv4 unicast summary") < at("show bgp vrf RED ipv4 unicast summary"));
+    assert!(
+        at("show bgp vrf BLUE ipv4 unicast summary") < at("show bgp vrf RED ipv4 unicast summary")
+    );
     assert!(entry(&e, bgp::NEIGHBORS).is_none());
 }
 
@@ -412,7 +460,10 @@ async fn iosxe_with_all_reads_the_tables_of_each_neighbour_of_the_summaries() {
         "show ip bgp vpnv4 vrf RED summary",
         &fixture("iosxe/bgp_vrf_red.txt"),
     );
-    e.t.reply("show bgp all neighbors", "BGP neighbor is 192.0.2.2,  remote AS 64501, external link\n");
+    e.t.reply(
+        "show bgp all neighbors",
+        "BGP neighbor is 192.0.2.2,  remote AS 64501, external link\n",
+    );
     let table = "BGP table version is 12, local router ID is 192.0.2.1\n\
                  \x20    Network          Next Hop            Metric LocPrf Weight Path\n\
                  \x20*>   198.51.100.0/24  192.0.2.2                0             0 64501 i\n";
@@ -421,7 +472,10 @@ async fn iosxe_with_all_reads_the_tables_of_each_neighbour_of_the_summaries() {
         "show ip bgp neighbors 192.0.2.2 received-routes",
         "% Inbound soft reconfiguration not enabled on 192.0.2.2\n",
     );
-    e.t.reply("show ip bgp vpnv4 vrf RED neighbors 203.0.113.2 advertised-routes", table);
+    e.t.reply(
+        "show ip bgp vpnv4 vrf RED neighbors 203.0.113.2 advertised-routes",
+        table,
+    );
     e.c.run_cycle().await.unwrap();
 
     let peers = [
@@ -438,19 +492,33 @@ async fn iosxe_with_all_reads_the_tables_of_each_neighbour_of_the_summaries() {
         }
     }
     let log = e.t.log.lock().unwrap().clone();
-    assert!(!log.iter().any(|c| c.contains("203.0.113.0")), "no range is a neighbour");
-    assert!(!log.iter().any(|c| c.contains("neighbors 203.0.113.2") && !c.contains("vrf RED")));
+    assert!(
+        !log.iter().any(|c| c.contains("203.0.113.0")),
+        "no range is a neighbour"
+    );
+    assert!(
+        !log.iter()
+            .any(|c| c.contains("neighbors 203.0.113.2") && !c.contains("vrf RED"))
+    );
 
     let routes = bytes(&e, bgp::ROUTES);
-    assert!(routes.starts_with("NEIGHBOR: RED 203.0.113.2 received-routes failed\n"), "{routes}");
+    assert!(
+        routes.starts_with("NEIGHBOR: RED 203.0.113.2 received-routes failed\n"),
+        "{routes}"
+    );
     assert!(routes.contains(&format!(
         "NEIGHBOR: RED 203.0.113.2 advertised-routes\n{table}"
     )));
-    assert!(routes.contains(
-        "NEIGHBOR: default 192.0.2.2 received-routes\n% Inbound soft reconfiguration"
-    ));
+    assert!(
+        routes.contains(
+            "NEIGHBOR: default 192.0.2.2 received-routes\n% Inbound soft reconfiguration"
+        )
+    );
     assert!(routes.contains(&format!("NEIGHBOR: default 192.0.2.2 routes\n{table}")));
-    assert_eq!(entry(&e, bgp::NEIGHBORS).unwrap().status, SectionStatus::Fresh);
+    assert_eq!(
+        entry(&e, bgp::NEIGHBORS).unwrap().status,
+        SectionStatus::Fresh
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -460,7 +528,10 @@ async fn after_two_route_timeouts_in_a_row_the_other_route_commands_are_not_sent
     e.t.reply("show ip bgp summary", &fixture("iosxe/bgp_sessions.txt"));
     e.t.reply("show bgp all neighbors", "\n");
     e.t.reply("show ip bgp neighbors 192.0.2.2 received-routes", "\n");
-    e.t.fail("show ip bgp neighbors 192.0.2.2 routes", TransportError::Timeout);
+    e.t.fail(
+        "show ip bgp neighbors 192.0.2.2 routes",
+        TransportError::Timeout,
+    );
     e.t.fail(
         "show ip bgp neighbors 192.0.2.2 advertised-routes",
         TransportError::Timeout,
@@ -468,10 +539,16 @@ async fn after_two_route_timeouts_in_a_row_the_other_route_commands_are_not_sent
     e.c.run_cycle().await.unwrap();
     assert!(!e.t.sent("show ip bgp neighbors 198.51.100.2 received-routes"));
     let routes = bytes(&e, bgp::ROUTES);
-    assert!(routes.starts_with("NEIGHBOR: default 192.0.2.2 received-routes\n\n"), "{routes}");
+    assert!(
+        routes.starts_with("NEIGHBOR: default 192.0.2.2 received-routes\n\n"),
+        "{routes}"
+    );
     assert!(routes.contains("NEIGHBOR: default 192.0.2.2 routes failed\n"));
     assert!(routes.contains("NEIGHBOR: default 203.0.113.7 advertised-routes failed\n"));
-    assert_eq!(routes.lines().filter(|l| l.ends_with(" failed")).count(), 3 * 4 - 1);
+    assert_eq!(
+        routes.lines().filter(|l| l.ends_with(" failed")).count(),
+        3 * 4 - 1
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -496,9 +573,15 @@ async fn vyos_with_all_reads_the_ipv4_unicast_neighbours_and_off_reads_no_bgp() 
     );
     e.c.run_cycle().await.unwrap();
     let log = e.t.log.lock().unwrap().clone();
-    let routes: Vec<&String> = log.iter().filter(|c| c.contains("unicast neighbors")).collect();
+    let routes: Vec<&String> = log
+        .iter()
+        .filter(|c| c.contains("unicast neighbors"))
+        .collect();
     assert_eq!(routes.len(), 3 * 3, "{routes:?}");
-    assert!(!log.iter().any(|c| c.contains("192.0.2.9") || c.contains("2001:db8::2")));
+    assert!(
+        !log.iter()
+            .any(|c| c.contains("192.0.2.9") || c.contains("2001:db8::2"))
+    );
     let v: serde_json::Value = serde_json::from_str(&bytes(&e, bgp::ROUTES)).unwrap();
     assert_eq!(
         v["RED"]["203.0.113.2"]["routes"]["answer"]["routes"]["198.51.100.0/24"][0]["valid"],
@@ -509,7 +592,10 @@ async fn vyos_with_all_reads_the_ipv4_unicast_neighbours_and_off_reads_no_bgp() 
         "Inbound soft reconfiguration not enabled"
     );
     assert!(v["default"]["198.51.100.2"]["routes"]["failed"].is_string());
-    assert_eq!(entry(&e, bgp::NEIGHBORS).unwrap().status, SectionStatus::Fresh);
+    assert_eq!(
+        entry(&e, bgp::NEIGHBORS).unwrap().status,
+        SectionStatus::Fresh
+    );
 
     // The same store with the setting `sessions`, then `off`.
     let dir = e.dir;

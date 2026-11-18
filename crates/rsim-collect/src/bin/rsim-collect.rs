@@ -50,12 +50,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use rsim_collect::bgp::CaptureBgp;
 use rsim_collect::https::{ClientCert, HttpsLimits, HttpsProfile, HttpsTransport, TlsTrust};
 use rsim_collect::iosxe::{IosxeSource, SHELL_SETUP as IOSXE_SHELL_SETUP};
 use rsim_collect::iosxr::{IosxrSource, SHELL_SETUP as IOSXR_SHELL_SETUP};
 use rsim_collect::nxos::{NxosSource, SHELL_SETUP};
 use rsim_collect::ssh::{Algorithms, CommandMode, SshLimits, SshProfile, SshTransport};
-use rsim_collect::bgp::CaptureBgp;
 use rsim_collect::unifi::UnifiSource;
 use rsim_collect::vyos::VyosSource;
 use rsim_collect::{
@@ -138,8 +138,7 @@ fn capture_bgp(
     let read = |key: String| -> Result<Option<CaptureBgp>, String> {
         env.get(&key)
             .map(|v| {
-                CaptureBgp::parse(v)
-                    .ok_or_else(|| format!("{key} {v} is not sessions, all or off"))
+                CaptureBgp::parse(v).ok_or_else(|| format!("{key} {v} is not sessions, all or off"))
             })
             .transpose()
     };

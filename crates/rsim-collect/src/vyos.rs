@@ -213,12 +213,10 @@ impl Source for VyosSource {
                     Err(_) => Vec::new(),
                 };
                 answers.iter_mut().for_each(bgp_answer);
-                let result = bgp::combined(
-                    parts.as_deref(),
-                    "the session summary",
-                    &answers,
-                    |_, a| bgp::combine_json(peers.as_ref().expect("the parts have peers"), a),
-                );
+                let result =
+                    bgp::combined(parts.as_deref(), "the session summary", &answers, |_, a| {
+                        bgp::combine_json(peers.as_ref().expect("the parts have peers"), a)
+                    });
                 out.push(RawSection { spec, result });
             }
             out
@@ -303,7 +301,12 @@ pub fn sections_with(capture: CaptureBgp) -> Vec<SectionSpec> {
         ..spec(name, command, Observation, Json, volatile, &[])
     };
     if capture.sessions() {
-        out.push(bgp_spec(bgp::SESSIONS, BGP_SESSIONS_COMMAND, &[], BGP_SESSION_KEEP));
+        out.push(bgp_spec(
+            bgp::SESSIONS,
+            BGP_SESSIONS_COMMAND,
+            &[],
+            BGP_SESSION_KEEP,
+        ));
     }
     if capture.all() {
         out.push(bgp_spec(

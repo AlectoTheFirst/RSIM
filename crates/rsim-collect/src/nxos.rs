@@ -651,12 +651,9 @@ impl Source for NxosSource {
                     };
                     RULES.apply(&mut answers, banner_each);
                     answers.iter_mut().for_each(shape);
-                    bgp::combined(
-                        parts.as_deref(),
-                        "the session summary",
-                        &answers,
-                        |_, a| bgp::combine_json(peers.as_ref().expect("the parts have peers"), a),
-                    )
+                    bgp::combined(parts.as_deref(), "the session summary", &answers, |_, a| {
+                        bgp::combine_json(peers.as_ref().expect("the parts have peers"), a)
+                    })
                 };
                 out.push(RawSection { spec, result });
             }
