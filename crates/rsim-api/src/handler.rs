@@ -112,7 +112,11 @@ fn json_response<T: Serialize>(v: &T) -> Response {
 
 fn from_query_error(e: QueryError) -> Problem {
     let status = match e.code {
-        ErrorCode::UnknownTopology | ErrorCode::NoSuchStep | ErrorCode::UnknownTable => 404,
+        ErrorCode::UnknownTopology
+        | ErrorCode::NoSuchStep
+        | ErrorCode::UnknownTable
+        | ErrorCode::NoSourceText => 404,
+        ErrorCode::NotMasked => 403,
         ErrorCode::InvalidQuery
         | ErrorCode::InvalidFilter
         | ErrorCode::UnknownIngress
@@ -645,13 +649,24 @@ fn twin_route(
                 branch: num(b, "branch")?,
                 step: num(s, "step")?,
             };
-            let o = if set {
+            let mut o = if set {
                 let input = args::set_query(&a, &[]).map_err(err)?;
                 commands::explain_set(&input, at, l).map_err(err)?
             } else {
                 let input = args::query(&a, &[]).map_err(err)?;
                 commands::explain(&input, at, l).map_err(err)?
             };
+            match p.get("source_lines").copied() {
+                None | Some("false") | Some("0") => {}
+                Some("true") | Some("1") => rsim_cli::sources::attach(&mut o, l),
+                Some(v) => {
+                    return Err(problem(
+                        422,
+                        "invalid_query",
+                        format!("source_lines {v} is not true or false"),
+                    ));
+                }
+            }
             Ok(json_response(&o))
         }
         ["queries", q, "claims", claim] => {
@@ -672,6 +687,23 @@ fn twin_route(
                 query: Some(m),
             };
             Ok(json_response(&claims::run(top, l, &a).map_err(err)?))
+        }
+        ["sources"] => {
+            method(req, "GET")?;
+            let file = p.get("file").copied().ok_or_else(|| {
+                problem(422, "invalid_query", "the parameter file is missing".into())
+            })?;
+            let lines = p.get("lines").copied().ok_or_else(|| {
+                problem(
+                    422,
+                    "invalid_query",
+                    "the parameter lines is missing".into(),
+                )
+            })?;
+            let (first, last) = rsim_cli::sources::parse_range(lines).map_err(err)?;
+            Ok(json_response(
+                &rsim_cli::sources::lines(top, l, file, first, last).map_err(err)?,
+            ))
         }
         ["topology"] => {
             method(req, "GET")?;

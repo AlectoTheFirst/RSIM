@@ -77,6 +77,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn each_secret_word_masks_the_rest_of_the_line() {
+        for w in SECRET_WORDS {
+            for line in [
+                format!("x {w} FAKESECRET"),
+                format!("x {} 7 FAKESECRET", w.to_uppercase()),
+            ] {
+                let got = mask(&line);
+                assert!(!got.contains("FAKESECRET"), "{w}: {got}");
+            }
+        }
+    }
+
+    #[test]
     fn a_secret_word_masks_the_rest_of_the_line() {
         let cases = [
             (

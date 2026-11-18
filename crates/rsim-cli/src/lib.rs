@@ -10,6 +10,7 @@ pub mod error;
 pub mod json;
 pub mod query;
 pub mod set_query;
+pub mod sources;
 pub mod tables;
 pub mod text;
 pub mod topology;

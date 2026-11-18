@@ -242,6 +242,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/twins/{twin}/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The source lines of a span of a twin with the secrets masked: at most 200 lines, the rest cut with a note. A built-in topology has no source text, and a section with no mask for its vendor is refused. */
+        get: operations["getSourceLines"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/twins/{twin}/tables/{table}/lpm": {
         parameters: {
             query?: never;
@@ -505,6 +522,8 @@ export interface components {
             src?: components["schemas"]["Field_string"] | null;
             vni?: components["schemas"]["Field_uint32"] | null;
         };
+        /** @description The code of a query error. */
+        ErrorCode: ("unknown_topology" | "unknown_ingress" | "invalid_query" | "no_such_step" | "start_requires_context" | "contract_violation" | "unknown_table" | "invalid_filter" | "internal") | "store" | "no_source_text" | "not_masked";
         /** @description One evidence row. */
         Evidence: {
             detail: string;
@@ -791,6 +810,11 @@ export interface components {
             tcp_flags?: components["schemas"]["TcpFlag"][] | null;
             topology: string;
         };
+        /** @description A query error: the code and a text for persons. */
+        QueryError: {
+            code: components["schemas"]["ErrorCode"];
+            detail: string;
+        };
         /** @description The query input of an output: of a path query or of a set query. */
         QueryJson: components["schemas"]["QueryEcho"] | components["schemas"]["SetEcho"];
         RateConditionJson: {
@@ -928,6 +952,41 @@ export interface components {
              */
             topology: string;
         };
+        /** @description One source line with its number in the canonical form of its section. */
+        SourceLineJson: {
+            /** Format: uint32 */
+            number: number;
+            /** @description The text of the line with each secret masked as `<secret>`. */
+            text: string;
+        };
+        /**
+         * SourceLinesOut
+         * @description The masked lines of one source span of a twin.
+         */
+        SourceLinesOut: {
+            kind: string;
+            /** Format: uint32 */
+            rsim_json: number;
+            source: components["schemas"]["SourceTextJson"];
+            topology: string;
+            twin: components["schemas"]["TwinJson"];
+        };
+        /**
+         * @description The masked lines of one source span: the lines from `first_line` to
+         *     `last_line`, at most `MAX_LINES` of them. `cut` is the number of lines
+         *     after the limit that the answer leaves out, with a note.
+         */
+        SourceTextJson: {
+            /** Format: uint32 */
+            cut: number;
+            file: string;
+            /** Format: uint32 */
+            first_line: number;
+            /** Format: uint32 */
+            last_line: number;
+            lines: components["schemas"]["SourceLineJson"][];
+            note?: string | null;
+        };
         SpanJson: {
             file: string;
             /** Format: uint32 */
@@ -954,11 +1013,28 @@ export interface components {
             reply_of?: number | null;
             /** Format: uint32 */
             rsim_json: number;
+            /**
+             * @description The masked source lines of each span of the step, when they are
+             *     asked for.
+             */
+            source_lines?: components["schemas"]["StepSourceJson"][] | null;
             /** Format: uint */
             step: number;
             topology: string;
             trace_step: components["schemas"]["TraceStepJson"];
             twin: components["schemas"]["TwinJson"];
+        };
+        /**
+         * @description The source lines of one span of a trace step: the masked lines, or the
+         *     error that refuses them.
+         */
+        StepSourceJson: components["schemas"]["SourceTextJson"] | {
+            error: components["schemas"]["QueryError"];
+            file: string;
+            /** Format: uint32 */
+            first_line: number;
+            /** Format: uint32 */
+            last_line: number;
         };
         /**
          * SummarizeOut
@@ -1508,6 +1584,8 @@ export interface operations {
             query?: {
                 /** @description Select the reply of this forward branch. */
                 reply_of?: string;
+                /** @description true to add the source lines of each span of the step, with the secrets masked. */
+                source_lines?: string;
             };
             header?: never;
             path: {
@@ -1595,6 +1673,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TopologyOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getSourceLines: {
+        parameters: {
+            query?: {
+                /** @description The file of a source span: <device>/<section>@<blob>. */
+                file?: string;
+                /** @description The line range a-b, or a for one line. */
+                lines?: string;
+            };
+            header?: never;
+            path: {
+                twin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceLinesOut"];
                 };
             };
             /** @description A problem */

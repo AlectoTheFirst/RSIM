@@ -133,21 +133,25 @@ impl Tools {
                     }
                 })
             }),
-            "explain_step" => match args::mode(arguments) {
-                Ok(false) => args::step(arguments)
-                    .and_then(|(q, at)| {
-                        self.twin(&q.topology)
-                            .and_then(|t| commands::explain(&q, at, &t))
-                    })
-                    .map(|o| text(&o)),
-                Ok(true) => args::set_step(arguments)
-                    .and_then(|(q, at)| {
-                        self.twin(&q.topology)
-                            .and_then(|t| commands::explain_set(&q, at, &t))
-                    })
-                    .map(|o| text(&o)),
-                Err(e) => Err(e),
-            },
+            "explain_step" => args::source_lines(arguments).and_then(|lines| {
+                let with_lines = |mut o: rsim_contract::json::StepOut, t: &Loaded| {
+                    if lines {
+                        rsim_cli::sources::attach(&mut o, t);
+                    }
+                    text(&o)
+                };
+                match args::mode(arguments) {
+                    Ok(false) => args::step(arguments).and_then(|(q, at)| {
+                        let t = self.twin(&q.topology)?;
+                        commands::explain(&q, at, &t).map(|o| with_lines(o, &t))
+                    }),
+                    Ok(true) => args::set_step(arguments).and_then(|(q, at)| {
+                        let t = self.twin(&q.topology)?;
+                        commands::explain_set(&q, at, &t).map(|o| with_lines(o, &t))
+                    }),
+                    Err(e) => Err(e),
+                }
+            }),
             "list_tables" => Ok(text(&tables::catalog())),
             "list_claims" => Ok(text(&rsim_cli::claims::catalog())),
             "get_topology" => serde_json::from_value::<rsim_contract::args::TopologyViewArgs>(

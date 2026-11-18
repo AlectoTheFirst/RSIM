@@ -281,6 +281,7 @@ fn main() {
             identity: TwinJson::builtin("scale").unwrap(),
             coverage: BTreeMap::new(),
             bgp: BTreeMap::new(),
+            source: None,
         };
         let page = Selection {
             limit: Some(100),

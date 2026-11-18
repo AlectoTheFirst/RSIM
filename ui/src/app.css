@@ -479,6 +479,32 @@ select:focus-visible,
   overflow-wrap: anywhere;
 }
 
+.spans .span-label {
+  height: auto;
+  padding: 0;
+}
+
+.code {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: var(--button-pad);
+  margin-bottom: var(--button-pad);
+}
+
+.code .ln {
+  text-align: right;
+  color: var(--ink-muted);
+}
+
+.code .tx {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code .note {
+  grid-column: 1 / -1;
+}
+
 /* The set page */
 
 .part {

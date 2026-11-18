@@ -17,6 +17,12 @@ pub enum ErrorCode {
     Store,
     UnknownTable,
     InvalidFilter,
+    /// The twin has no text of the source: a built-in topology, or a file
+    /// that is not a section of the snapshot of the twin.
+    NoSourceText,
+    /// The section has no mask of its secrets for its vendor and format, so
+    /// its lines are not given.
+    NotMasked,
     Internal,
 }
 
@@ -32,6 +38,8 @@ impl ErrorCode {
             ErrorCode::Store => "store",
             ErrorCode::UnknownTable => "unknown_table",
             ErrorCode::InvalidFilter => "invalid_filter",
+            ErrorCode::NoSourceText => "no_source_text",
+            ErrorCode::NotMasked => "not_masked",
             ErrorCode::Internal => "internal",
         }
     }

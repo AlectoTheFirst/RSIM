@@ -7,6 +7,7 @@ use rsim_contract::args::{PathQueryArgs, SetQueryArgs};
 use rsim_contract::claim::{ClaimOut, ClaimsOut};
 use rsim_contract::json::{PathAnswerOut, PathBriefOut, SetAnswerOut, SetBriefOut, StepOut};
 use rsim_contract::schema;
+use rsim_contract::source::SourceLinesOut;
 use rsim_contract::table::{SummarizeOut, TableOut, TablesOut, UniqueOut};
 use rsim_contract::topology::TopologyOut;
 
@@ -179,9 +180,30 @@ pub const ROUTES: &[Route] = &[
         path: "/v1/twins/{twin}/queries/{qid}/branches/{branch}/steps/{step}",
         id: "getStep",
         summary: "One trace step of the answer of a query.",
-        query: &[("reply_of", "Select the reply of this forward branch.")],
+        query: &[
+            ("reply_of", "Select the reply of this forward branch."),
+            (
+                "source_lines",
+                "true to add the source lines of each span of the step, with the secrets masked.",
+            ),
+        ],
         body: &[],
         ok: (200, &[schema::<StepOut>]),
+    },
+    Route {
+        method: "get",
+        path: "/v1/twins/{twin}/sources",
+        id: "getSourceLines",
+        summary: "The source lines of a span of a twin with the secrets masked: at most 200 lines, the rest cut with a note. A built-in topology has no source text, and a section with no mask for its vendor is refused.",
+        query: &[
+            (
+                "file",
+                "The file of a source span: <device>/<section>@<blob>.",
+            ),
+            ("lines", "The line range a-b, or a for one line."),
+        ],
+        body: &[],
+        ok: (200, &[schema::<SourceLinesOut>]),
     },
     Route {
         method: "get",

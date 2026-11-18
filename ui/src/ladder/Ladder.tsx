@@ -1,7 +1,8 @@
 // The ladder of a path query: one row for each function, or for each
 // device at the level device, with the forward path and the replies.
 import type { JSX } from "preact";
-import type { Answer, TraceStep, Verdict } from "../api/types";
+import { useEffect, useRef, useState } from "preact/hooks";
+import type { Answer, SourceText, Span, TraceStep, Verdict } from "../api/types";
 import { Hatch, HatchMark } from "../page/Hatch";
 import { SIZE, TYPE } from "../theme";
 import { LaneNames, Lanes, laneX } from "./Lanes";
@@ -9,7 +10,7 @@ import {
   type Cell,
   delayShown,
   destinationOf,
-  detailSpans,
+  detailSources,
   type Ladder as LadderModel,
   type Rib,
   outcomeKnown,
@@ -152,6 +153,72 @@ function Facts(props: { rows: [string, JSX.Element | string | null][] }) {
 export interface DetailActions {
   copyExplain: (row: StepRow) => void;
   copyUrl: (row: StepRow) => void;
+  /** The masked lines of a span; absent for a twin with no source text. */
+  sourceLines?: (span: Span) => Promise<SourceText>;
+}
+
+/** The numbered lines of a span, with the note of the cut lines. */
+function CodeLines(props: { t: SourceText }) {
+  return (
+    <div class="code t-value">
+      {props.t.lines.map((l) => (
+        <>
+          <span class="ln">{l.number}</span>
+          <span class="tx">{l.text}</span>
+        </>
+      ))}
+      {props.t.note ? <span class="note muted">{props.t.note}</span> : null}
+    </div>
+  );
+}
+
+/**
+ * The source spans of the opened row: the lines of the open span, first
+ * the most specific one, and the other spans as labels that open their
+ * lines. A span whose lines the API refuses shows its label only.
+ */
+function SourceLines(props: { steps: readonly TraceStep[]; load: DetailActions["sourceLines"] }) {
+  const { load } = props;
+  const sources = detailSources(props.steps);
+  const [open, setOpen] = useState<string | null>(sources[0]?.key ?? null);
+  const [text, setText] = useState<Record<string, SourceText | null>>({});
+  const asked = useRef(new Set<string>());
+  useEffect(() => {
+    const s = sources.find((e) => e.key === open);
+    if (!load || !s || asked.current.has(s.key)) return;
+    asked.current.add(s.key);
+    load(s.span).then(
+      (t) => setText((m) => ({ ...m, [s.key]: t })),
+      () => setText((m) => ({ ...m, [s.key]: null })),
+    );
+  }, [open, load]);
+  return (
+    <div>
+      <div class="t-label">source lines</div>
+      <ul class="spans">
+        {sources.map((e) => {
+          const t = e.key === open ? text[e.key] : null;
+          return (
+            <li>
+              {load ? (
+                <button
+                  type="button"
+                  class="plain span-label t-value"
+                  aria-expanded={e.key === open}
+                  onClick={() => setOpen(e.key === open ? null : e.key)}
+                >
+                  {e.label}
+                </button>
+              ) : (
+                <span class="t-value">{e.label}</span>
+              )}
+              {t ? <CodeLines t={t} /> : null}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 }
 
 function Detail(props: { row: StepRow; lanes: number; actions: DetailActions }) {
@@ -160,7 +227,6 @@ function Detail(props: { row: StepRow; lanes: number; actions: DetailActions }) 
   const w = Math.max(1, lanes) * SIZE.lane;
   const x = laneX(row.lane);
   const cls = row.dir === "forward" ? "path-forward" : "path-reply";
-  const spans = detailSpans(row.steps);
   const rate = last.rate_condition ? rateShown(last.rate_condition) : null;
   return (
     <div class="ladder-detail" role="row">
@@ -174,15 +240,7 @@ function Detail(props: { row: StepRow; lanes: number; actions: DetailActions }) 
         </svg>
       </span>
       <div class="detail">
-        <div>
-          <div class="t-label">source lines</div>
-          <ul class="spans">
-            {spans.map((l) => (
-              <li class="t-value">{l}</li>
-            ))}
-          </ul>
-          <div class="muted">The API does not serve the text of the source lines.</div>
-        </div>
+        <SourceLines key={row.key} steps={row.steps} load={actions.sourceLines} />
         <div>
           <div class="t-label">function</div>
           <Facts

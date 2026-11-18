@@ -2,6 +2,8 @@
 
 use std::fmt::Write;
 
+use rsim_contract::source::StepSourceJson;
+
 use crate::error::QueryError;
 use crate::json::{
     AnswerJson, BranchJson, DelayJson, DevicesOut, FieldJson, HeaderJson, PacketSetJson,
@@ -142,6 +144,32 @@ pub fn step(st: &StepOut) -> String {
         );
     }
     let _ = writeln!(s, "rib guard  {}", t.rib_guard);
+    for src in st.source_lines.iter().flatten() {
+        match src {
+            StepSourceJson::Lines(l) => {
+                let _ = writeln!(s, "lines of   {}:{}-{}", l.file, l.first_line, l.last_line);
+                let width = l.lines.last().map_or(1, |x| x.number.to_string().len());
+                for x in &l.lines {
+                    let _ = writeln!(s, "  {:>width$}  {}", x.number, x.text);
+                }
+                if let Some(n) = &l.note {
+                    let _ = writeln!(s, "  {n}");
+                }
+            }
+            StepSourceJson::Refused {
+                file,
+                first_line,
+                last_line,
+                error,
+            } => {
+                let _ = writeln!(
+                    s,
+                    "lines of   {file}:{first_line}-{last_line} not given: {}",
+                    error.detail
+                );
+            }
+        }
+    }
     s
 }
 

@@ -448,14 +448,28 @@ export function rateShown(rc: NonNullable<TraceStep["rate_condition"]>): { actio
   };
 }
 
-/** The source spans of the steps of a row, each once, in the order of the steps. */
-export function detailSpans(steps: readonly TraceStep[]): string[] {
-  const out: string[] = [];
+/** A source span of the opened row with its label and a key. */
+export interface DetailSource {
+  key: string;
+  label: string;
+  span: Span;
+}
+
+/**
+ * The source spans of the steps of a row, each once: the most specific
+ * span first, then the others in the order of the steps.
+ */
+export function detailSources(steps: readonly TraceStep[]): DetailSource[] {
+  const out: DetailSource[] = [];
   for (const st of steps) {
     for (const p of st.provenance) {
-      const l = spanLabel(p, st.device);
-      if (!out.includes(l)) out.push(l);
+      const key = `${p.file}:${p.first_line}-${p.last_line}`;
+      if (!out.some((e) => e.key === key)) out.push({ key, label: spanLabel(p, st.device), span: p });
     }
   }
+  const best = mostSpecific(out.map((e) => e.span));
+  const i = out.findIndex((e) => e.span === best);
+  if (i > 0) out.unshift(...out.splice(i, 1));
   return out;
 }
+

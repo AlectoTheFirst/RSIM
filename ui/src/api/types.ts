@@ -13,6 +13,7 @@ export type PacketSet = S["PacketSetJson"];
 export type Header = S["HeaderJson"];
 export type Verdict = S["VerdictJson"];
 export type Span = S["SpanJson"];
+export type SourceText = S["SourceTextJson"];
 export type Qos = S["QosJson"];
 export type Twin = S["TwinJson"];
 export type QueryEcho = S["QueryEcho"];

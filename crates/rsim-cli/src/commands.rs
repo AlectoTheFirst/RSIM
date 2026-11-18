@@ -29,6 +29,9 @@ pub struct Loaded {
     /// The BGP peer facts of each device of a store twin; empty for a
     /// built-in topology.
     pub bgp: BTreeMap<String, Vec<rsim_ingest::links::BgpPeerFact>>,
+    /// The store and the snapshot of a store twin, for the text of its
+    /// source lines; none for a built-in topology.
+    pub source: Option<crate::sources::SourceStore>,
 }
 
 impl std::ops::Deref for Loaded {
@@ -61,6 +64,7 @@ pub fn load(topology: &str) -> Result<Loaded, QueryError> {
         identity,
         coverage: BTreeMap::new(),
         bgp: BTreeMap::new(),
+        source: None,
     })
 }
 
@@ -93,6 +97,10 @@ pub fn load_store(folder: &str) -> Result<Loaded, QueryError> {
         identity: TwinJson::snapshot(snap.manifest.cycle),
         coverage,
         bgp,
+        source: Some(crate::sources::SourceStore {
+            store,
+            snapshot: snap,
+        }),
     })
 }
 
@@ -327,5 +335,6 @@ fn step_of(
         branch: at.branch,
         step: at.step,
         trace_step: crate::json::trace_step_json(at.step, step),
+        source_lines: None,
     })
 }
