@@ -1,0 +1,504 @@
+/* The styles of the UI. Each colour, font and size is a custom property
+   that the theme module sets. */
+
+@font-face {
+  font-family: "Instrument Sans";
+  src: url("/fonts/InstrumentSans-VariableFont.ttf") format("truetype");
+  font-weight: 400 700;
+  font-stretch: 75% 100%;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Martian Mono";
+  src: url("/fonts/MartianMono-VariableFont.ttf") format("truetype");
+  font-weight: 100 800;
+  font-stretch: 75% 112.5%;
+  font-style: normal;
+  font-display: swap;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+}
+
+body,
+.t-body {
+  font-family: var(--body-family);
+  font-size: var(--body-size);
+  line-height: var(--body-line);
+  font-weight: var(--body-weight);
+  font-stretch: var(--body-stretch);
+}
+
+.t-headline {
+  font-family: var(--headline-family);
+  font-size: var(--headline-size);
+  line-height: var(--headline-line);
+  font-weight: var(--headline-weight);
+  font-stretch: var(--headline-stretch);
+}
+
+.t-wordmark {
+  font-family: var(--wordmark-family);
+  font-size: var(--wordmark-size);
+  line-height: var(--wordmark-line);
+  font-weight: var(--wordmark-weight);
+  font-stretch: var(--wordmark-stretch);
+  letter-spacing: var(--wordmark-spacing);
+}
+
+.t-label {
+  font-family: var(--label-family);
+  font-size: var(--label-size);
+  line-height: var(--label-line);
+  font-weight: var(--label-weight);
+  font-stretch: var(--label-stretch);
+  color: var(--ink-muted);
+}
+
+.t-value {
+  font-family: var(--value-family);
+  font-size: var(--value-size);
+  line-height: var(--value-line);
+  font-weight: var(--value-weight);
+  font-stretch: var(--value-stretch);
+}
+
+.t-value-changed {
+  font-family: var(--value-changed-family);
+  font-size: var(--value-changed-size);
+  line-height: var(--value-changed-line);
+  font-weight: var(--value-changed-weight);
+  font-stretch: var(--value-changed-stretch);
+}
+
+.t-query {
+  font-family: var(--query-family);
+  font-size: var(--query-size);
+  line-height: var(--query-line);
+  font-weight: var(--query-weight);
+  font-stretch: var(--query-stretch);
+}
+
+.t-index {
+  font-family: var(--index-family);
+  font-size: var(--index-size);
+  line-height: var(--index-line);
+  font-weight: var(--index-weight);
+  font-stretch: var(--index-stretch);
+}
+
+.muted {
+  color: var(--ink-muted);
+}
+
+.strong {
+  font-weight: 700;
+}
+
+.actions {
+  margin-top: var(--button-pad);
+}
+
+.lanes.head {
+  min-height: calc(2 * var(--index-line));
+}
+
+.lanes.head svg {
+  position: static;
+}
+
+.c-forward {
+  color: var(--forward);
+}
+.c-reply {
+  color: var(--reply);
+}
+.c-deliver {
+  color: var(--deliver);
+}
+.c-drop {
+  color: var(--drop);
+}
+.c-parameter {
+  color: var(--parameter);
+}
+
+/* Controls */
+
+button {
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: var(--hairline) solid var(--control);
+  border-radius: var(--button-radius);
+  height: var(--button);
+  padding: 0 var(--button-pad);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+button[aria-pressed="true"],
+button[aria-current="page"] {
+  border-color: var(--ink);
+}
+
+button:disabled {
+  cursor: default;
+  color: var(--ink-muted);
+  border-style: dashed;
+}
+
+button.plain {
+  border-color: transparent;
+  text-align: left;
+}
+
+input,
+select {
+  color: var(--ink);
+  background: var(--ground);
+  border: var(--hairline) solid var(--control);
+  border-radius: var(--input-radius);
+  height: var(--input);
+  padding: 0 var(--button-pad);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+.ladder-row:focus-visible {
+  outline: var(--focus-ring) solid var(--forward);
+  outline-offset: var(--focus-offset);
+}
+
+.group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--button-gap);
+}
+
+/* Page structure */
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--fact-gap);
+  row-gap: var(--button-gap);
+  padding: var(--button-gap) var(--margin);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.bar .grow {
+  flex-grow: 1;
+}
+
+.account {
+  position: relative;
+}
+
+.account > button {
+  width: var(--account);
+  height: var(--account);
+  padding: 0;
+  border-radius: var(--account-radius);
+  font-weight: 700;
+}
+
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(var(--account) + var(--button-gap));
+  z-index: 1;
+  width: var(--menu);
+  background: var(--raise);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--button-radius);
+  padding: var(--button-pad) var(--margin);
+  display: grid;
+  gap: var(--button-pad);
+}
+
+.menu .settings {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  align-items: center;
+  gap: var(--button-gap) var(--button-pad);
+}
+
+.menu hr {
+  width: 100%;
+  border: 0;
+  border-top: var(--hairline) solid var(--rule);
+  margin: 0;
+}
+
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--button-gap);
+}
+
+.field input {
+  width: calc(var(--col-ip) + var(--col-port));
+}
+
+.field input.short {
+  width: calc(var(--col-port) + var(--col-step));
+}
+
+.result {
+  padding: var(--button-pad) var(--margin);
+  border-bottom: 0;
+}
+
+/* A hatch mark in a line of text: a square of hatch and its text in a
+   dashed border. */
+.mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--button-gap);
+  border: var(--hairline) dashed var(--ink-muted);
+  border-radius: var(--button-radius);
+  padding-right: var(--button-pad);
+  height: var(--hatch-mark);
+  white-space: nowrap;
+}
+
+.hatch line {
+  stroke: var(--ink-muted);
+  stroke-width: var(--hatch-line);
+}
+
+.body {
+  overflow-x: auto;
+  padding: 0 var(--margin) var(--margin);
+}
+
+.note {
+  padding: var(--button-pad) 0;
+}
+
+.keyline {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--fact-gap);
+  padding: var(--button-pad) var(--margin);
+  color: var(--ink-muted);
+}
+
+/* The ladder */
+
+.ladder {
+  width: max-content;
+  min-width: 100%;
+}
+
+.ladder-row {
+  display: grid;
+  grid-template-columns: var(--ladder-columns);
+  min-height: var(--row);
+  align-items: stretch;
+  position: relative;
+}
+
+.ladder-row > * {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: var(--row);
+}
+
+.ladder-row.step {
+  cursor: pointer;
+}
+
+.ladder-row.step:hover,
+.ladder-row.selected,
+.ladder-detail {
+  background: var(--raise);
+}
+
+.ladder-row.selected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--selected-bar);
+  background: var(--forward);
+}
+
+.ladder-head {
+  border-bottom: var(--hairline) solid var(--rule);
+  align-items: end;
+}
+
+.ladder-head > * {
+  line-height: var(--label-line);
+}
+
+.ladder-section {
+  border-top: var(--hairline) solid var(--rule);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.ladder-section .title {
+  grid-column: 3 / -1;
+  font-weight: 600;
+}
+
+.ix {
+  text-align: right;
+  padding-right: var(--button-pad);
+  color: var(--ink-muted);
+}
+
+.lanes {
+  position: relative;
+  overflow: visible !important;
+}
+
+.lanes svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+}
+
+.lane-guide {
+  stroke: var(--rule);
+  stroke-width: var(--hairline);
+}
+
+.path-forward {
+  fill: var(--forward);
+  stroke: var(--forward);
+}
+.path-reply {
+  fill: var(--reply);
+  stroke: var(--reply);
+}
+.ring {
+  fill: var(--ground);
+  stroke-width: var(--ring-stroke);
+}
+.selected .ring,
+.ladder-row.step:hover .ring {
+  fill: var(--raise);
+}
+.end-deliver {
+  fill: var(--deliver);
+}
+.end-drop {
+  fill: var(--drop);
+}
+.end-unknown {
+  fill: none;
+  stroke: var(--ink-muted);
+  stroke-width: var(--hairline);
+  stroke-dasharray: 2 2;
+}
+
+.lane-names text {
+  fill: var(--ink-muted);
+  text-anchor: middle;
+}
+
+.cell {
+  position: relative;
+  padding-left: var(--button-pad);
+}
+
+.cell.same::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--button-pad) + var(--button-gap));
+  top: 0;
+  bottom: 0;
+  width: var(--hairline);
+  background: var(--rule);
+}
+
+.cell.hatched {
+  display: flex;
+  align-items: center;
+}
+
+.num {
+  text-align: right;
+  padding-right: var(--button-pad);
+}
+
+/* The opened row */
+
+.ladder-detail {
+  display: grid;
+  grid-template-columns: var(--ladder-columns);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.ladder-detail .lanes svg {
+  height: 100%;
+}
+
+.detail {
+  grid-column: 3 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--col-reason) + var(--col-ip)), 1fr));
+  gap: var(--fact-gap);
+  padding: var(--button-pad) var(--margin) var(--margin) 0;
+  white-space: normal;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: var(--button-pad);
+  align-items: baseline;
+}
+
+.facts > * {
+  overflow-wrap: anywhere;
+}
+
+/* The set page */
+
+.part {
+  position: relative;
+  margin: 0 var(--button-gap);
+}
+
+.part.band {
+  background: color-mix(in srgb, var(--forward) 26%, transparent);
+}
+
+.part.end {
+  border: var(--hairline) solid var(--drop);
+  padding: 0 var(--button-gap);
+  line-height: calc(var(--row) - 2 * var(--hairline));
+}
+
+.part.end.deliver {
+  border-color: var(--deliver);
+}
+
+.part.end.unknown {
+  border-style: dashed;
+  border-color: var(--ink-muted);
+}
+
+.part-head {
+  white-space: normal !important;
+  padding: 0 var(--button-gap);
+}
