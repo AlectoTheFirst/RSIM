@@ -89,6 +89,8 @@ pub enum DeviceKind {
 pub struct Vap {
     pub ssid: String,
     pub wlan: Option<String>,
+    /// The radio band, for example `ng` or `na`.
+    pub radio: Option<String>,
     pub up: bool,
 }
 
@@ -128,6 +130,8 @@ pub struct Client {
     pub switch: Option<(String, u32)>,
     /// The access point and the SSID of a wireless client.
     pub ap: Option<(String, String)>,
+    /// The radio band of a wireless client, for example `ng` or `na`.
+    pub radio: Option<String>,
     pub index: usize,
 }
 
@@ -266,14 +270,17 @@ pub fn read(networks: &Value, wlans: &Value, devices: &Value, clients: &Value) -
                             Some(Vap {
                                 ssid: s(v, "essid")?,
                                 wlan: s(v, "wlanconf_id"),
+                                radio: s(v, "radio"),
                                 up: v.get("up").and_then(Value::as_bool).unwrap_or(true),
                             })
                         })
                         .collect()
                 })
                 .unwrap_or_default();
-            vaps.sort_by(|a, b| a.ssid.cmp(&b.ssid));
-            vaps.dedup_by(|a, b| a.ssid == b.ssid);
+            vaps.sort_by(|a, b| {
+                (&a.ssid, &a.wlan, &a.radio, a.up).cmp(&(&b.ssid, &b.wlan, &b.radio, b.up))
+            });
+            vaps.dedup();
             Some(Device {
                 mac: s(x, "mac")?.to_lowercase(),
                 name: s(x, "name").unwrap_or_else(|| s(x, "mac").unwrap_or_default()),
@@ -319,6 +326,7 @@ pub fn read(networks: &Value, wlans: &Value, devices: &Value, clients: &Value) -
                 network: s(x, "network_id"),
                 wired,
                 switch,
+                radio: if wired { None } else { s(x, "radio") },
                 ap,
                 index,
             })

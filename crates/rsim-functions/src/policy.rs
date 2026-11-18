@@ -140,14 +140,28 @@ impl NetFunction for AclMatch {
     }
 }
 
-/// The zones and the interfaces to which a firewall rule applies. `None`
-/// means any zone or any interface.
+/// A connection state that a firewall rule can match.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ConnState {
+    /// The packets of no session.
+    New,
+    /// The packets of a session, in either direction.
+    Established,
+    /// The session lookup gives no packet this state.
+    Related,
+    /// The session lookup gives no packet this state.
+    Invalid,
+}
+
+/// The zones, the interfaces and the connection states to which a firewall
+/// rule applies. `None` means any zone, any interface or any state.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ZoneScope {
     pub from: Option<BTreeSet<ZoneId>>,
     pub to: Option<BTreeSet<ZoneId>>,
     pub ingress: Option<BTreeSet<InterfaceId>>,
     pub egress: Option<BTreeSet<InterfaceId>>,
+    pub states: Option<BTreeSet<ConnState>>,
 }
 
 impl ZoneScope {
@@ -157,6 +171,7 @@ impl ZoneScope {
             to: Some([ZoneId::new(to)].into_iter().collect()),
             ingress: None,
             egress: None,
+            states: None,
         }
     }
 
@@ -170,15 +185,27 @@ impl ZoneScope {
                 },
             }
         }
+        let state = match &self.states {
+            None => Tri::True,
+            Some(s) => match &ctx.session {
+                Attr::Known(SessionMatch::New { .. }) => Tri::from(s.contains(&ConnState::New)),
+                Attr::Known(SessionMatch::Forward { .. } | SessionMatch::Reply { .. }) => {
+                    Tri::from(s.contains(&ConnState::Established))
+                }
+                _ => Tri::Unknown,
+            },
+        };
         one(&self.from, &ctx.src_zone)
             .and(one(&self.to, &ctx.dst_zone))
             .and(one(&self.ingress, &ctx.ingress_interface))
             .and(one(&self.egress, &ctx.egress_interface))
+            .and(state)
     }
 }
 
 /// A stateful firewall policy between zones. Packets of an existing session
-/// pass without a policy check.
+/// pass without a policy check, unless `sessions_pass` is false; then the
+/// rules evaluate them too.
 #[derive(Clone, Debug)]
 pub struct FirewallPolicy {
     pub meta: Meta,
@@ -189,6 +216,7 @@ pub struct FirewallPolicy {
     /// From the vendor profile.
     pub default: RuleAction,
     pub next: FunctionId,
+    pub sessions_pass: bool,
 }
 
 impl FirewallPolicy {
@@ -207,7 +235,14 @@ impl FirewallPolicy {
             rules,
             default,
             next,
+            sessions_pass: true,
         }
+    }
+
+    /// The policy with the rules evaluating the packets of a session.
+    pub fn evaluating_sessions(mut self) -> Self {
+        self.sessions_pass = false;
+        self
     }
 }
 
@@ -254,9 +289,9 @@ impl NetFunction for FirewallPolicy {
         predicates_of(&self.rules)
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
-        if let Attr::Known(
-            SessionMatch::Forward { index, .. } | SessionMatch::Reply { index, .. },
-        ) = &ctx.session
+        if let Attr::Known(SessionMatch::Forward { index, .. } | SessionMatch::Reply { index, .. }) =
+            &ctx.session
+            && self.sessions_pass
         {
             return vec![self.meta.forward(
                 input.clone(),

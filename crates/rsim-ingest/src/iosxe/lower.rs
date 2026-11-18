@@ -16,7 +16,7 @@ use std::net::IpAddr;
 use rsim_core::{InterfaceId, Mac, ObjectId, SourceSpan, VrfId};
 use rsim_functions::{
     DestinationNat, DeviceDelivery, LinkEnd, LocalInput, RouteLookup, SessionCommit, SessionLookup,
-    SourceNat, VendorProfile,
+    SourceNat, StateActions, VendorProfile,
 };
 
 use super::config::{Config, Interface};
@@ -263,6 +263,7 @@ pub fn lower(
     l.add(SessionLookup {
         meta,
         next: l.id("dnat"),
+        states: StateActions::default(),
     });
     // The NAT of the outside to inside direction, before the route lookup.
     let (dnat, scopes) = l.destination_nat(&outside);

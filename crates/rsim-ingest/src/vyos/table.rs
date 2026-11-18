@@ -11,6 +11,15 @@ const fn e(path: &'static str, state: State, reach: Reach) -> Entry {
 /// The interface kinds with handled stanzas.
 const KINDS: &[&str] = &["ethernet", "dummy", "loopback", "pppoe", "wireguard"];
 
+/// The firewall group kinds with the option of their members.
+const GROUPS: &[(&str, &str)] = &[
+    ("address-group", "address"),
+    ("network-group", "network"),
+    ("port-group", "port"),
+    ("ipv6-address-group", "address"),
+    ("ipv6-network-group", "network"),
+];
+
 /// The options of an interface or a VLAN subinterface, relative to the
 /// interface.
 const INTERFACE_OPTIONS: &[(&str, State, Reach)] = &[
@@ -85,7 +94,9 @@ const ENTRIES: &[Entry] = &[
     e("firewall", Handled, Node),
     e("firewall/zone", Handled, Node),
     e("firewall/zone/*", Handled, Node),
-    e("firewall/zone/*/member", Handled, Subtree),
+    e("firewall/zone/*/member", Handled, Node),
+    e("firewall/zone/*/member/interface", Handled, Subtree),
+    e("firewall/zone/*/member/vrf", Unhandled, Subtree),
     e("firewall/zone/*/from", Handled, Node),
     e("firewall/zone/*/from/*", Handled, Node),
     e("firewall/zone/*/from/*/firewall", Handled, Node),
@@ -117,11 +128,6 @@ const ENTRIES: &[Entry] = &[
     e("firewall/ipv4/name/*/rule/*", Handled, Node),
     e("firewall/ipv6/name/*/rule/*", Handled, Node),
     e("firewall/group", Handled, Node),
-    e("firewall/group/address-group", Handled, Subtree),
-    e("firewall/group/network-group", Handled, Subtree),
-    e("firewall/group/port-group", Handled, Subtree),
-    e("firewall/group/ipv6-address-group", Handled, Subtree),
-    e("firewall/group/ipv6-network-group", Handled, Subtree),
     e("firewall/global-options", Handled, Node),
     e("firewall/global-options/state-policy", Handled, Subtree),
     e("firewall/global-options/all-ping", Irrelevant, Subtree),
@@ -211,6 +217,14 @@ pub fn table(rib_collected: bool) -> Table {
                 t.push(&format!("{prefix}/{opt}"), *state, *reach);
             }
         }
+    }
+    for (kind, field) in GROUPS {
+        let base = format!("firewall/group/{kind}");
+        t.push(&base, Handled, Node);
+        t.push(&format!("{base}/*"), Handled, Node);
+        t.push(&format!("{base}/*/{field}"), Handled, Subtree);
+        t.push(&format!("{base}/*/include"), Handled, Subtree);
+        t.push(&format!("{base}/*/description"), Irrelevant, Subtree);
     }
     let rules = [
         "policy/route/*/rule/*",

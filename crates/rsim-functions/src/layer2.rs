@@ -244,6 +244,55 @@ impl NetFunction for HostResolution {
     }
 }
 
+/// The attachment point of a host whose place is not known, for example a
+/// client of the controller whose network is not the network of its port.
+/// Each packet from the host is unknown.
+#[derive(Clone, Debug)]
+pub struct Unplaced {
+    pub meta: Meta,
+    /// The attachment point, for example `unplaced/h1-005351`.
+    pub interface: InterfaceId,
+    /// Why the host is not placed.
+    pub detail: String,
+}
+
+impl NetFunction for Unplaced {
+    meta_methods!(FunctionKind::Ingress);
+
+    fn ingress_interface(&self) -> Option<&InterfaceId> {
+        Some(&self.interface)
+    }
+    fn requires(&self) -> Vec<ContextAttr> {
+        Vec::new()
+    }
+    fn provides(&self) -> Vec<ContextAttr> {
+        vec![ContextAttr::Device, ContextAttr::IngressInterface]
+    }
+    fn reads(&self) -> Vec<Dependency> {
+        Vec::new()
+    }
+    fn successors(&self) -> Vec<FunctionId> {
+        Vec::new()
+    }
+    fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
+        let mut c = ctx.clone();
+        c.device = Attr::Known(self.meta.device.clone());
+        c.ingress_interface = Attr::Known(self.interface.clone());
+        let mut out = Vec::new();
+        push_nonempty(
+            &mut out,
+            self.meta.unknown(
+                input.clone(),
+                ReasonCode::UnknownAttribute,
+                self.detail.clone(),
+                &c,
+                state,
+            ),
+        );
+        out
+    }
+}
+
 /// A frame enters a switch port. It sets the ingress port and the bridge
 /// domain from the tag of the frame.
 #[derive(Clone, Debug)]
