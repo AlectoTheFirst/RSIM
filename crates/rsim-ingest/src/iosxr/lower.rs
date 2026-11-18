@@ -1233,7 +1233,12 @@ pub(crate) fn fib(
                     })
                 })
                 .collect();
-            Route::unknown(RouteKind::Static, TABLE_NOT_COLLECTED, spans)
+            Route::unknown_with(
+                RouteKind::Static,
+                rsim_core::ReasonCode::NotCollected,
+                TABLE_NOT_COLLECTED,
+                spans,
+            )
         })
     };
     match rib {

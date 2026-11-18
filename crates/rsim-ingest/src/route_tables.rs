@@ -3,10 +3,11 @@
 //!
 //! A VRF with collected rows forwards on them, and the routing lines of its
 //! config are known-irrelevant. A VRF with no collected rows forwards on the
-//! connected and static routes of its config; if its config has a dynamic
-//! routing protocol, its routing lines are unhandled and each destination
-//! outside those routes is unknown, because the routes of the protocol are
-//! not known.
+//! connected and static routes of its config. If its config has a dynamic
+//! routing protocol, its routing lines are unhandled, and only its
+//! connected and local routes give an answer: a learned route that is not
+//! known can be more specific than a static route, so the static routes and
+//! each other destination are unknown with the code `NotCollected`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -29,7 +30,7 @@ pub fn words(s: &Stanza) -> Vec<&str> {
 }
 
 /// The reason of a route lookup in a VRF with a dynamic routing protocol
-/// and no collected route rows.
+/// and no collected route rows, with the code `NotCollected`.
 pub const TABLE_NOT_COLLECTED: &str = "vrf route table not collected";
 
 /// The VRFs of one device with collected route rows, and the VRFs whose

@@ -642,7 +642,7 @@ mod twin {
         );
         let a = run(&t, "eth0.10", tcp("192.0.2.30", "198.51.100.99", 443));
         let (_, v) = first(&a);
-        assert_eq!(code(&v), Some(ReasonCode::IncompleteTable), "{v:?}");
+        assert_eq!(code(&v), Some(ReasonCode::NotCollected), "{v:?}");
         let Verdict::Unknown(r) = &v else {
             panic!("{v:?}");
         };

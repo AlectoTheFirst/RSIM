@@ -393,29 +393,34 @@ fn what_is_not_lowered_gives_unknown() {
 
 #[test]
 fn without_a_route_table_the_config_routes_decide() {
-    let e = assemble(vec![Input::Nxos {
-        name: "leaf1".into(),
-        config: CONFIG.to_vec(),
-        file: "leaf1/config@000000000000".into(),
-        collected: Collected::default(),
-        sections: sections(),
-    }]);
-    let t = e.builder.build().expect("the twin builds");
-    let (_, steps) = only(&run(
-        &t,
-        "Vlan30",
-        "192.0.2.130",
-        "203.0.113.200",
-        PROTO_TCP,
-        443,
-    ));
-    assert!(
-        has(
-            &steps,
-            "route 0.0.0.0/0 in VRF default via 198.51.100.2 on Ethernet1/2"
+    let text = String::from_utf8(CONFIG.to_vec()).unwrap();
+    let start = text.find("router ospf 1\n").unwrap();
+    let end = text.find("ip nat inside source static").unwrap();
+    let without_protocols = format!("{}{}", &text[..start], &text[end..]);
+    for (config, route) in [
+        (
+            text.as_str(),
+            "route 0.0.0.0/0 in VRF default: vrf route table not collected",
         ),
-        "{steps:#?}"
-    );
+        (
+            without_protocols.as_str(),
+            "route 0.0.0.0/0 in VRF default via 198.51.100.2 on Ethernet1/2",
+        ),
+    ] {
+        let t = estate_of(config.as_bytes(), Collected::default())
+            .builder
+            .build()
+            .expect("the twin builds");
+        let (_, steps) = only(&run(
+            &t,
+            "Vlan30",
+            "192.0.2.130",
+            "203.0.113.200",
+            PROTO_TCP,
+            443,
+        ));
+        assert!(has(&steps, route), "{steps:#?}");
+    }
 }
 
 #[test]
@@ -1424,11 +1429,17 @@ fn a_learned_route_keeps_its_protocol() {
 }
 
 #[test]
-fn a_vrf_with_bgp_and_no_rows_is_unknown_outside_its_connected_and_static_routes() {
-    let config = String::from_utf8(CONFIG.to_vec()).unwrap().replace(
-        "router bgp 65000\n",
-        "router bgp 65000\n  vrf RED\n    address-family ipv4 unicast\n",
-    );
+fn a_vrf_with_bgp_and_no_rows_is_unknown_outside_its_connected_routes() {
+    let config = String::from_utf8(CONFIG.to_vec())
+        .unwrap()
+        .replace(
+            "router bgp 65000\n",
+            "router bgp 65000\n  vrf RED\n    address-family ipv4 unicast\n",
+        )
+        .replace(
+            "vrf context RED\n",
+            "vrf context RED\n  ip route 0.0.0.0/0 192.0.2.9\n",
+        );
     let mut col = collected();
     col.routes.retain(|r| r.vrf != "RED");
     let e = estate_of(config.as_bytes(), col);
@@ -1439,19 +1450,37 @@ fn a_vrf_with_bgp_and_no_rows_is_unknown_outside_its_connected_and_static_routes
     );
     assert!(!unhandled.contains_key("router bgp .."), "{unhandled:?}");
     let t = e.builder.build().expect("the twin builds");
-    let a = run(&t, "Vlan20", "192.0.2.70", "203.0.113.200", PROTO_TCP, 443);
-    let (verdict, steps) = only(&a);
-    assert_eq!(verdict, VerdictKind::Unknown);
+    for (dst, route) in [("203.0.113.200", "0.0.0.0/0"), ("10.1.1.1", "10.0.0.0/8")] {
+        let a = run(&t, "Vlan20", "192.0.2.70", dst, PROTO_TCP, 443);
+        let (verdict, steps) = only(&a);
+        assert_eq!(verdict, VerdictKind::Unknown);
+        assert!(
+            has(
+                &steps,
+                &format!("route {route} in VRF RED: vrf route table not collected")
+            ),
+            "{steps:#?}"
+        );
+        let Some(rsim_core::Verdict::Unknown(r)) = a.verdict() else {
+            panic!("{steps:#?}");
+        };
+        assert_eq!(r.code, rsim_core::ReasonCode::NotCollected);
+    }
+    let k = kinds(&t, "RED");
+    assert_eq!(k["0.0.0.0/0"], "static");
+    assert_eq!(k["192.0.2.64/26"], "connected");
+    let (_, steps) = only(&run(
+        &t,
+        "Vlan20",
+        "192.0.2.70",
+        "192.0.2.10",
+        PROTO_TCP,
+        443,
+    ));
     assert!(
-        has(
-            &steps,
-            "route 0.0.0.0/0 in VRF RED: vrf route table not collected"
-        ),
+        has(&steps, "route 192.0.2.0/26 in VRF RED connected on Vlan60"),
         "{steps:#?}"
     );
-    let k = kinds(&t, "RED");
-    assert_eq!(k["10.0.0.0/8"], "static");
-    assert_eq!(k["192.0.2.64/26"], "connected");
 }
 
 #[test]

@@ -1256,8 +1256,9 @@ impl L<'_> {
 
     /// The FIB of a VRF: the collected route rows of the VRF, or else the
     /// connected and static routes of the config. With no rows and a
-    /// dynamic routing protocol in the VRF, each other destination is
-    /// unknown. The addresses of the interfaces of the VRF are local routes.
+    /// dynamic routing protocol in the VRF, only the connected routes give
+    /// an answer: the static routes and each other destination are unknown.
+    /// The addresses of the interfaces of the VRF are local routes.
     /// Each IPv6 packet is unknown. Each next hop goes to the function
     /// `next`, and each VXLAN path to the encapsulation of `vx`.
     #[allow(clippy::too_many_arguments)]
@@ -1342,7 +1343,7 @@ impl L<'_> {
             }
             if let Some(found) = self.cfg.dynamic_vrfs.get(vrf).cloned() {
                 self.note(format!(
-                    "VRF {vrf}: a dynamic routing protocol and no collected route rows, so each destination outside the connected and static routes is unknown"
+                    "VRF {vrf}: a dynamic routing protocol and no collected route rows, so each destination outside the connected and local routes is unknown"
                 ));
                 let spans: Vec<SourceSpan> = found
                     .iter()
@@ -1353,12 +1354,25 @@ impl L<'_> {
                         })
                     })
                     .collect();
+                // A learned route can be more specific than a static route,
+                // so only the connected routes stay definite.
+                let not_collected = |mut s: Vec<SourceSpan>| {
+                    s.extend(spans.iter().cloned());
+                    Route::unknown_with(
+                        RouteKind::Static,
+                        rsim_core::ReasonCode::NotCollected,
+                        TABLE_NOT_COLLECTED,
+                        s,
+                    )
+                };
+                for (p, r) in t.entries() {
+                    if r.kind != RouteKind::Connected {
+                        t.insert(p, not_collected(r.spans));
+                    }
+                }
                 let all: Prefix = "0.0.0.0/0".parse().expect("a valid prefix");
                 if t.get(&all).is_none() {
-                    t.insert(
-                        all,
-                        Route::unknown(RouteKind::Static, TABLE_NOT_COLLECTED, spans),
-                    );
+                    t.insert(all, not_collected(Vec::new()));
                 }
             }
         } else {

@@ -743,7 +743,15 @@ impl L<'_> {
                     if r.kind != RouteKind::Connected {
                         let mut s = r.spans.clone();
                         s.extend(spans.iter().cloned());
-                        t.insert(p, Route::unknown(RouteKind::Static, TABLE_NOT_COLLECTED, s));
+                        t.insert(
+                            p,
+                            Route::unknown_with(
+                                RouteKind::Static,
+                                rsim_core::ReasonCode::NotCollected,
+                                TABLE_NOT_COLLECTED,
+                                s,
+                            ),
+                        );
                     }
                 }
                 for all in ["0.0.0.0/0", "::/0"] {
@@ -751,7 +759,12 @@ impl L<'_> {
                     if t.get(&p).is_none() {
                         t.insert(
                             p,
-                            Route::unknown(RouteKind::Static, TABLE_NOT_COLLECTED, spans.clone()),
+                            Route::unknown_with(
+                                RouteKind::Static,
+                                rsim_core::ReasonCode::NotCollected,
+                                TABLE_NOT_COLLECTED,
+                                spans.clone(),
+                            ),
                         );
                     }
                 }

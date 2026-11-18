@@ -63,6 +63,8 @@ pub enum ReasonCode {
     UnknownAttribute,
     AmbiguousOwner,
     IncompleteTable,
+    /// A table that the answer needs was not collected.
+    NotCollected,
     /// The set of a part of the query was over the node budget, and the
     /// part has one original request.
     SetBudget,
