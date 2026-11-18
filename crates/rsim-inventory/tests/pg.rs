@@ -359,7 +359,7 @@ async fn each_list_is_in_byte_order_of_its_key() {
                 account: d.into(),
                 fabric_port: p.into(),
                 device: d.into(),
-                port: "eth1".into(),
+                port: format!("eth-{p}"),
             }));
             changes.push(Change::PutEdgeDevice(EdgeDeviceBinding {
                 account: d.into(),
