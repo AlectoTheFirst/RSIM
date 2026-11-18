@@ -17,6 +17,7 @@ mod leaf_spine;
 mod mini_enterprise;
 mod profiles;
 mod routing_loop;
+mod scale;
 
 pub use builders::*;
 pub use chain::chain;
@@ -29,6 +30,7 @@ pub use leaf_spine::leaf_spine;
 pub use mini_enterprise::{MiniOpts, mini_enterprise};
 pub use profiles::*;
 pub use routing_loop::routing_loop;
+pub use scale::*;
 
 use rsim_engine::{Twin, TwinBuilder};
 

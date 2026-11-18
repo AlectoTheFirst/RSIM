@@ -81,6 +81,7 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | Layer 2 tests | `cargo test -p rsim-engine --test layer2` |
 | VXLAN fabric tests | `cargo test -p rsim-engine --test tunnel` |
 | Forwarding table benchmark at internet scale | `cargo bench -p rsim-functions --bench fib`. `RSIM_FIB_SKIP_ALL=1` leaves out the split of all destinations, which does not scale yet. |
+| Scale benchmark | `RSIM_SCALE_PERCENT=1 cargo bench -p rsim-cli --bench scale`: a generated estate at 1 % of 10,000 routers, 1,000 firewalls with 60,000 rules and 60,000 endpoints. It prints the heap and the build time of the twin, the time of a path query and of a set query, and the time and peak heap of the `fib` table request. `RSIM_SCALE_PHASES` selects the parts (`twin`, `path`, `set`, `table`, `fulltable`), `RSIM_SCALE_FILL=0` keeps only the routes of the estate, and `RSIM_SCALE_CAP_GIB` (default 12) stops the run at that live heap. `RSIM_SCALE_PERCENT=100` with `RSIM_SCALE_PHASES=twin,path,set` needs about 3 GB; the `table` part needs about 16 GiB at 100 %, so it runs only up to 50 % on a 16 GB machine. |
 | Twin of the newest snapshot of a store | `cargo run -p rsim-ingest --example estate -- <data folder>`. Add `<source> <destination> tcp\|udp <port>` for a path query; the ingress comes from the attachment of the source. |
 | Coverage of a VyOS config | `cargo run -p rsim-ingest --example vyos_coverage < config.json` |
 | Coverage of an NX-OS running config | `cargo run -p rsim-ingest --example nxos_coverage < running-config.txt`. Each printed line goes through the mask of the secrets. |
@@ -101,7 +102,7 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | Link join tests | `cargo test -p rsim-ingest --test links` |
 | Twin of a VyOS device of a store | `cargo run -p rsim-ingest --example vyos_snapshot -- <data folder> <device>`. Add `<ingress interface> <source> <destination> tcp\|udp <port>` for a path query. |
 
-The hand-built topologies are in the crate `rsim-topologies`, with one module for each topology in `crates/rsim-topologies/src/`. `layer2_site()` is a switched site behind a router for the layer 2 tests; it is not a built-in topology. The tests and the benchmarks of `rsim-engine` use it as a development dependency. `rsim-topologies::builtin(name)` gives the twin of a built-in topology.
+The hand-built topologies are in the crate `rsim-topologies`, with one module for each topology in `crates/rsim-topologies/src/`. `layer2_site()` is a switched site behind a router for the layer 2 tests; it is not a built-in topology. The tests and the benchmarks of `rsim-engine` use it as a development dependency. `scale_estate(ScaleOpts)` in `rsim-topologies/src/scale.rs` is the generated estate of the scale benchmark, from a fixed pseudo-random sequence; it is not a built-in topology. `rsim-topologies::builtin(name)` gives the twin of a built-in topology.
 
 `leaf_spine()` is a VXLAN fabric of 4 leaves and 2 spines with symmetric routing in one tenant VRF; `rsim-functions/src/tunnel.rs` holds its tunnel ends `VxlanEncap` and `VxlanDecap`.
 
