@@ -62,7 +62,10 @@ fn golden() -> Vec<(String, String)> {
         .map(|e| e.unwrap().path())
         .filter(|p| {
             let n = p.file_name().unwrap().to_string_lossy();
-            n.ends_with(".json") && !n.ends_with(".summary.json") && !n.ends_with(".steps.json")
+            n.ends_with(".json")
+                && !n.ends_with(".summary.json")
+                && !n.ends_with(".steps.json")
+                && !n.starts_with("claim-")
         })
         .map(|p| {
             (
