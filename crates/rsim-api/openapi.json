@@ -3482,6 +3482,69 @@
         "summary": "A claim on the twin, or on the devices of the parameter device."
       }
     },
+    "/v1/twins/{twin}/coverage": {
+      "get": {
+        "operationId": "getCoverage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The number of rows of a page.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The cursor of the next page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The coverage report of a twin: for each device in name order, the config lines that the ingestion handles, that have no effect on the twin and that it does not handle, with the number of unhandled paths and stanzas. A built-in topology has no report. The table coverage gives the unhandled paths."
+      }
+    },
     "/v1/twins/{twin}/queries": {
       "post": {
         "operationId": "createQuery",

@@ -21,6 +21,13 @@ export type SetEcho = S["SetEcho"];
 export type PathQueryArgs = S["PathQueryArgs"];
 export type SetQueryArgs = S["SetQueryArgs"];
 export type Problem = S["Problem"];
+export type TablesOut = S["TablesOut"];
+export type TableDef = S["TableDef"];
+export type Column = S["Column"];
+export type ColumnType = S["ColumnType"];
+export type TableOut = S["TableOut"];
+export type SummarizeOut = S["SummarizeOut"];
+export type UniqueOut = S["UniqueOut"];
 
 /** One header field value of the JSON output. */
 export type FieldValue =

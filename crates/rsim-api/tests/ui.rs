@@ -153,3 +153,21 @@ fn the_contract_has_no_ui_path() {
         paths.keys().collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn the_coverage_view_reads_the_report_of_a_twin_and_the_catalog() {
+    let s = state();
+    let r = get(&s, "/v1/twins/builtin.leaf-spine/coverage");
+    assert_eq!(r.status, 200);
+    let body: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
+    assert_eq!(body["kind"], "coverage_report");
+    assert_eq!(body["total"], 0);
+    let catalog: serde_json::Value = serde_json::from_slice(&get(&s, "/v1/tables").body).unwrap();
+    let coverage = catalog["tables"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "coverage")
+        .unwrap();
+    assert!(coverage["needs"].as_str().unwrap().contains("built-in"));
+}
