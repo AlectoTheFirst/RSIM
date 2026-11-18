@@ -130,10 +130,16 @@ pub const DEFAULT_VLAN: u16 = 1;
 pub const VTP_MODES_WITH_VLAN_LINES: &[&str] = &["transparent", "off"];
 
 /// The status word of a VLAN that forwards in `show vlan brief`, in lower
-/// case. A VLAN with another status, such as `act/lshut`, `suspended` or
-/// `act/unsup`, makes each port that carries it `Unknown`. Not confirmed
-/// against a device.
+/// case. A VLAN with another status, such as `act/lshut` or `suspended`,
+/// except [`VLAN_UNSUPPORTED`], makes each port that carries it `Unknown`.
+/// Not confirmed against a device.
 pub const VLAN_ACTIVE: &str = "active";
+
+/// The status word in `show vlan brief` of a reserved VLAN that the switch
+/// does not support, such as 1002 to 1005. Such a VLAN is not a VLAN of the
+/// switch, so a trunk with no allowed list does not carry it. Not confirmed
+/// against a device.
+pub const VLAN_UNSUPPORTED: &str = "act/unsup";
 
 /// The port state words of `show spanning-tree` of a port that forwards,
 /// in lower case.

@@ -1706,3 +1706,66 @@ fn show_vrrp_gives_the_virtual_mac_of_the_master() {
         "{steps:#?}"
     );
 }
+
+#[test]
+fn a_trunk_with_no_allowed_list_carries_the_vlans_of_show_vlan_brief_without_the_reserved_ones() {
+    let config = String::from_utf8(acc1_clean())
+        .unwrap()
+        .replace("vtp mode transparent\n", "")
+        .replacen(" switchport trunk allowed vlan 10,20,99\n", "", 1);
+    let sum = summary_of(
+        "acc1",
+        config.as_bytes(),
+        &acc1_sections(&[("vlans", ACC1_VLANS)]),
+    );
+    // The VLANs of the section and of the `vlan` lines, with no reserved
+    // VLAN 1002.
+    assert_eq!(
+        sum.ports["Port-channel1"]
+            .as_ref()
+            .map(|p| p.tagged.clone()),
+        Some(BTreeSet::from([10, 20, 99, 100, 200])),
+        "{:?}",
+        sum.ports
+    );
+}
+
+#[test]
+fn a_show_vrrp_that_the_template_cannot_read_leaves_the_brief_form_to_decide() {
+    let v3 = "GigabitEthernet0/0/1.200 - Group 10 - Address-Family IPv4
+  State is BACKUP
+  State duration 1 hours 2 mins 3.456 secs
+  Virtual IP address is 192.0.2.130
+  Virtual MAC address is 0000.5E00.53AA
+  Advertise time 1000 msec
+  Preemption enabled
+  Priority is 120
+  Master Router is 192.0.2.131, priority is 130
+  Master Advertisement interval is 1000 msec (expires in 456 msec)
+  Master Down interval is unknown
+  FLAGS: 0/1
+";
+    let e = routers_with(|s: &mut Sections| {
+        s.insert(
+            "vrrp_detail".into(),
+            (v3.as_bytes().to_vec(), "edge1/vrrp_detail".into()),
+        );
+    });
+    assert!(
+        e.notes["edge1"]
+            .iter()
+            .any(|n| n.starts_with("the section vrrp_detail is not read")),
+        "{:#?}",
+        e.notes["edge1"]
+    );
+    let to_vip = |t: &Twin| {
+        show(&query(
+            t,
+            "edge1",
+            "GigabitEthernet0/0/7",
+            "198.51.100.40",
+            "192.0.2.130",
+        ))
+    };
+    assert_eq!(to_vip(&twin_of(e)), to_vip(&twin_of(routers())));
+}

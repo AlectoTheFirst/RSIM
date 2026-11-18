@@ -461,8 +461,9 @@ fn ports(l: &mut L, cfg: &Config, st: &State) -> Vec<Port> {
 }
 
 /// The IPv4 HSRP and VRRP groups of the lowered interfaces with their state
-/// from `show standby` and `show vrrp`, else from `show standby brief` and
-/// `show vrrp brief`. The virtual MAC is the MAC of
+/// from `show standby` and `show vrrp` when the template reads them, else
+/// from `show standby brief` and `show vrrp brief`. The virtual MAC is the
+/// MAC of
 /// `standby <group> mac-address`, else the virtual MAC of `show standby` or
 /// `show vrrp`; the brief forms give none. A virtual MAC of the section that
 /// differs from the MAC of the config, and an HSRP state that contradicts
@@ -495,9 +496,11 @@ fn groups(
                     .map(|v| v.iter().map(|x| x.row.clone()).collect())
                     .map_err(Clone::clone)
             });
-            let (rules, rows) = match &detail_rows {
-                Some(_) => (detail_rules, &detail_rows),
-                None => (brief_rules, brief),
+            // The detail form decides when its template reads it; else the
+            // brief form, if it is in the snapshot.
+            let (rules, rows) = match (&detail_rows, brief) {
+                (Some(Ok(_)), _) | (Some(Err(_)), None) => (detail_rules, &detail_rows),
+                _ => (brief_rules, brief),
             };
             let mut spans = vec![l.span(g.lines)];
             spans.extend(g.addresses.iter().map(|(_, x)| l.span(*x)));

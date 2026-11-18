@@ -8,7 +8,8 @@ use std::net::IpAddr;
 
 use super::config::Config;
 use super::profile::{
-    DEFAULT_VLAN, MODE_WITHOUT_LINE, UP_WITHOUT_SHUTDOWN, VLAN_ACTIVE, VTP_MODES_WITH_VLAN_LINES,
+    DEFAULT_VLAN, MODE_WITHOUT_LINE, UP_WITHOUT_SHUTDOWN, VLAN_ACTIVE, VLAN_UNSUPPORTED,
+    VTP_MODES_WITH_VLAN_LINES,
 };
 use super::state::{State, StpState};
 use crate::collected::Collected;
@@ -39,7 +40,8 @@ fn vlans_in_config(cfg: &Config) -> bool {
 /// that make a port `Unknown`: the VLANs of a `vlan` stanza with a line
 /// that the lowering does not read, and on a switch whose VLANs are not in
 /// the running config, the VLANs of `show vlan brief` with a status other
-/// than active.
+/// than active. A reserved VLAN that the switch does not support is not a
+/// VLAN of the switch.
 pub(super) fn vlans(cfg: &Config, st: &State) -> (Ranges, Ranges) {
     let mut all = vec![(DEFAULT_VLAN, DEFAULT_VLAN)];
     let mut unknown = Vec::new();
@@ -52,7 +54,7 @@ pub(super) fn vlans(cfg: &Config, st: &State) -> (Ranges, Ranges) {
     if !vlans_in_config(cfg)
         && let Some(Ok(rows)) = &st.vlans
     {
-        for r in rows {
+        for r in rows.iter().filter(|r| supported(r)) {
             all.push((r.vlan, r.vlan));
             if !r.status.eq_ignore_ascii_case(VLAN_ACTIVE) {
                 unknown.push((r.vlan, r.vlan));
@@ -68,11 +70,17 @@ pub(super) fn inactive_vlans(cfg: &Config, st: &State) -> Vec<(u16, String)> {
     match &st.vlans {
         Some(Ok(rows)) if !vlans_in_config(cfg) => rows
             .iter()
-            .filter(|r| !r.status.eq_ignore_ascii_case(VLAN_ACTIVE))
+            .filter(|r| supported(r) && !r.status.eq_ignore_ascii_case(VLAN_ACTIVE))
             .map(|r| (r.vlan, r.status.clone()))
             .collect(),
         _ => Vec::new(),
     }
+}
+
+/// False for a VLAN of `show vlan brief` with the status of a reserved
+/// VLAN that the switch does not support.
+fn supported(r: &super::state::VlanRow) -> bool {
+    !r.status.eq_ignore_ascii_case(VLAN_UNSUPPORTED)
 }
 
 /// The interfaces in the form of the NX-OS layer 2 lowering. A port with an
