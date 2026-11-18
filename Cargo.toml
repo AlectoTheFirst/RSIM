@@ -14,6 +14,7 @@ members = [
     "crates/rsim-collect",
     "crates/rsim-ingest",
     "crates/rsim-textfsm",
+    "crates/rsim-inventory",
 ]
 
 [workspace.package]
@@ -36,6 +37,7 @@ rsim-store = { path = "crates/rsim-store" }
 rsim-collect = { path = "crates/rsim-collect" }
 rsim-ingest = { path = "crates/rsim-ingest" }
 rsim-textfsm = { path = "crates/rsim-textfsm" }
+rsim-inventory = { path = "crates/rsim-inventory" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

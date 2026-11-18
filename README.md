@@ -59,6 +59,7 @@ A VXLAN tunnel end uses `VxlanEncap` and `VxlanDecap`. `VxlanEncap` puts the pac
 | `rsim-cli` | The command `rsim` |
 | `rsim-api` | The REST API with its OpenAPI 3.1 contract, on a loopback address |
 | `rsim-mcp` | A Model Context Protocol server on stdio |
+| `rsim-inventory` | The inventory in PostgreSQL: device groups, devices, credential references, routes, Equinix bindings and the audit log |
 
 ## Build
 
@@ -137,6 +138,28 @@ cargo run -p rsim-api -- --listen 127.0.0.1:8787
 | A claim on the paths of the query | `GET <query resource>/claims/no-unknown` |
 
 The same server gives the MCP tools at `POST /mcp`, the Streamable HTTP transport of MCP, so many agents can share one server and its twins. Add `--store <data folder>` for the twin `store`, which redirects to its snapshot `snap-<cycle>`. A browser needs `--allow-origin <origin>`. The server has no authentication yet, so it accepts only a loopback listen address.
+
+## Collection
+
+`rsim-collect` reads the devices into a snapshot store:
+
+```sh
+rsim-collect --env <env file> --data <data folder> run --repeat
+```
+
+The env file has one `KEY=VALUE` on each line. For an SSH vendor `<P>` (`VYOS`, `NXOS`, `IOSXR` or `IOSXE`), `<P>_<NAME>_IP` adds a device, `<P>_USER` with `<P>_PASS`, `<P>_KEY_FILE` or `<P>_AGENT` is the credential of the vendor, and `<P>_VIA` and `<P>_PROXY` give the jump hosts and the proxy. `UNIFI_CONTROLLER` and `UNIFI_SITES` add the UniFi consoles and sites. The doc comment of `crates/rsim-collect/src/bin/rsim-collect.rs` lists each key. Keep the env file and the data folder outside the repository.
+
+The inventory can also be in PostgreSQL. Device groups hold the credential reference, the route, the SSH settings, the TLS trust and the collector settings, and a device inherits each setting from its group unless it sets its own. A credential is a reference to its source, for example `env:VYOS` for the `VYOS_USER` and `VYOS_PASS` keys of the env file; the database holds no secret. Each change increases the inventory version and writes an audit record, and each snapshot records the inventory version that its cycle read.
+
+```sh
+export RSIM_INVENTORY_URL=postgres://rsim:<password>@127.0.0.1:5432/rsim
+rsim-inventory migrate
+rsim-inventory import-env <env file>     # the groups, devices and routes of the env file
+rsim-collect --env <env file> --data <data folder> run --repeat
+rsim-api --inventory "$RSIM_INVENTORY_URL"   # GET and PUT /v1/inventory/...
+```
+
+With `RSIM_INVENTORY_URL` set, `rsim-collect` reads the inventory at the start of each cycle, and the env file gives only the secrets.
 
 ## License
 

@@ -1,8 +1,9 @@
 //! Collection cycles on fake transports: the first snapshot, a cycle with
 //! no change, volatile changes, the forced full collection, the change of
 //! each class, failed reads, a failed half of a table, an extract error,
-//! the limits of concurrency, the time limits of a device, the sink and a
-//! device that leaves the inventory.
+//! the limits of concurrency, the time limits of a device, the sink, a
+//! device that leaves the inventory and the inventory version of a
+//! reconfigured collector.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -757,6 +758,55 @@ async fn a_device_that_leaves_the_inventory_leaves_the_store_and_can_come_back()
             .collect::<Vec<_>>(),
         [0, 2]
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_reconfigured_collector_records_the_inventory_version_and_keeps_its_schedule() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = Arc::new(FakeTransport::new(Duration::from_millis(5)));
+    load(&t, &vyos("r1"));
+    load(&t, &vyos("r2"));
+    let mut c = Collector::new(
+        Store::open(dir.path(), keys()).unwrap(),
+        Box::new(Vec::<Device>::new()),
+        Schedule {
+            spread: false,
+            ..Schedule::default()
+        },
+        Limits::default(),
+        Arc::new(TokioClock::new(T0)),
+    )
+    .unwrap();
+    let source =
+        || -> Vec<Arc<dyn rsim_collect::Source>> { vec![Arc::new(VyosSource::new(t.clone()))] };
+    c.reconfigure(
+        Box::new(InventoryList {
+            devices: vec![vyos("r1")],
+            version: Some(4),
+        }),
+        source(),
+        Default::default(),
+    );
+    let r = c.run_cycle().await.unwrap();
+    assert_eq!(r.snapshot, Some(0));
+    let s0 = c.store().latest().unwrap().unwrap();
+    assert_eq!(s0.manifest.inventory_version, Some(4));
+
+    // A new version adds r2. r1 is not due again, so only r2 is fetched.
+    tokio::time::advance(Duration::from_secs(10)).await;
+    c.reconfigure(
+        Box::new(InventoryList {
+            devices: vec![vyos("r1"), vyos("r2")],
+            version: Some(5),
+        }),
+        source(),
+        Default::default(),
+    );
+    let r = c.run_cycle().await.unwrap();
+    assert_eq!((r.due, r.snapshot), (1, Some(1)), "{r:?}");
+    let s1 = c.store().latest().unwrap().unwrap();
+    assert_eq!(s1.manifest.inventory_version, Some(5));
+    assert_eq!(s1.devices.keys().collect::<Vec<_>>(), ["r1", "r2"]);
 }
 
 /// This test uses real time. With paused time, the runtime moves the time

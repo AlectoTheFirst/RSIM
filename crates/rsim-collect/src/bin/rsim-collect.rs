@@ -41,6 +41,21 @@
 //!
 //! The data folder holds the store, the store keys and the pin file. The
 //! keys are made at the first run.
+//!
+//! With an inventory database, from `--inventory`, the environment variable
+//! `RSIM_INVENTORY_URL` or the env key `RSIM_INVENTORY_URL`, the collector
+//! reads the devices, the groups, the routes and the credential references
+//! from the database at the start of each cycle, and the snapshot records
+//! the inventory version. The env file then gives only the secrets of the
+//! references: the reference `env:<P>` reads `<P>_USER` with `<P>_PASS`,
+//! `<P>_KEY_FILE` and `<P>_KEY_PASS`, or `<P>_AGENT`, and for an HTTPS device
+//! `<P>_API_KEY` or `<P>_USER` with `<P>_PASS`; the reference
+//! `env-url:<KEY>` reads the login in the URL of `<KEY>`. The client
+//! certificate of the UniFi consoles stays in `UNIFI_CLIENT_CERT` and
+//! `UNIFI_CLIENT_KEY`. `--inventory-ca-file`, `RSIM_INVENTORY_CA_FILE` or the
+//! env key of the same name gives the CA bundle of the database server. A
+//! cycle whose inventory read fails writes nothing; with `--repeat` the next
+//! cycle reads again. A device of a vendor with no collector is skipped.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -58,9 +73,12 @@ use rsim_collect::ssh::{Algorithms, CommandMode, SshLimits, SshProfile, SshTrans
 use rsim_collect::unifi::UnifiSource;
 use rsim_collect::vyos::VyosSource;
 use rsim_collect::{
-    CaptureBgp, Collector, Credential, Device, Jump, Limits, MemoryCredentials, PinPolicy, Proxy,
-    Route, Schedule, Secret, TimeLimits, TokioClock, TrustStore, Vendor,
+    CaptureBgp, Collector, Credential, CycleReport, Device, InventoryList, Jump, Limits,
+    MemoryCredentials, PinPolicy, Proxy, ProxyLogin, Route, Schedule, Secret, Source, TimeLimits,
+    TokioClock, TrustStore, Vendor,
 };
+use rsim_inventory::env::parse_env;
+use rsim_inventory::{CredentialSource, Inventory};
 use rsim_store::{Keys, SectionStatus, Store};
 
 #[derive(Parser)]
@@ -69,12 +87,19 @@ use rsim_store::{Keys, SectionStatus, Store};
     about = "Collects devices into a snapshot store"
 )]
 struct Cli {
-    /// The env file with the devices and the credentials.
+    /// The env file with the devices and the credentials, or with only the
+    /// secrets of the credential references of an inventory database.
     #[arg(long)]
     env: PathBuf,
     /// The folder of the store, the keys and the pins.
     #[arg(long)]
     data: PathBuf,
+    /// The URL of the inventory database: postgres://user:password@host:port/db.
+    #[arg(long, env = rsim_inventory::URL_VAR, hide_env_values = true)]
+    inventory: Option<String>,
+    /// The PEM file of the CA bundle of the inventory database server.
+    #[arg(long, env = rsim_inventory::CA_FILE_VAR)]
+    inventory_ca_file: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -96,28 +121,14 @@ enum Command {
     Show { device: String, section: String },
 }
 
-fn parse_env(text: &str) -> BTreeMap<String, String> {
-    text.lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .filter_map(|l| l.strip_prefix("export ").unwrap_or(l).split_once('='))
-        .map(|(k, v)| {
-            let v = v.trim();
-            let v = v
-                .strip_prefix('"')
-                .and_then(|v| v.strip_suffix('"'))
-                .or_else(|| v.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
-                .unwrap_or(v);
-            (k.trim().to_string(), v.to_string())
-        })
-        .collect()
-}
-
 struct Setup {
     devices: Vec<Device>,
     credentials: MemoryCredentials,
     profiles: Vec<(String, SshProfile)>,
+    /// The profile of the consoles with no profile of their own.
     https: HttpsProfile,
+    /// The profile of each console with its own profile.
+    https_profiles: Vec<(String, HttpsProfile)>,
     /// The NX-OS switches that get `| json native`.
     native_json: Vec<String>,
     /// The devices with a time key, with their time limits.
@@ -376,6 +387,7 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
         credentials: MemoryCredentials::new(),
         profiles: Vec::new(),
         https: HttpsProfile::default(),
+        https_profiles: Vec::new(),
         native_json: Vec::new(),
         times: Vec::new(),
     };
@@ -484,6 +496,359 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
     Ok(s)
 }
 
+/// The secret of a credential reference from the env file. An HTTPS
+/// device takes `<P>_API_KEY` or `<P>_USER` with `<P>_PASS`; an SSH device
+/// or a jump host takes `<P>_USER` with its SSH secret; `env-url` takes the
+/// login in the URL of its key.
+fn env_credential(
+    env: &BTreeMap<String, String>,
+    c: &rsim_inventory::Credential,
+    https: bool,
+) -> Result<Credential, String> {
+    let p = &c.key;
+    match c.source {
+        CredentialSource::Env if https => {
+            match (
+                env.get(&format!("{p}_API_KEY")),
+                env.get(&format!("{p}_USER")),
+            ) {
+                (Some(key), _) => Ok(Credential {
+                    user: String::new(),
+                    secret: Secret::ApiKey(key.clone()),
+                }),
+                (None, Some(user)) => Ok(Credential {
+                    user: user.clone(),
+                    secret: Secret::Password(
+                        env.get(&format!("{p}_PASS"))
+                            .ok_or_else(|| format!("{p}_PASS is not set"))?
+                            .clone(),
+                    ),
+                }),
+                (None, None) => Err(format!("{p}_USER or {p}_API_KEY is not set")),
+            }
+        }
+        CredentialSource::Env => Ok(Credential {
+            user: env
+                .get(&format!("{p}_USER"))
+                .ok_or_else(|| format!("{p}_USER is not set"))?
+                .clone(),
+            secret: ssh_secret(env, p)?,
+        }),
+        CredentialSource::EnvUrl => {
+            let url = env.get(p).ok_or_else(|| format!("{p} is not set"))?;
+            let login = match Proxy::parse(url).map_err(|e| format!("{p}: {e}"))? {
+                Proxy::Http { login, .. } | Proxy::Socks5 { login, .. } => login,
+            };
+            let login = login.ok_or_else(|| format!("the URL of {p} has no login"))?;
+            Ok(Credential {
+                user: login.user,
+                secret: Secret::Password(login.password),
+            })
+        }
+    }
+}
+
+/// The credential reference of a name, from the inventory and the env file.
+fn reference(
+    inv: &Inventory,
+    env: &BTreeMap<String, String>,
+    name: &str,
+    https: bool,
+) -> Result<Credential, String> {
+    let c = inv
+        .credential(name)
+        .ok_or_else(|| format!("no credential reference is named {name}"))?;
+    env_credential(env, c, https).map_err(|e| format!("the credential {name}: {e}"))
+}
+
+/// The route of a name of the inventory. Each jump host gets its
+/// credential. No name is a direct connection.
+fn inventory_route(
+    inv: &Inventory,
+    env: &BTreeMap<String, String>,
+    name: Option<&str>,
+    credentials: &mut MemoryCredentials,
+) -> Result<Route, String> {
+    let Some(name) = name else {
+        return Ok(Route::default());
+    };
+    let r = inv
+        .route(name)
+        .ok_or_else(|| format!("no route is named {name}"))?;
+    let mut proxy = r
+        .proxy
+        .as_deref()
+        .map(Proxy::parse)
+        .transpose()
+        .map_err(|e| format!("the route {name}: {e}"))?;
+    if let (Some(p), Some(c)) = (&mut proxy, &r.proxy_credential) {
+        let cred = reference(inv, env, c, false)?;
+        let Secret::Password(password) = cred.secret else {
+            return Err(format!(
+                "the proxy credential {c} of {name} has no password"
+            ));
+        };
+        let login = Some(ProxyLogin {
+            user: cred.user,
+            password,
+        });
+        match p {
+            Proxy::Http { login: l, .. } | Proxy::Socks5 { login: l, .. } => *l = login,
+        }
+    }
+    let mut jumps = Vec::new();
+    for j in &r.jumps {
+        let host = inv
+            .jump_host(j)
+            .ok_or_else(|| format!("no jump host is named {j}"))?;
+        credentials.insert(
+            &host.credential,
+            reference(inv, env, &host.credential, false)?,
+        );
+        jumps.push(Jump {
+            address: host.address.clone(),
+            credential: host.credential.clone(),
+            algorithms: match host.ssh_algorithms {
+                rsim_inventory::SshAlgorithms::Modern => Algorithms::Modern,
+                rsim_inventory::SshAlgorithms::Legacy => Algorithms::Legacy,
+            },
+        });
+    }
+    Ok(Route { proxy, jumps })
+}
+
+/// The setup of an inventory, with the secrets from the env file, and a
+/// note for each device that is not collected. Each device of a vendor with
+/// a collector needs its credential; a device with no credential, or a
+/// reference that the env file does not give, is an error, so that a
+/// cycle does not remove a device for a typing error.
+fn setup_from_inventory(
+    inv: &Inventory,
+    env: &BTreeMap<String, String>,
+) -> Result<(Setup, Vec<String>), String> {
+    let mut s = Setup {
+        devices: Vec::new(),
+        credentials: MemoryCredentials::new(),
+        profiles: Vec::new(),
+        https: HttpsProfile::default(),
+        https_profiles: Vec::new(),
+        native_json: Vec::new(),
+        times: Vec::new(),
+    };
+    let client = match (env.get("UNIFI_CLIENT_CERT"), env.get("UNIFI_CLIENT_KEY")) {
+        (Some(c), Some(k)) => Some(ClientCert {
+            chain: read_file(c)?,
+            key: read_file(k)?,
+        }),
+        (None, None) => None,
+        _ => return Err("UNIFI_CLIENT_CERT and UNIFI_CLIENT_KEY go together".into()),
+    };
+    let mut notes = Vec::new();
+    for d in inv.resolve()? {
+        let Some(vendor) = Vendor::ALL.into_iter().find(|v| v.name() == d.vendor) else {
+            notes.push(format!(
+                "{} is not collected: the vendor {} has no collector",
+                d.name, d.vendor
+            ));
+            continue;
+        };
+        let st = &d.settings;
+        let https = vendor == Vendor::Unifi;
+        let credential = st
+            .credential
+            .value
+            .clone()
+            .ok_or_else(|| format!("the device {} has no credential", d.name))?;
+        let secret = reference(inv, env, &credential, https)
+            .map_err(|e| format!("the device {}: {e}", d.name))?;
+        s.credentials.insert(&credential, secret);
+        let route = inventory_route(inv, env, st.route.value.as_deref(), &mut s.credentials)
+            .map_err(|e| format!("the device {}: {e}", d.name))?;
+        if st.timeout_seconds.is_set() || st.section_timeout_seconds.is_set() {
+            s.times.push((
+                d.name.clone(),
+                TimeLimits {
+                    section: Duration::from_secs(st.section_timeout_seconds.value.into()),
+                    device: Duration::from_secs(st.timeout_seconds.value.into()),
+                },
+            ));
+        }
+        if https {
+            let trust = match st.tls_trust.value {
+                rsim_inventory::TlsTrust::Pin => TlsTrust::Pin,
+                rsim_inventory::TlsTrust::None => TlsTrust::NoVerify,
+                rsim_inventory::TlsTrust::Ca => {
+                    TlsTrust::CaBundle(read_file(st.tls_ca_file.value.as_deref().ok_or_else(
+                        || format!("the device {} has tls_trust ca and no tls_ca_file", d.name),
+                    )?)?)
+                }
+            };
+            s.https_profiles.push((
+                d.name.clone(),
+                HttpsProfile {
+                    trust,
+                    client: client.clone(),
+                },
+            ));
+        } else {
+            let mut profile = SshProfile {
+                algorithms: match st.ssh_algorithms.value {
+                    rsim_inventory::SshAlgorithms::Modern => Algorithms::Modern,
+                    rsim_inventory::SshAlgorithms::Legacy => Algorithms::Legacy,
+                },
+                mode: match st.ssh_mode.value {
+                    rsim_inventory::SshMode::Exec => CommandMode::Exec,
+                    rsim_inventory::SshMode::Shell => CommandMode::Shell,
+                    rsim_inventory::SshMode::Connection => CommandMode::Connection,
+                },
+                ..SshProfile::default()
+            };
+            if matches!(vendor, Vendor::Nxos | Vendor::Iosxr | Vendor::Iosxe) {
+                profile.max_channels = st.ssh_channels.value as usize;
+            }
+            let setup: &[&str] = match vendor {
+                Vendor::Nxos => &SHELL_SETUP,
+                Vendor::Iosxr => &IOSXR_SHELL_SETUP,
+                Vendor::Iosxe => &IOSXE_SHELL_SETUP,
+                _ => &[],
+            };
+            profile.shell_setup = setup.iter().map(|c| (*c).to_string()).collect();
+            if vendor == Vendor::Nxos && st.nxos_json.value == rsim_inventory::NxosJson::Native {
+                s.native_json.push(d.name.clone());
+            }
+            if profile != SshProfile::default() {
+                s.profiles.push((d.name.clone(), profile));
+            }
+        }
+        s.devices.push(Device {
+            id: d.name.clone(),
+            vendor,
+            address: d.address.clone(),
+            credential,
+            site: d.console_site.clone(),
+            capture_bgp: match st.capture_bgp.value {
+                rsim_inventory::CaptureBgp::Off => CaptureBgp::Off,
+                rsim_inventory::CaptureBgp::Sessions => CaptureBgp::Sessions,
+                rsim_inventory::CaptureBgp::All => CaptureBgp::All,
+            },
+            route,
+        });
+    }
+    if s.devices.is_empty() {
+        return Err(format!(
+            "the inventory at version {} has no device with a collector",
+            inv.version
+        ));
+    }
+    Ok((s, notes))
+}
+
+/// The devices of a setup, its sources and the time limits of its devices.
+struct Collection {
+    devices: Vec<Device>,
+    sources: Vec<Arc<dyn Source>>,
+    times: BTreeMap<String, TimeLimits>,
+}
+
+/// The sources of a setup, with its transports, and the time limits of its
+/// devices.
+fn sources(setup: Setup, trust: &Arc<TrustStore>) -> Collection {
+    let credentials = Arc::new(setup.credentials);
+    let mut ssh = SshTransport::new(credentials.clone(), trust.clone(), SshLimits::default());
+    for (id, p) in setup.profiles {
+        ssh = ssh.with_profile(&id, p);
+    }
+    let ssh = Arc::new(ssh);
+    let mut nxos = NxosSource::new(ssh.clone());
+    for id in &setup.native_json {
+        nxos = nxos.with_native_json(id);
+    }
+    let vyos = VyosSource::new(ssh.clone());
+    let iosxr = IosxrSource::new(ssh.clone());
+    let iosxe = IosxeSource::new(ssh);
+    let mut https = HttpsTransport::new(credentials, trust.clone(), HttpsLimits::default())
+        .with_default_profile(setup.https);
+    for (id, p) in setup.https_profiles {
+        https = https.with_profile(&id, p);
+    }
+    let sources: Vec<Arc<dyn Source>> = vec![
+        Arc::new(vyos),
+        Arc::new(nxos),
+        Arc::new(iosxr),
+        Arc::new(iosxe),
+        Arc::new(UnifiSource::new(Arc::new(https))),
+    ];
+    Collection {
+        devices: setup.devices,
+        sources,
+        times: setup.times.into_iter().collect(),
+    }
+}
+
+fn print_devices(devices: &[Device]) {
+    for d in devices {
+        let via: Vec<&str> = d.route.jumps.iter().map(|j| j.address.as_str()).collect();
+        let proxy = d.route.proxy.as_ref().map(Proxy::address);
+        eprintln!(
+            "device {} ({}) at {}{}{}",
+            d.id,
+            d.vendor,
+            d.address,
+            if via.is_empty() {
+                String::new()
+            } else {
+                format!(" via {}", via.join(", "))
+            },
+            proxy.map_or(String::new(), |p| format!(" through proxy {p}"))
+        );
+    }
+}
+
+fn print_report(r: &CycleReport) {
+    println!(
+        "due {} snapshot {:?} failed {:?}",
+        r.due, r.snapshot, r.failed
+    );
+    for (device, classes) in &r.changed {
+        println!("changed {device}: {classes:?}");
+    }
+    for (device, section, error) in &r.extract_errors {
+        println!("extract error {device}/{section}: {error}");
+    }
+    for device in &r.removed {
+        println!("removed {device}");
+    }
+}
+
+/// Reads the inventory and sets the collector up for one cycle. Gives the
+/// inventory, so that the caller sees its version.
+async fn configure_from_inventory(
+    db: &rsim_inventory::Db,
+    env: &BTreeMap<String, String>,
+    trust: &Arc<TrustStore>,
+    collector: &mut Collector,
+) -> Result<(Inventory, Vec<Device>), String> {
+    let inv = db.load().await.map_err(|e| e.to_string())?;
+    let (setup, notes) = setup_from_inventory(&inv, env)?;
+    for n in notes {
+        eprintln!("{n}");
+    }
+    let Collection {
+        devices,
+        sources,
+        times,
+    } = sources(setup, trust);
+    collector.reconfigure(
+        Box::new(InventoryList {
+            devices: devices.clone(),
+            version: Some(inv.version),
+        }),
+        sources,
+        times,
+    );
+    Ok((inv, devices))
+}
+
 /// Reads the store keys, or makes new keys in a file that only the owner
 /// can read.
 fn keys(path: &Path) -> Result<Keys, String> {
@@ -576,10 +941,35 @@ fn show(store: &Store, device: &str, section: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// The inventory database of the flags, the environment or the env file,
+/// if any.
+fn inventory_db(
+    cli: &Cli,
+    env: &BTreeMap<String, String>,
+) -> Result<Option<rsim_inventory::Db>, String> {
+    let url = cli
+        .inventory
+        .clone()
+        .or_else(|| env.get(rsim_inventory::URL_VAR).cloned());
+    let Some(url) = url else {
+        return Ok(None);
+    };
+    let ca_file = cli
+        .inventory_ca_file
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .or_else(|| env.get(rsim_inventory::CA_FILE_VAR).cloned());
+    let ca = ca_file.as_deref().map(read_file).transpose()?;
+    rsim_inventory::Db::new(&url, ca.as_deref())
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
 async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
     let text =
         std::fs::read_to_string(&cli.env).map_err(|e| format!("{}: {e}", cli.env.display()))?;
-    let setup = setup(&parse_env(&text))?;
+    let env = parse_env(&text);
+    let db = inventory_db(cli, &env)?;
     let store = open_store(&cli.data)?;
     let policy = if strict {
         PinPolicy::Strict
@@ -587,75 +977,67 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
         PinPolicy::AcceptNew
     };
     let trust = Arc::new(TrustStore::open(&cli.data.join("pins"), policy)?);
-    let credentials = Arc::new(setup.credentials);
-    let mut ssh = SshTransport::new(credentials.clone(), trust.clone(), SshLimits::default());
-    for (id, p) in setup.profiles {
-        ssh = ssh.with_profile(&id, p);
-    }
-    let ssh = Arc::new(ssh);
-    let mut nxos = NxosSource::new(ssh.clone());
-    for id in &setup.native_json {
-        nxos = nxos.with_native_json(id);
-    }
-    let vyos = VyosSource::new(ssh.clone());
-    let iosxr = IosxrSource::new(ssh.clone());
-    let iosxe = IosxeSource::new(ssh);
-    let https = HttpsTransport::new(credentials, trust.clone(), HttpsLimits::default())
-        .with_default_profile(setup.https);
-    let devices = setup.devices;
-    for d in &devices {
-        let via: Vec<&str> = d.route.jumps.iter().map(|j| j.address.as_str()).collect();
-        let proxy = d.route.proxy.as_ref().map(Proxy::address);
-        eprintln!(
-            "device {} ({}) at {}{}{}",
-            d.id,
-            d.vendor,
-            d.address,
-            if via.is_empty() {
-                String::new()
-            } else {
-                format!(" via {}", via.join(", "))
-            },
-            proxy.map_or(String::new(), |p| format!(" through proxy {p}"))
-        );
-    }
     let mut collector = Collector::new(
         store,
-        Box::new(devices),
+        Box::new(Vec::<Device>::new()),
         Schedule::default(),
         Limits::default(),
         Arc::new(TokioClock::system()),
     )
-    .map_err(|e| e.to_string())?
-    .with_source(Arc::new(vyos))
-    .with_source(Arc::new(nxos))
-    .with_source(Arc::new(iosxr))
-    .with_source(Arc::new(iosxe))
-    .with_source(Arc::new(UnifiSource::new(Arc::new(https))));
-    for (id, t) in &setup.times {
-        collector = collector.with_time_limits(id, *t);
-    }
-    if repeat {
-        let stop = async {
-            let _ = tokio::signal::ctrl_c().await;
-        };
-        collector.run(stop).await.map_err(|e| e.to_string())?;
-    } else {
-        let r = collector.run_cycle().await.map_err(|e| e.to_string())?;
-        println!(
-            "due {} snapshot {:?} failed {:?}",
-            r.due, r.snapshot, r.failed
-        );
-        for (device, classes) in &r.changed {
-            println!("changed {device}: {classes:?}");
+    .map_err(|e| e.to_string())?;
+    match db {
+        None => {
+            let Collection {
+                devices,
+                sources,
+                times,
+            } = sources(setup(&env)?, &trust);
+            print_devices(&devices);
+            collector.reconfigure(Box::new(devices), sources, times);
+            if repeat {
+                let stop = async {
+                    let _ = tokio::signal::ctrl_c().await;
+                };
+                collector.run(stop).await.map_err(|e| e.to_string())?;
+            } else {
+                let r = collector.run_cycle().await.map_err(|e| e.to_string())?;
+                print_report(&r);
+                status(collector.store())?;
+            }
         }
-        for (device, section, error) in &r.extract_errors {
-            println!("extract error {device}/{section}: {error}");
+        Some(db) => {
+            let stop = tokio::signal::ctrl_c();
+            tokio::pin!(stop);
+            let mut tick = tokio::time::interval(collector.scheduler().schedule().interval);
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            let mut shown = None;
+            loop {
+                tokio::select! {
+                    _ = &mut stop => break,
+                    _ = tick.tick() => {}
+                }
+                match configure_from_inventory(&db, &env, &trust, &mut collector).await {
+                    Ok((inv, devices)) => {
+                        if shown != Some(inv.version) {
+                            eprintln!("inventory version {}", inv.version);
+                            print_devices(&devices);
+                            shown = Some(inv.version);
+                        }
+                    }
+                    Err(e) if repeat => {
+                        eprintln!("error: inventory: {e}; the cycle writes nothing");
+                        continue;
+                    }
+                    Err(e) => return Err(format!("inventory: {e}")),
+                }
+                let r = collector.run_cycle().await.map_err(|e| e.to_string())?;
+                if !repeat {
+                    print_report(&r);
+                    status(collector.store())?;
+                    break;
+                }
+            }
         }
-        for device in &r.removed {
-            println!("removed {device}");
-        }
-        status(collector.store())?;
     }
     let pins = trust.to_text();
     if !pins.is_empty() {
@@ -692,6 +1074,155 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn imported(env: &BTreeMap<String, String>) -> Inventory {
+        let r = rsim_inventory::env::import(env).unwrap();
+        Inventory {
+            version: 3,
+            credentials: r.credentials,
+            jump_hosts: r.jump_hosts,
+            routes: r.routes,
+            groups: r.groups,
+            devices: r.devices,
+            bindings: Default::default(),
+        }
+    }
+
+    /// The parts of a setup that a collection uses, in device order.
+    #[allow(clippy::type_complexity)]
+    fn effective(
+        s: &Setup,
+    ) -> (
+        Vec<Device>,
+        Vec<(String, Credential)>,
+        Vec<(String, SshProfile)>,
+        Vec<String>,
+        Vec<(String, TimeLimits)>,
+        Vec<(String, HttpsProfile)>,
+    ) {
+        use rsim_collect::Credentials;
+        let mut devices = s.devices.clone();
+        devices.sort();
+        let mut names: Vec<String> = devices
+            .iter()
+            .flat_map(|d| {
+                std::iter::once(d.credential.clone())
+                    .chain(d.route.jumps.iter().map(|j| j.credential.clone()))
+            })
+            .collect();
+        names.sort();
+        names.dedup();
+        let credentials = names
+            .into_iter()
+            .map(|n| {
+                let c = s.credentials.get(&n).unwrap();
+                (n, c)
+            })
+            .collect();
+        let mut profiles = s.profiles.clone();
+        profiles.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut native = s.native_json.clone();
+        native.sort();
+        let mut times = s.times.clone();
+        times.sort_by(|a, b| a.0.cmp(&b.0));
+        let https = devices
+            .iter()
+            .filter(|d| d.vendor == Vendor::Unifi)
+            .map(|d| {
+                let p = s
+                    .https_profiles
+                    .iter()
+                    .find(|(id, _)| *id == d.id)
+                    .map_or(s.https.clone(), |(_, p)| p.clone());
+                (d.id.clone(), p)
+            })
+            .collect();
+        (devices, credentials, profiles, native, times, https)
+    }
+
+    #[test]
+    fn the_inventory_of_an_env_import_collects_what_the_env_file_collects() {
+        let env = parse_env(
+            "VYOS_CORE1_IP=10.0.0.1\nVYOS_CORE1_MODE=shell\nVYOS_EDGE_IP=10.0.0.2\n\
+             VYOS_EDGE_VIA=\nVYOS_EDGE_2_IP=10.0.0.3\nVYOS_EDGE_2_PROFILE=legacy\n\
+             VYOS_EDGE_2_PROXY=http://u:v@192.0.2.10:3128\n\
+             VYOS_VIA=bastion-a, inner\nVYOS_PROXY=socks5://p:q@192.0.2.9:1080\n\
+             VYOS_USER=ro\nVYOS_AGENT=default\nVYOS_CAPTURE_BGP=all\nVYOS_EDGE_CAPTURE_BGP=off\n\
+             VYOS_SECTION_TIMEOUT=30\nVYOS_CORE1_TIMEOUT=90\n\
+             JUMP_BASTION_A_IP=192.0.2.20\nJUMP_BASTION_A_USER=hop\nJUMP_BASTION_A_PASS=h\n\
+             JUMP_INNER_IP=10.0.0.254:2222\nJUMP_INNER_USER=hop2\nJUMP_INNER_AGENT=/tmp/agent\n\
+             JUMP_INNER_PROFILE=legacy\n\
+             NXOS_LEAF_1_IP=192.0.2.31\nNXOS_LEAF_1_JSON=native\nNXOS_SPINE_IP=192.0.2.32\n\
+             NXOS_SPINE_CHANNELS=4\nNXOS_USER=ro\nNXOS_PASS=p\nNXOS_TIMEOUT=120\n\
+             IOSXR_PE1_IP=192.0.2.41\nIOSXR_PE1_MODE=connection\nIOSXR_USER=x\nIOSXR_PASS=y\n\
+             IOSXE_E1_IP=192.0.2.5\nIOSXE_E1_SECTION_TIMEOUT=5\nIOSXE_USER=u\nIOSXE_PASS=p\n\
+             IOSXE_CAPTURE_BGP=off\n\
+             UNIFI_CONTROLLER=192.0.2.8, 192.0.2.9\nUNIFI_SITES=default, branch\n\
+             UNIFI_USER=ro\nUNIFI_PASS=x\nUNIFI_VIA=bastion-a\nUNIFI_TLS=none\nUNIFI_TIMEOUT=60\n",
+        );
+        let direct = setup(&env).unwrap();
+        let (through, notes) = setup_from_inventory(&imported(&env), &env).unwrap();
+        assert!(notes.is_empty(), "{notes:?}");
+        let (a, b) = (effective(&direct), effective(&through));
+        assert_eq!(a.0, b.0);
+        assert_eq!(a.1, b.1);
+        assert_eq!(a.2, b.2);
+        assert_eq!(a.3, b.3);
+        assert_eq!(a.4, b.4);
+        assert_eq!(a.5, b.5);
+        assert_eq!(a.0.len(), 11);
+        let edge2 = a.0.iter().find(|d| d.id == "edge-2").unwrap();
+        assert!(matches!(
+            &edge2.route.proxy,
+            Some(Proxy::Http { login: Some(l), .. }) if l.user == "u" && l.password == "v"
+        ));
+    }
+
+    #[test]
+    fn the_defaults_of_the_inventory_are_the_limits_of_the_collector() {
+        let d = Limits::default();
+        assert_eq!(
+            d.device_timeout,
+            Duration::from_secs(rsim_inventory::DEFAULT_TIMEOUT_SECONDS.into())
+        );
+        assert_eq!(
+            d.section_timeout,
+            Duration::from_secs(rsim_inventory::DEFAULT_SECTION_TIMEOUT_SECONDS.into())
+        );
+    }
+
+    #[test]
+    fn a_vendor_with_no_collector_is_skipped_and_a_missing_secret_is_an_error() {
+        let env = parse_env("VYOS_R1_IP=192.0.2.1\nVYOS_USER=u\nVYOS_PASS=p\n");
+        let mut inv = imported(&env);
+        inv.groups.push(rsim_inventory::Group {
+            name: "fw".into(),
+            vendor: "checkpoint".into(),
+            description: None,
+            settings: Default::default(),
+        });
+        inv.devices.push(rsim_inventory::Device {
+            name: "fw1".into(),
+            group: "fw".into(),
+            address: "192.0.2.7".into(),
+            site: None,
+            location: None,
+            console_site: None,
+            settings: Default::default(),
+        });
+        let (s, notes) = setup_from_inventory(&inv, &env).unwrap();
+        assert_eq!(s.devices.len(), 1);
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("fw1") && notes[0].contains("checkpoint"));
+
+        let no_pass = parse_env("VYOS_USER=u\n");
+        let err = setup_from_inventory(&inv, &no_pass).err().unwrap();
+        assert!(err.contains("r1") && err.contains("VYOS_PASS"), "{err}");
+
+        inv.devices.retain(|d| d.name == "fw1");
+        let err = setup_from_inventory(&inv, &env).err().unwrap();
+        assert!(err.contains("no device with a collector"), "{err}");
+    }
 
     #[test]
     fn the_env_file_gives_devices_and_credentials() {
