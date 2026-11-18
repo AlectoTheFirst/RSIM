@@ -1,6 +1,7 @@
 //! Cisco IOS-XE: the running config as indented text, and the collected
 //! text sections through the TextFSM templates.
 
+pub mod bgp;
 pub mod config;
 mod layer2;
 pub mod lower;

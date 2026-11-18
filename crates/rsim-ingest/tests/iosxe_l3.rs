@@ -485,7 +485,7 @@ fn a_packet_follows_a_static_route_and_the_overload_rule_translates_its_source()
     assert!(
         spans_of(&a, "edge1/snat")
             .iter()
-            .any(|s| s.starts_with("edge1/config:253-")),
+            .any(|s| s.starts_with("edge1/config:271-")),
         "the line of the list rule"
     );
 }

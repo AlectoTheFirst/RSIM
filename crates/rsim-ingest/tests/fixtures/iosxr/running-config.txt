@@ -217,9 +217,35 @@ router ospf CORE
 !
 router bgp 64496
  bgp router-id 203.0.113.1
+ bgp confederation peers
+  64497
+  1.10
+ !
+ bgp confederation identifier 64500
  address-family ipv4 unicast
  !
  address-family vpnv4 unicast
+ !
+ session-group IBGP-SESSION
+  password encrypted FAKESESSIONGROUPPASSWORD
+  update-source Loopback0
+ !
+ neighbor-group RR-CLIENTS
+  remote-as 64496
+  password encrypted FAKENEIGHBORGROUPPASSWORD
+  use session-group IBGP-SESSION
+  address-family vpnv4 unicast
+  !
+ !
+ neighbor 203.0.113.10
+  use neighbor-group RR-CLIENTS
+  shutdown
+ !
+ neighbor 198.51.100.20
+  remote-as 64510
+  local-as 64505 no-prepend replace-as dual-as
+  address-family ipv4 unicast
+  !
  !
  neighbor 203.0.113.9
   remote-as 64496

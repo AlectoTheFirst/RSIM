@@ -60,8 +60,8 @@ fn the_coverage_shares_of_the_fixture() {
         &doc,
         &iosxr::table(&RouteTables::uniform(true, Default::default())),
     );
-    assert_eq!(cov.lines[&State::Handled], 67);
-    assert_eq!(cov.lines[&State::Irrelevant], 149);
+    assert_eq!(cov.lines[&State::Handled], 108);
+    assert_eq!(cov.lines[&State::Irrelevant], 134);
     assert_eq!(cov.lines[&State::Unhandled], 5);
     assert!(cov.share(State::Unhandled) < 0.05);
 }
@@ -87,7 +87,8 @@ fn without_a_route_table_the_routing_protocols_and_policies_are_unhandled() {
     let got = ranked(false);
     let paths: Vec<&str> = got.iter().map(|r| r.0.as_str()).collect();
     for p in [
-        "router bgp ..",
+        "router bgp */vrf */address-family ../redistribute connected",
+        "router bgp */bgp router-id 203.0.113.1",
         "router ospf ..",
         "router static ..",
         "route-policy ..",
@@ -168,7 +169,22 @@ fn the_states_of_key_stanzas() {
         (&["prefix-set PS-CUSTOMER"], Irrelevant, Unhandled),
         (&["end-set"], Irrelevant, Unhandled),
         (&["router static"], Irrelevant, Unhandled),
-        (&["router bgp 64496", "neighbor x"], Irrelevant, Unhandled),
+        (&["router bgp 64496", "neighbor x"], Handled, Handled),
+        (
+            &["router bgp 64496", "neighbor x", "remote-as 1"],
+            Handled,
+            Handled,
+        ),
+        (
+            &[
+                "router bgp 64496",
+                "neighbor x",
+                "address-family ipv4 unicast",
+                "route-policy P in",
+            ],
+            Irrelevant,
+            Unhandled,
+        ),
         (&["mpls ldp"], Unhandled, Unhandled),
         (&["segment-routing"], Unhandled, Unhandled),
         (&["l2vpn"], Unhandled, Unhandled),

@@ -78,7 +78,7 @@ fn as_str(v: &[(String, u32, u32)]) -> Vec<(&str, u32, u32)> {
 
 #[test]
 fn the_coverage_shares_of_the_fixtures() {
-    for (config, handled, irrelevant, unhandled) in [(ROUTER, 104, 151, 27), (SWITCH, 45, 61, 4)] {
+    for (config, handled, irrelevant, unhandled) in [(ROUTER, 129, 144, 27), (SWITCH, 45, 61, 4)] {
         let doc = iosxe::read_text(config);
         let cov = classify(
             &doc,
@@ -131,7 +131,19 @@ fn the_coverage_lists_the_unhandled_lines() {
 fn without_a_route_table_the_routing_is_unhandled() {
     let got = ranked(ROUTER, false);
     let count = |p: &str| got.iter().find(|r| r.0 == p).map(|r| (r.1, r.2));
-    assert_eq!(count("router bgp .."), Some((1, 16)));
+    assert_eq!(count("router bgp .."), None);
+    assert_eq!(
+        count("router bgp */address-family ../network 192.0.2.0 mask 255.255.255.0"),
+        Some((1, 1))
+    );
+    assert_eq!(
+        count("router bgp */address-family ipv4 vrf * ../redistribute connected"),
+        Some((1, 1))
+    );
+    assert_eq!(
+        count("router bgp */neighbor 198.51.100.1 password <secret>"),
+        Some((1, 1))
+    );
     assert_eq!(count("route-map .."), Some((2, 6)));
     assert_eq!(count("ip prefix-list .."), Some((2, 2)));
     assert_eq!(count("vrf definition */rd .."), Some((1, 1)));
@@ -141,7 +153,7 @@ fn without_a_route_table_the_routing_is_unhandled() {
     );
     assert_eq!(count("ip vrf */rd .."), Some((1, 1)));
     assert_eq!(count("ip vrf */route-target .."), Some((2, 2)));
-    assert_eq!(got.len(), ranked(ROUTER, true).len() + 7);
+    assert_eq!(got.len(), ranked(ROUTER, true).len() + 15);
     assert_eq!(ranked(SWITCH, false), ranked(SWITCH, true));
 }
 
@@ -303,6 +315,25 @@ fn the_states_of_key_stanzas() {
         (&["vlan 10", "name USERS"], Handled, Handled),
         (
             &["router bgp 64496", "address-family ipv4"],
+            Handled,
+            Handled,
+        ),
+        (
+            &[
+                "router bgp 64496",
+                "address-family ipv4",
+                "network 192.0.2.0 mask 255.255.255.0",
+            ],
+            Irrelevant,
+            Unhandled,
+        ),
+        (
+            &["router bgp 64496", "neighbor 198.51.100.1 remote-as 64511"],
+            Handled,
+            Handled,
+        ),
+        (
+            &["router bgp 64496", "neighbor 198.51.100.1 password 7 X"],
             Irrelevant,
             Unhandled,
         ),
@@ -639,7 +670,7 @@ fn the_typed_config_of_the_router() {
         n101.entries[1].destination_port,
         PortSpec::Eq(vec!["domain".into()])
     );
-    assert_eq!((n101.lines.first, n101.lines.last), (298, 300));
+    assert_eq!((n101.lines.first, n101.lines.last), (316, 318));
 
     let routes: Vec<RouteRow> = cfg
         .static_routes

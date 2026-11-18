@@ -1,5 +1,6 @@
 //! Cisco NX-OS: the running config as indented text.
 
+pub mod bgp;
 pub mod config;
 pub(crate) mod layer2;
 pub mod lower;

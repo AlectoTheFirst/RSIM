@@ -162,6 +162,72 @@ impl<'a> Answer<'a> {
     }
 }
 
+/// The section of the sessions of each vendor.
+pub const SESSIONS: &str = "bgp_sessions";
+/// The NX-OS section of the sessions of the global table, for a switch that
+/// refuses the form of all VRFs.
+pub const NXOS_SESSIONS_DEFAULT: &str = "bgp_sessions_default";
+/// The IOS-XR and IOS-XE section of the summaries of the VRFs.
+pub const VRF_SESSIONS: &str = "bgp_vrf_sessions";
+
+/// The session sections that a vendor reads.
+pub fn sections(vendor: &str) -> &'static [&'static str] {
+    match vendor {
+        "vyos" => &[SESSIONS],
+        "nxos" => &[SESSIONS, NXOS_SESSIONS_DEFAULT],
+        "iosxr" | "iosxe" => &[SESSIONS, VRF_SESSIONS],
+        _ => &[],
+    }
+}
+
+/// A collected session section that the snapshot has.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Collected {
+    /// The device does not have the command, with the reason.
+    Absent(String),
+    /// The last read failed, with the error.
+    Failed(String),
+    /// The bytes of the read and the file name of the spans.
+    Fresh(Vec<u8>, String),
+}
+
+impl Collected {
+    /// The section of a manifest entry and its blob, as [`Answer::of`]
+    /// reads it.
+    pub fn of(entry: &SectionEntry, bytes: Option<Vec<u8>>, file: String) -> Collected {
+        match Answer::of(Some(entry), bytes.as_deref(), &file) {
+            Answer::Absent(r) => Collected::Absent(r.to_string()),
+            Answer::Failed(e) => Collected::Failed(e.to_string()),
+            Answer::Fresh(..) => Collected::Fresh(bytes.unwrap_or_default(), file),
+            Answer::NotCollected => unreachable!("the entry is given"),
+        }
+    }
+
+    fn answer(&self) -> Answer<'_> {
+        match self {
+            Collected::Absent(r) => Answer::Absent(r),
+            Collected::Failed(e) => Answer::Failed(e),
+            Collected::Fresh(b, f) => Answer::Fresh(b, f),
+        }
+    }
+}
+
+/// The session sections of a device by name.
+pub type SessionSections = std::collections::BTreeMap<String, Collected>;
+
+/// The sessions of a device of a vendor from its session sections. A
+/// section that the device does not have in the snapshot is not collected.
+pub fn read(vendor: &str, s: &SessionSections) -> Sessions {
+    let a = |name: &str| s.get(name).map_or(Answer::NotCollected, Collected::answer);
+    match vendor {
+        "vyos" => vyos(a(SESSIONS)),
+        "nxos" => nxos(a(SESSIONS), a(NXOS_SESSIONS_DEFAULT)),
+        "iosxr" => iosxr(a(SESSIONS), a(VRF_SESSIONS)),
+        "iosxe" => iosxe(a(SESSIONS), a(VRF_SESSIONS)),
+        _ => Sessions::none(not_fresh(Answer::NotCollected).expect("not fresh")),
+    }
+}
+
 /// The outcome of an answer that is not fresh.
 fn not_fresh(a: Answer<'_>) -> Option<SectionOutcome> {
     match a {

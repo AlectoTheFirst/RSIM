@@ -308,6 +308,8 @@ pub struct Config {
     pub anycast_mac: Option<(String, Lines)>,
     /// True if `router bgp` has an `advertise-pip` line, with its lines.
     pub advertise_pip: Option<Lines>,
+    /// The BGP processes, neighbours and listen ranges.
+    pub bgp: crate::bgp_peers::BgpConfig,
     /// The name of the line `hostname`.
     pub hostname: Option<String>,
     pub vpc_domain: Option<VpcDomain>,
@@ -476,6 +478,7 @@ pub fn read(doc: &Document, table: &Table) -> Config {
                     })
                 }
                 cfg.advertise_pip = find(s);
+                cfg.bgp = super::bgp::read(s, &mut r.read, &|k| table.report_key(k));
             }
             ["fabric", "forwarding", "anycast-gateway-mac", m] => {
                 r.mark(s);

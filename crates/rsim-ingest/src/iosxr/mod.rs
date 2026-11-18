@@ -1,6 +1,7 @@
 //! Cisco IOS-XR: the running config as indented text, and the collected
 //! text sections through the TextFSM templates.
 
+pub mod bgp;
 pub mod config;
 pub mod lower;
 mod mask;

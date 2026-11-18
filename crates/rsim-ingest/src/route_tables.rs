@@ -129,6 +129,24 @@ impl RouteTables {
         }
     }
 
+    /// Adds a handled entry of the stanza alone, with `*` and with the name
+    /// of each VRF with collected rows in place of [`VRF`], for a stanza
+    /// that a handler reads, such as the VRF stanza of a routing process.
+    /// Its children keep the state of the entries of [`Self::push_vrfs`].
+    /// For the same levels, call it before [`Self::push_vrfs`]: of 2
+    /// entries of the same rank, the first decides.
+    pub fn push_handled_vrfs(&self, t: &mut Table, levels: &[&str]) {
+        let names = std::iter::once("*").chain(self.rows.iter().map(String::as_str));
+        for name in names {
+            let named: Vec<String> = levels.iter().map(|l| l.replace(VRF, name)).collect();
+            t.push_levels(
+                &named.iter().map(String::as_str).collect::<Vec<_>>(),
+                State::Handled,
+                Reach::Node,
+            );
+        }
+    }
+
     /// The state of the routing lines that belong to no one VRF, for
     /// example a route map, a prefix list or a routing line of an
     /// interface: known-irrelevant only if the device has collected rows

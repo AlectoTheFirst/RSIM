@@ -140,6 +140,8 @@ pub struct Config {
     /// The VRFs with a dynamic routing protocol, with the lines that show
     /// it.
     pub dynamic_vrfs: BTreeMap<String, Vec<(u32, u32)>>,
+    /// The BGP processes, neighbours and listen ranges.
+    pub bgp: crate::bgp_peers::BgpConfig,
     /// The first line of each stanza that a handler read.
     pub read: BTreeSet<u32>,
 }
@@ -196,6 +198,10 @@ pub fn read(doc: &Document, table: &Table) -> Config {
         let w = words(&s.key);
         match w.as_slice() {
             ["hostname", name] => cfg.hostname = Some((*name).to_string()),
+            ["router", "bgp", _] => {
+                let table = r.table;
+                cfg.bgp = super::bgp::read(s, &mut r.read, &|k| table.report_key(k));
+            }
             ["interface", name] => {
                 let i = interface(&mut r, s, name);
                 cfg.interfaces.push(i);

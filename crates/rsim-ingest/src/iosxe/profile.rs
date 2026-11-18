@@ -9,6 +9,12 @@ use crate::nxos::names::Types;
 /// table of `show ip route vrf *`.
 pub const DEFAULT_VRF: &str = "default";
 
+/// True if a BGP neighbour of the global table is active in IPv4 unicast
+/// with no `neighbor <peer> activate` line, unless the config has `no bgp
+/// default ipv4-unicast`: the default of `bgp default ipv4-unicast` in the
+/// Cisco IOS XE BGP configuration guide. Not confirmed against a device.
+pub const BGP_DEFAULT_IPV4_UNICAST: bool = true;
+
 /// Cisco IOS-XE on a router.
 ///
 /// - `acl_default`: a packet that matches no entry of an IPv4 access list

@@ -10,19 +10,25 @@ use rsim_engine::TwinBuilder;
 use rsim_store::{Hash, Snapshot, Store, StoreError};
 use serde_json::Value;
 
+use crate::bgp::{self, SessionSections};
+use crate::bgp_peers::{BgpConfig, InterfaceAddresses, address_of};
 use crate::collected::{self, Collected};
 use crate::coverage::{Coverage, classify};
+use crate::links::{BgpPeerFact, Summary};
 use crate::route_tables::RouteTables;
 use crate::stanza::read_json;
 use crate::{iosxe, iosxr, nxos, unifi, vyos};
 
 /// The twin builder of a snapshot, with the coverage, the unread handled
-/// stanzas and the lowering notes of each device.
+/// stanzas, the lowering notes and the BGP peers of each device.
 pub struct Estate {
     pub builder: TwinBuilder,
     pub coverage: BTreeMap<String, Coverage>,
     pub unread: BTreeMap<String, Vec<String>>,
     pub notes: BTreeMap<String, Vec<String>>,
+    /// The BGP peer facts of each device with a BGP neighbour, a listen
+    /// range or an observed peer.
+    pub bgp: BTreeMap<String, Vec<BgpPeerFact>>,
 }
 
 fn short(h: &Hash) -> String {
@@ -181,28 +187,64 @@ pub fn inputs(store: &Store, snap: &Snapshot) -> Result<(Vec<Input>, Vec<String>
     Ok((out, skipped))
 }
 
+/// Reads the BGP session sections of each router and switch of a
+/// snapshot, with the status of each section.
+pub fn session_inputs(
+    store: &Store,
+    snap: &Snapshot,
+) -> Result<BTreeMap<String, SessionSections>, StoreError> {
+    let mut out = BTreeMap::new();
+    for (device, m) in &snap.devices {
+        let mut sections = SessionSections::new();
+        for name in bgp::sections(&m.vendor) {
+            let Some(entry) = m.section(name) else {
+                continue;
+            };
+            let (bytes, file) = match entry.blob {
+                Some(b) => (
+                    Some(store.read_blob(&b)?),
+                    format!("{device}/{name}@{}", short(&b)),
+                ),
+                None => (None, format!("{device}/{name}")),
+            };
+            sections.insert((*name).to_string(), bgp::Collected::of(entry, bytes, file));
+        }
+        out.insert(device.clone(), sections);
+    }
+    Ok(out)
+}
+
 /// Builds the twin of the devices of a snapshot.
 pub fn build(store: &Store, snap: &Snapshot) -> Result<Estate, StoreError> {
     let (inputs, skipped) = inputs(store, snap)?;
-    let mut e = assemble(inputs);
+    let sessions = session_inputs(store, snap)?;
+    let mut e = assemble_with(inputs, &sessions);
     for s in skipped {
         e.notes.entry("estate".into()).or_default().push(s);
     }
     Ok(e)
 }
 
-/// Builds the twin of the inputs. The first lowering of each NX-OS switch,
-/// each IOS-XR router and each IOS-XE router or switch gives its summary,
-/// and the VyOS routers and the root devices of the UniFi sites give theirs;
-/// the link join of the summaries gives the links. Then each UniFi site,
-/// each VyOS router, each NX-OS switch, each IOS-XR router and each IOS-XE
-/// device is lowered with its links.
+/// Builds the twin of the inputs with no BGP session section.
 pub fn assemble(inputs: Vec<Input>) -> Estate {
+    assemble_with(inputs, &BTreeMap::new())
+}
+
+/// Builds the twin of the inputs with the BGP session sections of each
+/// device. The first lowering of each NX-OS switch, each IOS-XR router and
+/// each IOS-XE router or switch gives its summary, and the VyOS routers and
+/// the root devices of the UniFi sites give theirs; each router and switch
+/// adds its BGP peer facts and its local addresses to its summary. The link
+/// join of the summaries gives the links. Then each UniFi site, each VyOS
+/// router, each NX-OS switch, each IOS-XR router and each IOS-XE device is
+/// lowered with its links.
+pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSections>) -> Estate {
     let mut e = Estate {
         builder: TwinBuilder::new(),
         coverage: BTreeMap::new(),
         unread: BTreeMap::new(),
         notes: BTreeMap::new(),
+        bgp: BTreeMap::new(),
     };
     let mut routers: BTreeMap<String, Router> = BTreeMap::new();
     #[allow(clippy::type_complexity)]
@@ -452,6 +494,48 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
     for (_, site, files) in &parsed {
         summaries.extend(unifi::link_summary(site, files));
     }
+    // The BGP peers and the local addresses of each router and switch.
+    let mut peers = Peers {
+        sessions,
+        summaries: &mut summaries,
+        out: &mut e.bgp,
+    };
+    for (d, r) in &routers {
+        let i = r.cfg.interfaces.iter().map(|i| {
+            let addrs = i.addresses.iter().filter_map(|a| address_of(a)).collect();
+            (i.name.clone(), i.vrf.clone(), addrs)
+        });
+        peers.add(d, "vyos", &r.file, &r.cfg.bgp, interfaces(i));
+    }
+    for (d, (cfg, _, file, _)) in &switches {
+        let i = cfg.interfaces.iter().map(|i| {
+            let addrs = i
+                .addresses
+                .iter()
+                .filter_map(|a| address_of(&a.prefix))
+                .collect();
+            (i.name.clone(), i.vrf.clone(), addrs)
+        });
+        peers.add(d, "nxos", file, &cfg.bgp, interfaces(i));
+    }
+    for (d, (cfg, file, _)) in &xr {
+        let i = cfg.interfaces.iter().map(|i| {
+            let v4 = i.addresses.iter().map(|a| a.prefix.as_str());
+            let v6 = i.ipv6.iter().map(|a| a.0.as_str());
+            let addrs = v4.chain(v6).filter_map(address_of).collect();
+            (i.name.clone(), i.vrf.as_ref().map(|v| v.0.clone()), addrs)
+        });
+        peers.add(d, "iosxr", file, &cfg.bgp, interfaces(i));
+    }
+    for (d, (cfg, file, _)) in &xe {
+        let i = cfg.interfaces.iter().map(|i| {
+            let v4 = i.addresses.iter().map(|a| a.prefix.as_str());
+            let v6 = i.ipv6.iter().map(|a| a.0.as_str());
+            let addrs = v4.chain(v6).filter_map(address_of).collect();
+            (i.name.clone(), i.vrf.as_ref().map(|v| v.0.clone()), addrs)
+        });
+        peers.add(d, "iosxe", file, &cfg.bgp, interfaces(i));
+    }
     let mut joined = crate::links::join(&summaries, &next_hops, &device_macs);
     for (d, notes) in std::mem::take(&mut joined.notes) {
         e.notes.entry(d).or_default().extend(notes);
@@ -631,6 +715,52 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         }
     }
     e
+}
+
+/// The addresses of each interface with its VRF, `default` for an
+/// interface with no VRF.
+fn interfaces(
+    i: impl Iterator<Item = (String, Option<String>, Vec<IpAddr>)>,
+) -> InterfaceAddresses {
+    i.map(|(name, vrf, addrs)| {
+        (
+            name,
+            (
+                vrf.unwrap_or_else(|| crate::bgp_peers::DEFAULT_VRF.to_string()),
+                addrs,
+            ),
+        )
+    })
+    .collect()
+}
+
+/// The BGP peer facts of the devices: into the summary of each device and
+/// into the estate.
+struct Peers<'a> {
+    sessions: &'a BTreeMap<String, SessionSections>,
+    summaries: &'a mut BTreeMap<String, Summary>,
+    out: &'a mut BTreeMap<String, Vec<BgpPeerFact>>,
+}
+
+impl Peers<'_> {
+    fn add(
+        &mut self,
+        device: &str,
+        vendor: &str,
+        file: &str,
+        cfg: &BgpConfig,
+        interfaces: InterfaceAddresses,
+    ) {
+        let none = SessionSections::new();
+        let s = bgp::read(vendor, self.sessions.get(device).unwrap_or(&none));
+        let facts = crate::bgp_peers::facts(device, file, cfg, &s, &interfaces);
+        let sum = self.summaries.entry(device.to_string()).or_default();
+        sum.local_addresses = crate::bgp_peers::local_addresses(&interfaces);
+        if !facts.is_empty() {
+            self.out.insert(device.to_string(), facts.clone());
+        }
+        sum.bgp_peers = facts;
+    }
 }
 
 /// The vendor profile of UniFi switches and access points. They have no

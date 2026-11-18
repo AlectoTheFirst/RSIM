@@ -3,6 +3,7 @@
 //! clock and no randomness.
 
 pub mod bgp;
+pub mod bgp_peers;
 pub mod collected;
 pub mod coverage;
 pub mod estate;

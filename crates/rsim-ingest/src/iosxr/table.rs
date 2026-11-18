@@ -150,6 +150,7 @@ pub fn table(tables: &RouteTables) -> Table {
     let mut t = Table::new(ENTRIES).with_mask(super::mask);
     push_hsrp(&mut t);
     let default = tables.routing(DEFAULT_VRF);
+    super::bgp::push_entries(&mut t, tables);
     for p in PROCESSES {
         t.push_levels(&[&format!("{p} ..")], default, Subtree);
         tables.push_vrfs(&mut t, &[&format!("{p} .."), &format!("vrf {VRF}")]);

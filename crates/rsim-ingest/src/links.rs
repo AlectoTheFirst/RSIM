@@ -84,6 +84,132 @@ pub struct Summary {
     pub l3: BTreeMap<String, VlanAddrs>,
     /// The tunnel end of the switch, if it forwards.
     pub tunnel: Option<TunnelSummary>,
+    /// The BGP peers of the device: one fact for each configured neighbour,
+    /// each listen range and each observed peer with no neighbour.
+    pub bgp_peers: Vec<BgpPeerFact>,
+    /// All local addresses of the device for each VRF, loopbacks included.
+    pub local_addresses: BTreeMap<String, BTreeSet<IpAddr>>,
+}
+
+/// The peer of a BGP neighbour.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BgpPeer {
+    Address(IpAddr),
+    /// A listen range: the peers whose address is in the prefix.
+    Range(Prefix),
+    /// A neighbour named by its interface, with no address in the config.
+    Interface(String),
+}
+
+impl std::fmt::Display for BgpPeer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BgpPeer::Address(a) => write!(f, "{a}"),
+            BgpPeer::Range(p) => write!(f, "{p}"),
+            BgpPeer::Interface(i) => write!(f, "{i}"),
+        }
+    }
+}
+
+/// Where a BGP peer fact comes from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PeerSource {
+    /// A neighbour of the config.
+    Configured,
+    /// A listen range of the config.
+    ListenRange,
+    /// An observed peer in exactly one listen range whose inheritance
+    /// resolves, with the settings of the range.
+    Dynamic(Prefix),
+    /// An observed peer with no neighbour and no single listen range.
+    Observed,
+}
+
+impl PeerSource {
+    pub fn name(&self) -> &'static str {
+        match self {
+            PeerSource::Configured => "configured",
+            PeerSource::ListenRange => "listen-range",
+            PeerSource::Dynamic(_) => "dynamic",
+            PeerSource::Observed => "observed",
+        }
+    }
+}
+
+/// The AS numbers of one side of a BGP session, or the reason why they are
+/// not known. A side has 2 numbers with `dual-as`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AsnValue {
+    Known(Vec<u32>),
+    Unknown(String),
+}
+
+/// An AS value with the spans of the lines that give it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Asn {
+    pub value: AsnValue,
+    pub spans: Vec<SourceSpan>,
+}
+
+/// One BGP peer of a device: the config side after the inheritance, joined
+/// with the session rows of the device.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BgpPeerFact {
+    pub device: String,
+    pub vrf: String,
+    pub peer: BgpPeer,
+    pub source: PeerSource,
+    /// The interface or the address of the update-source or local address
+    /// line.
+    pub update_source: Option<String>,
+    /// The local address of the session from the update-source or local
+    /// address line, `None` when no such line gives one.
+    pub local_address: Option<IpAddr>,
+    /// The AS that the device presents to the peer.
+    pub local_asn: Asn,
+    /// The AS of the peer from the config, or from the session row of an
+    /// observed peer.
+    pub peer_asn: Asn,
+    /// The AS of the peer as the session row states it.
+    pub observed_asn: Option<u32>,
+    /// `None` when an inheritance gap can hide a `shutdown` line.
+    pub shutdown: Option<bool>,
+    /// The activated address families after the inheritance and the
+    /// defaults of the vendor, for example `ipv4-unicast`.
+    pub families: BTreeSet<String>,
+    pub policy_in: Option<String>,
+    pub policy_out: Option<String>,
+    /// The peer groups, templates and session groups of the inheritance.
+    pub inherits: Vec<String>,
+    /// The reasons of an inheritance that does not resolve.
+    pub gaps: Vec<String>,
+    /// The session rows of the peer, one for each address family that the
+    /// section states.
+    pub sessions: Vec<crate::bgp::SessionRow>,
+    /// The router ID of the peer as the device states it.
+    pub router_id: Option<IpAddr>,
+    /// The outcome of the session section of the device and its scope.
+    pub section: crate::bgp::SectionOutcome,
+    /// The config lines of the neighbour and of the lines that it inherits.
+    pub spans: Vec<SourceSpan>,
+}
+
+impl BgpPeerFact {
+    /// True if the scope of the session section covers each activated
+    /// address family of the peer in its VRF. A configured peer with no
+    /// activated family is not covered. An observed peer is covered.
+    pub fn in_scope(&self) -> bool {
+        match self.source {
+            PeerSource::Observed => true,
+            _ => {
+                !self.families.is_empty()
+                    && self
+                        .families
+                        .iter()
+                        .all(|f| self.section.scope.covers(&self.vrf, f))
+            }
+        }
+    }
 }
 
 /// The layer 2 tunnel end of a switch, for example a VXLAN tunnel end.
