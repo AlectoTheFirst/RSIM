@@ -828,7 +828,7 @@ async fn credentials(c: &impl GenericClient, name: Option<&String>) -> Result<Ve
     let rows = c
         .query(
             "SELECT name, source, key, description FROM credentials
-             WHERE ($1::text IS NULL OR name = $1) ORDER BY name",
+             WHERE ($1::text IS NULL OR name = $1) ORDER BY name COLLATE \"C\"",
             &[&name],
         )
         .await?;
@@ -849,7 +849,7 @@ async fn jump_hosts(c: &impl GenericClient, name: Option<&String>) -> Result<Vec
     let rows = c
         .query(
             "SELECT name, address, credential, ssh_algorithms FROM jump_hosts
-             WHERE ($1::text IS NULL OR name = $1) ORDER BY name",
+             WHERE ($1::text IS NULL OR name = $1) ORDER BY name COLLATE \"C\"",
             &[&name],
         )
         .await?;
@@ -870,14 +870,14 @@ async fn routes(c: &impl GenericClient, name: Option<&String>) -> Result<Vec<Rou
     let rows = c
         .query(
             "SELECT name, proxy, proxy_credential FROM routes
-             WHERE ($1::text IS NULL OR name = $1) ORDER BY name",
+             WHERE ($1::text IS NULL OR name = $1) ORDER BY name COLLATE \"C\"",
             &[&name],
         )
         .await?;
     let jumps = c
         .query(
             "SELECT route, jump_host FROM route_jumps
-             WHERE ($1::text IS NULL OR route = $1) ORDER BY route, position",
+             WHERE ($1::text IS NULL OR route = $1) ORDER BY route COLLATE \"C\", position",
             &[&name],
         )
         .await?;
@@ -904,7 +904,7 @@ async fn groups(c: &impl GenericClient, name: Option<&String>) -> Result<Vec<Gro
         .query(
             &format!(
                 "SELECT name, vendor, description, {} FROM device_groups
-                 WHERE ($1::text IS NULL OR name = $1) ORDER BY name",
+                 WHERE ($1::text IS NULL OR name = $1) ORDER BY name COLLATE \"C\"",
                 SETTINGS.join(", ")
             ),
             &[&name],
@@ -927,7 +927,7 @@ async fn devices(c: &impl GenericClient, name: Option<&String>) -> Result<Vec<De
         .query(
             &format!(
                 "SELECT name, device_group, address, site, location, console_site, {} FROM devices
-                 WHERE ($1::text IS NULL OR name = $1) ORDER BY name",
+                 WHERE ($1::text IS NULL OR name = $1) ORDER BY name COLLATE \"C\"",
                 SETTINGS.join(", ")
             ),
             &[&name],
@@ -957,7 +957,7 @@ async fn fabric_ports(
         .query(
             "SELECT account, fabric_port, device, port FROM fabric_port_bindings
              WHERE ($1::text IS NULL OR (account = $1 AND fabric_port = $2))
-             ORDER BY account, fabric_port",
+             ORDER BY account COLLATE \"C\", fabric_port COLLATE \"C\"",
             &[&a, &p],
         )
         .await?;
@@ -981,7 +981,7 @@ async fn edge_devices(
         .query(
             "SELECT account, edge_device, device FROM edge_device_bindings
              WHERE ($1::text IS NULL OR (account = $1 AND edge_device = $2))
-             ORDER BY account, edge_device",
+             ORDER BY account COLLATE \"C\", edge_device COLLATE \"C\"",
             &[&a, &e],
         )
         .await?;
@@ -1067,5 +1067,28 @@ mod tests {
     fn the_migrations_are_in_order() {
         assert!(MIGRATIONS.windows(2).all(|w| w[0].0 < w[1].0));
         assert_eq!(MIGRATIONS[0].0, 1);
+    }
+
+    #[test]
+    fn a_route_takes_only_a_proxy_that_the_collector_reads() {
+        let route = |proxy: &str| {
+            Change::PutRoute(Route {
+                name: "r".into(),
+                proxy: Some(proxy.into()),
+                proxy_credential: None,
+                jumps: vec![],
+            })
+            .check()
+        };
+        assert!(route("socks5://[2001:db8::1]:1080").is_ok());
+        assert!(route("http://proxy.example:3128/").is_ok());
+        for bad in [
+            "socks5://[2001:db8::1]",
+            "http://proxy.example:abc",
+            "http://proxy.example:70000",
+            "http://:3128",
+        ] {
+            assert!(matches!(route(bad), Err(Error::Invalid(_))), "{bad}");
+        }
     }
 }

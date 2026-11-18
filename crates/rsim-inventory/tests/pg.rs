@@ -314,3 +314,91 @@ async fn an_env_import_round_trips() {
         1
     );
 }
+
+#[tokio::test]
+async fn each_list_is_in_byte_order_of_its_key() {
+    let Some(db) = test_database("each_list_is_in_byte_order").await else {
+        return;
+    };
+    // A collation of a language puts 'ab' before 'a-c' and 'a1' before 'B1';
+    // byte order puts them the other way.
+    let mut changes = Vec::new();
+    for n in ["ab", "a-c"] {
+        changes.push(Change::PutCredential(credential(n, "VYOS")));
+        changes.push(Change::PutJumpHost(JumpHost {
+            name: n.into(),
+            address: "192.0.2.20".into(),
+            credential: n.into(),
+            ssh_algorithms: SshAlgorithms::Modern,
+        }));
+        changes.push(Change::PutRoute(Route {
+            name: n.into(),
+            proxy: None,
+            proxy_credential: None,
+            jumps: vec![n.into()],
+        }));
+        changes.push(Change::PutGroup(Group {
+            name: n.into(),
+            vendor: "vyos".into(),
+            description: None,
+            settings: Settings::default(),
+        }));
+    }
+    for d in ["a1", "B1"] {
+        changes.push(Change::PutDevice(Device {
+            name: d.into(),
+            group: "ab".into(),
+            address: "192.0.2.1".into(),
+            site: None,
+            location: None,
+            console_site: None,
+            settings: Settings::default(),
+        }));
+        for p in ["pc", "p-c"] {
+            changes.push(Change::PutFabricPort(FabricPortBinding {
+                account: d.into(),
+                fabric_port: p.into(),
+                device: d.into(),
+                port: "eth1".into(),
+            }));
+            changes.push(Change::PutEdgeDevice(EdgeDeviceBinding {
+                account: d.into(),
+                edge_device: p.into(),
+                device: d.into(),
+            }));
+        }
+    }
+    db.apply("tester", &changes).await.unwrap();
+    let inv = db.load().await.unwrap();
+    let sorted = |v: Vec<String>| {
+        let mut s = v.clone();
+        s.sort();
+        assert_eq!(v, s);
+        v
+    };
+    assert_eq!(
+        sorted(inv.credentials.iter().map(|c| c.name.clone()).collect()),
+        ["a-c", "ab"]
+    );
+    sorted(inv.jump_hosts.iter().map(|j| j.name.clone()).collect());
+    sorted(inv.routes.iter().map(|r| r.name.clone()).collect());
+    sorted(inv.groups.iter().map(|g| g.name.clone()).collect());
+    let devices = sorted(inv.devices.iter().map(|d| d.name.clone()).collect());
+    assert_eq!(devices, ["B1", "a1"]);
+    sorted(
+        inv.bindings
+            .fabric_ports
+            .iter()
+            .map(|b| format!("{}\0{}", b.account, b.fabric_port))
+            .collect(),
+    );
+    sorted(
+        inv.bindings
+            .edge_devices
+            .iter()
+            .map(|b| format!("{}\0{}", b.account, b.edge_device))
+            .collect(),
+    );
+    let resolved: Vec<String> = inv.resolve().unwrap().into_iter().map(|d| d.name).collect();
+    assert_eq!(resolved, devices);
+}

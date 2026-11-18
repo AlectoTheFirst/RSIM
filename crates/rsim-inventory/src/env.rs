@@ -119,24 +119,72 @@ pub fn algorithms(env: &BTreeMap<String, String>, key: &str) -> SshAlgorithms {
     }
 }
 
-/// The split of a proxy URL `scheme://[user:password@]host:port[/]` into
-/// the URL with no login and whether it has a login.
-pub fn split_proxy(url: &str) -> Result<(String, bool), String> {
+/// The parts of a proxy URL. The login is a user name and a password.
+pub struct ProxyUrl {
+    /// `http`, `socks5` or `socks5h`.
+    pub scheme: String,
+    /// The host name or the address, an IPv6 address with no brackets.
+    pub host: String,
+    pub port: u16,
+    pub login: Option<(String, String)>,
+}
+
+/// Reads a proxy URL `scheme://[user:password@]host:port[/]`, with an IPv6
+/// host in brackets. The collector reads its proxies with it. An error
+/// does not show the login.
+pub fn parse_proxy(url: &str) -> Result<ProxyUrl, String> {
     let (scheme, rest) = url
         .split_once("://")
         .ok_or_else(|| "the proxy has no scheme".to_string())?;
     if !matches!(scheme, "http" | "socks5" | "socks5h") {
         return Err(format!("the proxy scheme {scheme} is not supported"));
     }
-    let (login, host) = match rest.rsplit_once('@') {
-        Some((_, h)) => (true, h),
-        None => (false, rest),
+    let (login, hostport) = match rest.rsplit_once('@') {
+        Some((l, h)) => {
+            let (u, p) = l
+                .split_once(':')
+                .ok_or_else(|| format!("the login of the proxy {h} has no password"))?;
+            (Some((u.to_string(), p.to_string())), h)
+        }
+        None => (None, rest),
     };
-    let host = host.trim_end_matches('/');
-    if host.is_empty() || !host.contains(':') {
-        return Err(format!("the proxy {host} has no port"));
+    let address = hostport.trim_end_matches('/');
+    let (host, port) = if let Some(rest) = address.strip_prefix('[') {
+        rest.split_once("]:")
+            .ok_or_else(|| format!("the proxy {address} has no port"))?
+    } else {
+        address
+            .rsplit_once(':')
+            .ok_or_else(|| format!("the proxy {address} has no port"))?
+    };
+    if host.is_empty() {
+        return Err(format!("the proxy {address} has no host"));
     }
-    Ok((format!("{scheme}://{host}"), login))
+    let port = port
+        .parse()
+        .map_err(|_| format!("the proxy {address} has a bad port"))?;
+    Ok(ProxyUrl {
+        scheme: scheme.to_string(),
+        host: host.to_string(),
+        port,
+        login,
+    })
+}
+
+/// The split of a proxy URL `scheme://[user:password@]host:port[/]` into
+/// the URL with no login and whether it has a login. The URL must be one
+/// that [`parse_proxy`] reads.
+pub fn split_proxy(url: &str) -> Result<(String, bool), String> {
+    let p = parse_proxy(url)?;
+    let host = if p.host.contains(':') {
+        format!("[{}]", p.host)
+    } else {
+        p.host
+    };
+    Ok((
+        format!("{}://{host}:{}", p.scheme, p.port),
+        p.login.is_some(),
+    ))
 }
 
 /// The secret keys of an env credential prefix: one of them must be set.
@@ -625,5 +673,28 @@ mod tests {
             ("socks5://[2001:db8::1]:1080".to_string(), false)
         );
         assert!(split_proxy("http://proxy.example").is_err());
+    }
+
+    #[test]
+    fn a_proxy_url_needs_a_host_and_a_numeric_port() {
+        for (url, needle) in [
+            ("socks5://[2001:db8::1]", "no port"),
+            ("http://proxy.example:abc", "bad port"),
+            ("http://proxy.example:70000", "bad port"),
+            ("http://:3128", "no host"),
+            ("http://u@proxy.example:3128", "no password"),
+        ] {
+            let err = split_proxy(url).err().unwrap_or_else(|| panic!("{url}"));
+            assert!(err.contains(needle), "{url}: {err}");
+        }
+        let err = import(&parse_env(
+            "VYOS_R1_IP=192.0.2.1\nVYOS_USER=u\nVYOS_PASS=p\nVYOS_PROXY=socks5://[2001:db8::1]\n",
+        ))
+        .err()
+        .unwrap();
+        assert!(
+            err.contains("VYOS_PROXY") && err.contains("no port"),
+            "{err}"
+        );
     }
 }

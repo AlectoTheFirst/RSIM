@@ -561,13 +561,47 @@ fn reference(
     env_credential(env, c, https).map_err(|e| format!("the credential {name}: {e}"))
 }
 
+/// The secrets of the credential references of an inventory, with the
+/// first user of each reference. A reference gives the secret of its use:
+/// an API key or a password for HTTPS, a key, an agent or a password for
+/// SSH.
+#[derive(Default)]
+struct References(BTreeMap<String, (Credential, String)>);
+
+impl References {
+    /// Adds the secret of a reference for a user. A reference whose
+    /// secret for this user differs from its secret for an earlier user is
+    /// an error, because the collector keeps one secret for each name.
+    fn add(&mut self, name: &str, credential: Credential, user: String) -> Result<(), String> {
+        match self.0.get(name) {
+            Some((c, first)) if *c != credential => Err(format!(
+                "the credential {name} gives {first} and {user} different secrets; \
+                 give each use its own credential reference"
+            )),
+            Some(_) => Ok(()),
+            None => {
+                self.0.insert(name.to_string(), (credential, user));
+                Ok(())
+            }
+        }
+    }
+
+    fn into_credentials(self) -> MemoryCredentials {
+        let mut m = MemoryCredentials::new();
+        for (name, (c, _)) in self.0 {
+            m.insert(&name, c);
+        }
+        m
+    }
+}
+
 /// The route of a name of the inventory. Each jump host gets its
 /// credential. No name is a direct connection.
 fn inventory_route(
     inv: &Inventory,
     env: &BTreeMap<String, String>,
     name: Option<&str>,
-    credentials: &mut MemoryCredentials,
+    credentials: &mut References,
 ) -> Result<Route, String> {
     let Some(name) = name else {
         return Ok(Route::default());
@@ -601,10 +635,11 @@ fn inventory_route(
         let host = inv
             .jump_host(j)
             .ok_or_else(|| format!("no jump host is named {j}"))?;
-        credentials.insert(
+        credentials.add(
             &host.credential,
             reference(inv, env, &host.credential, false)?,
-        );
+            format!("the jump host {j} (SSH)"),
+        )?;
         jumps.push(Jump {
             address: host.address.clone(),
             credential: host.credential.clone(),
@@ -644,6 +679,7 @@ fn setup_from_inventory(
         _ => return Err("UNIFI_CLIENT_CERT and UNIFI_CLIENT_KEY go together".into()),
     };
     let mut notes = Vec::new();
+    let mut references = References::default();
     for d in inv.resolve()? {
         let Some(vendor) = Vendor::ALL.into_iter().find(|v| v.name() == d.vendor) else {
             notes.push(format!(
@@ -661,8 +697,13 @@ fn setup_from_inventory(
             .ok_or_else(|| format!("the device {} has no credential", d.name))?;
         let secret = reference(inv, env, &credential, https)
             .map_err(|e| format!("the device {}: {e}", d.name))?;
-        s.credentials.insert(&credential, secret);
-        let route = inventory_route(inv, env, st.route.value.as_deref(), &mut s.credentials)
+        let user = format!(
+            "the device {} ({})",
+            d.name,
+            if https { "HTTPS" } else { "SSH" }
+        );
+        references.add(&credential, secret, user)?;
+        let route = inventory_route(inv, env, st.route.value.as_deref(), &mut references)
             .map_err(|e| format!("the device {}: {e}", d.name))?;
         if st.timeout_seconds.is_set() || st.section_timeout_seconds.is_set() {
             s.times.push((
@@ -740,6 +781,7 @@ fn setup_from_inventory(
             inv.version
         ));
     }
+    s.credentials = references.into_credentials();
     Ok((s, notes))
 }
 
@@ -1188,6 +1230,63 @@ mod tests {
         assert_eq!(
             d.section_timeout,
             Duration::from_secs(rsim_inventory::DEFAULT_SECTION_TIMEOUT_SECONDS.into())
+        );
+    }
+
+    #[test]
+    fn a_credential_reference_with_one_secret_for_https_and_another_for_ssh_is_an_error() {
+        let devices = "VYOS_CORE1_IP=192.0.2.1\nVYOS_USER=u\nVYOS_PASS=p\n\
+                       UNIFI_CONTROLLER=192.0.2.8\nUNIFI_USER=u\nUNIFI_PASS=p\n";
+        let mut inv = imported(&parse_env(devices));
+        inv.credentials.push(rsim_inventory::Credential {
+            name: "lab".into(),
+            source: CredentialSource::Env,
+            key: "LAB".into(),
+            description: None,
+        });
+        for g in &mut inv.groups {
+            g.settings.credential = Some("lab".into());
+        }
+        assert_eq!(inv.groups.len(), 2);
+
+        let same = parse_env("LAB_USER=u\nLAB_PASS=p\n");
+        let (s, _) = setup_from_inventory(&inv, &same).unwrap();
+        assert_eq!(s.devices.len(), 2);
+        assert!(s.devices.iter().all(|d| d.credential == "lab"));
+
+        for env in [
+            "LAB_USER=u\nLAB_PASS=p\nLAB_API_KEY=k\n",
+            "LAB_USER=u\nLAB_PASS=p\nLAB_AGENT=default\n",
+        ] {
+            let err = setup_from_inventory(&inv, &parse_env(env)).err().unwrap();
+            assert!(
+                err.contains("credential lab") && err.contains("different secrets"),
+                "{err}"
+            );
+        }
+
+        // A jump host and a UniFi controller on one reference.
+        let mut inv = imported(&parse_env(&format!(
+            "{devices}UNIFI_VIA=bastion\nJUMP_BASTION_IP=192.0.2.20\n\
+             JUMP_BASTION_USER=u\nJUMP_BASTION_PASS=p\n"
+        )));
+        inv.credentials.push(rsim_inventory::Credential {
+            name: "lab".into(),
+            source: CredentialSource::Env,
+            key: "LAB".into(),
+            description: None,
+        });
+        for j in &mut inv.jump_hosts {
+            j.credential = "lab".into();
+        }
+        for g in inv.groups.iter_mut().filter(|g| g.vendor == "unifi") {
+            g.settings.credential = Some("lab".into());
+        }
+        let env = parse_env(&format!("{devices}LAB_USER=u\nLAB_PASS=p\nLAB_API_KEY=k\n"));
+        let err = setup_from_inventory(&inv, &env).err().unwrap();
+        assert!(
+            err.contains("jump host") && err.contains("different secrets"),
+            "{err}"
         );
     }
 
