@@ -1,17 +1,22 @@
 // The ladder of a path query: one row for each function, or for each
 // device at the level device, with the forward path and the replies.
 import type { JSX } from "preact";
-import type { Answer, Qos, TraceStep, Verdict } from "../api/types";
+import type { Answer, TraceStep, Verdict } from "../api/types";
 import { Hatch, HatchMark } from "../page/Hatch";
 import { SIZE, TYPE } from "../theme";
 import { LaneNames, Lanes, laneX } from "./Lanes";
 import {
   type Cell,
+  delayShown,
   destinationOf,
+  detailSpans,
   type Ladder as LadderModel,
   type Rib,
+  outcomeKnown,
+  qosShown,
+  rateShown,
   type SectionRow,
-  spanLabel,
+  type Shown,
   type StepRow,
   verdictWord,
 } from "./layout";
@@ -38,16 +43,28 @@ const FIELD_COLUMNS = [
 const FIELD_WIDTHS = [SIZE.colIp, SIZE.colPort, SIZE.colIp, SIZE.colPort, SIZE.colTransport];
 const IS_NUMBER = [false, true, false, true, false];
 
+/** The word of an outcome kind: with its colour if the engine knows it, else in a hatch mark. */
+export function OutcomeWord(props: { kind: string; headline?: boolean }) {
+  const { kind } = props;
+  const known = outcomeKnown(kind);
+  const word = (
+    <span class={`${props.headline ? "t-headline" : "strong"}${known ? ` c-${kind}` : ""}`}>{verdictWord(kind)}</span>
+  );
+  return known ? word : <HatchMark>{word}</HatchMark>;
+}
+
+/** A value of the detail: plain if the twin knows it, else in a hatch mark with no colour. */
+function ShownValue(props: { s: Shown }) {
+  const v = <span class="t-value">{props.s.text}</span>;
+  return props.s.known ? v : <HatchMark>{v}</HatchMark>;
+}
+
 export function VerdictText(props: { v: Verdict; headline?: boolean }) {
   const { v } = props;
-  const known = v.kind === "deliver" || v.kind === "drop";
   const dest = destinationOf(v);
-  const word = (
-    <span class={`${props.headline ? "t-headline" : "strong"}${known ? ` c-${v.kind}` : ""}`}>{verdictWord(v.kind)}</span>
-  );
   return (
     <>
-      {known ? word : <HatchMark>{word}</HatchMark>}
+      <OutcomeWord kind={v.kind} headline={props.headline} />
       {dest ? (
         <>
           {" to "}
@@ -117,17 +134,6 @@ export function SectionLine(props: { row: SectionRow; lanes: number; h: number }
   );
 }
 
-function qosText(v: Qos[keyof Qos]): string {
-  if (typeof v === "string") return v;
-  if ("value" in v) {
-    const x = v.value;
-    if (typeof x === "string") return x;
-    if ("known" in x) return String(x.known);
-    return JSON.stringify(x.in);
-  }
-  return String(v.known);
-}
-
 function Facts(props: { rows: [string, JSX.Element | string | null][] }) {
   return (
     <div class="facts">
@@ -154,8 +160,8 @@ function Detail(props: { row: StepRow; lanes: number; actions: DetailActions }) 
   const w = Math.max(1, lanes) * SIZE.lane;
   const x = laneX(row.lane);
   const cls = row.dir === "forward" ? "path-forward" : "path-reply";
-  const spans = row.steps.flatMap((s) => s.provenance.map((p) => ({ p, device: s.device })));
-  const d = last.delay;
+  const spans = detailSpans(row.steps);
+  const rate = last.rate_condition ? rateShown(last.rate_condition) : null;
   return (
     <div class="ladder-detail" role="row">
       <span />
@@ -170,14 +176,11 @@ function Detail(props: { row: StepRow; lanes: number; actions: DetailActions }) 
       <div class="detail">
         <div>
           <div class="t-label">source lines</div>
-          <Facts
-            rows={spans.map(({ p, device }) => [
-              spanLabel(p, device),
-              <span class="t-value">
-                {p.file} lines {p.first_line} to {p.last_line}
-              </span>,
-            ])}
-          />
+          <ul class="spans">
+            {spans.map((l) => (
+              <li class="t-value">{l}</li>
+            ))}
+          </ul>
           <div class="muted">The API does not serve the text of the source lines.</div>
         </div>
         <div>
@@ -188,10 +191,17 @@ function Detail(props: { row: StepRow; lanes: number; actions: DetailActions }) 
               ["kind", <span class="t-value">{last.kind}</span>],
               ["outcome", <span class="t-value">{last.outcome.kind}{last.outcome.next ? ` to ${last.outcome.next}` : ""}</span>],
               ["reason", <span class="t-value">{last.reason.code}</span>],
-              ["delay", <span class="t-value">{d.lower_bound ? `at least ${d.known_ns} ns` : `${d.known_ns} ns`}</span>],
+              ["delay", <ShownValue s={delayShown(last.delay)} />],
               ["alternative", last.alternative ? <span class="t-value">{`${last.alternative.index + 1} of ${last.alternative.count}: ${last.alternative.label}`}</span> : null],
               ["flood copy", last.flood_copy ? <span class="t-value">{`${last.flood_copy.index + 1} of ${last.flood_copy.count} to ${last.flood_copy.port}`}</span> : null],
-              ["rate", last.rate_condition ? <span class="t-value">{`${last.rate_condition.exceed_action}, ${last.rate_condition.rate_bps ?? "unknown"} bps`}</span> : null],
+              [
+                "rate",
+                rate ? (
+                  <span>
+                    <span class="t-value">{rate.action}</span> <ShownValue s={rate.rate} />
+                  </span>
+                ) : null,
+              ],
               ["rib guard", <span class="t-value">{last.rib_guard}</span>],
             ]}
           />
@@ -200,11 +210,11 @@ function Detail(props: { row: StepRow; lanes: number; actions: DetailActions }) 
           <div class="t-label">QoS at this function</div>
           <Facts
             rows={[
-              ["dscp", <span class="t-value">{qosText(last.qos.dscp)}</span>],
-              ["ecn", <span class="t-value">{qosText(last.qos.ecn)}</span>],
-              ["traffic class", <span class="t-value">{qosText(last.qos.traffic_class)}</span>],
-              ["drop precedence", <span class="t-value">{qosText(last.qos.drop_precedence)}</span>],
-              ["queue", <span class="t-value">{qosText(last.qos.queue)}</span>],
+              ["dscp", <ShownValue s={qosShown(last.qos.dscp)} />],
+              ["ecn", <ShownValue s={qosShown(last.qos.ecn)} />],
+              ["traffic class", <ShownValue s={qosShown(last.qos.traffic_class)} />],
+              ["drop precedence", <ShownValue s={qosShown(last.qos.drop_precedence)} />],
+              ["queue", <ShownValue s={qosShown(last.qos.queue)} />],
             ]}
           />
           <div class="group actions">

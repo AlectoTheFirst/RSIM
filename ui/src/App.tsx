@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { ApiProblem, type TwinRef, createQuery, getQuery, getTwin, listTwins, stepUrl } from "./api/client";
 import type { Answer, PathAnswer, SetAnswer, Twin } from "./api/types";
-import { PathLadder, VerdictText } from "./ladder/Ladder";
+import { OutcomeWord, PathLadder, VerdictText } from "./ladder/Ladder";
 import { SetLadder } from "./ladder/SetLadder";
 import {
   type Level,
@@ -12,8 +12,8 @@ import {
   devicesOnPath,
   ladder,
   notStated,
+  partCounts,
   ribNotChecked,
-  verdictWord,
 } from "./ladder/layout";
 import { HatchMark } from "./page/Hatch";
 import { KeyLine, LEVELS, QueryBar, ResultLine, TopBar } from "./page/Parts";
@@ -73,7 +73,12 @@ function PathFacts(props: { a: Answer }) {
             {kinds.length === 1 && r.answer.branches[0] ? (
               <VerdictText v={r.answer.branches[0].verdict} />
             ) : (
-              kinds.map((k) => verdictWord(k)).join(", ")
+              kinds.map((k, i) => (
+                <>
+                  {i ? ", " : ""}
+                  <OutcomeWord kind={k} />
+                </>
+              ))
             )}
           </span>
         );
@@ -95,21 +100,20 @@ function PathFacts(props: { a: Answer }) {
 
 function SetFacts(props: { a: Answer }) {
   const parts = props.a.summary;
-  const count = (k: string) => parts.filter((p) => (p.result.verdict_kind ?? p.result.verdict?.kind) === k).length;
-  const other = parts.filter((p) => !p.result.verdict).length;
+  const n = partCounts(parts);
   return (
     <>
       <span class="t-headline">{parts.length} parts</span>
       <span>
-        <span class="strong c-deliver">Deliver</span> {count("deliver")}
+        <OutcomeWord kind="deliver" /> {n.deliver}
       </span>
       <span>
-        <span class="strong c-drop">Drop</span> {count("drop")}
+        <OutcomeWord kind="drop" /> {n.drop}
       </span>
       <span>
-        <span class="strong">Unknown</span> {count("unknown")}
+        <OutcomeWord kind="unknown" /> {n.unknown}
       </span>
-      {other ? <span class="muted">{other} parts depend on the path</span> : null}
+      {n.dependsOnPath ? <span class="muted">{n.dependsOnPath} parts depend on the path</span> : null}
     </>
   );
 }

@@ -1,6 +1,16 @@
 // The layout of the ladder: the lanes, the rows and the content of each
 // cell, from a query answer in the full form. No drawing code.
-import type { Answer, Branch, FieldValue, Header, PacketSet, Span, TraceStep, Verdict } from "../api/types";
+import type {
+  Answer,
+  Branch,
+  FieldValue,
+  Header,
+  PacketSet,
+  Qos,
+  Span,
+  TraceStep,
+  Verdict,
+} from "../api/types";
 
 /** The header field columns of the path query page. */
 export const FIELDS = [
@@ -26,13 +36,13 @@ function rawValue(h: Header, f: Field): FieldValue {
   return (h as unknown as Record<string, FieldValue>)[key] ?? "unknown";
 }
 
-function one(x: unknown, f: Field): string {
+function one(x: unknown, f: Field | null): string {
   if (f === "network.transport" && typeof x === "number") return TRANSPORT[x] ?? String(x);
   return String(x);
 }
 
 /** The text of one field value. A range or a list of values is not known. */
-export function fieldText(v: FieldValue, f: Field): Shown {
+export function fieldText(v: FieldValue, f: Field | null): Shown {
   if (v === "absent") return { known: true, text: "absent" };
   if (v === "unknown" || v === "original") return { known: false, text: v };
   if ("known" in v) return { known: true, text: one(v.known, f) };
@@ -350,7 +360,7 @@ export function ladder(a: Answer, level: Level): Ladder {
 }
 
 /** The number of functions with no delay data and of links with no delay data. */
-export function delayGaps(b: Branch): { functions: number; links: number } {
+export function delayGaps(b: Pick<Branch, "delay">): { functions: number; links: number } {
   const fns = new Set<string>();
   let links = 0;
   for (const m of b.delay.missing) {
@@ -386,5 +396,66 @@ export function notStated(echo: Record<string, unknown>): string[] {
   const stated = echo["network.transport"] != null || echo["network.iana_number"] != null;
   const out = Object.keys(echo).filter((k) => !skip.has(k) && echo[k] == null);
   if (!stated) out.push("network.transport");
+  return out;
+}
+
+/** Whether the engine knows an outcome kind: `deliver` and `drop` have a colour, each other kind the hatch. */
+export function outcomeKnown(kind: string): boolean {
+  return kind === "deliver" || kind === "drop";
+}
+
+/** The parts of a set answer by result: each part counts once. */
+export function partCounts(parts: readonly { result: { kind: string; verdict?: Verdict | null; verdict_kind?: string | null } }[]): {
+  deliver: number;
+  drop: number;
+  unknown: number;
+  dependsOnPath: number;
+} {
+  const out = { deliver: 0, drop: 0, unknown: 0, dependsOnPath: 0 };
+  for (const p of parts) {
+    if (p.result.kind === "depends_on_path") {
+      out.dependsOnPath += 1;
+      continue;
+    }
+    const k = p.result.verdict_kind ?? p.result.verdict?.kind;
+    if (k === "deliver" || k === "drop" || k === "unknown") out[k] += 1;
+  }
+  return out;
+}
+
+/** The text of a QoS value. A range, a value that varies or an unknown value is not known. */
+export function qosShown(v: Qos[keyof Qos]): Shown {
+  if (typeof v === "string") return { known: v === "unset" || v === "none", text: v };
+  if ("value" in v) return fieldText(v.value, null);
+  return { known: true, text: String(v.known) };
+}
+
+/** The delay of a step. A delay with no data for some functions or links is a lower bound and not known. */
+export function delayShown(d: Branch["delay"]): Shown {
+  if (!d.lower_bound) return { known: true, text: `${d.known_ns} ns` };
+  const g = delayGaps({ delay: d });
+  return {
+    known: false,
+    text: `at least ${d.known_ns} ns: ${g.functions} functions and ${g.links} links have no delay data`,
+  };
+}
+
+/** The rate condition of a step: its exceed action, then its rate, which is not known with no rate. */
+export function rateShown(rc: NonNullable<TraceStep["rate_condition"]>): { action: string; rate: Shown } {
+  return {
+    action: rc.exceed_action,
+    rate: rc.rate_bps == null ? { known: false, text: "rate not known" } : { known: true, text: `${rc.rate_bps} bps` },
+  };
+}
+
+/** The source spans of the steps of a row, each once, in the order of the steps. */
+export function detailSpans(steps: readonly TraceStep[]): string[] {
+  const out: string[] = [];
+  for (const st of steps) {
+    for (const p of st.provenance) {
+      const l = spanLabel(p, st.device);
+      if (!out.includes(l)) out.push(l);
+    }
+  }
   return out;
 }
