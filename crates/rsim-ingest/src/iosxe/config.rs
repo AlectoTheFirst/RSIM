@@ -246,7 +246,7 @@ pub fn read(doc: &Document, table: &Table) -> Config {
             ["ip", "nat", "inside", "source", ..] => {
                 r.mark(s);
                 cfg.nat_rules.push(NatRule {
-                    kind: nat_rule(&w, table),
+                    kind: nat_kind(&w, table),
                     lines: lines_of(s),
                 });
             }
@@ -299,6 +299,33 @@ pub fn read(doc: &Document, table: &Table) -> Config {
     }
     cfg.read = r.read;
     cfg
+}
+
+/// The kind of an `ip nat inside source` line. A static rule with a final
+/// `extendable` is a static rule with that word as its uncertain word; each
+/// other line with `extendable` is a form that the lowering does not read.
+fn nat_kind(w: &[&str], table: &Table) -> NatKind {
+    let Some((&"extendable", rest)) = w.split_last() else {
+        return nat_rule(w, table);
+    };
+    match nat_rule(rest, table) {
+        NatKind::Static {
+            protocol,
+            local,
+            local_port,
+            global,
+            global_port,
+            ..
+        } => NatKind::Static {
+            protocol,
+            local,
+            local_port,
+            global,
+            global_port,
+            uncertain: Some("extendable".into()),
+        },
+        _ => NatKind::Other(table.report_key(&w.join(" "))),
+    }
 }
 
 /// An IPv4 address with a dotted mask, as `address/length`, and the words

@@ -2,6 +2,8 @@
 //! running config of a router and of a Catalyst access switch, with fake
 //! secrets.
 
+use std::collections::BTreeMap;
+
 use rsim_ingest::collected::Collected;
 use rsim_ingest::estate::{Estate, Input, assemble};
 use rsim_ingest::nxos::config::{
@@ -52,6 +54,7 @@ fn estate() -> Estate {
         config: config.to_vec(),
         file: format!("{name}/config@000000000000"),
         collected: Collected::default(),
+        sections: BTreeMap::new(),
     };
     assemble(vec![input("edge1", ROUTER), input("acc1", SWITCH)])
 }
@@ -71,7 +74,7 @@ fn as_str(v: &[(String, u32, u32)]) -> Vec<(&str, u32, u32)> {
 
 #[test]
 fn the_coverage_shares_of_the_fixtures() {
-    for (config, handled, irrelevant, unhandled) in [(ROUTER, 83, 143, 27), (SWITCH, 44, 62, 4)] {
+    for (config, handled, irrelevant, unhandled) in [(ROUTER, 104, 151, 27), (SWITCH, 44, 62, 4)] {
         let doc = iosxe::read_text(config);
         let cov = classify(&doc, &iosxe::table(true));
         assert_eq!(cov.lines[&State::Handled], handled);
@@ -423,7 +426,7 @@ fn each_handled_line_is_read() {
 }
 
 #[test]
-fn the_estate_gives_the_coverage_and_no_function() {
+fn without_sections_the_estate_gives_the_coverage_and_a_twin() {
     let e = estate();
     for (name, config) in [("edge1", ROUTER), ("acc1", SWITCH)] {
         let doc = iosxe::read_text(config);
@@ -432,11 +435,10 @@ fn the_estate_gives_the_coverage_and_no_function() {
             classify(&doc, &iosxe::table(false)),
             "no route table leaves the routing unhandled"
         );
-        assert_eq!(
-            e.notes[name],
-            ["the IOS-XE config gives the coverage and no function"]
-        );
     }
+    assert!(e.notes["edge1"].iter().any(|n| n
+        == "no route table section, so each route lookup is unknown and the static routes of the config are not lowered"));
+    e.builder.build().expect("the twin builds");
 }
 
 #[test]
@@ -464,6 +466,10 @@ fn the_typed_config_of_the_router() {
             "GigabitEthernet0/0/3",
             "Tunnel10",
             "GigabitEthernet0",
+            "GigabitEthernet0/0/4",
+            "GigabitEthernet0/0/5",
+            "GigabitEthernet0/0/6",
+            "GigabitEthernet0/0/7",
         ]
     );
     let get = |n: &str| cfg.interfaces.iter().find(|i| i.name == n).unwrap();
@@ -541,7 +547,14 @@ fn the_typed_config_of_the_router() {
 
     assert_eq!(
         cfg.acls.keys().map(String::as_str).collect::<Vec<_>>(),
-        ["10", "101", "EDGE-IN", "NAT-INSIDE", "VPN-TRAFFIC"]
+        [
+            "10",
+            "101",
+            "EDGE-IN",
+            "NAT-INSIDE",
+            "VPN-TRAFFIC",
+            "WAN2-IN"
+        ]
     );
     let edge = &cfg.acls["EDGE-IN"];
     let seqs: Vec<&str> = edge.entries.iter().map(|e| e.seq.as_str()).collect();
@@ -613,7 +626,7 @@ fn the_typed_config_of_the_router() {
         n101.entries[1].destination_port,
         PortSpec::Eq(vec!["domain".into()])
     );
-    assert_eq!((n101.lines.first, n101.lines.last), (265, 267));
+    assert_eq!((n101.lines.first, n101.lines.last), (298, 300));
 
     let routes: Vec<RouteRow> = cfg
         .static_routes
@@ -648,23 +661,51 @@ fn the_typed_config_of_the_router() {
                 vec!["global".to_string()]
             ),
             ("MGMT", "0.0.0.0/0", Some("203.0.113.1"), None, vec![]),
+            (
+                "default",
+                "198.51.100.64/26",
+                Some("198.51.100.5"),
+                None,
+                vec![]
+            ),
+            (
+                "default",
+                "198.51.100.128/25",
+                Some("198.51.100.1"),
+                None,
+                vec![]
+            ),
+            (
+                "default",
+                "198.51.100.128/25",
+                Some("198.51.100.5"),
+                None,
+                vec![]
+            ),
         ]
     );
 
     assert_eq!(cfg.nat_pools["PUBLIC"].start, "203.0.113.32");
-    assert_eq!(cfg.nat_pools["PUBLIC"].end, "203.0.113.47");
+    assert_eq!(cfg.nat_pools["PUBLIC"].end, "203.0.113.32");
     let kinds: Vec<&NatKind> = cfg.nat_rules.iter().map(|r| &r.kind).collect();
     assert_eq!(kinds.len(), 4);
     assert!(matches!(kinds[0], NatKind::List { acl, overload: true, .. } if acl == "NAT-INSIDE"));
     assert!(matches!(kinds[1], NatKind::List { acl, overload: true, .. } if acl == "10"));
     assert_eq!(
         kinds[2],
-        &NatKind::Other(
-            "ip nat inside source static tcp 192.0.2.10 443 198.51.100.2 443 extendable".into()
-        )
+        &NatKind::Static {
+            protocol: Some("tcp".into()),
+            local: "192.0.2.10".into(),
+            local_port: Some("443".into()),
+            global: "198.51.100.2".into(),
+            global_port: Some("443".into()),
+            uncertain: Some("extendable".into()),
+        }
     );
-    assert!(matches!(kinds[3], NatKind::Static { local, global, .. }
-        if local == "192.0.2.20" && global == "203.0.113.20"));
+    assert!(
+        matches!(kinds[3], NatKind::Static { local, global, uncertain: None, .. }
+        if local == "192.0.2.220" && global == "203.0.113.20")
+    );
 }
 
 #[test]

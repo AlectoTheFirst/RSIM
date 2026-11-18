@@ -1,6 +1,6 @@
-//! The twin of a snapshot: the VyOS and IOS-XR routers, the UniFi sites and
-//! the NX-OS switches, with the links between them. An IOS-XE device gives
-//! its coverage and no function.
+//! The twin of a snapshot: the VyOS, IOS-XR and IOS-XE routers, the UniFi
+//! sites and the NX-OS switches, with the links between them. An IOS-XE
+//! router has no link.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
@@ -68,13 +68,14 @@ pub enum Input {
         sections: BTreeMap<String, (Vec<u8>, String)>,
     },
     /// An IOS-XE router or switch: its running config, the file name of
-    /// the config for the provenance, and its collected state. It gives its
-    /// coverage and its unread handled stanzas, and no function.
+    /// the config for the provenance, its collected state, and the text
+    /// sections that the lowering reads, each with its file name.
     Iosxe {
         name: String,
         config: Vec<u8>,
         file: String,
         collected: Collected,
+        sections: BTreeMap<String, (Vec<u8>, String)>,
     },
     /// A UniFi site: each section with its file name.
     Unifi {
@@ -144,12 +145,21 @@ pub fn inputs(store: &Store, snap: &Snapshot) -> Result<(Vec<Input>, Vec<String>
                 None => skipped.push(format!("{device}: no config section")),
             },
             "iosxe" => match section("config")? {
-                Some((config, file)) => out.push(Input::Iosxe {
-                    name: device.clone(),
-                    config,
-                    file,
-                    collected: collected::read(store, snap, device)?,
-                }),
+                Some((config, file)) => {
+                    let mut sections = BTreeMap::new();
+                    for name in iosxe::SECTIONS {
+                        if let Some(x) = section(name)? {
+                            sections.insert(name.to_string(), x);
+                        }
+                    }
+                    out.push(Input::Iosxe {
+                        name: device.clone(),
+                        config,
+                        file,
+                        collected: collected::read(store, snap, device)?,
+                        sections,
+                    })
+                }
                 None => skipped.push(format!("{device}: no config section")),
             },
             "unifi" => {
@@ -184,8 +194,8 @@ pub fn build(store: &Store, snap: &Snapshot) -> Result<Estate, StoreError> {
 /// and each IOS-XR router gives its summary, and the routers and the root
 /// devices of the UniFi sites give theirs; the link join of the summaries
 /// gives the links. Then each UniFi site, each VyOS router, each NX-OS
-/// switch and each IOS-XR router is lowered with its links. An IOS-XE
-/// device gives its coverage and its unread handled stanzas.
+/// switch and each IOS-XR router is lowered with its links, and each IOS-XE
+/// router with no link.
 pub fn assemble(inputs: Vec<Input>) -> Estate {
     let mut e = Estate {
         builder: TwinBuilder::new(),
@@ -205,6 +215,7 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         ),
     > = BTreeMap::new();
     let mut xr: BTreeMap<String, (iosxr::Config, String, Sections)> = BTreeMap::new();
+    let mut xe: BTreeMap<String, (iosxe::Config, String, Sections)> = BTreeMap::new();
     let mut sites = Vec::new();
     for input in inputs {
         match input {
@@ -264,19 +275,17 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
             Input::Iosxe {
                 name,
                 config,
-                collected: col,
+                file,
+                sections,
                 ..
             } => {
                 let doc = iosxe::read_text(&config);
-                let table = iosxe::table(!col.routes.is_empty());
+                let table = iosxe::table(iosxe::rib_collected(&sections));
                 let cfg = iosxe::read(&doc, &table);
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
                     .insert(name.clone(), iosxe::unread(&doc, &table, &cfg.read));
-                e.notes
-                    .entry(name)
-                    .or_default()
-                    .push("the IOS-XE config gives the coverage and no function".into());
+                xe.insert(name, (cfg, file, sections));
             }
             Input::Unifi { name, sections } => sites.push((name, sections)),
         }
@@ -565,6 +574,26 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
     for (device, (cfg, file, sections)) in &xr {
         let ext = joined.devices.remove(device).unwrap_or_default();
         let (low, _) = iosxr::lower(device, file, &xr_profile, cfg, sections, &ext);
+        e.notes.entry(device.clone()).or_default().extend(low.notes);
+        for f in low.functions {
+            e.builder.add_arc(f);
+        }
+        for x in low.edges {
+            e.builder.edge_interface(x);
+        }
+    }
+
+    // The IOS-XE routers, with no link.
+    let xe_profile = iosxe::profile();
+    for (device, (cfg, file, sections)) in &xe {
+        let low = iosxe::lower(
+            device,
+            file,
+            &xe_profile,
+            cfg,
+            sections,
+            &crate::links::External::default(),
+        );
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         for f in low.functions {
             e.builder.add_arc(f);

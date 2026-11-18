@@ -1014,7 +1014,7 @@ impl L<'_> {
     /// rules, which translate the global destination to the local address.
     /// Each rule applies only on the outside interfaces.
     #[allow(clippy::type_complexity)]
-    fn destination_nat(
+    pub(crate) fn destination_nat(
         &mut self,
         outside: &BTreeSet<InterfaceId>,
     ) -> (Vec<FRule<NatAction>>, Vec<Option<BTreeSet<InterfaceId>>>) {
@@ -1029,16 +1029,21 @@ impl L<'_> {
                     local_port,
                     global,
                     global_port,
+                    uncertain,
                 } => {
                     let name = format!("static {global} to {local}");
                     match self.static_parts(protocol, global, global_port, local, local_port) {
                         Ok((m, addr, port)) => FRule::new(
-                            name,
-                            RulePredicate::exact(Match {
-                                dst_ip: m.0,
-                                dst_port: m.1,
-                                ..m.2
-                            }),
+                            name.clone(),
+                            self.static_predicate(
+                                &name,
+                                uncertain,
+                                Match {
+                                    dst_ip: m.0,
+                                    dst_port: m.1,
+                                    ..m.2
+                                },
+                            ),
                             NatAction::Translate { addr, port },
                         )
                         .with_span(span),
@@ -1092,9 +1097,33 @@ impl L<'_> {
         ))
     }
 
+    /// The predicate of a static rule: exact, or with no definite match
+    /// and the rule's match as the upper bound if the line has a word that
+    /// the lowering does not model.
+    fn static_predicate(
+        &mut self,
+        name: &str,
+        uncertain: &Option<String>,
+        m: Match,
+    ) -> RulePredicate {
+        match uncertain {
+            None => RulePredicate::exact(m),
+            Some(word) => {
+                self.note(format!(
+                    "{name}: {word} is not lowered, so the packets that the rule can translate are unknown"
+                ));
+                let nothing = Match {
+                    src_ip: AddrCond::In(Vec::new()),
+                    ..Match::any()
+                };
+                RulePredicate::bounded(nothing, m)
+            }
+        }
+    }
+
     /// The rules of the NAT in the inside to outside direction. Each rule
     /// applies only from an inside interface to an outside interface.
-    fn source_nat(
+    pub(crate) fn source_nat(
         &mut self,
         active: &[Interface],
         inside: &BTreeSet<InterfaceId>,
@@ -1127,17 +1156,22 @@ impl L<'_> {
                     local_port,
                     global,
                     global_port,
+                    uncertain,
                 } => {
                     let name = format!("static {local} to {global}");
                     let rule =
                         match self.static_parts(protocol, local, local_port, global, global_port) {
                             Ok((m, addr, port)) => FRule::new(
-                                name,
-                                RulePredicate::exact(Match {
-                                    src_ip: m.0,
-                                    src_port: m.1,
-                                    ..m.2
-                                }),
+                                name.clone(),
+                                self.static_predicate(
+                                    &name,
+                                    uncertain,
+                                    Match {
+                                        src_ip: m.0,
+                                        src_port: m.1,
+                                        ..m.2
+                                    },
+                                ),
                                 NatAction::Translate { addr, port },
                             )
                             .with_span(span),

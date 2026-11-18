@@ -1,0 +1,26 @@
+Standard IP access list 10
+    10 permit 192.0.2.128, wildcard bits 0.0.0.63
+    20 permit 192.0.2.250
+Standard IP access list NAT-INSIDE
+    20 permit 192.0.2.200
+    10 permit 192.0.2.0, wildcard bits 0.0.0.127 (12 matches)
+    30 deny   any log
+Extended IP access list 101
+    10 permit tcp 192.0.2.0 0.0.0.63 any eq www
+    20 permit udp any any eq domain
+    30 deny ip any any
+Extended IP access list EDGE-IN
+    10 permit tcp any host 198.51.100.2 eq 443 (3 matches)
+    20 permit udp host 198.51.100.200 host 198.51.100.2 eq isakmp
+    30 permit esp host 198.51.100.200 host 198.51.100.2
+    40 permit icmp any any echo-reply
+    50 permit tcp any any established
+    60 permit ip object-group TRUSTED any
+    70 deny ip any any log
+Extended IP access list VPN-TRAFFIC
+    10 permit ip 192.0.2.0 0.0.0.255 203.0.113.0 0.0.0.255
+Extended IP access list WAN2-IN
+    10 deny tcp any host 203.0.113.20 eq 22
+    20 permit tcp any host 203.0.113.20 eq 443
+    30 permit tcp any eq 443 host 203.0.113.20
+    40 permit tcp any eq 443 host 203.0.113.32 (7 matches)
