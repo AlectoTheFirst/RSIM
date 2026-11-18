@@ -33,7 +33,8 @@ pub struct TopoEdge {
     pub from: String,
     pub to: String,
     /// The facts of the edge, for example the speed and the duplex of both
-    /// ends of a link, or the VNI of a tunnel.
+    /// ends of a link, or the tunnels of an overlay edge, each with its
+    /// encapsulation function, its source, its peer and its VNIs.
     pub facts: Value,
     /// The source spans of the facts: file:first-last.
     pub provenance: Vec<String>,

@@ -141,7 +141,7 @@ async fn the_time_lines_make_no_snapshot_and_a_config_change_makes_one() {
             ("Age: 17", "Age: 47"),
             (
                 "reliability 255/255, txload 0/255, rxload 0/255",
-                "reliability 254/255, txload 3/255, rxload 2/255",
+                "reliability 254/255, txload 9/255, rxload 12/255",
             ),
         ] {
             t = t.replace(a, b);

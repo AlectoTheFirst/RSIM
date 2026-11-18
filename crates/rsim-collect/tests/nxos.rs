@@ -470,6 +470,24 @@ async fn an_answer_of_another_shape_is_an_extract_error() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_absent_arp_section_leaves_no_rows() {
+    let mut e = env();
+    e.c.run_cycle().await.unwrap();
+    assert!(!rows(&e, &NEIGHBOURS).is_empty());
+    e.t.reply(
+        "n1",
+        &command("arp"),
+        Err(TransportError::NotFound("% Invalid command".into())),
+    );
+    tokio::time::advance(Duration::from_secs(60)).await;
+    let r = e.c.run_cycle().await.unwrap();
+    assert!(r.snapshot.is_some(), "{r:?}");
+    assert!(matches!(status(&e, "arp"), SectionStatus::Absent { .. }));
+    assert_eq!(rows(&e, &NEIGHBOURS), Vec::<Vec<String>>::new());
+    assert_eq!(latest(&e).devices["n1"].tables["neighbours"].rows, 0);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_dead_switch_gets_no_more_commands() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let calls = AtomicUsize::new(0);

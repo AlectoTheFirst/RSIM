@@ -2504,7 +2504,7 @@
             "type": "object"
           },
           "facts": {
-            "description": "The facts of the edge, for example the speed and the duplex of both\nends of a link, or the VNI of a tunnel."
+            "description": "The facts of the edge, for example the speed and the duplex of both\nends of a link, or the tunnels of an overlay edge, each with its\nencapsulation function, its source, its peer and its VNIs."
           },
           "from": {
             "type": "string"

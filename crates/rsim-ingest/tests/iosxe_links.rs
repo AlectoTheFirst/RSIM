@@ -1193,25 +1193,62 @@ fn the_tagging_of_the_native_vlan_makes_each_trunk_unknown() {
     assert!(!has(&steps, "dist1/handoff/Port-channel1"), "{steps:#?}");
 }
 
-/// The estate of edge1 with its running config changed, pe1 and pe3.
-fn routers_with_config(from: &str, to: &str) -> Estate {
+/// The estate of edge1 with one line of its running config changed, pe1
+/// and the router `pe3` given.
+fn routers_with_config(from: &str, to: &str, pe3: Input) -> Estate {
     let text = String::from_utf8(EDGE1.to_vec()).unwrap();
     assert!(text.contains(from), "{from}");
     let config = text.replacen(from, to, 1);
     assemble(vec![
         xe("edge1", config.as_bytes(), fixtures("edge1", "")),
         pe1(),
-        pe3(),
+        pe3,
     ])
+}
+
+/// pe3 with the address of VLAN 100 on its port to edge1, so it sends
+/// untagged frames to edge1.
+fn pe3_untagged() -> Input {
+    let config = PE3_CONFIG.replacen(
+        " description to-edge1-lan\n!\ninterface GigabitEthernet0/0/0/0.100\n vrf RED\n ipv4 address 192.0.2.4 255.255.255.192\n encapsulation dot1q 100\n!\n",
+        " description to-edge1-lan\n vrf RED\n ipv4 address 192.0.2.4 255.255.255.192\n!\n",
+        1,
+    );
+    assert_ne!(config, PE3_CONFIG);
+    let rib = PE3_RIB.replace("GigabitEthernet0/0/0/0.100", "GigabitEthernet0/0/0/0");
+    let arp = PE3_ARP.replace("Gi0/0/0/0.100", "Gi0/0/0/0");
+    xr(
+        "pe3",
+        config.as_bytes(),
+        text_sections(
+            "pe3",
+            &[
+                ("interfaces", PE3_INTERFACES),
+                ("rib", &rib),
+                ("arp", &arp),
+                ("lldp", PE3_LLDP),
+            ],
+        ),
+    )
 }
 
 #[test]
 fn a_sub_interface_with_a_vlan_that_is_not_lowered_makes_its_frames_unknown() {
-    for line in [
-        " encapsulation dot1Q 100 native\n",
-        " encapsulation dot1Q 100 second-dot1q 20\n",
+    for (line, why) in [
+        (
+            " encapsulation dot1Q 100 native\n",
+            "the native VLAN of GigabitEthernet0/0/1.100 is not lowered",
+        ),
+        (
+            " encapsulation dot1Q 100 second-dot1q 20\n",
+            "the dot1q VLAN of GigabitEthernet0/0/1.100 is not read",
+        ),
     ] {
-        let t = twin_of(routers_with_config(" encapsulation dot1Q 100\n", line));
+        let t = twin_of(routers_with_config(
+            " encapsulation dot1Q 100\n",
+            line,
+            pe3(),
+        ));
         let (verdict, steps) = only(&query(
             &t,
             "pe3",
@@ -1224,18 +1261,54 @@ fn a_sub_interface_with_a_vlan_that_is_not_lowered_makes_its_frames_unknown() {
             has(&steps, "edge1/handoff/GigabitEthernet0/0/1"),
             "{line}: {steps:#?}"
         );
-        assert!(
-            says(
-                &steps,
-                "the VLAN of GigabitEthernet0/0/1.100 is not lowered"
-            ),
-            "{line}: {steps:#?}"
-        );
+        assert!(says(&steps, why), "{line}: {steps:#?}");
         assert!(
             !has(&steps, "edge1/in/GigabitEthernet0/0/1.100"),
             "{line}: {steps:#?}"
         );
     }
+}
+
+#[test]
+fn a_native_sub_interface_makes_the_untagged_frames_unknown() {
+    // With a tagged sub-interface, the untagged frame has no interface.
+    let t = twin_of(routers_with_config(
+        " encapsulation dot1Q 100\n",
+        " encapsulation dot1Q 100\n",
+        pe3_untagged(),
+    ));
+    let (verdict, steps) = only(&query(
+        &t,
+        "pe3",
+        "GigabitEthernet0/0/0/0",
+        "192.0.2.20",
+        "192.0.2.3",
+    ));
+    assert_eq!(verdict, VerdictKind::Drop, "{steps:#?}");
+    assert!(
+        says(&steps, "the router has no interface for untagged frames"),
+        "{steps:#?}"
+    );
+    let t = twin_of(routers_with_config(
+        " encapsulation dot1Q 100\n",
+        " encapsulation dot1Q 100 native\n",
+        pe3_untagged(),
+    ));
+    let (verdict, steps) = only(&query(
+        &t,
+        "pe3",
+        "GigabitEthernet0/0/0/0",
+        "192.0.2.20",
+        "192.0.2.3",
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown, "{steps:#?}");
+    assert!(
+        says(
+            &steps,
+            "the native VLAN of GigabitEthernet0/0/1.100 is not lowered"
+        ),
+        "{steps:#?}"
+    );
 }
 
 #[test]

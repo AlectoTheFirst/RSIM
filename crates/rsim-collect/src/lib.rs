@@ -40,7 +40,7 @@ pub use pipeline::{
     Clock, CollectError, Collector, CycleReport, Limits, OsEntropy, Sink, TokioClock,
 };
 pub use schedule::{Due, Schedule, Scheduler};
-pub use source::{Capture, Extract, RawSection, SectionSpec, Source, fetch_sections};
+pub use source::{Capture, Extract, RawSection, SectionSpec, Source, Timeouts, fetch_sections};
 pub use transport::{BoxFuture, Https, Ssh, TransportError};
 pub use trust::{
     Credential, Credentials, MemoryCredentials, PinKind, PinPolicy, Secret, TrustStore,

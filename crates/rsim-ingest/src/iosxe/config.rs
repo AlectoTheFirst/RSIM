@@ -288,9 +288,13 @@ pub fn read(doc: &Document, table: &Table) -> Config {
                     lines: lines_of(s),
                 });
             }
-            ["vlan", "filter", _, "vlan-list", list] if r.state(&[&s.key]) == State::Unhandled => {
+            ["vlan", "filter", rest @ ..] if r.state(&[&s.key]) == State::Unhandled => {
+                let list = match rest {
+                    [_, "vlan-list", list] => vlan_list(list),
+                    _ => None,
+                };
                 cfg.filtered_vlans
-                    .extend(vlan_list(list).unwrap_or_else(|| vec![(1, 4094)]));
+                    .extend(list.unwrap_or_else(|| vec![(1, 4094)]));
             }
             ["vlan", "dot1q", "tag", "native"] if r.state(&[&s.key]) == State::Unhandled => {
                 cfg.native_tagging = Some(table.report_key(&s.key));

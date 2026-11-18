@@ -52,6 +52,17 @@ pub struct Interface {
     pub lines: Lines,
 }
 
+/// A sub-interface with `l2transport`. The handlers do not lower it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct L2Transport {
+    pub name: String,
+    /// The VLAN of an `encapsulation dot1q <vlan>` line with no other word.
+    pub dot1q: Option<u16>,
+    /// The masked key of the stanza.
+    pub key: String,
+    pub lines: Lines,
+}
+
 /// An IPv4 HSRP group of `router hsrp`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HsrpGroup {
@@ -78,6 +89,8 @@ pub struct Config {
     /// The name of the line `hostname`.
     pub hostname: Option<String>,
     pub interfaces: Vec<Interface>,
+    /// The `l2transport` sub-interfaces.
+    pub l2transport: Vec<L2Transport>,
     /// The VRFs of the config, with the lines of their `vrf` stanza.
     pub vrfs: BTreeMap<String, Lines>,
     /// The IPv4 access lists.
@@ -130,6 +143,9 @@ pub fn read(doc: &Document, table: &Table) -> Config {
                 let i = interface(&mut r, s, name);
                 cfg.interfaces.push(i);
             }
+            ["interface", name, "l2transport"] => {
+                cfg.l2transport.push(l2transport(&r, s, name));
+            }
             ["vrf", name] => {
                 r.mark(s);
                 cfg.vrfs.insert((*name).to_string(), lines_of(s));
@@ -163,6 +179,25 @@ fn ipv4_prefix<'a, 'b>(w: &'a [&'b str]) -> Option<(String, &'a [&'b str])> {
     let (m, rest) = rest.split_first()?;
     let len = mask_len(m)?;
     Some((format!("{first}/{len}"), rest))
+}
+
+fn l2transport(r: &R, s: &Stanza, name: &str) -> L2Transport {
+    let dot1q = s
+        .children()
+        .iter()
+        .find_map(|c| match words(&c.key).as_slice() {
+            ["encapsulation", "dot1q", v] => Some(v.parse::<u16>().ok()),
+            ["encapsulation", ..] => Some(None),
+            _ => None,
+        })
+        .flatten()
+        .filter(|v| (1..=4094).contains(v));
+    L2Transport {
+        name: name.to_string(),
+        dot1q,
+        key: r.table.report_key(&s.key),
+        lines: lines_of(s),
+    }
 }
 
 fn interface(r: &mut R, s: &Stanza, name: &str) -> Interface {

@@ -26,8 +26,8 @@ use super::profile::{
 };
 use super::state::{self, State};
 use crate::iosxr::lower::{
-    Group, GroupRules, GroupState, Hops, Port, RouterPort, edges, error, fib, group_note,
-    group_state, handoffs, inputs, next_hops, place_unreadable, routed_summary, vips,
+    Group, GroupRules, GroupState, Hops, Port, RouterPort, Unlowered, edges, error, fib,
+    group_note, group_state, handoffs, inputs, next_hops, place_unreadable, routed_summary, vips,
 };
 use crate::iosxr::state::HsrpRow;
 use crate::links::{External, Summary};
@@ -378,9 +378,54 @@ pub fn lower(
         l3.arp = Some(Ok(rows));
         next_hops(&mut l, &active, &l3, ext, &svi_links);
     }
-    handoffs(&mut l, &active, &groups, &sum, ext);
+    handoffs(
+        &mut l,
+        &active,
+        &groups,
+        &sum,
+        ext,
+        &unlowered(cfg, &active),
+    );
     edges(&mut l, device, &active);
     (l.out, sum)
+}
+
+/// The lowered sub-interfaces whose frames the hand-off of their port does
+/// not lower: a sub-interface of a native VLAN takes the frames of its VLAN
+/// and the untagged frames, and a sub-interface with no dot1q VLAN that the
+/// handlers read can take the frames of each VLAN of no other sub-interface
+/// and the untagged frames.
+fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
+    active
+        .iter()
+        .filter(|p| p.i.name.contains('.') && p.dot1q.is_none())
+        .map(|p| {
+            let native = cfg
+                .interfaces
+                .iter()
+                .find(|i| i.name == p.i.name)
+                .and_then(|i| i.dot1q)
+                .filter(|d| d.1);
+            match native {
+                Some((v, _, lines)) => Unlowered {
+                    name: p.i.name.clone(),
+                    vlan: Some(v),
+                    routed: true,
+                    untagged: true,
+                    reason: format!("the native VLAN of {} is not lowered", p.i.name),
+                    lines,
+                },
+                None => Unlowered {
+                    name: p.i.name.clone(),
+                    vlan: None,
+                    routed: true,
+                    untagged: true,
+                    reason: format!("the dot1q VLAN of {} is not read", p.i.name),
+                    lines: p.i.lines,
+                },
+            }
+        })
+        .collect()
 }
 
 /// Whether the section `arp_vrfs` gives the ARP table of a VRF other than

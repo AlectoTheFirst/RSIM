@@ -972,6 +972,27 @@ fn an_ip_nat_line_that_is_not_lowered_makes_the_nat_unknown() {
 }
 
 #[test]
+fn a_line_of_a_parent_port_that_is_not_lowered_makes_its_sub_interfaces_unknown() {
+    let config = config_with(
+        " description LAN trunk\n no ip address\n",
+        " description LAN trunk\n no ip address\n mpls ip\n",
+    );
+    let e = assemble(vec![Input::Iosxe {
+        name: "edge1".into(),
+        config: config.into_bytes(),
+        file: "edge1/config".into(),
+        collected: Collected::default(),
+        sections: sections(),
+    }]);
+    let n = "GigabitEthernet0/0/1.200: options not lowered: ip policy route-map PBR-BLUE, GigabitEthernet0/0/1: mpls ip";
+    assert!(
+        e.notes["edge1"].iter().any(|x| x == n),
+        "{:#?}",
+        e.notes["edge1"]
+    );
+}
+
+#[test]
 fn the_qos_policy_of_a_parent_port_applies_to_its_sub_interfaces() {
     let config = config_with(
         " description LAN trunk\n no ip address\n",

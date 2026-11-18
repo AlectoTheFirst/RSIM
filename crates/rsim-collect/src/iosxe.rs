@@ -5,13 +5,13 @@
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::time::Duration;
 
 use rsim_store::{Class, Format};
 
 use crate::cli::CliRules;
 use crate::{
-    BoxFuture, Device, RawSection, SectionSpec, Source, Ssh, TransportError, Vendor, fetch_sections,
+    BoxFuture, Device, RawSection, SectionSpec, Source, Ssh, Timeouts, TransportError, Vendor,
+    fetch_sections,
 };
 
 /// The CLI rules of IOS XE: the Cisco rules.
@@ -202,7 +202,7 @@ impl Source for IosxeSource {
     fn fetch<'a>(
         &'a self,
         device: &'a Device,
-        timeout: Duration,
+        timeouts: Timeouts,
     ) -> BoxFuture<'a, Vec<RawSection>> {
         Box::pin(async move {
             let serial = self.ssh.serial(device);
@@ -215,7 +215,7 @@ impl Source for IosxeSource {
                 .sections(device)
                 .into_iter()
                 .partition(|s| s.name != ARP_VRFS);
-            let mut out = fetch_sections(fixed, timeout, serial, read).await;
+            let mut out = fetch_sections(fixed, timeouts, serial, read).await;
             let Some(spec) = arp_vrfs.into_iter().next() else {
                 RULES.apply(&mut out, banner_each);
                 return out;
@@ -236,7 +236,7 @@ impl Source for IosxeSource {
                             ..spec.clone()
                         })
                         .collect();
-                    fetch_sections(specs, timeout, serial, read).await
+                    fetch_sections(specs, timeouts, serial, read).await
                 }
                 Err(_) => Vec::new(),
             };
