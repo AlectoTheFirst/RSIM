@@ -58,6 +58,16 @@ fn estate_more(
     extra: Vec<RouteRow>,
     more: Vec<Input>,
 ) -> Estate {
+    estate_from(VYOS, change, extra, more)
+}
+
+/// The estate with the router config `config`.
+fn estate_from(
+    config: &[u8],
+    change: impl Fn(&str, Vec<u8>) -> Vec<u8>,
+    extra: Vec<RouteRow>,
+    more: Vec<Input>,
+) -> Estate {
     let collected = Collected {
         addresses: vec![AddressRow {
             interface: "pppoe0".into(),
@@ -99,7 +109,7 @@ fn estate_more(
     let mut inputs = vec![
         Input::Vyos {
             name: "r1".into(),
-            config: VYOS.to_vec(),
+            config: config.to_vec(),
             file: "r1/config".into(),
             collected,
         },
@@ -364,4 +374,342 @@ interface Ethernet1/1
         e.notes
     );
     e.builder.build().expect("the twin builds");
+}
+
+/// The estate with the text `from` replaced by `to` in the UniFi section
+/// `name`.
+fn estate_replacing(name: &str, from: &str, to: &str) -> Estate {
+    estate_with(
+        |n, b| {
+            if n == name {
+                let s = String::from_utf8(b).unwrap();
+                assert!(s.contains(from), "{from}");
+                s.replace(from, to).into_bytes()
+            } else {
+                b
+            }
+        },
+        Vec::new(),
+    )
+}
+
+/// The verdict of a query that must be unknown, with its reason.
+fn unknown_reason(a: &Answer) -> rsim_core::Reason {
+    match a.verdict() {
+        Some(Verdict::Unknown(r)) => r.clone(),
+        v => panic!("{v:?}"),
+    }
+}
+
+#[test]
+fn a_wired_client_of_another_network_than_its_port_is_not_placed() {
+    // h1 is on an access port of LAN, with the network of GUEST.
+    for ip in ["192.0.2.50", "192.0.2.72"] {
+        let e = estate_replacing(
+            "clients",
+            r#""name": "h1", "ip": "192.0.2.50", "network_id": "n-lan""#,
+            &format!(r#""name": "h1", "ip": "{ip}", "network_id": "n-guest""#),
+        );
+        let notes = &e.notes["site1"];
+        assert!(
+            notes
+                .iter()
+                .any(|n| n.starts_with("client h1: its network n-guest")),
+            "{notes:?}"
+        );
+        let t = e.builder.build().unwrap();
+        let a = run(&t, "192.0.2.70", ip, 8123);
+        unknown_reason(&a);
+        let a = run(&t, "192.0.2.30", ip, 443);
+        unknown_reason(&a);
+        let a = run(&t, ip, "192.0.2.70", 443);
+        let r = unknown_reason(&a);
+        assert!(r.detail.contains("client h1 is not placed"), "{r:?}");
+        let first = a.branches()[0].steps[0].function.to_string();
+        assert_eq!(first, "sw1/unplaced/h1-005351");
+    }
+}
+
+#[test]
+fn a_client_listed_twice_that_is_not_placed_gives_one_ingress() {
+    let h1 = r#"{"mac": "00:00:5e:00:53:51", "name": "h1", "ip": "192.0.2.50", "network_id": "n-lan", "is_wired": true, "sw_mac": "00:00:5e:00:53:a1", "sw_port": 2},"#;
+    let e = estate_with(
+        |n, b| {
+            let s = String::from_utf8(b).unwrap();
+            if n != "clients" {
+                return s.into_bytes();
+            }
+            let wrong = h1.replace("n-lan", "n-guest");
+            s.replace(h1, &format!("{wrong}\n  {wrong}")).into_bytes()
+        },
+        Vec::new(),
+    );
+    let notes = &e.notes["site1"];
+    assert!(
+        notes
+            .iter()
+            .any(|n| n == "client h1-005351 is listed twice"),
+        "{notes:?}"
+    );
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.50", "192.0.2.70", 443);
+    let r = unknown_reason(&a);
+    assert!(r.detail.contains("client h1 is not placed"), "{r:?}");
+}
+
+/// A second WLAN `guest` of the network LAN.
+const SECOND_GUEST: (&str, &str) = (
+    r#""l2_isolation": false}"#,
+    r#""l2_isolation": false},
+  {"_id": "w-guest2", "name": "guest", "networkconf_id": "n-lan", "enabled": true}"#,
+);
+
+#[test]
+fn an_ssid_on_an_access_point_has_the_network_of_the_wlan_that_it_names() {
+    let e = estate_replacing("wlans", SECOND_GUEST.0, SECOND_GUEST.1);
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.50", "192.0.2.71", 443);
+    assert_eq!(
+        a.verdict(),
+        Some(&Verdict::Deliver(Destination::Endpoint(EndpointId::new(
+            "g2-005354"
+        ))))
+    );
+}
+
+#[test]
+fn the_clients_of_an_ssid_with_more_than_one_network_are_not_placed() {
+    // The access point names no WLAN.
+    let e = estate_with(
+        |n, b| {
+            let s = String::from_utf8(b).unwrap();
+            let s = match n {
+                "wlans" => s.replace(SECOND_GUEST.0, SECOND_GUEST.1),
+                "devices" => s.replace(r#""wlanconf_id": "w-guest", "#, ""),
+                _ => s,
+            };
+            s.into_bytes()
+        },
+        Vec::new(),
+    );
+    let notes = &e.notes["site1"];
+    assert!(
+        notes.iter().any(|n| n.starts_with("client g2:")),
+        "{notes:?}"
+    );
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.50", "192.0.2.71", 443);
+    assert!(
+        matches!(a.verdict(), Some(Verdict::Unknown(_))),
+        "{:?}",
+        a.verdict()
+    );
+}
+
+/// The reply of a guest request to a LAN host, with LAN-GUEST dropping all
+/// packets, the state policy `state_policy` and the rules `rules` in
+/// LAN-GUEST.
+fn reply_with(
+    state_policy: Option<serde_json::Value>,
+    rules: Option<serde_json::Value>,
+) -> (Vec<String>, Verdict) {
+    let mut v: serde_json::Value = serde_json::from_slice(VYOS).unwrap();
+    let fw = &mut v["firewall"];
+    fw["ipv4"]["name"]["LAN-GUEST"]["default-action"] = "drop".into();
+    let gopt = fw["global-options"].as_object_mut().unwrap();
+    match state_policy {
+        Some(sp) => gopt.insert("state-policy".into(), sp),
+        None => gopt.remove("state-policy"),
+    };
+    if let Some(r) = rules {
+        fw["ipv4"]["name"]["LAN-GUEST"]["rule"] = r;
+    }
+    let config = serde_json::to_vec_pretty(&v).unwrap();
+    let t = estate_from(&config, |_, b| b, Vec::new(), Vec::new())
+        .builder
+        .build()
+        .unwrap();
+    let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
+    assert!(
+        matches!(a.verdict(), Some(Verdict::Deliver(_))),
+        "{:?}",
+        a.verdict()
+    );
+    match &a.replies[0].result {
+        rsim_engine::ReplyResult::Ran(r) => {
+            let b = &r.branches()[0];
+            let path = b.steps.iter().map(|s| s.function.to_string()).collect();
+            (path, b.verdict.clone())
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+fn delivered_to_g1(v: &Verdict) {
+    assert_eq!(
+        v,
+        &Verdict::Deliver(Destination::Endpoint(EndpointId::new("g1-005352")))
+    );
+}
+
+fn denied_at(path: &[String], v: &Verdict, function: &str) {
+    match v {
+        Verdict::Drop(r) => assert_eq!(r.code, ReasonCode::Denied, "{r:?}"),
+        v => panic!("{v:?}"),
+    }
+    assert_eq!(path.last().map(String::as_str), Some(function), "{path:?}");
+}
+
+#[test]
+fn the_state_policy_accepts_the_packets_of_an_established_session() {
+    let sp = serde_json::json!({"established": {"action": "accept"}});
+    let (_, v) = reply_with(Some(sp), None);
+    delivered_to_g1(&v);
+}
+
+#[test]
+fn the_state_policy_drops_the_packets_of_an_established_session() {
+    let sp = serde_json::json!({"established": {"action": "drop"}});
+    let (path, v) = reply_with(Some(sp), None);
+    denied_at(&path, &v, "r1/session-lookup");
+}
+
+#[test]
+fn with_no_state_action_the_zone_policy_decides_the_packets_of_a_session() {
+    let (path, v) = reply_with(None, None);
+    denied_at(&path, &v, "r1/policy");
+    let sp = serde_json::json!({"invalid": {"action": "drop"}});
+    let (path, v) = reply_with(Some(sp), None);
+    denied_at(&path, &v, "r1/policy");
+}
+
+#[test]
+fn with_no_state_action_a_state_rule_decides_the_packets_of_a_session() {
+    let established = serde_json::json!({
+        "5": {"action": "accept", "state": ["established", "related"]}
+    });
+    let (_, v) = reply_with(None, Some(established));
+    delivered_to_g1(&v);
+    let new = serde_json::json!({"5": {"action": "accept", "state": "new"}});
+    let (path, v) = reply_with(None, Some(new));
+    denied_at(&path, &v, "r1/policy");
+}
+
+#[test]
+fn an_accepted_session_packet_skips_the_state_rules() {
+    let sp = serde_json::json!({"established": {"action": "accept"}});
+    let rules = serde_json::json!({"5": {"action": "drop", "state": "established"}});
+    let (_, v) = reply_with(Some(sp), Some(rules));
+    delivered_to_g1(&v);
+}
+
+/// The guest SSID of the access point with the network LAN on the radio
+/// `na`, the client g2 on LAN, and LAN on the port of the access point.
+fn two_radios(g1_radio: &str) -> Estate {
+    estate_with(
+        |n, b| {
+            let s = String::from_utf8(b).unwrap();
+            let s = match n {
+                "wlans" => s.replace(SECOND_GUEST.0, SECOND_GUEST.1),
+                "devices" => s
+                    .replace(
+                        r#""wlanconf_id": "w-guest", "radio": "na""#,
+                        r#""wlanconf_id": "w-guest2", "radio": "na""#,
+                    )
+                    .replace(r#""excluded_networkconf_ids": ["n-lan"]"#, r#""excluded_networkconf_ids": []"#),
+                "clients" => s
+                    .replace(
+                        r#""name": "g2", "ip": "192.0.2.71", "network_id": "n-guest","#,
+                        r#""name": "g2", "ip": "192.0.2.51", "network_id": "n-lan", "radio": "na","#,
+                    )
+                    .replace(
+                        r#""name": "g1", "ip": "192.0.2.70", "network_id": "n-guest","#,
+                        &format!(
+                            r#""name": "g1", "ip": "192.0.2.70", "network_id": "n-guest"{g1_radio},"#
+                        ),
+                    ),
+                _ => s,
+            };
+            s.into_bytes()
+        },
+        Vec::new(),
+    )
+}
+
+#[test]
+fn each_radio_of_an_ssid_has_the_network_of_its_wlan() {
+    let e = two_radios(r#", "radio": "ng""#);
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.50", "192.0.2.51", 443);
+    assert_eq!(
+        a.verdict(),
+        Some(&Verdict::Deliver(Destination::Endpoint(EndpointId::new(
+            "g2-005354"
+        ))))
+    );
+    let a = run(&t, "192.0.2.50", "192.0.2.70", 443);
+    assert_eq!(
+        a.verdict(),
+        Some(&Verdict::Deliver(Destination::Endpoint(EndpointId::new(
+            "g1-005352"
+        ))))
+    );
+}
+
+#[test]
+fn a_client_of_an_ssid_with_a_network_on_each_radio_needs_its_radio() {
+    let e = two_radios("");
+    let notes = &e.notes["site1"];
+    assert!(
+        notes.iter().any(|n| n.starts_with("client g1:")),
+        "{notes:?}"
+    );
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
+    let r = unknown_reason(&a);
+    assert!(r.detail.contains("client g1 is not placed"), "{r:?}");
+    let a = run(&t, "192.0.2.50", "192.0.2.70", 443);
+    unknown_reason(&a);
+    // g2 names its radio.
+    let a = run(&t, "192.0.2.50", "192.0.2.51", 443);
+    assert_eq!(
+        a.verdict(),
+        Some(&Verdict::Deliver(Destination::Endpoint(EndpointId::new(
+            "g2-005354"
+        ))))
+    );
+}
+
+#[test]
+fn a_vap_with_no_radio_leaves_the_radio_of_a_client_unmatched() {
+    // The vap of the network LAN names no radio, so g1 on the radio `ng`
+    // can be on either WLAN.
+    let e = estate_with(
+        |n, b| {
+            let s = String::from_utf8(b).unwrap();
+            let s = match n {
+                "wlans" => s.replace(SECOND_GUEST.0, SECOND_GUEST.1),
+                "devices" => s.replace(
+                    r#""wlanconf_id": "w-guest", "radio": "na""#,
+                    r#""wlanconf_id": "w-guest2""#,
+                ),
+                "clients" => s.replace(
+                    r#""name": "g1", "ip": "192.0.2.70", "network_id": "n-guest","#,
+                    r#""name": "g1", "ip": "192.0.2.70", "network_id": "n-guest", "radio": "ng","#,
+                ),
+                _ => s,
+            };
+            s.into_bytes()
+        },
+        Vec::new(),
+    );
+    let notes = &e.notes["site1"];
+    assert!(
+        notes.iter().any(|n| n.starts_with("client g1:")),
+        "{notes:?}"
+    );
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
+    let r = unknown_reason(&a);
+    assert!(r.detail.contains("client g1 is not placed"), "{r:?}");
 }

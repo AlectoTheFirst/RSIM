@@ -627,6 +627,9 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
         for (device, section, error) in &r.extract_errors {
             println!("extract error {device}/{section}: {error}");
         }
+        for device in &r.removed {
+            println!("removed {device}");
+        }
         status(collector.store())?;
     }
     let pins = trust.to_text();

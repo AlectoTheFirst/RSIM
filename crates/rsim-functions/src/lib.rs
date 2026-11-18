@@ -24,16 +24,16 @@ pub use forwarding::{
 };
 pub use layer2::{
     BROADCAST, Flood, HostMac, HostResolution, Layer3HandOff, LinkEnd, LinkFacts, MacEntry,
-    MacLookup, PortEgress, PortIngress, PortPeer, WirelessAttachment,
+    MacLookup, PortEgress, PortIngress, PortPeer, Unplaced, WirelessAttachment,
 };
 pub use multicast::{McastRoute, MulticastLookup, group_mac};
 pub use nat::{DestinationNat, NatAction, NatScope, SourceNat};
-pub use policy::{AclMatch, FirewallPolicy, ZoneScope};
+pub use policy::{AclMatch, ConnState, FirewallPolicy, ZoneScope};
 pub use profile::{PortTranslation, RuleAction, UnzonedInterface, VendorProfile};
 pub use qos::QosNotEvaluated;
 pub use routing::{
     Neighbour, NextHopResolution, PolicyRoute, Route, RouteKind, RouteLookup, RouteNextHop,
 };
 pub use rules::{Rule, RuleBody};
-pub use session::{SessionCommit, SessionLookup};
+pub use session::{SessionCommit, SessionLookup, StateAction, StateActions};
 pub use tunnel::{OuterFields, Segment, TunnelPeer, Unmatched, VxlanDecap, VxlanEncap};

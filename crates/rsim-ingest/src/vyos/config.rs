@@ -46,6 +46,8 @@ pub struct Interface {
     pub disabled: bool,
     /// The underlay interface of a PPPoE interface.
     pub source_interface: Option<String>,
+    /// The VRF of the interface, `None` for the default VRF.
+    pub vrf: Option<String>,
     /// The allowed IPs of the WireGuard peers.
     pub allowed_ips: Vec<String>,
     pub lines: Lines,
@@ -144,6 +146,8 @@ pub struct ZoneFrom {
 pub struct Zone {
     pub name: String,
     pub members: Vec<String>,
+    /// The VRFs of `member vrf`.
+    pub member_vrfs: Vec<String>,
     pub local: bool,
     pub default_action: Option<Action>,
     /// The action of the traffic between 2 interfaces of the zone.
@@ -177,6 +181,8 @@ pub struct StaticRoute {
 /// A policy route set with its interfaces.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PolicyRoute {
+    /// `V4` for `policy route`, `V6` for `policy route6`.
+    pub family: Family,
     pub name: String,
     pub interfaces: Vec<String>,
     pub rules: Vec<Rule>,
@@ -198,9 +204,11 @@ pub struct Config {
     pub interfaces: Vec<Interface>,
     pub zones: Vec<Zone>,
     pub rule_sets: Vec<RuleSet>,
-    pub address_groups: BTreeMap<String, Vec<String>>,
-    pub network_groups: BTreeMap<String, Vec<String>>,
-    pub port_groups: BTreeMap<String, Vec<String>>,
+    pub address_groups: Groups,
+    pub network_groups: Groups,
+    pub port_groups: Groups,
+    pub ipv6_address_groups: Groups,
+    pub ipv6_network_groups: Groups,
     pub state_policy: StatePolicy,
     pub source_nat: Vec<Rule>,
     pub destination_nat: Vec<Rule>,
@@ -213,6 +221,9 @@ pub struct Config {
     /// True if the config has a global input filter, which the handlers do
     /// not read.
     pub input_filter: bool,
+    /// The children of `protocols` that can add routes, for example `bgp`
+    /// or `ospf`.
+    pub routing_protocols: Vec<(String, Lines)>,
     /// The first lines of the stanzas that the handlers read.
     pub read: BTreeSet<u32>,
 }
@@ -225,6 +236,13 @@ impl Config {
             .find(|r| r.family == family && r.name == name)
     }
 }
+
+/// Firewall groups by name: the members with the members of the `include`
+/// groups, or the reason that the members are not known.
+pub type Groups = BTreeMap<String, Result<Vec<String>, String>>;
+
+/// The children of `protocols` that add no routes to the route table.
+const NO_ROUTES: &[&str] = &["static", "pim", "igmp-proxy"];
 
 struct Reader {
     read: BTreeSet<u32>,
@@ -307,22 +325,33 @@ pub fn read(doc: &Document) -> Config {
             c.destination_nat = read_rules(&mut r, dst);
         }
     }
-    if let Some(policy) = r.at(root, &["policy"])
-        && let Some(route) = r.at(policy, &["route"])
-    {
-        for p in members(route) {
-            r.mark(p);
-            let rules = r
-                .at(p, &["rule"])
-                .map(|x| read_rules(&mut r, x))
-                .unwrap_or_default();
-            c.policy_routes.push(PolicyRoute {
-                name: p.key.clone(),
-                interfaces: r.texts(p, "interface"),
-                rules,
-                lines: Lines::of(p),
-            });
+    if let Some(policy) = r.at(root, &["policy"]) {
+        for (key, family) in [("route", Family::V4), ("route6", Family::V6)] {
+            let Some(route) = r.at(policy, &[key]) else {
+                continue;
+            };
+            for p in members(route) {
+                r.mark(p);
+                let rules = r
+                    .at(p, &["rule"])
+                    .map(|x| read_rules(&mut r, x))
+                    .unwrap_or_default();
+                c.policy_routes.push(PolicyRoute {
+                    family,
+                    name: p.key.clone(),
+                    interfaces: r.texts(p, "interface"),
+                    rules,
+                    lines: Lines::of(p),
+                });
+            }
         }
+    }
+    if let Some(protocols) = root.get("protocols") {
+        c.routing_protocols = members(protocols)
+            .iter()
+            .filter(|p| !NO_ROUTES.contains(&p.key.as_str()))
+            .map(|p| (p.key.clone(), Lines::of(p)))
+            .collect();
     }
     if let Some(st) = r.at(root, &["protocols"]).and_then(|p| p.get("static")) {
         r.mark(st);
@@ -439,6 +468,7 @@ fn read_interface(r: &mut Reader, s: &Stanza, name: String, kind: Kind) -> Inter
         dynamic,
         disabled: r.flag(s, "disable"),
         source_interface: r.text(s, "source-interface"),
+        vrf: r.text(s, "vrf"),
         allowed_ips,
         lines: Lines::of(s),
     }
@@ -462,20 +492,14 @@ fn read_firewall(r: &mut Reader, fw: &Stanza, c: &mut Config) {
                 continue;
             };
             r.mark_all(g);
-            let (field, map) = if key.ends_with("port-group") {
-                ("port", &mut c.port_groups)
-            } else if key.ends_with("network-group") {
-                ("network", &mut c.network_groups)
-            } else {
-                ("address", &mut c.address_groups)
+            let (field, map) = match key {
+                "port-group" => ("port", &mut c.port_groups),
+                "network-group" => ("network", &mut c.network_groups),
+                "ipv6-network-group" => ("network", &mut c.ipv6_network_groups),
+                "ipv6-address-group" => ("address", &mut c.ipv6_address_groups),
+                _ => ("address", &mut c.address_groups),
             };
-            for x in members(g) {
-                let values = x
-                    .get(field)
-                    .map(|v| v.texts().into_iter().map(str::to_string).collect())
-                    .unwrap_or_default();
-                map.insert(x.key.clone(), values);
-            }
+            *map = read_groups(g, field);
         }
     }
     if let Some(sp) = r.at(fw, &["global-options", "state-policy"]) {
@@ -531,13 +555,11 @@ fn read_firewall(r: &mut Reader, fw: &Stanza, c: &mut Config) {
                     });
                 }
             }
-            let members_of = z
+            let (members_of, member_vrfs) = z
                 .get("member")
                 .map(|m| {
-                    r.mark_all(m);
-                    m.get("interface")
-                        .map(|i| i.texts().into_iter().map(str::to_string).collect())
-                        .unwrap_or_default()
+                    r.mark(m);
+                    (r.texts(m, "interface"), r.texts(m, "vrf"))
                 })
                 .unwrap_or_default();
             let intra = z.get("intra-zone-filtering").map(|i| {
@@ -549,6 +571,7 @@ fn read_firewall(r: &mut Reader, fw: &Stanza, c: &mut Config) {
             c.zones.push(Zone {
                 name: z.key.clone(),
                 members: members_of,
+                member_vrfs,
                 local: r.flag(z, "local-zone"),
                 default_action: r.text(z, "default-action").map(|a| Action::parse(&a)),
                 intra_zone: intra,
@@ -577,6 +600,59 @@ const RULE_KEYS: &[&str] = &[
 
 const SIDE_KEYS: &[&str] = &["address", "port", "group"];
 const GROUP_KEYS: &[&str] = &["address-group", "network-group", "port-group"];
+
+/// The members of an option other than `known`, each as `<key> <member>`.
+fn others(s: &Stanza, key: &str, known: &[&str]) -> Vec<String> {
+    members(s)
+        .iter()
+        .filter(|o| !known.contains(&o.key.as_str()))
+        .map(|o| format!("{key} {}", o.key))
+        .collect()
+}
+
+/// The groups of one kind, each with the members of its `include` groups.
+/// An include of a group that does not exist, or an option other than
+/// `field`, `include` and `description`, makes the members of the group
+/// unknown.
+fn read_groups(g: &Stanza, field: &str) -> Groups {
+    let texts = |x: &Stanza, k: &str| -> Vec<String> {
+        x.get(k)
+            .map(|v| v.texts().into_iter().map(str::to_string).collect())
+            .unwrap_or_default()
+    };
+    let by_name: BTreeMap<&str, &Stanza> = members(g).iter().map(|x| (x.key.as_str(), x)).collect();
+    let mut out = Groups::new();
+    for name in by_name.keys() {
+        let mut values: Vec<String> = Vec::new();
+        let mut problem = None;
+        let mut seen: BTreeSet<&str> = BTreeSet::new();
+        let mut stack: Vec<String> = vec![(*name).to_string()];
+        while let Some(n) = stack.pop() {
+            let Some(x) = by_name.get(n.as_str()) else {
+                problem = Some(format!("{} {n} does not exist", g.key));
+                break;
+            };
+            if !seen.insert(x.key.as_str()) {
+                continue;
+            }
+            if let Some(o) = members(x)
+                .iter()
+                .find(|o| ![field, "include", "description"].contains(&o.key.as_str()))
+            {
+                problem = Some(format!("{} {n} has the option {}", g.key, o.key));
+                break;
+            }
+            for v in texts(x, field) {
+                if !values.contains(&v) {
+                    values.push(v);
+                }
+            }
+            stack.extend(texts(x, "include").into_iter().rev());
+        }
+        out.insert((*name).to_string(), problem.map_or(Ok(values), Err));
+    }
+    out
+}
 
 fn read_rules(r: &mut Reader, rules: &Stanza) -> Vec<Rule> {
     let mut out = Vec::new();
@@ -621,21 +697,24 @@ fn read_rules(r: &mut Reader, rules: &Stanza) -> Vec<Rule> {
         };
         let source = side(r, "source", &mut unhandled);
         let destination = side(r, "destination", &mut unhandled);
-        let iface = |r: &mut Reader, key: &str| {
+        let iface = |r: &mut Reader, key: &str, unhandled: &mut Vec<String>| {
             x.get(key).and_then(|s| {
                 r.mark(s);
+                unhandled.extend(others(s, key, &["name"]));
                 r.text(s, "name")
             })
         };
-        let inbound_interface = iface(r, "inbound-interface");
-        let outbound_interface = iface(r, "outbound-interface");
+        let inbound_interface = iface(r, "inbound-interface", &mut unhandled);
+        let outbound_interface = iface(r, "outbound-interface", &mut unhandled);
         let icmp_type_name = x.get("icmp").and_then(|s| {
             r.mark(s);
+            unhandled.extend(others(s, "icmp", &["type-name"]));
             r.text(s, "type-name")
         });
         let (translation_address, translation_port) = match x.get("translation") {
             Some(t) => {
                 r.mark(t);
+                unhandled.extend(others(t, "translation", &["address", "port"]));
                 (r.text(t, "address"), r.text(t, "port"))
             }
             None => (None, None),
@@ -649,6 +728,10 @@ fn read_rules(r: &mut Reader, rules: &Stanza) -> Vec<Rule> {
             }
             r.text(s, "table")
         });
+        let state = r.texts(x, "state");
+        if state.is_empty() && x.get("state").is_some() {
+            unhandled.push("state".to_string());
+        }
         out.push(Rule {
             number: x.key.parse().unwrap_or(u32::MAX),
             action: r.text(x, "action").map(|a| Action::parse(&a)),
@@ -659,7 +742,7 @@ fn read_rules(r: &mut Reader, rules: &Stanza) -> Vec<Rule> {
                 inbound_interface,
                 outbound_interface,
                 icmp_type_name,
-                state: r.texts(x, "state"),
+                state,
             },
             disabled: r.flag(x, "disable"),
             translation_address,
@@ -687,20 +770,24 @@ fn read_static(r: &mut Reader, routes: &Stanza, table: Option<String>, c: &mut C
         };
         for opt in members(p) {
             match opt.key.as_str() {
-                "next-hop" => {
+                "next-hop" | "interface" => {
                     r.mark_all(opt);
-                    route
-                        .gateways
-                        .extend(members(opt).iter().map(|g| g.key.clone()));
-                }
-                "interface" => {
-                    r.mark_all(opt);
-                    route
-                        .interfaces
-                        .extend(members(opt).iter().map(|g| g.key.clone()));
+                    for h in members(opt) {
+                        if h.get("disable").is_some() {
+                            continue;
+                        }
+                        let key = format!("{} {}", opt.key, h.key);
+                        route.unhandled.extend(others(h, &key, &[]));
+                        if opt.key == "next-hop" {
+                            route.gateways.push(h.key.clone());
+                        } else {
+                            route.interfaces.push(h.key.clone());
+                        }
+                    }
                 }
                 "blackhole" => {
                     r.mark_all(opt);
+                    route.unhandled.extend(others(opt, "blackhole", &[]));
                     route.blackhole = true;
                 }
                 "description" => r.mark_all(opt),
