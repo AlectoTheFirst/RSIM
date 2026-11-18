@@ -217,6 +217,18 @@ pub(crate) fn encode(h: &Header) -> Vec<BitValue> {
     put(&mut bits, FRAGMENT, h.fragment.map(fragment_code));
     put(&mut bits, VLAN, h.vlan.map(u128::from));
     put(&mut bits, L2_PRIORITY, h.l2_priority.map(u128::from));
+    // The tag is free only when the request states neither field of it.
+    let tag = match (h.vlan, h.l2_priority) {
+        (FieldValue::Unstated, FieldValue::Unstated) => None,
+        (FieldValue::Absent, _) | (_, FieldValue::Absent) => Some(false),
+        _ => Some(true),
+    };
+    bits[P_VLAN as usize] = tag;
+    if tag == Some(false) {
+        for f in [VLAN, L2_PRIORITY] {
+            put(&mut bits, f, FieldValue::Absent);
+        }
+    }
     put(&mut bits, DST_MAC, h.dst_mac.map(mac_bits));
     put(&mut bits, SRC_MAC, h.src_mac.map(mac_bits));
     put(&mut bits, MPLS_TC, h.mpls_tc.map(u128::from));
@@ -254,8 +266,6 @@ fn put(bits: &mut [BitValue], f: FieldBits, v: FieldValue<u128>) {
     };
     let (present, unknown, value) = match v {
         FieldValue::Known(x) => (Some(true), false, Some(x)),
-        // The VLAN tag of a request that does not state it can be absent.
-        FieldValue::Unstated if f.presence == Some(P_VLAN) => (None, false, None),
         FieldValue::Unstated => (Some(true), false, None),
         FieldValue::Unknown if f.unknown.is_some() => (Some(true), true, Some(0)),
         FieldValue::Unknown => (Some(true), false, None),

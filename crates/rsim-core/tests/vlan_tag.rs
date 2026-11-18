@@ -39,3 +39,52 @@ fn a_pop_removes_the_tag_and_the_priority() {
         FieldValue::Absent
     );
 }
+
+fn with_tag(vlan: FieldValue<u16>, l2_priority: FieldValue<u8>) -> Header {
+    let mut h = untagged();
+    h.vlan = vlan;
+    h.l2_priority = l2_priority;
+    h
+}
+
+#[test]
+fn a_request_for_vlan_0_holds_no_untagged_frame() {
+    let arena = SetArena::standalone();
+    let vlan0 = PacketSet::single(
+        &arena,
+        &with_tag(FieldValue::Known(0), FieldValue::Unstated),
+    );
+    let plain = PacketSet::single(&arena, &with_tag(FieldValue::Absent, FieldValue::Absent));
+    assert!(vlan0.intersect(&plain).is_empty());
+    let tagged = PacketSet::single(
+        &arena,
+        &with_tag(FieldValue::Known(0), FieldValue::Known(5)),
+    );
+    assert!(tagged.is_subset(&vlan0));
+}
+
+#[test]
+fn an_untagged_request_holds_no_frame_of_vlan_0() {
+    let arena = SetArena::standalone();
+    let plain = PacketSet::single(&arena, &with_tag(FieldValue::Absent, FieldValue::Unstated));
+    let vlan0 = PacketSet::single(
+        &arena,
+        &with_tag(FieldValue::Known(0), FieldValue::Known(0)),
+    );
+    assert!(plain.intersect(&vlan0).is_empty());
+    let untagged = PacketSet::single(&arena, &with_tag(FieldValue::Absent, FieldValue::Absent));
+    assert_eq!(plain, untagged);
+}
+
+#[test]
+fn an_unstated_tag_holds_tagged_and_untagged_frames() {
+    let arena = SetArena::standalone();
+    let unstated = PacketSet::single(&arena, &untagged());
+    let plain = PacketSet::single(&arena, &with_tag(FieldValue::Absent, FieldValue::Absent));
+    let tagged = PacketSet::single(
+        &arena,
+        &with_tag(FieldValue::Known(7), FieldValue::Known(1)),
+    );
+    assert!(plain.is_subset(&unstated));
+    assert!(tagged.is_subset(&unstated));
+}

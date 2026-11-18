@@ -5,12 +5,12 @@
 use proptest::prelude::*;
 use rsim_core::{
     Branch, Context, ContextAttr, Dependency, Destination, EndpointId, FieldValue, FloodCopy,
-    FlowState, FunctionId, FunctionKind, Header, HeaderField, Match, NetFunction, Outcome,
-    PROTO_TCP, PROTO_UDP, PacketPair, PacketSet, PortCond, PortId, Reason, ReasonCode,
-    RulePredicate, SourceSpan, Verdict,
+    FlowState, FunctionId, FunctionKind, Header, HeaderField, InterfaceId, Match, NetFunction,
+    Outcome, PROTO_TCP, PROTO_UDP, PacketPair, PacketSet, PortCond, PortId, Prefix, Reason,
+    ReasonCode, RulePredicate, SourceSpan, Verdict, VrfId,
 };
 use rsim_engine::{Answer, ExecOptions, Executor, Query, Summary, Twin, TwinBuilder};
-use rsim_functions::{Ingress, Meta};
+use rsim_functions::{EgressMode, Ingress, McastRoute, Meta, MulticastLookup};
 use rsim_topologies::*;
 
 fn deliver(e: &str) -> Verdict {
@@ -192,6 +192,7 @@ impl NetFunction for TestFlood {
         let split = input.split(&dns);
         let copy = |index: u32| FloodCopy {
             flood: self.meta.id.clone(),
+            key: String::new(),
             port: PortId::new(format!("p{index}")),
             index,
             count: 2,
@@ -263,6 +264,74 @@ fn a_flood_keeps_the_partition_in_each_copy_and_delivers_if_a_copy_delivers() {
         };
         assert_eq!(p.summary, want);
     }
+}
+
+/// A switch with 2 multicast routes from `e4`: one to `e1` and `e2`, and
+/// one to `e1`, `e2` and `e3`.
+fn mcast_twin() -> Twin {
+    let dev = Dev::new("sw", nxos());
+    let mut b = TwinBuilder::new();
+    b.add(dev.ingress("e4", "vrf", 1));
+    b.add(dev.vrf(&[("e4", "default")], "mroute", 2));
+    let oif = |i: &str| (InterfaceId::new(i), fid(&format!("sw/out/{i}")));
+    let route = |group: &str, oifs: &[&str]| McastRoute {
+        source: None,
+        group: Prefix::host(ip(group)),
+        iif: Some(InterfaceId::new("e4")),
+        oifs: oifs.iter().map(|i| oif(i)).collect(),
+        spans: Vec::new(),
+    };
+    b.add(MulticastLookup {
+        meta: Meta::new("sw/mroute", "sw", &nxos()),
+        routes: [(
+            VrfId::new("default"),
+            vec![
+                route("233.252.0.1", &["e1", "e2"]),
+                route("233.252.0.2", &["e1", "e2", "e3"]),
+            ],
+        )]
+        .into(),
+        unicast: None,
+        rpf_interface: None,
+        unknown: None,
+    });
+    for i in ["e1", "e2", "e3"] {
+        b.add(dev.egress(i, EgressMode::Transparent, None, 3));
+    }
+    b.build().unwrap()
+}
+
+#[test]
+fn the_copies_of_2_multicast_routes_keep_the_partition_of_each_route() {
+    let twin = mcast_twin();
+    let arena = twin.arena(None);
+    let one = udp("192.0.2.1", 40000, "233.252.0.1", 5000);
+    let two = udp("192.0.2.1", 40000, "233.252.0.2", 5000);
+    let s = PacketSet::single(&arena, &one).union(&PacketSet::single(&arena, &two));
+    let a = Executor::new(&twin)
+        .run(
+            &Query::set(s.clone())
+                .with_ingress("sw", "e4")
+                .without_reply(),
+        )
+        .unwrap();
+    let mut covered = s.empty();
+    for p in &a.summary {
+        covered = covered.union(&p.packets);
+    }
+    assert_eq!(covered.project_original(), s.project_original());
+    let copies = |h: &Header| {
+        let a = Executor::new(&twin)
+            .run(
+                &Query::path(&twin, h)
+                    .with_ingress("sw", "e4")
+                    .without_reply(),
+            )
+            .unwrap();
+        a.branches().len()
+    };
+    assert_eq!(copies(&one), 2);
+    assert_eq!(copies(&two), 3);
 }
 
 // ------------------------------------------------------------ the 2 rules
