@@ -18,7 +18,7 @@ use crate::coverage::Table;
 use crate::stanza::{Document, read_indented};
 pub use config::{Config, read};
 pub use lower::lower;
-pub use mask::mask;
+pub use mask::{JSON as JSON_MASK, mask};
 pub use profile::profile;
 pub use table::{dynamic_vrfs, table};
 

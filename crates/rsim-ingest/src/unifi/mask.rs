@@ -1,6 +1,12 @@
 //! The mask of the secrets in a UniFi section.
 
-use crate::mask::{key_like, normalized, secret_key as common};
+use crate::mask::{JsonMask, key_like, normalized, secret_key as common};
+
+/// The mask of a UniFi section.
+pub const MASK: JsonMask = JsonMask {
+    key: secret_key,
+    subtrees: &[],
+};
 
 /// The words of UniFi keys that name a secret anywhere in a key, in lower
 /// case without `_`, `-`, `.` and spaces: the WLAN passphrases, the
@@ -18,20 +24,25 @@ pub const SECRET_WORDS: &[&str] = &[
 
 /// True for a UniFi key whose value is a secret: a key of the common rule
 /// of `crate::mask`, a key with a word of `SECRET_WORDS`, a key that ends
-/// with `key` or `keys` and is not a public key, or an `x_` key, in which
-/// the controller keeps its credentials. `x_fingerprint` and the `x_has_`
+/// with `key` or `keys` and is not a public key, an `x_` key, in which the
+/// controller keeps its credentials, or a key of the file of a VPN client:
+/// a key with `configuration_file` or a key that ends with
+/// `_configuration`, such as `openvpn_configuration` and
+/// `wireguard_client_configuration_file`. `x_fingerprint` and the `x_has_`
 /// keys are secrets only by the other rules.
 pub fn secret_key(key: &str, snmp: bool) -> bool {
     let n = normalized(key);
     let lower = key.to_lowercase();
     let x = lower.starts_with("x_") && lower != "x_fingerprint" && !lower.starts_with("x_has_");
-    x || common(key, snmp) || SECRET_WORDS.iter().any(|w| n.contains(w)) || key_like(key)
+    let file = n.contains("configurationfile") || lower.ends_with("_configuration");
+    x || file || common(key, snmp) || SECRET_WORDS.iter().any(|w| n.contains(w)) || key_like(key)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mask::json_lines;
+    use crate::mask::{check, json_lines};
+    use rsim_store::Format;
     use serde_json::json;
 
     #[test]
@@ -51,7 +62,7 @@ mod tests {
             },
             {"name": "admin", "x_password": "FAKEPASSWORD", "x_ssh_password": "FAKESSH", "x_authkey": "FAKEAUTHKEY"}
         ]});
-        let text = json_lines(v.to_string().as_bytes(), secret_key)
+        let text = json_lines(v.to_string().as_bytes(), &MASK)
             .unwrap()
             .join("\n");
         assert!(!text.contains("FAKE"), "{text}");
@@ -59,11 +70,97 @@ mod tests {
         assert!(text.contains("192.0.2.10"), "{text}");
     }
 
+    /// A networkconf answer with the files of the VPN clients.
+    fn vpn_clients() -> serde_json::Value {
+        json!({"data": [
+            {
+                "name": "vpn-out",
+                "purpose": "vpn-client",
+                "vpn_type": "openvpn-client",
+                "openvpn_configuration": "client\nremote vpn.example 1194\n<key>\n-----BEGIN PRIVATE KEY-----\nFAKEOVPNKEY\n-----END PRIVATE KEY-----\n</key>\n<tls-auth>FAKETLSAUTH</tls-auth>",
+                "openvpn_configuration_filename": "FAKEFILENAME.ovpn",
+                "x_openvpn_password": "FAKEOVPNPASSWORD"
+            },
+            {
+                "name": "wg-out",
+                "purpose": "vpn-client",
+                "vpn_type": "wireguard-client",
+                "wireguard_client_configuration_file": "[Interface]\nPrivateKey = FAKEWGFILEKEY\n",
+                "wireguard_client_configuration_filename": "FAKEWG.conf",
+                "x_wireguard_private_key": "FAKEWGPRIVATE",
+                "ip_subnet": "192.0.2.1/24"
+            }
+        ]})
+    }
+
+    #[test]
+    fn the_files_of_a_vpn_client_are_masked() {
+        let bytes = vpn_clients().to_string();
+        let got = check::masked(
+            "unifi",
+            Format::Json,
+            bytes.as_bytes(),
+            &["PRIVATE KEY", "PrivateKey"],
+            &["\"vpn_type\": \"openvpn-client\"", "192.0.2.1/24"],
+        );
+        assert!(
+            got.iter()
+                .any(|l| l.trim_start().starts_with("\"openvpn_configuration\": "))
+        );
+    }
+
+    #[test]
+    fn every_listed_place_of_a_unifi_section_is_masked() {
+        let mut v = vpn_clients();
+        let mut listed = serde_json::Map::new();
+        for (i, w) in crate::mask::SECRET_KEYS.iter().enumerate() {
+            listed.insert(w.to_string(), json!(format!("FAKEK{i}")));
+        }
+        for (i, w) in crate::mask::SECRET_WORDS
+            .iter()
+            .chain(SECRET_WORDS)
+            .enumerate()
+        {
+            listed.insert(format!("my_{w}_x"), json!([format!("FAKEW{i}")]));
+        }
+        for (i, k) in [
+            "x_iapp_key",
+            "x_ssh_password",
+            "x_anything",
+            "dpi_key",
+            "site_configuration",
+            "a_configuration_file",
+        ]
+        .iter()
+        .enumerate()
+        {
+            listed.insert(k.to_string(), json!(format!("FAKEX{i}")));
+        }
+        listed.insert("url".into(), json!("https://admin:FAKEURLPW@192.0.2.5/x"));
+        listed.insert("x_fingerprint".into(), json!("kept-fingerprint"));
+        v["data"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::Value::Object(listed));
+        let bytes = v.to_string();
+        check::masked(
+            "unifi",
+            Format::Json,
+            bytes.as_bytes(),
+            &["PRIVATE KEY", "PrivateKey"],
+            &[
+                "kept-fingerprint",
+                "192.0.2.1/24",
+                "https://admin:<secret>@192.0.2.5/x",
+            ],
+        );
+    }
+
     #[test]
     fn each_word_of_the_unifi_list_is_masked() {
         for w in SECRET_WORDS {
             let v = json!({"a": {format!("my_{w}"): "FAKESECRET", *w: "FAKESECRET"}});
-            let text = json_lines(v.to_string().as_bytes(), secret_key)
+            let text = json_lines(v.to_string().as_bytes(), &MASK)
                 .unwrap()
                 .join("\n");
             assert!(!text.contains("FAKESECRET"), "{w}: {text}");

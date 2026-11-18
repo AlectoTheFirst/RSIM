@@ -1,6 +1,49 @@
 //! The mask of the secrets in a VyOS config section.
 
-use crate::mask::{key_like, normalized, secret_key as common};
+use crate::mask::{JsonMask, key_like, normalized, secret_key as common};
+
+/// The mask of a VyOS config section.
+pub const MASK: JsonMask = JsonMask {
+    key: secret_key,
+    subtrees: SUBTREES,
+};
+
+/// The parts of a VyOS config in which the user names the secret, so its
+/// values are all masked: the environment variables, the arguments, the
+/// command and the entry point of a container, the environment variables
+/// and the arguments of the script of an event handler, the arguments of a
+/// scheduled task and the free options of an OpenVPN interface.
+pub const SUBTREES: &[&[&str]] = &[
+    &["container", "name", "*", "environment"],
+    &["container", "name", "*", "arguments"],
+    &["container", "name", "*", "command"],
+    &["container", "name", "*", "entrypoint"],
+    &[
+        "service",
+        "event-handler",
+        "event",
+        "*",
+        "script",
+        "environment",
+    ],
+    &[
+        "service",
+        "event-handler",
+        "event",
+        "*",
+        "script",
+        "arguments",
+    ],
+    &[
+        "system",
+        "task-scheduler",
+        "task",
+        "*",
+        "executable",
+        "arguments",
+    ],
+    &["interfaces", "openvpn", "*", "openvpn-option"],
+];
 
 /// The words of VyOS keys that name a secret anywhere in a key, in lower
 /// case without `_`, `-`, `.` and spaces: the WireGuard private and
@@ -33,7 +76,8 @@ pub fn secret_key(key: &str, snmp: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mask::{MASKED, json_lines};
+    use crate::mask::{MASKED, check, json_lines};
+    use rsim_store::Format;
     use serde_json::json;
 
     /// A VyOS config with fake secrets in each place of a secret.
@@ -77,7 +121,7 @@ mod tests {
 
     #[test]
     fn a_masked_vyos_config_shows_no_secret() {
-        let text = json_lines(config().to_string().as_bytes(), secret_key)
+        let text = json_lines(config().to_string().as_bytes(), &MASK)
             .unwrap()
             .join("\n");
         assert!(!text.contains("FAKE"), "{text}");
@@ -87,11 +131,122 @@ mod tests {
         assert!(text.contains("\"remote-as\": \"65001\""), "{text}");
     }
 
+    /// The places of a VyOS config in which the user names the secret.
+    fn user_named() -> serde_json::Value {
+        json!({
+            "container": {"name": {"db": {
+                "image": "registry.example/db:1",
+                "environment": {"DB_PASS": {"value": "FAKEDBPASS"}, "AUTH": {"value": "FAKEAUTH"}},
+                "arguments": "--user admin --pw FAKEARGS",
+                "command": "run --token=FAKECOMMAND",
+                "entrypoint": "/bin/sh -c 'login FAKEENTRY'"
+            }}},
+            "service": {"event-handler": {"event": {"e1": {
+                "filter": {"pattern": "kept-pattern"},
+                "script": {
+                    "path": "/config/scripts/e1.sh",
+                    "arguments": "FAKEEVENTARGS",
+                    "environment": {"API_AUTH": {"value": "FAKEEVENTENV"}}
+                }
+            }}}},
+            "system": {
+                "task-scheduler": {"task": {"t1": {
+                    "interval": "1h",
+                    "executable": {"path": "/config/scripts/t1.sh", "arguments": "--pw FAKETASKARGS"}
+                }}},
+                "config-management": {"commit-archive": {
+                    "location": ["sftp://backup:FAKEURLPW@192.0.2.5/cfg"],
+                    "source": {"s1": {"url": "scp://backup:FAKEURL15@192.0.2.5/archive"}}
+                }}
+            },
+            "interfaces": {"openvpn": {"vtun0": {
+                "mode": "client",
+                "openvpn-option": ["--auth-user-pass FAKEOVPNOPT", "--http-proxy 192.0.2.6 8080 FAKEPROXY"]
+            }}}
+        })
+    }
+
+    #[test]
+    fn a_secret_that_the_user_names_is_masked() {
+        let bytes = user_named().to_string();
+        check::masked(
+            "vyos",
+            Format::Json,
+            bytes.as_bytes(),
+            &[],
+            &[
+                "\"DB_PASS\"",
+                "registry.example/db:1",
+                "kept-pattern",
+                "/config/scripts/t1.sh",
+                "sftp://backup:<secret>@192.0.2.5/cfg",
+                "\"mode\": \"client\"",
+            ],
+        );
+    }
+
+    #[test]
+    fn every_listed_place_of_a_vyos_config_is_masked() {
+        let mut v = config();
+        let user = user_named();
+        for (k, x) in user.as_object().unwrap() {
+            v.as_object_mut()
+                .unwrap()
+                .entry(k.clone())
+                .or_insert(json!({}));
+            merge(&mut v[k.as_str()], x);
+        }
+        let mut listed = serde_json::Map::new();
+        for (i, w) in crate::mask::SECRET_KEYS.iter().enumerate() {
+            listed.insert(w.to_string(), json!(format!("FAKEK{i}")));
+        }
+        for (i, w) in crate::mask::SECRET_WORDS
+            .iter()
+            .chain(SECRET_WORDS)
+            .enumerate()
+        {
+            listed.insert(
+                format!("x-{w}-y"),
+                json!({"FAKENAME": [format!("FAKEW{i}")]}),
+            );
+        }
+        v["listed"] = serde_json::Value::Object(listed);
+        let bytes = v.to_string();
+        check::masked(
+            "vyos",
+            Format::Json,
+            bytes.as_bytes(),
+            &[],
+            &[
+                "192.0.2.65/26",
+                "PUBLICKEY",
+                "\"remote-as\": \"65001\"",
+                "kept-pattern",
+            ],
+        );
+    }
+
+    fn merge(a: &mut serde_json::Value, b: &serde_json::Value) {
+        match (a, b) {
+            (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
+                for (k, x) in b {
+                    match a.get_mut(k) {
+                        Some(y) => merge(y, x),
+                        None => {
+                            a.insert(k.clone(), x.clone());
+                        }
+                    }
+                }
+            }
+            (a, b) => *a = b.clone(),
+        }
+    }
+
     #[test]
     fn each_word_of_the_vyos_list_is_masked() {
         for w in SECRET_WORDS {
             let v = json!({"a": {format!("x-{w}"): "FAKESECRET", *w: "FAKESECRET"}});
-            let text = json_lines(v.to_string().as_bytes(), secret_key)
+            let text = json_lines(v.to_string().as_bytes(), &MASK)
                 .unwrap()
                 .join("\n");
             assert!(!text.contains("FAKESECRET"), "{w}: {text}");

@@ -5,8 +5,11 @@
 //! masked whole, with each key and each value below it, so a secret that
 //! is the key of an object (a VyOS SNMP community, the name of a pre-shared
 //! key) goes with it. The masked lines keep the lines of the canonical form
-//! of `rsim-store`: a line with no secret is the same text. A text section
-//! is masked line by line by the line mask of its vendor.
+//! of `rsim-store`: a line with no secret is the same text. Below a subtree
+//! of the mask of a vendor, a part of the config in which the user names
+//! the secret, each value is masked and the keys stay. The password of a
+//! URL (`scheme://user:password@host`) is masked in each key and value. A
+//! text section is masked line by line by the line mask of its vendor.
 
 use rsim_store::Format;
 use serde_json::Value;
@@ -47,13 +50,59 @@ impl std::fmt::Display for Refusal {
 /// is true below a key that names SNMP.
 pub type SecretKey = fn(key: &str, snmp: bool) -> bool;
 
+/// The mask of the JSON sections of a vendor.
+pub struct JsonMask {
+    /// The rule of the secret keys.
+    pub key: SecretKey,
+    /// The paths of the subtrees whose values are all masked, by their
+    /// object keys from the root; `*` is any key. The keys below a subtree
+    /// stay.
+    pub subtrees: &'static [&'static [&'static str]],
+}
+
+/// The text with the password of each URL masked: in `scheme://user:pw@`,
+/// the `pw` becomes `<secret>`. The user is the text after `://` with no
+/// `/`, `:`, `@` or white space, and the password the text after its `:` up
+/// to the next `@`, with no `/` or white space. `None` for a text with no
+/// such password.
+pub fn url_password(text: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut done = 0;
+    let mut from = 0;
+    while let Some(i) = text[from..].find("://") {
+        let start = from + i + 3;
+        from = start;
+        let rest = &text[start..];
+        let Some(colon) = rest.find(|c: char| matches!(c, '/' | ':' | '@') || c.is_whitespace())
+        else {
+            break;
+        };
+        if !rest[colon..].starts_with(':') {
+            continue;
+        }
+        let pw = &rest[colon + 1..];
+        let end = pw.find(|c: char| matches!(c, '/' | '@') || c.is_whitespace());
+        if let Some(end) = end.filter(|&e| e > 0 && pw[e..].starts_with('@')) {
+            let pw_start = start + colon + 1;
+            out.push_str(&text[done..pw_start]);
+            out.push_str(MASKED);
+            done = pw_start + end;
+            from = done;
+        }
+    }
+    (done > 0).then(|| {
+        out.push_str(&text[done..]);
+        out
+    })
+}
+
 /// The masked lines of the canonical form of a section of a vendor, from
 /// line 1. A vendor and format with no mask give `Refusal::NoMask`.
 pub fn section_lines(vendor: &str, format: Format, bytes: &[u8]) -> Result<Vec<String>, Refusal> {
     match (vendor, format) {
-        ("vyos", Format::Json) => json_lines(bytes, vyos::mask::secret_key),
-        ("unifi", Format::Json) => json_lines(bytes, unifi::mask::secret_key),
-        ("nxos", Format::Json) => json_lines(bytes, secret_key),
+        ("vyos", Format::Json) => json_lines(bytes, &vyos::mask::MASK),
+        ("unifi", Format::Json) => json_lines(bytes, &unifi::mask::MASK),
+        ("nxos", Format::Json) => json_lines(bytes, &nxos::JSON_MASK),
         ("nxos", Format::Text) => text_lines(bytes, nxos::mask),
         ("iosxr", Format::Text) => text_lines(bytes, iosxr::mask),
         ("iosxe", Format::Text) => text_lines(bytes, iosxe::mask),
@@ -150,11 +199,26 @@ pub fn key_like(key: &str) -> bool {
 const SETTING_NAMES: &[&str] = &["name", "key", "setting", "parameter"];
 
 /// The masked lines of a JSON section.
-pub fn json_lines(bytes: &[u8], rule: SecretKey) -> Result<Vec<String>, Refusal> {
+pub fn json_lines(bytes: &[u8], mask: &JsonMask) -> Result<Vec<String>, Refusal> {
     let v: Value = serde_json::from_slice(bytes).map_err(|e| Refusal::Unreadable(e.to_string()))?;
     let mut out = String::new();
-    write(&v, 0, false, false, rule, &mut out);
+    let mut w = Writer {
+        mask,
+        path: Vec::new(),
+        out: &mut out,
+    };
+    w.write(&v, 0, Masked::No, false);
     Ok(out.lines().map(str::to_string).collect())
+}
+
+/// How much of a JSON value is masked.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Masked {
+    No,
+    /// Each value; the keys stay.
+    Values,
+    /// Each key and each value.
+    All,
 }
 
 fn indent(depth: usize, out: &mut String) {
@@ -167,57 +231,93 @@ fn masked_text() -> String {
     Value::String(MASKED.into()).to_string()
 }
 
-/// Writes `v` in the canonical form of `rsim-store`, with each key and each
-/// value below a secret key masked. `masked` is true below a secret key.
-fn write(v: &Value, depth: usize, masked: bool, snmp: bool, rule: SecretKey, out: &mut String) {
-    match v {
-        Value::Object(m) if m.is_empty() => out.push_str("{}"),
-        Value::Array(a) if a.is_empty() => out.push_str("[]"),
-        Value::Object(m) => {
-            let named = m.contains_key("value")
-                && SETTING_NAMES.iter().any(|f| {
-                    m.get(*f)
-                        .and_then(Value::as_str)
-                        .is_some_and(|s| rule(s, snmp))
-                });
-            let mut keys: Vec<&String> = m.keys().collect();
-            keys.sort();
-            out.push_str("{\n");
-            for (i, k) in keys.iter().enumerate() {
-                indent(depth + 1, out);
-                if masked {
-                    out.push_str(&masked_text());
-                } else {
-                    out.push_str(&Value::String((*k).clone()).to_string());
+/// The JSON text of a string, with the password of each URL masked.
+fn plain_text(s: &str) -> String {
+    Value::String(url_password(s).unwrap_or_else(|| s.to_string())).to_string()
+}
+
+/// The writer of the masked canonical form of a JSON value.
+struct Writer<'a> {
+    mask: &'a JsonMask,
+    /// The object keys from the root to the value.
+    path: Vec<&'a str>,
+    out: &'a mut String,
+}
+
+impl<'a> Writer<'a> {
+    /// True if the path is a subtree of the mask.
+    fn in_subtree(&self) -> bool {
+        self.mask.subtrees.iter().any(|t| {
+            t.len() == self.path.len() && t.iter().zip(&self.path).all(|(p, k)| *p == "*" || p == k)
+        })
+    }
+
+    /// Writes `v` in the canonical form of `rsim-store`, masked by `masked`
+    /// and by the rules of the mask below it. `snmp` is true below a key
+    /// that names SNMP.
+    fn write(&mut self, v: &'a Value, depth: usize, masked: Masked, snmp: bool) {
+        let rule = self.mask.key;
+        match v {
+            Value::Object(m) if m.is_empty() => self.out.push_str("{}"),
+            Value::Array(a) if a.is_empty() => self.out.push_str("[]"),
+            Value::Object(m) => {
+                let named = m.contains_key("value")
+                    && SETTING_NAMES.iter().any(|f| {
+                        m.get(*f)
+                            .and_then(Value::as_str)
+                            .is_some_and(|s| rule(s, snmp))
+                    });
+                let mut keys: Vec<&String> = m.keys().collect();
+                keys.sort();
+                self.out.push_str("{\n");
+                for (i, k) in keys.iter().enumerate() {
+                    indent(depth + 1, self.out);
+                    if masked == Masked::All {
+                        self.out.push_str(&masked_text());
+                    } else {
+                        self.out.push_str(&plain_text(k));
+                    }
+                    self.out.push_str(": ");
+                    self.path.push(k.as_str());
+                    let below = if masked == Masked::All
+                        || rule(k, snmp)
+                        || (named && k.as_str() == "value")
+                    {
+                        Masked::All
+                    } else if masked == Masked::Values || self.in_subtree() {
+                        Masked::Values
+                    } else {
+                        Masked::No
+                    };
+                    let snmp_below = snmp || k.to_lowercase().contains("snmp");
+                    self.write(&m[k.as_str()], depth + 1, below, snmp_below);
+                    self.path.pop();
+                    if i + 1 < keys.len() {
+                        self.out.push(',');
+                    }
+                    self.out.push('\n');
                 }
-                out.push_str(": ");
-                let below = masked || rule(k, snmp) || (named && k.as_str() == "value");
-                let snmp_below = snmp || k.to_lowercase().contains("snmp");
-                write(&m[k.as_str()], depth + 1, below, snmp_below, rule, out);
-                if i + 1 < keys.len() {
-                    out.push(',');
-                }
-                out.push('\n');
+                indent(depth, self.out);
+                self.out.push('}');
             }
-            indent(depth, out);
-            out.push('}');
-        }
-        Value::Array(a) => {
-            out.push_str("[\n");
-            for (i, e) in a.iter().enumerate() {
-                indent(depth + 1, out);
-                write(e, depth + 1, masked, snmp, rule, out);
-                if i + 1 < a.len() {
-                    out.push(',');
+            Value::Array(a) => {
+                self.out.push_str("[\n");
+                for (i, e) in a.iter().enumerate() {
+                    indent(depth + 1, self.out);
+                    self.write(e, depth + 1, masked, snmp);
+                    if i + 1 < a.len() {
+                        self.out.push(',');
+                    }
+                    self.out.push('\n');
                 }
-                out.push('\n');
+                indent(depth, self.out);
+                self.out.push(']');
             }
-            indent(depth, out);
-            out.push(']');
+            Value::String(s) if hash_like(s) => self.out.push_str(&masked_text()),
+            _ if masked != Masked::No => self.out.push_str(&masked_text()),
+            Value::String(s) => self.out.push_str(&plain_text(s)),
+            other => self.out.push_str(&other.to_string()),
         }
-        Value::String(s) if hash_like(s) => out.push_str(&masked_text()),
-        _ if masked => out.push_str(&masked_text()),
-        other => out.push_str(&other.to_string()),
     }
 }
 
@@ -247,13 +347,131 @@ fn masked_line(line: &str, mask: fn(&str) -> String) -> String {
     }
 }
 
+/// The checks of the tests of the masks.
+#[cfg(test)]
+pub(crate) mod check {
+    use super::*;
+
+    /// The masked lines of a section, after the checks that the section has
+    /// the lines of its canonical form, that no line holds a text with
+    /// `FAKE` or a text of `secrets`, and that each text of `kept` stays.
+    pub(crate) fn masked(
+        vendor: &str,
+        format: Format,
+        bytes: &[u8],
+        secrets: &[&str],
+        kept: &[&str],
+    ) -> Vec<String> {
+        let got = section_lines(vendor, format, bytes).unwrap();
+        let canon = rsim_store::canonical(format, bytes).unwrap();
+        assert_eq!(got.len(), String::from_utf8_lossy(&canon).lines().count());
+        let text = got.join("\n");
+        assert!(!text.contains("FAKE"), "{text}");
+        for s in secrets {
+            assert!(!text.contains(s), "{s}: {text}");
+        }
+        for k in kept {
+            assert!(text.contains(k), "{k}: {text}");
+        }
+        got
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
-    fn lines(v: &Value, rule: SecretKey) -> Vec<String> {
-        json_lines(v.to_string().as_bytes(), rule).unwrap()
+    #[test]
+    fn the_password_of_a_url_is_masked_in_each_json_mask() {
+        let v = json!({
+            "system": {"config-management": {"commit-archive": {
+                "location": ["sftp://backup:FAKEURLPW@192.0.2.5/cfg", "ftp://u:FAKEFTP@192.0.2.6/a ftp://v:FAKESECOND@192.0.2.7/b"],
+                "source": {"scp://w:FAKEKEYURL@192.0.2.8/c": {"url": "scp://backup:FAKEURL15@192.0.2.5/archive"}}
+            }}},
+            "kept": ["http://192.0.2.9:8080/path", "http://[2001:db8::1]:80/", "ssh://git@192.0.2.10/repo"]
+        });
+        let bytes = v.to_string();
+        for vendor in ["vyos", "unifi", "nxos"] {
+            let got = check::masked(
+                vendor,
+                Format::Json,
+                bytes.as_bytes(),
+                &[],
+                &[
+                    "sftp://backup:<secret>@192.0.2.5/cfg",
+                    "ftp://u:<secret>@192.0.2.6/a ftp://v:<secret>@192.0.2.7/b",
+                    "http://192.0.2.9:8080/path",
+                    "http://[2001:db8::1]:80/",
+                    "ssh://git@192.0.2.10/repo",
+                ],
+            );
+            assert!(
+                got.join("\n").contains("scp://w:<secret>@192.0.2.8/c"),
+                "{vendor}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_url_password_is_found_by_the_pattern_of_hst() {
+        let masked = [
+            (
+                "sftp://backup:FAKE@192.0.2.5/cfg",
+                "sftp://backup:<secret>@192.0.2.5/cfg",
+            ),
+            ("ftp://:FAKE@192.0.2.5", "ftp://:<secret>@192.0.2.5"),
+            ("x http://u:FA:KE@h", "x http://u:<secret>@h"),
+            (
+                "http://h:80/ and ftp://u:FAKE@h",
+                "http://h:80/ and ftp://u:<secret>@h",
+            ),
+            (
+                "a://u:FAKE1@h b://v:FAKE2@k",
+                "a://u:<secret>@h b://v:<secret>@k",
+            ),
+        ];
+        for (text, want) in masked {
+            assert_eq!(url_password(text).as_deref(), Some(want), "{text}");
+        }
+        for text in [
+            "http://192.0.2.9:8080/path",
+            "http://[2001:db8::1]:80/",
+            "ssh://git@192.0.2.10",
+            "http://u:@h",
+            "http://u:p/x@h",
+            "no url",
+            "://",
+        ] {
+            assert_eq!(url_password(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn the_password_of_a_url_is_masked_in_each_text_mask() {
+        let t = "archive\n path scp://admin:FAKEURLPW@192.0.2.5/backup/$h\ncrypto pki trustpoint tp1\n enrollment url http://u:FAKEENR@192.0.2.9\n url http://192.0.2.9:8080/x\n";
+        for vendor in ["nxos", "iosxr", "iosxe"] {
+            check::masked(
+                vendor,
+                Format::Text,
+                t.as_bytes(),
+                &[],
+                &[
+                    " path scp://admin:<secret>@192.0.2.5/backup/$h",
+                    " enrollment url http://u:<secret>@192.0.2.9",
+                    " url http://192.0.2.9:8080/x",
+                ],
+            );
+        }
+    }
+
+    const COMMON: JsonMask = JsonMask {
+        key: secret_key,
+        subtrees: &[],
+    };
+
+    fn lines(v: &Value) -> Vec<String> {
+        json_lines(v.to_string().as_bytes(), &COMMON).unwrap()
     }
 
     fn canonical_lines(v: &Value) -> Vec<String> {
@@ -273,7 +491,7 @@ mod tests {
             "on": true,
             "none": null
         });
-        assert_eq!(lines(&v, secret_key), canonical_lines(&v));
+        assert_eq!(lines(&v), canonical_lines(&v));
     }
 
     #[test]
@@ -282,7 +500,7 @@ mod tests {
             "a": {"password": {"x": ["FAKE1", "FAKE2"], "y": {"FAKE3": 1}}},
             "b": "kept"
         });
-        let got = lines(&v, secret_key);
+        let got = lines(&v);
         let canon = canonical_lines(&v);
         assert_eq!(got.len(), canon.len());
         // The lines outside the value of the secret key are the same.
@@ -312,7 +530,7 @@ mod tests {
             );
         for key in keys {
             let v = json!({"outer": {key.clone(): "FAKESECRET"}});
-            let text = lines(&v, secret_key).join("\n");
+            let text = lines(&v).join("\n");
             assert!(!text.contains("FAKESECRET"), "{key}: {text}");
         }
     }
@@ -320,7 +538,7 @@ mod tests {
     #[test]
     fn a_short_key_name_is_a_secret_only_by_its_whole_name() {
         let v = json!({"keepalive": 30, "aside": "a", "key-id": 1});
-        assert_eq!(lines(&v, secret_key), canonical_lines(&v));
+        assert_eq!(lines(&v), canonical_lines(&v));
     }
 
     #[test]
@@ -329,7 +547,7 @@ mod tests {
             "snmp": {"community": {"FAKECOMMUNITY": {"authorization": "ro"}}},
             "bgp": {"community": "65000:1"}
         });
-        let text = lines(&v, secret_key).join("\n");
+        let text = lines(&v).join("\n");
         assert!(!text.contains("FAKECOMMUNITY"), "{text}");
         assert!(text.contains("65000:1"), "{text}");
     }
@@ -337,7 +555,7 @@ mod tests {
     #[test]
     fn a_setting_record_masks_its_value_by_its_name() {
         let v = json!({"settings": [{"name": "x_passphrase", "value": "FAKEVALUE"}, {"name": "mtu", "value": 1500}]});
-        let text = lines(&v, secret_key).join("\n");
+        let text = lines(&v).join("\n");
         assert!(!text.contains("FAKEVALUE"), "{text}");
         assert!(text.contains("1500"), "{text}");
     }
@@ -345,7 +563,7 @@ mod tests {
     #[test]
     fn a_crypt_hash_is_masked_under_any_key() {
         let v = json!({"login": {"hash": "$6$FAKESALT$FAKEHASH"}});
-        let text = lines(&v, secret_key).join("\n");
+        let text = lines(&v).join("\n");
         assert!(!text.contains("FAKEHASH"), "{text}");
     }
 

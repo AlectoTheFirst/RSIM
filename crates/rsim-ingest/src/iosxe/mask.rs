@@ -12,6 +12,8 @@ pub fn mask(line: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mask::check;
+    use rsim_store::Format;
 
     #[test]
     fn the_secrets_of_ios_xe_lines_are_masked() {
@@ -79,6 +81,63 @@ mod tests {
         for (line, want) in cases {
             assert_eq!(mask(line), want, "{line}");
         }
+    }
+
+    /// An IOS-XE running config with fake secrets in each listed place.
+    const CONFIG: &str = "\
+enable secret 9 $9$FAKESALT$FAKEHASH
+enable password 7 0822455D0A16
+username netops privilege 15 password 0 FAKEPLAIN
+aaa server radius dynamic-author
+ client 192.0.2.1 server-key 0 FAKESERVERKEY
+ client 192.0.2.2 server-key 7 0822455D0A
+ server-key FAKESK
+router isis
+ area-password FAKEISISAREA
+ domain-password FAKEISISDOM
+interface GigabitEthernet0/0/1
+ ip address 192.0.2.2 255.255.255.192
+ standby 1 authentication md5 key-string FAKEHSRPKEY
+ vrrp 2 authentication text FAKEVRRPTEXT
+ ip ospf message-digest-key 1 md5 7 FAKEOSPFKEY
+ isis password FAKEISISIF
+snmp mib community-map FAKECOMMMAP context c1
+snmp-server community FAKECOMMUNITY RO
+snmp-server host 192.0.2.7 version 2c FAKECOMMUNITYHOST
+snmp-server user u1 g1 v3 auth sha FAKEAUTH priv aes 128 FAKEPRIV
+tacacs server t1
+ key 7 FAKETACACSKEY
+radius-server key 7 FAKERADIUSKEY
+crypto isakmp key FAKEISAKMPKEY address 198.51.100.200
+crypto keyring kr1
+ pre-shared-key address 198.51.100.200 key FAKEPSK
+key chain KC macsec
+ key 01
+  key-string 7 FAKEKEYSTRING
+ntp authentication-key 1 md5 FAKENTPKEY 7
+archive
+ path scp://admin:FAKEURLPW@192.0.2.5/backup/$h
+crypto pki trustpoint tp1
+ enrollment url http://u:FAKEENR@192.0.2.9
+router bgp 65000
+ neighbor 198.51.100.1 password 7 FAKEBGPPASSWORD
+";
+
+    #[test]
+    fn every_listed_place_of_an_iosxe_config_is_masked() {
+        check::masked(
+            "iosxe",
+            Format::Text,
+            CONFIG.as_bytes(),
+            &["0822455D0A"],
+            &[
+                " ip address 192.0.2.2 255.255.255.192",
+                " area-password <secret>",
+                " client 192.0.2.2 server-key <secret>",
+                "snmp mib community-map <secret>",
+                " path scp://admin:<secret>@192.0.2.5/backup/$h",
+            ],
+        );
     }
 
     #[test]
