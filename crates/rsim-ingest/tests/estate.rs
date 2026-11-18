@@ -58,6 +58,16 @@ fn estate_more(
     extra: Vec<RouteRow>,
     more: Vec<Input>,
 ) -> Estate {
+    estate_from(VYOS, change, extra, more)
+}
+
+/// The estate with the router config `config`.
+fn estate_from(
+    config: &[u8],
+    change: impl Fn(&str, Vec<u8>) -> Vec<u8>,
+    extra: Vec<RouteRow>,
+    more: Vec<Input>,
+) -> Estate {
     let collected = Collected {
         addresses: vec![AddressRow {
             interface: "pppoe0".into(),
@@ -99,7 +109,7 @@ fn estate_more(
     let mut inputs = vec![
         Input::Vyos {
             name: "r1".into(),
-            config: VYOS.to_vec(),
+            config: config.to_vec(),
             file: "r1/config".into(),
             collected,
         },
@@ -457,4 +467,101 @@ fn the_clients_of_an_ssid_with_more_than_one_network_are_not_placed() {
         "{:?}",
         a.verdict()
     );
+}
+
+/// The reply of a guest request to a LAN host, with LAN-GUEST dropping all
+/// packets, the state policy `state_policy` and the rules `rules` in
+/// LAN-GUEST.
+fn reply_with(
+    state_policy: Option<serde_json::Value>,
+    rules: Option<serde_json::Value>,
+) -> (Vec<String>, Verdict) {
+    let mut v: serde_json::Value = serde_json::from_slice(VYOS).unwrap();
+    let fw = &mut v["firewall"];
+    fw["ipv4"]["name"]["LAN-GUEST"]["default-action"] = "drop".into();
+    let gopt = fw["global-options"].as_object_mut().unwrap();
+    match state_policy {
+        Some(sp) => gopt.insert("state-policy".into(), sp),
+        None => gopt.remove("state-policy"),
+    };
+    if let Some(r) = rules {
+        fw["ipv4"]["name"]["LAN-GUEST"]["rule"] = r;
+    }
+    let config = serde_json::to_vec_pretty(&v).unwrap();
+    let t = estate_from(&config, |_, b| b, Vec::new(), Vec::new())
+        .builder
+        .build()
+        .unwrap();
+    let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
+    assert!(
+        matches!(a.verdict(), Some(Verdict::Deliver(_))),
+        "{:?}",
+        a.verdict()
+    );
+    match &a.replies[0].result {
+        rsim_engine::ReplyResult::Ran(r) => {
+            let b = &r.branches()[0];
+            let path = b.steps.iter().map(|s| s.function.to_string()).collect();
+            (path, b.verdict.clone())
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+fn delivered_to_g1(v: &Verdict) {
+    assert_eq!(
+        v,
+        &Verdict::Deliver(Destination::Endpoint(EndpointId::new("g1-005352")))
+    );
+}
+
+fn denied_at(path: &[String], v: &Verdict, function: &str) {
+    match v {
+        Verdict::Drop(r) => assert_eq!(r.code, ReasonCode::Denied, "{r:?}"),
+        v => panic!("{v:?}"),
+    }
+    assert_eq!(path.last().map(String::as_str), Some(function), "{path:?}");
+}
+
+#[test]
+fn the_state_policy_accepts_the_packets_of_an_established_session() {
+    let sp = serde_json::json!({"established": {"action": "accept"}});
+    let (_, v) = reply_with(Some(sp), None);
+    delivered_to_g1(&v);
+}
+
+#[test]
+fn the_state_policy_drops_the_packets_of_an_established_session() {
+    let sp = serde_json::json!({"established": {"action": "drop"}});
+    let (path, v) = reply_with(Some(sp), None);
+    denied_at(&path, &v, "r1/session-lookup");
+}
+
+#[test]
+fn with_no_state_action_the_zone_policy_decides_the_packets_of_a_session() {
+    let (path, v) = reply_with(None, None);
+    denied_at(&path, &v, "r1/policy");
+    let sp = serde_json::json!({"invalid": {"action": "drop"}});
+    let (path, v) = reply_with(Some(sp), None);
+    denied_at(&path, &v, "r1/policy");
+}
+
+#[test]
+fn with_no_state_action_a_state_rule_decides_the_packets_of_a_session() {
+    let established = serde_json::json!({
+        "5": {"action": "accept", "state": ["established", "related"]}
+    });
+    let (_, v) = reply_with(None, Some(established));
+    delivered_to_g1(&v);
+    let new = serde_json::json!({"5": {"action": "accept", "state": "new"}});
+    let (path, v) = reply_with(None, Some(new));
+    denied_at(&path, &v, "r1/policy");
+}
+
+#[test]
+fn an_accepted_session_packet_skips_the_state_rules() {
+    let sp = serde_json::json!({"established": {"action": "accept"}});
+    let rules = serde_json::json!({"5": {"action": "drop", "state": "established"}});
+    let (_, v) = reply_with(Some(sp), Some(rules));
+    delivered_to_g1(&v);
 }

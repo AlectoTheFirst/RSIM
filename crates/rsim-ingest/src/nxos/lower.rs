@@ -15,7 +15,7 @@ use rsim_functions::{
     AclMatch, DestinationNat, DeviceDelivery, Egress, EgressMode, Fib, Ingress, Link, LocalInput,
     Meta, NatAction, NatScope, Neighbour, NextHopResolution, PortTranslation, QosNotEvaluated,
     Route, RouteKind, RouteLookup, RouteNextHop, Rule as FRule, RuleAction, SessionCommit,
-    SessionLookup, SourceNat, Tag, VendorProfile, VrfSelection,
+    SessionLookup, SourceNat, StateActions, Tag, VendorProfile, VrfSelection,
 };
 
 use super::config::{
@@ -244,6 +244,7 @@ pub fn lower(
     l.add(SessionLookup {
         meta,
         next: l.id("dnat"),
+        states: StateActions::default(),
     });
 
     // The multicast routes, before the unicast route lookup.

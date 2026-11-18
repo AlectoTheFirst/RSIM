@@ -712,4 +712,22 @@ mod twin {
         assert!(unknown, "{detail}");
         assert_eq!(code, ReasonCode::NotInZone, "{detail}");
     }
+
+    #[test]
+    fn a_state_rule_does_not_match_new_packets() {
+        let config = super::edited(|v| {
+            super::put(
+                v,
+                &["firewall", "ipv4", "name", "GUEST-LAN", "rule", "5"],
+                serde_json::json!({"action": "drop", "state": "established"}),
+            );
+        });
+        let (t, _) = build_from(&config);
+        let a = run(&t, "eth0.110", tcp("192.0.2.70", "192.0.2.50", 8123));
+        assert!(
+            !matches!(a.verdict(), Some(Verdict::Drop(_))),
+            "{:?}",
+            a.verdict()
+        );
+    }
 }

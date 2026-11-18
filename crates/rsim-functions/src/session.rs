@@ -9,14 +9,50 @@ use rsim_core::{
 use crate::common::{Meta, push_nonempty};
 use crate::forwarding::meta_methods;
 
+/// What the session lookup does with the packets of one connection state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StateAction {
+    /// The packets go on, and the firewall policy passes them.
+    Accept,
+    /// The packets are dropped at the session lookup.
+    Drop,
+    /// The packets go on, and the firewall policy evaluates them.
+    Continue,
+    /// The action is not known, so the packets are unknown.
+    Unknown,
+}
+
+/// The action of each connection state. The packets of a session have the
+/// state established, and all other packets have the state new. The lookup
+/// gives no packet the state related or invalid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StateActions {
+    pub established: StateAction,
+    pub related: StateAction,
+    pub invalid: StateAction,
+}
+
+impl Default for StateActions {
+    /// The packets of a session pass the firewall policy.
+    fn default() -> Self {
+        StateActions {
+            established: StateAction::Accept,
+            related: StateAction::Accept,
+            invalid: StateAction::Continue,
+        }
+    }
+}
+
 /// Looks up the sessions of the device. A match in the reply direction undoes
 /// the NAT binding of the session. A match in the forward direction applies
-/// it again. Packets with no match are new; their flow key is kept in the
-/// context for the commit.
+/// it again. The action of the state established then applies to the
+/// matched packets. Packets with no match are new; their flow key is kept in
+/// the context for the commit.
 #[derive(Clone, Debug)]
 pub struct SessionLookup {
     pub meta: Meta,
     pub next: FunctionId,
+    pub states: StateActions,
 }
 
 impl NetFunction for SessionLookup {
@@ -63,14 +99,13 @@ impl NetFunction for SessionLookup {
                 };
                 let mut c = ctx.clone();
                 c.session = Attr::Known(m);
-                let detail = if s.translated {
+                let mut detail = if s.translated {
                     format!("{name} packets · session {index}, translated")
                 } else {
                     format!("{name} packets · session {index}")
                 };
-                push_nonempty(
-                    &mut out,
-                    self.meta.forward(
+                let matched = match self.states.established {
+                    StateAction::Accept => self.meta.forward(
                         split.matched,
                         &self.next,
                         ReasonCode::SessionMatched,
@@ -78,7 +113,34 @@ impl NetFunction for SessionLookup {
                         c,
                         state,
                     ),
-                );
+                    StateAction::Continue => {
+                        detail.push_str("; the state policy has no action for established");
+                        self.meta.forward(
+                            split.matched,
+                            &self.next,
+                            ReasonCode::SessionMatched,
+                            detail,
+                            c,
+                            state,
+                        )
+                    }
+                    StateAction::Drop => {
+                        detail.push_str("; the state policy drops established");
+                        self.meta
+                            .drop(split.matched, ReasonCode::Denied, detail, &c, state)
+                    }
+                    StateAction::Unknown => {
+                        detail.push_str("; the state policy action for established is not known");
+                        self.meta.unknown(
+                            split.matched,
+                            ReasonCode::MatchUnknown,
+                            detail,
+                            &c,
+                            state,
+                        )
+                    }
+                };
+                push_nonempty(&mut out, matched);
                 push_nonempty(
                     &mut out,
                     self.meta.unknown(

@@ -8,7 +8,7 @@ use rsim_engine::{AttachmentKind, AttachmentRecord, EdgeInterface, Endpoint, Twi
 use rsim_functions::{
     AclMatch, Egress, EgressMode, Ingress, Link, Meta, Neighbour, NextHopResolution, Route,
     RouteKind, RouteLookup, RouteNextHop, Rule, RuleAction, SessionCommit, SessionLookup,
-    VendorProfile, VrfSelection, ZoneLookup, ZoneRole,
+    StateActions, VendorProfile, VrfSelection, ZoneLookup, ZoneRole,
 };
 
 use crate::helpers::*;
@@ -100,6 +100,7 @@ impl Dev {
         SessionLookup {
             meta: self.meta("session-lookup", 1, 1),
             next: self.id(next),
+            states: StateActions::default(),
         }
     }
 

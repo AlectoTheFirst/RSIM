@@ -12,11 +12,11 @@ use rsim_core::{
 };
 use rsim_engine::EdgeInterface;
 use rsim_functions::{
-    DestinationNat, DeviceDelivery, Egress, EgressMode, Fib, FirewallPolicy, Ingress,
+    ConnState, DestinationNat, DeviceDelivery, Egress, EgressMode, Fib, FirewallPolicy, Ingress,
     Layer3HandOff, Link, LinkEnd, LinkFacts, LocalInput, Meta, NatAction, Neighbour,
     NextHopResolution, PolicyRoute, QosNotEvaluated, Route, RouteKind, RouteLookup, RouteNextHop,
-    Rule as FRule, RuleAction, SessionCommit, SessionLookup, SourceNat, Tag, VendorProfile,
-    VrfSelection, ZoneLookup, ZoneRole, ZoneScope,
+    Rule as FRule, RuleAction, SessionCommit, SessionLookup, SourceNat, StateAction, StateActions,
+    Tag, VendorProfile, VrfSelection, ZoneLookup, ZoneRole, ZoneScope,
 };
 
 use crate::collected::Collected;
@@ -235,10 +235,12 @@ pub fn lower(
         });
     }
     let sp = l.span(cfg.state_policy.lines);
+    let states = l.state_actions();
     let meta = l.meta("session-lookup", vec![sp.clone()]);
     l.add(SessionLookup {
         meta,
         next: l.id("dnat"),
+        states,
     });
 
     // Destination NAT.
@@ -368,14 +370,23 @@ pub fn lower(
 
     // Zone policy, the local input and the delivery to the router.
     let (forward_rules, local_rules) = l.zone_rules(local_zone.as_deref());
+    // With no action of the state policy for established packets, the
+    // rules evaluate the packets of a session.
+    let evaluate = |p: FirewallPolicy| {
+        if states.established == StateAction::Continue {
+            p.evaluating_sessions()
+        } else {
+            p
+        }
+    };
     let meta = l.meta("policy", zone_spans.clone());
-    l.add(FirewallPolicy::new(
+    l.add(evaluate(FirewallPolicy::new(
         meta,
         ObjectId::new(format!("{device}:firewall:zone")),
         forward_rules,
         profile.firewall_default,
         l.id("snat"),
-    ));
+    )));
     let meta = l.meta("local", zone_spans.clone());
     l.add(LocalInput {
         meta,
@@ -388,13 +399,13 @@ pub fn lower(
     });
     if local_zone.is_some() {
         let meta = l.meta("policy-local", zone_spans);
-        l.add(FirewallPolicy::new(
+        l.add(evaluate(FirewallPolicy::new(
             meta,
             ObjectId::new(format!("{device}:firewall:zone:local")),
             local_rules,
             profile.firewall_default,
             l.id("deliver"),
-        ));
+        )));
     }
     let meta = l.meta("deliver", Vec::new());
     l.add(DeviceDelivery { meta });
@@ -884,10 +895,11 @@ impl L<'_> {
                 for (family, name) in [(Family::V4, &f.ipv4), (Family::V6, &f.ipv6)] {
                     match name {
                         Some(n) => pairs.extend(self.rule_set(family, n).into_iter().map(
-                            |(ingress, egress, r)| {
+                            |(ingress, egress, states, r)| {
                                 let s = ZoneScope {
                                     ingress,
                                     egress,
+                                    states,
                                     ..scope.clone()
                                 };
                                 (s, r)
@@ -938,6 +950,7 @@ impl L<'_> {
                 to: Some(BTreeSet::from([ZoneId::new(&to.name)])),
                 ingress: None,
                 egress: None,
+                states: None,
             };
             let name = format!("zone {} default", to.name);
             let r = self.zone_default(to, &name, None);
@@ -961,6 +974,7 @@ impl L<'_> {
                 to: Some(BTreeSet::from([ZoneId::new(NO_ZONE)])),
                 ingress: None,
                 egress: None,
+                states: None,
             },
             r,
         ));
@@ -988,6 +1002,26 @@ impl L<'_> {
             );
         }
         (forward, to_local)
+    }
+
+    /// The actions of the global state policy. A state with no action goes
+    /// on to the zone policy.
+    fn state_actions(&mut self) -> StateActions {
+        let sp = self.cfg.state_policy.clone();
+        let mut one = |state: &str, a: &Option<Action>| match a {
+            None => StateAction::Continue,
+            Some(Action::Accept) => StateAction::Accept,
+            Some(Action::Drop | Action::Reject) => StateAction::Drop,
+            Some(Action::Other(x)) => {
+                self.note(format!("state-policy {state}: action {x} is not lowered"));
+                StateAction::Unknown
+            }
+        };
+        StateActions {
+            established: one("established", &sp.established),
+            related: one("related", &sp.related),
+            invalid: one("invalid", &sp.invalid),
+        }
     }
 
     fn zone_default(
@@ -1024,6 +1058,7 @@ impl L<'_> {
             return vec![(
                 None,
                 None,
+                None,
                 FRule::unhandled(msg, SourceSpan::new(self.file, 1, 1)),
             )];
         };
@@ -1031,17 +1066,20 @@ impl L<'_> {
         for r in rs.rules.iter().filter(|r| !r.disabled) {
             let rname = format!("{name}/{}", r.number);
             let span = self.span(r.lines);
-            if !r.matches.state.is_empty() && !r.matches.state.iter().any(|s| s == "new") {
-                // The rule matches only packets of a session. The session
-                // lookup passes these before the policy.
-                continue;
-            }
+            let states = match conn_states(&r.matches.state) {
+                Ok(s) => s,
+                Err(e) => {
+                    self.note(format!("{rname}: state {e} is not lowered"));
+                    out.push((None, None, None, FRule::unhandled(rname, span)));
+                    continue;
+                }
+            };
             let action = match r.action {
                 Some(Action::Accept) => RuleAction::Permit,
                 Some(Action::Drop | Action::Reject) => RuleAction::Deny,
                 ref a => {
                     self.note(format!("{rname}: action {a:?} is not lowered"));
-                    out.push((None, None, FRule::unhandled(rname, span)));
+                    out.push((None, None, None, FRule::unhandled(rname, span)));
                     continue;
                 }
             };
@@ -1052,6 +1090,7 @@ impl L<'_> {
             out.push((
                 ingress,
                 egress,
+                states,
                 FRule::new(rname, p, action).with_span(span),
             ));
         }
@@ -1068,7 +1107,7 @@ impl L<'_> {
                 FRule::unhandled(dname, span)
             }
         };
-        out.push((None, None, rule));
+        out.push((None, None, None, rule));
         out
     }
 
@@ -1188,12 +1227,32 @@ impl L<'_> {
     }
 }
 
-/// A rule with its ingress and egress interfaces.
+/// A rule with its ingress and egress interfaces and its connection states.
 type ScopedRule = (
     Option<BTreeSet<InterfaceId>>,
     Option<BTreeSet<InterfaceId>>,
+    Option<BTreeSet<ConnState>>,
     FRule<RuleAction>,
 );
+
+/// The connection states of the `state` option of a rule, `None` for no
+/// option. `Err` names a state that is not known.
+fn conn_states(names: &[String]) -> Result<Option<BTreeSet<ConnState>>, String> {
+    if names.is_empty() {
+        return Ok(None);
+    }
+    names
+        .iter()
+        .map(|n| match n.as_str() {
+            "new" => Ok(ConnState::New),
+            "established" => Ok(ConnState::Established),
+            "related" => Ok(ConnState::Related),
+            "invalid" => Ok(ConnState::Invalid),
+            other => Err(other.to_string()),
+        })
+        .collect::<Result<BTreeSet<_>, _>>()
+        .map(Some)
+}
 
 /// The interface set of an `inbound-interface` or `outbound-interface`
 /// option, which it takes from the match. A name with a wildcard stays in
