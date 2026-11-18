@@ -6,6 +6,8 @@
 //! stops the stage before it. A cycle writes one snapshot to the store, and
 //! a cycle with no change writes nothing.
 
+#[cfg(feature = "ssh")]
+pub mod bgp;
 mod classify;
 pub mod cli;
 mod device;

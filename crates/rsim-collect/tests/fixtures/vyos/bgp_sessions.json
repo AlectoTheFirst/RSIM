@@ -1,0 +1,139 @@
+{
+  "default": {
+    "ipv4Unicast": {
+      "routerId": "192.0.2.1",
+      "as": 64500,
+      "vrfId": 0,
+      "vrfName": "default",
+      "tableVersion": 12,
+      "ribCount": 5,
+      "ribMemory": 920,
+      "peerCount": 2,
+      "peerMemory": 1488,
+      "peers": {
+        "192.0.2.2": {
+          "hostname": "edge-2",
+          "remoteAs": 64501,
+          "localAs": 64500,
+          "version": 4,
+          "msgRcvd": 1201,
+          "msgSent": 1199,
+          "tableVersion": 0,
+          "outq": 0,
+          "inq": 0,
+          "peerUptime": "20:01:02",
+          "peerUptimeMsec": 72062000,
+          "peerUptimeEstablishedEpoch": 1700000000,
+          "pfxRcd": 3,
+          "pfxSnt": 2,
+          "state": "Established",
+          "peerState": "OK",
+          "connectionsEstablished": 1,
+          "connectionsDropped": 0,
+          "idType": "ipv4"
+        },
+        "198.51.100.2": {
+          "remoteAs": 64502,
+          "localAs": 64500,
+          "version": 4,
+          "msgRcvd": 0,
+          "msgSent": 0,
+          "tableVersion": 0,
+          "outq": 0,
+          "inq": 0,
+          "peerUptime": "never",
+          "peerUptimeMsec": 0,
+          "pfxRcd": 0,
+          "pfxSnt": 0,
+          "state": "Active",
+          "peerState": "OK",
+          "connectionsEstablished": 0,
+          "connectionsDropped": 0,
+          "idType": "ipv4"
+        }
+      },
+      "failedPeers": 1,
+      "displayedPeers": 2,
+      "totalPeers": 2,
+      "dynamicPeers": 0,
+      "bestPath": {
+        "multiPathRelax": "false"
+      }
+    },
+    "ipv6Unicast": {
+      "routerId": "192.0.2.1",
+      "as": 64500,
+      "vrfId": 0,
+      "vrfName": "default",
+      "tableVersion": 4,
+      "peers": {
+        "2001:db8::2": {
+          "remoteAs": 64501,
+          "localAs": 64500,
+          "version": 4,
+          "msgRcvd": 1190,
+          "msgSent": 1188,
+          "peerUptime": "20:00:58",
+          "peerUptimeMsec": 72058000,
+          "pfxRcd": 1,
+          "pfxSnt": 1,
+          "state": "Established",
+          "peerState": "OK",
+          "idType": "ipv6"
+        }
+      },
+      "failedPeers": 0,
+      "totalPeers": 1
+    },
+    "l2VpnEvpn": {
+      "routerId": "192.0.2.1",
+      "as": 64500,
+      "vrfId": 0,
+      "vrfName": "default",
+      "peers": {
+        "192.0.2.9": {
+          "remoteAs": 64500,
+          "localAs": 64500,
+          "version": 4,
+          "msgRcvd": 300,
+          "msgSent": 301,
+          "peerUptime": "05:00:00",
+          "pfxRcd": 8,
+          "pfxSnt": 6,
+          "state": "Established",
+          "peerState": "OK",
+          "idType": "ipv4"
+        }
+      },
+      "failedPeers": 0,
+      "totalPeers": 1
+    }
+  },
+  "RED": {
+    "ipv4Unicast": {
+      "routerId": "203.0.113.1",
+      "as": 64500,
+      "vrfId": 5,
+      "vrfName": "RED",
+      "tableVersion": 3,
+      "peers": {
+        "203.0.113.2": {
+          "remoteAs": 65551,
+          "localAs": 64500,
+          "version": 4,
+          "msgRcvd": 50,
+          "msgSent": 52,
+          "peerUptime": "00:45:10",
+          "peerUptimeMsec": 2710000,
+          "pfxRcd": 1,
+          "pfxSnt": 1,
+          "state": "Established",
+          "peerState": "OK",
+          "idType": "ipv4"
+        }
+      },
+      "failedPeers": 0,
+      "totalPeers": 1
+    }
+  }
+}

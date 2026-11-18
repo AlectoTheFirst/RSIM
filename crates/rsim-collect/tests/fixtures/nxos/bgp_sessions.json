@@ -1,0 +1,81 @@
+{
+  "totalpeers": "4",
+  "totalestablishedpeers": "3",
+  "localas": "64500",
+  "TABLE_vrf": {
+    "ROW_vrf": [
+      {
+        "vrf-name-out": "default",
+        "local-as": "64500",
+        "vrfpeers": "3",
+        "vrfestablishedpeers": "2",
+        "router-id": "192.0.2.1",
+        "TABLE_neighbor": {
+          "ROW_neighbor": [
+            {
+              "neighbor-id": "192.0.2.2",
+              "connectionsdropped": "0",
+              "remoteas": "64501",
+              "lastflap": "PT20H1M2S",
+              "lastread": "PT10S",
+              "lastwrite": "PT20S",
+              "state": "Established",
+              "localport": "179",
+              "remoteport": "51234",
+              "notificationssent": "0",
+              "notificationsreceived": "0"
+            },
+            {
+              "neighbor-id": "198.51.100.2",
+              "connectionsdropped": "2",
+              "remoteas": "64502",
+              "lastflap": "PT3M",
+              "lastread": "never",
+              "lastwrite": "never",
+              "state": "Idle",
+              "localport": "0",
+              "remoteport": "0",
+              "notificationssent": "1",
+              "notificationsreceived": "0"
+            },
+            {
+              "neighbor-id": "2001:db8::2",
+              "connectionsdropped": "0",
+              "remoteas": "64501",
+              "lastflap": "PT20H",
+              "lastread": "PT15S",
+              "lastwrite": "PT25S",
+              "state": "Established",
+              "localport": "179",
+              "remoteport": "40001",
+              "notificationssent": "0",
+              "notificationsreceived": "0"
+            }
+          ]
+        }
+      },
+      {
+        "vrf-name-out": "RED",
+        "local-as": "64500",
+        "vrfpeers": "1",
+        "vrfestablishedpeers": "1",
+        "router-id": "203.0.113.1",
+        "TABLE_neighbor": {
+          "ROW_neighbor": {
+            "neighbor-id": "203.0.113.2",
+            "connectionsdropped": "0",
+            "remoteas": "65551",
+            "lastflap": "PT45M10S",
+            "lastread": "PT5S",
+            "lastwrite": "PT7S",
+            "state": "Established",
+            "localport": "40002",
+            "remoteport": "179",
+            "notificationssent": "0",
+            "notificationsreceived": "0"
+          }
+        }
+      }
+    ]
+  }
+}
