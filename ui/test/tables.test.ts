@@ -5,6 +5,11 @@ import { describe, expect, it } from "vitest";
 import type { Column, TableDef } from "../src/api/types";
 import {
   EMPTY,
+  LIMITS,
+  answerOf,
+  keyForElement,
+  keyPlace,
+  limitOptions,
   FIRST_PAGE,
   apiParams,
   apiUrl,
@@ -283,5 +288,60 @@ describe("virtual rows", () => {
     expect(scrollFor(10, 0, 90, 18, null, 0)).toBe(11 * 18 - 90);
     expect(scrollFor(2, 0, 90, 18, null, 0)).toBeNull();
     expect(scrollFor(2, 100, 90, 18, null, 0)).toBe(36);
+  });
+});
+
+describe("repeated filters in the URL", () => {
+  it("keeps the later filter of the same column and op, as the API does", () => {
+    const s = readState("?table=fib&f.device=r1&f.vrf=red&f.device=r2&f.prefix.contains=10.0&f.prefix.contains=10.1&f.prefix.gt=1");
+    expect(s.filters).toEqual([
+      { column: "vrf", op: "=", value: "red" },
+      { column: "device", op: "=", value: "r2" },
+      { column: "prefix", op: "contains", value: "10.1" },
+      { column: "prefix", op: "gt", value: "1" },
+    ]);
+    expect(filterCellText("device", s.filters)).toBe("r2");
+    const sent = apiParams(s, FIB).filter(([k]) => k === "device" || k.startsWith("prefix."));
+    expect(sent).toEqual([
+      ["device", "r2"],
+      ["prefix.contains", "10.1"],
+      ["prefix.gt", "1"],
+    ]);
+  });
+});
+
+describe("page size control", () => {
+  it("offers the page size of the URL with the usual sizes", () => {
+    expect(limitOptions(200)).toEqual([...LIMITS]);
+    expect(limitOptions(50)).toEqual([50, 100, 200, 500, 1000]);
+    expect(limitOptions(300)).toEqual([100, 200, 300, 500, 1000]);
+    expect(limitOptions(5000)).toEqual([100, 200, 500, 1000, 5000]);
+    expect(readState("?limit=50").limit).toBe(50);
+  });
+});
+
+describe("keys of a view", () => {
+  it("leaves each key to a text field and Enter and Space to a button or a link", () => {
+    for (const tag of ["INPUT", "SELECT", "TEXTAREA"]) {
+      for (const k of ["j", "Enter", "Escape", "n"]) expect(keyForElement(keyPlace({ tagName: tag }), k), `${tag} ${k}`).toBe(true);
+    }
+    expect(keyPlace({ tagName: "DIV", isContentEditable: true })).toBe("text");
+    for (const tag of ["BUTTON", "A", "SUMMARY"]) {
+      expect(keyForElement(keyPlace({ tagName: tag }), "Enter"), tag).toBe(true);
+      expect(keyForElement(keyPlace({ tagName: tag }), " "), tag).toBe(true);
+      for (const k of ["j", "k", "n", "p", "Escape", "y", "/"]) expect(keyForElement(keyPlace({ tagName: tag }), k), `${tag} ${k}`).toBe(false);
+    }
+    for (const t of [null, { tagName: "BODY" }, { tagName: "DIV" }]) {
+      expect(keyForElement(keyPlace(t), "Enter")).toBe(false);
+    }
+  });
+});
+
+describe("answer of a request", () => {
+  it("gives the answer of the current request only", () => {
+    const a = { key: "/v1/twins/a/tables/fib/rows", value: 1 };
+    expect(answerOf(a, a.key)).toBe(1);
+    expect(answerOf(a, "/v1/twins/b/tables/fib/rows")).toBeNull();
+    expect(answerOf(null, a.key)).toBeNull();
   });
 });

@@ -37,3 +37,13 @@ export function withTwin(search: string, twin: string): string {
   for (const k of ["q", "at", "device"]) u.delete(k);
   return `?${u.toString()}`;
 }
+
+/**
+ * The option of the twin selector for a twin: the twin itself, or `store`
+ * for a snapshot `snap-<cycle>` when the list names the store `store`.
+ */
+export function twinOption(ids: readonly string[], twin: string): string {
+  if (ids.includes(twin)) return twin;
+  if (/^snap-\d+$/.test(twin) && ids.includes("store")) return "store";
+  return twin;
+}

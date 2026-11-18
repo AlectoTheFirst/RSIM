@@ -22,6 +22,45 @@ export interface Filter {
 export const DEFAULT_LIMIT = 200;
 export const LIMITS: readonly number[] = [100, 200, 500, 1000];
 
+/** The page sizes of the page size control: `LIMITS` and the current size, in order. */
+export function limitOptions(limit: number): number[] {
+  return LIMITS.includes(limit) ? [...LIMITS] : [...LIMITS, limit].sort((a, b) => a - b);
+}
+
+/**
+ * The place of the focus for a key of a view: `text` in a field that takes
+ * the keys, `control` on a button or a link, which takes Enter and Space,
+ * and `page` elsewhere.
+ */
+export type KeyPlace = "text" | "control" | "page";
+
+export function keyPlace(t: { tagName?: string; isContentEditable?: boolean } | null): KeyPlace {
+  if (!t) return "page";
+  if (t.isContentEditable) return "text";
+  switch (t.tagName) {
+    case "INPUT":
+    case "SELECT":
+    case "TEXTAREA":
+      return "text";
+    case "BUTTON":
+    case "A":
+    case "SUMMARY":
+      return "control";
+    default:
+      return "page";
+  }
+}
+
+/** True when the view leaves a key to the focused element. */
+export function keyForElement(place: KeyPlace, key: string): boolean {
+  return place === "text" || (place === "control" && (key === "Enter" || key === " "));
+}
+
+/** The value of an answer when it is the answer of the request `key`, else null. */
+export function answerOf<T>(answer: { key: string; value: T } | null, key: string): T | null {
+  return answer && answer.key === key ? answer.value : null;
+}
+
 export interface TablesState {
   table: string;
   verb: Verb;
@@ -60,6 +99,8 @@ const FILTER = "f.";
 /**
  * The state of the URL of the page. A filter is `f.<column>=v1,v2` or
  * `f.<column>.<op>=v`, so a column name never meets a parameter of the page.
+ * A later filter with the same column and op takes the place of an earlier
+ * one, as in the API.
  */
 export function readState(search: string): TablesState {
   const u = new URLSearchParams(search);
@@ -69,11 +110,13 @@ export function readState(search: string): TablesState {
     const rest = k.slice(FILTER.length);
     const dot = rest.lastIndexOf(".");
     const op = dot > 0 ? rest.slice(dot + 1) : "";
-    if (dot > 0 && (OPS as readonly string[]).includes(op) && op !== "=") {
-      filters.push({ column: rest.slice(0, dot), op: op as Op, value: v });
-    } else {
-      filters.push({ column: rest, op: "=", value: v });
-    }
+    const f: Filter =
+      dot > 0 && (OPS as readonly string[]).includes(op) && op !== "="
+        ? { column: rest.slice(0, dot), op: op as Op, value: v }
+        : { column: rest, op: "=", value: v };
+    const at = filters.findIndex((x) => x.column === f.column && x.op === f.op);
+    if (at >= 0) filters.splice(at, 1);
+    filters.push(f);
   }
   const verb = u.get("verb");
   const limit = Number(u.get("limit"));

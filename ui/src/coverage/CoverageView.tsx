@@ -6,10 +6,22 @@ import { ApiProblem, getCoverage, getUnhandled } from "../api/client";
 import type { TableDef, TableOut } from "../api/types";
 import { Hatch, HatchMark } from "../page/Hatch";
 import { KeyLine, ResultLine } from "../page/Parts";
-import { type Pages, nextPage, pageWords, previousPage, syncPages } from "../tables/model";
+import { type Pages, answerOf, keyForElement, keyPlace, nextPage, pageWords, previousPage, syncPages } from "../tables/model";
 import { Grid, type GridColumn, PageButtons } from "../tables/Grid";
 import { SIZE, type RowHeight } from "../theme";
-import { COVERAGE_COLUMNS, type CoverageRow, coverageRow, coverageSums, readCoverage, shareText, writeCoverage } from "./model";
+import {
+  COVERAGE_COLUMNS,
+  type CoverageRow,
+  type PathsState,
+  coverageKey,
+  coverageRow,
+  coverageSums,
+  openedDevice,
+  pathsStep,
+  readCoverage,
+  shareText,
+  writeCoverage,
+} from "./model";
 
 /** The page size of the unhandled paths of one device. */
 const PATHS_LIMIT = 200;
@@ -27,18 +39,22 @@ function UnhandledCount(props: { n: number; h: number }) {
 }
 
 function Paths(props: { twin: string; device: string; onTables: () => void }) {
-  const [pages, setPages] = useState<Pages>(syncPages(null, null, PATHS_LIMIT));
-  const [out, setOut] = useState<TableOut | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [st, setSt] = useState<PathsState>(() => ({ want: syncPages(null, null, PATHS_LIMIT), shown: null, problem: null }));
+  const want = st.want;
   useEffect(() => {
     let live = true;
-    getUnhandled(props.twin, props.device, PATHS_LIMIT, pages.cursor)
-      .then((o) => live && setOut(o))
-      .catch((e: unknown) => live && setProblem(e instanceof ApiProblem ? e.detail : String(e)));
+    getUnhandled(props.twin, props.device, PATHS_LIMIT, want.cursor)
+      .then((out) => live && setSt((s) => pathsStep(s, { kind: "done", at: want, out })))
+      .catch((e: unknown) => live && setSt((s) => pathsStep(s, { kind: "failed", at: want, problem: e instanceof ApiProblem ? e.detail : String(e) })));
     return () => {
       live = false;
     };
-  }, [props.twin, props.device, pages.cursor]);
+  }, [props.twin, props.device, want]);
+  const go = (to: Pages) => setSt((s) => pathsStep(s, { kind: "go", to }));
+  const problem = st.problem;
+  const out = st.shown?.out ?? null;
+  // The answer of the page that the view asks for, which gives the next page.
+  const current = st.shown && st.shown.at === want ? st.shown.out : null;
   const col = (n: string) => out?.columns.indexOf(n) ?? -1;
   return (
     <>
@@ -75,13 +91,17 @@ function Paths(props: { twin: string; device: string; onTables: () => void }) {
             </tbody>
           </table>
         )}
-        {out && out.total > out.rows.length ? (
+        {st.shown && st.shown.out.total > st.shown.out.rows.length ? (
           <div class="group actions">
-            <span class="muted">{pageWords(pages, out.rows.length, out.total)}</span>
-            <button type="button" disabled={!pages.back.length} onClick={() => setPages(previousPage(pages, PATHS_LIMIT))}>
+            <span class="muted">{problem ? null : current ? pageWords(want, current.rows.length, current.total) : "The page loads."}</span>
+            <button type="button" disabled={!want.back.length} onClick={() => go(previousPage(want, PATHS_LIMIT))}>
               Previous page
             </button>
-            <button type="button" disabled={!out.next_cursor} onClick={() => out.next_cursor && setPages(nextPage(pages, out.next_cursor, out.rows.length))}>
+            <button
+              type="button"
+              disabled={!current?.next_cursor}
+              onClick={() => current?.next_cursor && go(nextPage(want, current.next_cursor, current.rows.length))}
+            >
               Next page
             </button>
           </div>
@@ -113,39 +133,41 @@ export function CoverageView(props: {
   const { twin, search, navigate } = props;
   const st = readCoverage(search);
   const [pages, setPages] = useState<Pages>(() => syncPages(null, st.cursor, st.limit));
-  const [out, setOut] = useState<TableOut | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
+  // The answer and the problem, each with the key of the request that gave it.
+  const [answer, setAnswer] = useState<{ key: string; value: TableOut } | null>(null);
+  const [refusal, setRefusal] = useState<{ key: string; value: string } | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
+  const key = coverageKey(twin, st);
+  const out = answerOf(answer, key);
+  const problem = answerOf(refusal, key);
+  const busy = !!twin && !out && !problem;
 
   useEffect(() => {
     setPages((p) => syncPages(p, st.cursor, st.limit));
   }, [st.cursor, st.limit]);
 
   useEffect(() => {
+    setSelected(null);
+    setOpen(false);
     if (!twin) return;
     let live = true;
-    setBusy(true);
-    setProblem(null);
     getCoverage(twin, st.limit, st.cursor)
       .then((o) => {
         if (!live) return;
-        setOut(o);
+        setAnswer({ key, value: o });
         const at = st.device ? o.rows.findIndex((r) => r[o.columns.indexOf("device")] === st.device) : -1;
         setSelected(at >= 0 ? at : null);
         setOpen(at >= 0);
       })
       .catch((e: unknown) => {
         if (!live) return;
-        setOut(null);
-        setProblem(e instanceof ApiProblem ? `The request is refused: ${e.detail}` : String(e));
-      })
-      .finally(() => live && setBusy(false));
+        setRefusal({ key, value: e instanceof ApiProblem ? `The request is refused: ${e.detail}` : String(e) });
+      });
     return () => {
       live = false;
     };
-  }, [twin, st.cursor, st.limit]);
+  }, [key]);
 
   const rows: CoverageRow[] = useMemo(() => (out ? out.rows.map((r) => coverageRow(out.columns, r)) : []), [out]);
   const grid = useMemo(() => rows.map((r) => COVERAGE_COLUMNS.map((c) => (c.name === "unhandled share" ? shareText(r) : r[c.key]))), [rows]);
@@ -169,18 +191,22 @@ export function CoverageView(props: {
   };
 
   const select = (i: number) => {
-    const same = i === selected;
-    const nowOpen = same ? !open : true;
+    setOpen(i === selected ? !open : true);
     setSelected(i);
-    setOpen(nowOpen);
-    window.history.replaceState(null, "", writeCoverage({ ...st, device: nowOpen ? rows[i]!.device : null }, twin ? { view: "coverage", twin } : { view: "coverage" }));
   };
+
+  // The URL holds the device of the opened row of the report on screen.
+  const device = out ? openedDevice(rows, selected, open) : null;
+  useEffect(() => {
+    if (!out) return;
+    const next = writeCoverage({ ...st, device }, twin ? { view: "coverage", twin } : { view: "coverage" });
+    if (next !== window.location.search) window.history.replaceState(null, "", next);
+  }, [out, device]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
+      if (keyForElement(keyPlace(e.target as HTMLElement | null), e.key)) return;
       const n = rows.length;
       switch (e.key) {
         case "j":

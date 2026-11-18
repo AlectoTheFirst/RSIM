@@ -8,6 +8,7 @@ import type { Level } from "../ladder/layout";
 import { type ColourPref, type Prefs, ROW_HEIGHTS, type RowHeight, type ThemePref } from "../theme";
 import { HatchMark } from "./Hatch";
 import { type Fields, type Mode, QUERY_FIELDS, type QueryField } from "./query";
+import { twinOption } from "./url";
 
 export const VIEWS = ["Trace", "Tables", "Coverage", "Compare", "Inventory", "Admin"] as const;
 export type View = (typeof VIEWS)[number];
@@ -105,7 +106,7 @@ export function TopBar(props: {
   return (
     <header class="bar">
       <span class="t-wordmark">RSIM</span>
-      <select class="t-value" aria-label="Twin" value={props.twin} onChange={(e) => props.onTwin(e.currentTarget.value)}>
+      <select class="t-value" aria-label="Twin" value={twinOption(props.twins.map((t) => t.id), props.twin)} onChange={(e) => props.onTwin(e.currentTarget.value)}>
         {props.twins.map((t) => (
           <option value={t.id}>{t.id}</option>
         ))}

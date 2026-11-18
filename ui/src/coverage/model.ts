@@ -1,6 +1,7 @@
 // The layout of the coverage report: its columns, the row of a device, the
 // sums of a page and the URL state. No drawing code.
-import { DEFAULT_LIMIT } from "../tables/model";
+import type { TableOut } from "../api/types";
+import { DEFAULT_LIMIT, type Pages } from "../tables/model";
 
 /** The report of one device. */
 export interface CoverageRow {
@@ -88,4 +89,39 @@ export function writeCoverage(s: CoverageState, base: Record<string, string> = {
   if (s.device) u.set("device", s.device);
   const q = u.toString();
   return q ? `?${q}` : "";
+}
+
+/** The device of the opened row, or null when no row is open. */
+export function openedDevice(rows: readonly CoverageRow[], selected: number | null, open: boolean): string | null {
+  return open && selected !== null ? (rows[selected]?.device ?? null) : null;
+}
+
+/** The key of a request of the report. */
+export const coverageKey = (twin: string, s: CoverageState): string => JSON.stringify([twin, s.limit, s.cursor]);
+
+/**
+ * The unhandled paths of one device: the page that the view asks for, the
+ * page on screen with its rows, and the problem of the page that it asks for.
+ */
+export interface PathsState {
+  want: Pages;
+  shown: { at: Pages; out: TableOut } | null;
+  problem: string | null;
+}
+
+export type PathsEvent =
+  | { kind: "go"; to: Pages }
+  | { kind: "done"; at: Pages; out: TableOut }
+  | { kind: "failed"; at: Pages; problem: string };
+
+/** The state after an event; the answer of a page other than the page that the view asks for changes nothing. */
+export function pathsStep(s: PathsState, e: PathsEvent): PathsState {
+  switch (e.kind) {
+    case "go":
+      return { ...s, want: e.to, problem: null };
+    case "done":
+      return e.at === s.want ? { want: s.want, shown: { at: e.at, out: e.out }, problem: null } : s;
+    case "failed":
+      return e.at === s.want ? { ...s, problem: e.problem } : s;
+  }
 }

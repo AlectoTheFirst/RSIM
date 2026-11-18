@@ -11,7 +11,9 @@ import type { RowHeight } from "../theme";
 import { Grid, type GridColumn, PageButtons } from "./Grid";
 import {
   type CellText,
-  LIMITS,
+  keyForElement,
+  keyPlace,
+  limitOptions,
   type Pages,
   type TablesState,
   VERBS,
@@ -332,8 +334,9 @@ export function TablesView(props: {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) {
-        if (e.key === "Escape") t.blur();
+      const place = keyPlace(t);
+      if (keyForElement(place, e.key)) {
+        if (place === "text" && e.key === "Escape") t?.blur();
         return;
       }
       const n = grid?.rows.length ?? 0;
@@ -492,7 +495,7 @@ export function TablesView(props: {
           <label class="field">
             <span class="t-label">rows of a page</span>
             <select class="t-value" value={String(st.limit)} onChange={(e) => go({ limit: Number(e.currentTarget.value) })}>
-              {LIMITS.map((l) => (
+              {limitOptions(st.limit).map((l) => (
                 <option value={String(l)}>{l}</option>
               ))}
             </select>
