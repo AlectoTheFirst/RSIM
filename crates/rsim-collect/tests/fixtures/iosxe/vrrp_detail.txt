@@ -1,0 +1,10 @@
+GigabitEthernet1.200 - Group 10
+  State is Master
+  Virtual IP address is 198.51.100.1
+  Virtual MAC address is 0000.5e00.010a
+  Advertisement interval is 1.000 sec
+  Preemption enabled
+  Priority is 110
+  Master Router is 198.51.100.2 (local), priority is 110
+  Master Advertisement interval is 1.000 sec
+  Master Down interval is 3.570 sec
