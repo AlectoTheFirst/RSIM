@@ -1143,6 +1143,102 @@ fn a_switch_port_with_no_mode_line_is_unknown() {
 }
 
 #[test]
+fn a_vlan_filter_makes_the_ports_of_its_vlans_unknown() {
+    let config = String::from_utf8(acc1_clean()).unwrap().replacen(
+        "vlan 100,200\n!\n",
+        "vlan 100,200\n!\nvlan access-map BLOCK 10\n match ip address 101\n action drop\n!\nvlan filter BLOCK vlan-list 10\n!\n",
+        1,
+    );
+    let t = with_host(campus_with(config.as_bytes()));
+    let (verdict, steps) = only(&query(
+        &t,
+        "acc1",
+        "GigabitEthernet1/0/2",
+        "192.0.2.50",
+        "198.51.100.1",
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown, "{steps:#?}");
+    assert!(
+        has(&steps, "acc1/port/GigabitEthernet1/0/2/in"),
+        "{steps:#?}"
+    );
+    assert!(says(&steps, "VLAN 10"), "{steps:#?}");
+    assert!(!has(&steps, "acc1/mac"), "{steps:#?}");
+}
+
+#[test]
+fn the_tagging_of_the_native_vlan_makes_each_trunk_unknown() {
+    let config = String::from_utf8(acc1_clean()).unwrap().replacen(
+        "vtp mode transparent\n",
+        "vtp mode transparent\nvlan dot1q tag native\n",
+        1,
+    );
+    let e = campus_with(config.as_bytes());
+    assert!(
+        e.notes["acc1"]
+            .iter()
+            .any(|n| n == "Port-channel1: options not lowered: vlan dot1q tag native"),
+        "{:#?}",
+        e.notes["acc1"]
+    );
+    let t = with_host(e);
+    let (verdict, steps) = only(&query(
+        &t,
+        "acc1",
+        "GigabitEthernet1/0/2",
+        "192.0.2.50",
+        "198.51.100.1",
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown, "{steps:#?}");
+    assert!(!has(&steps, "dist1/handoff/Port-channel1"), "{steps:#?}");
+}
+
+/// The estate of edge1 with its running config changed, pe1 and pe3.
+fn routers_with_config(from: &str, to: &str) -> Estate {
+    let text = String::from_utf8(EDGE1.to_vec()).unwrap();
+    assert!(text.contains(from), "{from}");
+    let config = text.replacen(from, to, 1);
+    assemble(vec![
+        xe("edge1", config.as_bytes(), fixtures("edge1", "")),
+        pe1(),
+        pe3(),
+    ])
+}
+
+#[test]
+fn a_sub_interface_with_a_vlan_that_is_not_lowered_makes_its_frames_unknown() {
+    for line in [
+        " encapsulation dot1Q 100 native\n",
+        " encapsulation dot1Q 100 second-dot1q 20\n",
+    ] {
+        let t = twin_of(routers_with_config(" encapsulation dot1Q 100\n", line));
+        let (verdict, steps) = only(&query(
+            &t,
+            "pe3",
+            "GigabitEthernet0/0/0/0.100",
+            "192.0.2.20",
+            "192.0.2.3",
+        ));
+        assert_eq!(verdict, VerdictKind::Unknown, "{line}: {steps:#?}");
+        assert!(
+            has(&steps, "edge1/handoff/GigabitEthernet0/0/1"),
+            "{line}: {steps:#?}"
+        );
+        assert!(
+            says(
+                &steps,
+                "the VLAN of GigabitEthernet0/0/1.100 is not lowered"
+            ),
+            "{line}: {steps:#?}"
+        );
+        assert!(
+            !has(&steps, "edge1/in/GigabitEthernet0/0/1.100"),
+            "{line}: {steps:#?}"
+        );
+    }
+}
+
+#[test]
 fn with_no_vtp_mode_line_the_vlans_of_each_switch_port_are_not_known() {
     let config = String::from_utf8(acc1_clean())
         .unwrap()

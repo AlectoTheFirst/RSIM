@@ -568,10 +568,20 @@ fn groups(
 /// An interface in the form of the shared ACL and NAT functions. The lines
 /// that the lowering does not model go to the unhandled lines: a NAT role
 /// in a VRF, a VRF with no IPv4 or not in the config, a native VLAN of a
-/// sub-interface, an admin state that is not known and `no ip routing`.
+/// sub-interface, an admin state that is not known, `no ip routing` and the
+/// unhandled lines of the parent port of a sub-interface. A sub-interface
+/// with no QoS policy of its own in a direction takes the policy of its
+/// parent port.
 fn port(i: &Interface, admin: Option<bool>, cfg: &Config) -> nxos::config::Interface {
     let vrf = i.vrf.as_ref().map(|v| v.0.clone());
     let mut unhandled = i.unhandled.clone();
+    let parent = i
+        .name
+        .split_once('.')
+        .and_then(|(p, _)| cfg.interfaces.iter().find(|x| x.name == p));
+    if let Some(p) = parent {
+        unhandled.extend(p.unhandled.iter().map(|u| format!("{}: {u}", p.name)));
+    }
     if admin.is_none() {
         unhandled.push("the admin state is not known".into());
     }
@@ -605,8 +615,14 @@ fn port(i: &Interface, admin: Option<bool>, cfg: &Config) -> nxos::config::Inter
         acl_in: i.acl_in.clone(),
         acl_out: i.acl_out.clone(),
         nat: i.nat,
-        qos_in: i.qos_in.clone(),
-        qos_out: i.qos_out.clone(),
+        qos_in: i
+            .qos_in
+            .clone()
+            .or_else(|| parent.and_then(|p| p.qos_in.clone())),
+        qos_out: i
+            .qos_out
+            .clone()
+            .or_else(|| parent.and_then(|p| p.qos_out.clone())),
         unhandled,
         lines: i.lines,
         ..nxos::config::Interface::default()

@@ -15,6 +15,7 @@ use super::state::{State, StpState};
 use crate::collected::Collected;
 use crate::iosxr::lower::{Group, GroupState, Port};
 use crate::nxos;
+use crate::nxos::config::PortMode;
 use crate::nxos::layer2::{Gateway, svi_vlan};
 
 /// True if the device has a layer 2 part: a switch port, a `vlan` line or
@@ -38,13 +39,13 @@ fn vlans_in_config(cfg: &Config) -> bool {
 
 /// The VLANs of the device as ranges, with the default VLAN, and the VLANs
 /// that make a port `Unknown`: the VLANs of a `vlan` stanza with a line
-/// that the lowering does not read, and on a switch whose VLANs are not in
-/// the running config, the VLANs of `show vlan brief` with a status other
-/// than active. A reserved VLAN that the switch does not support is not a
-/// VLAN of the switch.
+/// that the lowering does not read, the VLANs of a `vlan filter` line, and
+/// on a switch whose VLANs are not in the running config, the VLANs of
+/// `show vlan brief` with a status other than active. A reserved VLAN that
+/// the switch does not support is not a VLAN of the switch.
 pub(super) fn vlans(cfg: &Config, st: &State) -> (Ranges, Ranges) {
     let mut all = vec![(DEFAULT_VLAN, DEFAULT_VLAN)];
-    let mut unknown = Vec::new();
+    let mut unknown = cfg.filtered_vlans.clone();
     for v in &cfg.vlans {
         all.extend(v.ranges.iter().copied());
         if !v.unhandled.is_empty() {
@@ -87,7 +88,8 @@ fn supported(r: &super::state::VlanRow) -> bool {
 /// address, with a sub-interface or with `no switchport` is a routed port. A
 /// switch port with no `switchport mode` line gets an unhandled line, so it
 /// gives `Unknown`. So does each switch port of a switch whose VLANs are not
-/// in the running config, unless the section `vlans` gives them.
+/// in the running config, unless the section `vlans` gives them, and each
+/// trunk of a switch with `vlan dot1q tag native`.
 pub(super) fn interfaces(cfg: &Config, st: &State) -> Vec<nxos::config::Interface> {
     let not_in_config = match &cfg.vtp_mode {
         Some((m, _)) => format!("VTP mode {m}, so the VLANs are not in the running config"),
@@ -120,6 +122,11 @@ pub(super) fn interfaces(cfg: &Config, st: &State) -> Vec<nxos::config::Interfac
             }
             if let (Some(true), Some(why)) = (switchport, &vlans_unknown) {
                 unhandled.push(why.clone());
+            }
+            if let (Some(true), Some(PortMode::Trunk), Some(line)) =
+                (switchport, i.mode, &cfg.native_tagging)
+            {
+                unhandled.push(line.clone());
             }
             nxos::config::Interface {
                 name: i.name.clone(),

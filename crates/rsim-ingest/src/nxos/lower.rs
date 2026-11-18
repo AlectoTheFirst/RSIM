@@ -1012,9 +1012,10 @@ impl L<'_> {
         }
     }
 
-    /// The rules of the NAT in the outside to inside direction: the static
-    /// rules, which translate the global destination to the local address.
-    /// Each rule applies only on the outside interfaces.
+    /// The rules of the NAT in the outside to inside direction: the
+    /// unhandled forms first, then the static rules, which translate the
+    /// global destination to the local address. Each rule applies only on
+    /// the outside interfaces.
     #[allow(clippy::type_complexity)]
     pub(crate) fn destination_nat(
         &mut self,
@@ -1022,7 +1023,9 @@ impl L<'_> {
     ) -> (Vec<FRule<NatAction>>, Vec<Option<BTreeSet<InterfaceId>>>) {
         let mut rules = Vec::new();
         let mut scopes = Vec::new();
-        for r in self.cfg.nat_rules.clone() {
+        let mut nat_rules = self.cfg.nat_rules.clone();
+        nat_rules.sort_by_key(|r| !matches!(r.kind, NatKind::Other(_)));
+        for r in nat_rules {
             let span = self.span(r.lines);
             let rule = match &r.kind {
                 NatKind::Static {

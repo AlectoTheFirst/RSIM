@@ -129,6 +129,12 @@ pub struct Config {
     pub vlans: Vec<Vlan>,
     /// The masked `vlan` lines whose list the handler cannot read.
     pub unreadable_vlans: Vec<String>,
+    /// The VLANs of the `vlan filter` lines, which the lowering does not
+    /// model. A list that the handler cannot read gives each VLAN.
+    pub filtered_vlans: Vec<(u16, u16)>,
+    /// The masked line `vlan dot1q tag native`, which the lowering does not
+    /// model.
+    pub native_tagging: Option<String>,
     /// The mode of `vtp mode`.
     pub vtp_mode: Option<(String, Lines)>,
     /// The first line of each stanza that a handler read.
@@ -275,6 +281,19 @@ pub fn read(doc: &Document, table: &Table) -> Config {
                 for c in s.children() {
                     r.mark(c);
                 }
+            }
+            ["ip", "nat", ..] if r.state(&[&s.key]) == State::Unhandled => {
+                cfg.nat_rules.push(NatRule {
+                    kind: NatKind::Other(table.report_key(&s.key)),
+                    lines: lines_of(s),
+                });
+            }
+            ["vlan", "filter", _, "vlan-list", list] if r.state(&[&s.key]) == State::Unhandled => {
+                cfg.filtered_vlans
+                    .extend(vlan_list(list).unwrap_or_else(|| vec![(1, 4094)]));
+            }
+            ["vlan", "dot1q", "tag", "native"] if r.state(&[&s.key]) == State::Unhandled => {
+                cfg.native_tagging = Some(table.report_key(&s.key));
             }
             ["vtp", "mode", m] if r.state(&[&s.key]) == State::Handled => {
                 r.mark(s);

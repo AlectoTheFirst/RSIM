@@ -918,3 +918,95 @@ fn a_failed_or_missing_vrf_of_the_arp_section_keeps_its_next_hops_unknown() {
         assert!(!has(&steps, "edge1/nexthop"), "{steps:#?}");
     }
 }
+
+/// The running config of edge1 with one text replaced.
+fn config_with(from: &str, to: &str) -> String {
+    let text = String::from_utf8(CONFIG.to_vec()).unwrap();
+    assert!(text.contains(from), "{from}");
+    text.replacen(from, to, 1)
+}
+
+fn twin_of_config(config: &str) -> Twin {
+    assemble(vec![Input::Iosxe {
+        name: "edge1".into(),
+        config: config.as_bytes().to_vec(),
+        file: "edge1/config".into(),
+        collected: Collected::default(),
+        sections: sections(),
+    }])
+    .builder
+    .build()
+    .expect("the twin builds")
+}
+
+#[test]
+fn an_ip_nat_line_that_is_not_lowered_makes_the_nat_unknown() {
+    let config = config_with(
+        "ip nat translation timeout 3600\n",
+        "ip nat outside source static 198.51.100.77 192.0.2.5\nip nat translation timeout 3600\n",
+    );
+    let t = twin_of_config(&config);
+    // Outside to inside: the static inside rule matches, and the outside
+    // rule can translate the source of the same packet.
+    let (verdict, steps) = only(&run(
+        &t,
+        "GigabitEthernet0/0/4",
+        "198.51.100.77",
+        "203.0.113.20",
+        443,
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown, "{steps:#?}");
+    assert!(has(&steps, "edge1/dnat"), "{steps:#?}");
+    assert!(!has(&steps, "dnat translated"), "{steps:#?}");
+    // Inside to outside.
+    let (verdict, steps) = only(&run(
+        &t,
+        "GigabitEthernet0/0/5",
+        "192.0.2.200",
+        "198.51.100.77",
+        443,
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown, "{steps:#?}");
+    assert!(has(&steps, "edge1/snat"), "{steps:#?}");
+    assert!(!has(&steps, "snat translated"), "{steps:#?}");
+}
+
+#[test]
+fn the_qos_policy_of_a_parent_port_applies_to_its_sub_interfaces() {
+    let config = config_with(
+        " description LAN trunk\n no ip address\n",
+        " description LAN trunk\n no ip address\n service-policy output PARENT-SHAPER\n",
+    );
+    let doc = iosxe::read_text(config.as_bytes());
+    let cfg = iosxe::read(&doc, &iosxe::table(true));
+    let (low, _) = iosxe::lower(
+        "edge1",
+        "edge1/config",
+        &iosxe::profile(),
+        &cfg,
+        &sections(),
+        &External::default(),
+    );
+    let line = config
+        .lines()
+        .position(|l| l == " service-policy output PARENT-SHAPER")
+        .unwrap()
+        + 1;
+    for sub in ["GigabitEthernet0/0/1.100", "GigabitEthernet0/0/1.200"] {
+        let id = format!("edge1/qos-out/{sub}");
+        let f = low
+            .functions
+            .iter()
+            .find(|f| f.id().as_str() == id)
+            .unwrap_or_else(|| panic!("no {id}"));
+        let spans: Vec<String> = f
+            .provenance()
+            .iter()
+            .map(|s| format!("{}:{}", s.file, s.first_line))
+            .collect();
+        assert!(
+            spans.contains(&format!("edge1/config:{line}")),
+            "{id}: {spans:?}"
+        );
+    }
+}

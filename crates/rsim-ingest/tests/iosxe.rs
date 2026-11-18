@@ -765,3 +765,12 @@ fn the_typed_config_of_the_switch() {
     assert!(cfg.vrfs["Mgmt-vrf"].ipv4.is_some());
     assert!(cfg.acls.is_empty());
 }
+
+#[test]
+fn the_short_names_of_the_multigigabit_ports_resolve() {
+    let config = "interface TwoGigabitEthernet1/0/5\n switchport mode access\n!\ninterface FiveGigabitEthernet1/0/6\n switchport mode access\n!\n";
+    let cfg = iosxe::read(&iosxe::read_text(config.as_bytes()), &iosxe::table(true));
+    let names = iosxe::names(&cfg);
+    assert_eq!(names.resolve("Tw1/0/5"), "TwoGigabitEthernet1/0/5");
+    assert_eq!(names.resolve("Fi1/0/6"), "FiveGigabitEthernet1/0/6");
+}

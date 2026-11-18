@@ -9,8 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr};
 
 use rsim_core::{
-    FieldValue, FunctionId, InterfaceId, Mac, MacCond, Match, NeighbourTarget, ObjectId, Prefix,
-    PrefixTable, Rewrite, RulePredicate, SourceSpan, TriePrefixTable, VrfId,
+    FieldValue, FunctionId, InterfaceId, Mac, MacCond, Match, NeighbourTarget, ObjectId, PortCond,
+    Prefix, PrefixTable, Rewrite, RulePredicate, SourceSpan, TriePrefixTable, VrfId,
 };
 use rsim_engine::EdgeInterface;
 use rsim_functions::{
@@ -687,9 +687,11 @@ fn hsrp(
 /// The hand-off of each port with a link: the MACs of the port, of its
 /// sub-interfaces and of its active groups go to the ingress of the port or
 /// of the sub-interface of the dot1q VLAN. A frame to the virtual MAC of a
-/// group whose state is not known gives `Unknown`. If an active group or a
-/// group whose state is not known has no known virtual MAC, each frame of
-/// the port gives `Unknown`.
+/// group whose state is not known gives `Unknown`. If a sub-interface of
+/// the port has no lowered dot1q VLAN, a frame to a MAC of the router that
+/// is untagged or has the VLAN of no other sub-interface gives `Unknown`.
+/// If an active group or a group whose state is not known has no known
+/// virtual MAC, each frame of the port gives `Unknown`.
 pub(crate) fn handoffs(
     l: &mut L,
     active: &[Port],
@@ -741,11 +743,10 @@ pub(crate) fn handoffs(
             l.add(s);
             continue;
         }
-        let entry = if unknown.is_empty() {
-            f.clone()
-        } else {
-            let next = format!("{f}/mac");
-            let gate_spans: Vec<SourceSpan> = on_port
+        let mut rules = Vec::new();
+        let mut gate_spans: Vec<SourceSpan> = Vec::new();
+        if !unknown.is_empty() {
+            let group_spans: Vec<SourceSpan> = on_port
                 .iter()
                 .filter(|g| matches!(g.state, GroupState::Unknown(_)))
                 .flat_map(|g| g.spans.clone())
@@ -773,12 +774,62 @@ pub(crate) fn handoffs(
                 ),
                 RuleAction::Deny,
             );
-            rule.spans = gate_spans.clone();
+            rule.spans = group_spans.clone();
+            gate_spans.extend(group_spans);
+            rules.push(rule);
+        }
+        // A sub-interface whose VLAN is not lowered can take an untagged
+        // frame or a frame of a VLAN of no other sub-interface.
+        let no_tag: Vec<&Port> = mine
+            .iter()
+            .filter(|p| p.i.name != *port && p.dot1q.is_none())
+            .copied()
+            .collect();
+        if !no_tag.is_empty() {
+            let tags: Vec<(u16, u16)> = mine
+                .iter()
+                .filter_map(|p| p.dot1q)
+                .map(|v| (v, v))
+                .collect();
+            if !tags.is_empty() {
+                rules.push(FRule::new(
+                    format!("{port}: the VLAN of a sub-interface"),
+                    RulePredicate::exact(Match {
+                        vlan: PortCond::In(tags),
+                        ..Match::any()
+                    }),
+                    RuleAction::Permit,
+                ));
+            }
+            let tag_spans: Vec<SourceSpan> = no_tag.iter().map(|p| l.span(p.i.lines)).collect();
+            let names: Vec<&str> = no_tag.iter().map(|p| p.i.name.as_str()).collect();
+            let mut rule = FRule::new(
+                format!("{port}: the VLAN of {} is not lowered", names.join(", ")),
+                RulePredicate::bounded(
+                    Match {
+                        dst_mac: MacCond::In(BTreeSet::new()),
+                        ..Match::any()
+                    },
+                    Match {
+                        dst_mac: MacCond::In(macs.clone()),
+                        ..Match::any()
+                    },
+                ),
+                RuleAction::Deny,
+            );
+            rule.spans = tag_spans.clone();
+            gate_spans.extend(tag_spans);
+            rules.push(rule);
+        }
+        let entry = if rules.is_empty() {
+            f.clone()
+        } else {
+            let next = format!("{f}/mac");
             let meta = l.meta(&f, gate_spans);
             l.add(AclMatch {
                 meta,
                 acl: ObjectId::new(format!("{}:{f}", l.dev)),
-                rules: vec![rule],
+                rules,
                 default: RuleAction::Permit,
                 next: l.id(&next),
             });

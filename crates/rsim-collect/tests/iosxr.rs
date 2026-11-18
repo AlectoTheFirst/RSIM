@@ -139,6 +139,10 @@ async fn the_time_lines_make_no_snapshot_and_a_config_change_makes_one() {
             ("Output 2 broadcast", "Output 5 broadcast"),
             ("Last input 00:00:00", "Last input 00:00:01"),
             ("Age: 17", "Age: 47"),
+            (
+                "reliability 255/255, txload 0/255, rxload 0/255",
+                "reliability 254/255, txload 3/255, rxload 2/255",
+            ),
         ] {
             t = t.replace(a, b);
         }
