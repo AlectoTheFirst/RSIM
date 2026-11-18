@@ -8,7 +8,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+arrow-array = "60.1.0"
+arrow-ord = "60.1.0"
 clap = { version = "4.6.7", features = ["derive"] }
+rayon = "1.12.0"
 rsim-contract.workspace = true
 rsim-core.workspace = true
 rsim-engine.workspace = true
