@@ -30,3 +30,7 @@ workspace = true
 [[bin]]
 name = "rsim"
 path = "src/main.rs"
+
+[[bench]]
+name = "scale"
+harness = false

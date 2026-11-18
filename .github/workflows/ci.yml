@@ -21,8 +21,24 @@ env:
 jobs:
   check:
     runs-on: ubuntu-24.04
+    env:
+      # rsim-api embeds the built UI; a missing UI is a build error.
+      RSIM_UI_REQUIRED: "1"
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.22.2
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install the UI dependencies
+        run: npm ci --prefix ui
+      - name: UI API types match openapi.json
+        run: npm --prefix ui run api:check
+      - name: UI tests
+        run: npm --prefix ui test
+      - name: UI build
+        run: npm --prefix ui run build
       - name: Install the Rust toolchain
         run: |
           rustup toolchain install 1.99 --profile minimal --component clippy --component rustfmt
