@@ -1,0 +1,55 @@
+{
+ "template": "cisco_ios_show_spanning-tree.textfsm",
+ "header": [
+  "VLAN_ID",
+  "INTERFACE",
+  "ROLE",
+  "STATUS",
+  "COST",
+  "PORT_PRIORITY",
+  "PORT_ID",
+  "TYPE"
+ ],
+ "records": [
+  [
+   "10",
+   "Gi1/0/2",
+   "Desg",
+   "FWD",
+   "4",
+   "128",
+   "2",
+   "P2p Edge"
+  ],
+  [
+   "10",
+   "Po1",
+   "Root",
+   "FWD",
+   "3",
+   "128",
+   "25",
+   "P2p"
+  ],
+  [
+   "20",
+   "Gi1/0/3",
+   "Desg",
+   "FWD",
+   "4",
+   "128",
+   "3",
+   "P2p Edge"
+  ],
+  [
+   "20",
+   "Po1",
+   "Root",
+   "FWD",
+   "3",
+   "128",
+   "25",
+   "P2p"
+  ]
+ ]
+}

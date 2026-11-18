@@ -1,0 +1,45 @@
+{
+ "template": "cisco_ios_show_vrrp_all.textfsm",
+ "header": [
+  "INTERFACE",
+  "GROUP",
+  "ADDR_FAMILY",
+  "STATE",
+  "STATE_DURATION",
+  "VIRTUAL_IP_ADDRESS",
+  "VIRTUAL_MAC_ADDRESS",
+  "ADV_INTERVAL",
+  "PREEMPT",
+  "PRIORITY",
+  "PRIORITY_CONFIGURED",
+  "TRACK_OBJ",
+  "TRACK_STATUS",
+  "TRACK_ACTION",
+  "MASTER_IP_ADDRESS",
+  "MASTER_PRIORITY",
+  "MASTER_ADV_INTERVAL",
+  "MASTER_DOWN_INTERVAL"
+ ],
+ "records": [
+  [
+   "GigabitEthernet1.200",
+   "10",
+   "",
+   "Master",
+   "",
+   "198.51.100.1",
+   "0000.5e00.010a",
+   "1.000",
+   "enabled",
+   "110",
+   "",
+   "",
+   "",
+   "",
+   "198.51.100.2",
+   "110",
+   "1.000",
+   "3.570"
+  ]
+ ]
+}

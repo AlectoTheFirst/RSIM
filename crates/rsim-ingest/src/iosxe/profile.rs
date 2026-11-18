@@ -98,15 +98,16 @@ pub const VRF_HEADER: &str = "Routing Table:";
 /// the gateway of last resort.
 pub const TABLE_HEADERS: &[&str] = &["Codes:", "Gateway of last resort"];
 
-/// The HSRP state word of the active router in `show standby brief`, in
-/// lower case.
+/// The HSRP state word of the active router in `show standby` and
+/// `show standby brief`, in lower case.
 pub const HSRP_ACTIVE: &str = "active";
 
 /// The HSRP state words of a router that is not the active router, in lower
 /// case. Each other word is a state that is not known.
 pub const HSRP_NOT_ACTIVE: &[&str] = &["standby", "speak", "listen", "init"];
 
-/// The VRRP state word of the master in `show vrrp brief`, in lower case.
+/// The VRRP state word of the master in `show vrrp` and `show vrrp brief`,
+/// in lower case.
 pub const VRRP_MASTER: &str = "master";
 
 /// The VRRP state words of a router that is not the master, in lower case.
@@ -122,9 +123,45 @@ pub const DEFAULT_VLAN: u16 = 1;
 
 /// The VTP modes in which the running config holds the VLANs of a switch.
 /// In the modes `server` and `client`, and with no `vtp mode` line, the
-/// VLANs are in the VLAN database and not in the running config, so the
-/// VLANs of a switch port are not known. Not confirmed against a device.
+/// VLANs are in the VLAN database and not in the running config: the
+/// section `vlans` (`show vlan brief`) gives them, and with no such section
+/// the VLANs of a switch port are not known. Not confirmed against a
+/// device.
 pub const VTP_MODES_WITH_VLAN_LINES: &[&str] = &["transparent", "off"];
+
+/// The status word of a VLAN that forwards in `show vlan brief`, in lower
+/// case. A VLAN with another status, such as `act/lshut` or `suspended`,
+/// except [`VLAN_UNSUPPORTED`], makes each port that carries it `Unknown`.
+/// Not confirmed against a device.
+pub const VLAN_ACTIVE: &str = "active";
+
+/// The status word in `show vlan brief` of a reserved VLAN that the switch
+/// does not support, such as 1002 to 1005. Such a VLAN is not a VLAN of the
+/// switch, so a trunk with no allowed list does not carry it. Not confirmed
+/// against a device.
+pub const VLAN_UNSUPPORTED: &str = "act/unsup";
+
+/// The port state words of `show spanning-tree` of a port that forwards,
+/// in lower case.
+pub const STP_FORWARDING: &[&str] = &["fwd"];
+
+/// The port state words of `show spanning-tree` of a port that does not
+/// forward: blocking, listening, learning, broken and disabled, in lower
+/// case. Each other word is a state that is not known. Not confirmed
+/// against a device.
+pub const STP_NOT_FORWARDING: &[&str] = &["blk", "lis", "lrn", "bkn", "dis"];
+
+/// The start of the header of an MST instance in `show spanning-tree`. The
+/// section does not give the VLANs of an instance.
+pub const STP_MST_HEADER: &str = "MST";
+
+/// The word of `show standby` for the router itself as the active router.
+pub const HSRP_LOCAL: &str = "local";
+
+/// The line before the answer of a VRF in the section `arp_vrfs`, and the
+/// end of that line for a VRF whose command failed.
+pub const ARP_VRF_LINE: &str = "VRF: ";
+pub const ARP_VRF_FAILED: &str = " failed";
 
 /// A switch port with a `switchport` line and no `switchport mode` line
 /// negotiates its mode with its neighbour (DTP), so its mode is not known.

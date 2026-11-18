@@ -1,16 +1,18 @@
 //! The layer 2 part of a Catalyst switch in the form of the NX-OS layer 2
-//! lowering: the switch ports, the VLANs, the SVIs with their gateway facts
-//! and the interface state. The snapshot has no MAC table and no spanning
-//! tree state of an IOS-XE device.
+//! lowering: the switch ports, the VLANs of the config or of
+//! `show vlan brief`, the SVIs with their gateway facts, the interface
+//! state, the MAC table and the spanning tree state of each port.
 
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
 use super::config::Config;
 use super::profile::{
-    DEFAULT_VLAN, MODE_WITHOUT_LINE, UP_WITHOUT_SHUTDOWN, VTP_MODES_WITH_VLAN_LINES,
+    DEFAULT_VLAN, MODE_WITHOUT_LINE, UP_WITHOUT_SHUTDOWN, VLAN_ACTIVE, VLAN_UNSUPPORTED,
+    VTP_MODES_WITH_VLAN_LINES,
 };
-use super::state::State;
+use super::state::{State, StpState};
+use crate::collected::Collected;
 use crate::iosxr::lower::{Group, GroupState, Port};
 use crate::nxos;
 use crate::nxos::layer2::{Gateway, svi_vlan};
@@ -28,9 +30,19 @@ pub(super) fn has_layer2(cfg: &Config) -> bool {
 /// VLAN ranges.
 type Ranges = Vec<(u16, u16)>;
 
+/// True if the running config holds the VLANs of the switch, by its VTP
+/// mode.
+fn vlans_in_config(cfg: &Config) -> bool {
+    matches!(&cfg.vtp_mode, Some((m, _)) if VTP_MODES_WITH_VLAN_LINES.contains(&m.as_str()))
+}
+
 /// The VLANs of the device as ranges, with the default VLAN, and the VLANs
-/// of a `vlan` stanza with a line that the lowering does not read.
-pub(super) fn vlans(cfg: &Config) -> (Ranges, Ranges) {
+/// that make a port `Unknown`: the VLANs of a `vlan` stanza with a line
+/// that the lowering does not read, and on a switch whose VLANs are not in
+/// the running config, the VLANs of `show vlan brief` with a status other
+/// than active. A reserved VLAN that the switch does not support is not a
+/// VLAN of the switch.
+pub(super) fn vlans(cfg: &Config, st: &State) -> (Ranges, Ranges) {
     let mut all = vec![(DEFAULT_VLAN, DEFAULT_VLAN)];
     let mut unknown = Vec::new();
     for v in &cfg.vlans {
@@ -39,21 +51,55 @@ pub(super) fn vlans(cfg: &Config) -> (Ranges, Ranges) {
             unknown.extend(v.ranges.iter().copied());
         }
     }
+    if !vlans_in_config(cfg)
+        && let Some(Ok(rows)) = &st.vlans
+    {
+        for r in rows.iter().filter(|r| supported(r)) {
+            all.push((r.vlan, r.vlan));
+            if !r.status.eq_ignore_ascii_case(VLAN_ACTIVE) {
+                unknown.push((r.vlan, r.vlan));
+            }
+        }
+    }
     (all, unknown)
+}
+
+/// The VLANs of `show vlan brief` that are not active, on a switch whose
+/// VLANs are not in the running config, each with its status.
+pub(super) fn inactive_vlans(cfg: &Config, st: &State) -> Vec<(u16, String)> {
+    match &st.vlans {
+        Some(Ok(rows)) if !vlans_in_config(cfg) => rows
+            .iter()
+            .filter(|r| supported(r) && !r.status.eq_ignore_ascii_case(VLAN_ACTIVE))
+            .map(|r| (r.vlan, r.status.clone()))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// False for a VLAN of `show vlan brief` with the status of a reserved
+/// VLAN that the switch does not support.
+fn supported(r: &super::state::VlanRow) -> bool {
+    !r.status.eq_ignore_ascii_case(VLAN_UNSUPPORTED)
 }
 
 /// The interfaces in the form of the NX-OS layer 2 lowering. A port with an
 /// address, with a sub-interface or with `no switchport` is a routed port. A
-/// switch port with no `switchport mode` line, and each switch port of a
-/// switch whose VLANs are not in the running config, gets an unhandled
-/// line, so it gives `Unknown`.
-pub(super) fn interfaces(cfg: &Config) -> Vec<nxos::config::Interface> {
-    let vlans_unknown = match &cfg.vtp_mode {
-        Some((m, _)) if VTP_MODES_WITH_VLAN_LINES.contains(&m.as_str()) => None,
-        Some((m, _)) => Some(format!(
-            "VTP mode {m}, so the VLANs are not in the running config"
+/// switch port with no `switchport mode` line gets an unhandled line, so it
+/// gives `Unknown`. So does each switch port of a switch whose VLANs are not
+/// in the running config, unless the section `vlans` gives them.
+pub(super) fn interfaces(cfg: &Config, st: &State) -> Vec<nxos::config::Interface> {
+    let not_in_config = match &cfg.vtp_mode {
+        Some((m, _)) => format!("VTP mode {m}, so the VLANs are not in the running config"),
+        None => "no vtp mode line, so the VLANs are not in the running config".to_string(),
+    };
+    let vlans_unknown = match &st.vlans {
+        _ if vlans_in_config(cfg) => None,
+        Some(Ok(_)) => None,
+        Some(Err(e)) => Some(format!(
+            "{not_in_config}, and show vlan brief is not read: {e}"
         )),
-        None => Some("no vtp mode line, so the VLANs are not in the running config".to_string()),
+        None => Some(not_in_config),
     };
     cfg.interfaces
         .iter()
@@ -100,11 +146,28 @@ pub(super) fn interfaces(cfg: &Config) -> Vec<nxos::config::Interface> {
 }
 
 /// The collected state in the form of the NX-OS layer 2 lowering: the
-/// interface state and the ports with an LLDP or CDP neighbour. The MAC
-/// table is not collected.
+/// interface state, the ports with an LLDP or CDP neighbour and the
+/// spanning tree state of each port. With no MAC table that the template
+/// reads, the MAC lookup gives `Unknown` for a MAC that the twin does not
+/// place.
 pub(super) fn switch_state(st: &State) -> nxos::state::State {
     let mut out = nxos::state::State {
-        no_mac_table: true,
+        no_mac_table: !matches!(st.mac_table, Some(Ok(_))),
+        stp: match &st.stp {
+            Some(Ok(m)) => Some(
+                m.iter()
+                    .map(|(k, (s, span))| {
+                        let fwd = match s {
+                            StpState::Forwarding => Some(true),
+                            StpState::NotForwarding => Some(false),
+                            StpState::Unknown(_) => None,
+                        };
+                        (k.clone(), (fwd, span.clone()))
+                    })
+                    .collect(),
+            ),
+            _ => None,
+        },
         ..nxos::state::State::default()
     };
     if let Some(Ok(m)) = &st.l3.interfaces {
@@ -128,6 +191,15 @@ pub(super) fn switch_state(st: &State) -> nxos::state::State {
         }
     }
     out
+}
+
+/// The collected tables in the form of the NX-OS layer 2 lowering: the rows
+/// of the MAC table.
+pub(super) fn collected(st: &State) -> Collected {
+    Collected {
+        macs: st.mac_table.iter().flatten().flatten().cloned().collect(),
+        ..Collected::default()
+    }
 }
 
 /// The gateway facts of each lowered layer 3 interface: its MAC in

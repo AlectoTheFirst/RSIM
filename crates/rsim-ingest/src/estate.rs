@@ -599,7 +599,7 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         }
     }
 
-    // The IOS-XE routers and switches, with their links.
+    // The IOS-XE routers and switches, with their links and endpoints.
     for (device, (cfg, file, sections)) in &xe {
         let ext = joined.devices.remove(device).unwrap_or_default();
         let (low, _) = iosxe::lower(device, file, &xe_profile, cfg, sections, &ext);
@@ -609,6 +609,12 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         }
         for x in low.edges {
             e.builder.edge_interface(x);
+        }
+        for x in low.endpoints {
+            e.builder.endpoint(x);
+        }
+        for a in low.attachments {
+            e.builder.attachment(a);
         }
     }
     e

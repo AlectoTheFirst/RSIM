@@ -1278,3 +1278,494 @@ fn the_active_group_of_an_svi_takes_its_virtual_mac_and_address() {
     assert!(has(&steps, "acc1/svi/Vlan10/out"), "{steps:#?}");
     assert!(!has(&steps, "acc1/in/Vlan10"), "{steps:#?}");
 }
+
+const ACC1_MAC_TABLE: &str = "          Mac Address Table
+-------------------------------------------
+
+Vlan    Mac Address       Type        Ports
+----    -----------       --------    -----
+ All    0100.0ccc.cccc    STATIC      CPU
+  10    0000.5e00.5381    STATIC      Vl10
+  10    0000.5e00.53b0    DYNAMIC     Gi1/0/2
+  99    0000.5e00.53e1    DYNAMIC     Po1
+Total Mac Addresses for this criterion: 4
+";
+
+const ACC1_STP: &str = "
+VLAN0010
+  Spanning tree enabled protocol rstp
+  Root ID    Priority    32778
+             Address     0000.5e00.53e0
+             Cost        3
+             Port        25 (Port-channel1)
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Gi1/0/1             Desg FWD 4         128.1    P2p Edge
+Gi1/0/2             Desg FWD 4         128.2    P2p Edge
+Po1                 Root FWD 3         128.25   P2p
+
+VLAN0020
+  Spanning tree enabled protocol rstp
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Po1                 Root FWD 3         128.25   P2p
+
+VLAN0099
+  Spanning tree enabled protocol rstp
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Po1                 Root FWD 3         128.25   P2p
+";
+
+const ACC1_VLANS: &str = "
+VLAN Name                             Status    Ports
+---- -------------------------------- --------- -------------------------------
+1    default                          active    Gi1/0/3
+10   USERS                            active    Gi1/0/1, Gi1/0/2
+20   VOICE                            active
+99   MGMT                             active
+1002 fddi-default                     act/unsup
+";
+
+/// The sections of acc1 with the sections `extra` added or replaced.
+fn acc1_sections(extra: &[(&str, &str)]) -> Sections {
+    let mut sections = fixtures("acc1", "switch-");
+    for (n, t) in extra {
+        sections.insert(n.to_string(), (t.as_bytes().to_vec(), format!("acc1/{n}")));
+    }
+    sections
+}
+
+/// The campus with the sections `extra` of acc1.
+fn campus_plus(config: &[u8], extra: &[(&str, &str)]) -> Estate {
+    assemble(vec![xe("acc1", config, acc1_sections(extra)), dist1()])
+}
+
+/// The successors of the flood of acc1 with the sections `extra`, the
+/// notes, and the function of the spanning tree state of Port-channel1 as
+/// debug text.
+fn flood_of(config: &[u8], extra: &[(&str, &str)]) -> (Vec<String>, Vec<String>, String) {
+    let doc = iosxe::read_text(config);
+    let cfg = iosxe::read(&doc, &iosxe::table(true));
+    let (low, _) = iosxe::lower(
+        "acc1",
+        "acc1/config",
+        &iosxe::profile(),
+        &cfg,
+        &acc1_sections(extra),
+        &Default::default(),
+    );
+    let find = |id: &str| low.functions.iter().find(|f| f.id().as_str() == id);
+    let next = find("acc1/flood")
+        .expect("a flood")
+        .successors()
+        .iter()
+        .map(|f| f.to_string())
+        .collect();
+    let stp = find("acc1/port/Port-channel1/stp").map_or(String::new(), |f| format!("{f:?}"));
+    (next, low.notes.clone(), stp)
+}
+
+fn contains(list: &[String], item: &str) -> bool {
+    list.iter().any(|x| x == item)
+}
+
+#[test]
+fn with_the_mac_table_a_frame_to_a_host_reaches_its_endpoint() {
+    let t = twin_of(campus_plus(&acc1_clean(), &[("mac_table", ACC1_MAC_TABLE)]));
+    let (verdict, steps) = only(&query(
+        &t,
+        "dist1",
+        "Port-channel1.99",
+        "198.51.100.50",
+        "192.0.2.50",
+    ));
+    assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
+    for f in [
+        "acc1/out/Vlan10",
+        "acc1/mac",
+        "acc1/port/GigabitEthernet1/0/2/out",
+    ] {
+        assert!(has(&steps, f), "{f} not in {steps:#?}");
+    }
+    assert!(!has(&steps, "acc1/mac-miss"), "{steps:#?}");
+}
+
+#[test]
+fn the_endpoint_of_an_arp_row_sits_on_the_edge_port_of_its_mac() {
+    let sum = summary_of(
+        "acc1",
+        &acc1_clean(),
+        &acc1_sections(&[("mac_table", ACC1_MAC_TABLE)]),
+    );
+    let port = |v: u16, m: &str| sum.macs.get(&(v, mac(m))).map(|x| x.0.clone());
+    assert_eq!(
+        port(10, "00:00:5e:00:53:b0").as_deref(),
+        Some("GigabitEthernet1/0/2")
+    );
+    assert_eq!(
+        port(99, "00:00:5e:00:53:e1").as_deref(),
+        Some("Port-channel1")
+    );
+    // The row of the MAC of the SVI is not a row of the table.
+    assert_eq!(port(10, "00:00:5e:00:53:81"), None);
+    let t = twin_of(campus_plus(&acc1_clean(), &[("mac_table", ACC1_MAC_TABLE)]));
+    // The host sends from its own port through its host resolution.
+    let (verdict, steps) = only(&query(
+        &t,
+        "acc1",
+        "GigabitEthernet1/0/2",
+        "192.0.2.50",
+        "198.51.100.1",
+    ));
+    assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
+    assert!(has(&steps, "acc1/host/GigabitEthernet1/0/2"), "{steps:#?}");
+    assert!(has(&steps, "dist1/deliver"), "{steps:#?}");
+}
+
+#[test]
+fn the_spanning_tree_gives_the_flood_copy_of_each_forwarding_port() {
+    let config = acc1_clean();
+    // Without the section, the trunk goes through the function of the
+    // state that is not collected.
+    let (next, _, stp) = flood_of(&config, &[]);
+    assert!(contains(&next, "acc1/port/Port-channel1/stp"), "{next:?}");
+    assert!(stp.contains("the spanning tree state of the port is not collected"));
+    // Forwarding in each VLAN: the copy goes to the egress.
+    let (next, _, stp) = flood_of(&config, &[("spanning_tree", ACC1_STP)]);
+    assert!(contains(&next, "acc1/port/Port-channel1/out"), "{next:?}");
+    assert!(!contains(&next, "acc1/port/Port-channel1/stp"), "{next:?}");
+    assert!(stp.is_empty(), "{stp}");
+    assert!(
+        contains(&next, "acc1/port/GigabitEthernet1/0/2/out"),
+        "{next:?}"
+    );
+    // Blocking in each VLAN: no copy at all.
+    let blocked = ACC1_STP.replace("Root FWD", "Altn BLK");
+    let (next, _, _) = flood_of(&config, &[("spanning_tree", &blocked)]);
+    assert!(
+        !next
+            .iter()
+            .any(|n| n.starts_with("acc1/port/Port-channel1/")),
+        "{next:?}"
+    );
+    // An edge port that blocks gets no copy either.
+    let edge_blocked = ACC1_STP.replace(
+        "Gi1/0/2             Desg FWD",
+        "Gi1/0/2             Desg BLK",
+    );
+    let (next, _, _) = flood_of(&config, &[("spanning_tree", &edge_blocked)]);
+    assert!(
+        !contains(&next, "acc1/port/GigabitEthernet1/0/2/out"),
+        "{next:?}"
+    );
+}
+
+#[test]
+fn a_port_with_no_known_state_in_a_vlan_of_the_flood_is_unknown() {
+    let config = acc1_clean();
+    // No tree of VLAN 99: the copy of the trunk in VLAN 99 is unknown, and
+    // the copies in VLANs 10 and 20 go to the egress.
+    let no_99 = &ACC1_STP[..ACC1_STP.find("\nVLAN0099").unwrap()];
+    let (next, _, stp) = flood_of(&config, &[("spanning_tree", no_99)]);
+    assert!(contains(&next, "acc1/port/Port-channel1/stp"), "{next:?}");
+    assert!(contains(&next, "acc1/port/Port-channel1/out"), "{next:?}");
+    assert!(
+        stp.contains("Port-channel1: the spanning tree state of the port is not known in VLAN 99"),
+        "{stp}"
+    );
+    // A state word that is not known.
+    let odd = ACC1_STP.replace(
+        "Po1                 Root FWD",
+        "Po1                 Root XYZ",
+    );
+    let (next, _, stp) = flood_of(&config, &[("spanning_tree", &odd)]);
+    assert!(contains(&next, "acc1/port/Port-channel1/stp"), "{next:?}");
+    assert!(stp.contains("not known in VLAN 10, 20, 99"), "{stp}");
+    // An MST instance, which the section does not map to VLANs.
+    let mst = "\nMST0\n  Spanning tree enabled protocol mstp\nInterface           Role Sts Cost      Prio.Nbr Type\n------------------- ---- --- --------- -------- --------------------------------\nPo1                 Root FWD 3         128.25   P2p\n";
+    let (next, notes, _) = flood_of(&config, &[("spanning_tree", mst)]);
+    assert!(contains(&next, "acc1/port/Port-channel1/stp"), "{next:?}");
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.starts_with("the section spanning_tree is not read")),
+        "{notes:#?}"
+    );
+}
+
+#[test]
+fn show_vlan_brief_gives_the_vlans_of_a_switch_with_no_vtp_mode_line() {
+    let config = String::from_utf8(acc1_clean())
+        .unwrap()
+        .replace("vtp mode transparent\n", "");
+    let sum = summary_of(
+        "acc1",
+        config.as_bytes(),
+        &acc1_sections(&[("vlans", ACC1_VLANS)]),
+    );
+    assert!(!sum.ports.is_empty());
+    assert!(sum.ports.values().all(Option::is_some), "{:?}", sum.ports);
+    assert_eq!(
+        sum.ports["Port-channel1"]
+            .as_ref()
+            .map(|p| p.tagged.clone()),
+        Some(BTreeSet::from([10, 20, 99]))
+    );
+    let t = twin_of(campus_plus(config.as_bytes(), &[("vlans", ACC1_VLANS)]));
+    let (verdict, steps) = only(&query(
+        &t,
+        "dist1",
+        "Port-channel1.99",
+        "198.51.100.50",
+        "192.0.2.1",
+    ));
+    assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
+    // A VLAN that is not active makes each port that carries it unknown.
+    let suspended = ACC1_VLANS.replace(
+        "20   VOICE                            active",
+        "20   VOICE                            suspended",
+    );
+    let e = campus_plus(config.as_bytes(), &[("vlans", &suspended)]);
+    assert!(
+        e.notes["acc1"].iter().any(|n| n
+            == "VLAN 20: show vlan brief gives the status suspended, so each port that carries it is unknown"),
+        "{:#?}",
+        e.notes["acc1"]
+    );
+    let (verdict, steps) = only(&query(
+        &twin_of(e),
+        "dist1",
+        "Port-channel1.99",
+        "198.51.100.50",
+        "192.0.2.1",
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown, "{steps:#?}");
+    assert!(has(&steps, "acc1/port/Port-channel1/in"), "{steps:#?}");
+    // In VTP mode transparent the running config holds the VLANs, and the
+    // section does not change them.
+    let sum = summary_of(
+        "acc1",
+        &acc1_clean(),
+        &acc1_sections(&[("vlans", &suspended)]),
+    );
+    assert!(sum.ports.values().all(Option::is_some), "{:?}", sum.ports);
+}
+
+/// `show standby` of the group 1 of Vlan10 of acc1 in the state `state`,
+/// with the active router `active` and the virtual MAC `vmac`.
+fn standby(state: &str, active: &str, vmac: &str) -> String {
+    format!(
+        "Vlan10 - Group 1
+  State is {state}
+    2 state changes, last state change 1w2d
+  Virtual IP address is 192.0.2.126
+  Active virtual MAC address is {vmac} (MAC In Use)
+    Local virtual MAC address is {vmac} (v1 default)
+  Hello time 3 sec, hold time 10 sec
+    Next hello sent in 1.264 secs
+  Preemption enabled
+  Active router is {active}
+  Standby router is 192.0.2.2, priority 100 (expires in 9.808 sec)
+  Priority 110 (configured 110)
+  Group name is \"hsrp-Vl10-1\" (default)
+"
+    )
+}
+
+/// acc1 with the HSRP group 1 of Vlan10 and no `mac-address` line.
+fn acc1_group_config() -> Vec<u8> {
+    String::from_utf8(acc1_clean())
+        .unwrap()
+        .replace(
+            " ip address 192.0.2.1 255.255.255.128\n",
+            " ip address 192.0.2.1 255.255.255.128\n standby 1 ip 192.0.2.126\n",
+        )
+        .into_bytes()
+}
+
+#[test]
+fn show_standby_gives_the_virtual_mac_of_the_active_group() {
+    let text = standby("Active", "local", "0000.5e00.53a9");
+    let e = campus_plus(&acc1_group_config(), &[("hsrp_detail", &text)]);
+    assert!(
+        !e.notes["acc1"].iter().any(|n| n.contains("HSRP group 1")),
+        "{:#?}",
+        e.notes["acc1"]
+    );
+    let t = twin_of(e);
+    let (verdict, steps) = only(&query(
+        &t,
+        "dist1",
+        "Port-channel1.99",
+        "198.51.100.50",
+        "192.0.2.126",
+    ));
+    assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
+    assert!(has(&steps, "acc1/deliver"), "{steps:#?}");
+    // With the brief form only, the virtual MAC is not known.
+    let brief = "Interface   Grp  Pri P State   Active          Standby         Virtual IP
+Vl10        1    110 P Active  local           192.0.2.2       192.0.2.126
+";
+    let e = campus_plus(&acc1_group_config(), &[("hsrp", brief)]);
+    assert!(
+        e.notes["acc1"].iter().any(|n| n
+            == "Vlan10: HSRP group 1: no mac-address line, and show standby brief gives no virtual MAC, so the virtual MAC is not known"),
+        "{:#?}",
+        e.notes["acc1"]
+    );
+}
+
+#[test]
+fn a_contradiction_of_show_standby_makes_the_group_unknown() {
+    for (text, why) in [
+        (
+            standby(
+                "Active",
+                "192.0.2.2, priority 120 (expires in 8.000 sec)",
+                "0000.5e00.53a9",
+            ),
+            "show standby gives the state Active and another active router",
+        ),
+        (
+            standby("Standby", "local", "0000.5e00.53a9"),
+            "show standby gives the state Standby and the router itself as the active router",
+        ),
+    ] {
+        let e = campus_plus(&acc1_group_config(), &[("hsrp_detail", &text)]);
+        let note = format!(
+            "Vlan10: HSRP group 1: {why}, so the packets to its virtual address and MAC are unknown"
+        );
+        assert!(e.notes["acc1"].contains(&note), "{:#?}", e.notes["acc1"]);
+    }
+    let config = String::from_utf8(acc1_group_config()).unwrap().replace(
+        " standby 1 ip 192.0.2.126\n",
+        " standby 1 ip 192.0.2.126\n standby 1 mac-address 0000.5e00.53aa\n",
+    );
+    let text = standby("Active", "local", "0000.5e00.53a9");
+    let e = campus_plus(config.as_bytes(), &[("hsrp_detail", &text)]);
+    assert!(
+        e.notes["acc1"].iter().any(|n| n.starts_with(
+            "Vlan10: HSRP group 1: show standby gives the virtual MAC 00:00:5e:00:53:a9, and the config gives 00:00:5e:00:53:aa"
+        )),
+        "{:#?}",
+        e.notes["acc1"]
+    );
+}
+
+#[test]
+fn show_vrrp_gives_the_virtual_mac_of_the_master() {
+    let text = "GigabitEthernet0/0/1.200 - Group 10
+  State is Master
+  Virtual IP address is 192.0.2.130
+  Virtual MAC address is 0000.5e00.53aa
+  Advertisement interval is 1.000 sec
+  Preemption enabled
+  Priority is 120
+  Master Router is 192.0.2.129 (local), priority is 120
+  Master Advertisement interval is 1.000 sec
+  Master Down interval is 3.531 sec
+";
+    let e = routers_with(|s: &mut Sections| {
+        s.insert(
+            "vrrp_detail".into(),
+            (text.as_bytes().to_vec(), "edge1/vrrp_detail".into()),
+        );
+    });
+    assert!(
+        !e.notes["edge1"].iter().any(|n| n.contains("VRRP group 10")),
+        "{:#?}",
+        e.notes["edge1"]
+    );
+    let t = twin_of(e);
+    let (verdict, steps) = only(&query(
+        &t,
+        "edge1",
+        "GigabitEthernet0/0/7",
+        "198.51.100.40",
+        "192.0.2.130",
+    ));
+    assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
+    // The frames of the trunk pass the hand-off; the unknown part is the
+    // zone-member line of the sub-interface.
+    let (_, steps) = only(&query(
+        &t,
+        "pe3",
+        "GigabitEthernet0/0/0/0.100",
+        "192.0.2.20",
+        "192.0.2.3",
+    ));
+    assert!(
+        !says(&steps, "VRRP group 10 of GigabitEthernet0/0/1.200"),
+        "{steps:#?}"
+    );
+    assert!(
+        has(&steps, "edge1/in/GigabitEthernet0/0/1.100"),
+        "{steps:#?}"
+    );
+}
+
+#[test]
+fn a_trunk_with_no_allowed_list_carries_the_vlans_of_show_vlan_brief_without_the_reserved_ones() {
+    let config = String::from_utf8(acc1_clean())
+        .unwrap()
+        .replace("vtp mode transparent\n", "")
+        .replacen(" switchport trunk allowed vlan 10,20,99\n", "", 1);
+    let sum = summary_of(
+        "acc1",
+        config.as_bytes(),
+        &acc1_sections(&[("vlans", ACC1_VLANS)]),
+    );
+    // The VLANs of the section and of the `vlan` lines, with no reserved
+    // VLAN 1002.
+    assert_eq!(
+        sum.ports["Port-channel1"]
+            .as_ref()
+            .map(|p| p.tagged.clone()),
+        Some(BTreeSet::from([10, 20, 99, 100, 200])),
+        "{:?}",
+        sum.ports
+    );
+}
+
+#[test]
+fn a_show_vrrp_that_the_template_cannot_read_leaves_the_brief_form_to_decide() {
+    let v3 = "GigabitEthernet0/0/1.200 - Group 10 - Address-Family IPv4
+  State is BACKUP
+  State duration 1 hours 2 mins 3.456 secs
+  Virtual IP address is 192.0.2.130
+  Virtual MAC address is 0000.5E00.53AA
+  Advertise time 1000 msec
+  Preemption enabled
+  Priority is 120
+  Master Router is 192.0.2.131, priority is 130
+  Master Advertisement interval is 1000 msec (expires in 456 msec)
+  Master Down interval is unknown
+  FLAGS: 0/1
+";
+    let e = routers_with(|s: &mut Sections| {
+        s.insert(
+            "vrrp_detail".into(),
+            (v3.as_bytes().to_vec(), "edge1/vrrp_detail".into()),
+        );
+    });
+    assert!(
+        e.notes["edge1"]
+            .iter()
+            .any(|n| n.starts_with("the section vrrp_detail is not read")),
+        "{:#?}",
+        e.notes["edge1"]
+    );
+    let to_vip = |t: &Twin| {
+        show(&query(
+            t,
+            "edge1",
+            "GigabitEthernet0/0/7",
+            "198.51.100.40",
+            "192.0.2.130",
+        ))
+    };
+    assert_eq!(to_vip(&twin_of(e)), to_vip(&twin_of(routers())));
+}

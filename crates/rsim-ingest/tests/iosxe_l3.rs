@@ -857,3 +857,64 @@ fn the_section_of_the_global_table_gives_the_default_vrf() {
             .any(|p| p.vrf == "default" && p.prefix.to_string() == "198.51.100.128/25")
     );
 }
+
+/// The section `arp_vrfs` with the ARP table of VRF MGMT and a failed
+/// command of VRF RED.
+const ARP_VRFS: &str = "VRF: MGMT
+Protocol  Address          Age (min)  Hardware Addr   Type   Interface
+Internet  203.0.113.1             4   0000.5e00.53f1  ARPA   GigabitEthernet0
+Internet  203.0.113.10            -   0000.5e00.53f0  ARPA   GigabitEthernet0
+Internet  203.0.113.60            9   0000.5e00.53f6  ARPA   GigabitEthernet0
+VRF: RED failed
+";
+
+#[test]
+fn with_the_arp_of_the_vrfs_a_next_hop_in_a_vrf_resolves() {
+    let t = twin_with(with_section("arp_vrfs", ARP_VRFS));
+    // The port has no link, so the egress gives `Unknown` after the next
+    // hop resolves.
+    for (dst, hop, hop_line) in [
+        ("203.0.113.60", "203.0.113.60 is 00:00:5e:00:53:f6", 5),
+        ("192.0.2.77", "203.0.113.1 is 00:00:5e:00:53:f1", 3),
+    ] {
+        let a = run(&t, "GigabitEthernet0", "203.0.113.50", dst, 443);
+        let (_, steps) = only(&a);
+        assert!(has(&steps, &format!("edge1/nexthop {hop}")), "{steps:#?}");
+        assert!(has(&steps, "edge1/out/GigabitEthernet0"), "{steps:#?}");
+        assert!(!has(&steps, "edge1/arp/MGMT"), "{steps:#?}");
+        // The provenance is the line of the row in the combined section.
+        let spans = spans_of(&a, "edge1/nexthop");
+        assert!(
+            spans.contains(&format!("edge1/arp_vrfs:{hop_line}-{hop_line}")),
+            "{dst}: {spans:?}"
+        );
+    }
+}
+
+#[test]
+fn a_failed_or_missing_vrf_of_the_arp_section_keeps_its_next_hops_unknown() {
+    let missing = ARP_VRFS.replace("VRF: MGMT", "VRF: OTHER");
+    for (text, why) in [
+        (
+            "VRF: MGMT failed\n".to_string(),
+            "the command of the ARP table of VRF MGMT failed",
+        ),
+        (missing, "the section arp_vrfs has no ARP table of VRF MGMT"),
+        (
+            "Internet  203.0.113.1  4  0000.5e00.53f1  ARPA  GigabitEthernet0\n".to_string(),
+            "the section arp_vrfs is not read",
+        ),
+    ] {
+        let t = twin_with(with_section("arp_vrfs", &text));
+        let (verdict, steps) = only(&run(
+            &t,
+            "GigabitEthernet0",
+            "203.0.113.50",
+            "192.0.2.77",
+            443,
+        ));
+        assert_eq!(verdict, VerdictKind::Unknown, "{why}: {steps:#?}");
+        assert!(has(&steps, why), "{why}: {steps:#?}");
+        assert!(!has(&steps, "edge1/nexthop"), "{steps:#?}");
+    }
+}

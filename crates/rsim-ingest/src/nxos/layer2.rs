@@ -620,23 +620,46 @@ impl L<'_> {
                         None => self.id(&out_f),
                     };
                     egress.insert(pid.clone(), out_id.clone());
-                    let flood_id = if *edge && !ext.peers.contains_key(name) {
-                        out_id
-                    } else {
-                        let f = format!("port/{name}/stp");
-                        let s = self.sink(
-                            &f,
-                            format!("{name}: the spanning tree state of the port is not collected"),
-                            span,
-                        );
-                        self.add(s);
-                        self.id(&f)
-                    };
+                    // The VLANs in which a flood copy goes out of the port:
+                    // true for a copy to the egress, false for a copy whose
+                    // spanning tree state is not known.
+                    let open = *edge && !ext.peers.contains_key(name);
+                    let mut copies: Vec<(u16, bool)> = Vec::new();
                     for v in native.iter().chain(tagged.iter()) {
-                        flood
-                            .entry(self.bd(*v))
-                            .or_default()
-                            .push((pid.clone(), flood_id.clone()));
+                        let state = st.stp.as_ref().map(|m| m.get(&(name.clone(), *v)));
+                        match state {
+                            None => copies.push((*v, open)),
+                            Some(Some((Some(true), _))) => copies.push((*v, true)),
+                            Some(Some((Some(false), _))) => {}
+                            Some(None) if open => copies.push((*v, true)),
+                            Some(_) => copies.push((*v, false)),
+                        }
+                    }
+                    let unsure: Vec<String> = copies
+                        .iter()
+                        .filter(|c| !c.1)
+                        .map(|c| c.0.to_string())
+                        .collect();
+                    let stp_id = self.id(&format!("port/{name}/stp"));
+                    if !unsure.is_empty() {
+                        let why = if st.stp.is_some() {
+                            format!(
+                                "{name}: the spanning tree state of the port is not known in VLAN {}",
+                                unsure.join(", ")
+                            )
+                        } else {
+                            format!("{name}: the spanning tree state of the port is not collected")
+                        };
+                        let s = self.sink(&format!("port/{name}/stp"), why, span);
+                        self.add(s);
+                    }
+                    for (v, known) in copies {
+                        let f = if known {
+                            out_id.clone()
+                        } else {
+                            stp_id.clone()
+                        };
+                        flood.entry(self.bd(v)).or_default().push((pid.clone(), f));
                     }
                 }
             }

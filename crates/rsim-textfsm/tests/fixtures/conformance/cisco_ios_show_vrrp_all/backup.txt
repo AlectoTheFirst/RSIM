@@ -1,0 +1,22 @@
+GigabitEthernet0/0/1.200 - Group 10
+  State is Backup
+  Virtual IP address is 198.51.100.1
+  Virtual MAC address is 0000.5e00.010a
+  Advertisement interval is 1.000 sec
+  Preemption enabled
+  Priority is 100
+  Track object 1 state Up decrement 20
+  Master Router is 198.51.100.3, priority is 120
+  Master Advertisement interval is 1.000 sec
+  Master Down interval is 3.609 sec (expires in 3.120 sec)
+
+Vlan30 - Group 30
+  State is Init
+  Virtual IP address is 203.0.113.1
+  Virtual MAC address is 0000.5e00.011e
+  Advertisement interval is 1.000 sec
+  Preemption enabled
+  Priority is 100
+  Master Router is unknown, priority is unknown
+  Master Advertisement interval is unknown
+  Master Down interval is unknown

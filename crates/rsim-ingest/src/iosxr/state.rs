@@ -165,7 +165,7 @@ impl Parsed {
             .unwrap_or_default()
     }
 
-    fn list(&self, record: &[Field], name: &str) -> Vec<String> {
+    pub(crate) fn list(&self, record: &[Field], name: &str) -> Vec<String> {
         match self.column(name).and_then(|i| record.get(i)) {
             Some(Field::List(items)) => items
                 .iter()
@@ -181,6 +181,12 @@ impl Parsed {
     pub(crate) fn span(&self, first: usize, last: usize) -> SourceSpan {
         let n = |x: usize| u32::try_from(x + self.offset).unwrap_or(u32::MAX);
         SourceSpan::new(&self.file, n(first), n(last.max(first)))
+    }
+
+    /// Moves the spans down by `lines` lines, for a text that starts below
+    /// the first line of its section.
+    pub(crate) fn shift(&mut self, lines: usize) {
+        self.offset += lines;
     }
 
     /// Each record with its span.

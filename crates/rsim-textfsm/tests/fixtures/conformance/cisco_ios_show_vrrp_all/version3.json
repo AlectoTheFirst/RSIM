@@ -1,0 +1,24 @@
+{
+ "template": "cisco_ios_show_vrrp_all.textfsm",
+ "header": [
+  "INTERFACE",
+  "GROUP",
+  "ADDR_FAMILY",
+  "STATE",
+  "STATE_DURATION",
+  "VIRTUAL_IP_ADDRESS",
+  "VIRTUAL_MAC_ADDRESS",
+  "ADV_INTERVAL",
+  "PREEMPT",
+  "PRIORITY",
+  "PRIORITY_CONFIGURED",
+  "TRACK_OBJ",
+  "TRACK_STATUS",
+  "TRACK_ACTION",
+  "MASTER_IP_ADDRESS",
+  "MASTER_PRIORITY",
+  "MASTER_ADV_INTERVAL",
+  "MASTER_DOWN_INTERVAL"
+ ],
+ "error": "State Error raised. Rule Line: 41. Input Line:   Advertise time 1000 msec"
+}
