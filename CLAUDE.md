@@ -69,7 +69,7 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | NX-OS collection tests | `cargo test -p rsim-collect --test nxos` |
 | IOS XR collection tests | `cargo test -p rsim-collect --test iosxr` |
 | IOS XE collection tests | `cargo test -p rsim-collect --test iosxe` |
-| One collection cycle of real devices | `cargo run -p rsim-collect --bin rsim-collect -- --env <env file> --data <data folder> run`. Add `--repeat` for a cycle every 60 s. The `status` command shows the sections of the newest snapshot, and `show <device> <section>` writes the raw bytes of a section. The env file and the data folder stay outside the repository. |
+| One collection cycle of real devices | `cargo run -p rsim-collect --bin rsim-collect -- --env <env file> --data <data folder> run`. Add `--repeat` for a cycle every 60 s. The `status` command shows the sections of the newest snapshot, and `show <device> <section>` writes the raw bytes of a section. The env file and the data folder stay outside the repository. The time limits are 45 s for a device and 20 s for a section; the env keys `<P>_TIMEOUT` and `<P>_SECTION_TIMEOUT` set them for a vendor, and `<P>_<NAME>_TIMEOUT` and `<P>_<NAME>_SECTION_TIMEOUT` for a device, in whole seconds. |
 | SSH transport tests | `cargo test -p rsim-collect --test ssh` |
 | HTTPS transport tests | `cargo test -p rsim-collect --test https` |
 | Collection benchmark | `cargo bench -p rsim-collect --bench cycle` |

@@ -17,6 +17,8 @@
 //! | `IOSXR_<NAME>_IP`, `IOSXR_USER`, `IOSXR_PASS` | An IOS XR router and the credential of the IOS XR routers, with the same `KEY_FILE`, `AGENT`, `VIA`, `PROXY`, `MODE` and `PROFILE` keys as VyOS |
 //! | `IOSXE_<NAME>_IP`, `IOSXE_USER`, `IOSXE_PASS` | An IOS XE device and the credential of the IOS XE devices, with the same keys as IOS XR |
 //! | `NXOS_<NAME>_CHANNELS`, `IOSXR_<NAME>_CHANNELS`, `IOSXE_<NAME>_CHANNELS` | The exec channels at one time. The default is 1: one command after the other. |
+//! | `<P>_TIMEOUT`, `<P>_<NAME>_TIMEOUT` | The time for all sections of a device, in whole seconds from 1 to 86400. The default is 45. `<P>` is `VYOS`, `NXOS`, `IOSXR`, `IOSXE` or `UNIFI`; UniFi has only the vendor key. |
+//! | `<P>_SECTION_TIMEOUT`, `<P>_<NAME>_SECTION_TIMEOUT` | The time for one section, in whole seconds from 1 to 86400. The default is 20. |
 //! | `UNIFI_CONTROLLER` | The addresses of the UniFi consoles, separated by commas |
 //! | `UNIFI_SITES` | The sites, separated by commas. The default is `default`. |
 //! | `UNIFI_USER`, `UNIFI_PASS` | The credential of the UniFi consoles |
@@ -31,7 +33,9 @@
 //!
 //! A `<NAME>` of a device or a jump host is in upper case with `_`; the id
 //! is in lower case with `-`. Two devices with one id are an error. A jump
-//! host gets only its own credential.
+//! host gets only its own credential. A key of a device wins over the key
+//! of its vendor. A device named `SECTION` with `<P>_SECTION_TIMEOUT` set is
+//! an error, because the key is also the section time of the vendor.
 //!
 //! The data folder holds the store, the store keys and the pin file. The
 //! keys are made at the first run.
@@ -41,6 +45,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use rsim_collect::https::{ClientCert, HttpsLimits, HttpsProfile, HttpsTransport, TlsTrust};
@@ -52,7 +57,7 @@ use rsim_collect::unifi::UnifiSource;
 use rsim_collect::vyos::VyosSource;
 use rsim_collect::{
     Collector, Credential, Device, Jump, Limits, MemoryCredentials, PinPolicy, Proxy, Route,
-    Schedule, Secret, TokioClock, TrustStore, Vendor,
+    Schedule, Secret, TimeLimits, TokioClock, TrustStore, Vendor,
 };
 use rsim_store::{Keys, SectionStatus, Store};
 
@@ -113,11 +118,64 @@ struct Setup {
     https: HttpsProfile,
     /// The NX-OS switches that get `| json native`.
     native_json: Vec<String>,
+    /// The devices with a time key, with their time limits.
+    times: Vec<(String, TimeLimits)>,
+}
+
+/// The largest time limit in seconds.
+const MAX_SECONDS: u64 = 86_400;
+
+/// The seconds of a time key, from 1 to `MAX_SECONDS`.
+fn seconds(env: &BTreeMap<String, String>, key: &str) -> Result<Option<Duration>, String> {
+    let Some(v) = env.get(key) else {
+        return Ok(None);
+    };
+    match v.parse::<u64>() {
+        Ok(n) if (1..=MAX_SECONDS).contains(&n) => Ok(Some(Duration::from_secs(n))),
+        _ => Err(format!(
+            "{key} {v} is not a positive number of seconds: a whole number from 1 to {MAX_SECONDS}"
+        )),
+    }
+}
+
+/// The time limits of a device of the prefix: `<P>_<NAME>_TIMEOUT` or
+/// `<P>_TIMEOUT` for the device, `<P>_<NAME>_SECTION_TIMEOUT` or
+/// `<P>_SECTION_TIMEOUT` for one section, and the default limits for a key
+/// that is not set. `None` if no key is set.
+fn time_limits(
+    env: &BTreeMap<String, String>,
+    prefix: &str,
+    name: Option<&str>,
+) -> Result<Option<TimeLimits>, String> {
+    let pick = |k: &str| -> Result<Option<Duration>, String> {
+        let vendor = seconds(env, &format!("{prefix}_{k}"))?;
+        let device = match name {
+            Some(n) => seconds(env, &format!("{prefix}_{n}_{k}"))?,
+            None => None,
+        };
+        Ok(device.or(vendor))
+    };
+    if name == Some("SECTION") && env.contains_key(&format!("{prefix}_SECTION_TIMEOUT")) {
+        return Err(format!(
+            "{prefix}_SECTION_TIMEOUT is the section time of {prefix} and the device time \
+             of {prefix}_SECTION_IP; give the device another name"
+        ));
+    }
+    let device = pick("TIMEOUT")?;
+    let section = pick("SECTION_TIMEOUT")?;
+    if device.is_none() && section.is_none() {
+        return Ok(None);
+    }
+    let d = Limits::default();
+    Ok(Some(TimeLimits {
+        section: section.unwrap_or(d.section_timeout),
+        device: device.unwrap_or(d.device_timeout),
+    }))
 }
 
 /// The SSH devices of one vendor: `<P>_<NAME>_IP` with the keys of the
-/// route, the mode, the algorithm set and, for NX-OS, the JSON form and the
-/// channel limit. The credential of the vendor is `<P>_USER` with its
+/// route, the mode, the algorithm set, the time limits and, for NX-OS, the
+/// JSON form and the channel limit. The credential of the vendor is `<P>_USER` with its
 /// secret.
 fn ssh_devices(
     env: &BTreeMap<String, String>,
@@ -135,6 +193,9 @@ fn ssh_devices(
         };
         let id = name.to_lowercase().replace('_', "-");
         let route = route(env, prefix, Some(name), &mut s.credentials)?;
+        if let Some(t) = time_limits(env, prefix, Some(name))? {
+            s.times.push((id.clone(), t));
+        }
         s.devices.push(Device {
             id: id.clone(),
             vendor,
@@ -288,6 +349,7 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
         profiles: Vec::new(),
         https: HttpsProfile::default(),
         native_json: Vec::new(),
+        times: Vec::new(),
     };
     let list = |key: &str| -> Vec<String> {
         env.get(key)
@@ -315,6 +377,7 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
             sites.push("default".into());
         }
         let route = route(env, "UNIFI", None, &mut s.credentials)?;
+        let times = time_limits(env, "UNIFI", None)?;
         s.https.trust = match env.get("UNIFI_TLS").map(String::as_str) {
             None | Some("pin") => TlsTrust::Pin,
             Some("ca") => TlsTrust::CaBundle(read_file(
@@ -339,6 +402,9 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
                 } else {
                     format!("unifi-{console}-{site}")
                 };
+                if let Some(t) = times {
+                    s.times.push((id.clone(), t));
+                }
                 s.devices.push(Device {
                     id,
                     vendor: Vendor::Unifi,
@@ -534,6 +600,9 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
     .with_source(Arc::new(IosxrSource::new(ssh.clone())))
     .with_source(Arc::new(IosxeSource::new(ssh)))
     .with_source(Arc::new(UnifiSource::new(Arc::new(https))));
+    for (id, t) in &setup.times {
+        collector = collector.with_time_limits(id, *t);
+    }
     if repeat {
         let stop = async {
             let _ = tokio::signal::ctrl_c().await;
@@ -638,6 +707,64 @@ mod tests {
             ))
             .is_err()
         );
+    }
+
+    #[test]
+    fn the_device_key_of_a_time_limit_wins_over_the_vendor_key() {
+        let env = parse_env(
+            "VYOS_R1_IP=192.0.2.1\nVYOS_R2_IP=192.0.2.2\nVYOS_R3_IP=192.0.2.3\n\
+             VYOS_SECTION_TIMEOUT=30\nVYOS_R1_TIMEOUT=90\nVYOS_R2_SECTION_TIMEOUT=5\n\
+             VYOS_USER=u\nVYOS_PASS=p\nNXOS_S1_IP=192.0.2.4\nNXOS_TIMEOUT=120\n\
+             NXOS_USER=u\nNXOS_PASS=p\nIOSXE_E1_IP=192.0.2.5\nIOSXE_USER=u\nIOSXE_PASS=p\n\
+             UNIFI_CONTROLLER=192.0.2.8\nUNIFI_API_KEY=k\nUNIFI_TIMEOUT=60\n",
+        );
+        let s = setup(&env).unwrap();
+        let secs = Duration::from_secs;
+        let limits = |section, device| TimeLimits {
+            section: secs(section),
+            device: secs(device),
+        };
+        assert_eq!(
+            s.times,
+            [
+                ("r1".to_string(), limits(30, 90)),
+                ("r2".to_string(), limits(5, 45)),
+                ("r3".to_string(), limits(30, 45)),
+                ("s1".to_string(), limits(20, 120)),
+                ("unifi-default".to_string(), limits(20, 60)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_time_limit_that_is_not_a_positive_number_is_an_error() {
+        let base = "VYOS_R1_IP=192.0.2.1\nVYOS_USER=u\nVYOS_PASS=p\n";
+        for (line, key) in [
+            ("VYOS_R1_TIMEOUT=0", "VYOS_R1_TIMEOUT"),
+            ("VYOS_R1_SECTION_TIMEOUT=-5", "VYOS_R1_SECTION_TIMEOUT"),
+            ("VYOS_TIMEOUT=abc", "VYOS_TIMEOUT"),
+            ("VYOS_SECTION_TIMEOUT=", "VYOS_SECTION_TIMEOUT"),
+            ("VYOS_TIMEOUT=2.5", "VYOS_TIMEOUT"),
+            ("VYOS_R1_TIMEOUT=18446744073709551615", "VYOS_R1_TIMEOUT"),
+        ] {
+            let err = setup(&parse_env(&format!("{base}{line}\n")))
+                .err()
+                .unwrap_or_else(|| panic!("{line}"));
+            assert!(err.starts_with(key), "{err}");
+            assert!(err.contains("positive number of seconds"), "{err}");
+        }
+        let err = setup(&parse_env(&format!(
+            "{base}VYOS_TIMEOUT=0\nVYOS_R1_TIMEOUT=60\n"
+        )))
+        .err()
+        .expect("a vendor key is checked when each device has its own key");
+        assert!(err.starts_with("VYOS_TIMEOUT"), "{err}");
+        let err = setup(&parse_env(&format!(
+            "{base}VYOS_SECTION_IP=192.0.2.2\nVYOS_SECTION_TIMEOUT=10\n"
+        )))
+        .err()
+        .expect("a device named SECTION makes the key ambiguous");
+        assert!(err.contains("VYOS_SECTION_TIMEOUT"), "{err}");
     }
 
     #[test]

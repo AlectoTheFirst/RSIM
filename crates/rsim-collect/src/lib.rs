@@ -37,7 +37,7 @@ pub use classify::{Classified, classify};
 pub use device::{Device, Inventory, Vendor};
 pub use path::{Algorithms, Jump, Proxy, ProxyLogin, Route};
 pub use pipeline::{
-    Clock, CollectError, Collector, CycleReport, Limits, OsEntropy, Sink, TokioClock,
+    Clock, CollectError, Collector, CycleReport, Limits, OsEntropy, Sink, TimeLimits, TokioClock,
 };
 pub use schedule::{Due, Schedule, Scheduler};
 pub use source::{Capture, Extract, RawSection, SectionSpec, Source, Timeouts, fetch_sections};

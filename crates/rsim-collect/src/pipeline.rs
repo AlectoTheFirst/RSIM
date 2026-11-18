@@ -101,6 +101,16 @@ impl Default for Limits {
     }
 }
 
+/// The time limits of the reads of one device, in place of the times of
+/// the `Limits` of the cycle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TimeLimits {
+    /// The time for one section.
+    pub section: Duration,
+    /// The time for all sections of the device.
+    pub device: Duration,
+}
+
 /// An error that stops a cycle.
 #[derive(Debug)]
 pub enum CollectError {
@@ -154,6 +164,7 @@ pub struct Collector {
     sources: BTreeMap<Vendor, Arc<dyn Source>>,
     scheduler: Scheduler,
     limits: Limits,
+    times: Arc<BTreeMap<String, TimeLimits>>,
     clock: Arc<dyn Clock>,
     sinks: Vec<Arc<dyn Sink>>,
     state: Arc<BTreeMap<String, DeviceManifest>>,
@@ -165,6 +176,7 @@ impl fmt::Debug for Collector {
             .field("store", &self.store.dir())
             .field("vendors", &self.sources.keys().collect::<Vec<_>>())
             .field("limits", &self.limits)
+            .field("times", &self.times)
             .finish()
     }
 }
@@ -191,6 +203,7 @@ impl Collector {
                 workers: limits.workers.max(1),
                 ..limits
             },
+            times: Arc::new(BTreeMap::new()),
             clock,
             sinks: Vec::new(),
             state: Arc::new(state),
@@ -200,6 +213,12 @@ impl Collector {
     /// Adds the source of a vendor.
     pub fn with_source(mut self, source: Arc<dyn Source>) -> Collector {
         self.sources.insert(source.vendor(), source);
+        self
+    }
+
+    /// Sets the time limits of the device with the id `device`.
+    pub fn with_time_limits(mut self, device: &str, limits: TimeLimits) -> Collector {
+        Arc::make_mut(&mut self.times).insert(device.to_string(), limits);
         self
     }
 
@@ -271,6 +290,7 @@ impl Collector {
             cap_tx,
             self.sources.clone(),
             self.limits,
+            self.times.clone(),
             self.clock.clone(),
         ));
         let process = tokio::spawn(process_stage(
@@ -331,14 +351,15 @@ impl Collector {
     }
 }
 
-/// Fetches the due devices within the limits. A fetch keeps its permits
-/// until the next stage takes its capture, so a full channel stops new
-/// fetches.
+/// Fetches the due devices within the limits. A device in `times` gets its
+/// own time limits. A fetch keeps its permits until the next stage takes
+/// its capture, so a full channel stops new fetches.
 pub(crate) async fn fetch_stage(
     mut jobs: mpsc::Receiver<Due>,
     out: mpsc::Sender<(Capture, bool)>,
     sources: BTreeMap<Vendor, Arc<dyn Source>>,
     limits: Limits,
+    times: Arc<BTreeMap<String, TimeLimits>>,
     clock: Arc<dyn Clock>,
 ) {
     let global = Arc::new(Semaphore::new(limits.devices));
@@ -357,13 +378,17 @@ pub(crate) async fn fetch_stage(
         let source = sources.get(&job.device.vendor).cloned();
         let out = out.clone();
         let clock = clock.clone();
+        let time = times.get(&job.device.id).copied().unwrap_or(TimeLimits {
+            section: limits.section_timeout,
+            device: limits.device_timeout,
+        });
         tasks.spawn(async move {
             let collected_at = clock.now_ms();
             let sections = match source {
                 Some(s) => {
                     let timeouts = Timeouts {
-                        section: limits.section_timeout,
-                        deadline: Some(tokio::time::Instant::now() + limits.device_timeout),
+                        section: time.section,
+                        deadline: Some(tokio::time::Instant::now() + time.device),
                     };
                     s.fetch(&job.device, timeouts).await
                 }
@@ -553,6 +578,7 @@ mod tests {
             out_tx,
             sources,
             limits,
+            Arc::new(BTreeMap::new()),
             Arc::new(TokioClock::new(0)),
         ));
         tokio::time::sleep(Duration::from_secs(10)).await;
@@ -640,6 +666,7 @@ mod tests {
             out_tx,
             sources,
             limits,
+            Arc::new(BTreeMap::new()),
             Arc::new(TokioClock::new(0)),
         ));
         let (capture, _) = out_rx.recv().await.unwrap();
