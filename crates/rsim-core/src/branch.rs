@@ -22,10 +22,15 @@ pub struct Alternative {
     pub label: String,
 }
 
-/// The copy of a layer 2 flood to which a branch belongs.
+/// The copy of a flood to which a branch belongs: a layer 2 flood or the
+/// copies of a multicast route.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FloodCopy {
+    /// The function that made the copies.
     pub flood: FunctionId,
+    /// The replication point in the function, for example the multicast
+    /// route. The function and the key together identify one flood.
+    pub key: String,
     pub port: PortId,
     pub index: u32,
     pub count: u32,

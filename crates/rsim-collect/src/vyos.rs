@@ -1,7 +1,6 @@
 //! The VyOS source: read-only commands over SSH.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use rsim_store::{
     ADDRESSES, Cell, Class, Format, LINK_SPEEDS, LINKS, NEIGHBOURS, ROUTES, Row, TableSchema,
@@ -9,7 +8,8 @@ use rsim_store::{
 use serde_json::Value;
 
 use crate::{
-    BoxFuture, Device, Extract, RawSection, SectionSpec, Source, Ssh, Vendor, fetch_sections,
+    BoxFuture, Device, Extract, RawSection, SectionSpec, Source, Ssh, Timeouts, Vendor,
+    fetch_sections,
 };
 
 /// The search path that each operational command sets, because `ip` is in
@@ -91,7 +91,10 @@ pub fn sections() -> Vec<SectionSpec> {
             &format!("{PATH} ip -d -j link show"),
             Observation,
             Json,
-            &[],
+            &[
+                "/*/linkinfo/info_data/*_timer",
+                "/*/linkinfo/info_slave_data/*_timer",
+            ],
             &[&LinkExtract],
         ),
         spec(
@@ -152,12 +155,12 @@ impl Source for VyosSource {
     fn fetch<'a>(
         &'a self,
         device: &'a Device,
-        timeout: Duration,
+        timeouts: Timeouts,
     ) -> BoxFuture<'a, Vec<RawSection>> {
         let serial = self.ssh.serial(device);
         Box::pin(fetch_sections(
             sections(),
-            timeout,
+            timeouts,
             serial,
             move |command| {
                 let ssh = self.ssh.clone();

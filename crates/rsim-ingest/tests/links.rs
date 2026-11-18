@@ -202,6 +202,41 @@ fn a_neighbour_that_does_not_report_back_gives_no_link() {
 }
 
 #[test]
+fn a_host_name_of_more_than_one_device_names_no_neighbour() {
+    let rtr = |name: &str, m: &str| Summary {
+        host_name: Some("rtr1".to_string()),
+        ..device(name, &[("Gi0/0/1", m)], &[], false)
+    };
+    let devices = BTreeMap::from([
+        (
+            "a".to_string(),
+            device(
+                "a",
+                &[("p1", "00:00:5e:00:53:01")],
+                &[("p1", Some("rtr1"), "Gi0/0/1", None)],
+                true,
+            ),
+        ),
+        (
+            "site-a-rtr1".to_string(),
+            rtr("site-a-rtr1", "00:00:5e:00:53:0a"),
+        ),
+        (
+            "site-b-rtr1".to_string(),
+            rtr("site-b-rtr1", "00:00:5e:00:53:0b"),
+        ),
+    ]);
+    let (p, notes) = peers(&devices);
+    assert!(p.is_empty(), "{p:?}");
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("the host name rtr1 is on more than one device")),
+        "{notes:?}"
+    );
+}
+
+#[test]
 fn a_mac_on_more_than_one_port_proves_no_link() {
     // An anycast gateway MAC on 2 leaf switches.
     let devices = BTreeMap::from([

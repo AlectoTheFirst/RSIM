@@ -363,19 +363,40 @@ fn values(v: &Value) -> Vec<&Value> {
     }
 }
 
-/// True if `addr` is in `prefix` (`<address>/<length>`).
-fn in_prefix(addr: &str, prefix: &str) -> Option<bool> {
-    let addr: IpAddr = addr.split('/').next()?.parse().ok()?;
-    let (net, len) = prefix.split_once('/')?;
-    let net: IpAddr = net.parse().ok()?;
-    let len: u32 = len.parse().ok()?;
-    let (a, n, bits) = match (addr, net) {
-        (IpAddr::V4(a), IpAddr::V4(n)) => (u128::from(u32::from(a)), u128::from(u32::from(n)), 32),
-        (IpAddr::V6(a), IpAddr::V6(n)) => (u128::from(a), u128::from(n), 128),
-        _ => return Some(false),
+/// The address bits, the length and the address width of
+/// `<address>/<length>`, or of an address alone with the full length.
+fn parse_prefix(s: &str) -> Option<(u128, u32, u32)> {
+    let (addr, len) = match s.split_once('/') {
+        Some((a, l)) => (a, Some(l)),
+        None => (s, None),
     };
-    if len > bits {
+    let (a, bits) = match addr.parse::<IpAddr>().ok()? {
+        IpAddr::V4(a) => (u128::from(u32::from(a)), 32),
+        IpAddr::V6(a) => (u128::from(a), 128),
+    };
+    let len = match len {
+        Some(l) => l.parse::<u32>().ok().filter(|l| *l <= bits)?,
+        None => bits,
+    };
+    Some((a, len, bits))
+}
+
+/// The operand of `in_prefix`: an `<address>/<length>`.
+fn valid_prefix(s: &str) -> bool {
+    s.contains('/') && parse_prefix(s).is_some()
+}
+
+/// True if `addr`, an address or an `<address>/<length>`, is inside
+/// `prefix` (`<address>/<length>`): a prefix is inside when its length is
+/// at least the length of `prefix` and its network is in `prefix`.
+fn in_prefix(addr: &str, prefix: &str) -> Option<bool> {
+    let (a, alen, abits) = parse_prefix(addr)?;
+    if !prefix.contains('/') {
         return None;
+    }
+    let (n, len, bits) = parse_prefix(prefix)?;
+    if abits != bits || alen < len {
+        return Some(false);
     }
     let shift = bits - len;
     Some(len == 0 || (a >> shift) == (n >> shift))
@@ -419,6 +440,14 @@ pub fn filter(
             .ok_or_else(|| format!("{k} is not <column>.<op>"))?;
         if !["contains", "prefix", "gt", "lt", "in_prefix"].contains(&op) {
             return Err(format!("{op} is not contains, prefix, gt, lt or in_prefix"));
+        }
+        let valid = match op {
+            "in_prefix" => valid_prefix(v),
+            "gt" | "lt" => v.parse::<f64>().is_ok_and(f64::is_finite),
+            _ => true,
+        };
+        if !valid {
+            return Err(format!("{v} is not a value of the filter {k}"));
         }
         typed.push((index(c)?, op, v));
     }
@@ -501,7 +530,7 @@ pub fn page(
     };
     let end = match sel.limit {
         Some(0) => return Err("the limit is 0".into()),
-        Some(l) => (start + l).min(total),
+        Some(l) => start.saturating_add(l).min(total),
         None => total,
     };
     let rows = matching[start..end]
@@ -686,6 +715,49 @@ mod tests {
         let mut sel = Selection::default();
         sel.typed.insert("prefix.like".into(), "10".into());
         assert!(filter(def, &rows(), &sel).is_err());
+    }
+
+    #[test]
+    fn the_largest_limit_after_a_cursor_gives_the_rest_of_the_rows() {
+        let def = table("fib").unwrap();
+        let sel = Selection {
+            limit: Some(usize::MAX),
+            cursor: Some("o1".into()),
+            ..Selection::default()
+        };
+        let (_, rows, total, next) = page(def, rows(), &sel).unwrap();
+        assert_eq!((rows.len(), total, next), (3, 4, None));
+    }
+
+    #[test]
+    fn in_prefix_on_a_prefix_column_gives_the_prefixes_inside_the_filter() {
+        let def = table("fib").unwrap();
+        let mut sel = Selection::default();
+        sel.typed
+            .insert("prefix.in_prefix".into(), "10.0.0.0/24".into());
+        let m = filter(def, &rows(), &sel).unwrap();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0][2], json!("10.0.0.0/24"));
+        sel.typed
+            .insert("prefix.in_prefix".into(), "10.0.0.0/8".into());
+        assert_eq!(filter(def, &rows(), &sel).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn a_typed_filter_value_that_does_not_parse_is_an_error() {
+        let def = table("fib").unwrap();
+        for (k, v) in [
+            ("prefix.in_prefix", "10.0.0.10"),
+            ("prefix.in_prefix", "10.0.0.0/33"),
+            ("prefix.in_prefix", "ten/8"),
+            ("prefix.gt", "ten"),
+            ("prefix.lt", "nan"),
+            ("prefix.gt", "inf"),
+        ] {
+            let mut sel = Selection::default();
+            sel.typed.insert(k.into(), v.into());
+            assert!(filter(def, &rows(), &sel).is_err(), "{k}={v}");
+        }
     }
 
     #[test]

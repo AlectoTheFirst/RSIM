@@ -252,6 +252,31 @@ fn a_backup_path_does_not_forward() {
 }
 
 #[test]
+fn a_backup_path_with_no_interface_does_not_forward() {
+    let mut s = sections();
+    let rib = String::from_utf8(s["rib"].0.clone()).unwrap().replace(
+        "C    203.0.113.0/24 is directly connected",
+        "B    198.51.100.224/27 [20/0] via 198.51.100.2, 1d00h\n                      \
+         [20/0] via 203.0.113.254, 1d00h (!)\n\
+         C    203.0.113.0/24 is directly connected",
+    );
+    s.get_mut("rib").unwrap().0 = rib.into_bytes();
+    let t = estate_with(s).builder.build().expect("the twin builds");
+    let (_, steps) = only(&run(
+        &t,
+        "Bundle-Ether10",
+        "198.51.100.2",
+        "198.51.100.230",
+        443,
+    ));
+    assert!(has(
+        &steps,
+        "route 198.51.100.224/27 in VRF default via 198.51.100.2 on Bundle-Ether10"
+    ));
+    assert!(!has(&steps, "203.0.113.254"), "{steps:#?}");
+}
+
+#[test]
 fn an_unread_route_line_makes_its_prefix_unknown() {
     let t = twin();
     // A route line that the template cannot read.

@@ -9,8 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr};
 
 use rsim_core::{
-    FieldValue, FunctionId, InterfaceId, Mac, MacCond, Match, NeighbourTarget, ObjectId, Prefix,
-    PrefixTable, Rewrite, RulePredicate, SourceSpan, TriePrefixTable, VrfId,
+    FieldValue, FunctionId, InterfaceId, Mac, MacCond, Match, NeighbourTarget, ObjectId, PortCond,
+    Prefix, PrefixTable, Rewrite, RulePredicate, SourceSpan, TriePrefixTable, VrfId,
 };
 use rsim_engine::EdgeInterface;
 use rsim_functions::{
@@ -352,9 +352,77 @@ pub fn lower(
     if forwards {
         next_hops(&mut l, &active, &st, ext, &BTreeMap::new());
     }
-    handoffs(&mut l, &active, &groups, &sum, ext);
+    handoffs(
+        &mut l,
+        &active,
+        &groups,
+        &sum,
+        ext,
+        &unlowered(cfg, &active),
+    );
     edges(&mut l, device, &active);
     (l.out, sum)
+}
+
+/// The sub-interfaces whose frames the hand-off of their port does not
+/// lower: the `l2transport` sub-interfaces and the lowered sub-interfaces
+/// with no dot1q VLAN that the handlers read.
+fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
+    let mut out: Vec<Unlowered> = cfg
+        .l2transport
+        .iter()
+        .map(|t| Unlowered {
+            name: t.name.clone(),
+            vlan: t.dot1q,
+            routed: false,
+            untagged: false,
+            reason: format!("{} is not lowered", t.key),
+            lines: t.lines,
+        })
+        .collect();
+    out.extend(
+        active
+            .iter()
+            .filter(|p| p.i.name.contains('.') && p.dot1q.is_none())
+            .map(|p| Unlowered {
+                name: p.i.name.clone(),
+                vlan: None,
+                routed: true,
+                untagged: false,
+                reason: format!("the dot1q VLAN of {} is not read", p.i.name),
+                lines: p.i.lines,
+            }),
+    );
+    out
+}
+
+/// A sub-interface whose frames the hand-off of its port does not lower.
+pub(crate) struct Unlowered {
+    pub(crate) name: String,
+    /// Its VLAN; with none, each VLAN of no lowered sub-interface.
+    pub(crate) vlan: Option<u16>,
+    /// True when only its frames to a MAC of the router are affected.
+    pub(crate) routed: bool,
+    /// True when it can take an untagged frame too.
+    pub(crate) untagged: bool,
+    pub(crate) reason: String,
+    pub(crate) lines: nxos::config::Lines,
+}
+
+/// The VLANs from 0 to 4095 that are not in `taken`, as ranges.
+fn other_vlans(taken: &BTreeSet<u16>) -> Vec<(u16, u16)> {
+    let mut out = Vec::new();
+    let mut lo: u16 = 0;
+    for &v in taken {
+        if v > lo {
+            out.push((lo, v - 1));
+        }
+        lo = v + 1;
+    }
+    if lo <= 4095 {
+        out.push((lo, 4095));
+    }
+    out
 }
 
 /// The ingress of each lowered interface, its input QoS and its input ACL,
@@ -687,15 +755,19 @@ fn hsrp(
 /// The hand-off of each port with a link: the MACs of the port, of its
 /// sub-interfaces and of its active groups go to the ingress of the port or
 /// of the sub-interface of the dot1q VLAN. A frame to the virtual MAC of a
-/// group whose state is not known gives `Unknown`. If an active group or a
-/// group whose state is not known has no known virtual MAC, each frame of
-/// the port gives `Unknown`.
+/// group whose state is not known gives `Unknown`, as does a frame of a
+/// sub-interface in `unlowered`: each frame of its VLAN, or of a routed
+/// sub-interface each frame of its VLAN to a MAC of the router, and the
+/// untagged frames of a sub-interface that can take them. If an active
+/// group or a group whose state is not known has no known virtual MAC, each
+/// frame of the port gives `Unknown`.
 pub(crate) fn handoffs(
     l: &mut L,
     active: &[Port],
     groups: &[Group],
     sum: &Summary,
     ext: &External,
+    unlowered: &[Unlowered],
 ) {
     for (port, peers) in &ext.peers {
         if !sum.entries.contains_key(port) || peers.is_empty() {
@@ -741,44 +813,117 @@ pub(crate) fn handoffs(
             l.add(s);
             continue;
         }
-        let entry = if unknown.is_empty() {
-            f.clone()
-        } else {
-            let next = format!("{f}/mac");
-            let gate_spans: Vec<SourceSpan> = on_port
-                .iter()
-                .filter(|g| matches!(g.state, GroupState::Unknown(_)))
-                .flat_map(|g| g.spans.clone())
-                .collect();
-            let what: BTreeSet<&str> = on_port
-                .iter()
-                .filter(|g| matches!(g.state, GroupState::Unknown(_)))
-                .map(|g| g.what)
-                .collect();
-            let what: Vec<&str> = what.into_iter().collect();
+        let tagged: BTreeSet<u16> = mine.iter().filter_map(|p| p.dot1q).collect();
+        let mut rules: Vec<FRule<RuleAction>> = Vec::new();
+        for u in unlowered.iter().filter(|u| parent(&u.name) == port) {
+            let vlans = u
+                .vlan
+                .map_or_else(|| other_vlans(&tagged), |v| vec![(v, v)]);
+            let dst_mac = if u.routed {
+                MacCond::In(macs.union(&unknown).copied().collect())
+            } else {
+                MacCond::Any
+            };
             let mut rule = FRule::new(
-                format!(
-                    "{port}: the virtual MAC of an {} group whose state is not known",
-                    what.join(" or ")
+                format!("{port}: {}", u.reason),
+                RulePredicate::bounded(
+                    Match {
+                        vlan: PortCond::In(Vec::new()),
+                        ..Match::any()
+                    },
+                    Match {
+                        dst_mac,
+                        vlan: PortCond::In(vlans),
+                        ..Match::any()
+                    },
                 ),
+                RuleAction::Deny,
+            );
+            rule.spans = vec![l.span(u.lines)];
+            rules.push(rule);
+        }
+        // The untagged frames come after each tagged frame.
+        let open: Vec<&Unlowered> = unlowered
+            .iter()
+            .filter(|u| parent(&u.name) == port && u.untagged)
+            .collect();
+        if !open.is_empty() {
+            rules.push(FRule::new(
+                format!("{port}: a tagged frame"),
+                RulePredicate::exact(Match {
+                    vlan: PortCond::In(vec![(0, 4095)]),
+                    ..Match::any()
+                }),
+                RuleAction::Permit,
+            ));
+        }
+        for u in open {
+            let dst_mac = if u.routed {
+                MacCond::In(macs.union(&unknown).copied().collect())
+            } else {
+                MacCond::Any
+            };
+            let mut rule = FRule::new(
+                format!("{port}: {}", u.reason),
                 RulePredicate::bounded(
                     Match {
                         dst_mac: MacCond::In(BTreeSet::new()),
                         ..Match::any()
                     },
                     Match {
-                        dst_mac: MacCond::In(unknown),
+                        dst_mac,
                         ..Match::any()
                     },
                 ),
                 RuleAction::Deny,
             );
-            rule.spans = gate_spans.clone();
+            rule.spans = vec![l.span(u.lines)];
+            rules.push(rule);
+        }
+        let entry = if unknown.is_empty() && rules.is_empty() {
+            f.clone()
+        } else {
+            let next = format!("{f}/mac");
+            let mut gate_spans: Vec<SourceSpan> = on_port
+                .iter()
+                .filter(|g| matches!(g.state, GroupState::Unknown(_)))
+                .flat_map(|g| g.spans.clone())
+                .collect();
+            let mut gate: Vec<FRule<RuleAction>> = Vec::new();
+            if !unknown.is_empty() {
+                let what: BTreeSet<&str> = on_port
+                    .iter()
+                    .filter(|g| matches!(g.state, GroupState::Unknown(_)))
+                    .map(|g| g.what)
+                    .collect();
+                let what: Vec<&str> = what.into_iter().collect();
+                let mut rule = FRule::new(
+                    format!(
+                        "{port}: the virtual MAC of an {} group whose state is not known",
+                        what.join(" or ")
+                    ),
+                    RulePredicate::bounded(
+                        Match {
+                            dst_mac: MacCond::In(BTreeSet::new()),
+                            ..Match::any()
+                        },
+                        Match {
+                            dst_mac: MacCond::In(unknown),
+                            ..Match::any()
+                        },
+                    ),
+                    RuleAction::Deny,
+                );
+                rule.spans = gate_spans.clone();
+                gate.push(rule);
+            }
+            gate_spans.extend(rules.iter().flat_map(|r| r.spans.clone()));
+            gate.extend(rules);
             let meta = l.meta(&f, gate_spans);
             l.add(AclMatch {
                 meta,
                 acl: ObjectId::new(format!("{}:{f}", l.dev)),
-                rules: vec![rule],
+                rules: gate,
                 default: RuleAction::Permit,
                 next: l.id(&next),
             });

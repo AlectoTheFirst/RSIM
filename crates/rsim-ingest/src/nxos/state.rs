@@ -152,6 +152,41 @@ pub fn mac(s: &str) -> Option<Mac> {
     Some(Mac(out))
 }
 
+/// True if the MAC table of a switch is collected: `has_rows` is true if
+/// the collected table has rows of the switch, else the section
+/// `mac_table` must be a table with no row that has a VLAN.
+pub fn mac_table_collected(sections: &BTreeMap<String, (Vec<u8>, String)>, has_rows: bool) -> bool {
+    if has_rows {
+        return true;
+    }
+    let Some(v) = sections
+        .get("mac_table")
+        .and_then(|(b, _)| serde_json::from_slice::<Value>(b).ok())
+    else {
+        return false;
+    };
+    top_rows(&v, "mac_address", "MAC table").is_ok_and(|rs| {
+        rs.iter().all(|r| {
+            text(r, "disp_vlan")
+                .and_then(|x| x.trim().parse::<u64>().ok())
+                .is_none()
+        })
+    })
+}
+
+/// The rows of `TABLE_<t>/ROW_<t>` at the top of a section that must have
+/// the table: `{}` is an empty table, and an object with other members is
+/// an error.
+fn top_rows<'a>(v: &'a Value, t: &str, section: &str) -> Result<&'a [Value], String> {
+    let m = v
+        .as_object()
+        .ok_or_else(|| format!("the {section} section is not a JSON object"))?;
+    if !m.is_empty() && !m.contains_key(&format!("TABLE_{t}")) {
+        return Err(format!("the {section} section has no TABLE_{t}"));
+    }
+    Ok(rows(v, t))
+}
+
 /// The rows of `TABLE_<t>/ROW_<t>` at the top of a section.
 fn rows<'a>(v: &'a Value, t: &str) -> &'a [Value] {
     v.get(format!("TABLE_{t}"))
@@ -307,12 +342,12 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
             span: Some(line(file, 0)),
         });
     }
-    // The keys of the NVE sections are not confirmed on a device. A row
-    // with no address or VNI makes the section unread.
+    // The keys of the NVE sections are not confirmed on a device. A section
+    // with no table, or a row with no address or VNI, makes the section
+    // unread.
     if let Some((v, file)) = json("nve_peers") {
-        let peers =
-            rows(&v, "nve_peers")
-                .iter()
+        let peers = top_rows(&v, "nve_peers", "NVE peer").and_then(|rs| {
+            rs.iter()
                 .enumerate()
                 .map(|(i, r)| {
                     Ok(NvePeer {
@@ -323,23 +358,25 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
                         span: line(file, i),
                     })
                 })
-                .collect();
+                .collect()
+        });
         st.nve_peers = Some(peers);
     }
     if let Some((v, file)) = json("nve_vnis") {
-        let vnis = rows(&v, "nve_vni")
-            .iter()
-            .enumerate()
-            .map(|(i, r)| {
-                Ok(NveVni {
-                    vni: text(r, "vni")
-                        .and_then(|a| a.parse().ok())
-                        .ok_or_else(|| format!("row {} of the NVE VNIs has no VNI", i + 1))?,
-                    up: up(text(r, "vni-state")),
-                    span: line(file, i),
+        let vnis = top_rows(&v, "nve_vni", "NVE VNI").and_then(|rs| {
+            rs.iter()
+                .enumerate()
+                .map(|(i, r)| {
+                    Ok(NveVni {
+                        vni: text(r, "vni")
+                            .and_then(|a| a.parse().ok())
+                            .ok_or_else(|| format!("row {} of the NVE VNIs has no VNI", i + 1))?,
+                        up: up(text(r, "vni-state")),
+                        span: line(file, i),
+                    })
                 })
-            })
-            .collect();
+                .collect()
+        });
         st.nve_vnis = Some(vnis);
     }
     // The keys of the multicast route section are not confirmed on a

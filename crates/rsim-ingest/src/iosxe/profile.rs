@@ -51,6 +51,8 @@ pub const PLATFORM: &str = "cisco_ios";
 /// The interface types of IOS-XE with their short forms, in lower case.
 pub const INTERFACE_TYPES: Types = &[
     ("gigabitethernet", &["gi", "gig", "ge"]),
+    ("twogigabitethernet", &["tw"]),
+    ("fivegigabitethernet", &["fi"]),
     ("tengigabitethernet", &["te", "ten"]),
     ("twentyfivegige", &["twe"]),
     ("fortygigabitethernet", &["fo"]),

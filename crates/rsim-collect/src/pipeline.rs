@@ -11,8 +11,8 @@ use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinSet;
 
 use crate::{
-    Capture, Classified, Device, Due, Inventory, RawSection, Schedule, Scheduler, Source,
-    TransportError, Vendor, classify,
+    Capture, Classified, Device, Due, Inventory, Schedule, Scheduler, Source, Timeouts, Vendor,
+    classify,
 };
 
 /// The time in milliseconds since the Unix epoch.
@@ -80,7 +80,8 @@ pub struct Limits {
     pub channel: usize,
     /// The time for one section.
     pub section_timeout: Duration,
-    /// The time for all sections of one device.
+    /// The time for all sections of one device. The sections that are read
+    /// in this time keep their results.
     pub device_timeout: Duration,
     /// The captures that the classify and hash stage processes at the same
     /// time.
@@ -106,6 +107,8 @@ pub enum CollectError {
     Store(StoreError),
     /// A stage task stopped with a fault.
     Stage(String),
+    /// The inventory has two devices with one id.
+    Inventory(String),
 }
 
 impl fmt::Display for CollectError {
@@ -113,6 +116,7 @@ impl fmt::Display for CollectError {
         match self {
             CollectError::Store(e) => write!(f, "store: {e}"),
             CollectError::Stage(e) => write!(f, "stage: {e}"),
+            CollectError::Inventory(e) => write!(f, "inventory: {e}"),
         }
     }
 }
@@ -233,6 +237,13 @@ impl Collector {
     pub async fn run_cycle(&mut self) -> Result<CycleReport, CollectError> {
         let now = self.clock.now_ms();
         let devices = self.inventory.devices();
+        let mut ids = std::collections::BTreeSet::new();
+        if let Some(d) = devices.iter().find(|d| !ids.insert(d.id.as_str())) {
+            return Err(CollectError::Inventory(format!(
+                "two devices have the id {}",
+                d.id
+            )));
+        }
         let due = self.scheduler.due(now, &devices);
         let mut report = CycleReport {
             time: now,
@@ -350,18 +361,11 @@ pub(crate) async fn fetch_stage(
             let collected_at = clock.now_ms();
             let sections = match source {
                 Some(s) => {
-                    let f = s.fetch(&job.device, limits.section_timeout);
-                    match tokio::time::timeout(limits.device_timeout, f).await {
-                        Ok(sections) => sections,
-                        Err(_) => s
-                            .sections(&job.device)
-                            .into_iter()
-                            .map(|spec| RawSection {
-                                spec,
-                                result: Err(TransportError::Timeout),
-                            })
-                            .collect(),
-                    }
+                    let timeouts = Timeouts {
+                        section: limits.section_timeout,
+                        deadline: Some(tokio::time::Instant::now() + limits.device_timeout),
+                    };
+                    s.fetch(&job.device, timeouts).await
                 }
                 None => Vec::new(),
             };
@@ -472,8 +476,8 @@ fn store_stage(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SectionSpec;
     use crate::fake::FakeTransport;
+    use crate::{RawSection, SectionSpec, TransportError};
     use rsim_store::Format;
 
     struct OneSection(Arc<FakeTransport>);
@@ -497,12 +501,12 @@ mod tests {
         fn fetch<'a>(
             &'a self,
             device: &'a Device,
-            timeout: Duration,
+            timeouts: Timeouts,
         ) -> crate::BoxFuture<'a, Vec<RawSection>> {
             let t = self.0.clone();
             Box::pin(crate::fetch_sections(
                 self.sections(device),
-                timeout,
+                timeouts,
                 false,
                 move |c| {
                     let t = t.clone();
@@ -561,5 +565,100 @@ mod tests {
         }
         stage.await.unwrap();
         assert_eq!((n, t.calls()), (20, 20));
+    }
+
+    /// 5 sections, read one after the other, each in 2 s.
+    struct SlowSerial;
+
+    impl Source for SlowSerial {
+        fn vendor(&self) -> Vendor {
+            Vendor::Vyos
+        }
+        fn sections(&self, _: &Device) -> Vec<SectionSpec> {
+            ["s0", "s1", "s2", "s3", "s4"]
+                .into_iter()
+                .map(|name| SectionSpec {
+                    name,
+                    command: format!("show {name}"),
+                    class: Class::Observation,
+                    format: Format::Text,
+                    volatile: &[],
+                    extracts: &[],
+                    keep: &[],
+                    optional: false,
+                })
+                .collect()
+        }
+        fn fetch<'a>(
+            &'a self,
+            device: &'a Device,
+            timeouts: Timeouts,
+        ) -> crate::BoxFuture<'a, Vec<RawSection>> {
+            Box::pin(crate::fetch_sections(
+                self.sections(device),
+                timeouts,
+                true,
+                |c| {
+                    Box::pin(async move {
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        Ok(c.into_bytes())
+                    })
+                },
+            ))
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_device_timeout_keeps_the_sections_that_were_read() {
+        let mut sources: BTreeMap<Vendor, Arc<dyn Source>> = BTreeMap::new();
+        sources.insert(Vendor::Vyos, Arc::new(SlowSerial));
+        let limits = Limits {
+            section_timeout: Duration::from_secs(20),
+            device_timeout: Duration::from_secs(5),
+            ..Limits::default()
+        };
+        let (job_tx, job_rx) = mpsc::channel(1);
+        let (out_tx, mut out_rx) = mpsc::channel(1);
+        job_tx
+            .send(Due {
+                device: Device {
+                    id: "r1".into(),
+                    vendor: Vendor::Vyos,
+                    address: "192.0.2.1".into(),
+                    credential: "lab".into(),
+                    site: None,
+                    route: Default::default(),
+                },
+                forced: false,
+            })
+            .await
+            .unwrap();
+        drop(job_tx);
+        let start = tokio::time::Instant::now();
+        let stage = tokio::spawn(fetch_stage(
+            job_rx,
+            out_tx,
+            sources,
+            limits,
+            Arc::new(TokioClock::new(0)),
+        ));
+        let (capture, _) = out_rx.recv().await.unwrap();
+        stage.await.unwrap();
+        assert_eq!(start.elapsed(), Duration::from_secs(5));
+        let results: Vec<_> = capture.sections.iter().map(|s| s.result.clone()).collect();
+        let not_sent = Err(TransportError::Connect(
+            "not sent: the time of the device ended".into(),
+        ));
+        assert_eq!(
+            results,
+            [
+                Ok(b"show s0".to_vec()),
+                Ok(b"show s1".to_vec()),
+                Err(TransportError::Timeout),
+                not_sent.clone(),
+                not_sent,
+            ]
+        );
+        assert!(!capture.failed());
     }
 }

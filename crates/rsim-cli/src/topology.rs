@@ -164,26 +164,50 @@ fn overlay(t: &Loaded) -> Vec<TopoEdge> {
         }
     }
     let mut out: BTreeMap<String, TopoEdge> = BTreeMap::new();
+    // The tunnels of each edge, keyed by the encapsulation function and the
+    // peer address, so each edge lists each tunnel once and in order.
+    let mut tunnels: BTreeMap<String, BTreeMap<(String, String), serde_json::Value>> =
+        BTreeMap::new();
     let pairs = encaps.iter().flat_map(|(d, id, e)| {
         let peers: Vec<std::net::IpAddr> = match e.peer {
             TunnelPeer::Fixed(p) => vec![p],
             TunnelPeer::NextHop => gateways.get(id).into_iter().flatten().copied().collect(),
         };
-        peers.into_iter().map(move |p| (d.clone(), *e, p))
+        peers
+            .into_iter()
+            .map(move |p| (d.clone(), id.clone(), *e, p))
     });
-    for (d, e, peer) in pairs {
+    for (d, encap, e, peer) in pairs {
         for pd in ends.get(&peer).into_iter().flatten() {
             if *pd == d {
                 continue;
             }
             let id = format!("overlay:{d}>{pd}");
-            let x = out
-                .entry(id.clone())
-                .or_insert_with(|| edge(id, "overlay", d.clone(), pd.clone()));
+            out.entry(id.clone())
+                .or_insert_with(|| edge(id.clone(), "overlay", d.clone(), pd.clone()));
             let vnis: BTreeSet<u32> = e.vnis.values().copied().collect();
-            x.facts =
-                json!({"source": e.source.to_string(), "peer": peer.to_string(), "vnis": vnis});
+            let mode = match e.peer {
+                TunnelPeer::Fixed(_) => "fixed",
+                TunnelPeer::NextHop => "next-hop",
+            };
+            tunnels.entry(id).or_default().insert(
+                (encap.clone(), peer.to_string()),
+                json!({
+                    "encap": encap,
+                    "peer_from": mode,
+                    "source": e.source.to_string(),
+                    "peer": peer.to_string(),
+                    "vnis": vnis,
+                }),
+            );
         }
+    }
+    for (id, x) in &mut out {
+        let list: Vec<serde_json::Value> = tunnels
+            .remove(id)
+            .map(|m| m.into_values().collect())
+            .unwrap_or_default();
+        x.facts = json!({ "tunnels": list });
     }
     out.into_values().collect()
 }
@@ -318,10 +342,30 @@ pub fn topology(
     })
 }
 
+/// The underlay edges of the hops of a tunnel from `start`: the id, the 2
+/// devices of the hop and the overlay edge of the tunnel when it ends at
+/// `end`.
+fn underlay(
+    start: &str,
+    end: Option<&str>,
+    hops: Vec<(String, String)>,
+) -> impl Iterator<Item = (String, String, String, Option<String>)> {
+    let tag = match end {
+        Some(e) => format!("{start}>{e}"),
+        None => start.to_string(),
+    };
+    let over = end.map(|e| format!("overlay:{start}>{e}"));
+    hops.into_iter()
+        .map(move |(p, d)| (format!("underlay:{p}>{d}:{tag}"), p, d, over.clone()))
+}
+
 /// The drawing of the paths of an answer at the device level. A hop
 /// between 2 devices is a `physical` edge; inside a tunnel it is an
 /// `underlay` edge that names its `overlay` edge, from the device that
-/// encapsulates to the device that decapsulates.
+/// encapsulates to the device that decapsulates. The id of an underlay
+/// edge holds both tunnel ends; a tunnel with no decapsulation in the
+/// branch gives underlay edges with only the start device and no overlay
+/// edge.
 pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
     let devices = device_nodes(t);
     let mut used: BTreeSet<String> = BTreeSet::new();
@@ -340,8 +384,9 @@ pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
         };
     for b in a.branches() {
         let mut prev: Option<String> = None;
-        // The device that encapsulated the packets, inside a tunnel.
-        let mut tunnel: Option<String> = None;
+        // The device that encapsulated the packets and the hops of the
+        // outer packet since then, inside a tunnel.
+        let mut tunnel: Option<(String, Vec<(String, String)>)> = None;
         for s in &b.steps {
             let Some(d) = s.device.as_ref().map(ToString::to_string) else {
                 continue;
@@ -350,15 +395,8 @@ pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
             if let Some(p) = &prev
                 && *p != d
             {
-                match &tunnel {
-                    Some(start) => add(
-                        format!("underlay:{p}>{d}:{start}"),
-                        "underlay",
-                        p,
-                        &d,
-                        b.index,
-                        None,
-                    ),
+                match &mut tunnel {
+                    Some((_, hops)) => hops.push((p.clone(), d.clone())),
                     None => add(
                         format!("physical:{p}>{d}"),
                         "physical",
@@ -371,11 +409,16 @@ pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
             }
             let forwards = matches!(s.outcome, rsim_core::Outcome::Forward(_));
             if s.kind == FunctionKind::Encapsulation && forwards {
-                tunnel = Some(d.clone());
+                if let Some((start, hops)) = tunnel.take() {
+                    for (id, p, x, over) in underlay(&start, None, hops) {
+                        add(id, "underlay", &p, &x, b.index, over);
+                    }
+                }
+                tunnel = Some((d.clone(), Vec::new()));
             }
             if s.kind == FunctionKind::Decapsulation
                 && forwards
-                && let Some(start) = tunnel.take()
+                && let Some((start, hops)) = tunnel.take()
             {
                 add(
                     format!("overlay:{start}>{d}"),
@@ -385,22 +428,16 @@ pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
                     b.index,
                     None,
                 );
+                for (id, p, x, over) in underlay(&start, Some(&d), hops) {
+                    add(id, "underlay", &p, &x, b.index, over);
+                }
             }
             prev = Some(d);
         }
-    }
-    // An underlay edge names the overlay edge of its tunnel: the overlay
-    // edge from its start device.
-    let overlay_of: BTreeMap<String, String> = edges
-        .values()
-        .filter(|e| e.layer == "overlay")
-        .map(|e| (e.from.clone(), e.id.clone()))
-        .collect();
-    for e in edges.values_mut() {
-        if e.layer == "underlay"
-            && let Some(start) = e.id.rsplit(':').next()
-        {
-            e.overlay = overlay_of.get(start).cloned();
+        if let Some((start, hops)) = tunnel {
+            for (id, p, x, over) in underlay(&start, None, hops) {
+                add(id, "underlay", &p, &x, b.index, over);
+            }
         }
     }
     let nodes = used

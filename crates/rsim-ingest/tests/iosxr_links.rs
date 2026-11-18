@@ -687,6 +687,137 @@ fn an_active_group_with_no_virtual_mac_makes_the_port_unknown() {
     assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
 }
 
+/// pe2 with the sub-interface `Bundle-Ether20.300` on VLAN 300 and ARP rows
+/// for 192.0.2.193, a MAC of pe1, and 192.0.2.200, a MAC of no router.
+fn pe2_with_vlan_300() -> Input {
+    let config = PE2_CONFIG.replace(
+        "interface GigabitEthernet0/0/0/2\n",
+        "interface Bundle-Ether20.300\n vrf RED\n ipv4 address 192.0.2.194 255.255.255.192\n encapsulation dot1q 300\n!\ninterface GigabitEthernet0/0/0/2\n",
+    );
+    let interfaces = PE2_INTERFACES.replace(
+        "GigabitEthernet0/0/0/2 is up",
+        "Bundle-Ether20.300 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is VLAN sub-interface(s), address is 0000.5e00.5370
+  Internet address is 192.0.2.194/26
+  MTU 1518 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+  Encapsulation 802.1Q Virtual LAN, VLAN Id 300,  loopback not set,
+
+GigabitEthernet0/0/0/2 is up",
+    );
+    let rib = format!(
+        "{PE2_RIB}C    192.0.2.192/26 is directly connected, 3d04h, Bundle-Ether20.300\n\
+         L    192.0.2.194/32 is directly connected, 3d04h, Bundle-Ether20.300\n"
+    );
+    let arp = format!(
+        "{PE2_ARP}192.0.2.193     00:00:41   0000.5e00.5320  Dynamic    ARPA  BE20.300\n\
+         192.0.2.200     00:00:41   0000.5e00.5390  Dynamic    ARPA  BE20.300\n"
+    );
+    let sections = [
+        ("interfaces", interfaces.as_str()),
+        ("rib", rib.as_str()),
+        ("arp", arp.as_str()),
+        ("lldp", PE2_LLDP),
+        ("hsrp", PE2_HSRP),
+    ]
+    .into_iter()
+    .map(|(n, t)| (n.to_string(), (t.as_bytes().to_vec(), format!("pe2/{n}"))))
+    .collect();
+    Input::Iosxr {
+        name: "pe2".into(),
+        config: config.into_bytes(),
+        file: "pe2/config".into(),
+        collected: Collected::default(),
+        sections,
+    }
+}
+
+/// pe1 with `stanza` added before `Loopback0`.
+fn pe1_with(stanza: &str) -> Input {
+    let config = String::from_utf8_lossy(CONFIG).replace(
+        "interface Loopback0\n",
+        &format!("{stanza}interface Loopback0\n"),
+    );
+    Input::Iosxr {
+        name: "pe1".into(),
+        config: config.into_bytes(),
+        file: "pe1/config".into(),
+        collected: Collected::default(),
+        sections: sections(),
+    }
+}
+
+#[test]
+fn a_vlan_of_a_sub_interface_that_is_not_lowered_gives_unknown() {
+    let l2 = "interface Bundle-Ether20.300 l2transport\n encapsulation dot1q 300\n!\n";
+    let routed = "interface Bundle-Ether20.300\n vrf BLUE\n ipv4 address 192.0.2.193 255.255.255.192\n encapsulation dot1q 300 second-dot1q 5\n!\n";
+    for (stanza, dst) in [
+        (l2, "192.0.2.200"),
+        (l2, "192.0.2.193"),
+        (routed, "192.0.2.193"),
+    ] {
+        let t = twin_of(assemble(vec![
+            core1(),
+            pe1_with(stanza),
+            pe2_with_vlan_300(),
+        ]));
+        let (verdict, steps) = only(&query(
+            &t,
+            "pe2",
+            "GigabitEthernet0/0/0/5",
+            "198.51.100.250",
+            dst,
+            false,
+        ));
+        assert_eq!(verdict, VerdictKind::Unknown, "{stanza}{dst}: {steps:#?}");
+        assert!(has(&steps, "pe1/handoff/Bundle-Ether20"), "{steps:#?}");
+        // A frame of a VLAN of a lowered sub-interface is not affected.
+        let (verdict, steps) = only(&query(
+            &t,
+            "pe2",
+            "GigabitEthernet0/0/0/5",
+            "198.51.100.250",
+            "192.0.2.3",
+            false,
+        ));
+        assert_eq!(verdict, VerdictKind::Deliver, "{stanza}: {steps:#?}");
+    }
+    // A routed sub-interface whose VLAN is not read leaves a frame to a MAC
+    // of no router dropped.
+    let t = twin_of(assemble(vec![
+        core1(),
+        pe1_with(routed),
+        pe2_with_vlan_300(),
+    ]));
+    let (verdict, steps) = only(&query(
+        &t,
+        "pe2",
+        "GigabitEthernet0/0/0/5",
+        "198.51.100.250",
+        "192.0.2.200",
+        false,
+    ));
+    assert_eq!(verdict, VerdictKind::Drop, "{steps:#?}");
+    // With no such sub-interface, the frames of VLAN 300 are dropped.
+    let t = twin_of(assemble(vec![
+        core1(),
+        pe1(sections()),
+        pe2_with_vlan_300(),
+    ]));
+    for dst in ["192.0.2.200", "192.0.2.193"] {
+        let (verdict, steps) = only(&query(
+            &t,
+            "pe2",
+            "GigabitEthernet0/0/0/5",
+            "198.51.100.250",
+            dst,
+            false,
+        ));
+        assert_eq!(verdict, VerdictKind::Drop, "{dst}: {steps:#?}");
+        assert!(has(&steps, "pe1/handoff/Bundle-Ether20"), "{steps:#?}");
+    }
+}
+
 #[test]
 fn the_links_carry_their_provenance() {
     let t = twin();

@@ -26,8 +26,8 @@ use super::profile::{
 };
 use super::state::{self, State};
 use crate::iosxr::lower::{
-    Group, GroupRules, GroupState, Hops, Port, RouterPort, edges, error, fib, group_note,
-    group_state, handoffs, inputs, next_hops, place_unreadable, routed_summary, vips,
+    Group, GroupRules, GroupState, Hops, Port, RouterPort, Unlowered, edges, error, fib,
+    group_note, group_state, handoffs, inputs, next_hops, place_unreadable, routed_summary, vips,
 };
 use crate::iosxr::state::HsrpRow;
 use crate::links::{External, Summary};
@@ -378,9 +378,54 @@ pub fn lower(
         l3.arp = Some(Ok(rows));
         next_hops(&mut l, &active, &l3, ext, &svi_links);
     }
-    handoffs(&mut l, &active, &groups, &sum, ext);
+    handoffs(
+        &mut l,
+        &active,
+        &groups,
+        &sum,
+        ext,
+        &unlowered(cfg, &active),
+    );
     edges(&mut l, device, &active);
     (l.out, sum)
+}
+
+/// The lowered sub-interfaces whose frames the hand-off of their port does
+/// not lower: a sub-interface of a native VLAN takes the frames of its VLAN
+/// and the untagged frames, and a sub-interface with no dot1q VLAN that the
+/// handlers read can take the frames of each VLAN of no other sub-interface
+/// and the untagged frames.
+fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
+    active
+        .iter()
+        .filter(|p| p.i.name.contains('.') && p.dot1q.is_none())
+        .map(|p| {
+            let native = cfg
+                .interfaces
+                .iter()
+                .find(|i| i.name == p.i.name)
+                .and_then(|i| i.dot1q)
+                .filter(|d| d.1);
+            match native {
+                Some((v, _, lines)) => Unlowered {
+                    name: p.i.name.clone(),
+                    vlan: Some(v),
+                    routed: true,
+                    untagged: true,
+                    reason: format!("the native VLAN of {} is not lowered", p.i.name),
+                    lines,
+                },
+                None => Unlowered {
+                    name: p.i.name.clone(),
+                    vlan: None,
+                    routed: true,
+                    untagged: true,
+                    reason: format!("the dot1q VLAN of {} is not read", p.i.name),
+                    lines: p.i.lines,
+                },
+            }
+        })
+        .collect()
 }
 
 /// Whether the section `arp_vrfs` gives the ARP table of a VRF other than
@@ -568,10 +613,20 @@ fn groups(
 /// An interface in the form of the shared ACL and NAT functions. The lines
 /// that the lowering does not model go to the unhandled lines: a NAT role
 /// in a VRF, a VRF with no IPv4 or not in the config, a native VLAN of a
-/// sub-interface, an admin state that is not known and `no ip routing`.
+/// sub-interface, an admin state that is not known, `no ip routing` and the
+/// unhandled lines of the parent port of a sub-interface. A sub-interface
+/// with no QoS policy of its own in a direction takes the policy of its
+/// parent port.
 fn port(i: &Interface, admin: Option<bool>, cfg: &Config) -> nxos::config::Interface {
     let vrf = i.vrf.as_ref().map(|v| v.0.clone());
     let mut unhandled = i.unhandled.clone();
+    let parent = i
+        .name
+        .split_once('.')
+        .and_then(|(p, _)| cfg.interfaces.iter().find(|x| x.name == p));
+    if let Some(p) = parent {
+        unhandled.extend(p.unhandled.iter().map(|u| format!("{}: {u}", p.name)));
+    }
     if admin.is_none() {
         unhandled.push("the admin state is not known".into());
     }
@@ -605,8 +660,14 @@ fn port(i: &Interface, admin: Option<bool>, cfg: &Config) -> nxos::config::Inter
         acl_in: i.acl_in.clone(),
         acl_out: i.acl_out.clone(),
         nat: i.nat,
-        qos_in: i.qos_in.clone(),
-        qos_out: i.qos_out.clone(),
+        qos_in: i
+            .qos_in
+            .clone()
+            .or_else(|| parent.and_then(|p| p.qos_in.clone())),
+        qos_out: i
+            .qos_out
+            .clone()
+            .or_else(|| parent.and_then(|p| p.qos_out.clone())),
         unhandled,
         lines: i.lines,
         ..nxos::config::Interface::default()

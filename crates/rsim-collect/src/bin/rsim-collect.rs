@@ -14,7 +14,9 @@
 //! | `VYOS_PROXY`, `VYOS_<NAME>_PROXY` | A proxy for the first connection: `http://host:port` or `socks5://host:port`, with an optional `user:password@` |
 //! | `NXOS_<NAME>_IP`, `NXOS_USER`, `NXOS_PASS` | An NX-OS switch and the credential of the switches, with the same `KEY_FILE`, `AGENT`, `VIA`, `PROXY`, `MODE` and `PROFILE` keys as VyOS |
 //! | `NXOS_<NAME>_JSON` | `native` for `\| json native` (NX-OS 9.3 and later), needed for a large route table |
-//! | `NXOS_<NAME>_CHANNELS` | The exec channels at one time. The default is 1: one command after the other. |
+//! | `IOSXR_<NAME>_IP`, `IOSXR_USER`, `IOSXR_PASS` | An IOS XR router and the credential of the IOS XR routers, with the same `KEY_FILE`, `AGENT`, `VIA`, `PROXY`, `MODE` and `PROFILE` keys as VyOS |
+//! | `IOSXE_<NAME>_IP`, `IOSXE_USER`, `IOSXE_PASS` | An IOS XE device and the credential of the IOS XE devices, with the same keys as IOS XR |
+//! | `NXOS_<NAME>_CHANNELS`, `IOSXR_<NAME>_CHANNELS`, `IOSXE_<NAME>_CHANNELS` | The exec channels at one time. The default is 1: one command after the other. |
 //! | `UNIFI_CONTROLLER` | The addresses of the UniFi consoles, separated by commas |
 //! | `UNIFI_SITES` | The sites, separated by commas. The default is `default`. |
 //! | `UNIFI_USER`, `UNIFI_PASS` | The credential of the UniFi consoles |
@@ -28,7 +30,8 @@
 //! | `JUMP_<NAME>_PROFILE` | `legacy` for the legacy SSH algorithm set |
 //!
 //! A `<NAME>` of a device or a jump host is in upper case with `_`; the id
-//! is in lower case with `-`. A jump host gets only its own credential.
+//! is in lower case with `-`. Two devices with one id are an error. A jump
+//! host gets only its own credential.
 //!
 //! The data folder holds the store, the store keys and the pin file. The
 //! keys are made at the first run.
@@ -365,8 +368,23 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
     }
     if s.devices.is_empty() {
         return Err(
-            "the env file has no VYOS_<NAME>_IP, no NXOS_<NAME>_IP and no UNIFI_CONTROLLER".into(),
+            "the env file has no VYOS_<NAME>_IP, no NXOS_<NAME>_IP, no IOSXR_<NAME>_IP, \
+                    no IOSXE_<NAME>_IP and no UNIFI_CONTROLLER"
+                .into(),
         );
+    }
+    let mut seen: BTreeMap<&str, &Device> = BTreeMap::new();
+    for d in &s.devices {
+        if let Some(first) = seen.insert(&d.id, d) {
+            return Err(format!(
+                "the {} device {} and the {} device {} have one id: {}",
+                first.vendor.name(),
+                first.address,
+                d.vendor.name(),
+                d.address,
+                d.id
+            ));
+        }
     }
     Ok(s)
 }
@@ -620,6 +638,23 @@ mod tests {
             ))
             .is_err()
         );
+    }
+
+    #[test]
+    fn two_devices_with_one_id_are_an_error() {
+        for text in [
+            "VYOS_CORE1_IP=192.0.2.1\nNXOS_CORE1_IP=192.0.2.2\n",
+            "IOSXR_EDGE_1_IP=192.0.2.1\nIOSXE_EDGE_1_IP=192.0.2.2\n",
+            "VYOS_EDGE_2_IP=192.0.2.1\nVYOS_EDGE-2_IP=192.0.2.2\n",
+            "VYOS_UNIFI_DEFAULT_IP=192.0.2.1\nUNIFI_CONTROLLER=192.0.2.8\nUNIFI_API_KEY=k\n",
+        ] {
+            let creds = "VYOS_USER=u\nVYOS_PASS=p\nNXOS_USER=u\nNXOS_PASS=p\n\
+                         IOSXR_USER=u\nIOSXR_PASS=p\nIOSXE_USER=u\nIOSXE_PASS=p\n";
+            let err = setup(&parse_env(&format!("{text}{creds}")))
+                .err()
+                .unwrap_or_else(|| panic!("{text}"));
+            assert!(err.contains("one id"), "{err}");
+        }
     }
 
     #[test]

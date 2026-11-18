@@ -435,6 +435,14 @@ impl L<'_> {
             }
         }
         own.extend(foreign.iter().copied());
+        // The function of a frame that the MAC lookup of the ports and the
+        // SVIs does not find.
+        let has_mac = !plans.is_empty() || !svis.is_empty();
+        let miss = if st.no_mac_table && has_mac {
+            self.mac_miss("flood")
+        } else {
+            self.id("flood")
+        };
 
         // The summary: the ports, the next hops, the ARP rows of the SVIs and
         // the facts of each VLAN with an SVI.
@@ -923,12 +931,17 @@ impl L<'_> {
                     (bd.clone(), kept)
                 })
                 .collect();
+            let miss_peer = if st.no_mac_table {
+                self.mac_miss("flood-peer")
+            } else {
+                self.id("flood-peer")
+            };
             let meta = self.meta("mac-peer", vec![SourceSpan::line(VPC_GUIDE, 7)]);
             self.out.functions.push(Arc::new(MacLookup {
                 meta,
                 tables: tables.clone(),
                 egress: egress_peer,
-                flood: self.id("flood-peer"),
+                flood: miss_peer,
                 hairpin: BTreeSet::new(),
                 blocked: BTreeMap::new(),
             }));
@@ -961,7 +974,7 @@ impl L<'_> {
                 meta,
                 tables: tables_svi,
                 egress: egress.clone(),
-                flood: self.id("flood"),
+                flood: miss.clone(),
                 hairpin: BTreeSet::new(),
                 blocked: BTreeMap::new(),
             }));
@@ -997,13 +1010,11 @@ impl L<'_> {
                 peer_link: peer_links.iter().next().cloned(),
             });
         }
-        self.vxlan_split_horizon(tunnel, &tables, &egress, &flood, &bdf);
-        let mut miss = self.id("flood");
-        if st.no_mac_table && (!plans.is_empty() || !svis.is_empty()) {
+        self.vxlan_split_horizon(tunnel, &tables, &egress, &flood, &bdf, st.no_mac_table);
+        if st.no_mac_table && has_mac {
             self.far_macs(&plans, &own, ext, &mut tables);
-            miss = self.mac_miss();
         }
-        if !plans.is_empty() || !svis.is_empty() {
+        if has_mac {
             let meta = self.meta("mac", Vec::new());
             self.out.functions.push(Arc::new(MacLookup {
                 meta,
@@ -1114,11 +1125,12 @@ impl L<'_> {
         }
     }
 
-    /// The function of a frame that the MAC lookup does not find, with no
-    /// collected MAC table: a broadcast frame floods, and each other frame
-    /// gives `Unknown`, because its port or its flood is not known.
-    fn mac_miss(&mut self) -> FunctionId {
-        let f = "mac-miss";
+    /// The function of a frame that a MAC lookup does not find, with no
+    /// collected MAC table: a broadcast frame goes to the flood `flood`, and
+    /// each other frame gives `Unknown`, because its port or its flood is not
+    /// known. The flood `flood-<x>` has the function `mac-miss-<x>`.
+    pub(super) fn mac_miss(&mut self, flood: &str) -> FunctionId {
+        let f = &format!("mac-miss{}", flood.strip_prefix("flood").unwrap_or(""));
         let span = SourceSpan::new(self.file_name(), 1, 1);
         let broadcast = FRule::new(
             "a broadcast frame floods",
@@ -1137,7 +1149,7 @@ impl L<'_> {
             acl: ObjectId::new(format!("{}:{f}", self.dev)),
             rules: vec![broadcast, rest],
             default: RuleAction::Deny,
-            next: self.id("flood"),
+            next: self.id(flood),
         });
         self.id(f)
     }

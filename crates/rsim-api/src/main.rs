@@ -51,12 +51,6 @@ fn main() -> ExitCode {
         );
         return ExitCode::from(2);
     }
-    let state = Arc::new(State::new(Settings {
-        listen,
-        store,
-        allow_origins: origins,
-        max_body,
-    }));
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_io()
         .build()
@@ -69,7 +63,14 @@ fn main() -> ExitCode {
     };
     let r = rt.block_on(async {
         let listener = tokio::net::TcpListener::bind(listen).await?;
-        eprintln!("rsim-api listens on http://{}", listener.local_addr()?);
+        let listen = listener.local_addr()?;
+        eprintln!("rsim-api listens on http://{listen}");
+        let state = Arc::new(State::new(Settings {
+            listen,
+            store,
+            allow_origins: origins,
+            max_body,
+        }));
         rsim_api::server::serve(listener, state).await
     });
     match r {

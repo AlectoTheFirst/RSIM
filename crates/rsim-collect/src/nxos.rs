@@ -8,7 +8,6 @@
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::time::Duration;
 
 use rsim_store::{
     ADDRESSES, Cell, Class, Format, LINK_SPEEDS, LINKS, MAC_TABLE, NEIGHBOURS, ROUTES, Row,
@@ -18,8 +17,8 @@ use serde_json::Value;
 
 use crate::cli::CliRules;
 use crate::{
-    BoxFuture, Device, Extract, RawSection, SectionSpec, Source, Ssh, TransportError, Vendor,
-    fetch_sections,
+    BoxFuture, Device, Extract, RawSection, SectionSpec, Source, Ssh, Timeouts, TransportError,
+    Vendor, fetch_sections,
 };
 
 /// The CLI rules of NX-OS: the Cisco rules with no banner strip, because
@@ -409,7 +408,7 @@ impl Source for NxosSource {
     fn fetch<'a>(
         &'a self,
         device: &'a Device,
-        timeout: Duration,
+        timeouts: Timeouts,
     ) -> BoxFuture<'a, Vec<RawSection>> {
         Box::pin(async move {
             let serial = self.ssh.serial(device);
@@ -417,7 +416,7 @@ impl Source for NxosSource {
                 let ssh = self.ssh.clone();
                 Box::pin(async move { ssh.run(device, &command).await })
             };
-            let mut out = fetch_sections(self.sections(device), timeout, serial, read).await;
+            let mut out = fetch_sections(self.sections(device), timeouts, serial, read).await;
             RULES.apply(&mut out, self.ssh.banner_each_command(device));
             out.iter_mut().for_each(shape);
             out

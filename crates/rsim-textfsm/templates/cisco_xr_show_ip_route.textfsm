@@ -38,10 +38,10 @@ Start
   ^Gateway\s+of\s+last\s+resort
   ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP},\s+${UPTIME},\s+${INTERFACE}(?:\s+${BACKUP})? -> Record
   ^\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP},\s+${UPTIME},\s+${INTERFACE}(?:\s+${BACKUP})? -> Record
-  ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP},\s+${UPTIME} -> Record
-  ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP}\s+\(nexthop\sin\s${INTERFACE}\),\s+${UPTIME} -> Record
-  ^\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP},\s+${UPTIME} -> Record
-  ^\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP}\s+\(nexthop\sin\s${INTERFACE}\),\s+${UPTIME} -> Record
+  ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP},\s+${UPTIME}(?:\s+${BACKUP})? -> Record
+  ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP}\s+\(nexthop\sin\s${INTERFACE}\),\s+${UPTIME}(?:\s+${BACKUP})? -> Record
+  ^\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP},\s+${UPTIME}(?:\s+${BACKUP})? -> Record
+  ^\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP}\s+\(nexthop\sin\s${INTERFACE}\),\s+${UPTIME}(?:\s+${BACKUP})? -> Record
   ^\s*$$
   ^\S+\s+\S+\s+\d+\s+\d+:\d+:\d+
   ^% No matching routes found
@@ -73,8 +73,8 @@ AFTER_UNREAD
   ^\s+(\S+\s+-\s+.+[,]*)+ -> Start
   ^Gateway\s+of\s+last\s+resort -> Start
   ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP},\s+${UPTIME},\s+${INTERFACE}(?:\s+${BACKUP})? -> Record Start
-  ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP},\s+${UPTIME} -> Record Start
-  ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP}\s+\(nexthop\sin\s${INTERFACE}\),\s+${UPTIME} -> Record Start
+  ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP},\s+${UPTIME}(?:\s+${BACKUP})? -> Record Start
+  ^${PROTOCOL}\s+${NETWORK}/${PREFIX_LENGTH}\s+(?:\[${DISTANCE}/${METRIC}\]|is)\s+${TYPE}\s+${NEXT_HOP}\s+\(nexthop\sin\s${INTERFACE}\),\s+${UPTIME}(?:\s+${BACKUP})? -> Record Start
   ^\s*$$ -> Start
   ^\S+\s+\S+\s+\d+\s+\d+:\d+:\d+ -> Start
   ^% No matching routes found -> Start

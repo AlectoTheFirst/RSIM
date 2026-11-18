@@ -747,8 +747,15 @@ proptest! {
         let po = sa.project_original();
         prop_assert_eq!(&po, &set(&ar, &originals));
         let projected = sa.project(&[rsim_core::HeaderField::DstIp]);
-        for x in [&sa, &po, &projected] {
+        let related = sa.project_with_original(&[rsim_core::HeaderField::Dscp]);
+        for x in [&sa, &po, &projected, &related] {
             prop_assert!(x.has_free_levels());
+        }
+        prop_assert!(sa.is_subset(&related));
+        prop_assert_eq!(related.project_original(), po.clone());
+        for p in &eb {
+            let kept = ea.iter().any(|q| q.original == p.original && q.current.dscp == p.current.dscp);
+            prop_assert_eq!(related.contains(p), kept, "{:?}", p);
         }
     }
 
