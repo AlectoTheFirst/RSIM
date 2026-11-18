@@ -37,6 +37,7 @@ fn file(section: &str) -> Option<&'static str> {
         "version" => "version.txt",
         "interfaces" => "interfaces.txt",
         "rib" => "rib.txt",
+        "rib_global" => "rib_global.txt",
         "arp" => "arp.txt",
         "acls" => "acls.txt",
         _ => return None,
@@ -115,7 +116,15 @@ async fn the_first_cycle_keeps_each_text_answer() {
     let mut e = env();
     let r = e.c.run_cycle().await.unwrap();
     assert!(r.snapshot.is_some() && r.failed.is_empty(), "{r:?}");
-    for s in ["config", "version", "interfaces", "rib", "arp", "acls"] {
+    for s in [
+        "config",
+        "version",
+        "interfaces",
+        "rib",
+        "rib_global",
+        "arp",
+        "acls",
+    ] {
         assert_eq!(status(&e, s), SectionStatus::Fresh, "{s}");
     }
     for s in ["lldp", "cdp", "vrfs", "inventory", "hsrp", "vrrp"] {
@@ -155,6 +164,7 @@ async fn the_ages_and_counters_make_no_snapshot_and_a_config_change_makes_one() 
         ("config", "config.txt"),
         ("version", "version.txt"),
         ("rib", "rib.txt"),
+        ("rib_global", "rib_global.txt"),
         ("interfaces", "interfaces.txt"),
         ("arp", "arp.txt"),
         ("acls", "acls.txt"),

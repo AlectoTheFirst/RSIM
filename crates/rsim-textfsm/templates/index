@@ -2,7 +2,7 @@
 # uses, in the format of the ntc-templates index. The first row that matches a
 # command selects its template.
 #
-# The first three rows are the route tables and the access lists, whose
+# The first rows are the route tables and the access lists, whose
 # templates differ from ntc-templates (see the comment at the top of each).
 # Their patterns end in `$` or come before the ntc-templates rows, so that
 # they win over a row of the same command prefix. The other rows are the
@@ -14,6 +14,7 @@ Template, Hostname, Platform, Command
 
 cisco_ios_show_ip_access-lists.textfsm, .*, cisco_ios, sh[[ow]] ip acce[[ss-lists]]
 cisco_ios_show_ip_route.textfsm, .*, cisco_ios, sh[[ow]] ip ro[[ute]] vrf \*$
+cisco_ios_show_ip_route.textfsm, .*, cisco_ios, sh[[ow]] ip ro[[ute]]$
 cisco_xr_show_ip_route.textfsm, .*, cisco_xr, sh[[ow]] ro[[ute]] vrf all ipv4$
 
 cisco_ios_show_ip_ospf_database_network.textfsm, .*, cisco_ios, sh[[ow]] ip ospf data[[base]] ne[[twork]]

@@ -23,6 +23,7 @@ use crate::nxos::state::mac;
 pub const SECTIONS: &[(&str, &str)] = &[
     ("interfaces", "show interfaces"),
     ("rib", "show ip route vrf *"),
+    ("rib_global", "show ip route"),
     ("arp", "show ip arp"),
     ("acls", "show ip access-lists"),
 ];
@@ -74,7 +75,7 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
     State {
         l3: crate::iosxr::state::State {
             interfaces: section(sections, "interfaces", |p, _| Ok(interfaces(p, names))),
-            rib: section(sections, "rib", |p, text| Ok(rib(p, text, names))),
+            rib: routes(sections, names),
             arp: section(sections, "arp", |p, _| Ok(arp(p, names))),
             ..Default::default()
         },
@@ -82,17 +83,30 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
     }
 }
 
+/// The route tables. With the section `rib_global`, the global table comes
+/// from it, and the section `rib` gives only the tables of the VRFs.
+/// Without it, the global table is the table before the first VRF header
+/// of `rib`.
+fn routes(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> Section<Rib> {
+    let all = section(sections, "rib", |p, text| Ok(rib(p, text, names)));
+    let global = section(sections, "rib_global", |p, text| Ok(rib(p, text, names)));
+    let (Some(Ok(mut global)), Some(Ok(all))) = (global, all) else {
+        return section(sections, "rib", |p, text| Ok(rib(p, text, names)));
+    };
+    let named = |vrf: &Option<String>| vrf.as_deref() != Some(DEFAULT_VRF);
+    global
+        .paths
+        .extend(all.paths.into_iter().filter(|p| p.vrf != DEFAULT_VRF));
+    global
+        .unread
+        .extend(all.unread.into_iter().filter(|u| named(&u.vrf)));
+    Some(Ok(global))
+}
+
 /// True if the route table section is in the snapshot and its template
 /// parses it.
 pub fn rib_collected(sections: &BTreeMap<String, (Vec<u8>, String)>) -> bool {
-    matches!(
-        section(sections, "rib", |p, text| Ok(rib(
-            p,
-            text,
-            &Names::default()
-        ))),
-        Some(Ok(_))
-    )
+    matches!(routes(sections, &Names::default()), Some(Ok(_)))
 }
 
 /// The first word of a state, so `up (connected)` is `up`; the whole state
@@ -337,7 +351,7 @@ mod tests {
             let (name, _) = lib.find(PLATFORM, command).unwrap();
             let want = match *section {
                 "interfaces" => "cisco_ios_show_interfaces.textfsm",
-                "rib" => "cisco_ios_show_ip_route.textfsm",
+                "rib" | "rib_global" => "cisco_ios_show_ip_route.textfsm",
                 "arp" => "cisco_ios_show_ip_arp.textfsm",
                 _ => "cisco_ios_show_ip_access-lists.textfsm",
             };

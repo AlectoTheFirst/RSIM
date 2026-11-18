@@ -20,7 +20,7 @@ pub use state::rib_collected;
 pub use table::table;
 
 /// The text sections of a router that the lowering reads.
-pub const SECTIONS: &[&str] = &["interfaces", "rib", "arp", "acls"];
+pub const SECTIONS: &[&str] = &["interfaces", "rib", "rib_global", "arp", "acls"];
 
 /// The resolver of the interface names of the sections to the names of the
 /// config.

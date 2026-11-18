@@ -91,6 +91,7 @@ const SPECS: &[Spec] = {
         ("cdp", "show cdp neighbors detail", Observation, true, CDP),
         ("vrfs", "show vrf detail", Configuration, true, NONE),
         ("rib", "show ip route vrf *", Observation, false, ROUTES),
+        ("rib_global", "show ip route", Observation, false, ROUTES),
         ("arp", "show ip arp", Observation, true, ARP),
         ("acls", "show ip access-lists", Configuration, true, ACLS),
         ("inventory", "show inventory", Configuration, true, NONE),

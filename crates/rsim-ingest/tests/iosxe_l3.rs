@@ -24,18 +24,18 @@ const RIB: &str = include_str!("fixtures/iosxe/rib.txt");
 
 type Sections = BTreeMap<String, (Vec<u8>, String)>;
 
+/// The sections that have a fixture. `rib_global` has none, so the global
+/// table is the first table of `rib`.
 fn sections() -> Sections {
     iosxe::SECTIONS
         .iter()
-        .map(|n| {
+        .filter_map(|n| {
             let path = format!(
                 "{}/tests/fixtures/iosxe/{n}.txt",
                 env!("CARGO_MANIFEST_DIR")
             );
-            (
-                n.to_string(),
-                (std::fs::read(path).unwrap(), format!("edge1/{n}")),
-            )
+            let bytes = std::fs::read(path).ok()?;
+            Some((n.to_string(), (bytes, format!("edge1/{n}"))))
         })
         .collect()
 }
@@ -814,4 +814,47 @@ fn two_builds_give_the_same_answers() {
         assert_eq!(q(&a), q(&b));
     }
     assert_eq!(estate().notes, estate().notes);
+}
+
+#[test]
+fn the_section_of_the_global_table_gives_the_default_vrf() {
+    let doc = iosxe::read_text(CONFIG);
+    let cfg = iosxe::read(&doc, &iosxe::table(true));
+    let global = "Gateway of last resort is 198.51.100.5 to network 0.0.0.0\n\nS*    0.0.0.0/0 [1/0] via 198.51.100.5\nC        198.51.100.4/30 is directly connected, GigabitEthernet0/0/4\n";
+    let st = iosxe::state::read(&with_section("rib_global", global), &iosxe::names(&cfg));
+    let rib = st.l3.rib.unwrap().unwrap();
+    let default: Vec<String> = rib
+        .paths
+        .iter()
+        .filter(|p| p.vrf == "default")
+        .map(|p| format!("{} {:?}", p.prefix, p.gateway))
+        .collect();
+    assert_eq!(
+        default,
+        ["0.0.0.0/0 Some(198.51.100.5)", "198.51.100.4/30 None"]
+    );
+    assert!(rib.paths.iter().any(|p| p.vrf == "RED"));
+    assert!(rib.paths.iter().any(|p| p.vrf == "BLUE"));
+    // The unread line of the global part of `vrf *` is not in the result.
+    assert!(
+        rib.unread
+            .iter()
+            .all(|u| u.vrf.as_deref() != Some("default"))
+    );
+    assert!(
+        rib.paths
+            .iter()
+            .all(|p| p.vrf != "default" || p.span.file.as_ref() == "edge1/rib_global")
+    );
+    // Without the section, the global table is the first table of `vrf *`.
+    let rib = iosxe::state::read(&sections(), &iosxe::names(&cfg))
+        .l3
+        .rib
+        .unwrap()
+        .unwrap();
+    assert!(
+        rib.paths
+            .iter()
+            .any(|p| p.vrf == "default" && p.prefix.to_string() == "198.51.100.128/25")
+    );
 }
