@@ -607,6 +607,8 @@ fn a_state_change_alters_the_hash_of_the_neighbour_detail_and_a_counter_change_d
                 "\"lastResetTimerMsecs\": 75670000",
             ),
             ("\"estimatedRttInMsecs\": 1", "\"estimatedRttInMsecs\": 2"),
+            ("\"portLocal\": 179", "\"portLocal\": 40123"),
+            ("\"portForeign\": 51234", "\"portForeign\": 51299"),
         ],
         &[
             ("\"bgpState\": \"Established\"", "\"bgpState\": \"Idle\""),
@@ -813,4 +815,49 @@ async fn vyos_with_all_reads_the_ipv4_unicast_neighbours_and_off_reads_no_bgp() 
             .collect();
         assert_eq!(names, sections, "{capture:?}");
     }
+}
+
+/// Runs a cycle with the sessions answer `sessions`, then a cycle with an
+/// answer that is not JSON, and checks that the second cycle sends no table
+/// command and stores no new blob of the tables.
+async fn sessions_not_json(vendor: Vendor, command: &str, sessions: &str, garbage: &str) {
+    let mut e = env(vendor, CaptureBgp::All);
+    e.t.reply(command, sessions);
+    e.c.run_cycle().await.unwrap();
+    let first = entry(&e, bgp::ROUTES).unwrap().blob.unwrap();
+    assert_ne!(bytes(&e, bgp::ROUTES), "{}");
+
+    e.t.reply(command, garbage);
+    let sent = e.t.log.lock().unwrap().len();
+    tokio::time::advance(Duration::from_secs(60)).await;
+    e.c.run_cycle().await.unwrap();
+    let routes = entry(&e, bgp::ROUTES).unwrap();
+    assert!(absent(&e, bgp::ROUTES), "{vendor}: {routes:?}");
+    assert!(
+        routes.blob.is_none_or(|b| b == first),
+        "{vendor}: {routes:?}"
+    );
+    let log = e.t.log.lock().unwrap().clone();
+    assert!(
+        !log[sent..].iter().any(|c| c.contains("unicast neighbors")),
+        "{vendor}: {log:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn sessions_that_are_not_json_give_no_new_blob_of_the_tables() {
+    sessions_not_json(
+        Vendor::Vyos,
+        rsim_collect::vyos::BGP_SESSIONS_COMMAND,
+        &fixture("vyos/bgp_sessions.json"),
+        "vtysh: the daemon is not ready\n",
+    )
+    .await;
+    sessions_not_json(
+        Vendor::Nxos,
+        rsim_collect::nxos::BGP_SESSIONS_COMMAND,
+        &fixture("nxos/bgp_sessions.json"),
+        "the BGP process is restarting\n",
+    )
+    .await;
 }

@@ -506,12 +506,12 @@ pub fn sections_with(native_json: bool, capture: CaptureBgp) -> Vec<SectionSpec>
 }
 
 /// The IPv4 neighbours of an answer of `show bgp sessions` after
-/// [`shape`]: `neighbor-id` of each row of each VRF row.
-fn json_peers(bytes: &[u8]) -> BTreeSet<Peer> {
+/// [`shape`]: `neighbor-id` of each row of each VRF row. An answer that is
+/// not JSON gives [`TransportError::NotFound`].
+fn json_peers(bytes: &[u8]) -> Result<BTreeSet<Peer>, TransportError> {
     let mut out = BTreeSet::new();
-    let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
-        return out;
-    };
+    let v = serde_json::from_slice::<Value>(bytes)
+        .map_err(|e| TransportError::NotFound(format!("the session summary is not JSON: {e}")))?;
     for vr in rows(&v, "vrf") {
         let vrf = vrf(vr);
         for n in rows(vr, "neighbor") {
@@ -523,7 +523,7 @@ fn json_peers(bytes: &[u8]) -> BTreeSet<Peer> {
             }
         }
     }
-    out
+    Ok(out)
 }
 
 /// True for the error of a device that cannot be reached.
@@ -587,8 +587,9 @@ impl Source for NxosSource {
     /// Reads the sections of the static list. When the switch refuses the
     /// sessions of all VRFs, the fetch then reads the sessions of the
     /// global table, [`BGP_SESSIONS_DEFAULT`]. Then it reads the 3 tables
-    /// of each IPv4 neighbour of the sessions. A failed or absent answer of
-    /// the sessions makes the section of the tables absent, except a
+    /// of each IPv4 neighbour of the first of the 2 sessions sections whose
+    /// answer is JSON. A failed, absent or unreadable answer of the
+    /// sessions makes the section of the tables absent, except a
     /// connect error or a timeout, which the section takes as its error, as
     /// it does when each of its commands ends in one.
     fn fetch<'a>(
@@ -628,10 +629,10 @@ impl Source for NxosSource {
                         )),
                     }
                 } else {
-                    let sessions = [bgp::SESSIONS, BGP_SESSIONS_DEFAULT]
+                    let peers = [bgp::SESSIONS, BGP_SESSIONS_DEFAULT]
                         .iter()
                         .filter_map(|n| out.iter().find(|s| s.spec.name == *n))
-                        .map(|s| s.result.clone())
+                        .map(|s| s.result.clone().and_then(|b| json_peers(&b)))
                         .reduce(|a, b| match (&a, &b) {
                             (Ok(_), _) => a,
                             (_, Ok(_)) => b,
@@ -641,7 +642,6 @@ impl Source for NxosSource {
                         .unwrap_or_else(|| {
                             Err(TransportError::NotFound("the sessions are not read".into()))
                         });
-                    let peers = sessions.map(|b| json_peers(&b));
                     let parts = match &peers {
                         Ok(p) => Ok(bgp::route_parts(p, |v, a, d| {
                             let c = bgp_route_command(v, a, d);

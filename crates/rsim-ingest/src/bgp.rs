@@ -1,6 +1,6 @@
 //! The BGP sessions of a router from its collected session sections, with
-//! the outcome of the read and its scope: the VRFs and the address families
-//! that the read covers. A neighbour outside the scope of a read is not
+//! the outcome of the read and its scope: the pairs of a VRF and an address
+//! family that the read covers. A neighbour outside the scope of a read is not
 //! known to be absent.
 //!
 //! An answer with lines in the shape of session rows of which none is read
@@ -39,23 +39,33 @@ pub enum Outcome {
     NotCaptured,
 }
 
-/// The VRFs or the address families that a read covers: the listed members
-/// only.
+/// The pairs of a VRF and an address family that a read covers: the listed
+/// pairs only.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Scope(pub BTreeSet<String>);
+pub struct Scope(pub BTreeSet<(String, String)>);
 
 impl Scope {
-    fn of<'a>(names: impl IntoIterator<Item = &'a str>) -> Scope {
-        Scope(names.into_iter().map(str::to_string).collect())
+    /// IPv4 unicast in each of the VRFs.
+    fn ipv4_unicast(vrfs: impl IntoIterator<Item = String>) -> Scope {
+        Scope(
+            vrfs.into_iter()
+                .map(|v| (v, IPV4_UNICAST.to_string()))
+                .collect(),
+        )
     }
 
     fn none() -> Scope {
         Scope::default()
     }
 
-    /// True if the scope holds the member.
-    pub fn covers(&self, name: &str) -> bool {
-        self.0.contains(name)
+    /// True if the scope holds the address family in the VRF.
+    pub fn covers(&self, vrf: &str, family: &str) -> bool {
+        self.0.contains(&(vrf.to_string(), family.to_string()))
+    }
+
+    /// The VRFs of the pairs.
+    pub fn vrfs(&self) -> BTreeSet<&str> {
+        self.0.iter().map(|(v, _)| v.as_str()).collect()
     }
 }
 
@@ -63,8 +73,7 @@ impl Scope {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SectionOutcome {
     pub outcome: Outcome,
-    pub vrfs: Scope,
-    pub families: Scope,
+    pub scope: Scope,
     /// The reason of an outcome other than `Complete`, or the lines that
     /// are not read.
     pub detail: Option<String>,
@@ -74,8 +83,7 @@ impl SectionOutcome {
     fn new(outcome: Outcome, detail: impl Into<String>) -> SectionOutcome {
         SectionOutcome {
             outcome,
-            vrfs: Scope::none(),
-            families: Scope::none(),
+            scope: Scope::none(),
             detail: Some(detail.into()),
         }
     }
@@ -213,8 +221,8 @@ const FRR_FAMILIES: &[(&str, &str)] = &[
 const FRR_ESTABLISHED: &str = "Established";
 
 /// The sessions of a VyOS router: each peer of each address family key of
-/// each VRF. The scope is the VRFs and the address families that the answer
-/// lists, because the listing of a named VRF and of a family other than
+/// each VRF. The scope is each pair of a VRF and an address family that the
+/// answer lists with its peers, because the listing of a named VRF and of a family other than
 /// IPv4 unicast is not confirmed. An empty answer `{}` has no session. A
 /// member that is not a known address family of a VRF is not read.
 pub fn vyos(answer: Answer<'_>) -> Sessions {
@@ -246,13 +254,12 @@ pub fn vyos(answer: Answer<'_>) -> Sessions {
         top.iter().map(|s| (s.key.as_str(), s)).collect()
     };
     let (mut rows, mut unread) = (Vec::new(), Vec::new());
-    let (mut vrf_scope, mut families) = (BTreeSet::new(), BTreeSet::new());
+    let mut scope = BTreeSet::new();
     for (vrf, v) in vrfs {
         let Body::Object(members) = &v.body else {
             unread.push(format!("VRF {vrf} is not an object"));
             continue;
         };
-        let mut read_one = false;
         for m in members {
             let Some(fam) = family(&m.key) else {
                 if !flat && matches!(m.body, Body::Object(_)) {
@@ -264,8 +271,7 @@ pub fn vyos(answer: Answer<'_>) -> Sessions {
                 unread.push(format!("VRF {vrf} {fam} has no peers"));
                 continue;
             };
-            read_one = true;
-            families.insert(fam.to_string());
+            scope.insert((vrf.to_string(), fam.to_string()));
             for p in peers.children() {
                 match frr_row(vrf, fam, p, file) {
                     Some(r) => rows.push(r),
@@ -273,17 +279,13 @@ pub fn vyos(answer: Answer<'_>) -> Sessions {
                 }
             }
         }
-        if read_one {
-            vrf_scope.insert(vrf.to_string());
-        }
     }
     let (outcome, detail) = rows_outcome(rows.len(), &unread);
     Sessions {
         rows,
         outcome: SectionOutcome {
             outcome,
-            vrfs: Scope(vrf_scope),
-            families: Scope(families),
+            scope: Scope(scope),
             detail,
         },
     }
@@ -320,12 +322,11 @@ const NXOS_ESTABLISHED: &str = "Established";
 
 /// The sessions of an NX-OS switch from the sessions of all VRFs, or from
 /// the sessions of the global table when the switch refuses the form of all
-/// VRFs. The answer gives no address family, so the scope of the families
-/// is IPv4 unicast: whether it lists the IPv6 and EVPN neighbours is not
-/// confirmed. The scope of the VRFs is each VRF row with a table of
-/// neighbours, only `default` for the global table; an answer with VRF rows
-/// and no table of neighbours is `Failed`. An empty answer `{}` has no
-/// session and an empty scope.
+/// VRFs. The answer gives no address family, and whether it lists the IPv6
+/// and EVPN neighbours is not confirmed, so the scope is IPv4 unicast in
+/// each VRF row with a table of neighbours, and only in `default` for the
+/// global table. An answer with VRF rows and no table of neighbours is
+/// `Failed`. An empty answer `{}` has no session and an empty scope.
 pub fn nxos(all: Answer<'_>, default: Answer<'_>) -> Sessions {
     let (answer, global) = match (all, default) {
         (Answer::Fresh(..), _) => (all, false),
@@ -348,19 +349,17 @@ pub fn nxos(all: Answer<'_>, default: Answer<'_>) -> Sessions {
             ));
         }
     };
-    let families = Scope::of([IPV4_UNICAST]);
     let empty = matches!(&doc.root.body, Body::Object(m) if m.is_empty());
     if empty {
         return Sessions {
             rows: Vec::new(),
             outcome: SectionOutcome {
                 outcome: Outcome::CompleteEmpty,
-                vrfs: if global {
-                    Scope::of(["default"])
+                scope: if global {
+                    Scope::ipv4_unicast(["default".to_string()])
                 } else {
                     Scope::none()
                 },
-                families,
                 detail: None,
             },
         };
@@ -405,8 +404,7 @@ pub fn nxos(all: Answer<'_>, default: Answer<'_>) -> Sessions {
         rows,
         outcome: SectionOutcome {
             outcome,
-            vrfs: Scope(vrfs),
-            families,
+            scope: Scope::ipv4_unicast(vrfs),
             detail: (!notes.is_empty()).then(|| notes.join("; ")),
         },
     }
@@ -563,8 +561,7 @@ fn cisco(vendor: Cisco, global: Answer<'_>, vrfs: Answer<'_>) -> Sessions {
         rows: parts.into_iter().flat_map(|p| p.rows).collect(),
         outcome: SectionOutcome {
             outcome,
-            vrfs: Scope(scope),
-            families: Scope::of([IPV4_UNICAST]),
+            scope: Scope::ipv4_unicast(scope),
             detail: (!notes.is_empty()).then(|| notes.join("; ")),
         },
     }

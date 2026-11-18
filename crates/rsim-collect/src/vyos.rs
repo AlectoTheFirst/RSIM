@@ -164,8 +164,8 @@ impl Source for VyosSource {
     }
 
     /// Reads the sections, then the 3 tables of each IPv4 unicast neighbour
-    /// of the BGP sessions. A failed or absent answer of the sessions makes
-    /// the section of the tables absent, except a connect error or a
+    /// of the BGP sessions. A failed, absent or unreadable answer of the
+    /// sessions makes the section of the tables absent, except a connect error or a
     /// timeout, which the section takes as its error, as it does when each
     /// of its commands ends in one.
     fn fetch<'a>(
@@ -193,7 +193,7 @@ impl Source for VyosSource {
                         || Err(TransportError::NotFound("the sessions are not read".into())),
                         |s| s.result.clone(),
                     )
-                    .map(|b| session_peers(&b));
+                    .and_then(|b| session_peers(&b));
                 let parts = match &peers {
                     Ok(p) => Ok(bgp::route_parts(p, bgp_route_command)),
                     Err(e) => Err(e.clone()),
@@ -255,10 +255,11 @@ const BGP_SESSION_KEEP: &[&str] = &[
     "/warning",
 ];
 
-/// The timers, the counters and the up times of the neighbour detail of
-/// each VRF.
+/// The timers, the counters, the up times and the TCP ports of the
+/// neighbour detail of each VRF.
 const BGP_NEIGHBOR_TIMES: &[&str] = &[
     "/*/*/bgpTimer*",
+    "/*/*/port*",
     "/*/*/*Msecs",
     "/*/*/*Msec",
     "/*/*/*Epoch",
@@ -339,11 +340,22 @@ fn bgp_answer(section: &mut RawSection) {
 
 /// The IPv4 unicast neighbours of the BGP sessions: the addresses of
 /// `ipv4Unicast/peers` of each VRF, or of the top in the form with no VRF
-/// level.
-fn session_peers(bytes: &[u8]) -> BTreeSet<Peer> {
+/// level. An answer that is not a JSON object gives
+/// [`TransportError::NotFound`].
+fn session_peers(bytes: &[u8]) -> Result<BTreeSet<Peer>, TransportError> {
     let mut out = BTreeSet::new();
-    let Ok(Value::Object(top)) = serde_json::from_slice::<Value>(bytes) else {
-        return out;
+    let top = match serde_json::from_slice::<Value>(bytes) {
+        Ok(Value::Object(top)) => top,
+        Ok(_) => {
+            return Err(TransportError::NotFound(
+                "the session summary is not a JSON object".into(),
+            ));
+        }
+        Err(e) => {
+            return Err(TransportError::NotFound(format!(
+                "the session summary is not JSON: {e}"
+            )));
+        }
     };
     let mut add = |vrf: &str, family: Option<&Value>| {
         let Some(Value::Object(peers)) = family.and_then(|f| f.get("peers")) else {
@@ -365,7 +377,7 @@ fn session_peers(bytes: &[u8]) -> BTreeSet<Peer> {
             add(vrf, v.get("ipv4Unicast"));
         }
     }
-    out
+    Ok(out)
 }
 
 fn json(bytes: &[u8]) -> Result<Value, String> {

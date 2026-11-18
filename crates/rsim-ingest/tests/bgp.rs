@@ -20,8 +20,18 @@ fn fresh(text: &str) -> Answer<'_> {
     Answer::Fresh(text.as_bytes(), "r1/bgp_sessions")
 }
 
-fn scope(names: &[&str]) -> Scope {
-    Scope(names.iter().map(|s| s.to_string()).collect())
+fn scope(pairs: &[(&str, &str)]) -> Scope {
+    Scope(
+        pairs
+            .iter()
+            .map(|(v, f)| (v.to_string(), f.to_string()))
+            .collect(),
+    )
+}
+
+/// IPv4 unicast in each of the VRFs.
+fn ipv4(vrfs: &[&str]) -> Scope {
+    scope(&vrfs.iter().map(|v| (*v, IPV4_UNICAST)).collect::<Vec<_>>())
 }
 
 fn row<'a>(s: &'a Sessions, vrf: &str, peer: &str) -> &'a SessionRow {
@@ -40,11 +50,18 @@ fn vyos_reads_each_family_of_each_vrf_and_a_down_peer() {
     let text = fixture("vyos/bgp_sessions.json");
     let s = bgp::vyos(fresh(&text));
     assert_eq!(outcome(&s), Outcome::Complete, "{:?}", s.outcome);
-    assert_eq!(s.outcome.vrfs, scope(&["RED", "default"]));
     assert_eq!(
-        s.outcome.families,
-        scope(&[IPV4_UNICAST, "ipv6-unicast", "l2vpn-evpn"])
+        s.outcome.scope,
+        scope(&[
+            ("RED", IPV4_UNICAST),
+            ("default", IPV4_UNICAST),
+            ("default", "ipv6-unicast"),
+            ("default", "l2vpn-evpn"),
+        ])
     );
+    assert!(s.outcome.scope.covers("RED", IPV4_UNICAST));
+    assert!(!s.outcome.scope.covers("RED", "ipv6-unicast"));
+    assert!(!s.outcome.scope.covers("RED", "l2vpn-evpn"));
     assert_eq!(s.rows.len(), 5);
     let up = row(&s, "default", "192.0.2.2");
     assert!(up.established);
@@ -78,7 +95,7 @@ fn vyos_reads_each_family_of_each_vrf_and_a_down_peer() {
 fn vyos_outcomes_of_an_empty_a_misread_and_a_missing_answer() {
     let s = bgp::vyos(fresh("{}"));
     assert_eq!(outcome(&s), Outcome::CompleteEmpty);
-    assert_eq!(s.outcome.vrfs, Scope::default());
+    assert_eq!(s.outcome.scope, Scope::default());
 
     assert_eq!(outcome(&bgp::vyos(fresh("not json"))), Outcome::Failed);
     let unread = r#"{"default":{"ipv4Unicast":{"peers":{"192.0.2.2":{"remoteAs":64501}}}}}"#;
@@ -120,9 +137,8 @@ fn nxos_reads_the_vrf_rows_and_covers_ipv4_unicast_only() {
     let text = fixture("nxos/bgp_sessions.json");
     let s = bgp::nxos(fresh(&text), Answer::Absent("not sent"));
     assert_eq!(outcome(&s), Outcome::Complete, "{:?}", s.outcome);
-    assert_eq!(s.outcome.vrfs, scope(&["RED", "default"]));
-    assert_eq!(s.outcome.families, scope(&[IPV4_UNICAST]));
-    assert!(!s.outcome.families.covers("ipv6-unicast"));
+    assert_eq!(s.outcome.scope, ipv4(&["RED", "default"]));
+    assert!(!s.outcome.scope.covers("default", "ipv6-unicast"));
     assert_eq!(s.rows.len(), 4);
     assert_eq!(row(&s, "default", "198.51.100.2").state, "Idle");
     assert!(!row(&s, "default", "198.51.100.2").established);
@@ -135,7 +151,7 @@ fn nxos_reads_the_vrf_rows_and_covers_ipv4_unicast_only() {
 fn nxos_falls_back_to_the_global_table_and_guards_a_misread() {
     let text = fixture("nxos/bgp_sessions.json");
     let s = bgp::nxos(Answer::Absent("% Invalid command"), fresh(&text));
-    assert_eq!(s.outcome.vrfs, scope(&["default"]));
+    assert_eq!(s.outcome.scope, ipv4(&["default"]));
     let s = bgp::nxos(
         Answer::Absent("% Invalid command"),
         Answer::Absent("% Invalid command"),
@@ -175,12 +191,12 @@ fn nxos_falls_back_to_the_global_table_and_guards_a_misread() {
     let renamed = text.replacen("\"TABLE_neighbor\"", "\"TABLE_peer\"", 1);
     let s = bgp::nxos(fresh(&renamed), Answer::Absent("not sent"));
     assert_eq!(outcome(&s), Outcome::Complete);
-    assert_eq!(s.outcome.vrfs, scope(&["RED"]));
+    assert_eq!(s.outcome.scope, ipv4(&["RED"]));
     assert!(s.outcome.detail.unwrap().contains("VRF default"));
     let all = text.replace("\"TABLE_neighbor\"", "\"TABLE_peer\"");
     let s = bgp::nxos(fresh(&all), Answer::Absent("not sent"));
     assert_eq!(outcome(&s), Outcome::Failed);
-    assert_eq!(s.outcome.vrfs, Scope::default());
+    assert_eq!(s.outcome.scope, Scope::default());
 }
 
 fn vrfs_text(red: &str) -> String {
@@ -194,7 +210,7 @@ fn iosxr_reads_the_columns_of_each_vrf_and_a_failed_vrf_is_partial() {
     let vrfs = vrfs_text(&red);
     let s = bgp::iosxr(fresh(&global), fresh(&vrfs));
     assert_eq!(outcome(&s), Outcome::Partial, "{:?}", s.outcome);
-    assert_eq!(s.outcome.vrfs, scope(&["RED", "default"]));
+    assert_eq!(s.outcome.scope, ipv4(&["RED", "default"]));
     assert!(s.outcome.detail.as_deref().unwrap().contains("BLUE"));
     assert_eq!(s.rows.len(), 4);
     let up = row(&s, "default", "192.0.2.2");
@@ -213,7 +229,7 @@ fn iosxr_reads_the_columns_of_each_vrf_and_a_failed_vrf_is_partial() {
     assert_eq!(outcome(&s), Outcome::Complete, "{:?}", s.outcome);
     let s = bgp::iosxr(fresh(&global), fresh(""));
     assert_eq!(outcome(&s), Outcome::Complete);
-    assert_eq!(s.outcome.vrfs, scope(&["default"]));
+    assert_eq!(s.outcome.scope, ipv4(&["default"]));
 }
 
 #[test]
@@ -229,7 +245,7 @@ fn iosxr_outcomes_of_no_bgp_a_misread_and_an_empty_table() {
         .replace(" 0 64503 ", " x 64503 ");
     let s = bgp::iosxr(fresh(&garbled), Answer::NotCollected);
     assert_eq!(outcome(&s), Outcome::Failed, "{:?}", s.outcome);
-    assert!(s.outcome.vrfs.0.is_empty());
+    assert!(s.outcome.scope.0.is_empty());
 
     let one = global.replace(" 0 64502 ", " x 64502 ");
     let s = bgp::iosxr(fresh(&one), Answer::NotCollected);
@@ -259,7 +275,7 @@ fn iosxr_outcomes_of_no_bgp_a_misread_and_an_empty_table() {
         .collect();
     let s = bgp::iosxr(fresh(&empty), Answer::NotCollected);
     assert_eq!(outcome(&s), Outcome::CompleteEmpty);
-    assert_eq!(s.outcome.vrfs, scope(&["default"]));
+    assert_eq!(s.outcome.scope, ipv4(&["default"]));
     assert_eq!(
         outcome(&bgp::iosxr(Answer::NotCollected, Answer::NotCollected)),
         Outcome::NotCaptured
@@ -272,7 +288,7 @@ fn iosxe_reads_the_template_rows_with_a_dynamic_peer() {
     let red = fixture("iosxe/bgp_vrf_red.txt");
     let s = bgp::iosxe(fresh(&global), fresh(&format!("VRF: RED\n{red}")));
     assert_eq!(outcome(&s), Outcome::Complete, "{:?}", s.outcome);
-    assert_eq!(s.outcome.vrfs, scope(&["RED", "default"]));
+    assert_eq!(s.outcome.scope, ipv4(&["RED", "default"]));
     assert_eq!(s.rows.len(), 5);
     let dynamic = row(&s, "default", "203.0.113.7");
     assert!(dynamic.established);
@@ -293,8 +309,7 @@ fn iosxe_outcomes_of_no_bgp_and_a_misread_row() {
         s.outcome,
         SectionOutcome {
             outcome: Outcome::NotCaptured,
-            vrfs: Scope::default(),
-            families: scope(&[IPV4_UNICAST]),
+            scope: Scope::default(),
             detail: Some("default: % BGP not active".into()),
         }
     );
@@ -306,5 +321,5 @@ fn iosxe_outcomes_of_no_bgp_and_a_misread_row() {
     assert!(s.outcome.detail.unwrap().contains("line 15"));
     let s = bgp::iosxe(fresh(&global), Answer::Failed("the connect failed"));
     assert_eq!(outcome(&s), Outcome::Partial);
-    assert_eq!(s.outcome.vrfs, scope(&["default"]));
+    assert_eq!(s.outcome.scope, ipv4(&["default"]));
 }
