@@ -378,7 +378,7 @@ pub fn lower(
         l3.arp = Some(Ok(rows));
         next_hops(&mut l, &active, &l3, ext, &svi_links);
     }
-    handoffs(&mut l, &active, &groups, &sum, ext);
+    handoffs(&mut l, &active, &groups, &sum, ext, &[]);
     edges(&mut l, device, &active);
     (l.out, sum)
 }
