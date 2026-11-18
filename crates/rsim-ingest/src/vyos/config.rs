@@ -224,6 +224,8 @@ pub struct Config {
     /// The children of `protocols` that can add routes, for example `bgp`
     /// or `ospf`.
     pub routing_protocols: Vec<(String, Lines)>,
+    /// The BGP processes, neighbours and listen ranges.
+    pub bgp: crate::bgp_peers::BgpConfig,
     /// The first lines of the stanzas that the handlers read.
     pub read: BTreeSet<u32>,
 }
@@ -391,6 +393,7 @@ pub fn read(doc: &Document) -> Config {
             }
         }
     }
+    c.bgp = super::bgp::read(root, &mut r.read);
     c.read = r.read;
     c
 }

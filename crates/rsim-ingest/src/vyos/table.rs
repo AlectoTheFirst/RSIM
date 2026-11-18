@@ -213,6 +213,7 @@ const ENTRIES: &[Entry] = &[
 /// table; the BGP configuration of a VRF without rows is unhandled.
 pub fn table(tables: &RouteTables) -> Table {
     let mut t = Table::new(ENTRIES);
+    super::bgp::push_entries(&mut t, tables);
     t.push("protocols/bgp", tables.routing(DEFAULT_VRF), Subtree);
     tables.push_vrfs(&mut t, &["vrf", "name", VRF, "protocols", "bgp"]);
     for kind in KINDS {

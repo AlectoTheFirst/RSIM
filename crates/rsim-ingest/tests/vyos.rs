@@ -798,14 +798,37 @@ mod twin {
             vyos::dynamic_vrfs(&doc),
         );
         let table = vyos::table(&tables);
-        assert_eq!(
-            table.state(&["protocols", "bgp"]),
-            rsim_ingest::State::Irrelevant
-        );
-        assert_eq!(
-            table.state(&["vrf", "name", "BLUE", "protocols", "bgp"]),
-            rsim_ingest::State::Unhandled
-        );
+        let network = ["address-family", "ipv4-unicast", "network"];
+        let main: Vec<&str> = ["protocols", "bgp"]
+            .iter()
+            .chain(&network)
+            .copied()
+            .collect();
+        assert_eq!(table.state(&main), rsim_ingest::State::Irrelevant);
+        let blue: Vec<&str> = ["vrf", "name", "BLUE", "protocols", "bgp"]
+            .iter()
+            .chain(&network)
+            .copied()
+            .collect();
+        assert_eq!(table.state(&blue), rsim_ingest::State::Unhandled);
+        // The process and its neighbour lines are handled in each VRF.
+        for path in [
+            &["protocols", "bgp"][..],
+            &["vrf", "name", "BLUE", "protocols", "bgp"],
+            &["vrf", "name", "BLUE", "protocols", "bgp", "system-as"],
+            &[
+                "vrf",
+                "name",
+                "BLUE",
+                "protocols",
+                "bgp",
+                "neighbor",
+                "192.0.2.9",
+                "remote-as",
+            ],
+        ] {
+            assert_eq!(table.state(path), rsim_ingest::State::Handled, "{path:?}");
+        }
     }
 
     #[test]

@@ -26,6 +26,9 @@ pub struct Loaded {
     /// The coverage report of each device of a store twin; empty for a
     /// built-in topology.
     pub coverage: BTreeMap<String, rsim_ingest::coverage::Coverage>,
+    /// The BGP peer facts of each device of a store twin; empty for a
+    /// built-in topology.
+    pub bgp: BTreeMap<String, Vec<rsim_ingest::links::BgpPeerFact>>,
 }
 
 impl std::ops::Deref for Loaded {
@@ -57,6 +60,7 @@ pub fn load(topology: &str) -> Result<Loaded, QueryError> {
         twin,
         identity,
         coverage: BTreeMap::new(),
+        bgp: BTreeMap::new(),
     })
 }
 
@@ -79,6 +83,7 @@ pub fn load_store(folder: &str) -> Result<Loaded, QueryError> {
         .ok_or_else(|| err(format!("{folder} has no snapshot")))?;
     let estate = rsim_ingest::estate::build(&store, &snap).map_err(|e| err(e.to_string()))?;
     let coverage = estate.coverage.clone();
+    let bgp = estate.bgp.clone();
     let twin = estate.builder.build().map_err(|errors| {
         let text: Vec<String> = errors.iter().map(ToString::to_string).collect();
         err(format!("the twin does not build: {}", text.join("; ")))
@@ -87,6 +92,7 @@ pub fn load_store(folder: &str) -> Result<Loaded, QueryError> {
         twin,
         identity: TwinJson::snapshot(snap.manifest.cycle),
         coverage,
+        bgp,
     })
 }
 

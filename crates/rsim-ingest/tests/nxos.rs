@@ -269,7 +269,13 @@ fn without_a_route_table_the_routing_protocols_are_unhandled() {
     );
     let paths: Vec<&str> = cov.ranked().iter().map(|r| r.0).collect();
     assert!(paths.contains(&"router ospf .."), "{paths:?}");
-    assert!(paths.contains(&"router bgp .."));
+    // The neighbour lines are handled, and the routing lines below them
+    // are unhandled.
+    assert!(!paths.contains(&"router bgp .."), "{paths:?}");
+    assert!(
+        paths.iter().any(|p| p.starts_with("router bgp */")),
+        "{paths:?}"
+    );
 }
 
 /// The functions of the steps of the only branch, and its verdict.
@@ -1434,7 +1440,7 @@ fn a_vrf_with_bgp_and_no_rows_is_unknown_outside_its_connected_routes() {
         .unwrap()
         .replace(
             "router bgp 65000\n",
-            "router bgp 65000\n  vrf RED\n    address-family ipv4 unicast\n",
+            "router bgp 65000\n  vrf RED\n    address-family ipv4 unicast\n      redistribute direct route-map RM\n",
         )
         .replace(
             "vrf context RED\n",
@@ -1445,7 +1451,8 @@ fn a_vrf_with_bgp_and_no_rows_is_unknown_outside_its_connected_routes() {
     let e = estate_of(config.as_bytes(), col);
     let unhandled = &e.coverage["leaf1"].unhandled;
     assert!(
-        unhandled.contains_key("router bgp ../vrf *"),
+        unhandled
+            .contains_key("router bgp */vrf */address-family ../redistribute direct route-map RM"),
         "{unhandled:?}"
     );
     assert!(!unhandled.contains_key("router bgp .."), "{unhandled:?}");

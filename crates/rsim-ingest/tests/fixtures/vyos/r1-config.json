@@ -161,7 +161,40 @@
     "prefix-list": {"pl": {"rule": {"10": {"action": "permit", "prefix": "192.0.2.0/24"}}}}
   },
   "protocols": {
-    "bgp": {"system-as": "64496"},
+    "bgp": {
+      "system-as": "64496",
+      "parameters": {
+        "router-id": "192.0.2.254",
+        "confederation": {"identifier": "64500", "peers": ["64497", "1.10"]}
+      },
+      "address-family": {
+        "ipv4-unicast": {"network": {"192.0.2.0/26": {}}}
+      },
+      "neighbor": {
+        "192.0.2.2": {
+          "remote-as": "64501",
+          "password": "FAKEVYOSPASSWORD",
+          "update-source": "dum0",
+          "local-as": {"64505": {"no-prepend": {"replace-as": {}}}},
+          "address-family": {
+            "ipv4-unicast": {"route-map": {"import": "FROM-PEER"}}
+          }
+        },
+        "198.51.100.2": {"peer-group": "UPSTREAM", "shutdown": {}},
+        "198.51.100.6": {
+          "remote-as": "64503",
+          "address-family": {"ipv4-unicast": {}}
+        }
+      },
+      "peer-group": {
+        "UPSTREAM": {
+          "remote-as": "external",
+          "password": "FAKEPEERGROUPPASSWORD",
+          "address-family": {"ipv4-unicast": {}}
+        }
+      },
+      "listen": {"range": {"203.0.113.0/28": {"peer-group": "UPSTREAM"}}}
+    },
     "static": {
       "table": {
         "100": {"route": {"0.0.0.0/0": {"interface": {"wg0": {}}}}}

@@ -2,6 +2,7 @@
 //! for one packet with its reply gives the stored JSON, the same query
 //! gives the same bytes, and the errors give their codes and exit codes.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::thread;
@@ -768,6 +769,53 @@ fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
     let cov: Value = serde_json::from_slice(&cov.stdout).unwrap();
     assert_eq!(cov["kind"], "table_rows");
     assert!(cov["total"].as_u64().unwrap() > 0, "{cov}");
+    // The BGP peers of a store twin: the configured neighbours joined with
+    // the session rows, the listen range, the dynamic peer of the range and
+    // the observed peers with no neighbour.
+    let bgp = rsim(&[topology.as_str(), "bgp-sessions", "--format", "json"]);
+    assert_eq!(bgp.status.code(), Some(0));
+    let bgp: Value = serde_json::from_slice(&bgp.stdout).unwrap();
+    let cols: Vec<&str> = bgp["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap())
+        .collect();
+    let col = |row: &Value, name: &str| row[cols.iter().position(|c| *c == name).unwrap()].clone();
+    let rows = bgp["rows"].as_array().unwrap();
+    let by_peer: BTreeMap<String, &Value> = rows
+        .iter()
+        .map(|r| (col(r, "peer").as_str().unwrap().to_string(), r))
+        .collect();
+    let source = |p: &str| col(by_peer[p], "source");
+    assert_eq!(source("192.0.2.2"), "configured");
+    assert_eq!(col(by_peer["192.0.2.2"], "established"), true);
+    assert_eq!(col(by_peer["192.0.2.2"], "peer_asn"), 64501);
+    assert_eq!(
+        col(by_peer["192.0.2.2"], "local_asn"),
+        serde_json::json!(["64505"])
+    );
+    assert_eq!(col(by_peer["192.0.2.2"], "outcome"), "complete");
+    assert_eq!(source("198.51.100.6"), "configured");
+    assert_eq!(col(by_peer["198.51.100.6"], "state"), serde_json::json!([]));
+    assert_eq!(col(by_peer["198.51.100.6"], "in_scope"), true);
+    assert_eq!(source("198.51.100.2"), "configured");
+    assert_eq!(col(by_peer["198.51.100.2"], "shutdown"), true);
+    assert_eq!(source("203.0.113.0/28"), "listen-range");
+    assert_eq!(source("203.0.113.5"), "dynamic");
+    assert_eq!(col(by_peer["203.0.113.5"], "range"), "203.0.113.0/28");
+    assert_eq!(source("192.0.2.9"), "observed");
+    assert_eq!(source("2001:db8::2"), "observed");
+    assert_eq!(rows.len(), 7, "{bgp}");
+    assert!(!bgp.to_string().contains("FAKE"), "{bgp}");
+    // The provenance of each row lists each span once.
+    for r in rows {
+        let spans = col(r, "provenance");
+        let spans = spans.as_array().unwrap();
+        let unique: std::collections::BTreeSet<String> =
+            spans.iter().map(Value::to_string).collect();
+        assert_eq!(unique.len(), spans.len(), "{r}");
+    }
     // The links of a store twin have collected facts for the claim.
     let c = rsim(&[
         topology.as_str(),

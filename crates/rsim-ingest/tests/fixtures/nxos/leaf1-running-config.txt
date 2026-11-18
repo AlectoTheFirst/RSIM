@@ -161,9 +161,34 @@ router ospf 1
   router-id 203.0.113.1
   area 0.0.0.0 authentication message-digest
 router bgp 65000
+  confederation identifier 64496
+  confederation peers 65536 1.10
+  template peer-session SESSION-BASE
+    password 3 FAKETEMPLATEPASSWORD
+    update-source loopback0
+  template peer SPINES
+    remote-as 65000
+    inherit peer-session SESSION-BASE
+    address-family l2vpn evpn
+      send-community extended
+  template peer-policy UPSTREAM-POLICY
+    route-map FROM-UPSTREAM in
   neighbor 198.51.100.2
     remote-as 65001
     password 3 FAKEBGPPASSWORD
+    local-as 64511 no-prepend replace-as dual-as
+    address-family ipv4 unicast
+      inherit peer-policy UPSTREAM-POLICY 10
+  neighbor 192.0.2.250
+    inherit peer SPINES
+    shutdown
+  neighbor 198.51.100.64/28
+    remote-as route-map DYNAMIC-AS
+    address-family ipv4 unicast
+  vrf RED
+    neighbor 203.0.113.2
+      remote-as 65551
+      address-family ipv4 unicast
 ip nat inside source static 192.0.2.5 198.51.100.5
 ip nat inside source list NATACL interface Ethernet1/2 overload
 ip ospf authentication-key 3 FAKEUNLISTEDKEY

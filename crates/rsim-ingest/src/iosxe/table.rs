@@ -215,6 +215,7 @@ pub fn table(tables: &RouteTables) -> Table {
     }
     let default = tables.routing(DEFAULT_VRF);
     let shared = tables.shared();
+    super::bgp::push_entries(&mut t, tables);
     for p in ["router bgp", "router eigrp", "router rip"] {
         t.push_levels(&[&format!("{p} ..")], default, Subtree);
         for af in ["address-family ipv4", "address-family ipv4 unicast"] {

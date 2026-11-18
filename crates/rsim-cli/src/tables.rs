@@ -9,6 +9,7 @@ use rsim_contract::table::{
 };
 use rsim_core::SourceSpan;
 use rsim_functions::RouteLookup;
+use rsim_ingest::links::{AsnValue, BgpPeerFact, PeerSource};
 use serde_json::{Value, json};
 
 use crate::commands::Loaded;
@@ -158,6 +159,11 @@ pub fn rows(t: &Loaded, def: &TableDef) -> Vec<Vec<Value>> {
                 })
             })
             .collect(),
+        "bgp-sessions" => t
+            .bgp
+            .values()
+            .flat_map(|facts| facts.iter().map(bgp_row))
+            .collect(),
         _ => Vec::new(),
     };
     // The key order. A prefix sorts by its address bits and its length, so
@@ -183,6 +189,77 @@ pub fn rows(t: &Loaded, def: &TableDef) -> Vec<Vec<Value>> {
     };
     rows.sort_by_cached_key(|r| key.iter().map(|i| sort_text(&r[*i])).collect::<Vec<_>>());
     rows
+}
+
+/// The row of a BGP peer fact.
+fn bgp_row(f: &BgpPeerFact) -> Vec<Value> {
+    let opt = |v: Option<String>| v.map_or(Value::Null, Value::from);
+    let (local, local_reason) = match &f.local_asn.value {
+        AsnValue::Known(v) => (
+            Value::from(v.iter().map(ToString::to_string).collect::<Vec<_>>()),
+            Value::Null,
+        ),
+        AsnValue::Unknown(r) => (Value::from(Vec::<String>::new()), json!(r)),
+    };
+    let (peer, peer_reason) = match &f.peer_asn.value {
+        AsnValue::Known(v) => (v.first().map_or(Value::Null, |a| json!(a)), Value::Null),
+        AsnValue::Unknown(r) => (Value::Null, json!(r)),
+    };
+    let sum = |c: fn(&rsim_ingest::bgp::SessionRow) -> Option<u64>| {
+        let counts: Vec<u64> = f.sessions.iter().filter_map(c).collect();
+        if counts.is_empty() {
+            Value::Null
+        } else {
+            json!(counts.iter().sum::<u64>())
+        }
+    };
+    let range = match &f.source {
+        PeerSource::Dynamic(p) => json!(p.to_string()),
+        _ => Value::Null,
+    };
+    let mut provenance: Vec<SourceSpan> = f.spans.clone();
+    for r in &f.sessions {
+        if !provenance.contains(&r.span) {
+            provenance.push(r.span.clone());
+        }
+    }
+    vec![
+        json!(f.device),
+        json!(f.vrf),
+        json!(f.peer.to_string()),
+        json!(f.source.name()),
+        range,
+        opt(f.local_address.map(|a| a.to_string())),
+        opt(f.update_source.clone()),
+        local,
+        local_reason,
+        peer,
+        peer_reason,
+        f.observed_asn.map_or(Value::Null, |a| json!(a)),
+        f.shutdown.map_or(Value::Null, Value::from),
+        Value::from(f.families.iter().cloned().collect::<Vec<_>>()),
+        opt(f.policy_in.clone()),
+        opt(f.policy_out.clone()),
+        Value::from(f.inherits.clone()),
+        Value::from(f.gaps.clone()),
+        Value::from(
+            f.sessions
+                .iter()
+                .map(|r| r.state.clone())
+                .collect::<Vec<_>>(),
+        ),
+        if f.sessions.is_empty() {
+            Value::Null
+        } else {
+            json!(f.sessions.iter().all(|r| r.established))
+        },
+        sum(|r| r.prefixes_received),
+        sum(|r| r.prefixes_sent),
+        opt(f.router_id.map(|a| a.to_string())),
+        json!(f.section.outcome.name()),
+        json!(f.in_scope()),
+        spans(&provenance),
+    ]
 }
 
 fn invalid(e: String) -> QueryError {

@@ -227,13 +227,29 @@ interface GigabitEthernet0/0/7
  negotiation auto
 !
 router bgp 64496
+ template peer-session IBGP-BASE
+  remote-as 64496
+  password FAKETEMPLATEPASSWORD
+  update-source Loopback0
+ exit-peer-session
+ !
  bgp router-id 192.0.2.255
  bgp log-neighbor-changes
+ bgp confederation identifier 64500
+ bgp confederation peers 64497 1.10
+ bgp listen range 198.51.100.128/26 peer-group DYNAMIC
+ neighbor DYNAMIC peer-group
+ neighbor DYNAMIC remote-as 64510
+ neighbor DYNAMIC password 7 FAKEPEERGROUPPASSWORD
  neighbor 198.51.100.1 remote-as 64511
  neighbor 198.51.100.1 password 7 FAKEBGPPASSWORD
+ neighbor 198.51.100.1 local-as 64505 no-prepend replace-as dual-as
+ neighbor 192.0.2.254 inherit peer-session IBGP-BASE
+ neighbor 192.0.2.254 shutdown
  !
  address-family ipv4
   network 192.0.2.0 mask 255.255.255.0
+  neighbor DYNAMIC activate
   neighbor 198.51.100.1 activate
   neighbor 198.51.100.1 route-map FROM-ISP in
   neighbor 198.51.100.1 prefix-list OUR-NETS out
@@ -241,6 +257,8 @@ router bgp 64496
  !
  address-family ipv4 vrf RED
   redistribute connected
+  neighbor 203.0.113.2 remote-as 65551
+  neighbor 203.0.113.2 activate
  exit-address-family
 !
 ip forward-protocol nd
