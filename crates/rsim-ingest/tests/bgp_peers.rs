@@ -137,6 +137,14 @@ fn the_neighbour_lines_are_handled_and_read_in_each_vrf_state() {
                 .keys()
                 .filter(|p| p.starts_with("router bgp") || p.contains("protocols/bgp"))
                 .count();
+            // No unhandled stanza can hold a neighbour, so the BGP config of
+            // each fixture is read in full.
+            let hidden: Vec<&String> = cov
+                .unhandled
+                .keys()
+                .filter(|p| rsim_ingest::estate::hides_peers(p))
+                .collect();
+            assert!(hidden.is_empty(), "{vendor} {rows:?}: {hidden:?}");
             match rows {
                 Rows::All => assert_eq!(bgp_lines, 0, "{vendor}: {:?}", cov.unhandled),
                 Rows::None => assert!(bgp_lines > 0, "{vendor}: {:?}", cov.unhandled),
@@ -827,7 +835,7 @@ fn an_address_family_that_the_reader_does_not_name_leaves_the_families_open() {
         "nxos",
         NXOS,
         "router bgp 65000\n",
-        "  neighbor 192.0.2.90\n    remote-as 65000\n    address-family ipv4 mvpn\n    address-family ipv4 unicast\n",
+        "  neighbor 192.0.2.90\n    remote-as 64500\n    address-family ipv4 mvpn\n    address-family ipv4 unicast\n",
         "192.0.2.90",
     );
     assert_eq!(families(&nxos), ["ipv4-unicast"]);
@@ -938,7 +946,7 @@ fn an_ipv6_address_of_an_nxos_switch_is_an_address_of_the_twin() {
     );
     let vyos = String::from_utf8(fixture(VYOS)).unwrap().replacen(
         r#""198.51.100.6": {"#,
-        r#""2001:db8:5::1": {"remote-as": "65000"},
+        r#""2001:db8:5::1": {"remote-as": "64500"},
         "198.51.100.6": {"#,
         1,
     );

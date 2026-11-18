@@ -715,6 +715,29 @@ fn the_far_neighbour_must_send_from_the_peer_address_of_the_near_side() {
         ),
     );
     d.insert("b2".to_string(), device(&["198.51.100.6"], vec![lost]));
+    // a3 peers with b3, which has a dynamic peer of a listen range for the
+    // source of a3 with an update-source of the range: the range satisfies
+    // the second condition.
+    let mut dynamic = neighbour("b3", 10, "198.51.100.9", 64497, 64496, "192.0.2.3");
+    dynamic.source = PeerSource::Dynamic("198.51.100.8/29".parse().unwrap());
+    d.insert(
+        "a3".to_string(),
+        device(
+            &["198.51.100.9"],
+            vec![neighbour(
+                "a3",
+                10,
+                "198.51.100.10",
+                64496,
+                64497,
+                "198.51.100.9",
+            )],
+        ),
+    );
+    d.insert(
+        "b3".to_string(),
+        device(&["198.51.100.10", "192.0.2.3"], vec![dynamic]),
+    );
     let bgp = join(&d, &BTreeSet::new(), &BTreeSet::new()).bgp;
     let only = |dev: &str| {
         let (rows, _) = claims::bgp_peers_agree(&bgp, &|d| d == dev);
@@ -727,6 +750,48 @@ fn the_far_neighbour_must_send_from_the_peer_address_of_the_near_side() {
     let a2 = only("a2");
     assert_eq!(a2.result, ClaimResult::Unknown, "{a2:?}");
     assert!(a2.detail.contains("no route"), "{a2:?}");
+    let a3 = only("a3");
+    assert_eq!(a3.result, ClaimResult::Confirmed, "{a3:?}");
+}
+
+#[test]
+fn a_gap_that_can_hide_a_shutdown_line_turns_a_refute_into_unknown() {
+    let row = |gap: bool| {
+        let mut d = BTreeMap::new();
+        // a expects the AS 64499 of b, which presents 64497.
+        let mut a = loopback(
+            neighbour("a", 10, "198.51.100.2", 64496, 64499, "198.51.100.1"),
+            "Loopback0",
+        );
+        if gap {
+            a.gaps = vec!["inheritance gap: template peer-session MISSING is not defined".into()];
+            a.shutdown = None;
+        }
+        d.insert("a".to_string(), device(&["198.51.100.1"], vec![a]));
+        d.insert(
+            "b".to_string(),
+            device(
+                &["198.51.100.2"],
+                vec![neighbour(
+                    "b",
+                    10,
+                    "198.51.100.1",
+                    64497,
+                    64496,
+                    "198.51.100.2",
+                )],
+            ),
+        );
+        let bgp = join(&d, &BTreeSet::new(), &BTreeSet::new()).bgp;
+        let (rows, _) = claims::bgp_peers_agree(&bgp, &|d| d == "a");
+        rows.into_iter().next().unwrap()
+    };
+    let r = row(false);
+    assert_eq!(r.result, ClaimResult::Refuted, "{r:?}");
+    let r = row(true);
+    assert_eq!(r.result, ClaimResult::Unknown, "{r:?}");
+    assert!(r.detail.starts_with("asn mismatch"), "{r:?}");
+    assert!(r.detail.contains("can hide a shutdown line"), "{r:?}");
 }
 
 #[test]

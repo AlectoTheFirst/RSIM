@@ -246,7 +246,7 @@ pub enum BgpFar {
 pub enum FarSide {
     /// The fact of the far device for the source address of the near side:
     /// a neighbour of that address whose own source address is the peer
-    /// address of the near side, a dynamic peer with no known other source
+    /// address of the near side, a dynamic peer of a listen range for that
     /// address, or the listen range that holds it. The index is the place of
     /// the fact in the BGP peers of the far device.
     Paired(usize),
@@ -866,7 +866,9 @@ fn far_end(
     for kind in ["configured", "dynamic"] {
         if let Some((i, g)) = in_vrf().find(|(_, g)| g.source.name() == kind && g.peer == at_src) {
             return side(match (&g.source, &g.source_address) {
-                (_, AddressValue::Known(x)) if *x != peer => FarSide::SourceMismatch(i),
+                (PeerSource::Configured, AddressValue::Known(x)) if *x != peer => {
+                    FarSide::SourceMismatch(i)
+                }
                 (PeerSource::Configured, AddressValue::Unknown(r)) => FarSide::Unresolved(format!(
                     "the source address of the neighbour {src} of {b} is not known: {r}"
                 )),
