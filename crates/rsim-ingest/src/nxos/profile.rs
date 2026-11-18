@@ -108,9 +108,9 @@ pub const LEARNED_WORDS: &[(&str, RouteProtocol)] = &[
 ];
 
 /// The `clientname` words of a route that no routing protocol gave:
-/// `static`, `am`, the host route of an adjacency, and `hsrp` and `vrrp`,
-/// the route of a virtual address.
-pub const STATIC_WORDS: &[&str] = &["static", "am", "hsrp", "vrrp"];
+/// `static`, `am`, the host route of an adjacency, `hsrp` and `vrrp`, the
+/// route of a virtual address, and `broadcast` and `discard`.
+pub const STATIC_WORDS: &[&str] = &["static", "am", "hsrp", "vrrp", "broadcast", "discard"];
 
 /// The protocol word of a `clientname`: the word before the `-` of the
 /// instance.

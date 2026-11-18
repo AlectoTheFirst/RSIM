@@ -103,5 +103,6 @@ pub const LEARNED_CODES: &[(&str, RouteProtocol)] = &[
     ("R", RouteProtocol::Rip),
 ];
 
-/// The route code of a static route.
-pub const STATIC_CODES: &[&str] = &["S"];
+/// The route codes of a route that no routing protocol gave: `S`, a static
+/// route, and `U`, a per-user static route.
+pub const STATIC_CODES: &[&str] = &["S", "U"];

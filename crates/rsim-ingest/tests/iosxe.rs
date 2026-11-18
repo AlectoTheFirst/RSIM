@@ -793,3 +793,26 @@ fn the_short_names_of_the_multigigabit_ports_resolve() {
     assert_eq!(names.resolve("Tw1/0/5"), "TwoGigabitEthernet1/0/5");
     assert_eq!(names.resolve("Fi1/0/6"), "FiveGigabitEthernet1/0/6");
 }
+
+#[test]
+fn a_named_eigrp_vrf_follows_the_rows_of_its_vrf() {
+    let doc = iosxe::read_text(
+        b"router eigrp CORE\n address-family ipv4 unicast vrf RED autonomous-system 10\n  network 192.0.2.0\n",
+    );
+    let dynamic = iosxe::dynamic_vrfs(&doc);
+    assert_eq!(
+        dynamic.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["RED", "default"]
+    );
+    let path = [
+        "router eigrp CORE",
+        "address-family ipv4 unicast vrf RED autonomous-system 10",
+    ];
+    let without = iosxe::table(&RouteTables::new(["default".to_string()], dynamic.clone()));
+    assert_eq!(without.state(&path), State::Unhandled);
+    let with = iosxe::table(&RouteTables::new(
+        ["default".to_string(), "RED".to_string()],
+        dynamic,
+    ));
+    assert_eq!(with.state(&path), State::Irrelevant);
+}

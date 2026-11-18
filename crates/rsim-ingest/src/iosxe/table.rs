@@ -217,13 +217,9 @@ pub fn table(tables: &RouteTables) -> Table {
     let shared = tables.shared();
     for p in ["router bgp", "router eigrp", "router rip"] {
         t.push_levels(&[&format!("{p} ..")], default, Subtree);
-        tables.push_vrfs(
-            &mut t,
-            &[
-                &format!("{p} .."),
-                &format!("address-family ipv4 vrf {VRF} .."),
-            ],
-        );
+        for af in ["address-family ipv4", "address-family ipv4 unicast"] {
+            tables.push_vrfs(&mut t, &[&format!("{p} .."), &format!("{af} vrf {VRF} ..")]);
+        }
     }
     for p in ["router ospf", "router isis"] {
         t.push_levels(&[&format!("{p} ..")], default, Subtree);
@@ -266,8 +262,8 @@ pub fn table(tables: &RouteTables) -> Table {
 
 /// The VRFs whose config has a dynamic routing protocol, each with the
 /// lines that show it: a routing process gives the default VRF, or the VRF
-/// of its `vrf` word, and the VRF of each of its `address-family ipv4 vrf`
-/// and `vrf` lines; the route distinguisher, a route target or an address
+/// of its `vrf` word, and the VRF of each of its `address-family ipv4 vrf`,
+/// `address-family ipv4 unicast vrf` and `vrf` lines; the route distinguisher, a route target or an address
 /// family of a VRF gives that VRF; an `ip router` line or an `ip ospf`
 /// line with an area gives the VRF of the interface.
 pub fn dynamic_vrfs(doc: &Document) -> BTreeMap<String, Vec<(u32, u32)>> {
@@ -287,7 +283,9 @@ pub fn dynamic_vrfs(doc: &Document) -> BTreeMap<String, Vec<(u32, u32)>> {
                 }
                 for c in s.children() {
                     match words(c).as_slice() {
-                        ["address-family", "ipv4", "vrf", v, ..] | ["vrf", v] => add(v, lines(c)),
+                        ["address-family", "ipv4", "vrf", v, ..]
+                        | ["address-family", "ipv4", "unicast", "vrf", v, ..]
+                        | ["vrf", v] => add(v, lines(c)),
                         _ => {}
                     }
                 }

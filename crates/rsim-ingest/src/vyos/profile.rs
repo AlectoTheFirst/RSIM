@@ -58,6 +58,7 @@ pub const LEARNED_WORDS: &[(&str, RouteProtocol)] = &[
     ("rip", RouteProtocol::Rip),
 ];
 
-/// The protocol words of FRR for a static route: `static`, and `kernel`
-/// for a route that another process installed, for example PPPoE or DHCP.
-pub const STATIC_WORDS: &[&str] = &["static", "kernel"];
+/// The protocol words of FRR for a route that no routing protocol gave:
+/// `static`, `kernel` for a route that another process installed, for
+/// example PPPoE or DHCP, and `table` for a route of another kernel table.
+pub const STATIC_WORDS: &[&str] = &["static", "kernel", "table"];
