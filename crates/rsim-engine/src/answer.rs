@@ -387,7 +387,7 @@ pub fn merge(parts: Vec<Part>) -> Vec<Part> {
 fn aggregate_node(node: &ExecNode, done: &[Option<Vec<Part>>]) -> Result<Vec<Part>, String> {
     let mut plain = Vec::new();
     let mut choices: BTreeMap<(FunctionId, String), BTreeMap<u32, Vec<Part>>> = BTreeMap::new();
-    let mut floods: BTreeMap<FunctionId, BTreeMap<u32, Vec<Part>>> = BTreeMap::new();
+    let mut floods: BTreeMap<(FunctionId, String), BTreeMap<u32, Vec<Part>>> = BTreeMap::new();
     for e in &node.edges {
         let ps = match (&e.end, e.next) {
             (Some(end), _) => vec![Part {
@@ -408,7 +408,7 @@ fn aggregate_node(node: &ExecNode, done: &[Option<Vec<Part>>]) -> Result<Vec<Par
                 .extend(ps);
         } else if let Some(fc) = &e.step.flood_copy {
             floods
-                .entry(fc.flood.clone())
+                .entry((fc.flood.clone(), fc.key.clone()))
                 .or_default()
                 .entry(fc.index)
                 .or_default()

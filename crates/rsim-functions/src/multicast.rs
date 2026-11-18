@@ -244,6 +244,7 @@ impl NetFunction for MulticastLookup {
                 }),
             };
             let count = u32::try_from(oifs.len()).expect("too many interfaces");
+            let key = r.name();
             for (k, (oif, next)) in oifs.iter().enumerate() {
                 let mut c = ctx.clone();
                 c.egress_interface = Attr::Known(oif.clone());
@@ -260,6 +261,7 @@ impl NetFunction for MulticastLookup {
                     .with_spans(r.spans.clone());
                 b.flood_copy = Some(FloodCopy {
                     flood: self.meta.id.clone(),
+                    key: key.clone(),
                     port: PortId::new(oif.to_string()),
                     index: u32::try_from(k).expect("too many interfaces"),
                     count,

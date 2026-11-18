@@ -668,9 +668,9 @@ pub fn check_contract(
     check_partition(input, branches).map_err(violation)?;
     if f.qos_writes().is_empty() {
         let marks = [HeaderField::Dscp, HeaderField::Ecn];
-        let before = input.project(&marks);
+        let before = input.project_with_original(&marks);
         for b in branches {
-            if !b.packets.project(&marks).is_subset(&before) {
+            if !b.packets.project_with_original(&marks).is_subset(&before) {
                 return Err(violation(
                     "the marking changed, and the function declares no QoS write".into(),
                 ));
@@ -717,7 +717,7 @@ pub fn check_partition(input: &PacketSet, branches: &[Branch]) -> Result<(), Str
             *g = g.union(&orig(&b.packets));
         } else if let Some(fc) = &b.flood_copy {
             let g = groups
-                .entry((1, fc.flood.to_string(), String::new()))
+                .entry((1, fc.flood.to_string(), fc.key.clone()))
                 .or_default()
                 .entry(fc.index)
                 .or_insert_with(|| input.empty());

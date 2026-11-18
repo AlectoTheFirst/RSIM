@@ -501,6 +501,22 @@ impl PacketSet {
         })
     }
 
+    /// The relation of the original request to fields of the current
+    /// header. The other current fields and the inner header have all
+    /// values.
+    pub fn project_with_original(&self, fields: &[HeaderField]) -> PacketSet {
+        self.op(&[], |ops| {
+            let keep: Vec<u32> = fields
+                .iter()
+                .flat_map(|f| bits::field_bits(*f).all_bits())
+                .collect();
+            let drop: Vec<u32> = (0..bits::BITS).filter(|b| !keep.contains(b)).collect();
+            let c = ops.cube(&drop, Bank::Current)?;
+            let cube = ops.dd.and(c, ops.base.inner_cube)?;
+            ops.dd.exists(self.edge, cube)
+        })
+    }
+
     /// The fields that `pred` reads and that are unknown in a part of the set.
     pub fn open_fields(&self, pred: &RulePredicate) -> Vec<HeaderField> {
         pred.reads()

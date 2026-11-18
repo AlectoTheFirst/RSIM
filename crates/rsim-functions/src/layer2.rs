@@ -589,6 +589,7 @@ impl NetFunction for Flood {
                 );
                 b.flood_copy = Some(FloodCopy {
                     flood: self.meta.id.clone(),
+                    key: String::new(),
                     port: port.clone(),
                     index: u32::try_from(i).expect("too many ports"),
                     count,

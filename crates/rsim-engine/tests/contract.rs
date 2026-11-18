@@ -6,13 +6,13 @@ use std::sync::Arc;
 use rsim_core::{
     Alternative, Attr, Branch, Context, Delay, EndpointId, FieldValue, FlagsCond, FlowState,
     Header, InterfaceId, Match, NetFunction, NextHop, Outcome, PROTO_ICMP, PacketSet, Prefix,
-    PrefixTable, Reason, ReasonCode, SetArena, SourceSpan, TriePrefixTable, ValueCond, Verdict,
-    ZoneId,
+    PrefixTable, Reason, ReasonCode, Rewrite, SetArena, SourceSpan, TriePrefixTable, ValueCond,
+    Verdict, ZoneId,
 };
-use rsim_engine::{Executor, Query, Summary, check_partition};
+use rsim_engine::{Executor, Query, Summary, check_contract, check_partition};
 use rsim_functions::{
-    AclMatch, Meta, Neighbour, NextHopResolution, RuleAction, UnzonedInterface, ZoneLookup,
-    ZoneRole,
+    AclMatch, EgressMode, Meta, Neighbour, NextHopResolution, RuleAction, UnzonedInterface,
+    ZoneLookup, ZoneRole,
 };
 use rsim_topologies::*;
 
@@ -216,4 +216,44 @@ fn the_reply_to_an_echo_request_passes_a_rule_for_echo_replies() {
         &FlowState::new(),
     );
     assert_eq!(out[0].outcome, Outcome::Forward(fid("dev/next")));
+}
+
+#[test]
+fn a_marking_rewrite_with_no_declared_qos_write_breaks_the_contract() {
+    let arena = SetArena::standalone();
+    let dev = Dev::new("r1", nxos());
+    let mut out = dev.egress(
+        "eth1",
+        EgressMode::Transparent,
+        Some(("r2/in/eth1", None)),
+        1,
+    );
+    let ctx = Context::default();
+    let state = FlowState::new();
+    let unstated = single(&arena, udp("192.0.2.1", 1, "198.51.100.2", 53));
+    let mut h = udp("192.0.2.1", 1, "198.51.100.2", 53);
+    h.dscp = FieldValue::Known(46);
+    let marked = single(&arena, h.clone());
+    h.dscp = FieldValue::Known(0);
+    let inputs = [unstated, marked.union(&single(&arena, h))];
+
+    out.rewrite = Rewrite {
+        dst_mac: Some(FieldValue::Known(rsim_core::Mac([
+            0x00, 0x00, 0x5e, 0x00, 0x53, 0x01,
+        ]))),
+        ..Rewrite::default()
+    };
+    for input in &inputs {
+        let branches = out.apply(input, &ctx, &state);
+        assert!(check_contract(&out, input, &ctx, &branches).is_ok());
+    }
+
+    out.rewrite = Rewrite {
+        dscp: Some(FieldValue::Known(0)),
+        ..Rewrite::default()
+    };
+    for input in &inputs {
+        let branches = out.apply(input, &ctx, &state);
+        assert!(check_contract(&out, input, &ctx, &branches).is_err());
+    }
 }
