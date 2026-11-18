@@ -1,8 +1,8 @@
 //! Collection cycles on fake transports: the first snapshot, a cycle with
 //! no change, volatile changes, the forced full collection, the change of
 //! each class, failed reads, a failed half of a table, an extract error,
-//! the limits of concurrency, the sink and a device that leaves the
-//! inventory.
+//! the limits of concurrency, the time limits of a device, the sink and a
+//! device that leaves the inventory.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -569,6 +569,63 @@ async fn the_limits_bound_the_devices_in_flight() {
     assert_eq!((r.due, r.changed.len()), (40, 40));
     assert_eq!(e.t.max_devices(), 3);
     assert_eq!(e.t.max_per_device(), 8);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_time_limits_of_a_device_replace_the_limits_of_the_cycle() {
+    let devices = vec![vyos("r1"), vyos("r2"), vyos("r3")];
+    let dir = tempfile::tempdir().unwrap();
+    let t = Arc::new(FakeTransport::new(Duration::from_secs(15)));
+    for d in &devices {
+        load(&t, d);
+    }
+    let store = Store::open(dir.path(), keys()).unwrap();
+    let mut c = Collector::new(
+        store,
+        Box::new(devices),
+        Schedule {
+            spread: false,
+            ..Schedule::default()
+        },
+        Limits::default(),
+        Arc::new(TokioClock::new(T0)),
+    )
+    .unwrap()
+    .with_source(Arc::new(VyosSource::new(t.clone())))
+    .with_time_limits(
+        "r1",
+        TimeLimits {
+            section: Duration::from_secs(10),
+            device: Duration::from_secs(45),
+        },
+    )
+    .with_time_limits(
+        "r2",
+        TimeLimits {
+            section: Duration::from_secs(20),
+            device: Duration::from_secs(10),
+        },
+    );
+    let start = tokio::time::Instant::now();
+    let r = c.run_cycle().await.unwrap();
+    assert_eq!(start.elapsed(), Duration::from_secs(15));
+    assert_eq!(r.failed, ["r1", "r2"]);
+    let s = c.store().latest().unwrap().unwrap();
+    for d in ["r1", "r2"] {
+        assert!(
+            s.devices[d]
+                .sections
+                .iter()
+                .all(|x| matches!(x.status, SectionStatus::Missing { .. })),
+            "{d}"
+        );
+    }
+    assert!(
+        s.devices["r3"]
+            .sections
+            .iter()
+            .all(|x| x.status == SectionStatus::Fresh)
+    );
 }
 
 #[tokio::test(start_paused = true)]
