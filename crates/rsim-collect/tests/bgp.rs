@@ -27,13 +27,14 @@ fn fixture(path: &str) -> String {
     std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{p}: {e}"))
 }
 
-fn device(vendor: Vendor) -> Device {
+fn device(vendor: Vendor, capture_bgp: CaptureBgp) -> Device {
     Device {
         id: "r1".into(),
         vendor,
         address: "192.0.2.10".into(),
         credential: "lab".into(),
         site: None,
+        capture_bgp,
         route: Default::default(),
     }
 }
@@ -103,11 +104,16 @@ fn transport(base: &[SectionSpec]) -> Arc<Logged> {
     t
 }
 
-fn collector(dir: &std::path::Path, vendor: Vendor, source: Arc<dyn Source>) -> Collector {
+fn collector(
+    dir: &std::path::Path,
+    vendor: Vendor,
+    capture: CaptureBgp,
+    source: Arc<dyn Source>,
+) -> Collector {
     let store = Store::open(dir, Keys::new([1; 32], [2; 32])).unwrap();
     Collector::new(
         store,
-        Box::new(vec![device(vendor)]),
+        Box::new(vec![device(vendor, capture)]),
         Schedule {
             spread: false,
             ..Schedule::default()
@@ -119,12 +125,12 @@ fn collector(dir: &std::path::Path, vendor: Vendor, source: Arc<dyn Source>) -> 
     .with_source(source)
 }
 
-fn source(vendor: Vendor, t: &Arc<Logged>, capture: CaptureBgp) -> Arc<dyn Source> {
+fn source(vendor: Vendor, t: &Arc<Logged>) -> Arc<dyn Source> {
     match vendor {
-        Vendor::Vyos => Arc::new(VyosSource::new(t.clone()).with_capture_bgp("r1", capture)),
-        Vendor::Nxos => Arc::new(NxosSource::new(t.clone()).with_capture_bgp("r1", capture)),
-        Vendor::Iosxr => Arc::new(IosxrSource::new(t.clone()).with_capture_bgp("r1", capture)),
-        Vendor::Iosxe => Arc::new(IosxeSource::new(t.clone()).with_capture_bgp("r1", capture)),
+        Vendor::Vyos => Arc::new(VyosSource::new(t.clone())),
+        Vendor::Nxos => Arc::new(NxosSource::new(t.clone())),
+        Vendor::Iosxr => Arc::new(IosxrSource::new(t.clone())),
+        Vendor::Iosxe => Arc::new(IosxeSource::new(t.clone())),
         Vendor::Unifi => unreachable!("UniFi has no BGP"),
     }
 }
@@ -142,7 +148,7 @@ fn base(vendor: Vendor) -> Vec<SectionSpec> {
 fn env(vendor: Vendor, capture: CaptureBgp) -> Env {
     let dir = tempfile::tempdir().unwrap();
     let t = transport(&base(vendor));
-    let c = collector(dir.path(), vendor, source(vendor, &t, capture));
+    let c = collector(dir.path(), vendor, capture, source(vendor, &t));
     Env { dir, t, c }
 }
 
@@ -194,7 +200,7 @@ fn check_hash(
     counters: &[(&str, &str)],
     states: &[(&str, &str)],
 ) {
-    let h = |a: &str| hash(vendor, CaptureBgp::Sessions, section, a);
+    let h = |a: &str| hash(vendor, CaptureBgp::All, section, a);
     let first = h(answer);
     let mut later = answer.to_string();
     for (a, b) in counters {
@@ -396,10 +402,12 @@ async fn nxos_with_all_reads_the_tables_of_each_ipv4_neighbour_with_native_json(
         "show bgp vrf RED ipv4 unicast neighbors 203.0.113.2 routes | json native",
         r#"{"TABLE_vrf":{"ROW_vrf":{"vrf-name-out":"RED","TABLE_afi":{"ROW_afi":null}}}}"#,
     );
-    let s = NxosSource::new(t.clone())
-        .with_native_json("r1")
-        .with_capture_bgp("r1", CaptureBgp::All);
-    let mut c = collector(dir.path(), Vendor::Nxos, Arc::new(s));
+    t.reply(
+        "show bgp vrf all neighbors | json native",
+        &fixture("nxos/bgp_neighbors.json"),
+    );
+    let s = NxosSource::new(t.clone()).with_native_json("r1");
+    let mut c = collector(dir.path(), Vendor::Nxos, CaptureBgp::All, Arc::new(s));
     c.run_cycle().await.unwrap();
     let log = t.log.lock().unwrap().clone();
     let routes: Vec<&String> = log
@@ -418,10 +426,13 @@ async fn nxos_with_all_reads_the_tables_of_each_ipv4_neighbour_with_native_json(
         v["RED"]["203.0.113.2"]["routes"]["answer"]["TABLE_vrf"]["ROW_vrf"][0]["TABLE_afi"]["ROW_afi"],
         serde_json::json!([])
     );
-    assert!(matches!(
-        snap.devices["r1"].section(bgp::NEIGHBORS).unwrap().status,
-        SectionStatus::Missing { .. }
-    ));
+    let n = snap.devices["r1"].section(bgp::NEIGHBORS).unwrap();
+    assert_eq!(n.status, SectionStatus::Fresh);
+    let stored: serde_json::Value =
+        serde_json::from_slice(&c.store().read_blob(&n.blob.unwrap()).unwrap()).unwrap();
+    let fixed: serde_json::Value =
+        serde_json::from_str(&fixture("nxos/bgp_neighbors.json")).unwrap();
+    assert_eq!(stored, fixed);
 }
 
 #[tokio::test(start_paused = true)]
@@ -460,10 +471,8 @@ async fn iosxe_with_all_reads_the_tables_of_each_neighbour_of_the_summaries() {
         "show ip bgp vpnv4 vrf RED summary",
         &fixture("iosxe/bgp_vrf_red.txt"),
     );
-    e.t.reply(
-        "show bgp all neighbors",
-        "BGP neighbor is 192.0.2.2,  remote AS 64501, external link\n",
-    );
+    let neighbors = fixture("iosxe/bgp_neighbors.txt");
+    e.t.reply("show bgp all neighbors", &neighbors);
     let table = "BGP table version is 12, local router ID is 192.0.2.1\n\
                  \x20    Network          Next Hop            Metric LocPrf Weight Path\n\
                  \x20*>   198.51.100.0/24  192.0.2.2                0             0 64501 i\n";
@@ -519,6 +528,189 @@ async fn iosxe_with_all_reads_the_tables_of_each_neighbour_of_the_summaries() {
         entry(&e, bgp::NEIGHBORS).unwrap().status,
         SectionStatus::Fresh
     );
+    assert_eq!(bytes(&e, bgp::NEIGHBORS), neighbors);
+}
+
+#[tokio::test(start_paused = true)]
+async fn iosxr_with_all_reads_the_neighbour_detail_and_the_tables() {
+    let mut e = env(Vendor::Iosxr, CaptureBgp::All);
+    e.t.reply("show running-config", IOSXR_CONFIG);
+    e.t.reply("show bgp summary", &fixture("iosxr/bgp_sessions.txt"));
+    e.t.reply(
+        "show bgp vrf RED ipv4 unicast summary",
+        &fixture("iosxr/bgp_vrf_red.txt"),
+    );
+    let neighbors = fixture("iosxr/bgp_neighbors.txt");
+    e.t.reply("show bgp neighbors", &neighbors);
+    e.t.reply(
+        "show bgp vrf all neighbors",
+        &neighbors.replace("192.0.2.2", "203.0.113.2"),
+    );
+    let table = "Tue Nov 17 10:00:03.000 UTC\nBGP router identifier 192.0.2.1, local AS number 64500\n\
+                 Status codes: s suppressed, d damped, h history, * valid, > best\n\
+                 \x20  Network            Next Hop            Metric LocPrf Weight Path\n\
+                 *> 198.51.100.0/24    192.0.2.2                0             0 64501 i\n";
+    e.t.reply("show bgp neighbors 192.0.2.2 received routes", table);
+    e.t.reply(
+        "show bgp vrf RED ipv4 unicast neighbors 203.0.113.2 advertised-routes",
+        table,
+    );
+    e.c.run_cycle().await.unwrap();
+    assert_eq!(bytes(&e, bgp::NEIGHBORS), neighbors);
+    assert_eq!(
+        entry(&e, rsim_collect::iosxr::BGP_VRF_NEIGHBORS)
+            .unwrap()
+            .status,
+        SectionStatus::Fresh
+    );
+    for peer in ["192.0.2.2", "198.51.100.2", "198.51.100.6"] {
+        for d in ["received routes", "routes", "advertised-routes"] {
+            assert!(
+                e.t.sent(&format!("show bgp neighbors {peer} {d}")),
+                "{peer} {d}"
+            );
+        }
+    }
+    let routes = bytes(&e, bgp::ROUTES);
+    assert!(routes.contains(&format!(
+        "NEIGHBOR: default 192.0.2.2 received-routes\n{table}"
+    )));
+    assert!(routes.contains(&format!(
+        "NEIGHBOR: RED 203.0.113.2 advertised-routes\n{table}"
+    )));
+    assert!(routes.contains("NEIGHBOR: default 198.51.100.6 routes failed\n"));
+}
+
+#[test]
+fn a_state_change_alters_the_hash_of_the_neighbour_detail_and_a_counter_change_does_not() {
+    check_hash(
+        Vendor::Vyos,
+        bgp::NEIGHBORS,
+        &fixture("vyos/bgp_neighbors.json"),
+        &[
+            (
+                "\"bgpTimerUpMsec\": 72062000",
+                "\"bgpTimerUpMsec\": 75662000",
+            ),
+            (
+                "\"bgpTimerUpString\": \"20:01:02\"",
+                "\"bgpTimerUpString\": \"21:01:02\"",
+            ),
+            ("\"bgpTimerLastRead\": 12000", "\"bgpTimerLastRead\": 3000"),
+            ("\"keepalivesSent\": 1500", "\"keepalivesSent\": 1560"),
+            (
+                "\"acceptedPrefixCounter\": 3",
+                "\"acceptedPrefixCounter\": 4",
+            ),
+            (
+                "\"lastResetTimerMsecs\": 72070000",
+                "\"lastResetTimerMsecs\": 75670000",
+            ),
+            ("\"estimatedRttInMsecs\": 1", "\"estimatedRttInMsecs\": 2"),
+        ],
+        &[
+            ("\"bgpState\": \"Established\"", "\"bgpState\": \"Idle\""),
+            (
+                "\"remoteRouterId\": \"192.0.2.2\"",
+                "\"remoteRouterId\": \"192.0.2.3\"",
+            ),
+        ],
+    );
+    check_hash(
+        Vendor::Nxos,
+        bgp::NEIGHBORS,
+        &fixture("nxos/bgp_neighbors.json"),
+        &[
+            ("\"elapsedtime\": \"P1DT2H\"", "\"elapsedtime\": \"P1DT3H\""),
+            ("\"lastread\": \"PT10S\"", "\"lastread\": \"PT11S\""),
+            ("\"keepalive\": \"PT40S\"", "\"keepalive\": \"PT41S\""),
+            ("\"msgrecvd\": \"1499\"", "\"msgrecvd\": \"1559\""),
+            ("\"msgsent\": \"1500\"", "\"msgsent\": \"1560\""),
+            ("\"tableversion\": \"12\"", "\"tableversion\": \"13\""),
+            ("\"pfxrecvd\": \"3\"", "\"pfxrecvd\": \"4\""),
+        ],
+        &[
+            ("\"state\": \"Established\"", "\"state\": \"Idle\""),
+            (
+                "\"remote-id\": \"192.0.2.2\"",
+                "\"remote-id\": \"192.0.2.3\"",
+            ),
+            (
+                "\"connectedif\": \"Ethernet1/1\"",
+                "\"connectedif\": \"Ethernet1/2\"",
+            ),
+        ],
+    );
+    check_hash(
+        Vendor::Iosxr,
+        bgp::NEIGHBORS,
+        &fixture("iosxr/bgp_neighbors.txt"),
+        &[
+            ("10:00:02.000", "10:01:02.000"),
+            ("up for 1d02h", "up for 1d03h"),
+            ("Last read 00:00:12", "Last read 00:00:13"),
+            (
+                "Last write 00:00:30, attempted 19, written 19",
+                "Last write 00:00:31, attempted 21, written 21",
+            ),
+            (
+                "Nov 17 10:00:00.123 last full not set pulse count 3005",
+                "Nov 17 10:01:00.456 last full not set pulse count 3065",
+            ),
+            ("Received 1500 messages", "Received 1560 messages"),
+            (
+                "3 accepted prefixes, 3 are bestpaths",
+                "4 accepted prefixes, 4 are bestpaths",
+            ),
+            ("Last ack version 12", "Last ack version 13"),
+        ],
+        &[
+            ("BGP state = Established", "BGP state = Idle"),
+            ("Remote router ID 192.0.2.2", "Remote router ID 192.0.2.3"),
+        ],
+    );
+    check_hash(
+        Vendor::Iosxe,
+        bgp::NEIGHBORS,
+        &fixture("iosxe/bgp_neighbors.txt"),
+        &[
+            ("up for 1d02h", "up for 1d03h"),
+            (
+                "Last read 00:00:12, last write 00:00:45",
+                "Last read 00:00:02, last write 00:00:15",
+            ),
+            (
+                "Keepalives:          1500       1499",
+                "Keepalives:          1560       1559",
+            ),
+            (
+                "Total:               1506       1507",
+                "Total:               1566       1567",
+            ),
+            (
+                "2          3 (Consumes 408 bytes)",
+                "2          4 (Consumes 544 bytes)",
+            ),
+            ("Up: 1; Down: 0", "Up: 2; Down: 1"),
+            ("mis-ordered: 0 (0 bytes)", "mis-ordered: 1 (512 bytes)"),
+            ("current time is 0x5A3C1F0", "current time is 0x5A4D2E1"),
+            ("Retrans          1503", "Retrans          1563"),
+            (
+                "iss: 2394029120  snduna: 2394057772",
+                "iss: 2394029120  snduna: 2394058772",
+            ),
+            ("uptime: 93723045 ms", "uptime: 93783045 ms"),
+            (
+                "Rcvd: 3000 (out of order: 0)",
+                "Rcvd: 3120 (out of order: 2)",
+            ),
+        ],
+        &[
+            ("BGP state = Established", "BGP state = Idle"),
+            ("remote router ID 192.0.2.2", "remote router ID 192.0.2.3"),
+            ("Connection state is ESTAB", "Connection state is CLOSED"),
+        ],
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -561,7 +753,7 @@ async fn vyos_with_all_reads_the_ipv4_unicast_neighbours_and_off_reads_no_bgp() 
     let path = "PATH=/usr/sbin:/sbin:/usr/bin:/bin";
     e.t.reply(
         &format!(r#"{path} vtysh -c "show ip bgp vrf all neighbors json""#),
-        r#"{"default":{"vrfId":0,"192.0.2.2":{"remoteAs":64501,"bgpTimerUpMsec":72062000}}}"#,
+        &fixture("vyos/bgp_neighbors.json"),
     );
     e.t.reply(
         &rsim_collect::vyos::bgp_route_command("RED", "203.0.113.2".parse().unwrap(), 1),
@@ -609,7 +801,7 @@ async fn vyos_with_all_reads_the_ipv4_unicast_neighbours_and_off_reads_no_bgp() 
             rsim_collect::vyos::BGP_SESSIONS_COMMAND,
             &fixture("vyos/bgp_sessions.json"),
         );
-        let mut c = collector(dir.path(), Vendor::Vyos, source(Vendor::Vyos, &t, capture));
+        let mut c = collector(dir.path(), Vendor::Vyos, capture, source(Vendor::Vyos, &t));
         tokio::time::advance(Duration::from_secs(3600)).await;
         c.run_cycle().await.unwrap();
         let s = c.store().latest().unwrap().unwrap();

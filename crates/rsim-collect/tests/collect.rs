@@ -29,6 +29,7 @@ fn vyos(id: &str) -> Device {
         address: "192.0.2.1".into(),
         credential: "lab".into(),
         site: None,
+        capture_bgp: Default::default(),
         route: Default::default(),
     }
 }
@@ -40,6 +41,7 @@ fn site(id: &str) -> Device {
         address: "192.0.2.5".into(),
         credential: "lab".into(),
         site: Some("default".into()),
+        capture_bgp: Default::default(),
         route: Default::default(),
     }
 }

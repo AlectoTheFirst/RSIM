@@ -17,7 +17,7 @@ use rsim_store::{
 };
 use serde_json::Value;
 
-use crate::bgp::{self, BgpCaptures, CaptureBgp, Peer};
+use crate::bgp::{self, CaptureBgp, Peer};
 use crate::{
     BoxFuture, Device, Extract, RawSection, SectionSpec, Source, Ssh, Timeouts, TransportError,
     Vendor, fetch_sections,
@@ -47,21 +47,11 @@ pub const SPEED_COMMAND: &str = concat!(
 /// Reads a VyOS router.
 pub struct VyosSource {
     ssh: Arc<dyn Ssh>,
-    bgp: BgpCaptures,
 }
 
 impl VyosSource {
     pub fn new(ssh: Arc<dyn Ssh>) -> VyosSource {
-        VyosSource {
-            ssh,
-            bgp: BgpCaptures::default(),
-        }
-    }
-
-    /// Sets the BGP sections of a device.
-    pub fn with_capture_bgp(mut self, device: &str, capture: CaptureBgp) -> VyosSource {
-        self.bgp.set(device, capture);
-        self
+        VyosSource { ssh }
     }
 }
 
@@ -170,7 +160,7 @@ impl Source for VyosSource {
     }
 
     fn sections(&self, device: &Device) -> Vec<SectionSpec> {
-        sections_with(self.bgp.of(&device.id))
+        sections_with(device.capture_bgp)
     }
 
     /// Reads the sections, then the 3 tables of each IPv4 unicast neighbour
@@ -278,6 +268,7 @@ const BGP_NEIGHBOR_TIMES: &[&str] = &[
     "/*/*/lastReset*",
     "/*/*/*Time*",
     "/*/*/addressFamilyInfo/*/*Counter",
+    "/*/*/addressFamilyInfo/*/packetQueueLength",
 ];
 
 /// The table versions of the tables of the neighbours.

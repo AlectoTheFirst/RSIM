@@ -169,6 +169,18 @@ fn nxos_falls_back_to_the_global_table_and_guards_a_misread() {
     let s = bgp::nxos(fresh(&one), Answer::Absent("not sent"));
     assert_eq!(outcome(&s), Outcome::Partial);
     assert_eq!(s.rows.len(), 3);
+
+    // A VRF row whose table of neighbours has another key is outside the
+    // scope, so its neighbours are not known to be absent.
+    let renamed = text.replacen("\"TABLE_neighbor\"", "\"TABLE_peer\"", 1);
+    let s = bgp::nxos(fresh(&renamed), Answer::Absent("not sent"));
+    assert_eq!(outcome(&s), Outcome::Complete);
+    assert_eq!(s.outcome.vrfs, scope(&["RED"]));
+    assert!(s.outcome.detail.unwrap().contains("VRF default"));
+    let all = text.replace("\"TABLE_neighbor\"", "\"TABLE_peer\"");
+    let s = bgp::nxos(fresh(&all), Answer::Absent("not sent"));
+    assert_eq!(outcome(&s), Outcome::Failed);
+    assert_eq!(s.outcome.vrfs, Scope::default());
 }
 
 fn vrfs_text(red: &str) -> String {
@@ -230,15 +242,24 @@ fn iosxr_outcomes_of_no_bgp_a_misread_and_an_empty_table() {
         Outcome::Failed
     );
 
-    let empty: String = global
+    let no_rows: String = global
         .lines()
         .filter(|l| !l.starts_with("192.") && !l.starts_with("198."))
         .map(|l| format!("{l}\n"))
         .collect();
     assert_eq!(
-        outcome(&bgp::iosxr(fresh(&empty), Answer::NotCollected)),
-        Outcome::CompleteEmpty
+        outcome(&bgp::iosxr(fresh(&no_rows), Answer::NotCollected)),
+        Outcome::Failed,
+        "a column header with no row is a misread"
     );
+    let empty: String = no_rows
+        .lines()
+        .filter(|l| !l.starts_with("Neighbor"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    let s = bgp::iosxr(fresh(&empty), Answer::NotCollected);
+    assert_eq!(outcome(&s), Outcome::CompleteEmpty);
+    assert_eq!(s.outcome.vrfs, scope(&["default"]));
     assert_eq!(
         outcome(&bgp::iosxr(Answer::NotCollected, Answer::NotCollected)),
         Outcome::NotCaptured

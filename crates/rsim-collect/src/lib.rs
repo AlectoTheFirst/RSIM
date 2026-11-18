@@ -36,7 +36,7 @@ pub mod unifi;
 pub mod vyos;
 
 pub use classify::{Classified, classify};
-pub use device::{Device, Inventory, Vendor};
+pub use device::{CaptureBgp, Device, Inventory, Vendor};
 pub use path::{Algorithms, Jump, Proxy, ProxyLogin, Route};
 pub use pipeline::{
     Clock, CollectError, Collector, CycleReport, Limits, OsEntropy, Sink, TimeLimits, TokioClock,

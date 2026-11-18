@@ -50,7 +50,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use rsim_collect::bgp::CaptureBgp;
 use rsim_collect::https::{ClientCert, HttpsLimits, HttpsProfile, HttpsTransport, TlsTrust};
 use rsim_collect::iosxe::{IosxeSource, SHELL_SETUP as IOSXE_SHELL_SETUP};
 use rsim_collect::iosxr::{IosxrSource, SHELL_SETUP as IOSXR_SHELL_SETUP};
@@ -59,8 +58,8 @@ use rsim_collect::ssh::{Algorithms, CommandMode, SshLimits, SshProfile, SshTrans
 use rsim_collect::unifi::UnifiSource;
 use rsim_collect::vyos::VyosSource;
 use rsim_collect::{
-    Collector, Credential, Device, Jump, Limits, MemoryCredentials, PinPolicy, Proxy, Route,
-    Schedule, Secret, TimeLimits, TokioClock, TrustStore, Vendor,
+    CaptureBgp, Collector, Credential, Device, Jump, Limits, MemoryCredentials, PinPolicy, Proxy,
+    Route, Schedule, Secret, TimeLimits, TokioClock, TrustStore, Vendor,
 };
 use rsim_store::{Keys, SectionStatus, Store};
 
@@ -123,28 +122,6 @@ struct Setup {
     native_json: Vec<String>,
     /// The devices with a time key, with their time limits.
     times: Vec<(String, TimeLimits)>,
-    /// The BGP setting of each router that does not read only the sessions.
-    capture_bgp: Vec<(String, CaptureBgp)>,
-}
-
-/// The BGP setting of a device of the prefix: `<P>_<NAME>_CAPTURE_BGP`, else
-/// `<P>_CAPTURE_BGP`, else the default. The vendor key is checked when each
-/// device has its own key.
-fn capture_bgp(
-    env: &BTreeMap<String, String>,
-    prefix: &str,
-    name: &str,
-) -> Result<CaptureBgp, String> {
-    let read = |key: String| -> Result<Option<CaptureBgp>, String> {
-        env.get(&key)
-            .map(|v| {
-                CaptureBgp::parse(v).ok_or_else(|| format!("{key} {v} is not sessions, all or off"))
-            })
-            .transpose()
-    };
-    let vendor = read(format!("{prefix}_CAPTURE_BGP"))?;
-    let device = read(format!("{prefix}_{name}_CAPTURE_BGP"))?;
-    Ok(device.or(vendor).unwrap_or_default())
 }
 
 /// The largest time limit in seconds.
@@ -204,6 +181,25 @@ fn time_limits(
     }))
 }
 
+/// The BGP setting of a device of the prefix: `<P>_<NAME>_CAPTURE_BGP`, else
+/// `<P>_CAPTURE_BGP`, else the default.
+fn capture_bgp(
+    env: &BTreeMap<String, String>,
+    prefix: &str,
+    name: &str,
+) -> Result<CaptureBgp, String> {
+    let read = |key: String| -> Result<Option<CaptureBgp>, String> {
+        env.get(&key)
+            .map(|v| {
+                CaptureBgp::parse(v).ok_or_else(|| format!("{key} {v} is not sessions, all or off"))
+            })
+            .transpose()
+    };
+    let vendor = read(format!("{prefix}_CAPTURE_BGP"))?;
+    let device = read(format!("{prefix}_{name}_CAPTURE_BGP"))?;
+    Ok(device.or(vendor).unwrap_or_default())
+}
+
 /// The SSH devices of one vendor: `<P>_<NAME>_IP` with the keys of the
 /// route, the mode, the algorithm set, the time limits and, for NX-OS, the
 /// JSON form and the channel limit. The credential of the vendor is `<P>_USER` with its
@@ -227,16 +223,13 @@ fn ssh_devices(
         if let Some(t) = time_limits(env, prefix, Some(name))? {
             s.times.push((id.clone(), t));
         }
-        let bgp = capture_bgp(env, prefix, name)?;
-        if bgp != CaptureBgp::default() {
-            s.capture_bgp.push((id.clone(), bgp));
-        }
         s.devices.push(Device {
             id: id.clone(),
             vendor,
             address: address.clone(),
             credential: credential.clone(),
             site: None,
+            capture_bgp: capture_bgp(env, prefix, name)?,
             route,
         });
         let get = |k: &str| env.get(&format!("{prefix}_{name}_{k}")).map(String::as_str);
@@ -385,7 +378,6 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
         https: HttpsProfile::default(),
         native_json: Vec::new(),
         times: Vec::new(),
-        capture_bgp: Vec::new(),
     };
     let list = |key: &str| -> Vec<String> {
         env.get(key)
@@ -447,6 +439,7 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
                     address: console.clone(),
                     credential: "unifi".into(),
                     site: Some(site.clone()),
+                    capture_bgp: Default::default(),
                     route: route.clone(),
                 });
             }
@@ -604,15 +597,9 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
     for id in &setup.native_json {
         nxos = nxos.with_native_json(id);
     }
-    let mut vyos = VyosSource::new(ssh.clone());
-    let mut iosxr = IosxrSource::new(ssh.clone());
-    let mut iosxe = IosxeSource::new(ssh);
-    for (id, c) in &setup.capture_bgp {
-        vyos = vyos.with_capture_bgp(id, *c);
-        nxos = nxos.with_capture_bgp(id, *c);
-        iosxr = iosxr.with_capture_bgp(id, *c);
-        iosxe = iosxe.with_capture_bgp(id, *c);
-    }
+    let vyos = VyosSource::new(ssh.clone());
+    let iosxr = IosxrSource::new(ssh.clone());
+    let iosxe = IosxeSource::new(ssh);
     let https = HttpsTransport::new(credentials, trust.clone(), HttpsLimits::default())
         .with_default_profile(setup.https);
     let devices = setup.devices;
@@ -830,11 +817,18 @@ mod tests {
              IOSXE_E1_IP=192.0.2.5\nIOSXE_USER=u\nIOSXE_PASS=p\n",
         );
         let s = setup(&env).unwrap();
+        let got: Vec<(&str, CaptureBgp)> = s
+            .devices
+            .iter()
+            .map(|d| (d.id.as_str(), d.capture_bgp))
+            .collect();
         assert_eq!(
-            s.capture_bgp,
+            got,
             [
-                ("r1".to_string(), CaptureBgp::All),
-                ("s1".to_string(), CaptureBgp::Off),
+                ("r1", CaptureBgp::All),
+                ("r2", CaptureBgp::Sessions),
+                ("s1", CaptureBgp::Off),
+                ("e1", CaptureBgp::Sessions),
             ]
         );
     }
@@ -845,7 +839,6 @@ mod tests {
         for (line, key) in [
             ("VYOS_R1_CAPTURE_BGP=none", "VYOS_R1_CAPTURE_BGP"),
             ("VYOS_CAPTURE_BGP=ALL", "VYOS_CAPTURE_BGP"),
-            ("VYOS_CAPTURE_BGP=", "VYOS_CAPTURE_BGP"),
         ] {
             let err = setup(&parse_env(&format!("{base}{line}\n")))
                 .err()
@@ -853,30 +846,6 @@ mod tests {
             assert!(err.starts_with(key), "{err}");
             assert!(err.contains("sessions, all or off"), "{err}");
         }
-        let err = setup(&parse_env(&format!(
-            "{base}VYOS_CAPTURE_BGP=x\nVYOS_R1_CAPTURE_BGP=all\n"
-        )))
-        .err()
-        .expect("a vendor key is checked when each device has its own key");
-        assert!(err.starts_with("VYOS_CAPTURE_BGP"), "{err}");
-    }
-
-    #[test]
-    fn a_device_named_capture_does_not_take_the_vendor_key() {
-        let env = parse_env(
-            "VYOS_CAPTURE_IP=192.0.2.1\nVYOS_X_CAPTURE_IP=192.0.2.2\nVYOS_CAPTURE_BGP=all\n\
-             VYOS_X_CAPTURE_CAPTURE_BGP=off\nVYOS_USER=u\nVYOS_PASS=p\n",
-        );
-        let s = setup(&env).unwrap();
-        let ids: Vec<&str> = s.devices.iter().map(|d| d.id.as_str()).collect();
-        assert_eq!(ids, ["capture", "x-capture"]);
-        assert_eq!(
-            s.capture_bgp,
-            [
-                ("capture".to_string(), CaptureBgp::All),
-                ("x-capture".to_string(), CaptureBgp::Off),
-            ]
-        );
     }
 
     #[test]

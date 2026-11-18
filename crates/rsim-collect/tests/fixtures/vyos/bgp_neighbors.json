@@ -1,0 +1,63 @@
+{
+  "default": {
+    "vrfId": 0,
+    "vrfName": "default",
+    "192.0.2.2": {
+      "remoteAs": 64501,
+      "localAs": 64500,
+      "nbrExternalLink": true,
+      "hostname": "edge-2",
+      "bgpVersion": 4,
+      "remoteRouterId": "192.0.2.2",
+      "localRouterId": "192.0.2.1",
+      "bgpState": "Established",
+      "bgpTimerUpMsec": 72062000,
+      "bgpTimerUpString": "20:01:02",
+      "bgpTimerUpEstablishedEpoch": 1700000000,
+      "bgpTimerLastRead": 12000,
+      "bgpTimerLastWrite": 45000,
+      "bgpInUpdateElapsedTimeMsecs": 72000000,
+      "bgpTimerConfiguredHoldTimeMsecs": 180000,
+      "bgpTimerConfiguredKeepAliveIntervalMsecs": 60000,
+      "bgpTimerHoldTimeMsecs": 180000,
+      "bgpTimerKeepAliveIntervalMsecs": 60000,
+      "messageStats": {
+        "depthInq": 0,
+        "depthOutq": 0,
+        "opensSent": 1,
+        "opensRecv": 1,
+        "updatesSent": 5,
+        "updatesRecv": 7,
+        "keepalivesSent": 1500,
+        "keepalivesRecv": 1499,
+        "totalSent": 1506,
+        "totalRecv": 1507
+      },
+      "minBtwnAdvertisementRunsTimerMsecs": 0,
+      "addressFamilyInfo": {
+        "ipv4Unicast": {
+          "updateGroupId": 1,
+          "subGroupId": 1,
+          "packetQueueLength": 0,
+          "commAttriSentToNbr": "extendedAndStandard",
+          "acceptedPrefixCounter": 3,
+          "sentPrefixCounter": 2
+        }
+      },
+      "connectionsEstablished": 1,
+      "connectionsDropped": 0,
+      "lastResetTimerMsecs": 72070000,
+      "lastResetDueTo": "No AFI/SAFI activated for peer",
+      "hostLocal": "192.0.2.1",
+      "portLocal": 179,
+      "hostForeign": "192.0.2.2",
+      "portForeign": 51234,
+      "nexthop": "192.0.2.1",
+      "bgpConnection": "sharedNetwork",
+      "connectRetryTimer": 120,
+      "estimatedRttInMsecs": 1,
+      "readThread": "on",
+      "writeThread": "on"
+    }
+  }
+}

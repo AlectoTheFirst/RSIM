@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use rsim_store::{Class, Format};
 
-use crate::bgp::{self, BgpCaptures, CaptureBgp};
+use crate::bgp::{self, CaptureBgp};
 use crate::cli::CliRules;
 use crate::{BoxFuture, Device, RawSection, SectionSpec, Source, Ssh, Timeouts, Vendor};
 
@@ -145,12 +145,16 @@ pub fn bgp_route_command(vrf: &str, peer: Ipv4Addr, direction: usize) -> String 
     )
 }
 
-/// The numbers and the ages of a session summary and of the neighbour
-/// detail: the table versions, the message counters, the queues, the prefix
-/// counts and the up and down times. The change hash covers the addresses
-/// and the state words; the AS of a neighbour and the local AS are in the
-/// running config.
+/// The numbers and the ages of a session summary: the table versions, the
+/// message counters, the queues, the prefix counts and the up and down
+/// times. The change hash covers the addresses and the state words; the AS
+/// of a neighbour and the local AS are in the running config.
 const BGP_COUNTERS: &[&str] = volatile!["~#", "~#/#", "~#:#:#", "~#d#h", "~#w#d", "~#y#w", "~#h#m"];
+/// The numbers, the times and the ages of the neighbour detail, also with a
+/// fraction of a second or a final `;`.
+const BGP_NEIGHBORS: &[&str] = volatile![
+    "~#", "~#/#", "~#;", "~#.", "~#:#:#", "~#:#:#.#", "~#d#h", "~#w#d", "~#y#w", "~#h#m",
+];
 /// The table versions of a table of a neighbour.
 const BGP_ROUTES: &[&str] = volatile![
     "Table ID:",
@@ -217,14 +221,14 @@ pub fn sections_with(capture: CaptureBgp) -> Vec<SectionSpec> {
             "show bgp neighbors",
             Observation,
             true,
-            BGP_COUNTERS,
+            BGP_NEIGHBORS,
         ));
         out.push(text(
             BGP_VRF_NEIGHBORS,
             "show bgp vrf all neighbors",
             Observation,
             true,
-            BGP_COUNTERS,
+            BGP_NEIGHBORS,
         ));
         out.push(text(
             bgp::ROUTES,
@@ -244,21 +248,11 @@ const DERIVED: [&str; 2] = [BGP_VRF_SESSIONS, bgp::ROUTES];
 /// Reads an IOS XR router.
 pub struct IosxrSource {
     ssh: Arc<dyn Ssh>,
-    bgp: BgpCaptures,
 }
 
 impl IosxrSource {
     pub fn new(ssh: Arc<dyn Ssh>) -> IosxrSource {
-        IosxrSource {
-            ssh,
-            bgp: BgpCaptures::default(),
-        }
-    }
-
-    /// Sets the BGP sections of a device.
-    pub fn with_capture_bgp(mut self, device: &str, capture: CaptureBgp) -> IosxrSource {
-        self.bgp.set(device, capture);
-        self
+        IosxrSource { ssh }
     }
 }
 
@@ -268,7 +262,7 @@ impl Source for IosxrSource {
     }
 
     fn sections(&self, device: &Device) -> Vec<SectionSpec> {
-        sections_with(self.bgp.of(&device.id))
+        sections_with(device.capture_bgp)
     }
 
     /// Reads the sections of the static list, then the session summary of

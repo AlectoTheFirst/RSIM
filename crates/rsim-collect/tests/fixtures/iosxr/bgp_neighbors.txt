@@ -1,0 +1,56 @@
+Tue Nov 17 10:00:02.000 UTC
+
+BGP neighbor is 192.0.2.2
+ Remote AS 64501, local AS 64500, external link
+ Remote router ID 192.0.2.2
+  BGP state = Established, up for 1d02h
+  NSR State: None
+  Last read 00:00:12, Last read before reset 00:00:00
+  Hold time is 180, keepalive interval is 60 seconds
+  Configured hold time: 180, keepalive: 60, min acceptable hold time: 3
+  Last write 00:00:30, attempted 19, written 19
+  Second last write 00:01:30, attempted 19, written 19
+  Last write before reset 00:00:00, attempted 0, written 0
+  Second last write before reset 00:00:00, attempted 0, written 0
+  Last write pulse rcvd  Nov 17 10:00:00.123 last full not set pulse count 3005
+  Last write pulse rcvd before reset 00:00:00
+  Socket not armed for io, armed for read, armed for write
+  Last write thread event before reset 00:00:00, second last 00:00:00
+  Last KA expiry before reset 00:00:00, second last 00:00:00
+  Last KA error before reset 00:00:00, KA not sent 00:00:00
+  Last KA start before reset 00:00:00, second last 00:00:00
+  Precedence: internet
+  Non-stop routing is enabled
+  Multi-protocol capability received
+  Neighbor capabilities:
+    Route refresh: advertised (old + new) and received (old + new)
+    4-byte AS: advertised and received
+    Address family IPv4 Unicast: advertised and received
+  Received 1500 messages, 0 notifications, 0 in queue
+  Sent 1501 messages, 0 notifications, 0 in queue
+  Minimum time between advertisement runs is 0 secs
+  Inbound message logging enabled, 3 messages buffered
+  Outbound message logging enabled, 3 messages buffered
+
+ For Address Family: IPv4 Unicast
+  BGP neighbor version 12
+  Update group: 0.2 Filter-group: 0.1  No Refresh request being processed
+  Route refresh request: received 0, sent 0
+  Policy for incoming advertisements is PASS
+  Policy for outgoing advertisements is PASS
+  3 accepted prefixes, 3 are bestpaths
+  Exact no. of prefixes denied : 0.
+  Cumulative no. of prefixes denied: 0.
+  Prefix advertised 2, suppressed 0, withdrawn 0
+  Maximum prefixes allowed 1048576
+  Threshold for warning message 75%, restart interval 0 min
+  An EoR was received during read-only mode
+  Last ack version 12, Last synced ack version 0
+  Outstanding version objects: current 0, max 1
+  Additional-paths operation: None
+  Send Multicast Attributes
+
+  Connections established 1; dropped 0
+  Local host: 192.0.2.1, Local port: 179, IF Handle: 0x00000030
+  Foreign host: 192.0.2.2, Foreign port: 51234
+  Last reset 00:00:00

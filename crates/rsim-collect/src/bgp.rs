@@ -1,4 +1,4 @@
-//! The BGP sections of a router: the setting of each device, the sections
+//! The BGP sections of a router: the sections
 //! that combine the answers of several commands, and the neighbours whose
 //! tables a fetch reads.
 //!
@@ -9,70 +9,14 @@
 //! never a neighbour of a command; a dynamic peer that a session answer
 //! lists is.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
 
 use serde_json::Value;
 
 use crate::cli::CliRules;
+pub use crate::device::CaptureBgp;
 use crate::{BoxFuture, RawSection, SectionSpec, Timeouts, TransportError, fetch_sections};
-
-/// What the collector reads of the BGP of a router.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum CaptureBgp {
-    /// No BGP section.
-    Off,
-    /// The summary of each session.
-    #[default]
-    Sessions,
-    /// The summaries, the neighbour detail and the tables of each neighbour.
-    All,
-}
-
-impl CaptureBgp {
-    /// The setting of a word: `off`, `sessions` or `all`.
-    pub fn parse(word: &str) -> Option<CaptureBgp> {
-        match word {
-            "off" => Some(CaptureBgp::Off),
-            "sessions" => Some(CaptureBgp::Sessions),
-            "all" => Some(CaptureBgp::All),
-            _ => None,
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            CaptureBgp::Off => "off",
-            CaptureBgp::Sessions => "sessions",
-            CaptureBgp::All => "all",
-        }
-    }
-
-    /// True if the source reads the session sections.
-    pub fn sessions(self) -> bool {
-        self != CaptureBgp::Off
-    }
-
-    /// True if the source reads the neighbour detail and the tables.
-    pub fn all(self) -> bool {
-        self == CaptureBgp::All
-    }
-}
-
-/// The setting of each device of a source. A device with no setting reads
-/// the sessions.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct BgpCaptures(BTreeMap<String, CaptureBgp>);
-
-impl BgpCaptures {
-    pub fn set(&mut self, device: &str, capture: CaptureBgp) {
-        self.0.insert(device.to_string(), capture);
-    }
-
-    pub fn of(&self, device: &str) -> CaptureBgp {
-        self.0.get(device).copied().unwrap_or_default()
-    }
-}
 
 /// The section of the summary of each session.
 pub const SESSIONS: &str = "bgp_sessions";
@@ -425,10 +369,7 @@ mod tests {
         assert_eq!(CaptureBgp::parse("all"), Some(CaptureBgp::All));
         assert_eq!(CaptureBgp::parse("off"), Some(CaptureBgp::Off));
         assert_eq!(CaptureBgp::parse("none"), None);
-        let mut c = BgpCaptures::default();
-        c.set("r1", CaptureBgp::All);
-        assert_eq!(c.of("r1"), CaptureBgp::All);
-        assert_eq!(c.of("r2"), CaptureBgp::Sessions);
+        assert_eq!(CaptureBgp::default(), CaptureBgp::Sessions);
     }
 
     #[test]

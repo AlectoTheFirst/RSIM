@@ -322,8 +322,10 @@ const NXOS_ESTABLISHED: &str = "Established";
 /// the sessions of the global table when the switch refuses the form of all
 /// VRFs. The answer gives no address family, so the scope of the families
 /// is IPv4 unicast: whether it lists the IPv6 and EVPN neighbours is not
-/// confirmed. The scope of the VRFs is each VRF row of the form of all
-/// VRFs, or `default`. An empty answer `{}` has no session.
+/// confirmed. The scope of the VRFs is each VRF row with a table of
+/// neighbours, only `default` for the global table; an answer with VRF rows
+/// and no table of neighbours is `Failed`. An empty answer `{}` has no
+/// session and an empty scope.
 pub fn nxos(all: Answer<'_>, default: Answer<'_>) -> Sessions {
     let (answer, global) = match (all, default) {
         (Answer::Fresh(..), _) => (all, false),
@@ -369,17 +371,21 @@ pub fn nxos(all: Answer<'_>, default: Answer<'_>) -> Sessions {
             "the answer has no TABLE_vrf",
         ));
     };
-    let (mut rows, mut unread) = (Vec::new(), Vec::new());
+    let (mut rows, mut unread, mut notes) = (Vec::new(), Vec::new(), Vec::new());
     let mut vrfs = BTreeSet::new();
     for vr in nx_rows(table, "ROW_vrf") {
         let vrf = scalar(vr, "vrf-name-out")
             .filter(|v| !v.is_empty())
             .unwrap_or("default")
             .to_string();
-        vrfs.insert(vrf.clone());
-        let Some(t) = vr.get("TABLE_neighbor") else {
+        let Some(t) = vr
+            .get("TABLE_neighbor")
+            .filter(|t| t.get("ROW_neighbor").is_some())
+        else {
+            notes.push(format!("VRF {vrf} has no table of neighbours"));
             continue;
         };
+        vrfs.insert(vrf.clone());
         for n in nx_rows(t, "ROW_neighbor") {
             match nxos_row(&vrf, n, file) {
                 Some(r) => rows.push(r),
@@ -388,16 +394,20 @@ pub fn nxos(all: Answer<'_>, default: Answer<'_>) -> Sessions {
         }
     }
     if global {
-        vrfs = BTreeSet::from(["default".to_string()]);
+        vrfs.retain(|v| v == "default");
     }
-    let (outcome, detail) = rows_outcome(rows.len(), &unread);
+    let (mut outcome, detail) = rows_outcome(rows.len(), &unread);
+    if vrfs.is_empty() && !notes.is_empty() {
+        outcome = Outcome::Failed;
+    }
+    notes.extend(detail);
     Sessions {
         rows,
         outcome: SectionOutcome {
             outcome,
             vrfs: Scope(vrfs),
             families,
-            detail,
+            detail: (!notes.is_empty()).then(|| notes.join("; ")),
         },
     }
 }
@@ -431,6 +441,9 @@ fn nxos_row(vrf: &str, n: &Stanza, file: &str) -> Option<SessionRow> {
 
 /// The head of the summary of a BGP process.
 const CISCO_HEADER: &str = "BGP router identifier";
+/// The start of the header of the neighbour columns. A summary with this
+/// header and no row is not read.
+const CISCO_COLUMNS: &str = "Neighbor";
 /// The start of a line with which a Cisco device states that it has no BGP
 /// process or no such VRF.
 const CISCO_NOTE: &str = "%";
@@ -665,6 +678,12 @@ fn summary(vendor: Cisco, vrf: &str, text: &str, offset: usize, file: &str) -> P
         .into_iter()
         .filter(|(_, l)| row_address(l).is_some())
         .collect();
+    if shaped.is_empty() && content.iter().any(|l| l.starts_with(CISCO_COLUMNS)) {
+        return part(
+            Outcome::Failed,
+            Some("the header of the neighbour columns has no row below it".into()),
+        );
+    }
     let (rows, unread) = match vendor {
         Cisco::Iosxr => xr_rows(vrf, &shaped, offset, file),
         Cisco::Iosxe => match xe_rows(vrf, text, &shaped, offset, file) {

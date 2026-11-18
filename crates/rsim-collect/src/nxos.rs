@@ -22,7 +22,7 @@ use rsim_store::{
 };
 use serde_json::Value;
 
-use crate::bgp::{self, BgpCaptures, CaptureBgp, Peer};
+use crate::bgp::{self, CaptureBgp, Peer};
 use crate::cli::CliRules;
 use crate::{
     BoxFuture, Device, Extract, RawSection, SectionSpec, Source, Ssh, Timeouts, TransportError,
@@ -47,7 +47,6 @@ pub const SHELL_SETUP: [&str; 2] = ["terminal length 0", "terminal width 511"];
 pub struct NxosSource {
     ssh: Arc<dyn Ssh>,
     native: BTreeSet<String>,
-    bgp: BgpCaptures,
 }
 
 impl NxosSource {
@@ -55,14 +54,7 @@ impl NxosSource {
         NxosSource {
             ssh,
             native: BTreeSet::new(),
-            bgp: BgpCaptures::default(),
         }
-    }
-
-    /// Sets the BGP sections of a device.
-    pub fn with_capture_bgp(mut self, device: &str, capture: CaptureBgp) -> NxosSource {
-        self.bgp.set(device, capture);
-        self
     }
 
     /// Sends `| json native` in place of `| json` to a device. NX-OS 9.3
@@ -374,8 +366,10 @@ const BGP_SESSION_TIMES: &[&str] = &[
     "/*/*/*/*/*/*/*port",
 ];
 
-/// The times and the counters of the neighbour detail, in the rows of one
-/// or of 2 levels of tables. The keys are not confirmed on a device.
+/// The times and the counters of the neighbour detail, in the neighbour
+/// rows of one or of 2 levels of tables, and the table versions and the
+/// prefix counts of the rows of the subsequent address families below
+/// them. The keys are not confirmed on a device.
 const BGP_NEIGHBOR_TIMES: &[&str] = &[
     "/*/*/*/*time*",
     "/*/*/*/*msg*",
@@ -386,8 +380,13 @@ const BGP_NEIGHBOR_TIMES: &[&str] = &[
     "/*/*/*/*read*",
     "/*/*/*/*write*",
     "/*/*/*/*flap*",
+    "/*/*/*/conns*",
     "/*/*/*/connections*",
+    "/*/*/*/keepalive",
     "/*/*/*/*port",
+    "/*/*/*/fd",
+    "/*/*/*/*/*/*/*/*/*/*version*",
+    "/*/*/*/*/*/*/*/*/*/pfx*",
     "/*/*/*/*/*/*/*time*",
     "/*/*/*/*/*/*/*msg*",
     "/*/*/*/*/*/*/*bytes*",
@@ -397,8 +396,13 @@ const BGP_NEIGHBOR_TIMES: &[&str] = &[
     "/*/*/*/*/*/*/*read*",
     "/*/*/*/*/*/*/*write*",
     "/*/*/*/*/*/*/*flap*",
+    "/*/*/*/*/*/*/conns*",
     "/*/*/*/*/*/*/connections*",
+    "/*/*/*/*/*/*/keepalive",
     "/*/*/*/*/*/*/*port",
+    "/*/*/*/*/*/*/fd",
+    "/*/*/*/*/*/*/*/*/*/*/*/*/*version*",
+    "/*/*/*/*/*/*/*/*/*/*/*/*/pfx*",
 ];
 
 /// The table versions of the tables of the neighbours, at the levels of the
@@ -577,7 +581,7 @@ impl Source for NxosSource {
     }
 
     fn sections(&self, device: &Device) -> Vec<SectionSpec> {
-        sections_with(self.native.contains(&device.id), self.bgp.of(&device.id))
+        sections_with(self.native.contains(&device.id), device.capture_bgp)
     }
 
     /// Reads the sections of the static list. When the switch refuses the
