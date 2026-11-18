@@ -94,7 +94,8 @@ pub struct Summary {
     /// in the config.
     pub bgp_read: bool,
     /// The collected routes of each VRF, for the egress interface of the
-    /// route lookup on the address of a BGP peer.
+    /// route lookup on the address of a BGP peer. The estate takes them out
+    /// after that lookup, so they are empty in the join.
     pub routes: crate::resolve::Resolver,
 }
 

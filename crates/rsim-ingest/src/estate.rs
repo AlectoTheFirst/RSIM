@@ -739,6 +739,32 @@ fn interfaces(
     .collect()
 }
 
+/// True if an unhandled or unread stanza of a BGP path can hold a neighbour
+/// or a listen range that the peer facts do not have: the stanza is a BGP
+/// process, a VRF, an address family, or a neighbour, group, template or
+/// listen stanza itself. A setting line, for example a password or a policy
+/// line below a neighbour, holds none. A segment `*` or `..` is the value of
+/// the segment before it.
+pub fn hides_peers(path: &str) -> bool {
+    let p = path.to_ascii_lowercase();
+    if !p.split(['/', ' ']).any(|w| w == "bgp") {
+        return false;
+    }
+    let segs: Vec<&str> = p.split('/').collect();
+    let mut last = segs.last().copied().unwrap_or_default();
+    if matches!(last, "*" | "..") && segs.len() > 1 {
+        last = segs[segs.len() - 2];
+    }
+    let words: Vec<&str> = last.split_whitespace().collect();
+    match words.first().copied().unwrap_or_default() {
+        "router" | "vrf" | "address-family" => true,
+        "bgp" => words.len() == 1 || words.get(1) == Some(&"listen"),
+        "neighbor" | "neighbour" | "neighbor-group" | "session-group" | "peer-group"
+        | "template" | "listen" | "range" => words.len() <= 2,
+        _ => false,
+    }
+}
+
 /// The BGP peer facts of the devices, into the summary of each device.
 struct Peers<'a> {
     sessions: &'a BTreeMap<String, SessionSections>,
@@ -760,19 +786,17 @@ impl Peers<'_> {
         let s = bgp::read(vendor, self.sessions.get(device).unwrap_or(&none));
         let mut facts = crate::bgp_peers::facts(device, file, cfg, &s, &interfaces);
         let sum = self.summaries.entry(device.to_string()).or_default();
-        crate::bgp_peers::lookup_sources(&mut facts, &sum.routes, &interfaces);
+        let routes = std::mem::take(&mut sum.routes);
+        crate::bgp_peers::lookup_sources(&mut facts, &routes, &interfaces);
         sum.local_addresses = crate::bgp_peers::local_addresses(&interfaces);
-        // The BGP config is read in full when no unhandled stanza and no
-        // unread handled stanza names BGP.
-        let bgp = |p: &str| p.to_ascii_lowercase().contains("bgp");
         sum.bgp_read = !self
             .coverage
             .get(device)
-            .is_some_and(|c| c.unhandled.keys().any(|p| bgp(p)))
+            .is_some_and(|c| c.unhandled.keys().any(|p| hides_peers(p)))
             && !self
                 .unread
                 .get(device)
-                .is_some_and(|u| u.iter().any(|p| bgp(p)));
+                .is_some_and(|u| u.iter().any(|p| hides_peers(p)));
         sum.bgp_peers = facts;
     }
 }

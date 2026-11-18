@@ -566,3 +566,95 @@ fn bgp_peers_up_refutes_idle_and_is_unknown_outside_the_scope_of_the_read() {
     assert_eq!(o.detail, "no BGP neighbour in scope");
     stored("claim-bgp-peers-up-no-neighbour.json", &o);
 }
+
+#[test]
+fn a_far_side_that_is_not_known_is_unknown_and_never_refuted() {
+    let mut d = BTreeMap::new();
+    // a1 peers with b1, whose BGP config is not read in full.
+    d.insert(
+        "a1".to_string(),
+        device(
+            &["198.51.100.1"],
+            vec![neighbour(
+                "a1",
+                10,
+                "198.51.100.2",
+                64496,
+                64497,
+                "198.51.100.1",
+            )],
+        ),
+    );
+    let mut b1 = device(&["198.51.100.2"], Vec::new());
+    b1.bgp_read = false;
+    d.insert("b1".to_string(), b1);
+    // a2 peers with b2, which has a session with a2 and no neighbour.
+    d.insert(
+        "a2".to_string(),
+        device(
+            &["198.51.100.5"],
+            vec![neighbour(
+                "a2",
+                10,
+                "198.51.100.6",
+                64496,
+                64497,
+                "198.51.100.5",
+            )],
+        ),
+    );
+    let mut observed = neighbour("b2", 10, "198.51.100.5", 64497, 64496, "198.51.100.6");
+    observed.source = PeerSource::Observed;
+    d.insert("b2".to_string(), device(&["198.51.100.6"], vec![observed]));
+    // a3 peers with an address that 2 devices have.
+    d.insert(
+        "a3".to_string(),
+        device(
+            &["198.51.100.9"],
+            vec![neighbour(
+                "a3",
+                10,
+                "198.51.100.10",
+                64496,
+                64497,
+                "198.51.100.9",
+            )],
+        ),
+    );
+    d.insert("b3".to_string(), device(&["198.51.100.10"], Vec::new()));
+    d.insert("c3".to_string(), device(&["198.51.100.10"], Vec::new()));
+    // a4 peers with b4, which has 2 listen ranges that hold the source.
+    d.insert(
+        "a4".to_string(),
+        device(
+            &["198.51.100.17"],
+            vec![neighbour(
+                "a4",
+                10,
+                "198.51.100.18",
+                64496,
+                64497,
+                "198.51.100.17",
+            )],
+        ),
+    );
+    let range = |p: &str, line| {
+        let mut r = neighbour("b4", line, "198.51.100.18", 64497, 64496, "198.51.100.18");
+        r.peer = BgpPeer::Range(p.parse().unwrap());
+        r.source = PeerSource::ListenRange;
+        r
+    };
+    d.insert(
+        "b4".to_string(),
+        device(
+            &["198.51.100.18"],
+            vec![range("198.51.100.16/28", 10), range("198.51.100.16/29", 20)],
+        ),
+    );
+    let bgp = join(&d, &BTreeSet::new(), &BTreeSet::new()).bgp;
+    let (rows, _) = claims::bgp_peers_agree(&bgp, &|_| true);
+    assert_eq!(rows.len(), 4, "{rows:?}");
+    for r in &rows {
+        assert_eq!(r.result, ClaimResult::Unknown, "{r:?}");
+    }
+}

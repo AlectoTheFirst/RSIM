@@ -816,6 +816,29 @@ fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
             spans.iter().map(Value::to_string).collect();
         assert_eq!(unique.len(), spans.len(), "{r}");
     }
+    // The BGP claims of a store twin: the peers of the one router are
+    // outside the twin, except the dynamic peer of the listen range, and a
+    // neighbour has shutdown.
+    let claim = |name: &str| {
+        let c = rsim(&[topology.as_str(), "claim", "run", name, "--format", "json"]);
+        serde_json::from_slice::<Value>(&c.stdout).unwrap()
+    };
+    let up = claim("bgp-peers-up");
+    assert_eq!(up["result"], "confirmed", "{up}");
+    assert_eq!(
+        up["evidence"][0]["subject"],
+        "r1 vrf default neighbour 203.0.113.5"
+    );
+    assert_eq!(
+        up["detail"],
+        "left out: 1 with shutdown, 2 with the peer outside the twin"
+    );
+    let agree = claim("bgp-peers-agree");
+    assert_eq!(agree["result"], "unknown", "{agree}");
+    assert_eq!(
+        agree["detail"],
+        "no BGP neighbour in scope; left out: 1 with shutdown, 2 with the peer outside the twin"
+    );
     // The links of a store twin have collected facts for the claim.
     let c = rsim(&[
         topology.as_str(),
