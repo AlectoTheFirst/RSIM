@@ -1,0 +1,21 @@
+Tue Nov 17 10:00:00.000 UTC
+BGP router identifier 192.0.2.1, local AS number 64500
+BGP generic scan interval 60 secs
+Non-stop routing is enabled
+BGP table state: Active
+Table ID: 0xe0000000   RD version: 12
+BGP main routing table version 12
+BGP NSR Initial initsync version 4 (Reached)
+BGP NSR/ISSU Sync-Group versions 0/0
+BGP scan interval 60 secs
+
+BGP is operating in STANDALONE mode.
+
+
+Process       RcvTblVer   bRIB/RIB   LabelVer  ImportVer  SendTblVer  StandbyVer
+Speaker              12         12         12         12          12           0
+
+Neighbor        Spk    AS MsgRcvd MsgSent   TblVer  InQ OutQ  Up/Down  St/PfxRcd
+192.0.2.2         0 64501    1201    1199       12    0    0 1d02h             3
+198.51.100.2      0 64502       0       0        0    0    0 never    Idle
+198.51.100.6      0 64503       0       0        0    0    0 00:10:02 Idle (Admin)

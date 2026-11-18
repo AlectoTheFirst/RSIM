@@ -5,8 +5,15 @@
 //! `{}`, and each `ROW_x` that NX-OS prints as one object for a table with
 //! one row becomes a list. The keep lists of the sections, the extracts and
 //! the ingestion then see only lists.
+//!
+//! The BGP sections follow the setting of the device, [`CaptureBgp`]: the
+//! sessions of all VRFs, or of the global table when the switch refuses the
+//! form of all VRFs, and with `all` the neighbour detail and the tables of
+//! each IPv4 neighbour. The BGP commands are the commands of the HST
+//! collector and their JSON keys are not confirmed on a device.
 
 use std::collections::BTreeSet;
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 
 use rsim_store::{
@@ -15,6 +22,7 @@ use rsim_store::{
 };
 use serde_json::Value;
 
+use crate::bgp::{self, CaptureBgp, Peer};
 use crate::cli::CliRules;
 use crate::{
     BoxFuture, Device, Extract, RawSection, SectionSpec, Source, Ssh, Timeouts, TransportError,
@@ -321,6 +329,141 @@ const SPECS: &[Spec] = {
     ]
 };
 
+/// The section of the sessions of the global table, which the fetch reads
+/// only when the switch refuses the form of all VRFs. Else the section is
+/// absent.
+pub const BGP_SESSIONS_DEFAULT: &str = "bgp_sessions_default";
+
+/// The command of the sessions of all VRFs.
+pub const BGP_SESSIONS_COMMAND: &str = "show bgp sessions vrf all | json";
+/// The command of the sessions of the global table.
+pub const BGP_SESSIONS_DEFAULT_COMMAND: &str = "show bgp sessions | json";
+
+/// The command of a table of a neighbour, with the index of its direction
+/// in [`bgp::DIRECTIONS`].
+pub fn bgp_route_command(vrf: &str, peer: Ipv4Addr, direction: usize) -> String {
+    let scope = if vrf == bgp::DEFAULT_VRF {
+        String::new()
+    } else {
+        format!("vrf {vrf} ")
+    };
+    format!(
+        "show bgp {scope}ipv4 unicast neighbors {peer} {} | json",
+        bgp::DIRECTIONS[direction]
+    )
+}
+
+/// The times, the counters and the ports of a session row of
+/// `show bgp sessions`. The keys are not confirmed on a device, so a
+/// removal is used, not a keep list: the VRF, the address, the AS and the
+/// state stay in the change hash.
+const BGP_SESSION_TIMES: &[&str] = &[
+    "/*/*/*/*/*/*/last*",
+    "/*/*/*/*/*/*/*time*",
+    "/*/*/*/*/*/*/*flap*",
+    "/*/*/*/*/*/*/connections*",
+    "/*/*/*/*/*/*/notification*",
+    "/*/*/*/*/*/*/*port",
+];
+
+/// The times and the counters of the neighbour detail, in the neighbour
+/// rows of one or of 2 levels of tables, and the table versions and the
+/// prefix counts of the rows of the subsequent address families below
+/// them. The keys are not confirmed on a device.
+const BGP_NEIGHBOR_TIMES: &[&str] = &[
+    "/*/*/*/*time*",
+    "/*/*/*/*msg*",
+    "/*/*/*/*bytes*",
+    "/*/*/*/*sent*",
+    "/*/*/*/*recv*",
+    "/*/*/*/*rcvd*",
+    "/*/*/*/*read*",
+    "/*/*/*/*write*",
+    "/*/*/*/*flap*",
+    "/*/*/*/conns*",
+    "/*/*/*/connections*",
+    "/*/*/*/keepalive",
+    "/*/*/*/*port",
+    "/*/*/*/fd",
+    "/*/*/*/*/*/*/*/*/*/*version*",
+    "/*/*/*/*/*/*/*/*/*/pfx*",
+    "/*/*/*/*/*/*/*time*",
+    "/*/*/*/*/*/*/*msg*",
+    "/*/*/*/*/*/*/*bytes*",
+    "/*/*/*/*/*/*/*sent*",
+    "/*/*/*/*/*/*/*recv*",
+    "/*/*/*/*/*/*/*rcvd*",
+    "/*/*/*/*/*/*/*read*",
+    "/*/*/*/*/*/*/*write*",
+    "/*/*/*/*/*/*/*flap*",
+    "/*/*/*/*/*/*/conns*",
+    "/*/*/*/*/*/*/connections*",
+    "/*/*/*/*/*/*/keepalive",
+    "/*/*/*/*/*/*/*port",
+    "/*/*/*/*/*/*/fd",
+    "/*/*/*/*/*/*/*/*/*/*/*/*/*version*",
+    "/*/*/*/*/*/*/*/*/*/*/*/*/pfx*",
+];
+
+/// The table versions of the tables of the neighbours, at the levels of the
+/// VRF, the address family and the subsequent address family of each
+/// answer. The keys are not confirmed on a device.
+const BGP_ROUTE_TIMES: &[&str] = &[
+    "/*/*/*/answer/*version*",
+    "/*/*/*/answer/*/*/*/*version*",
+    "/*/*/*/answer/*/*/*/*/*/*/*version*",
+    "/*/*/*/answer/*/*/*/*/*/*/*/*/*/*version*",
+];
+
+/// The BGP sections of a setting.
+fn bgp_specs(capture: CaptureBgp) -> Vec<Spec> {
+    use Class::Observation;
+    use Format::Json;
+    let mut out = Vec::new();
+    if capture.sessions() {
+        out.push(
+            row(bgp::SESSIONS, BGP_SESSIONS_COMMAND, Observation, Json, true)
+                .volatile(BGP_SESSION_TIMES),
+        );
+        out.push(
+            row(
+                BGP_SESSIONS_DEFAULT,
+                BGP_SESSIONS_DEFAULT_COMMAND,
+                Observation,
+                Json,
+                true,
+            )
+            .volatile(BGP_SESSION_TIMES),
+        );
+    }
+    if capture.all() {
+        out.push(
+            row(
+                bgp::NEIGHBORS,
+                "show bgp vrf all neighbors | json",
+                Observation,
+                Json,
+                true,
+            )
+            .volatile(BGP_NEIGHBOR_TIMES),
+        );
+        out.push(
+            row(
+                bgp::ROUTES,
+                "show bgp [vrf <vrf>] ipv4 unicast neighbors <address> <direction> | json",
+                Observation,
+                Json,
+                true,
+            )
+            .volatile(BGP_ROUTE_TIMES),
+        );
+    }
+    out
+}
+
+/// The sections whose commands come from the answers of other sections.
+const DERIVED: [&str; 2] = [BGP_SESSIONS_DEFAULT, bgp::ROUTES];
+
 /// The command with `| json native` in place of a final `| json`.
 fn native(command: &str) -> String {
     if command.ends_with("| json") {
@@ -330,11 +473,19 @@ fn native(command: &str) -> String {
     }
 }
 
-/// The sections of an NX-OS switch. With `native_json`, each JSON command
-/// ends with `| json native`.
+/// The sections of an NX-OS switch with the BGP sections of the default
+/// setting. With `native_json`, each JSON command ends with `| json native`.
 pub fn sections(native_json: bool) -> Vec<SectionSpec> {
-    SPECS
+    sections_with(native_json, CaptureBgp::default())
+}
+
+/// The sections of an NX-OS switch with the BGP sections of a setting, in
+/// the order of the fetch.
+pub fn sections_with(native_json: bool, capture: CaptureBgp) -> Vec<SectionSpec> {
+    let mut out: Vec<SectionSpec> = SPECS
         .iter()
+        .copied()
+        .chain(bgp_specs(capture))
         .map(|s| SectionSpec {
             name: s.name,
             command: if native_json {
@@ -349,7 +500,35 @@ pub fn sections(native_json: bool) -> Vec<SectionSpec> {
             keep: s.keep,
             optional: s.optional,
         })
-        .collect()
+        .collect();
+    out.sort_by_key(|s| DERIVED.contains(&s.name));
+    out
+}
+
+/// The IPv4 neighbours of an answer of `show bgp sessions` after
+/// [`shape`]: `neighbor-id` of each row of each VRF row. An answer that is
+/// not JSON gives [`TransportError::NotFound`].
+fn json_peers(bytes: &[u8]) -> Result<BTreeSet<Peer>, TransportError> {
+    let mut out = BTreeSet::new();
+    let v = serde_json::from_slice::<Value>(bytes)
+        .map_err(|e| TransportError::NotFound(format!("the session summary is not JSON: {e}")))?;
+    for vr in rows(&v, "vrf") {
+        let vrf = vrf(vr);
+        for n in rows(vr, "neighbor") {
+            if let Some(address) = text(n, "neighbor-id").and_then(|a| a.parse().ok()) {
+                out.insert(Peer {
+                    vrf: vrf.clone(),
+                    address,
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// True for the error of a device that cannot be reached.
+fn unreachable(e: &TransportError) -> bool {
+    matches!(e, TransportError::Connect(_) | TransportError::Timeout)
 }
 
 /// Makes each `ROW_x` that is one object a list with that object, and each
@@ -402,9 +581,17 @@ impl Source for NxosSource {
     }
 
     fn sections(&self, device: &Device) -> Vec<SectionSpec> {
-        sections(self.native.contains(&device.id))
+        sections_with(self.native.contains(&device.id), device.capture_bgp)
     }
 
+    /// Reads the sections of the static list. When the switch refuses the
+    /// sessions of all VRFs, the fetch then reads the sessions of the
+    /// global table, [`BGP_SESSIONS_DEFAULT`]. Then it reads the 3 tables
+    /// of each IPv4 neighbour of the first of the 2 sessions sections whose
+    /// answer is JSON. A failed, absent or unreadable answer of the
+    /// sessions makes the section of the tables absent, except a
+    /// connect error or a timeout, which the section takes as its error, as
+    /// it does when each of its commands ends in one.
     fn fetch<'a>(
         &'a self,
         device: &'a Device,
@@ -412,18 +599,72 @@ impl Source for NxosSource {
     ) -> BoxFuture<'a, Vec<RawSection>> {
         Box::pin(async move {
             let serial = self.ssh.serial(device);
+            let banner_each = self.ssh.banner_each_command(device);
+            let native_json = self.native.contains(&device.id);
             let read = |command: String| -> BoxFuture<'a, _> {
                 let ssh = self.ssh.clone();
                 Box::pin(async move { ssh.run(device, &command).await })
             };
-            let mut out = fetch_sections(self.sections(device), timeouts, serial, read).await;
-            RULES.apply(&mut out, self.ssh.banner_each_command(device));
+            let (fixed, derived): (Vec<SectionSpec>, Vec<SectionSpec>) = self
+                .sections(device)
+                .into_iter()
+                .partition(|s| !DERIVED.contains(&s.name));
+            let mut out = fetch_sections(fixed, timeouts, serial, read).await;
+            RULES.apply(&mut out, banner_each);
             out.iter_mut().for_each(shape);
+            for spec in derived {
+                let result = if spec.name == BGP_SESSIONS_DEFAULT {
+                    let all = out.iter().find(|s| s.spec.name == bgp::SESSIONS);
+                    match all.map(|s| &s.result) {
+                        Some(Err(TransportError::NotFound(_))) => {
+                            let mut a =
+                                fetch_sections(vec![spec.clone()], timeouts, serial, read).await;
+                            RULES.apply(&mut a, banner_each);
+                            a.iter_mut().for_each(shape);
+                            a.remove(0).result
+                        }
+                        Some(Err(e)) if unreachable(e) => Err(e.clone()),
+                        _ => Err(TransportError::NotFound(
+                            "not sent: the sessions of all VRFs did not refuse".into(),
+                        )),
+                    }
+                } else {
+                    let peers = [bgp::SESSIONS, BGP_SESSIONS_DEFAULT]
+                        .iter()
+                        .filter_map(|n| out.iter().find(|s| s.spec.name == *n))
+                        .map(|s| s.result.clone().and_then(|b| json_peers(&b)))
+                        .reduce(|a, b| match (&a, &b) {
+                            (Ok(_), _) => a,
+                            (_, Ok(_)) => b,
+                            (Err(e), _) if unreachable(e) => a,
+                            _ => b,
+                        })
+                        .unwrap_or_else(|| {
+                            Err(TransportError::NotFound("the sessions are not read".into()))
+                        });
+                    let parts = match &peers {
+                        Ok(p) => Ok(bgp::route_parts(p, |v, a, d| {
+                            let c = bgp_route_command(v, a, d);
+                            if native_json { native(&c) } else { c }
+                        })),
+                        Err(e) => Err(e.clone()),
+                    };
+                    let mut answers = match &parts {
+                        Ok(parts) => bgp::fetch_parts(&spec, parts, timeouts, serial, read).await,
+                        Err(_) => Vec::new(),
+                    };
+                    RULES.apply(&mut answers, banner_each);
+                    answers.iter_mut().for_each(shape);
+                    bgp::combined(parts.as_deref(), "the session summary", &answers, |_, a| {
+                        bgp::combine_json(peers.as_ref().expect("the parts have peers"), a)
+                    })
+                };
+                out.push(RawSection { spec, result });
+            }
             out
         })
     }
 }
-
 fn json(bytes: &[u8]) -> Result<Value, String> {
     serde_json::from_slice(bytes).map_err(|e| e.to_string())
 }

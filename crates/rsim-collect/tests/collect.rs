@@ -29,6 +29,7 @@ fn vyos(id: &str) -> Device {
         address: "192.0.2.1".into(),
         credential: "lab".into(),
         site: None,
+        capture_bgp: Default::default(),
         route: Default::default(),
     }
 }
@@ -40,6 +41,7 @@ fn site(id: &str) -> Device {
         address: "192.0.2.5".into(),
         credential: "lab".into(),
         site: Some("default".into()),
+        capture_bgp: Default::default(),
         route: Default::default(),
     }
 }
@@ -54,6 +56,7 @@ fn vyos_file(section: &str) -> &'static str {
         "link_speeds" => "vyos/speeds.txt",
         "routes_ipv4" => "vyos/routes_ipv4.json",
         "routes_ipv6" => "vyos/routes_ipv6.json",
+        "bgp_sessions" => "vyos/bgp_sessions.json",
         s => panic!("no fixture for {s}"),
     }
 }
@@ -423,7 +426,7 @@ async fn volatile_changes_write_nothing_until_the_forced_full_collection() {
     let raw = String::from_utf8(e.c.store().read_blob(&v.blob.unwrap()).unwrap()).unwrap();
     assert!(raw.contains("2 days"));
     assert_eq!(rows(&e, table("neighbours").unwrap(), "r1")[0][3], "STALE");
-    assert_eq!(e.t.calls(), 16 * (8 + 9));
+    assert_eq!(e.t.calls(), 16 * (9 + 9));
 }
 
 #[tokio::test(start_paused = true)]
@@ -568,7 +571,7 @@ async fn the_limits_bound_the_devices_in_flight() {
     let r = e.c.run_cycle().await.unwrap();
     assert_eq!((r.due, r.changed.len()), (40, 40));
     assert_eq!(e.t.max_devices(), 3);
-    assert_eq!(e.t.max_per_device(), 8);
+    assert_eq!(e.t.max_per_device(), 9);
 }
 
 #[tokio::test(start_paused = true)]

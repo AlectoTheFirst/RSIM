@@ -6,6 +6,8 @@
 //! stops the stage before it. A cycle writes one snapshot to the store, and
 //! a cycle with no change writes nothing.
 
+#[cfg(feature = "ssh")]
+pub mod bgp;
 mod classify;
 pub mod cli;
 mod device;
@@ -34,7 +36,7 @@ pub mod unifi;
 pub mod vyos;
 
 pub use classify::{Classified, classify};
-pub use device::{Device, Inventory, Vendor};
+pub use device::{CaptureBgp, Device, Inventory, Vendor};
 pub use path::{Algorithms, Jump, Proxy, ProxyLogin, Route};
 pub use pipeline::{
     Clock, CollectError, Collector, CycleReport, Limits, OsEntropy, Sink, TimeLimits, TokioClock,

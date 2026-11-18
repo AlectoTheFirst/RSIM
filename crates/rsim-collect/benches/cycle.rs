@@ -27,6 +27,7 @@ fn file(section: &str) -> &'static str {
         "neighbours" => "neighbours.json",
         "link_speeds" => "speeds.txt",
         "routes_ipv4" => "routes_ipv4.json",
+        "bgp_sessions" => "bgp_sessions.json",
         _ => "routes_ipv6.json",
     }
 }
@@ -38,6 +39,7 @@ fn device(id: &str) -> Device {
         address: "192.0.2.1".into(),
         credential: "lab".into(),
         site: None,
+        capture_bgp: Default::default(),
         route: Default::default(),
     }
 }

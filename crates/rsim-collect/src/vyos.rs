@@ -1,5 +1,15 @@
 //! The VyOS source: read-only commands over SSH.
+//!
+//! The BGP sections follow the setting of the device, [`CaptureBgp`]: the
+//! FRR summary of the sessions of all VRFs and address families, and with
+//! `all` the neighbour detail and the tables of each IPv4 unicast
+//! neighbour. The summary and the tables of a neighbour are confirmed on
+//! one router with one eBGP neighbour in IPv4 unicast in the default VRF; a
+//! named VRF, another address family, an empty table and the neighbour
+//! detail are not confirmed on a device.
 
+use std::collections::BTreeSet;
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 
 use rsim_store::{
@@ -7,9 +17,10 @@ use rsim_store::{
 };
 use serde_json::Value;
 
+use crate::bgp::{self, CaptureBgp, Peer};
 use crate::{
-    BoxFuture, Device, Extract, RawSection, SectionSpec, Source, Ssh, Timeouts, Vendor,
-    fetch_sections,
+    BoxFuture, Device, Extract, RawSection, SectionSpec, Source, Ssh, Timeouts, TransportError,
+    Vendor, fetch_sections,
 };
 
 /// The search path that each operational command sets, because `ip` is in
@@ -64,8 +75,8 @@ fn spec(
     }
 }
 
-/// The sections of a VyOS router.
-pub fn sections() -> Vec<SectionSpec> {
+/// The sections of a VyOS router without its BGP sections.
+fn base_sections() -> Vec<SectionSpec> {
     use Class::{Configuration, Observation};
     use Format::{Json, Text};
     const ROUTE_VOLATILE: &[&str] = &["/*/*/uptime", "/*/*/*/uptime"];
@@ -148,26 +159,225 @@ impl Source for VyosSource {
         Vendor::Vyos
     }
 
-    fn sections(&self, _: &Device) -> Vec<SectionSpec> {
-        sections()
+    fn sections(&self, device: &Device) -> Vec<SectionSpec> {
+        sections_with(device.capture_bgp)
     }
 
+    /// Reads the sections, then the 3 tables of each IPv4 unicast neighbour
+    /// of the BGP sessions. A failed, absent or unreadable answer of the
+    /// sessions makes the section of the tables absent, except a connect error or a
+    /// timeout, which the section takes as its error, as it does when each
+    /// of its commands ends in one.
     fn fetch<'a>(
         &'a self,
         device: &'a Device,
         timeouts: Timeouts,
     ) -> BoxFuture<'a, Vec<RawSection>> {
-        let serial = self.ssh.serial(device);
-        Box::pin(fetch_sections(
-            sections(),
-            timeouts,
-            serial,
-            move |command| {
+        Box::pin(async move {
+            let serial = self.ssh.serial(device);
+            let read = |command: String| -> BoxFuture<'a, _> {
                 let ssh = self.ssh.clone();
                 Box::pin(async move { ssh.run(device, &command).await })
-            },
-        ))
+            };
+            let (fixed, routes): (Vec<SectionSpec>, Vec<SectionSpec>) = self
+                .sections(device)
+                .into_iter()
+                .partition(|s| s.name != bgp::ROUTES);
+            let mut out = fetch_sections(fixed, timeouts, serial, read).await;
+            out.iter_mut().for_each(bgp_answer);
+            for spec in routes {
+                let peers = out
+                    .iter()
+                    .find(|s| s.spec.name == bgp::SESSIONS)
+                    .map_or_else(
+                        || Err(TransportError::NotFound("the sessions are not read".into())),
+                        |s| s.result.clone(),
+                    )
+                    .and_then(|b| session_peers(&b));
+                let parts = match &peers {
+                    Ok(p) => Ok(bgp::route_parts(p, bgp_route_command)),
+                    Err(e) => Err(e.clone()),
+                };
+                let mut answers = match &parts {
+                    Ok(parts) => bgp::fetch_parts(&spec, parts, timeouts, serial, read).await,
+                    Err(_) => Vec::new(),
+                };
+                answers.iter_mut().for_each(bgp_answer);
+                let result =
+                    bgp::combined(parts.as_deref(), "the session summary", &answers, |_, a| {
+                        bgp::combine_json(peers.as_ref().expect("the parts have peers"), a)
+                    });
+                out.push(RawSection { spec, result });
+            }
+            out
+        })
     }
+}
+
+/// The section of the BGP sessions: FRR `show bgp vrf all summary json`.
+pub const BGP_SESSIONS_COMMAND: &str =
+    r#"PATH=/usr/sbin:/sbin:/usr/bin:/bin vtysh -c "show bgp vrf all summary json""#;
+
+/// The command of a table of a neighbour, with the index of its direction
+/// in [`bgp::DIRECTIONS`]. The VRF comes before the address family, as the
+/// grammar of FRR has it.
+pub fn bgp_route_command(vrf: &str, peer: Ipv4Addr, direction: usize) -> String {
+    let scope = if vrf == bgp::DEFAULT_VRF {
+        String::new()
+    } else {
+        format!("vrf {vrf} ")
+    };
+    format!(
+        r#"{PATH} vtysh -c "show bgp {scope}ipv4 unicast neighbors {peer} {} json""#,
+        bgp::DIRECTIONS[direction]
+    )
+}
+
+/// The members of the BGP sessions that the change hash covers: the local
+/// AS and the router ID of each VRF and address family, and the AS and the
+/// state of each neighbour, under a VRF or, in the form with no VRF level,
+/// at the top. The VRF, the address family and the address are the keys on
+/// these paths. The counters and the up times are not in the list.
+const BGP_SESSION_KEEP: &[&str] = &[
+    "/*/*/as",
+    "/*/*/routerId",
+    "/*/*/vrfName",
+    "/*/*/peers/*/remoteAs",
+    "/*/*/peers/*/localAs",
+    "/*/*/peers/*/state",
+    "/*/*/peers/*/peerState",
+    "/*/as",
+    "/*/routerId",
+    "/*/peers/*/remoteAs",
+    "/*/peers/*/localAs",
+    "/*/peers/*/state",
+    "/*/peers/*/peerState",
+    "/warning",
+];
+
+/// The timers, the counters, the up times and the TCP ports of the
+/// neighbour detail of each VRF.
+const BGP_NEIGHBOR_TIMES: &[&str] = &[
+    "/*/*/bgpTimer*",
+    "/*/*/port*",
+    "/*/*/*Msecs",
+    "/*/*/*Msec",
+    "/*/*/*Epoch",
+    "/*/*/*Thread",
+    "/*/*/messageStats",
+    "/*/*/connections*",
+    "/*/*/lastReset*",
+    "/*/*/*Time*",
+    "/*/*/addressFamilyInfo/*/*Counter",
+    "/*/*/addressFamilyInfo/*/packetQueueLength",
+];
+
+/// The table versions of the tables of the neighbours.
+const BGP_ROUTE_TIMES: &[&str] = &["/*/*/*/answer/*ableVersion"];
+
+/// The sections of a VyOS router with the BGP sections of the default
+/// setting.
+pub fn sections() -> Vec<SectionSpec> {
+    sections_with(CaptureBgp::default())
+}
+
+/// The sections of a VyOS router with the BGP sections of a setting, in
+/// the order of the fetch.
+pub fn sections_with(capture: CaptureBgp) -> Vec<SectionSpec> {
+    use Class::Observation;
+    use Format::Json;
+    let mut out = base_sections();
+    let bgp_spec = |name, command: &str, volatile, keep| SectionSpec {
+        keep,
+        optional: true,
+        ..spec(name, command, Observation, Json, volatile, &[])
+    };
+    if capture.sessions() {
+        out.push(bgp_spec(
+            bgp::SESSIONS,
+            BGP_SESSIONS_COMMAND,
+            &[],
+            BGP_SESSION_KEEP,
+        ));
+    }
+    if capture.all() {
+        out.push(bgp_spec(
+            bgp::NEIGHBORS,
+            &format!(r#"{PATH} vtysh -c "show ip bgp vrf all neighbors json""#),
+            BGP_NEIGHBOR_TIMES,
+            &[],
+        ));
+        out.push(bgp_spec(
+            bgp::ROUTES,
+            &format!(
+                r#"{PATH} vtysh -c "show bgp [vrf <vrf>] ipv4 unicast neighbors <address> <direction> json""#
+            ),
+            BGP_ROUTE_TIMES,
+            &[],
+        ));
+    }
+    out
+}
+
+/// An answer of a BGP command: an empty answer is `{}`, and an answer whose
+/// first line starts with `%`, such as the answer of a router with no BGP
+/// instance, makes the section absent with that line. The other sections
+/// keep their answers.
+fn bgp_answer(section: &mut RawSection) {
+    if ![bgp::SESSIONS, bgp::NEIGHBORS, bgp::ROUTES].contains(&section.spec.name) {
+        return;
+    }
+    let Ok(bytes) = &section.result else { return };
+    let text = String::from_utf8_lossy(bytes);
+    let text = text.trim();
+    if text.is_empty() {
+        section.result = Ok(b"{}".to_vec());
+    } else if text.starts_with('%') {
+        let line = text.lines().next().unwrap_or_default().to_string();
+        section.result = Err(TransportError::NotFound(line));
+    }
+}
+
+/// The IPv4 unicast neighbours of the BGP sessions: the addresses of
+/// `ipv4Unicast/peers` of each VRF, or of the top in the form with no VRF
+/// level. An answer that is not a JSON object gives
+/// [`TransportError::NotFound`].
+fn session_peers(bytes: &[u8]) -> Result<BTreeSet<Peer>, TransportError> {
+    let mut out = BTreeSet::new();
+    let top = match serde_json::from_slice::<Value>(bytes) {
+        Ok(Value::Object(top)) => top,
+        Ok(_) => {
+            return Err(TransportError::NotFound(
+                "the session summary is not a JSON object".into(),
+            ));
+        }
+        Err(e) => {
+            return Err(TransportError::NotFound(format!(
+                "the session summary is not JSON: {e}"
+            )));
+        }
+    };
+    let mut add = |vrf: &str, family: Option<&Value>| {
+        let Some(Value::Object(peers)) = family.and_then(|f| f.get("peers")) else {
+            return;
+        };
+        for p in peers.keys() {
+            if let Ok(address) = p.parse::<Ipv4Addr>() {
+                out.insert(Peer {
+                    vrf: vrf.to_string(),
+                    address,
+                });
+            }
+        }
+    };
+    if top.contains_key("ipv4Unicast") {
+        add(bgp::DEFAULT_VRF, top.get("ipv4Unicast"));
+    } else {
+        for (vrf, v) in &top {
+            add(vrf, v.get("ipv4Unicast"));
+        }
+    }
+    Ok(out)
 }
 
 fn json(bytes: &[u8]) -> Result<Value, String> {

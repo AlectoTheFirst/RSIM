@@ -29,6 +29,7 @@ fn switch() -> Device {
         address: "192.0.2.10".into(),
         credential: "lab".into(),
         site: None,
+        capture_bgp: Default::default(),
         route: Default::default(),
     }
 }

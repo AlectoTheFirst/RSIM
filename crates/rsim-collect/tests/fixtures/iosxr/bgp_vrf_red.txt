@@ -1,0 +1,20 @@
+Tue Nov 17 10:00:01.000 UTC
+BGP VRF RED, state: Active
+BGP Route Distinguisher: 64500:1
+VRF ID: 0x60000001
+BGP router identifier 203.0.113.1, local AS number 64500
+Non-stop routing is enabled
+BGP table state: Active
+Table ID: 0xe0000011   RD version: 4
+BGP main routing table version 4
+BGP NSR Initial initsync version 2 (Reached)
+BGP NSR/ISSU Sync-Group versions 0/0
+
+BGP is operating in STANDALONE mode.
+
+
+Process       RcvTblVer   bRIB/RIB   LabelVer  ImportVer  SendTblVer  StandbyVer
+Speaker               4          4          4          4           4           0
+
+Neighbor        Spk    AS MsgRcvd MsgSent   TblVer  InQ OutQ  Up/Down  St/PfxRcd
+203.0.113.2       0 65551      50      52        4    0    0 00:45:10          1

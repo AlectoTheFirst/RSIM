@@ -19,6 +19,7 @@
 //! | `NXOS_<NAME>_CHANNELS`, `IOSXR_<NAME>_CHANNELS`, `IOSXE_<NAME>_CHANNELS` | The exec channels at one time. The default is 1: one command after the other. |
 //! | `<P>_TIMEOUT`, `<P>_<NAME>_TIMEOUT` | The time for all sections of a device, in whole seconds from 1 to 86400. The default is 45. `<P>` is `VYOS`, `NXOS`, `IOSXR`, `IOSXE` or `UNIFI`; UniFi has only the vendor key. |
 //! | `<P>_SECTION_TIMEOUT`, `<P>_<NAME>_SECTION_TIMEOUT` | The time for one section, in whole seconds from 1 to 86400. The default is 20. |
+//! | `<P>_CAPTURE_BGP`, `<P>_<NAME>_CAPTURE_BGP` | The BGP sections of a router: `sessions` (the default) for the session summaries, `all` for the summaries, the neighbour detail and the tables of each neighbour, or `off`. `<P>` is `VYOS`, `NXOS`, `IOSXR` or `IOSXE`. A router with `all` can need a longer `<P>_<NAME>_TIMEOUT`. |
 //! | `UNIFI_CONTROLLER` | The addresses of the UniFi consoles, separated by commas |
 //! | `UNIFI_SITES` | The sites, separated by commas. The default is `default`. |
 //! | `UNIFI_USER`, `UNIFI_PASS` | The credential of the UniFi consoles |
@@ -57,8 +58,8 @@ use rsim_collect::ssh::{Algorithms, CommandMode, SshLimits, SshProfile, SshTrans
 use rsim_collect::unifi::UnifiSource;
 use rsim_collect::vyos::VyosSource;
 use rsim_collect::{
-    Collector, Credential, Device, Jump, Limits, MemoryCredentials, PinPolicy, Proxy, Route,
-    Schedule, Secret, TimeLimits, TokioClock, TrustStore, Vendor,
+    CaptureBgp, Collector, Credential, Device, Jump, Limits, MemoryCredentials, PinPolicy, Proxy,
+    Route, Schedule, Secret, TimeLimits, TokioClock, TrustStore, Vendor,
 };
 use rsim_store::{Keys, SectionStatus, Store};
 
@@ -180,6 +181,25 @@ fn time_limits(
     }))
 }
 
+/// The BGP setting of a device of the prefix: `<P>_<NAME>_CAPTURE_BGP`, else
+/// `<P>_CAPTURE_BGP`, else the default.
+fn capture_bgp(
+    env: &BTreeMap<String, String>,
+    prefix: &str,
+    name: &str,
+) -> Result<CaptureBgp, String> {
+    let read = |key: String| -> Result<Option<CaptureBgp>, String> {
+        env.get(&key)
+            .map(|v| {
+                CaptureBgp::parse(v).ok_or_else(|| format!("{key} {v} is not sessions, all or off"))
+            })
+            .transpose()
+    };
+    let vendor = read(format!("{prefix}_CAPTURE_BGP"))?;
+    let device = read(format!("{prefix}_{name}_CAPTURE_BGP"))?;
+    Ok(device.or(vendor).unwrap_or_default())
+}
+
 /// The SSH devices of one vendor: `<P>_<NAME>_IP` with the keys of the
 /// route, the mode, the algorithm set, the time limits and, for NX-OS, the
 /// JSON form and the channel limit. The credential of the vendor is `<P>_USER` with its
@@ -209,6 +229,7 @@ fn ssh_devices(
             address: address.clone(),
             credential: credential.clone(),
             site: None,
+            capture_bgp: capture_bgp(env, prefix, name)?,
             route,
         });
         let get = |k: &str| env.get(&format!("{prefix}_{name}_{k}")).map(String::as_str);
@@ -418,6 +439,7 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
                     address: console.clone(),
                     credential: "unifi".into(),
                     site: Some(site.clone()),
+                    capture_bgp: Default::default(),
                     route: route.clone(),
                 });
             }
@@ -575,6 +597,9 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
     for id in &setup.native_json {
         nxos = nxos.with_native_json(id);
     }
+    let vyos = VyosSource::new(ssh.clone());
+    let iosxr = IosxrSource::new(ssh.clone());
+    let iosxe = IosxeSource::new(ssh);
     let https = HttpsTransport::new(credentials, trust.clone(), HttpsLimits::default())
         .with_default_profile(setup.https);
     let devices = setup.devices;
@@ -602,10 +627,10 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
         Arc::new(TokioClock::system()),
     )
     .map_err(|e| e.to_string())?
-    .with_source(Arc::new(VyosSource::new(ssh.clone())))
+    .with_source(Arc::new(vyos))
     .with_source(Arc::new(nxos))
-    .with_source(Arc::new(IosxrSource::new(ssh.clone())))
-    .with_source(Arc::new(IosxeSource::new(ssh)))
+    .with_source(Arc::new(iosxr))
+    .with_source(Arc::new(iosxe))
     .with_source(Arc::new(UnifiSource::new(Arc::new(https))));
     for (id, t) in &setup.times {
         collector = collector.with_time_limits(id, *t);
@@ -781,6 +806,46 @@ mod tests {
         .err()
         .expect("a device name that ends in _SECTION makes the key ambiguous");
         assert!(err.starts_with("VYOS_R1_SECTION_TIMEOUT"), "{err}");
+    }
+
+    #[test]
+    fn the_device_key_of_the_bgp_setting_wins_over_the_vendor_key() {
+        let env = parse_env(
+            "VYOS_R1_IP=192.0.2.1\nVYOS_R2_IP=192.0.2.2\nVYOS_CAPTURE_BGP=all\n\
+             VYOS_R2_CAPTURE_BGP=sessions\nVYOS_USER=u\nVYOS_PASS=p\n\
+             NXOS_S1_IP=192.0.2.4\nNXOS_S1_CAPTURE_BGP=off\nNXOS_USER=u\nNXOS_PASS=p\n\
+             IOSXE_E1_IP=192.0.2.5\nIOSXE_USER=u\nIOSXE_PASS=p\n",
+        );
+        let s = setup(&env).unwrap();
+        let got: Vec<(&str, CaptureBgp)> = s
+            .devices
+            .iter()
+            .map(|d| (d.id.as_str(), d.capture_bgp))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("r1", CaptureBgp::All),
+                ("r2", CaptureBgp::Sessions),
+                ("s1", CaptureBgp::Off),
+                ("e1", CaptureBgp::Sessions),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_bgp_setting_that_is_not_a_word_of_the_list_is_an_error() {
+        let base = "VYOS_R1_IP=192.0.2.1\nVYOS_USER=u\nVYOS_PASS=p\n";
+        for (line, key) in [
+            ("VYOS_R1_CAPTURE_BGP=none", "VYOS_R1_CAPTURE_BGP"),
+            ("VYOS_CAPTURE_BGP=ALL", "VYOS_CAPTURE_BGP"),
+        ] {
+            let err = setup(&parse_env(&format!("{base}{line}\n")))
+                .err()
+                .unwrap_or_else(|| panic!("{line}"));
+            assert!(err.starts_with(key), "{err}");
+            assert!(err.contains("sessions, all or off"), "{err}");
+        }
     }
 
     #[test]

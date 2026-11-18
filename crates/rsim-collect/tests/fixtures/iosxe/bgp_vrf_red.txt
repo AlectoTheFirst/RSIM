@@ -1,0 +1,11 @@
+BGP router identifier 203.0.113.1, local AS number 64500
+BGP table version is 4, main routing table version 4
+2 network entries using 496 bytes of memory
+2 path entries using 272 bytes of memory
+2/2 BGP path/bestpath attribute entries using 576 bytes of memory
+1 BGP AS-PATH entries using 24 bytes of memory
+BGP using 1368 total bytes of memory
+BGP activity 7/2 prefixes, 9/3 paths, scan interval 60 secs
+
+Neighbor        V           AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd
+203.0.113.2     4        65551      50      52        4    0    0 00:45:10        1

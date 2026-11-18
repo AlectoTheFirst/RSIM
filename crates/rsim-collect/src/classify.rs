@@ -267,6 +267,7 @@ mod tests {
                 address: "192.0.2.1".into(),
                 credential: "lab".into(),
                 site: None,
+                capture_bgp: Default::default(),
                 route: Default::default(),
             },
             collected_at: 5,

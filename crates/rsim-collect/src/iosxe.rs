@@ -2,16 +2,24 @@
 //! text. `show ip arp` gives the ARP table of the global routing table, and
 //! the section `arp_vrfs` holds the ARP table of each VRF of
 //! `show vrf detail`.
+//!
+//! The BGP sections follow the setting of the device, [`CaptureBgp`]: the
+//! session summary of the global table and of each VRF of the `router bgp`
+//! block, and with `all` the neighbour detail and the tables of each IPv4
+//! neighbour. The BGP commands are the commands of the HST collector, which
+//! has not run against a live IOS XE router; they are not confirmed on a
+//! device.
 
 use std::collections::BTreeSet;
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 
 use rsim_store::{Class, Format};
 
+use crate::bgp::{self, CaptureBgp, Part, Plan};
 use crate::cli::CliRules;
 use crate::{
     BoxFuture, Device, RawSection, SectionSpec, Source, Ssh, Timeouts, TransportError, Vendor,
-    fetch_sections,
 };
 
 /// The CLI rules of IOS XE: the Cisco rules.
@@ -155,24 +163,132 @@ const SPECS: &[Spec] = {
     ]
 };
 
-/// The sections of an IOS XE router. A text answer keeps its raw bytes;
-/// the change hash leaves out the volatile parts. The commands of the
-/// section [`ARP_VRFS`] come from the answer of `show vrf detail`.
+/// The sections of an IOS XE router with the BGP sections of the default
+/// setting. A text answer keeps its raw bytes; the change hash leaves out
+/// the volatile parts. The commands of the section [`ARP_VRFS`] come from
+/// the answer of `show vrf detail`.
 pub fn sections() -> Vec<SectionSpec> {
-    SPECS
-        .iter()
-        .map(|(name, command, class, optional, volatile)| SectionSpec {
-            name,
-            command: (*command).to_string(),
-            class: *class,
-            format: Format::Text,
-            volatile,
-            extracts: &[],
-            keep: &[],
-            optional: *optional,
-        })
-        .collect()
+    sections_with(CaptureBgp::default())
 }
+
+fn text(
+    name: &'static str,
+    command: &str,
+    class: Class,
+    optional: bool,
+    volatile: &'static [&'static str],
+) -> SectionSpec {
+    SectionSpec {
+        name,
+        command: command.to_string(),
+        class,
+        format: Format::Text,
+        volatile,
+        extracts: &[],
+        keep: &[],
+        optional,
+    }
+}
+
+/// The section of the session summary of each VRF of the BGP process. Each
+/// answer follows a line `VRF: <name>`, and a VRF whose command fails has
+/// the line `VRF: <name> failed`.
+pub const BGP_VRF_SESSIONS: &str = "bgp_vrf_sessions";
+
+/// The command of the session summary of the global table.
+pub const BGP_SESSIONS_COMMAND: &str = "show ip bgp summary";
+
+/// The command of the session summary of a VRF.
+pub fn bgp_vrf_sessions_command(vrf: &str) -> String {
+    format!("show ip bgp vpnv4 vrf {vrf} summary")
+}
+
+/// The command of a table of a neighbour, with the index of its direction
+/// in [`bgp::DIRECTIONS`].
+pub fn bgp_route_command(vrf: &str, peer: Ipv4Addr, direction: usize) -> String {
+    let scope = if vrf == bgp::DEFAULT_VRF {
+        String::new()
+    } else {
+        format!("vpnv4 vrf {vrf} ")
+    };
+    format!(
+        "show ip bgp {scope}neighbors {peer} {}",
+        bgp::DIRECTIONS[direction]
+    )
+}
+
+/// The numbers and the ages of a session summary: the memory, the table
+/// versions, the message counters, the queues, the prefix counts, the up
+/// and down times and the time of the most networks. The change hash covers
+/// the addresses and the state words; the AS of a neighbour and the local
+/// AS are in the running config.
+const BGP_COUNTERS: &[&str] = &[
+    "=# networks peaked",
+    "~#",
+    "~#/#",
+    "~#:#:#",
+    "~#d#h",
+    "~#w#d",
+    "~#y#w",
+    "~#h#m",
+];
+/// The numbers, the times and the ages of the neighbour detail, also in
+/// parentheses, with a final `;` or in hexadecimal, such as the TCP
+/// sequence numbers and the current time of the event timers.
+const BGP_NEIGHBORS: &[&str] = &[
+    "~#", "~#/#", "~#;", "~(#", "~#)", "~0x*", "~#:#:#", "~#d#h", "~#w#d", "~#y#w", "~#h#m",
+];
+/// The table version of a table of a neighbour.
+const BGP_ROUTES: &[&str] = &["BGP table version"];
+
+/// The sections of an IOS XE router with the BGP sections of a setting, in
+/// the order of the fetch.
+pub fn sections_with(capture: CaptureBgp) -> Vec<SectionSpec> {
+    use Class::Observation;
+    let mut out: Vec<SectionSpec> = SPECS
+        .iter()
+        .map(|(name, command, class, optional, volatile)| {
+            text(name, command, *class, *optional, volatile)
+        })
+        .collect();
+    if capture.sessions() {
+        out.push(text(
+            bgp::SESSIONS,
+            BGP_SESSIONS_COMMAND,
+            Observation,
+            true,
+            BGP_COUNTERS,
+        ));
+        out.push(text(
+            BGP_VRF_SESSIONS,
+            "show ip bgp vpnv4 vrf <name> summary",
+            Observation,
+            true,
+            BGP_COUNTERS,
+        ));
+    }
+    if capture.all() {
+        out.push(text(
+            bgp::NEIGHBORS,
+            "show bgp all neighbors",
+            Observation,
+            true,
+            BGP_NEIGHBORS,
+        ));
+        out.push(text(
+            bgp::ROUTES,
+            "show ip bgp [vpnv4 vrf <vrf>] neighbors <address> <direction>",
+            Observation,
+            true,
+            BGP_ROUTES,
+        ));
+    }
+    out.sort_by_key(|s| DERIVED.contains(&s.name));
+    out
+}
+
+/// The sections whose commands come from the answers of other sections.
+const DERIVED: [&str; 3] = [ARP_VRFS, BGP_VRF_SESSIONS, bgp::ROUTES];
 
 /// Reads an IOS XE router.
 pub struct IosxeSource {
@@ -190,88 +306,80 @@ impl Source for IosxeSource {
         Vendor::Iosxe
     }
 
-    fn sections(&self, _device: &Device) -> Vec<SectionSpec> {
-        sections()
+    fn sections(&self, device: &Device) -> Vec<SectionSpec> {
+        sections_with(device.capture_bgp)
     }
 
-    /// Reads the sections of the static list, then the ARP table of each
-    /// VRF of the answer of `show vrf detail` in name order. A failed or
-    /// absent answer of the VRFs makes the section [`ARP_VRFS`] absent,
-    /// except a connect error or a timeout, which the section takes as its
-    /// error, as it does when each command of the VRFs ends in one.
+    /// Reads the sections of the static list, then the sections whose
+    /// commands come from the answers before them: the ARP table of each
+    /// VRF of the answer of `show vrf detail` in name order, the session
+    /// summary of each VRF of the `router bgp` block of the running config
+    /// in name order, and the 3 tables of each IPv4 neighbour of the
+    /// session summaries. A failed or absent answer of the section that
+    /// names the commands makes the section absent, except a connect error
+    /// or a timeout, which the section takes as its error, as it does when
+    /// each of its commands ends in one.
     fn fetch<'a>(
         &'a self,
         device: &'a Device,
         timeouts: Timeouts,
     ) -> BoxFuture<'a, Vec<RawSection>> {
         Box::pin(async move {
-            let serial = self.ssh.serial(device);
-            let banner_each = self.ssh.banner_each_command(device);
             let read = |command: String| -> BoxFuture<'a, _> {
                 let ssh = self.ssh.clone();
                 Box::pin(async move { ssh.run(device, &command).await })
             };
-            let (fixed, arp_vrfs): (Vec<SectionSpec>, Vec<SectionSpec>) = self
-                .sections(device)
-                .into_iter()
-                .partition(|s| s.name != ARP_VRFS);
-            let mut out = fetch_sections(fixed, timeouts, serial, read).await;
-            let Some(spec) = arp_vrfs.into_iter().next() else {
-                RULES.apply(&mut out, banner_each);
-                return out;
-            };
-            let names = out
-                .iter()
-                .find(|s| s.spec.name == VRFS)
-                .ok_or_else(|| {
-                    TransportError::NotFound("the section of the VRFs is not read".into())
-                })
-                .and_then(vrf_names);
-            let per_vrf = match &names {
-                Ok(names) => {
-                    let specs = names
-                        .iter()
-                        .map(|n| SectionSpec {
-                            command: arp_vrf_command(n),
-                            ..spec.clone()
-                        })
-                        .collect();
-                    fetch_sections(specs, timeouts, serial, read).await
-                }
-                Err(_) => Vec::new(),
-            };
-            // The rules see each answer on its own, so that a rejection
-            // fails one VRF and the banner is the head of all answers.
-            let fixed_len = out.len();
-            out.extend(per_vrf);
-            RULES.apply(&mut out, banner_each);
-            let answers = out.split_off(fixed_len);
-            // A device that cannot be reached gives the error of the
-            // connection, so the section keeps its last blob; another
-            // failure of the VRFs makes the section absent.
-            let unreachable = |e: &TransportError| {
-                matches!(e, TransportError::Connect(_) | TransportError::Timeout)
-            };
-            let result = match names {
-                Err(e) if unreachable(&e) => Err(e),
-                Err(e) => Err(TransportError::NotFound(format!(
-                    "the section of the VRFs failed: {e}"
-                ))),
-                Ok(names) => match answers.first().map(|a| &a.result) {
-                    Some(Err(e))
-                        if answers
+            bgp::fetch_text(
+                self.sections(device),
+                &DERIVED,
+                &RULES,
+                self.ssh.banner_each_command(device),
+                timeouts,
+                self.ssh.serial(device),
+                read,
+                |spec, view| match spec.name {
+                    ARP_VRFS => Plan {
+                        parts: view
                             .iter()
-                            .all(|a| a.result.as_ref().is_err_and(unreachable)) =>
-                    {
-                        Err(e.clone())
+                            .find(|s| s.spec.name == VRFS)
+                            .ok_or_else(|| {
+                                TransportError::NotFound(
+                                    "the section of the VRFs is not read".into(),
+                                )
+                            })
+                            .and_then(vrf_names)
+                            .map(|names| {
+                                names
+                                    .into_iter()
+                                    .map(|n| Part {
+                                        command: arp_vrf_command(&n),
+                                        head: n,
+                                    })
+                                    .collect()
+                            }),
+                        what: "the section of the VRFs",
+                        line: bgp::VRF_LINE,
+                    },
+                    BGP_VRF_SESSIONS => {
+                        bgp::vrf_session_plan(view, bgp_vrfs, bgp_vrf_sessions_command)
                     }
-                    _ => Ok(combine(&names, &answers)),
+                    _ => bgp::text_route_plan(view, BGP_VRF_SESSIONS, bgp_route_command),
                 },
-            };
-            out.push(RawSection { spec, result });
-            out
+            )
+            .await
         })
     }
+}
+
+/// The VRFs of the `router bgp` block: `address-family ipv4 vrf <name>`
+/// and `address-family ipv4 unicast vrf <name>`.
+fn bgp_vrfs(config: &str) -> Vec<String> {
+    bgp::config_bgp_vrfs(config, |l| {
+        let l = l.trim();
+        l.strip_prefix("address-family ipv4 vrf ")
+            .or_else(|| l.strip_prefix("address-family ipv4 unicast vrf "))
+            .map(str::trim)
+    })
 }
 
 /// The names of the VRFs in the answer of `show vrf detail`, in name order:
@@ -290,25 +398,6 @@ fn vrf_names(vrfs: &RawSection) -> Result<BTreeSet<String>, TransportError> {
                 .then(|| name.to_string())
         })
         .collect())
-}
-
-/// The ARP tables of the VRFs as one text: for each VRF, a line
-/// `VRF: <name>` and its answer, or the line `VRF: <name> failed`.
-fn combine(names: &BTreeSet<String>, answers: &[RawSection]) -> Vec<u8> {
-    let mut out = Vec::new();
-    for (name, a) in names.iter().zip(answers) {
-        match &a.result {
-            Ok(bytes) => {
-                out.extend_from_slice(format!("VRF: {name}\n").as_bytes());
-                out.extend_from_slice(bytes);
-                if !bytes.is_empty() && !bytes.ends_with(b"\n") {
-                    out.push(b'\n');
-                }
-            }
-            Err(_) => out.extend_from_slice(format!("VRF: {name} failed\n").as_bytes()),
-        }
-    }
-    out
 }
 
 #[cfg(test)]

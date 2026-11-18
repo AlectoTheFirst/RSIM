@@ -1,0 +1,57 @@
+{
+  "TABLE_neighbor": {
+    "ROW_neighbor": [
+      {
+        "neighbor": "192.0.2.2",
+        "remoteas": "64501",
+        "link": "ebgp",
+        "index": "1",
+        "version": "4",
+        "remote-id": "192.0.2.2",
+        "state": "Established",
+        "up": "true",
+        "elapsedtime": "P1DT2H",
+        "connectedif": "Ethernet1/1",
+        "lastread": "PT10S",
+        "holdtime": "180",
+        "keepalivetime": "60",
+        "lastwrite": "PT20S",
+        "keepalive": "PT40S",
+        "msgrecvd": "1499",
+        "notificationsrcvd": "0",
+        "recvbufbytes": "0",
+        "msgsent": "1500",
+        "notificationssent": "0",
+        "sentbytesoutstanding": "0",
+        "connsestablished": "1",
+        "connsdropped": "0",
+        "resettime": "never",
+        "resetreason": "No error",
+        "TABLE_af": {
+          "ROW_af": [
+            {
+              "af-afi": "1",
+              "TABLE_saf": {
+                "ROW_saf": [
+                  {
+                    "af-safi": "1",
+                    "tableversion": "12",
+                    "neighbortableversion": "12",
+                    "pfxrecvd": "3",
+                    "pfxbytes": "408",
+                    "pfxsent": "2"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "localaddr": "192.0.2.1",
+        "localport": "179",
+        "remoteaddr": "192.0.2.2",
+        "remoteport": "51234",
+        "fd": "71"
+      }
+    ]
+  }
+}

@@ -272,6 +272,7 @@ fn device(address: &str) -> Device {
         address: address.into(),
         credential: "lab".into(),
         site: None,
+        capture_bgp: Default::default(),
         route: Default::default(),
     }
 }

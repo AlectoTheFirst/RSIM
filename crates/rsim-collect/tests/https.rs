@@ -232,6 +232,7 @@ fn device(address: &str, site: &str) -> Device {
         address: address.into(),
         credential: "lab".into(),
         site: Some(site.into()),
+        capture_bgp: Default::default(),
         route: Default::default(),
     }
 }

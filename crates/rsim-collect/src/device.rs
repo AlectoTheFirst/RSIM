@@ -53,8 +53,52 @@ pub struct Device {
     pub credential: String,
     /// The UniFi site. `None` for the other vendors.
     pub site: Option<String>,
+    /// The BGP sections of a router. UniFi has none.
+    pub capture_bgp: CaptureBgp,
     /// The proxy and the jump hosts to the device.
     pub route: Route,
+}
+
+/// What the collector reads of the BGP of a router.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CaptureBgp {
+    /// No BGP section.
+    Off,
+    /// The summary of each session.
+    #[default]
+    Sessions,
+    /// The summaries, the neighbour detail and the tables of each neighbour.
+    All,
+}
+
+impl CaptureBgp {
+    /// The setting of a word: `off`, `sessions` or `all`.
+    pub fn parse(word: &str) -> Option<CaptureBgp> {
+        match word {
+            "off" => Some(CaptureBgp::Off),
+            "sessions" => Some(CaptureBgp::Sessions),
+            "all" => Some(CaptureBgp::All),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            CaptureBgp::Off => "off",
+            CaptureBgp::Sessions => "sessions",
+            CaptureBgp::All => "all",
+        }
+    }
+
+    /// True if the source reads the session sections.
+    pub fn sessions(self) -> bool {
+        self != CaptureBgp::Off
+    }
+
+    /// True if the source reads the neighbour detail and the tables.
+    pub fn all(self) -> bool {
+        self == CaptureBgp::All
+    }
 }
 
 /// The devices to collect.
