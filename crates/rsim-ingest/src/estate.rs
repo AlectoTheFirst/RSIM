@@ -12,6 +12,7 @@ use serde_json::Value;
 
 use crate::collected::{self, Collected};
 use crate::coverage::{Coverage, classify};
+use crate::route_tables::RouteTables;
 use crate::stanza::read_json;
 use crate::{iosxe, iosxr, nxos, unifi, vyos};
 
@@ -235,7 +236,11 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
                         continue;
                     }
                 };
-                let table = vyos::table(!col.routes.is_empty());
+                let tables = RouteTables::new(
+                    col.routes.iter().map(|r| r.vrf.clone()),
+                    vyos::dynamic_vrfs(&doc),
+                );
+                let table = vyos::table(&tables);
                 let cfg = vyos::read(&doc);
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
@@ -250,7 +255,11 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
                 sections,
             } => {
                 let doc = nxos::read_text(&config);
-                let table = nxos::table(!col.routes.is_empty());
+                let tables = RouteTables::new(
+                    col.routes.iter().map(|r| r.vrf.clone()),
+                    nxos::dynamic_vrfs(&doc),
+                );
+                let table = nxos::table(&tables);
                 let cfg = nxos::read(&doc, &table);
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
@@ -265,7 +274,9 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
                 ..
             } => {
                 let doc = iosxr::read_text(&config);
-                let table = iosxr::table(iosxr::rib_collected(&sections));
+                let tables =
+                    RouteTables::new(iosxr::rib_vrfs(&sections), iosxr::dynamic_vrfs(&doc));
+                let table = iosxr::table(&tables);
                 let cfg = iosxr::read(&doc, &table);
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
@@ -280,7 +291,9 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
                 ..
             } => {
                 let doc = iosxe::read_text(&config);
-                let table = iosxe::table(iosxe::rib_collected(&sections));
+                let tables =
+                    RouteTables::new(iosxe::rib_vrfs(&sections), iosxe::dynamic_vrfs(&doc));
+                let table = iosxe::table(&tables);
                 let cfg = iosxe::read(&doc, &table);
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread

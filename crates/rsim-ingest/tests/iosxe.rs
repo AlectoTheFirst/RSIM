@@ -9,6 +9,7 @@ use rsim_ingest::estate::{Estate, Input, assemble};
 use rsim_ingest::nxos::config::{
     AclAction, AddrSpec, FhrpKind, NatKind, NatRole, PortMode, PortSpec,
 };
+use rsim_ingest::route_tables::RouteTables;
 use rsim_ingest::{State, classify, iosxe};
 
 const ROUTER: &[u8] = include_bytes!("fixtures/iosxe/running-config.txt");
@@ -61,11 +62,14 @@ fn estate() -> Estate {
 
 fn ranked(config: &[u8], rib: bool) -> Vec<(String, u32, u32)> {
     let doc = iosxe::read_text(config);
-    classify(&doc, &iosxe::table(rib))
-        .ranked()
-        .into_iter()
-        .map(|(p, n, l)| (p.to_string(), n, l))
-        .collect()
+    classify(
+        &doc,
+        &iosxe::table(&RouteTables::uniform(rib, iosxe::dynamic_vrfs(&doc))),
+    )
+    .ranked()
+    .into_iter()
+    .map(|(p, n, l)| (p.to_string(), n, l))
+    .collect()
 }
 
 fn as_str(v: &[(String, u32, u32)]) -> Vec<(&str, u32, u32)> {
@@ -76,7 +80,10 @@ fn as_str(v: &[(String, u32, u32)]) -> Vec<(&str, u32, u32)> {
 fn the_coverage_shares_of_the_fixtures() {
     for (config, handled, irrelevant, unhandled) in [(ROUTER, 104, 151, 27), (SWITCH, 45, 61, 4)] {
         let doc = iosxe::read_text(config);
-        let cov = classify(&doc, &iosxe::table(true));
+        let cov = classify(
+            &doc,
+            &iosxe::table(&RouteTables::uniform(true, Default::default())),
+        );
         assert_eq!(cov.lines[&State::Handled], handled);
         assert_eq!(cov.lines[&State::Irrelevant], irrelevant);
         assert_eq!(cov.lines[&State::Unhandled], unhandled);
@@ -141,8 +148,8 @@ fn without_a_route_table_the_routing_is_unhandled() {
 #[test]
 fn the_states_of_key_stanzas() {
     use State::{Handled, Irrelevant, Unhandled};
-    let with = iosxe::table(true);
-    let without = iosxe::table(false);
+    let with = iosxe::table(&RouteTables::uniform(true, Default::default()));
+    let without = iosxe::table(&RouteTables::uniform(false, Default::default()));
     let i = "interface Gi0/0/1.100";
     for (path, rib, no_rib) in [
         (&["Building configuration..."][..], Irrelevant, Irrelevant),
@@ -370,7 +377,7 @@ fn no_secret_reaches_the_reports() {
     for config in [ROUTER, SWITCH] {
         let doc = iosxe::read_text(config);
         for rib in [true, false] {
-            let table = iosxe::table(rib);
+            let table = iosxe::table(&RouteTables::uniform(rib, iosxe::dynamic_vrfs(&doc)));
             for (path, _, _) in classify(&doc, &table).ranked() {
                 no_secret(path);
             }
@@ -415,7 +422,7 @@ fn each_handled_line_is_read() {
     for config in [ROUTER, SWITCH] {
         let doc = iosxe::read_text(config);
         for rib in [true, false] {
-            let table = iosxe::table(rib);
+            let table = iosxe::table(&RouteTables::uniform(rib, iosxe::dynamic_vrfs(&doc)));
             let cfg = iosxe::read(&doc, &table);
             assert_eq!(iosxe::unread(&doc, &table, &cfg.read), Vec::<String>::new());
         }
@@ -432,7 +439,10 @@ fn without_sections_the_estate_gives_the_coverage_and_a_twin() {
         let doc = iosxe::read_text(config);
         assert_eq!(
             e.coverage[name],
-            classify(&doc, &iosxe::table(false)),
+            classify(
+                &doc,
+                &iosxe::table(&RouteTables::uniform(false, Default::default()))
+            ),
             "no route table leaves the routing unhandled"
         );
     }
@@ -444,7 +454,10 @@ fn without_sections_the_estate_gives_the_coverage_and_a_twin() {
 #[test]
 fn the_typed_config_of_the_router() {
     let doc = iosxe::read_text(ROUTER);
-    let cfg = iosxe::read(&doc, &iosxe::table(true));
+    let cfg = iosxe::read(
+        &doc,
+        &iosxe::table(&RouteTables::uniform(true, Default::default())),
+    );
     assert_eq!(cfg.hostname.as_deref(), Some("edge1"));
     assert!(cfg.ip_routing.is_none());
     let vrfs: Vec<(&str, bool)> = cfg
@@ -711,7 +724,10 @@ fn the_typed_config_of_the_router() {
 #[test]
 fn the_typed_config_of_the_switch() {
     let doc = iosxe::read_text(SWITCH);
-    let cfg = iosxe::read(&doc, &iosxe::table(true));
+    let cfg = iosxe::read(
+        &doc,
+        &iosxe::table(&RouteTables::uniform(true, Default::default())),
+    );
     assert_eq!(cfg.hostname.as_deref(), Some("acc1"));
     assert_eq!(cfg.ip_routing.map(|r| r.0), Some(true));
     let vlans: Vec<VlanRow> = cfg
@@ -769,8 +785,34 @@ fn the_typed_config_of_the_switch() {
 #[test]
 fn the_short_names_of_the_multigigabit_ports_resolve() {
     let config = "interface TwoGigabitEthernet1/0/5\n switchport mode access\n!\ninterface FiveGigabitEthernet1/0/6\n switchport mode access\n!\n";
-    let cfg = iosxe::read(&iosxe::read_text(config.as_bytes()), &iosxe::table(true));
+    let cfg = iosxe::read(
+        &iosxe::read_text(config.as_bytes()),
+        &iosxe::table(&RouteTables::uniform(true, Default::default())),
+    );
     let names = iosxe::names(&cfg);
     assert_eq!(names.resolve("Tw1/0/5"), "TwoGigabitEthernet1/0/5");
     assert_eq!(names.resolve("Fi1/0/6"), "FiveGigabitEthernet1/0/6");
+}
+
+#[test]
+fn a_named_eigrp_vrf_follows_the_rows_of_its_vrf() {
+    let doc = iosxe::read_text(
+        b"router eigrp CORE\n address-family ipv4 unicast vrf RED autonomous-system 10\n  network 192.0.2.0\n",
+    );
+    let dynamic = iosxe::dynamic_vrfs(&doc);
+    assert_eq!(
+        dynamic.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["RED", "default"]
+    );
+    let path = [
+        "router eigrp CORE",
+        "address-family ipv4 unicast vrf RED autonomous-system 10",
+    ];
+    let without = iosxe::table(&RouteTables::new(["default".to_string()], dynamic.clone()));
+    assert_eq!(without.state(&path), State::Unhandled);
+    let with = iosxe::table(&RouteTables::new(
+        ["default".to_string(), "RED".to_string()],
+        dynamic,
+    ));
+    assert_eq!(with.state(&path), State::Irrelevant);
 }

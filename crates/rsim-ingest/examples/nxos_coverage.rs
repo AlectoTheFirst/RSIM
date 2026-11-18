@@ -3,6 +3,7 @@
 
 use std::io::Read;
 
+use rsim_ingest::route_tables::RouteTables;
 use rsim_ingest::{State, classify, nxos};
 
 fn main() {
@@ -11,7 +12,10 @@ fn main() {
         .read_to_end(&mut bytes)
         .expect("stdin is readable");
     let doc = nxos::read_text(&bytes);
-    let cov = classify(&doc, &nxos::table(true));
+    let cov = classify(
+        &doc,
+        &nxos::table(&RouteTables::uniform(true, nxos::dynamic_vrfs(&doc))),
+    );
     for state in [State::Handled, State::Irrelevant, State::Unhandled] {
         println!(
             "{state:?}: {} lines, {:.1} %",

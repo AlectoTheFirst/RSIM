@@ -1,7 +1,7 @@
 //! The vendor behaviour profile of NX-OS.
 
 use rsim_core::{SourceSpan, VrfId};
-use rsim_functions::{PortTranslation, RuleAction, UnzonedInterface, VendorProfile};
+use rsim_functions::{PortTranslation, RouteProtocol, RuleAction, UnzonedInterface, VendorProfile};
 
 /// Cisco NX-OS on a Nexus switch.
 ///
@@ -94,3 +94,26 @@ pub const VXLAN_ENTRY: &str = "vxlan/route";
 /// `Backup`. No source confirms these words in the JSON of NX-OS. Each other
 /// word gives `Unknown`.
 pub const STATE_WORDS: [&str; 5] = ["peer-ok", "active", "standby", "master", "backup"];
+
+/// The protocol words of `clientname` in `show ip route vrf all`, before
+/// the `-` of the instance, for example `bgp` of `bgp-65001` and `ospf` of
+/// `ospf-1`. Each word that is not here and not in [`STATIC_WORDS`] is a
+/// learned route of another protocol.
+pub const LEARNED_WORDS: &[(&str, RouteProtocol)] = &[
+    ("bgp", RouteProtocol::Bgp),
+    ("ospf", RouteProtocol::Ospf),
+    ("isis", RouteProtocol::Isis),
+    ("eigrp", RouteProtocol::Eigrp),
+    ("rip", RouteProtocol::Rip),
+];
+
+/// The `clientname` words of a route that no routing protocol gave:
+/// `static`, `am`, the host route of an adjacency, `hsrp` and `vrrp`, the
+/// route of a virtual address, and `broadcast` and `discard`.
+pub const STATIC_WORDS: &[&str] = &["static", "am", "hsrp", "vrrp", "broadcast", "discard"];
+
+/// The protocol word of a `clientname`: the word before the `-` of the
+/// instance.
+pub fn protocol_word(clientname: &str) -> &str {
+    clientname.split('-').next().unwrap_or_default()
+}

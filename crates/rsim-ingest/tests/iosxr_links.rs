@@ -11,6 +11,7 @@ use rsim_engine::{Answer, Executor, Query, Twin};
 use rsim_ingest::collected::{Collected, LinkRow, NeighbourRow, row_span};
 use rsim_ingest::estate::{Estate, Input, assemble};
 use rsim_ingest::iosxr;
+use rsim_ingest::route_tables::RouteTables;
 
 type Sections = BTreeMap<String, (Vec<u8>, String)>;
 
@@ -327,7 +328,10 @@ fn mac(s: &str) -> Mac {
 #[test]
 fn the_summary_of_the_router() {
     let doc = iosxr::read_text(CONFIG);
-    let cfg = iosxr::read(&doc, &iosxr::table(true));
+    let cfg = iosxr::read(
+        &doc,
+        &iosxr::table(&RouteTables::uniform(true, iosxr::dynamic_vrfs(&doc))),
+    );
     let (_, sum) = iosxr::lower(
         "pe1",
         "pe1/config",

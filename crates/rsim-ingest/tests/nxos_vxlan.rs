@@ -346,7 +346,7 @@ fn a_frame_to_a_remote_mac_crosses_the_tunnel_and_the_reply_comes_back() {
     for text in [
         "leaf1/mac 00:00:5e:00:53:12 is on port nve1(192.0.2.2)",
         "leaf1/vxlan/encap/192.0.2.2 VXLAN VNI 10010 from 192.0.2.1 to 192.0.2.2",
-        "leaf1/vxlan/route 192.0.2.2/32 in VRF default via 172.16.0.1 on Ethernet1/49",
+        "leaf1/vxlan/route 192.0.2.2/32 (ospf) in VRF default via 172.16.0.1 on Ethernet1/49",
         "leaf2/vxlan-decap VXLAN VNI 10010 · bridge domain leaf2/vlan10",
         "leaf2/mac-tunnel 00:00:5e:00:53:12 is on port Ethernet1/5",
     ] {

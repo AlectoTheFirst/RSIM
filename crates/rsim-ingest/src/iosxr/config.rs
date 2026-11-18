@@ -97,6 +97,9 @@ pub struct Config {
     pub acls: BTreeMap<String, Acl>,
     /// The IPv4 HSRP groups.
     pub hsrp: Vec<HsrpGroup>,
+    /// The VRFs with a dynamic routing protocol, with the lines that show
+    /// it.
+    pub dynamic_vrfs: BTreeMap<String, Vec<(u32, u32)>>,
     /// The first line of each stanza that a handler read.
     pub read: BTreeSet<u32>,
 }
@@ -163,6 +166,7 @@ pub fn read(doc: &Document, table: &Table) -> Config {
         }
     }
     cfg.read = r.read;
+    cfg.dynamic_vrfs = super::table::dynamic_vrfs(doc);
     cfg
 }
 

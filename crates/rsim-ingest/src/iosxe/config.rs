@@ -137,6 +137,9 @@ pub struct Config {
     pub native_tagging: Option<String>,
     /// The mode of `vtp mode`.
     pub vtp_mode: Option<(String, Lines)>,
+    /// The VRFs with a dynamic routing protocol, with the lines that show
+    /// it.
+    pub dynamic_vrfs: BTreeMap<String, Vec<(u32, u32)>>,
     /// The first line of each stanza that a handler read.
     pub read: BTreeSet<u32>,
 }
@@ -327,6 +330,7 @@ pub fn read(doc: &Document, table: &Table) -> Config {
         }
     }
     cfg.read = r.read;
+    cfg.dynamic_vrfs = super::table::dynamic_vrfs(doc);
     cfg
 }
 

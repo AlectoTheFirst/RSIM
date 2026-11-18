@@ -7,6 +7,7 @@
 //! port.
 
 use rsim_engine::TwinBuilder;
+use rsim_ingest::route_tables::RouteTables;
 use rsim_ingest::{State, classify, collected, read_json, vyos};
 use rsim_store::{Keys, Store};
 
@@ -29,7 +30,10 @@ fn main() {
     let bytes = store.read_blob(&blob).expect("the blob reads");
     let doc = read_json(&bytes).expect("the config is JSON");
     let col = collected::read(&store, &snap, device).expect("the tables read");
-    let table = vyos::table(!col.routes.is_empty());
+    let table = vyos::table(&RouteTables::new(
+        col.routes.iter().map(|r| r.vrf.clone()),
+        vyos::dynamic_vrfs(&doc),
+    ));
     let cov = classify(&doc, &table);
     let cfg = vyos::read(&doc);
     println!("snapshot {}", snap.manifest.cycle);

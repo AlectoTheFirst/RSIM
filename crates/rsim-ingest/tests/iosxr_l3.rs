@@ -9,6 +9,7 @@ use rsim_core::{Header, PROTO_TCP, VerdictKind};
 use rsim_engine::{Answer, Executor, Query, Twin};
 use rsim_ingest::collected::Collected;
 use rsim_ingest::estate::{Estate, Input, assemble};
+use rsim_ingest::route_tables::RouteTables;
 use rsim_ingest::{classify, iosxr};
 
 const CONFIG: &[u8] = include_bytes!("fixtures/iosxr/running-config.txt");
@@ -114,7 +115,10 @@ fn spans_of(a: &Answer, function: &str) -> Vec<String> {
 #[test]
 fn the_route_table_section_gives_paths_and_unread_lines() {
     let doc = iosxr::read_text(CONFIG);
-    let cfg = iosxr::read(&doc, &iosxr::table(true));
+    let cfg = iosxr::read(
+        &doc,
+        &iosxr::table(&RouteTables::uniform(true, iosxr::dynamic_vrfs(&doc))),
+    );
     let st = iosxr::state::read(&sections(), &iosxr::names(&cfg));
     let rib = st.rib.unwrap().unwrap();
     let ecmp: Vec<_> = rib
@@ -180,7 +184,13 @@ fn the_route_table_section_gives_paths_and_unread_lines() {
 fn with_a_route_table_the_routing_is_irrelevant_and_each_handled_line_is_read() {
     let e = estate();
     let doc = iosxr::read_text(CONFIG);
-    assert_eq!(e.coverage["pe1"], classify(&doc, &iosxr::table(true)));
+    assert_eq!(
+        e.coverage["pe1"],
+        classify(
+            &doc,
+            &iosxr::table(&RouteTables::uniform(true, iosxr::dynamic_vrfs(&doc)))
+        )
+    );
     assert_eq!(e.unread["pe1"], Vec::<String>::new());
 }
 
@@ -246,7 +256,7 @@ fn a_backup_path_does_not_forward() {
     ));
     assert!(has(
         &steps,
-        "route 198.51.100.128/26 in VRF default via 198.51.100.2 on Bundle-Ether10"
+        "route 198.51.100.128/26 (ospf) in VRF default via 198.51.100.2 on Bundle-Ether10"
     ));
     assert!(!has(&steps, "GigabitEthernet0/0/0/3"));
 }
@@ -271,7 +281,7 @@ fn a_backup_path_with_no_interface_does_not_forward() {
     ));
     assert!(has(
         &steps,
-        "route 198.51.100.224/27 in VRF default via 198.51.100.2 on Bundle-Ether10"
+        "route 198.51.100.224/27 (bgp) in VRF default via 198.51.100.2 on Bundle-Ether10"
     ));
     assert!(!has(&steps, "203.0.113.254"), "{steps:#?}");
 }
@@ -430,7 +440,7 @@ fn what_is_not_lowered_gives_unknown() {
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(has(
         &steps,
-        "route 198.51.100.96/27 in VRF RED has no next hop"
+        "route 198.51.100.96/27 (bgp) in VRF RED has no next hop"
     ));
     // A next hop that resolves through a route that is not connected.
     let (verdict, steps) = only(&run(
@@ -443,7 +453,7 @@ fn what_is_not_lowered_gives_unknown() {
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(has(
         &steps,
-        "route 198.51.100.32/27 in VRF default has no next hop"
+        "route 198.51.100.32/27 (bgp) in VRF default has no next hop"
     ));
     // The uRPF line of the interface.
     let (verdict, steps) = only(&run(
@@ -469,7 +479,10 @@ fn what_is_not_lowered_gives_unknown() {
 #[test]
 fn a_shut_interface_and_an_interface_with_no_address_are_not_lowered() {
     let doc = iosxr::read_text(CONFIG);
-    let cfg = iosxr::read(&doc, &iosxr::table(true));
+    let cfg = iosxr::read(
+        &doc,
+        &iosxr::table(&RouteTables::uniform(true, iosxr::dynamic_vrfs(&doc))),
+    );
     let (low, _) = iosxr::lower(
         "pe1",
         "pe1/config",
@@ -514,7 +527,7 @@ fn without_sections_each_route_lookup_is_unknown() {
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(has(
         &steps,
-        "route 0.0.0.0/0 in VRF default has no next hop"
+        "route 0.0.0.0/0 in VRF default: vrf route table not collected"
     ));
 }
 
@@ -526,4 +539,25 @@ fn two_builds_give_the_same_answers() {
         assert_eq!(q(&a), q(&b));
     }
     assert_eq!(estate().notes, estate().notes);
+}
+
+#[test]
+fn a_learned_route_keeps_its_protocol() {
+    let t = twin();
+    let mut kinds = BTreeMap::new();
+    for f in t.functions() {
+        let any: &dyn std::any::Any = f.as_ref();
+        if let Some(rl) = any.downcast_ref::<rsim_functions::RouteLookup>()
+            && let Some(fib) = rl.tables.get(&rsim_core::VrfId::new("default"))
+        {
+            for (p, r) in fib.entries() {
+                kinds.insert(p.to_string(), r.kind.name());
+            }
+        }
+    }
+    assert_eq!(kinds["198.51.100.64/26"], "ospf");
+    assert_eq!(kinds["198.51.100.32/27"], "bgp");
+    assert_eq!(kinds["0.0.0.0/0"], "static");
+    assert_eq!(kinds["198.51.100.0/30"], "connected");
+    assert_eq!(kinds["198.51.100.1/32"], "local");
 }

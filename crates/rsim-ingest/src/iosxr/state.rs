@@ -267,13 +267,22 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
     }
 }
 
-/// True if the route table section is in the snapshot and its template
-/// parses it.
-pub fn rib_collected(sections: &BTreeMap<String, (Vec<u8>, String)>) -> bool {
-    matches!(
-        section(sections, "rib", |p| Ok(rib(p, &Names::default()))),
-        Some(Ok(_))
-    )
+/// The VRFs with a path or a line of the route table section, if the
+/// section is in the snapshot and its template parses it.
+pub fn rib_vrfs(sections: &BTreeMap<String, (Vec<u8>, String)>) -> BTreeSet<String> {
+    match section(sections, "rib", |p| Ok(rib(p, &Names::default()))) {
+        Some(Ok(r)) => vrfs_of(&r),
+        _ => BTreeSet::new(),
+    }
+}
+
+/// The VRFs with a path or a line of a route table.
+pub(crate) fn vrfs_of(r: &Rib) -> BTreeSet<String> {
+    r.paths
+        .iter()
+        .map(|p| p.vrf.clone())
+        .chain(r.unread.iter().filter_map(|u| u.vrf.clone()))
+        .collect()
 }
 
 fn interfaces(p: &Parsed, names: &Names) -> BTreeMap<String, IfState> {

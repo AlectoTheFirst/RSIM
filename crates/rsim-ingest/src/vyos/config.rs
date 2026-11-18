@@ -242,7 +242,7 @@ impl Config {
 pub type Groups = BTreeMap<String, Result<Vec<String>, String>>;
 
 /// The children of `protocols` that add no routes to the route table.
-const NO_ROUTES: &[&str] = &["static", "pim", "igmp-proxy"];
+pub(crate) const NO_ROUTES: &[&str] = &["static", "pim", "igmp-proxy"];
 
 struct Reader {
     read: BTreeSet<u32>,

@@ -1,5 +1,6 @@
 //! The VyOS handlers and lowering on a synthetic configuration.
 
+use rsim_ingest::route_tables::RouteTables;
 use rsim_ingest::vyos::{self, config::Action, config::Family};
 use rsim_ingest::{State, classify, read_json};
 
@@ -147,7 +148,7 @@ fn a_disabled_next_hop_is_left_out_and_another_next_hop_option_is_unhandled() {
 #[test]
 fn each_handled_stanza_is_read() {
     let doc = read_json(CONFIG).unwrap();
-    let table = vyos::table(true);
+    let table = vyos::table(&RouteTables::uniform(true, vyos::dynamic_vrfs(&doc)));
     let cfg = vyos::read(&doc);
     assert_eq!(vyos::unread(&doc, &table, &cfg.read), Vec::<String>::new());
 }
@@ -155,7 +156,10 @@ fn each_handled_stanza_is_read() {
 #[test]
 fn the_coverage_names_the_unhandled_rule_option() {
     let doc = read_json(CONFIG).unwrap();
-    let cov = classify(&doc, &vyos::table(true));
+    let cov = classify(
+        &doc,
+        &vyos::table(&RouteTables::uniform(true, vyos::dynamic_vrfs(&doc))),
+    );
     let ranked: Vec<&str> = cov.ranked().iter().map(|r| r.0).collect();
     assert_eq!(ranked, ["firewall/ipv4/name/*/rule/*/recent"]);
     assert!(cov.share(State::Unhandled) < 0.02);
@@ -634,6 +638,10 @@ mod twin {
         let a = run(&t, "eth0.10", tcp("192.0.2.30", "198.51.100.99", 443));
         let (_, v) = first(&a);
         assert_eq!(code(&v), Some(ReasonCode::IncompleteTable), "{v:?}");
+        let Verdict::Unknown(r) = &v else {
+            panic!("{v:?}");
+        };
+        assert!(r.detail.contains("vrf route table not collected"), "{v:?}");
         // A connected network stays definite.
         let (path, _) = first(&run(&t, "eth0.110", tcp("192.0.2.70", "192.0.2.50", 8123)));
         assert!(path.contains(&"r1/out/eth0.10".to_string()), "{path:?}");
@@ -744,6 +752,54 @@ mod twin {
             !matches!(a.verdict(), Some(Verdict::Drop(_))),
             "{:?}",
             a.verdict()
+        );
+    }
+
+    #[test]
+    fn a_learned_route_keeps_its_protocol() {
+        let mut col = collected();
+        col.routes.push(route("198.51.100.0/25", "bgp", "eth1"));
+        col.routes.push(route("198.51.100.128/25", "ospf", "eth1"));
+        let (t, _) = build_with(CONFIG, &col);
+        let mut kinds = std::collections::BTreeMap::new();
+        for f in t.functions() {
+            let any: &dyn std::any::Any = f.as_ref();
+            if let Some(rl) = any.downcast_ref::<rsim_functions::RouteLookup>()
+                && let Some(fib) = rl.tables.get(&rsim_core::VrfId::new("default"))
+            {
+                for (p, r) in fib.entries() {
+                    kinds.insert(p.to_string(), r.kind.name());
+                }
+            }
+        }
+        assert_eq!(kinds["198.51.100.0/25"], "bgp");
+        assert_eq!(kinds["198.51.100.128/25"], "ospf");
+        assert_eq!(kinds["0.0.0.0/0"], "static");
+        assert_eq!(kinds["192.0.2.0/26"], "connected");
+    }
+
+    #[test]
+    fn the_bgp_config_of_a_vrf_without_rows_is_unhandled() {
+        let config = super::edited(|v| {
+            super::put(
+                v,
+                &["vrf", "name", "BLUE", "protocols", "bgp"],
+                serde_json::json!({"system-as": "64496"}),
+            );
+        });
+        let doc = read_json(&config).unwrap();
+        let tables = rsim_ingest::route_tables::RouteTables::new(
+            collected().routes.iter().map(|r| r.vrf.clone()),
+            vyos::dynamic_vrfs(&doc),
+        );
+        let table = vyos::table(&tables);
+        assert_eq!(
+            table.state(&["protocols", "bgp"]),
+            rsim_ingest::State::Irrelevant
+        );
+        assert_eq!(
+            table.state(&["vrf", "name", "BLUE", "protocols", "bgp"]),
+            rsim_ingest::State::Unhandled
         );
     }
 }

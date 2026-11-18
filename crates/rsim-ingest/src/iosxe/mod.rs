@@ -17,8 +17,8 @@ pub use config::{Config, read};
 pub use lower::{device_macs, lower};
 pub use mask::mask;
 pub use profile::profile;
-pub use state::rib_collected;
-pub use table::table;
+pub use state::rib_vrfs;
+pub use table::{dynamic_vrfs, table};
 
 /// The text sections of a router or a switch that the lowering reads.
 pub const SECTIONS: &[&str] = &[

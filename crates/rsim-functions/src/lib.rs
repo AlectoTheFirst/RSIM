@@ -33,6 +33,7 @@ pub use profile::{PortTranslation, RuleAction, UnzonedInterface, VendorProfile};
 pub use qos::QosNotEvaluated;
 pub use routing::{
     Neighbour, NextHopResolution, PolicyRoute, Route, RouteKind, RouteLookup, RouteNextHop,
+    RouteProtocol,
 };
 pub use rules::{Rule, RuleBody};
 pub use session::{SessionCommit, SessionLookup, StateAction, StateActions};

@@ -15,7 +15,7 @@ pub use lower::{
     physical,
 };
 pub use profile::profile;
-pub use table::table;
+pub use table::{dynamic_vrfs, table};
 
 /// The paths of the handled stanzas that no handler read. A correct handler
 /// set gives an empty list.

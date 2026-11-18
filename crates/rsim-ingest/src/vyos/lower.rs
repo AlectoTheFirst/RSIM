@@ -20,6 +20,7 @@ use rsim_functions::{
 };
 
 use crate::collected::Collected;
+use crate::route_tables::{TABLE_NOT_COLLECTED, route_kind};
 use crate::vyos::config::{Action, Config, Family, Interface, Kind, Lines, RuleMatch, Side};
 
 /// The default VRF. It is the only VRF with a route table, so the packets
@@ -705,8 +706,9 @@ impl L<'_> {
         }
     }
 
-    /// The main FIB: the collected RIB, or else the connected and static
-    /// routes of the config. The local routes are always in it.
+    /// The main FIB: the collected route rows of the main VRF, or else the
+    /// connected and static routes of the config. The local routes are
+    /// always in it.
     fn main_fib(&mut self, col: &Collected, addrs: &Addrs, locals: &[(Prefix, Route)]) -> Fib {
         let mut t = Fib::new();
         let rib: Vec<_> = col
@@ -714,7 +716,7 @@ impl L<'_> {
             .iter()
             .filter(|r| r.selected && r.vrf == VRF)
             .collect();
-        if rib.is_empty() {
+        if !col.routes.iter().any(|r| r.vrf == VRF) {
             self.connected(&mut t, addrs);
             let statics: Vec<_> = self
                 .cfg
@@ -740,13 +742,16 @@ impl L<'_> {
                     if r.kind != RouteKind::Connected {
                         let mut s = r.spans.clone();
                         s.extend(spans.iter().cloned());
-                        t.insert(p, Route::new(RouteKind::Static, Vec::new(), s));
+                        t.insert(p, Route::unknown(RouteKind::Static, TABLE_NOT_COLLECTED, s));
                     }
                 }
                 for all in ["0.0.0.0/0", "::/0"] {
                     let p: Prefix = all.parse().expect("a valid prefix");
                     if t.get(&p).is_none() {
-                        t.insert(p, Route::new(RouteKind::Static, Vec::new(), spans.clone()));
+                        t.insert(
+                            p,
+                            Route::unknown(RouteKind::Static, TABLE_NOT_COLLECTED, spans.clone()),
+                        );
                     }
                 }
             }
@@ -764,7 +769,11 @@ impl L<'_> {
                 let kind = match rows[0].protocol.as_str() {
                     "connected" => RouteKind::Connected,
                     "local" => RouteKind::Local,
-                    _ => RouteKind::Static,
+                    word => route_kind(
+                        word,
+                        super::profile::LEARNED_WORDS,
+                        super::profile::STATIC_WORDS,
+                    ),
                 };
                 if kind == RouteKind::Local {
                     t.insert(p, Route::new(kind, Vec::new(), spans));

@@ -139,7 +139,7 @@ pub fn rows(t: &Loaded, def: &TableDef) -> Vec<Vec<Value>> {
                             device.clone(),
                             json!(vrf.to_string()),
                             json!(prefix.to_string()),
-                            json!(snake(&route.kind)),
+                            json!(route.kind.name()),
                             json!(f.id().to_string()),
                             Value::from(hops),
                             spans(&route.spans),

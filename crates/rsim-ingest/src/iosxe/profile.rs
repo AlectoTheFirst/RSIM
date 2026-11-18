@@ -1,7 +1,7 @@
 //! The vendor behaviour profile of IOS-XE.
 
 use rsim_core::{SourceSpan, VrfId};
-use rsim_functions::{PortTranslation, RuleAction, UnzonedInterface, VendorProfile};
+use rsim_functions::{PortTranslation, RouteProtocol, RuleAction, UnzonedInterface, VendorProfile};
 
 use crate::nxos::names::Types;
 
@@ -169,3 +169,19 @@ pub const ARP_VRF_FAILED: &str = " failed";
 /// negotiates its mode with its neighbour (DTP), so its mode is not known.
 /// Not confirmed against a device.
 pub const MODE_WITHOUT_LINE: &str = "no switchport mode line, so the mode is negotiated";
+
+/// The route codes of `show ip route` of a route that a routing protocol
+/// gave. The codes are case-sensitive: `o` is ODR, a learned route of
+/// another protocol. Each code that is not here and not in
+/// [`STATIC_CODES`] is a learned route of another protocol.
+pub const LEARNED_CODES: &[(&str, RouteProtocol)] = &[
+    ("B", RouteProtocol::Bgp),
+    ("O", RouteProtocol::Ospf),
+    ("i", RouteProtocol::Isis),
+    ("D", RouteProtocol::Eigrp),
+    ("R", RouteProtocol::Rip),
+];
+
+/// The route codes of a route that no routing protocol gave: `S`, a static
+/// route, and `U`, a per-user static route.
+pub const STATIC_CODES: &[&str] = &["S", "U"];

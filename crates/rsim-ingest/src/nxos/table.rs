@@ -1,8 +1,15 @@
 //! The classification of the lines of an NX-OS running config.
 
+use std::collections::BTreeMap;
+
 use crate::coverage::{Entry, Reach, State, Table};
+use crate::route_tables::{RouteTables, VRF, lines, words};
+use crate::stanza::Document;
 use Reach::{Node, Subtree};
 use State::{Handled, Irrelevant};
+
+/// The VRF of an interface with no `vrf member` line.
+const DEFAULT_VRF: &str = "default";
 
 const fn e(path: &'static str, state: State, reach: Reach) -> Entry {
     Entry { path, state, reach }
@@ -216,23 +223,31 @@ const ENTRIES: &[Entry] = &[
     e("ipv6 access-list ..", Irrelevant, Subtree),
 ];
 
-/// The classification table, with the mask of the secrets. With a collected
-/// route table, the routing protocols and their policies are known-irrelevant,
-/// because the routes come from the route table. Without it, they are
-/// unhandled. IPv6 is known-irrelevant, because each IPv6 packet is unknown
-/// at the route lookup.
-pub fn table(rib_collected: bool) -> Table {
+/// The routing processes of NX-OS that can add IPv4 routes.
+const PROCESSES: &[&str] = &[
+    "router bgp",
+    "router ospf",
+    "router eigrp",
+    "router isis",
+    "router rip",
+];
+
+/// The classification table, with the mask of the secrets. The routing
+/// lines of a VRF with collected route rows are known-irrelevant, because
+/// its routes come from the route table; the routing lines of a VRF
+/// without rows are unhandled. The route maps, the lists, the multicast
+/// routing and the routing lines of an interface are known-irrelevant only
+/// if each VRF with a dynamic protocol has rows. IPv6 is known-irrelevant,
+/// because each IPv6 packet is unknown at the route lookup.
+pub fn table(tables: &RouteTables) -> Table {
     let mut t = Table::new(ENTRIES).with_mask(super::mask);
-    let routing = if rib_collected {
-        Irrelevant
-    } else {
-        State::Unhandled
-    };
-    for protocol in [
-        "router bgp ..",
-        "router ospf ..",
-        "router eigrp ..",
-        "router isis ..",
+    let default = tables.routing(DEFAULT_VRF);
+    let shared = tables.shared();
+    for p in PROCESSES {
+        t.push_levels(&[&format!("{p} ..")], default, Subtree);
+        tables.push_vrfs(&mut t, &[&format!("{p} .."), &format!("vrf {VRF}")]);
+    }
+    for object in [
         "route-map ..",
         "ip prefix-list ..",
         "ip community-list ..",
@@ -241,13 +256,60 @@ pub fn table(rib_collected: bool) -> Table {
         "ip pim ..",
         "ip igmp ..",
     ] {
-        t.push_levels(&[protocol], routing, Subtree);
+        t.push_levels(&[object], shared, Subtree);
     }
     for option in ["ip ospf ..", "ip router .."] {
-        t.push_levels(&["interface *", option], routing, Subtree);
+        t.push_levels(&["interface *", option], shared, Subtree);
     }
     for option in ["rd ..", "address-family .."] {
-        t.push_levels(&["vrf context *", option], routing, Subtree);
+        tables.push_vrfs(&mut t, &[&format!("vrf context {VRF}"), option]);
     }
     t
+}
+
+/// The VRFs whose config has a dynamic routing protocol, each with the
+/// lines that show it: a routing process gives the default VRF and each
+/// VRF of its `vrf` lines; the route distinguisher or an address family of
+/// a VRF gives that VRF; an `ip router` line of an interface gives the VRF
+/// of the interface.
+pub fn dynamic_vrfs(doc: &Document) -> BTreeMap<String, Vec<(u32, u32)>> {
+    let mut out: BTreeMap<String, Vec<(u32, u32)>> = BTreeMap::new();
+    let mut add = |vrf: &str, l: (u32, u32)| out.entry(vrf.to_string()).or_default().push(l);
+    for s in doc.root.children() {
+        let w = words(s);
+        match w.as_slice() {
+            ["router", p, ..] if PROCESSES.contains(&format!("router {p}").as_str()) => {
+                add(DEFAULT_VRF, lines(s));
+                for c in s.children() {
+                    if let ["vrf", v] = words(c).as_slice() {
+                        add(v, lines(c));
+                    }
+                }
+            }
+            ["vrf", "context", v] => {
+                for c in s.children() {
+                    if matches!(words(c).first(), Some(&("rd" | "address-family"))) {
+                        add(v, lines(c));
+                    }
+                }
+            }
+            ["interface", _] => {
+                let vrf = s
+                    .children()
+                    .iter()
+                    .find_map(|c| match words(c).as_slice() {
+                        ["vrf", "member", v] => Some((*v).to_string()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| DEFAULT_VRF.to_string());
+                for c in s.children() {
+                    if words(c).starts_with(&["ip", "router"]) {
+                        add(&vrf, lines(c));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
