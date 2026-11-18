@@ -417,6 +417,8 @@ export interface components {
         ClaimOut: {
             claim: string;
             counts: components["schemas"]["Counts"];
+            /** @description What the claim leaves out of its rows, or why it has none. */
+            detail?: string;
             evidence: components["schemas"]["Evidence"][];
             kind: string;
             result: components["schemas"]["ClaimResult"];
