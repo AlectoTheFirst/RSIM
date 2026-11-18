@@ -302,16 +302,18 @@ pub fn combine_paths(paths: &[Summary]) -> Summary {
 }
 
 /// Combines the results of the copies of a flood: delivered if a minimum of
-/// one copy delivers. If not, the result depends on the path if a minimum of
-/// one copy depends on the path. If not, `Unknown` if a minimum of one
-/// copy is `Unknown`. If not, dropped. The first copy of the selected
-/// kind, in the fixed order of the copies, gives the result.
+/// one copy delivers. If not, an exit if a minimum of one copy leaves the
+/// twin. If not, the result depends on the path if a minimum of one copy
+/// depends on the path. If not, `Unknown` if a minimum of one copy is
+/// `Unknown`. If not, dropped. The first copy of the selected kind, in the
+/// fixed order of the copies, gives the result.
 pub fn combine_flood(copies: &[Summary]) -> Summary {
     let rank = |s: &Summary| match s.kind() {
         Some(VerdictKind::Deliver) => 0,
-        None => 1,
-        Some(VerdictKind::Unknown) => 2,
-        Some(VerdictKind::Drop) => 3,
+        Some(VerdictKind::Exit) => 1,
+        None => 2,
+        Some(VerdictKind::Unknown) => 3,
+        Some(VerdictKind::Drop) => 4,
     };
     let Some(best) = copies.iter().map(rank).min() else {
         unreachable!("a flood has at least one copy")

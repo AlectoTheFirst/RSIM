@@ -52,7 +52,7 @@ fn deliver(e: &str) -> Verdict {
 fn reason_code(v: &Verdict) -> Option<ReasonCode> {
     match v {
         Verdict::Drop(r) | Verdict::Unknown(r) => Some(r.code),
-        Verdict::Deliver(_) => None,
+        Verdict::Deliver(_) | Verdict::Exit(_) => None,
     }
 }
 

@@ -129,6 +129,9 @@ body,
 .c-drop {
   color: var(--drop);
 }
+.c-exit {
+  color: var(--ink);
+}
 .c-parameter {
   color: var(--parameter);
 }
@@ -403,6 +406,9 @@ select:focus-visible,
 .end-drop {
   fill: var(--drop);
 }
+.end-exit {
+  fill: var(--ink);
+}
 .end-unknown {
   fill: none;
   stroke: var(--ink-muted);
@@ -503,6 +509,10 @@ select:focus-visible,
 
 .part.end.deliver {
   border-color: var(--deliver);
+}
+
+.part.end.exit {
+  border-color: var(--ink);
 }
 
 .part.end.unknown {

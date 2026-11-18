@@ -280,6 +280,7 @@ fn add_isp(b: &mut TwinBuilder) {
         link: None,
         rewrite: Rewrite::default(),
         tag: Tag::Keep,
+        exit: None,
     });
     b.add(Egress {
         meta: meta("out/eth0"),
@@ -293,6 +294,7 @@ fn add_isp(b: &mut TwinBuilder) {
         }),
         rewrite: Rewrite::default(),
         tag: Tag::Keep,
+        exit: None,
     });
     b.endpoint(Endpoint {
         id: EndpointId::new("server"),

@@ -11,21 +11,23 @@ describe("set result line", () => {
       { result: { kind: "same_kind", verdict: null, verdict_kind: "drop" } },
       { result: { kind: "same", verdict: { kind: "deliver" } as never, verdict_kind: "deliver" } },
       { result: { kind: "same_kind", verdict_kind: "unknown" } },
+      { result: { kind: "same_kind", verdict_kind: "exit" } },
       { result: { kind: "depends_on_path", verdict: null, verdict_kind: null } },
     ];
-    expect(partCounts(parts)).toEqual({ deliver: 1, drop: 1, unknown: 1, dependsOnPath: 1 });
+    expect(partCounts(parts)).toEqual({ deliver: 1, exit: 1, drop: 1, unknown: 1, dependsOnPath: 1 });
   });
 
   it("counts the parts of the stored set answer of mini-enterprise", () => {
     const url = new URL("../../crates/rsim-cli/tests/golden/set-mini-enterprise.json", import.meta.url);
     const a = (JSON.parse(readFileSync(url, "utf8")) as SetAnswer).answer;
-    expect(partCounts(a.summary)).toEqual({ deliver: 1, drop: 2, unknown: 0, dependsOnPath: 0 });
+    expect(partCounts(a.summary)).toEqual({ deliver: 1, exit: 0, drop: 2, unknown: 0, dependsOnPath: 0 });
   });
 });
 
 describe("outcome words", () => {
-  it("gives a colour to deliver and drop and the hatch to each other kind", () => {
+  it("gives a colour to deliver, exit and drop and the hatch to each other kind", () => {
     expect(outcomeKnown("deliver")).toBe(true);
+    expect(outcomeKnown("exit")).toBe(true);
     expect(outcomeKnown("drop")).toBe(true);
     expect(outcomeKnown("unknown")).toBe(false);
     expect(outcomeKnown("loop")).toBe(false);

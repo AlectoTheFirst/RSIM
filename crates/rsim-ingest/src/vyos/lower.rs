@@ -12,8 +12,8 @@ use rsim_core::{
 };
 use rsim_engine::EdgeInterface;
 use rsim_functions::{
-    ConnState, DestinationNat, DeviceDelivery, Egress, EgressMode, Fib, FirewallPolicy, Ingress,
-    Layer3HandOff, Link, LinkEnd, LinkFacts, LocalInput, Meta, NatAction, Neighbour,
+    ConnState, DestinationNat, DeviceDelivery, Egress, EgressMode, ExitMark, Fib, FirewallPolicy,
+    Ingress, Layer3HandOff, Link, LinkEnd, LinkFacts, LocalInput, Meta, NatAction, Neighbour,
     NextHopResolution, PolicyRoute, QosNotEvaluated, Route, RouteKind, RouteLookup, RouteNextHop,
     Rule as FRule, RuleAction, SessionCommit, SessionLookup, SourceNat, StateAction, StateActions,
     Tag, VendorProfile, VrfSelection, ZoneLookup, ZoneRole, ZoneScope,
@@ -351,6 +351,7 @@ pub fn lower(
     }
     let local_routes = local_routes(&main_addrs);
     let main_fib = l.main_fib(col, &main_addrs, &local_routes);
+    let exits = exit_marks(&active, &main_fib);
     let local_id = l.id("local");
     let meta = l.meta("route", Vec::new());
     l.add(RouteLookup {
@@ -560,6 +561,7 @@ pub fn lower(
             link,
             rewrite,
             tag,
+            exit: exits.get(i.name.as_str()).copied(),
         });
     }
     for (phys, (_, prov, _)) in l2 {
@@ -606,6 +608,28 @@ pub fn lower(
         }
     }
     l.out
+}
+
+/// The edge interfaces of the twin: a PPPoE interface is an access link,
+/// and an interface of a next hop of the default route of the main table
+/// is a default route. The packets of an edge with no link leave the twin.
+fn exit_marks<'a>(active: &[&'a Interface], main: &Fib) -> BTreeMap<&'a str, ExitMark> {
+    let mut out = BTreeMap::new();
+    for all in ["0.0.0.0/0", "::/0"] {
+        let p: Prefix = all.parse().expect("a valid prefix");
+        let Some(r) = main.get(&p) else {
+            continue;
+        };
+        for h in r.next_hops() {
+            if let Some(i) = active.iter().find(|i| i.name == h.interface.as_str()) {
+                out.insert(i.name.as_str(), ExitMark::DefaultRoute);
+            }
+        }
+    }
+    for i in active.iter().filter(|i| i.kind == Kind::Pppoe) {
+        out.insert(i.name.as_str(), ExitMark::AccessLink);
+    }
+    out
 }
 
 /// The addresses of each interface with their prefix length: the config,

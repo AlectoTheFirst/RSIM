@@ -68,7 +68,7 @@ export interface SetLadder {
 }
 
 function endOf(v: Verdict): End {
-  return v.kind === "deliver" ? "deliver" : v.kind === "drop" ? "drop" : "unknown";
+  return v.kind === "deliver" || v.kind === "exit" || v.kind === "drop" ? v.kind : "unknown";
 }
 
 /**

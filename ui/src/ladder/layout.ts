@@ -179,7 +179,7 @@ export function functionLabel(st: TraceStep): string {
 
 export type Dir = "forward" | "reply";
 export type Level = "device" | "function";
-export type End = "deliver" | "drop" | "unknown";
+export type End = "deliver" | "exit" | "drop" | "unknown";
 
 /** The path of a row: a forward branch, or a branch of the reply of one. */
 export interface PathRef {
@@ -231,7 +231,7 @@ export interface Ladder {
 }
 
 function endOf(v: Verdict): End {
-  return v.kind === "deliver" ? "deliver" : v.kind === "drop" ? "drop" : "unknown";
+  return v.kind === "deliver" || v.kind === "exit" || v.kind === "drop" ? v.kind : "unknown";
 }
 
 /** The device sequence of a branch, with each run of one device once. */
@@ -399,26 +399,27 @@ export function notStated(echo: Record<string, unknown>): string[] {
   return out;
 }
 
-/** Whether the engine knows an outcome kind: `deliver` and `drop` have a colour, each other kind the hatch. */
+/** Whether the engine knows an outcome kind: `deliver`, `exit` and `drop` have a colour, each other kind the hatch. */
 export function outcomeKnown(kind: string): boolean {
-  return kind === "deliver" || kind === "drop";
+  return kind === "deliver" || kind === "exit" || kind === "drop";
 }
 
 /** The parts of a set answer by result: each part counts once. */
 export function partCounts(parts: readonly { result: { kind: string; verdict?: Verdict | null; verdict_kind?: string | null } }[]): {
   deliver: number;
+  exit: number;
   drop: number;
   unknown: number;
   dependsOnPath: number;
 } {
-  const out = { deliver: 0, drop: 0, unknown: 0, dependsOnPath: 0 };
+  const out = { deliver: 0, exit: 0, drop: 0, unknown: 0, dependsOnPath: 0 };
   for (const p of parts) {
     if (p.result.kind === "depends_on_path") {
       out.dependsOnPath += 1;
       continue;
     }
     const k = p.result.verdict_kind ?? p.result.verdict?.kind;
-    if (k === "deliver" || k === "drop" || k === "unknown") out[k] += 1;
+    if (k === "deliver" || k === "exit" || k === "drop" || k === "unknown") out[k] += 1;
   }
   return out;
 }

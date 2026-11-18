@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use crate::id::{DeviceId, EndpointId, FunctionId};
+use crate::id::{DeviceId, EndpointId, FunctionId, InterfaceId};
 
 /// Where packets were delivered.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -12,6 +12,20 @@ pub enum Destination {
     Device(DeviceId),
 }
 
+/// The interface where packets leave the twin: an interface with no link
+/// that its device marks as an edge.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ExitPoint {
+    pub device: DeviceId,
+    pub interface: InterfaceId,
+}
+
+impl fmt::Display for ExitPoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.device, self.interface)
+    }
+}
+
 /// The outcome of one branch of one function.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Outcome {
@@ -19,6 +33,8 @@ pub enum Outcome {
     Forward(FunctionId),
     /// The packets reached their destination.
     Deliver(Destination),
+    /// The packets left the twin on an edge interface.
+    Exit(ExitPoint),
     Drop,
     Unknown,
 }
@@ -47,6 +63,8 @@ pub enum ReasonCode {
     Decapsulated,
     // Deliver.
     Delivered,
+    // Exit.
+    Exited,
     // Drop.
     Denied,
     NoRoute,
@@ -102,6 +120,9 @@ impl fmt::Debug for Reason {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Verdict {
     Deliver(Destination),
+    /// The packets left the twin on an edge interface. It is a terminal
+    /// result like `Deliver` and `Drop`, and it is not `Unknown`.
+    Exit(ExitPoint),
     Drop(Reason),
     Unknown(Reason),
 }
@@ -110,6 +131,7 @@ impl Verdict {
     pub fn kind(&self) -> VerdictKind {
         match self {
             Verdict::Deliver(_) => VerdictKind::Deliver,
+            Verdict::Exit(_) => VerdictKind::Exit,
             Verdict::Drop(_) => VerdictKind::Drop,
             Verdict::Unknown(_) => VerdictKind::Unknown,
         }
@@ -119,6 +141,7 @@ impl Verdict {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum VerdictKind {
     Deliver,
+    Exit,
     Drop,
     Unknown,
 }

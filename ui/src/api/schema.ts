@@ -624,6 +624,7 @@ export interface components {
         };
         OutcomeJson: {
             destination?: components["schemas"]["DestinationJson"] | null;
+            /** @description `forward`, `deliver`, `exit`, `drop` or `unknown`. */
             kind: string;
             next?: string | null;
         };
@@ -941,6 +942,7 @@ export interface components {
             function: string;
             /** Format: uint */
             index: number;
+            /** @description `forward`, `deliver`, `exit`, `drop` or `unknown`. */
             outcome: string;
             reason: components["schemas"]["ReasonJson"];
         };
@@ -978,6 +980,7 @@ export interface components {
         SummaryResultJson: {
             kind: string;
             verdict?: components["schemas"]["VerdictJson"] | null;
+            /** @description `deliver`, `exit`, `drop`, `unknown` or `null`. */
             verdict_kind?: string | null;
         };
         /** @description One table of the catalog. */
@@ -1142,6 +1145,10 @@ export interface components {
         };
         VerdictJson: {
             destination?: components["schemas"]["DestinationJson"] | null;
+            /**
+             * @description `deliver`, `exit`, `drop` or `unknown`. `exit`: the packets left the
+             *     twin on an edge interface, which the reason names.
+             */
             kind: string;
             reason?: components["schemas"]["ReasonJson"] | null;
         };

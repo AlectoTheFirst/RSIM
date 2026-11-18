@@ -1051,6 +1051,7 @@ pub(crate) fn next_hops(
             link,
             rewrite,
             tag,
+            exit: None,
         });
     }
 }

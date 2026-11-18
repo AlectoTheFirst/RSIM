@@ -1078,6 +1078,7 @@
             ]
           },
           "kind": {
+            "description": "`forward`, `deliver`, `exit`, `drop` or `unknown`.",
             "type": "string"
           },
           "next": {
@@ -2201,6 +2202,7 @@
             "type": "integer"
           },
           "outcome": {
+            "description": "`forward`, `deliver`, `exit`, `drop` or `unknown`.",
             "type": "string"
           },
           "reason": {
@@ -2329,6 +2331,7 @@
             ]
           },
           "verdict_kind": {
+            "description": "`deliver`, `exit`, `drop`, `unknown` or `null`.",
             "type": [
               "string",
               "null"
@@ -2855,6 +2858,7 @@
             ]
           },
           "kind": {
+            "description": "`deliver`, `exit`, `drop` or `unknown`. `exit`: the packets left the\ntwin on an edge interface, which the reason names.",
             "type": "string"
           },
           "reason": {

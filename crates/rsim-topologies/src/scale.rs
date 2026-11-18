@@ -365,6 +365,7 @@ impl Node {
                 }),
                 rewrite: Default::default(),
                 tag: Default::default(),
+                exit: None,
             });
         }
         routes

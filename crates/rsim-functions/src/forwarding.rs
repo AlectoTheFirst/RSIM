@@ -3,9 +3,9 @@
 use std::collections::BTreeMap;
 
 use rsim_core::{
-    Attr, Branch, Context, ContextAttr, Delay, DelayGap, Dependency, Destination, FlowState,
-    FunctionId, FunctionKind, InterfaceId, NeighbourTarget, NetFunction, Outcome, PacketSet,
-    Reason, ReasonCode, Rewrite, SourceSpan, VrfId, ZoneId,
+    Attr, Branch, Context, ContextAttr, Delay, DelayGap, Dependency, Destination, ExitPoint,
+    FlowState, FunctionId, FunctionKind, InterfaceId, NeighbourTarget, NetFunction, Outcome,
+    PacketSet, Reason, ReasonCode, Rewrite, SourceSpan, VrfId, ZoneId,
 };
 
 use crate::common::Meta;
@@ -274,6 +274,32 @@ pub struct Egress {
     pub rewrite: Rewrite,
     /// The 802.1Q tag of the frames that leave on the link.
     pub tag: Tag,
+    /// Why the interface is an edge of the twin, if it is one. With no
+    /// link, the packets of an edge leave the twin; the packets of an
+    /// interface that is not an edge are unknown.
+    pub exit: Option<ExitMark>,
+}
+
+/// Why an interface with no link is an edge of the twin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ExitMark {
+    /// An access link to a provider, for example PPPoE.
+    AccessLink,
+    /// The interface carries a default route to a next hop outside the
+    /// twin.
+    DefaultRoute,
+    /// The owner marks the interface as an edge.
+    Owner,
+}
+
+impl ExitMark {
+    fn text(self) -> &'static str {
+        match self {
+            ExitMark::AccessLink => "access link",
+            ExitMark::DefaultRoute => "default route",
+            ExitMark::Owner => "marked by the owner",
+        }
+    }
 }
 
 /// What an egress does with the 802.1Q tag.
@@ -326,13 +352,29 @@ impl Egress {
                 }
                 b
             }
-            None => self.meta.unknown(
-                input.clone(),
-                ReasonCode::NoLink,
-                format!("no link · interface {}", self.interface),
-                ctx,
-                state,
-            ),
+            None => match self.exit {
+                Some(mark) => {
+                    let at = ExitPoint {
+                        device: self.meta.device.clone(),
+                        interface: self.interface.clone(),
+                    };
+                    let detail = format!("exit at {at} · {}", mark.text());
+                    self.meta.branch(
+                        input.clone(),
+                        Outcome::Exit(at),
+                        Reason::new(ReasonCode::Exited, detail),
+                        ctx.clone(),
+                        state,
+                    )
+                }
+                None => self.meta.unknown(
+                    input.clone(),
+                    ReasonCode::NoLink,
+                    format!("no link · interface {}", self.interface),
+                    ctx,
+                    state,
+                ),
+            },
         }
     }
 }

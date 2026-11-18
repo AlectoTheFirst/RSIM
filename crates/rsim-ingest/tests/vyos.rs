@@ -223,8 +223,11 @@ fn the_handlers_give_typed_structures() {
 mod twin {
     use std::net::IpAddr;
 
-    use rsim_core::{Destination, FieldValue, Header, PROTO_TCP, PROTO_UDP, ReasonCode, Verdict};
-    use rsim_engine::{Answer, Executor, Query, Twin, TwinBuilder};
+    use rsim_core::{
+        Destination, ExitPoint, FieldValue, Header, PROTO_TCP, PROTO_UDP, PacketSet, Prefix,
+        ReasonCode, SetSpec, Verdict,
+    };
+    use rsim_engine::{Answer, Executor, Query, Summary, Twin, TwinBuilder};
     use rsim_ingest::collected::{AddressRow, Collected, NeighbourRow, RouteRow, row_span};
     use rsim_ingest::{read_json, vyos};
 
@@ -329,7 +332,7 @@ mod twin {
     fn code(v: &Verdict) -> Option<ReasonCode> {
         match v {
             Verdict::Drop(r) | Verdict::Unknown(r) => Some(r.code),
-            Verdict::Deliver(_) => None,
+            Verdict::Deliver(_) | Verdict::Exit(_) => None,
         }
     }
 
@@ -384,7 +387,96 @@ mod twin {
             qos.output.witness().unwrap().current.dscp,
             FieldValue::Unknown
         );
+        assert_eq!(v, exit("pppoe0"));
+        let last = b.steps.last().unwrap();
+        assert_eq!(last.reason.code, ReasonCode::Exited);
+        assert_eq!(last.reason.detail, "exit at r1 pppoe0 · access link");
+    }
+
+    fn exit(iface: &str) -> Verdict {
+        Verdict::Exit(ExitPoint {
+            device: "r1".into(),
+            interface: iface.into(),
+        })
+    }
+
+    #[test]
+    fn an_egress_with_no_link_that_is_not_an_edge_stays_unknown() {
+        let (t, _) = build();
+        // eth0.10 has no layer 2 link in this twin and is not an edge.
+        let (path, v) = first(&run(&t, "eth0.110", tcp("192.0.2.70", "192.0.2.50", 8123)));
+        assert!(path.ends_with(&["r1/out/eth0.10".to_string()]), "{path:?}");
         assert_eq!(code(&v), Some(ReasonCode::NoLink));
+        // wg0 carries the default route of table 100 only, so it is not an
+        // edge.
+        let (path, v) = first(&run(&t, "eth0.10", tcp("192.0.2.10", "203.0.113.99", 443)));
+        assert!(path.ends_with(&["r1/out/wg0".to_string()]), "{path:?}");
+        assert_eq!(code(&v), Some(ReasonCode::NoLink));
+    }
+
+    #[test]
+    fn the_interface_of_the_default_route_is_an_edge() {
+        let mut col = collected();
+        col.routes[0] = RouteRow {
+            next_hop: Some("203.0.113.140".into()),
+            ..route("0.0.0.0/0", "static", "eth1")
+        };
+        col.neighbours.push(NeighbourRow {
+            interface: "eth1".into(),
+            ip: "203.0.113.140".into(),
+            mac: Some("00:00:5e:00:53:40".into()),
+            state: Some("REACHABLE".into()),
+            span: row_span("r1", "neighbours", "b3", 1),
+        });
+        let (t, _) = build_with(CONFIG, &col);
+        let a = run(&t, "eth0", tcp("192.0.2.200", "198.18.0.1", 443));
+        let b = &a.branches()[0];
+        assert_eq!(*b.verdict, exit("eth1"), "{:?}", b.steps.last());
+        assert_eq!(
+            b.steps.last().unwrap().reason.detail,
+            "exit at r1 eth1 · default route"
+        );
+    }
+
+    #[test]
+    fn set_mode_agrees_with_path_mode_on_an_exit() {
+        let (t, _) = build();
+        let arena = t.arena(None);
+        let pfx = |s: &str| s.parse::<Prefix>().unwrap();
+        let spec = SetSpec {
+            src_ip: Some(vec![pfx("192.0.2.30/32")]),
+            dst_ip: Some(vec![pfx("203.0.113.0/26"), pfx("192.0.2.64/30")]),
+            protocol: Some(vec![(PROTO_TCP, PROTO_TCP)]),
+            src_port: Some(vec![(40000, 40000)]),
+            dst_port: Some(vec![(443, 443)]),
+            ..SetSpec::default()
+        };
+        let ex = Executor::new(&t);
+        let set = ex
+            .run(
+                &Query::set(PacketSet::from_spec(&arena, &spec))
+                    .with_ingress("r1", "eth0.10")
+                    .without_reply(),
+            )
+            .unwrap();
+        assert!(
+            set.summary
+                .iter()
+                .any(|p| p.summary == Summary::Same(exit("pppoe0"))),
+            "{:?}",
+            set.summary
+        );
+        for p in &set.summary {
+            let w = p.packets.witness().unwrap();
+            let one = ex
+                .run(
+                    &Query::path(&t, &w.original)
+                        .with_ingress("r1", "eth0.10")
+                        .without_reply(),
+                )
+                .unwrap();
+            assert_eq!(one.single_summary(), Some(&p.summary), "{:?}", w.original);
+        }
     }
 
     #[test]
