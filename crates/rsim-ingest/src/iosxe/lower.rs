@@ -311,6 +311,9 @@ pub fn lower(
         let hops = Hops {
             next: &next,
             other_vrf: &other_vrf,
+            learned: super::profile::LEARNED_CODES,
+            statics: super::profile::STATIC_CODES,
+            dynamic: &cfg.dynamic_vrfs,
         };
         let t = fib(&mut l, v, &active, rib, &vips, &hops);
         let has_hops = t.groups().iter().any(|g| !g.next_hops.is_empty());

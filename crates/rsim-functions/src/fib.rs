@@ -8,15 +8,19 @@ use rsim_core::{
     AddrField, GroupPartition, PacketSet, Prefix, PrefixTable, SetSpec, SourceSpan, TriePrefixTable,
 };
 
-use crate::routing::{Route, RouteKind, RouteNextHop};
+use crate::routing::{Route, RouteKind, RouteNextHop, RouteProtocol};
 
-/// The forwarding result of a route: its kind and its next hops in the
-/// fixed order of the alternatives. Routes with the same group forward the
-/// same packets the same way.
+/// The forwarding result of a route: its forwarding kind, its next hops in
+/// the fixed order of the alternatives, and for a route with no next hop
+/// the reason that its packets are unknown. Routes with the same group
+/// forward the same packets the same way. A learned route has the kind
+/// `Static`, so it shares the group of a static route with the same next
+/// hops; its protocol is a column of its entry.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NextHopGroup {
     pub kind: RouteKind,
     pub next_hops: Vec<RouteNextHop>,
+    pub unknown: Option<String>,
 }
 
 const NONE: u32 = u32::MAX;
@@ -34,6 +38,7 @@ struct Span {
 struct Entry {
     group: u32,
     span: Span,
+    protocol: Option<RouteProtocol>,
 }
 
 /// The summary of a trie node: the number of entries in its subtree and
@@ -94,6 +99,9 @@ pub struct GroupRoutes<'a> {
     pub exact: bool,
     /// The first routes, in prefix order, at most the asked number.
     pub sample: Vec<Prefix>,
+    /// The protocol of each route of the sample that a routing protocol
+    /// gave.
+    pub protocols: Vec<Option<RouteProtocol>>,
     /// The provenance of the routes of the sample.
     pub spans: Vec<SourceSpan>,
     pub packets: PacketSet,
@@ -128,9 +136,11 @@ impl Fib {
     pub fn insert(&mut self, prefix: Prefix, route: Route) {
         self.summary = OnceLock::new();
         let group = self.intern_group(NextHopGroup {
-            kind: route.kind,
+            kind: route.kind.forwarding(),
             next_hops: route.next_hops().to_vec(),
+            unknown: route.unknown_reason().map(str::to_string),
         });
+        let protocol = route.kind.protocol();
         let mut spans = route.spans.into_iter();
         let span = match spans.next() {
             Some(s) => Span {
@@ -144,7 +154,11 @@ impl Fib {
                 last: 0,
             },
         };
-        let entry = Entry { group, span };
+        let entry = Entry {
+            group,
+            span,
+            protocol,
+        };
         let id = match self.trie.get(&prefix) {
             Some(i) => {
                 self.entries[*i as usize] = entry;
@@ -201,8 +215,16 @@ impl Fib {
     }
 
     fn route(&self, id: u32) -> Route {
-        let g = &self.groups[self.entries[id as usize].group as usize];
-        Route::new(g.kind, g.next_hops.clone(), self.spans_of(id))
+        let e = self.entries[id as usize];
+        let g = &self.groups[e.group as usize];
+        let kind = match e.protocol {
+            Some(p) => RouteKind::Learned(p),
+            None => g.kind,
+        };
+        match &g.unknown {
+            Some(why) => Route::unknown(kind, why.clone(), self.spans_of(id)),
+            None => Route::new(kind, g.next_hops.clone(), self.spans_of(id)),
+        }
     }
 
     /// The longest-prefix match of one address: the prefix and its group.
@@ -362,6 +384,10 @@ impl Fib {
                         .iter()
                         .flat_map(|(_, id)| self.spans_of(*id))
                         .collect(),
+                    protocols: routes
+                        .iter()
+                        .map(|(_, id)| self.entries[*id as usize].protocol)
+                        .collect(),
                     sample: routes.into_iter().map(|(p, _)| p).collect(),
                     packets: g.packets,
                 }
@@ -423,6 +449,52 @@ mod tests {
         assert_eq!(groups.len(), 2);
         let total: usize = groups.iter().map(|g| g.count).sum();
         assert!(total >= 4, "{total}");
+    }
+
+    #[test]
+    fn a_learned_route_shares_the_group_of_a_static_route_and_keeps_its_protocol() {
+        let learned = |iface: &str, p: RouteProtocol| {
+            let r = route(iface);
+            Route::new(RouteKind::Learned(p), r.next_hops().to_vec(), r.spans)
+        };
+        let f: Fib = [
+            ("10.1.0.0/16", route("eth1")),
+            ("10.2.0.0/16", learned("eth1", RouteProtocol::Bgp)),
+            ("10.3.0.0/16", learned("eth2", RouteProtocol::Ospf)),
+        ]
+        .into_iter()
+        .map(|(p, r)| (p.parse().unwrap(), r))
+        .collect();
+        assert_eq!(f.groups().len(), 2);
+        let kinds: Vec<&str> = f.entries().iter().map(|(_, r)| r.kind.name()).collect();
+        assert_eq!(kinds, ["static", "bgp", "ospf"]);
+        let (groups, _, _) = f.split(&set("10.0.0.0/8"), 5);
+        assert_eq!(groups.len(), 2);
+        let eth1 = groups
+            .iter()
+            .find(|g| g.group.next_hops[0].interface == InterfaceId::new("eth1"))
+            .unwrap();
+        assert_eq!(eth1.protocols, [None, Some(RouteProtocol::Bgp)]);
+    }
+
+    #[test]
+    fn the_reason_of_an_unknown_route_is_part_of_its_group() {
+        let why = |w: &str| Route::unknown(RouteKind::Static, w, Vec::new());
+        let f: Fib = [
+            ("10.1.0.0/16", why("a")),
+            ("10.2.0.0/16", why("a")),
+            ("10.3.0.0/16", why("b")),
+            (
+                "10.4.0.0/16",
+                Route::new(RouteKind::Static, Vec::new(), Vec::new()),
+            ),
+        ]
+        .into_iter()
+        .map(|(p, r)| (p.parse().unwrap(), r))
+        .collect();
+        assert_eq!(f.groups().len(), 3);
+        let p: Prefix = "10.3.0.0/16".parse().unwrap();
+        assert_eq!(f.get(&p).unwrap().unknown_reason(), Some("b"));
     }
 
     #[test]

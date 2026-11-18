@@ -1,0 +1,79 @@
+Codes: L - local, C - connected, S - static, R - RIP, M - mobile, B - BGP
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area 
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2, m - OMP
+       n - NAT, Ni - NAT inside, No - NAT outside, Nd - NAT DIA
+       i - IS-IS, su - IS-IS summary, L1 - IS-IS level-1, L2 - IS-IS level-2
+       ia - IS-IS inter area, * - candidate default, U - per-user static route
+       H - NHRP, G - NHRP registered, g - NHRP registration summary
+       o - ODR, P - periodic downloaded static route, l - LISP
+       a - application route
+       + - replicated route, % - next hop override, p - overrides from PfR
+       & - replicated local route overrides by connected
+
+Gateway of last resort is 198.51.100.1 to network 0.0.0.0
+
+S*    0.0.0.0/0 [1/0] via 198.51.100.1
+      192.0.2.0/24 is variably subnetted, 3 subnets, 2 masks
+C        192.0.2.192/27 is directly connected, GigabitEthernet0/0/5
+L        192.0.2.193/32 is directly connected, GigabitEthernet0/0/5
+L        192.0.2.255/32 is directly connected, Loopback0
+      198.51.100.0/24 is variably subnetted, 7 subnets, 5 masks
+C        198.51.100.0/30 is directly connected, GigabitEthernet0/0/0
+L        198.51.100.2/32 is directly connected, GigabitEthernet0/0/0
+C        198.51.100.4/30 is directly connected, GigabitEthernet0/0/4
+L        198.51.100.6/32 is directly connected, GigabitEthernet0/0/4
+S        198.51.100.64/26 [1/0] via 198.51.100.5
+S        198.51.100.128/25 [1/0] via 198.51.100.1
+                           [1/0] via 198.51.100.5
+O        198.51.100.16/29 [110/20] via 198.51.100.5, 1d02h, GigabitEthernet0/0/4
+B        198.51.100.24/29 [20/0] via 198.51.100.1, 1d00h
+B        198.51.100.192/27 [20/0] via 2001:db8::9, 1d00h
+      203.0.113.0/24 is variably subnetted, 3 subnets, 3 masks
+S        203.0.113.128/25 is directly connected, Null0
+C        203.0.113.252/30 is directly connected, Tunnel10
+L        203.0.113.253/32 is directly connected, Tunnel10
+
+Routing Table: RED
+Codes: L - local, C - connected, S - static, R - RIP, M - mobile, B - BGP
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area 
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2, m - OMP
+       n - NAT, Ni - NAT inside, No - NAT outside, Nd - NAT DIA
+       i - IS-IS, su - IS-IS summary, L1 - IS-IS level-1, L2 - IS-IS level-2
+       ia - IS-IS inter area, * - candidate default, U - per-user static route
+       H - NHRP, G - NHRP registered, g - NHRP registration summary
+       o - ODR, P - periodic downloaded static route, l - LISP
+       a - application route
+       + - replicated route, % - next hop override, p - overrides from PfR
+       & - replicated local route overrides by connected
+
+Gateway of last resort is 198.51.100.1 to network 0.0.0.0
+
+S*    0.0.0.0/0 [1/0] via 198.51.100.1 (default)
+      192.0.2.0/24 is variably subnetted, 4 subnets, 2 masks
+C        192.0.2.0/26 is directly connected, GigabitEthernet0/0/1.100
+L        192.0.2.2/32 is directly connected, GigabitEthernet0/0/1.100
+C        192.0.2.64/26 is directly connected, GigabitEthernet0/0/1.100
+L        192.0.2.66/32 is directly connected, GigabitEthernet0/0/1.100
+
+Routing Table: MGMT
+Codes: L - local, C - connected, S - static, R - RIP, M - mobile, B - BGP
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area 
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2, m - OMP
+       n - NAT, Ni - NAT inside, No - NAT outside, Nd - NAT DIA
+       i - IS-IS, su - IS-IS summary, L1 - IS-IS level-1, L2 - IS-IS level-2
+       ia - IS-IS inter area, * - candidate default, U - per-user static route
+       H - NHRP, G - NHRP registered, g - NHRP registration summary
+       o - ODR, P - periodic downloaded static route, l - LISP
+       a - application route
+       + - replicated route, % - next hop override, p - overrides from PfR
+       & - replicated local route overrides by connected
+
+Gateway of last resort is 203.0.113.1 to network 0.0.0.0
+
+S*    0.0.0.0/0 [1/0] via 203.0.113.1
+      203.0.113.0/24 is variably subnetted, 2 subnets, 2 masks
+C        203.0.113.0/24 is directly connected, GigabitEthernet0
+L        203.0.113.10/32 is directly connected, GigabitEthernet0

@@ -1,6 +1,11 @@
 //! The classification of the lines of an IOS-XR running config.
 
+use std::collections::BTreeMap;
+
+use super::profile::DEFAULT_VRF;
 use crate::coverage::{Entry, Reach, State, Table};
+use crate::route_tables::{RouteTables, VRF, lines, words};
+use crate::stanza::Document;
 use Reach::{Node, Subtree};
 use State::{Handled, Irrelevant};
 
@@ -123,26 +128,33 @@ fn push_hsrp(t: &mut Table) {
     }
 }
 
-/// The classification table, with the mask of the secrets. With a collected
-/// route table, the routing protocols, the route policies, the sets and the
-/// routing lines of a VRF are known-irrelevant, because the routes come from
-/// the route table. Without it, they are unhandled. The `end-policy` and
+/// The routing processes of IOS-XR that can add IPv4 routes.
+const PROCESSES: &[&str] = &[
+    "router bgp",
+    "router ospf",
+    "router isis",
+    "router eigrp",
+    "router rip",
+    "router static",
+];
+
+/// The classification table, with the mask of the secrets. The routing
+/// lines of a VRF with collected route rows are known-irrelevant, because
+/// its routes come from the route table; the routing lines of a VRF without
+/// rows are unhandled. The route policies and the sets are known-irrelevant
+/// only if each VRF with a dynamic protocol has rows. The `end-policy` and
 /// `end-set` lines that close a policy or a set get the state of the policy
 /// or the set. IPv6 access lists are known-irrelevant, because each IPv6
 /// packet is unknown at the route lookup.
-pub fn table(rib_collected: bool) -> Table {
+pub fn table(tables: &RouteTables) -> Table {
     let mut t = Table::new(ENTRIES).with_mask(super::mask);
     push_hsrp(&mut t);
-    let routing = if rib_collected {
-        Irrelevant
-    } else {
-        State::Unhandled
-    };
-    for protocol in [
-        "router bgp ..",
-        "router ospf ..",
-        "router isis ..",
-        "router static ..",
+    let default = tables.routing(DEFAULT_VRF);
+    for p in PROCESSES {
+        t.push_levels(&[&format!("{p} ..")], default, Subtree);
+        tables.push_vrfs(&mut t, &[&format!("{p} .."), &format!("vrf {VRF}")]);
+    }
+    for object in [
         "route-policy ..",
         "end-policy",
         "prefix-set ..",
@@ -152,10 +164,42 @@ pub fn table(rib_collected: bool) -> Table {
         "rpl ..",
         "end-set",
     ] {
-        t.push_levels(&[protocol], routing, Subtree);
+        t.push_levels(&[object], tables.shared(), Subtree);
     }
     for option in ["address-family ..", "rd .."] {
-        t.push_levels(&["vrf *", option], routing, Subtree);
+        tables.push_vrfs(&mut t, &[&format!("vrf {VRF}"), option]);
     }
     t
+}
+
+/// The VRFs whose config has a dynamic routing protocol, each with the
+/// lines that show it: a routing process other than `router static` gives
+/// the default VRF and each VRF of its `vrf` lines; an address family or
+/// a route distinguisher of a VRF gives that VRF.
+pub fn dynamic_vrfs(doc: &Document) -> BTreeMap<String, Vec<(u32, u32)>> {
+    let mut out: BTreeMap<String, Vec<(u32, u32)>> = BTreeMap::new();
+    let mut add = |vrf: &str, l: (u32, u32)| out.entry(vrf.to_string()).or_default().push(l);
+    for s in doc.root.children() {
+        let w = words(s);
+        match w.as_slice() {
+            ["router", "static", ..] => {}
+            ["router", p, ..] if PROCESSES.contains(&format!("router {p}").as_str()) => {
+                add(DEFAULT_VRF, lines(s));
+                for c in s.children() {
+                    if let ["vrf", v] = words(c).as_slice() {
+                        add(v, lines(c));
+                    }
+                }
+            }
+            ["vrf", v] => {
+                for c in s.children() {
+                    if matches!(words(c).first(), Some(&("rd" | "address-family"))) {
+                        add(v, lines(c));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }

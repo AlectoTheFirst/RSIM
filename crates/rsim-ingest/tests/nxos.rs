@@ -4,10 +4,12 @@
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
-use rsim_core::{Header, PROTO_TCP, PROTO_UDP, VerdictKind};
+use rsim_core::{Header, PROTO_TCP, PROTO_UDP, VerdictKind, VrfId};
 use rsim_engine::{Answer, Executor, Query, Twin};
+use rsim_functions::RouteLookup;
 use rsim_ingest::collected::{Collected, LinkRow, MacRow, NeighbourRow, RouteRow, row_span};
 use rsim_ingest::estate::{Estate, Input, assemble};
+use rsim_ingest::route_tables::RouteTables;
 use rsim_ingest::{State, classify, nxos};
 
 const CONFIG: &[u8] = include_bytes!("fixtures/nxos/leaf1-running-config.txt");
@@ -225,7 +227,10 @@ fn each_handled_line_is_read() {
 #[test]
 fn the_coverage_lists_the_unhandled_lines() {
     let doc = nxos::read_text(CONFIG);
-    let cov = classify(&doc, &nxos::table(true));
+    let cov = classify(
+        &doc,
+        &nxos::table(&RouteTables::uniform(true, nxos::dynamic_vrfs(&doc))),
+    );
     let mut paths: Vec<&str> = cov.ranked().iter().map(|r| r.0).collect();
     paths.sort_unstable();
     assert_eq!(paths, ["ip ospf authentication-key <secret>"]);
@@ -236,7 +241,10 @@ fn the_coverage_lists_the_unhandled_lines() {
 fn no_secret_reaches_the_coverage_or_the_notes() {
     let doc = nxos::read_text(CONFIG);
     for rib in [true, false] {
-        let cov = classify(&doc, &nxos::table(rib));
+        let cov = classify(
+            &doc,
+            &nxos::table(&RouteTables::uniform(rib, nxos::dynamic_vrfs(&doc))),
+        );
         for (path, _, _) in cov.ranked() {
             no_secret(path);
         }
@@ -255,7 +263,10 @@ fn no_secret_reaches_the_coverage_or_the_notes() {
 #[test]
 fn without_a_route_table_the_routing_protocols_are_unhandled() {
     let doc = nxos::read_text(CONFIG);
-    let cov = classify(&doc, &nxos::table(false));
+    let cov = classify(
+        &doc,
+        &nxos::table(&RouteTables::uniform(false, nxos::dynamic_vrfs(&doc))),
+    );
     let paths: Vec<&str> = cov.ranked().iter().map(|r| r.0).collect();
     assert!(paths.contains(&"router ospf .."), "{paths:?}");
     assert!(paths.contains(&"router bgp .."));
@@ -1352,4 +1363,105 @@ fn a_trunk_vlan_with_no_vlan_line_floods_to_unknown() {
         has(&steps, "mac 00:00:5e:00:53:b1 is on port port-channel10"),
         "{steps:#?}"
     );
+}
+
+fn estate_of(config: &[u8], collected: Collected) -> Estate {
+    assemble(vec![Input::Nxos {
+        name: "leaf1".into(),
+        config: config.to_vec(),
+        file: "leaf1/config@000000000000".into(),
+        collected,
+        sections: sections(),
+    }])
+}
+
+/// The kind name of each route of the route lookups of a twin in a VRF.
+fn kinds(t: &Twin, vrf: &str) -> BTreeMap<String, &'static str> {
+    let mut out = BTreeMap::new();
+    for f in t.functions() {
+        let any: &dyn std::any::Any = f.as_ref();
+        let Some(rl) = any.downcast_ref::<RouteLookup>() else {
+            continue;
+        };
+        if let Some(fib) = rl.tables.get(&VrfId::new(vrf)) {
+            for (p, r) in fib.entries() {
+                out.insert(p.to_string(), r.kind.name());
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn a_learned_route_keeps_its_protocol() {
+    let mut col = collected();
+    col.routes.push(route(
+        "default",
+        "198.51.100.64/26",
+        "bgp-65000",
+        "Eth1/2",
+        Some("198.51.100.2"),
+    ));
+    col.routes.push(route(
+        "default",
+        "198.51.100.128/26",
+        "ospf-1",
+        "Eth1/2",
+        Some("198.51.100.2"),
+    ));
+    let t = estate_of(CONFIG, col)
+        .builder
+        .build()
+        .expect("the twin builds");
+    let k = kinds(&t, "default");
+    assert_eq!(k["198.51.100.64/26"], "bgp");
+    assert_eq!(k["198.51.100.128/26"], "ospf");
+    assert_eq!(k["0.0.0.0/0"], "static");
+    assert_eq!(k["192.0.2.0/26"], "connected");
+    let (_, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "198.51.100.70",
+        PROTO_TCP,
+        443,
+    ));
+    assert!(
+        has(
+            &steps,
+            "route 198.51.100.64/26 (bgp) in VRF default via 198.51.100.2 on Ethernet1/2"
+        ),
+        "{steps:#?}"
+    );
+}
+
+#[test]
+fn a_vrf_with_bgp_and_no_rows_is_unknown_outside_its_connected_and_static_routes() {
+    let config = String::from_utf8(CONFIG.to_vec()).unwrap().replace(
+        "router bgp 65000\n",
+        "router bgp 65000\n  vrf RED\n    address-family ipv4 unicast\n",
+    );
+    let mut col = collected();
+    col.routes.retain(|r| r.vrf != "RED");
+    let e = estate_of(config.as_bytes(), col);
+    let unhandled = &e.coverage["leaf1"].unhandled;
+    assert!(
+        unhandled.contains_key("router bgp ../vrf *"),
+        "{unhandled:?}"
+    );
+    assert!(!unhandled.contains_key("router bgp .."), "{unhandled:?}");
+    let t = e.builder.build().expect("the twin builds");
+    let a = run(&t, "Vlan20", "192.0.2.70", "203.0.113.200", PROTO_TCP, 443);
+    let (verdict, steps) = only(&a);
+    assert_eq!(verdict, VerdictKind::Unknown);
+    assert!(
+        has(
+            &steps,
+            "route 0.0.0.0/0 in VRF RED: vrf route table not collected"
+        ),
+        "{steps:#?}"
+    );
+    let k = kinds(&t, "RED");
+    assert_eq!(k["10.0.0.0/8"], "static");
+    assert_eq!(k["192.0.2.64/26"], "connected");
 }

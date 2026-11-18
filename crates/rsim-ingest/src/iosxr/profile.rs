@@ -1,7 +1,7 @@
 //! The vendor behaviour profile of IOS-XR.
 
 use rsim_core::{SourceSpan, VrfId};
-use rsim_functions::{PortTranslation, RuleAction, UnzonedInterface, VendorProfile};
+use rsim_functions::{PortTranslation, RouteProtocol, RuleAction, UnzonedInterface, VendorProfile};
 
 use crate::nxos::names::Types;
 
@@ -91,3 +91,17 @@ pub const HSRP_ACTIVE: &str = "active";
 /// The HSRP state words of a router that is not the active router, in
 /// lower case. Each other word is a state that is not known.
 pub const HSRP_NOT_ACTIVE: &[&str] = &["standby", "speak", "listen", "init"];
+
+/// The route codes of `show route` of a route that a routing protocol gave.
+/// The codes are case-sensitive. Each code that is not here and not in
+/// [`STATIC_CODES`] is a learned route of another protocol.
+pub const LEARNED_CODES: &[(&str, RouteProtocol)] = &[
+    ("B", RouteProtocol::Bgp),
+    ("O", RouteProtocol::Ospf),
+    ("i", RouteProtocol::Isis),
+    ("D", RouteProtocol::Eigrp),
+    ("R", RouteProtocol::Rip),
+];
+
+/// The route code of a static route.
+pub const STATIC_CODES: &[&str] = &["S"];

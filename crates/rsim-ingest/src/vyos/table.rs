@@ -1,8 +1,16 @@
 //! The classification of the stanzas of a VyOS 1.4 or 1.5 configuration.
 
+use std::collections::BTreeMap;
+
+use super::config::NO_ROUTES;
 use crate::coverage::{Entry, Reach, State, Table};
+use crate::route_tables::{RouteTables, VRF, lines};
+use crate::stanza::{Document, Stanza};
 use Reach::{Node, Subtree};
 use State::{Handled, Irrelevant, Unhandled};
+
+/// The name of the main VRF in the collected route rows.
+const DEFAULT_VRF: &str = "default";
 
 const fn e(path: &'static str, state: State, reach: Reach) -> Entry {
     Entry { path, state, reach }
@@ -200,13 +208,13 @@ const ENTRIES: &[Entry] = &[
     e("container", Irrelevant, Subtree),
 ];
 
-/// The classification table. With a collected RIB, the BGP configuration is
-/// known-irrelevant, because the routes come from the RIB. Without it, the
-/// BGP configuration is unhandled.
-pub fn table(rib_collected: bool) -> Table {
+/// The classification table. The BGP configuration of a VRF with collected
+/// route rows is known-irrelevant, because its routes come from the route
+/// table; the BGP configuration of a VRF without rows is unhandled.
+pub fn table(tables: &RouteTables) -> Table {
     let mut t = Table::new(ENTRIES);
-    let bgp = if rib_collected { Irrelevant } else { Unhandled };
-    t.push("protocols/bgp", bgp, Subtree);
+    t.push("protocols/bgp", tables.routing(DEFAULT_VRF), Subtree);
+    tables.push_vrfs(&mut t, &["vrf", "name", VRF, "protocols", "bgp"]);
     for kind in KINDS {
         let base = format!("interfaces/{kind}");
         t.push(&base, Handled, Node);
@@ -239,4 +247,29 @@ pub fn table(rib_collected: bool) -> Table {
         }
     }
     t
+}
+
+/// The VRFs whose config has a routing protocol that adds routes, each
+/// with the lines of its stanza: `protocols` gives the main VRF, and
+/// `vrf name <name> protocols` gives that VRF.
+pub fn dynamic_vrfs(doc: &Document) -> BTreeMap<String, Vec<(u32, u32)>> {
+    let mut out: BTreeMap<String, Vec<(u32, u32)>> = BTreeMap::new();
+    let mut add = |vrf: &str, protocols: &Stanza| {
+        for p in protocols.children() {
+            if !NO_ROUTES.contains(&p.key.as_str()) {
+                out.entry(vrf.to_string()).or_default().push(lines(p));
+            }
+        }
+    };
+    if let Some(p) = doc.root.get("protocols") {
+        add(DEFAULT_VRF, p);
+    }
+    if let Some(names) = doc.root.at(&["vrf", "name"]) {
+        for v in names.children() {
+            if let Some(p) = v.get("protocols") {
+                add(&v.key, p);
+            }
+        }
+    }
+    out
 }

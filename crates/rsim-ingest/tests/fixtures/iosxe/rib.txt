@@ -26,6 +26,8 @@ L        198.51.100.6/32 is directly connected, GigabitEthernet0/0/4
 S        198.51.100.64/26 [1/0] via 198.51.100.5
 S        198.51.100.128/25 [1/0] via 198.51.100.1
                            [1/0] via 198.51.100.5
+O        198.51.100.16/29 [110/20] via 198.51.100.5, 1d02h, GigabitEthernet0/0/4
+B        198.51.100.24/29 [20/0] via 198.51.100.1, 1d00h
 B        198.51.100.192/27 [20/0] via 2001:db8::9, 1d00h
       203.0.113.0/24 is variably subnetted, 3 subnets, 3 masks
 S        203.0.113.128/25 is directly connected, Null0

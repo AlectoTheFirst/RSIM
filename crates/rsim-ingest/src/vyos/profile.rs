@@ -1,7 +1,7 @@
 //! The vendor behaviour profile of VyOS.
 
 use rsim_core::{SourceSpan, VrfId};
-use rsim_functions::{PortTranslation, RuleAction, UnzonedInterface, VendorProfile};
+use rsim_functions::{PortTranslation, RouteProtocol, RuleAction, UnzonedInterface, VendorProfile};
 
 /// VyOS 1.4 and 1.5.
 ///
@@ -46,3 +46,18 @@ pub fn profile() -> VendorProfile {
         ],
     }
 }
+
+/// The protocol words of a route of FRR, `show ip route json`, that a
+/// routing protocol gave. Each word that is not here and not in
+/// [`STATIC_WORDS`] is a learned route of another protocol.
+pub const LEARNED_WORDS: &[(&str, RouteProtocol)] = &[
+    ("bgp", RouteProtocol::Bgp),
+    ("ospf", RouteProtocol::Ospf),
+    ("isis", RouteProtocol::Isis),
+    ("eigrp", RouteProtocol::Eigrp),
+    ("rip", RouteProtocol::Rip),
+];
+
+/// The protocol words of FRR for a static route: `static`, and `kernel`
+/// for a route that another process installed, for example PPPoE or DHCP.
+pub const STATIC_WORDS: &[&str] = &["static", "kernel"];

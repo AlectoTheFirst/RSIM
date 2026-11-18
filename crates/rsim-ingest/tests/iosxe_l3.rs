@@ -17,6 +17,7 @@ use rsim_functions::{
 use rsim_ingest::collected::Collected;
 use rsim_ingest::estate::{Estate, Input, assemble};
 use rsim_ingest::links::{External, Peer};
+use rsim_ingest::route_tables::RouteTables;
 use rsim_ingest::{classify, iosxe};
 
 const CONFIG: &[u8] = include_bytes!("fixtures/iosxe/running-config.txt");
@@ -151,7 +152,10 @@ fn spans_of(a: &Answer, function: &str) -> Vec<String> {
 /// back.
 fn linked() -> Twin {
     let doc = iosxe::read_text(CONFIG);
-    let cfg = iosxe::read(&doc, &iosxe::table(true));
+    let cfg = iosxe::read(
+        &doc,
+        &iosxe::table(&RouteTables::uniform(true, iosxe::dynamic_vrfs(&doc))),
+    );
     let ext = External {
         peers: [(
             "GigabitEthernet0/0/4".to_string(),
@@ -318,7 +322,10 @@ fn only_reply(a: &Answer) -> (VerdictKind, Vec<String>) {
 #[test]
 fn the_route_table_gives_the_global_table_and_each_vrf() {
     let doc = iosxe::read_text(CONFIG);
-    let cfg = iosxe::read(&doc, &iosxe::table(true));
+    let cfg = iosxe::read(
+        &doc,
+        &iosxe::table(&RouteTables::uniform(true, iosxe::dynamic_vrfs(&doc))),
+    );
     let st = iosxe::state::read(&sections(), &iosxe::names(&cfg));
     let rib = st.l3.rib.unwrap().unwrap();
     let vrfs: std::collections::BTreeSet<&str> = rib.paths.iter().map(|p| p.vrf.as_str()).collect();
@@ -389,7 +396,10 @@ fn the_route_table_gives_the_global_table_and_each_vrf() {
 fn a_vrf_header_of_another_form_makes_its_routes_unknown_in_each_vrf() {
     let rib = RIB.replace("Routing Table: MGMT", "Routing Table:MGMT");
     let doc = iosxe::read_text(CONFIG);
-    let cfg = iosxe::read(&doc, &iosxe::table(true));
+    let cfg = iosxe::read(
+        &doc,
+        &iosxe::table(&RouteTables::uniform(true, iosxe::dynamic_vrfs(&doc))),
+    );
     let st = iosxe::state::read(&with_section("rib", &rib), &iosxe::names(&cfg));
     let r = st.l3.rib.unwrap().unwrap();
     assert!(r.paths.iter().all(|p| p.vrf != "MGMT"));
@@ -424,7 +434,13 @@ fn a_vrf_header_of_another_form_makes_its_routes_unknown_in_each_vrf() {
 fn with_a_route_table_the_routing_is_irrelevant_and_each_handled_line_is_read() {
     let e = estate();
     let doc = iosxe::read_text(CONFIG);
-    assert_eq!(e.coverage["edge1"], classify(&doc, &iosxe::table(true)));
+    assert_eq!(
+        e.coverage["edge1"],
+        classify(
+            &doc,
+            &iosxe::table(&RouteTables::uniform(true, iosxe::dynamic_vrfs(&doc)))
+        )
+    );
     assert_eq!(e.unread["edge1"], Vec::<String>::new());
 }
 
@@ -731,7 +747,10 @@ fn the_unhandled_lines_of_an_interface_make_its_packets_unknown() {
 #[test]
 fn a_shut_interface_and_an_interface_with_no_address_are_not_lowered() {
     let doc = iosxe::read_text(CONFIG);
-    let cfg = iosxe::read(&doc, &iosxe::table(true));
+    let cfg = iosxe::read(
+        &doc,
+        &iosxe::table(&RouteTables::uniform(true, iosxe::dynamic_vrfs(&doc))),
+    );
     let (low, _) = iosxe::lower(
         "edge1",
         "edge1/config",
@@ -798,11 +817,17 @@ fn without_sections_each_route_lookup_is_unknown() {
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(has(
         &steps,
-        "route 0.0.0.0/0 in VRF default has no next hop"
+        "route 0.0.0.0/0 in VRF default: vrf route table not collected"
     ));
     let e = estate_with(BTreeMap::new());
     let doc = iosxe::read_text(CONFIG);
-    assert_eq!(e.coverage["edge1"], classify(&doc, &iosxe::table(false)));
+    assert_eq!(
+        e.coverage["edge1"],
+        classify(
+            &doc,
+            &iosxe::table(&RouteTables::uniform(false, iosxe::dynamic_vrfs(&doc)))
+        )
+    );
 }
 
 #[test]
@@ -818,7 +843,10 @@ fn two_builds_give_the_same_answers() {
 #[test]
 fn the_section_of_the_global_table_gives_the_default_vrf() {
     let doc = iosxe::read_text(CONFIG);
-    let cfg = iosxe::read(&doc, &iosxe::table(true));
+    let cfg = iosxe::read(
+        &doc,
+        &iosxe::table(&RouteTables::uniform(true, iosxe::dynamic_vrfs(&doc))),
+    );
     let global = "Gateway of last resort is 198.51.100.5 to network 0.0.0.0\n\nS*    0.0.0.0/0 [1/0] via 198.51.100.5\nC        198.51.100.4/30 is directly connected, GigabitEthernet0/0/4\n";
     let st = iosxe::state::read(&with_section("rib_global", global), &iosxe::names(&cfg));
     let rib = st.l3.rib.unwrap().unwrap();
@@ -999,7 +1027,10 @@ fn the_qos_policy_of_a_parent_port_applies_to_its_sub_interfaces() {
         " description LAN trunk\n no ip address\n service-policy output PARENT-SHAPER\n",
     );
     let doc = iosxe::read_text(config.as_bytes());
-    let cfg = iosxe::read(&doc, &iosxe::table(true));
+    let cfg = iosxe::read(
+        &doc,
+        &iosxe::table(&RouteTables::uniform(true, iosxe::dynamic_vrfs(&doc))),
+    );
     let (low, _) = iosxe::lower(
         "edge1",
         "edge1/config",
@@ -1030,4 +1061,92 @@ fn the_qos_policy_of_a_parent_port_applies_to_its_sub_interfaces() {
             "{id}: {spans:?}"
         );
     }
+}
+
+/// The kind name of each route of the route lookups of edge1 in a VRF.
+fn kinds(t: &Twin, vrf: &str) -> BTreeMap<String, &'static str> {
+    let mut out = BTreeMap::new();
+    for f in t.functions() {
+        let any: &dyn std::any::Any = f.as_ref();
+        let Some(rl) = any.downcast_ref::<RouteLookup>() else {
+            continue;
+        };
+        if let Some(fib) = rl.tables.get(&VrfId::new(vrf)) {
+            for (p, r) in fib.entries() {
+                out.insert(p.to_string(), r.kind.name());
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn a_learned_route_keeps_its_protocol() {
+    let k = kinds(&twin(), "default");
+    assert_eq!(k["198.51.100.16/29"], "ospf");
+    assert_eq!(k["198.51.100.24/29"], "bgp");
+    assert_eq!(k["0.0.0.0/0"], "static");
+    assert_eq!(k["198.51.100.0/30"], "connected");
+    let (_, steps) = only(&run(
+        &twin(),
+        "GigabitEthernet0/0/5",
+        "192.0.2.200",
+        "198.51.100.25",
+        443,
+    ));
+    assert!(
+        has(
+            &steps,
+            "route 198.51.100.24/29 (bgp) in VRF default via 198.51.100.1 on GigabitEthernet0/0/0"
+        ),
+        "{steps:#?}"
+    );
+}
+
+#[test]
+fn a_vrf_with_a_dynamic_protocol_and_no_printed_table_is_unknown_outside_its_routes() {
+    let printed = with_section(
+        "rib",
+        include_str!("fixtures/iosxe/rib-vrf-not-printed.txt"),
+    );
+    let t = twin_with(printed.clone());
+    let a = run(
+        &t,
+        "GigabitEthernet0/0/7",
+        "198.51.100.40",
+        "203.0.113.50",
+        443,
+    );
+    let (verdict, steps) = only(&a);
+    assert_eq!(verdict, VerdictKind::Unknown);
+    assert!(
+        has(
+            &steps,
+            "route 0.0.0.0/0 in VRF BLUE: vrf route table not collected"
+        ),
+        "{steps:#?}"
+    );
+    let doc = iosxe::read_text(CONFIG);
+    let rd = doc
+        .root
+        .get("ip vrf BLUE")
+        .and_then(|v| v.get("rd 64496:200"))
+        .unwrap()
+        .first_line;
+    assert!(
+        spans_of(&a, "edge1/route").contains(&format!("edge1/config:{rd}-{rd}")),
+        "{:?}",
+        spans_of(&a, "edge1/route")
+    );
+    assert_eq!(kinds(&t, "RED")["192.0.2.64/26"], "connected");
+    assert_eq!(kinds(&t, "RED")["0.0.0.0/0"], "static");
+
+    let full = estate().coverage["edge1"].clone();
+    let partial = estate_with(printed).coverage["edge1"].clone();
+    for blue in ["ip vrf */rd ..", "ip vrf */route-target .."] {
+        assert!(!full.unhandled.contains_key(blue), "{full:#?}");
+        assert!(partial.unhandled.contains_key(blue), "{partial:#?}");
+    }
+    assert!(!partial.unhandled.contains_key("vrf definition */rd .."));
+    assert!(!partial.unhandled.contains_key("router bgp .."));
 }

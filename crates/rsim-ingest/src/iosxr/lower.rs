@@ -16,7 +16,7 @@ use rsim_engine::EdgeInterface;
 use rsim_functions::{
     AclMatch, DeviceDelivery, Egress, EgressMode, Fib, Ingress, Layer3HandOff, Link, LinkEnd,
     LinkFacts, LocalInput, Neighbour, NextHopResolution, Route, RouteKind, RouteLookup,
-    RouteNextHop, Rule as FRule, RuleAction, Tag, VendorProfile, VrfSelection,
+    RouteNextHop, RouteProtocol, Rule as FRule, RuleAction, Tag, VendorProfile, VrfSelection,
 };
 
 use super::config::{Config, Interface};
@@ -27,8 +27,9 @@ use super::profile::{
 use super::state::{self, HsrpRow, Rib, RoutePath, Section, UnreadRoute};
 use crate::links::{External, Summary, VlanAddrs};
 use crate::nxos;
-use crate::nxos::config::{Ace, AclAction, AddrSpec, PortSpec};
+use crate::nxos::config::{Ace, AclAction, AddrSpec, Lines, PortSpec};
 use crate::nxos::lower::{L, iface_addr};
+use crate::route_tables::{TABLE_NOT_COLLECTED, route_kind};
 use crate::vyos::Lowered;
 
 /// The protocol word of the shared ACL functions for all IPv4 protocols.
@@ -112,6 +113,12 @@ pub(crate) struct Vip {
 pub(crate) struct Hops<'a> {
     pub(crate) next: &'a str,
     pub(crate) other_vrf: &'a dyn Fn(&str) -> String,
+    /// The route codes of the learned routes and of the static routes of
+    /// the vendor profile.
+    pub(crate) learned: &'a [(&'a str, RouteProtocol)],
+    pub(crate) statics: &'a [&'a str],
+    /// The VRFs with a dynamic routing protocol in the config.
+    pub(crate) dynamic: &'a BTreeMap<String, Vec<(u32, u32)>>,
 }
 
 fn port(i: &Interface) -> nxos::config::Interface {
@@ -321,6 +328,9 @@ pub fn lower(
     let hops = Hops {
         next: "nexthop",
         other_vrf: &other_vrf,
+        learned: super::profile::LEARNED_CODES,
+        statics: super::profile::STATIC_CODES,
+        dynamic: &cfg.dynamic_vrfs,
     };
     let mut tables = BTreeMap::new();
     for v in &vrfs {
@@ -1185,7 +1195,8 @@ fn line_of(s: &SourceSpan) -> String {
 /// The FIB of a VRF from the route table section. A route table line that
 /// is not read makes the lookup of its prefix unknown; such a line with no
 /// prefix makes each lookup of the VRF unknown, as does a VRF that the
-/// section does not have. The addresses of the interfaces of the VRF are
+/// section does not have, with the reason that its route table is not
+/// collected if its config has a dynamic routing protocol. The addresses of the interfaces of the VRF are
 /// local routes, as are the virtual addresses of the active HSRP groups; the
 /// virtual address of a group whose state is not known has no next hop.
 /// Each IPv6 packet is unknown. The next hops go to the function of `hops`.
@@ -1200,8 +1211,26 @@ pub(crate) fn fib(
     let mut t = Fib::new();
     let all: Prefix = "0.0.0.0/0".parse().expect("a valid prefix");
     let unknown_all = |spans: Vec<SourceSpan>| Route::new(RouteKind::Static, Vec::new(), spans);
+    // A VRF with a dynamic routing protocol and no route of the section.
+    let not_collected = |l: &L| {
+        hops.dynamic.get(vrf).map(|found| {
+            let spans = found
+                .iter()
+                .map(|(first, last)| {
+                    l.span(Lines {
+                        first: *first,
+                        last: *last,
+                    })
+                })
+                .collect();
+            Route::unknown(RouteKind::Static, TABLE_NOT_COLLECTED, spans)
+        })
+    };
     match rib {
-        None => t.insert(all, unknown_all(Vec::new())),
+        None => t.insert(
+            all,
+            not_collected(l).unwrap_or_else(|| unknown_all(Vec::new())),
+        ),
         Some(rib) => {
             let mine = |v: &Option<String>| v.as_deref().is_none_or(|v| v == vrf);
             let whole: Vec<&UnreadRoute> = rib
@@ -1227,7 +1256,10 @@ pub(crate) fn fib(
                 l.note(format!(
                     "VRF {vrf}: the route table section has no route of the VRF, so each route lookup is unknown"
                 ));
-                t.insert(all, unknown_all(Vec::new()));
+                t.insert(
+                    all,
+                    not_collected(l).unwrap_or_else(|| unknown_all(Vec::new())),
+                );
             } else {
                 routes(l, &mut t, vrf, rib, &mine, hops);
             }
@@ -1344,7 +1376,7 @@ fn routes(
         let kind = if c == CONNECTED_CODE {
             RouteKind::Connected
         } else {
-            RouteKind::Static
+            route_kind(c, to.learned, to.statics)
         };
         let mut hops = Vec::new();
         let mut problem = None;

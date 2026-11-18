@@ -19,7 +19,7 @@ pub use config::{Config, read};
 pub use lower::lower;
 pub use mask::mask;
 pub use profile::profile;
-pub use table::table;
+pub use table::{dynamic_vrfs, table};
 
 /// The JSON sections of a switch that the lowering reads.
 pub const SECTIONS: &[&str] = &[

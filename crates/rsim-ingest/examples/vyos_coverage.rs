@@ -3,6 +3,7 @@
 
 use std::io::Read;
 
+use rsim_ingest::route_tables::RouteTables;
 use rsim_ingest::{State, classify, read_json, vyos};
 
 fn main() {
@@ -11,7 +12,7 @@ fn main() {
         .read_to_end(&mut bytes)
         .expect("stdin is readable");
     let doc = read_json(&bytes).expect("stdin is a JSON configuration");
-    let table = vyos::table(true);
+    let table = vyos::table(&RouteTables::uniform(true, vyos::dynamic_vrfs(&doc)));
     let cov = classify(&doc, &table);
     let cfg = vyos::read(&doc);
     for path in vyos::unread(&doc, &table, &cfg.read) {

@@ -3,6 +3,7 @@
 
 use std::io::Read;
 
+use rsim_ingest::route_tables::RouteTables;
 use rsim_ingest::{State, classify, iosxe};
 
 fn main() {
@@ -11,7 +12,7 @@ fn main() {
         .read_to_end(&mut bytes)
         .expect("stdin is readable");
     let doc = iosxe::read_text(&bytes);
-    let table = iosxe::table(true);
+    let table = iosxe::table(&RouteTables::uniform(true, iosxe::dynamic_vrfs(&doc)));
     let cov = classify(&doc, &table);
     for state in [State::Handled, State::Irrelevant, State::Unhandled] {
         println!(

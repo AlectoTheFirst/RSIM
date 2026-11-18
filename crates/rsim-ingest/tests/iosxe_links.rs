@@ -15,6 +15,7 @@ use rsim_functions::{HostMac, HostResolution, Meta};
 use rsim_ingest::collected::Collected;
 use rsim_ingest::estate::{Estate, Input, assemble};
 use rsim_ingest::links::{PortVlans, Summary};
+use rsim_ingest::route_tables::RouteTables;
 use rsim_ingest::{iosxe, iosxr};
 
 type Sections = BTreeMap<String, (Vec<u8>, String)>;
@@ -562,7 +563,10 @@ fn says(steps: &[String], text: &str) -> bool {
 
 fn summary_of(name: &str, config: &[u8], sections: &Sections) -> Summary {
     let doc = iosxe::read_text(config);
-    let cfg = iosxe::read(&doc, &iosxe::table(true));
+    let cfg = iosxe::read(
+        &doc,
+        &iosxe::table(&RouteTables::uniform(true, iosxe::dynamic_vrfs(&doc))),
+    );
     let (_, sum) = iosxe::lower(
         name,
         &format!("{name}/config"),
@@ -577,7 +581,10 @@ fn summary_of(name: &str, config: &[u8], sections: &Sections) -> Summary {
 #[test]
 fn the_sections_parse_through_their_templates() {
     let doc = iosxe::read_text(EDGE1);
-    let cfg = iosxe::read(&doc, &iosxe::table(true));
+    let cfg = iosxe::read(
+        &doc,
+        &iosxe::table(&RouteTables::uniform(true, iosxe::dynamic_vrfs(&doc))),
+    );
     let st = iosxe::state::read(&fixtures("edge1", ""), &iosxe::names(&cfg));
     let lldp = st.l3.lldp.unwrap().unwrap();
     assert_eq!(lldp.len(), 3);
@@ -1070,7 +1077,10 @@ fn with_no_mac_table_a_frame_to_a_host_is_unknown() {
 #[test]
 fn a_flood_copy_toward_the_trunk_is_unknown() {
     let doc = iosxe::read_text(&acc1_clean());
-    let cfg = iosxe::read(&doc, &iosxe::table(true));
+    let cfg = iosxe::read(
+        &doc,
+        &iosxe::table(&RouteTables::uniform(true, iosxe::dynamic_vrfs(&doc))),
+    );
     let (low, _) = iosxe::lower(
         "acc1",
         "acc1/config",
@@ -1517,7 +1527,10 @@ fn campus_plus(config: &[u8], extra: &[(&str, &str)]) -> Estate {
 /// debug text.
 fn flood_of(config: &[u8], extra: &[(&str, &str)]) -> (Vec<String>, Vec<String>, String) {
     let doc = iosxe::read_text(config);
-    let cfg = iosxe::read(&doc, &iosxe::table(true));
+    let cfg = iosxe::read(
+        &doc,
+        &iosxe::table(&RouteTables::uniform(true, iosxe::dynamic_vrfs(&doc))),
+    );
     let (low, _) = iosxe::lower(
         "acc1",
         "acc1/config",

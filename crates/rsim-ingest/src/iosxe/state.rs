@@ -324,10 +324,13 @@ fn routes(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> Sect
     Some(Ok(global))
 }
 
-/// True if the route table section is in the snapshot and its template
-/// parses it.
-pub fn rib_collected(sections: &BTreeMap<String, (Vec<u8>, String)>) -> bool {
-    matches!(routes(sections, &Names::default()), Some(Ok(_)))
+/// The VRFs with a path or a line of the route table section, if the
+/// section is in the snapshot and its template parses it.
+pub fn rib_vrfs(sections: &BTreeMap<String, (Vec<u8>, String)>) -> BTreeSet<String> {
+    match routes(sections, &Names::default()) {
+        Some(Ok(r)) => crate::iosxr::state::vrfs_of(&r),
+        _ => BTreeSet::new(),
+    }
 }
 
 /// The first word of a state, so `up (connected)` is `up`; the whole state

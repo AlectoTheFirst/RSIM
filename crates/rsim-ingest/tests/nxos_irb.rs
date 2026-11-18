@@ -394,7 +394,7 @@ fn a_routed_packet_crosses_the_layer_3_vni_and_the_reply_comes_back() {
     assert_eq!(*verdict, VerdictKind::Deliver, "{steps:#?}");
     for text in [
         "leaf1/host/Ethernet1/5 from 00:00:5e:00:53:11 to the gateway 00:00:5e:00:53:00",
-        "leaf1/route 203.0.113.12/32 in VRF RED via 192.0.2.2 on nve1",
+        "leaf1/route 203.0.113.12/32 (bgp) in VRF RED via 192.0.2.2 on nve1",
         "leaf1/nexthop the peer is the peer tunnel end on nve1",
         "leaf1/vxlan/encap-l3 VXLAN VNI 50001 from 192.0.2.1 to 192.0.2.2 · VRF RED",
         "leaf2/vxlan-decap-l3 VXLAN VNI 50001 · VRF RED",
@@ -424,7 +424,7 @@ fn a_vxlan_path_with_another_vni_is_unknown() {
     assert!(
         has(
             &branches[0].1,
-            "route 203.0.113.12/32 in VRF RED has no next hop"
+            "route 203.0.113.12/32 (bgp) in VRF RED has no next hop"
         ),
         "{branches:#?}"
     );

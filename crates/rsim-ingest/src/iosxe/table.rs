@@ -1,6 +1,11 @@
 //! The classification of the lines of an IOS-XE running config.
 
+use std::collections::BTreeMap;
+
+use super::profile::DEFAULT_VRF;
 use crate::coverage::{Entry, Reach, State, Table};
+use crate::route_tables::{RouteTables, VRF, lines, words};
+use crate::stanza::Document;
 use Reach::{Node, Subtree};
 use State::{Handled, Irrelevant};
 
@@ -197,33 +202,42 @@ const FORWARDING: &[Entry] = &[
     e("ipv6 ..", Irrelevant, Subtree),
 ];
 
-/// The classification table, with the mask of the secrets. With a collected
-/// route table, the routing protocols, the route maps, the lists of the
-/// routing policies, the routing lines of an interface and the route
-/// distinguishers and route targets of a VRF are known-irrelevant, because
-/// the routes come from the route table. Without it, they are unhandled.
-pub fn table(rib_collected: bool) -> Table {
+/// The classification table, with the mask of the secrets. The routing
+/// lines of a VRF with collected route rows are known-irrelevant, because
+/// its routes come from the route table; the routing lines of a VRF
+/// without rows are unhandled. The route maps, the lists of the routing
+/// policies and the routing lines of an interface are known-irrelevant only
+/// if each VRF with a dynamic protocol has rows.
+pub fn table(tables: &RouteTables) -> Table {
     let mut t = Table::new(MANAGEMENT).with_mask(super::mask);
     for entry in FORWARDING {
         t.push(entry.path, entry.state, entry.reach);
     }
-    let routing = if rib_collected {
-        Irrelevant
-    } else {
-        State::Unhandled
-    };
-    for protocol in [
-        "router bgp ..",
-        "router ospf ..",
-        "router eigrp ..",
-        "router isis ..",
+    let default = tables.routing(DEFAULT_VRF);
+    let shared = tables.shared();
+    for p in ["router bgp", "router eigrp", "router rip"] {
+        t.push_levels(&[&format!("{p} ..")], default, Subtree);
+        tables.push_vrfs(
+            &mut t,
+            &[
+                &format!("{p} .."),
+                &format!("address-family ipv4 vrf {VRF} .."),
+            ],
+        );
+    }
+    for p in ["router ospf", "router isis"] {
+        t.push_levels(&[&format!("{p} ..")], default, Subtree);
+        tables.push_vrfs(&mut t, &[&format!("{p} * vrf {VRF} ..")]);
+        tables.push_vrfs(&mut t, &[&format!("{p} .."), &format!("vrf {VRF}")]);
+    }
+    for object in [
         "route-map ..",
         "ip prefix-list ..",
         "ip community-list ..",
         "ip as-path ..",
         "ip bgp-community ..",
     ] {
-        t.push_levels(&[protocol], routing, Subtree);
+        t.push_levels(&[object], shared, Subtree);
     }
     for option in [
         "ip ospf ..",
@@ -231,18 +245,85 @@ pub fn table(rib_collected: bool) -> Table {
         "ip authentication ..",
         "ip summary-address ..",
     ] {
-        t.push_levels(&["interface *", option], routing, Subtree);
+        t.push_levels(&["interface *", option], shared, Subtree);
     }
     for option in ["rd ..", "route-target .."] {
-        t.push_levels(&["vrf definition *", option], routing, Subtree);
-        t.push_levels(&["ip vrf *", option], routing, Subtree);
+        tables.push_vrfs(&mut t, &[&format!("vrf definition {VRF}"), option]);
+        tables.push_vrfs(&mut t, &[&format!("ip vrf {VRF}"), option]);
     }
     for option in ["route-target ..", "import ..", "export .."] {
-        t.push_levels(
-            &["vrf definition *", "address-family ipv4", option],
-            routing,
-            Subtree,
+        tables.push_vrfs(
+            &mut t,
+            &[
+                &format!("vrf definition {VRF}"),
+                "address-family ipv4",
+                option,
+            ],
         );
     }
     t
+}
+
+/// The VRFs whose config has a dynamic routing protocol, each with the
+/// lines that show it: a routing process gives the default VRF, or the VRF
+/// of its `vrf` word, and the VRF of each of its `address-family ipv4 vrf`
+/// and `vrf` lines; the route distinguisher, a route target or an address
+/// family of a VRF gives that VRF; an `ip router` line or an `ip ospf`
+/// line with an area gives the VRF of the interface.
+pub fn dynamic_vrfs(doc: &Document) -> BTreeMap<String, Vec<(u32, u32)>> {
+    let mut out: BTreeMap<String, Vec<(u32, u32)>> = BTreeMap::new();
+    let mut add = |vrf: &str, l: (u32, u32)| out.entry(vrf.to_string()).or_default().push(l);
+    for s in doc.root.children() {
+        let w = words(s);
+        match w.as_slice() {
+            [
+                "router",
+                "bgp" | "ospf" | "eigrp" | "isis" | "rip",
+                rest @ ..,
+            ] => {
+                match rest {
+                    [_, "vrf", v, ..] => add(v, lines(s)),
+                    _ => add(DEFAULT_VRF, lines(s)),
+                }
+                for c in s.children() {
+                    match words(c).as_slice() {
+                        ["address-family", "ipv4", "vrf", v, ..] | ["vrf", v] => add(v, lines(c)),
+                        _ => {}
+                    }
+                }
+            }
+            ["vrf", "definition", v] | ["ip", "vrf", v] => {
+                for c in s.children() {
+                    if matches!(
+                        words(c).first(),
+                        Some(&("rd" | "route-target" | "address-family"))
+                    ) {
+                        add(v, lines(c));
+                    }
+                }
+            }
+            ["interface", _] => {
+                let vrf = s
+                    .children()
+                    .iter()
+                    .find_map(|c| match words(c).as_slice() {
+                        ["vrf", "forwarding", v] | ["ip", "vrf", "forwarding", v] => {
+                            Some((*v).to_string())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| DEFAULT_VRF.to_string());
+                for c in s.children() {
+                    let cw = words(c);
+                    if cw.starts_with(&["ip", "router"])
+                        || (cw.starts_with(&["ip", "ospf"]) && cw.get(3) == Some(&"area"))
+                    {
+                        add(&vrf, lines(c));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }

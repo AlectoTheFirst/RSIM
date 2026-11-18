@@ -15,7 +15,33 @@ use crate::fib::{Fib, GroupRoutes};
 use crate::forwarding::meta_methods;
 use crate::rules::{Decision, Rule, RuleBody, RuleRef, UnknownCause, evaluate};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+/// The routing protocol of a learned route. The vendor word stays in the
+/// collected row and in the span of the route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RouteProtocol {
+    Bgp,
+    Ospf,
+    Isis,
+    Eigrp,
+    Rip,
+    Other,
+}
+
+impl RouteProtocol {
+    /// The name in the tables and in the step text, for example `bgp`.
+    pub fn name(self) -> &'static str {
+        match self {
+            RouteProtocol::Bgp => "bgp",
+            RouteProtocol::Ospf => "ospf",
+            RouteProtocol::Isis => "isis",
+            RouteProtocol::Eigrp => "eigrp",
+            RouteProtocol::Rip => "rip",
+            RouteProtocol::Other => "other",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RouteKind {
     Connected,
     Static,
@@ -23,6 +49,39 @@ pub enum RouteKind {
     Local,
     /// A discard route.
     Null,
+    /// A route that a routing protocol gave.
+    Learned(RouteProtocol),
+}
+
+impl RouteKind {
+    /// The name in the tables: `connected`, `static`, `local`, `null` or
+    /// the name of the protocol of a learned route.
+    pub fn name(self) -> &'static str {
+        match self {
+            RouteKind::Connected => "connected",
+            RouteKind::Static => "static",
+            RouteKind::Local => "local",
+            RouteKind::Null => "null",
+            RouteKind::Learned(p) => p.name(),
+        }
+    }
+
+    /// The kind that decides the forwarding. A learned route forwards as a
+    /// static route with the same next hops.
+    pub fn forwarding(self) -> RouteKind {
+        match self {
+            RouteKind::Learned(_) => RouteKind::Static,
+            k => k,
+        }
+    }
+
+    /// The protocol of a learned route.
+    pub fn protocol(self) -> Option<RouteProtocol> {
+        match self {
+            RouteKind::Learned(p) => Some(p),
+            _ => None,
+        }
+    }
 }
 
 /// One next hop of a route.
@@ -42,6 +101,9 @@ pub struct Route {
     /// interface, then by gateway.
     next_hops: Vec<RouteNextHop>,
     pub spans: Vec<SourceSpan>,
+    /// Why a route with no next hop is unknown, for the reason of the
+    /// lookup. `None` gives the reason that the route has no next hop.
+    unknown: Option<String>,
 }
 
 impl Route {
@@ -52,11 +114,28 @@ impl Route {
             kind,
             next_hops,
             spans,
+            unknown: None,
+        }
+    }
+
+    /// A route with no next hop whose packets are unknown for the reason
+    /// `why`.
+    pub fn unknown(kind: RouteKind, why: impl Into<String>, spans: Vec<SourceSpan>) -> Self {
+        Route {
+            kind,
+            next_hops: Vec::new(),
+            spans,
+            unknown: Some(why.into()),
         }
     }
 
     pub fn next_hops(&self) -> &[RouteNextHop] {
         &self.next_hops
+    }
+
+    /// The reason of a route with no next hop, if it has one.
+    pub fn unknown_reason(&self) -> Option<&str> {
+        self.unknown.as_deref()
     }
 }
 
@@ -184,7 +263,15 @@ impl RouteLookup {
         ctx: &Context,
         state: &FlowState,
     ) {
-        let list: Vec<String> = g.sample.iter().map(ToString::to_string).collect();
+        let list: Vec<String> = g
+            .sample
+            .iter()
+            .zip(&g.protocols)
+            .map(|(p, proto)| match proto {
+                Some(x) => format!("{p} ({})", x.name()),
+                None => p.to_string(),
+            })
+            .collect();
         let what = if g.count == 1 && g.exact && !list.is_empty() {
             list[0].clone()
         } else if g.exact {
@@ -237,20 +324,18 @@ impl RouteLookup {
                 );
                 return;
             }
-            RouteKind::Connected | RouteKind::Static => {}
+            RouteKind::Connected | RouteKind::Static | RouteKind::Learned(_) => {}
         }
         let hops = &g.group.next_hops;
         let count = u32::try_from(hops.len()).expect("too many next hops");
         if count == 0 {
+            let detail = match &g.group.unknown {
+                Some(why) => format!("route {what} in VRF {vrf}: {why}"),
+                None => format!("route {what} in VRF {vrf} has no next hop"),
+            };
             out.push(
                 self.meta
-                    .unknown(
-                        set,
-                        ReasonCode::IncompleteTable,
-                        format!("route {what} in VRF {vrf} has no next hop"),
-                        ctx,
-                        state,
-                    )
+                    .unknown(set, ReasonCode::IncompleteTable, detail, ctx, state)
                     .with_spans(spans),
             );
             return;

@@ -24,6 +24,7 @@ use super::config::{
 use super::names::Names;
 use crate::collected::Collected;
 use crate::links::{External, Summary};
+use crate::route_tables::{TABLE_NOT_COLLECTED, route_kind};
 use crate::vyos::Lowered;
 
 /// The VRF of an interface with no `vrf member`.
@@ -1247,11 +1248,12 @@ impl L<'_> {
         out
     }
 
-    /// The FIB of a VRF: the collected route table, or else the connected
-    /// and static routes of the config. The addresses of the interfaces of
-    /// the VRF are local routes. Each IPv6 packet is unknown.
-    /// The FIB of a VRF. Each next hop goes to the function `next`, and
-    /// each VXLAN path to the encapsulation of `vx`.
+    /// The FIB of a VRF: the collected route rows of the VRF, or else the
+    /// connected and static routes of the config. With no rows and a
+    /// dynamic routing protocol in the VRF, each other destination is
+    /// unknown. The addresses of the interfaces of the VRF are local routes.
+    /// Each IPv6 packet is unknown. Each next hop goes to the function
+    /// `next`, and each VXLAN path to the encapsulation of `vx`.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn fib(
         &mut self,
@@ -1269,7 +1271,7 @@ impl L<'_> {
             gateway: gw,
             next: l.id(next),
         };
-        if col.routes.is_empty() {
+        if !col.routes.iter().any(|r| r.vrf == vrf) {
             for i in active.iter().filter(|i| vrf_of(i) == vrf) {
                 for a in &i.addresses {
                     if let Some((ip, len)) = iface_addr(&a.prefix)
@@ -1332,6 +1334,27 @@ impl L<'_> {
                 };
                 t.insert(p, Route::new(RouteKind::Static, hops, span));
             }
+            if let Some(found) = self.cfg.dynamic_vrfs.get(vrf).cloned() {
+                self.note(format!(
+                    "VRF {vrf}: a dynamic routing protocol and no collected route rows, so each destination outside the connected and static routes is unknown"
+                ));
+                let spans: Vec<SourceSpan> = found
+                    .iter()
+                    .map(|(first, last)| {
+                        self.span(Lines {
+                            first: *first,
+                            last: *last,
+                        })
+                    })
+                    .collect();
+                let all: Prefix = "0.0.0.0/0".parse().expect("a valid prefix");
+                if t.get(&all).is_none() {
+                    t.insert(
+                        all,
+                        Route::unknown(RouteKind::Static, TABLE_NOT_COLLECTED, spans),
+                    );
+                }
+            }
         } else {
             let mut by_prefix: BTreeMap<String, Vec<&crate::collected::RouteRow>> = BTreeMap::new();
             for r in col.routes.iter().filter(|r| r.selected && r.vrf == vrf) {
@@ -1349,7 +1372,11 @@ impl L<'_> {
                 let kind = match protocol {
                     "direct" => RouteKind::Connected,
                     "local" => RouteKind::Local,
-                    _ => RouteKind::Static,
+                    _ => route_kind(
+                        super::profile::protocol_word(protocol),
+                        super::profile::LEARNED_WORDS,
+                        super::profile::STATIC_WORDS,
+                    ),
                 };
                 if kind == RouteKind::Local {
                     t.insert(p, Route::new(kind, Vec::new(), spans));

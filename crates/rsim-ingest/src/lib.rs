@@ -9,6 +9,7 @@ pub mod iosxe;
 pub mod iosxr;
 pub mod links;
 pub mod nxos;
+pub mod route_tables;
 pub mod stanza;
 pub mod unifi;
 pub mod vyos;

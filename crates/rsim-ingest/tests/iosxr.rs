@@ -4,6 +4,7 @@
 use rsim_ingest::collected::Collected;
 use rsim_ingest::estate::{Estate, Input, assemble};
 use rsim_ingest::nxos::config::{AclAction, AddrSpec, PortSpec};
+use rsim_ingest::route_tables::RouteTables;
 use rsim_ingest::{State, classify, iosxr};
 
 const CONFIG: &[u8] = include_bytes!("fixtures/iosxr/running-config.txt");
@@ -42,17 +43,23 @@ fn estate() -> Estate {
 
 fn ranked(rib: bool) -> Vec<(String, u32, u32)> {
     let doc = iosxr::read_text(CONFIG);
-    classify(&doc, &iosxr::table(rib))
-        .ranked()
-        .into_iter()
-        .map(|(p, n, l)| (p.to_string(), n, l))
-        .collect()
+    classify(
+        &doc,
+        &iosxr::table(&RouteTables::uniform(rib, iosxr::dynamic_vrfs(&doc))),
+    )
+    .ranked()
+    .into_iter()
+    .map(|(p, n, l)| (p.to_string(), n, l))
+    .collect()
 }
 
 #[test]
 fn the_coverage_shares_of_the_fixture() {
     let doc = iosxr::read_text(CONFIG);
-    let cov = classify(&doc, &iosxr::table(true));
+    let cov = classify(
+        &doc,
+        &iosxr::table(&RouteTables::uniform(true, Default::default())),
+    );
     assert_eq!(cov.lines[&State::Handled], 67);
     assert_eq!(cov.lines[&State::Irrelevant], 149);
     assert_eq!(cov.lines[&State::Unhandled], 5);
@@ -103,8 +110,8 @@ fn without_a_route_table_the_routing_protocols_and_policies_are_unhandled() {
 #[test]
 fn the_states_of_key_stanzas() {
     use State::{Handled, Irrelevant, Unhandled};
-    let with = iosxr::table(true);
-    let without = iosxr::table(false);
+    let with = iosxr::table(&RouteTables::uniform(true, Default::default()));
+    let without = iosxr::table(&RouteTables::uniform(false, Default::default()));
     for (path, rib, no_rib) in [
         (&["Tue Nov 17 10:00:00.000 UTC"][..], Irrelevant, Irrelevant),
         (&["Building configuration..."], Irrelevant, Irrelevant),
@@ -241,7 +248,7 @@ fn the_mask_hides_each_fake_secret_of_the_fixture() {
 fn no_secret_reaches_the_reports() {
     let doc = iosxr::read_text(CONFIG);
     for rib in [true, false] {
-        let table = iosxr::table(rib);
+        let table = iosxr::table(&RouteTables::uniform(rib, iosxr::dynamic_vrfs(&doc)));
         for (path, _, _) in classify(&doc, &table).ranked() {
             no_secret(path);
         }
@@ -272,7 +279,7 @@ fn no_secret_reaches_the_reports() {
 fn each_handled_line_is_read() {
     let doc = iosxr::read_text(CONFIG);
     for rib in [true, false] {
-        let table = iosxr::table(rib);
+        let table = iosxr::table(&RouteTables::uniform(rib, iosxr::dynamic_vrfs(&doc)));
         let cfg = iosxr::read(&doc, &table);
         assert_eq!(iosxr::unread(&doc, &table, &cfg.read), Vec::<String>::new());
     }
@@ -285,7 +292,10 @@ fn without_a_route_table_section_the_routing_is_unhandled() {
     let doc = iosxr::read_text(CONFIG);
     assert_eq!(
         e.coverage["pe1"],
-        classify(&doc, &iosxr::table(false)),
+        classify(
+            &doc,
+            &iosxr::table(&RouteTables::uniform(false, Default::default()))
+        ),
         "no route table leaves the routing unhandled"
     );
     assert!(
@@ -298,7 +308,10 @@ fn without_a_route_table_section_the_routing_is_unhandled() {
 #[test]
 fn the_typed_config() {
     let doc = iosxr::read_text(CONFIG);
-    let cfg = iosxr::read(&doc, &iosxr::table(true));
+    let cfg = iosxr::read(
+        &doc,
+        &iosxr::table(&RouteTables::uniform(true, Default::default())),
+    );
     assert_eq!(cfg.hostname.as_deref(), Some("pe1"));
     assert_eq!(
         cfg.vrfs.keys().map(String::as_str).collect::<Vec<_>>(),
@@ -428,7 +441,7 @@ fn an_hsrp_line_that_is_not_read_goes_to_the_group() {
             " interface Bundle-Ether20.100\n  hsrp use-bia\n  address-family ipv4\n",
         );
     let doc = iosxr::read_text(text.as_bytes());
-    let table = iosxr::table(true);
+    let table = iosxr::table(&RouteTables::uniform(true, Default::default()));
     let cfg = iosxr::read(&doc, &table);
     assert_eq!(
         cfg.hsrp[0].unhandled,
