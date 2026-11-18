@@ -387,6 +387,8 @@ pub struct WireguardPeer {
     /// The source address of the outer header toward the endpoint, or the
     /// reason why it is not known.
     pub source: Result<IpAddr, String>,
+    /// The interface whose address is the source.
+    pub source_interface: Option<InterfaceId>,
     pub spans: Vec<SourceSpan>,
 }
 
@@ -463,7 +465,8 @@ impl WireguardEncap {
         h.src_port = self
             .listen_port
             .map_or(FieldValue::Unknown, FieldValue::Known);
-        // The outer header has DSCP 0 and the ECN of the inner header.
+        // The outer header has DSCP 0. The device copies the ECN of each
+        // inner packet, so the ECN of the outer header is unknown here.
         h.dscp = FieldValue::Known(0);
         h.ecn = FieldValue::Unknown;
         h.fragment = FieldValue::Known(Fragment::Unfragmented);
@@ -577,10 +580,21 @@ impl NetFunction for WireguardEncap {
         ]
     }
     fn reads(&self) -> Vec<Dependency> {
-        vec![Dependency::Interface(
-            self.meta.device.clone(),
-            self.interface.clone(),
-        )]
+        let dev = &self.meta.device;
+        let mut ifaces: Vec<&InterfaceId> = std::iter::once(&self.interface)
+            .chain(
+                self.peers
+                    .iter()
+                    .filter_map(|p| p.source_interface.as_ref()),
+            )
+            .collect();
+        ifaces.sort();
+        ifaces.dedup();
+        ifaces
+            .into_iter()
+            .map(|i| Dependency::Interface(dev.clone(), i.clone()))
+            .chain([Dependency::RouteTable(dev.clone(), self.underlay.clone())])
+            .collect()
     }
     fn successors(&self) -> Vec<FunctionId> {
         vec![self.next.clone()]

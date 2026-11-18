@@ -653,10 +653,14 @@ fn exit_marks<'a>(active: &[&'a Interface], main: &Fib) -> BTreeMap<&'a str, Exi
     out
 }
 
-/// The source address of the packets of the router to `endpoint`: the one
-/// address of the family of the endpoint on the one interface of the
-/// route of the main table to it.
-fn tunnel_source(main: &Fib, addrs: &Addrs, endpoint: IpAddr) -> Result<IpAddr, String> {
+/// The source address of the packets of the router to `endpoint` and its
+/// interface: the one address of the family of the endpoint on the one
+/// interface of the route of the main table to it.
+fn tunnel_source<'a>(
+    main: &'a Fib,
+    addrs: &Addrs,
+    endpoint: IpAddr,
+) -> Result<(IpAddr, &'a str), String> {
     let not_known = |why: String| Err(format!("the WireGuard source address is not known: {why}"));
     let Some((p, g)) = main.lookup(endpoint) else {
         return not_known(format!("no route to {endpoint}"));
@@ -678,7 +682,7 @@ fn tunnel_source(main: &Fib, addrs: &Addrs, endpoint: IpAddr) -> Result<IpAddr, 
         })
         .unwrap_or_default();
     match mine[..] {
-        [a] => Ok(a),
+        [a] => Ok((a, iface)),
         [] => not_known(format!(
             "{iface} has no address of the family of {endpoint}"
         )),
@@ -791,15 +795,19 @@ impl L<'_> {
                 .as_deref()
                 .and_then(|a| a.parse::<IpAddr>().ok())
                 .zip(p.port.as_deref().and_then(|x| x.parse::<u16>().ok()));
-            let source = match endpoint {
-                Some((ep, _)) => tunnel_source(main, addrs, ep),
-                None => Err("WireGuard peer endpoint not known".to_string()),
+            let (source, source_interface) = match endpoint {
+                Some((ep, _)) => match tunnel_source(main, addrs, ep) {
+                    Ok((a, i)) => (Ok(a), Some(InterfaceId::new(i))),
+                    Err(why) => (Err(why), None),
+                },
+                None => (Err("WireGuard peer endpoint not known".to_string()), None),
             };
             peers.push(WireguardPeer {
                 name: p.name.clone(),
                 allowed,
                 endpoint,
                 source,
+                source_interface,
                 spans: vec![self.span(p.lines)],
             });
         }
