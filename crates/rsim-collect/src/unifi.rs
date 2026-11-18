@@ -2,13 +2,13 @@
 //! One device is one site of a console.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use rsim_store::{CLIENTS, Cell, Class, Format, Row, TableSchema};
 use serde_json::Value;
 
 use crate::{
-    BoxFuture, Device, Extract, Https, RawSection, SectionSpec, Source, Vendor, fetch_sections,
+    BoxFuture, Device, Extract, Https, RawSection, SectionSpec, Source, Timeouts, Vendor,
+    fetch_sections,
 };
 
 /// Reads the sites of UniFi consoles.
@@ -228,11 +228,11 @@ impl Source for UnifiSource {
     fn fetch<'a>(
         &'a self,
         device: &'a Device,
-        timeout: Duration,
+        timeouts: Timeouts,
     ) -> BoxFuture<'a, Vec<RawSection>> {
         Box::pin(fetch_sections(
             self.sections(device),
-            timeout,
+            timeouts,
             false,
             move |path| {
                 let https = self.https.clone();

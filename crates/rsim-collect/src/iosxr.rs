@@ -3,12 +3,13 @@
 //! run against a live IOS XR router; they are not confirmed on a device.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use rsim_store::{Class, Format};
 
 use crate::cli::CliRules;
-use crate::{BoxFuture, Device, RawSection, SectionSpec, Source, Ssh, Vendor, fetch_sections};
+use crate::{
+    BoxFuture, Device, RawSection, SectionSpec, Source, Ssh, Timeouts, Vendor, fetch_sections,
+};
 
 /// The CLI rules of IOS XR: the Cisco rules.
 pub const RULES: CliRules = CliRules::CISCO;
@@ -144,7 +145,7 @@ impl Source for IosxrSource {
     fn fetch<'a>(
         &'a self,
         device: &'a Device,
-        timeout: Duration,
+        timeouts: Timeouts,
     ) -> BoxFuture<'a, Vec<RawSection>> {
         Box::pin(async move {
             let serial = self.ssh.serial(device);
@@ -152,7 +153,7 @@ impl Source for IosxrSource {
                 let ssh = self.ssh.clone();
                 Box::pin(async move { ssh.run(device, &command).await })
             };
-            let mut out = fetch_sections(self.sections(device), timeout, serial, read).await;
+            let mut out = fetch_sections(self.sections(device), timeouts, serial, read).await;
             RULES.apply(&mut out, self.ssh.banner_each_command(device));
             out
         })

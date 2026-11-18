@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use futures_util::future::join_all;
 use rsim_store::{Class, Format, Row, TableSchema};
+use tokio::time::Instant;
 
 use crate::{BoxFuture, Device, TransportError, Vendor};
 
@@ -92,31 +93,70 @@ pub trait Source: Send + Sync {
     /// The sections of the device, in a fixed order.
     fn sections(&self, device: &Device) -> Vec<SectionSpec>;
 
-    /// Reads each section. A section that fails or does not finish in its
-    /// time fails alone.
-    fn fetch<'a>(&'a self, device: &'a Device, timeout: Duration)
-    -> BoxFuture<'a, Vec<RawSection>>;
+    /// Reads each section within the timeouts. A section that fails or does
+    /// not finish in its time fails alone, and the sections that are read
+    /// keep their results.
+    fn fetch<'a>(
+        &'a self,
+        device: &'a Device,
+        timeouts: Timeouts,
+    ) -> BoxFuture<'a, Vec<RawSection>>;
+}
+
+/// The times of the reads of one device.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Timeouts {
+    /// The time for one section.
+    pub section: Duration,
+    /// The end of the time for all sections of the device. A read that does
+    /// not finish by then times out, and a section that is not sent by then
+    /// is not sent.
+    pub deadline: Option<Instant>,
+}
+
+impl Timeouts {
+    /// The end of the time of a read that starts at `now`.
+    fn end(&self, now: Instant) -> Instant {
+        let end = now + self.section;
+        self.deadline.map_or(end, |d| d.min(end))
+    }
+}
+
+impl From<Duration> for Timeouts {
+    /// The time for one section, with no deadline for the device.
+    fn from(section: Duration) -> Timeouts {
+        Timeouts {
+            section,
+            deadline: None,
+        }
+    }
 }
 
 /// Reads the sections through `read`, each with its timeout. The result has
 /// the order of `specs`. The reads run at the same time, or one after the
 /// other if `serial` is true, so that the time of a read starts when its
-/// command is sent. One after the other, a connect error or 2 timeouts in
-/// sequence stop the fetch, and the sections after them are not sent.
+/// command is sent. One after the other, a connect error, 2 timeouts in
+/// sequence or the deadline of the device stop the fetch, and the sections
+/// after them are not sent.
 pub async fn fetch_sections<'a, F>(
     specs: Vec<SectionSpec>,
-    timeout: Duration,
+    timeouts: impl Into<Timeouts>,
     serial: bool,
     read: F,
 ) -> Vec<RawSection>
 where
     F: Fn(String) -> BoxFuture<'a, Result<Vec<u8>, TransportError>>,
 {
+    let times: Timeouts = timeouts.into();
     if serial {
         let mut out = Vec::with_capacity(specs.len());
         let mut timeouts = 0;
         let mut stop: Option<String> = None;
         for spec in specs {
+            let now = Instant::now();
+            if stop.is_none() && times.deadline.is_some_and(|d| now >= d) {
+                stop = Some("the time of the device ended".into());
+            }
             if let Some(why) = &stop {
                 out.push(RawSection {
                     spec,
@@ -124,7 +164,7 @@ where
                 });
                 continue;
             }
-            let result = tokio::time::timeout(timeout, read(spec.command.clone()))
+            let result = tokio::time::timeout_at(times.end(now), read(spec.command.clone()))
                 .await
                 .unwrap_or(Err(TransportError::Timeout));
             match &result {
@@ -141,10 +181,11 @@ where
         }
         return out;
     }
+    let end = times.end(Instant::now());
     let reads = specs.iter().map(|s| {
         let f = read(s.command.clone());
         async move {
-            tokio::time::timeout(timeout, f)
+            tokio::time::timeout_at(end, f)
                 .await
                 .unwrap_or(Err(TransportError::Timeout))
         }
