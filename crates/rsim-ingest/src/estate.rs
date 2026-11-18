@@ -13,10 +13,10 @@ use serde_json::Value;
 use crate::bgp::{self, SessionSections};
 use crate::bgp_peers::{BgpConfig, InterfaceAddresses, address_of};
 use crate::collected::{self, Collected};
-use crate::coverage::{Coverage, classify};
+use crate::coverage::{Coverage, Table, classify};
 use crate::links::{BgpPeerFact, Summary};
 use crate::route_tables::RouteTables;
-use crate::stanza::read_json;
+use crate::stanza::{Document, read_json};
 use crate::{iosxe, iosxr, nxos, unifi, vyos};
 
 /// The twin builder of a snapshot, with the coverage, the unread handled
@@ -260,6 +260,9 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     let mut xr: BTreeMap<String, (iosxr::Config, String, Sections)> = BTreeMap::new();
     let mut xe: BTreeMap<String, (iosxe::Config, String, Sections)> = BTreeMap::new();
     let mut sites = Vec::new();
+    // True for each device with a BGP stanza that can hold a neighbour and
+    // that is not handled when no route rows are collected.
+    let mut bgp_hidden: BTreeMap<String, bool> = BTreeMap::new();
     for input in inputs {
         match input {
             Input::Vyos {
@@ -283,6 +286,8 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                     vyos::dynamic_vrfs(&doc),
                 );
                 let table = vyos::table(&tables);
+                let bare = vyos::table(&RouteTables::uniform(false, vyos::dynamic_vrfs(&doc)));
+                bgp_hidden.insert(name.clone(), peers_hidden(&doc, &bare));
                 let cfg = vyos::read(&doc);
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
@@ -302,6 +307,8 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                     nxos::dynamic_vrfs(&doc),
                 );
                 let table = nxos::table(&tables);
+                let bare = nxos::table(&RouteTables::uniform(false, nxos::dynamic_vrfs(&doc)));
+                bgp_hidden.insert(name.clone(), peers_hidden(&doc, &bare));
                 let cfg = nxos::read(&doc, &table);
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
@@ -319,6 +326,8 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 let tables =
                     RouteTables::new(iosxr::rib_vrfs(&sections), iosxr::dynamic_vrfs(&doc));
                 let table = iosxr::table(&tables);
+                let bare = iosxr::table(&RouteTables::uniform(false, iosxr::dynamic_vrfs(&doc)));
+                bgp_hidden.insert(name.clone(), peers_hidden(&doc, &bare));
                 let cfg = iosxr::read(&doc, &table);
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
@@ -336,6 +345,8 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 let tables =
                     RouteTables::new(iosxe::rib_vrfs(&sections), iosxe::dynamic_vrfs(&doc));
                 let table = iosxe::table(&tables);
+                let bare = iosxe::table(&RouteTables::uniform(false, iosxe::dynamic_vrfs(&doc)));
+                bgp_hidden.insert(name.clone(), peers_hidden(&doc, &bare));
                 let cfg = iosxe::read(&doc, &table);
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
@@ -498,7 +509,8 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     let mut peers = Peers {
         sessions,
         summaries: &mut summaries,
-        out: &mut e.bgp,
+        hidden: &bgp_hidden,
+        unread: &e.unread,
     };
     for (d, r) in &routers {
         let i = r.cfg.interfaces.iter().map(|i| {
@@ -509,11 +521,9 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     }
     for (d, (cfg, _, file, _)) in &switches {
         let i = cfg.interfaces.iter().map(|i| {
-            let addrs = i
-                .addresses
-                .iter()
-                .filter_map(|a| address_of(&a.prefix))
-                .collect();
+            let v4 = i.addresses.iter().map(|a| a.prefix.as_str());
+            let v6 = i.ipv6.iter().map(|a| a.0.as_str());
+            let addrs = v4.chain(v6).filter_map(address_of).collect();
             (i.name.clone(), i.vrf.clone(), addrs)
         });
         peers.add(d, "nxos", file, &cfg.bgp, interfaces(i));
@@ -540,6 +550,10 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     for (d, notes) in std::mem::take(&mut joined.notes) {
         e.notes.entry(d).or_default().extend(notes);
     }
+    // The BGP peers with their far ends; a peer outside the twin is a
+    // router, not an endpoint.
+    e.bgp = std::mem::take(&mut joined.bgp);
+    next_hops.extend(joined.bgp_outside.iter().copied());
 
     let mut l2: BTreeMap<String, vyos::Layer2Links> = BTreeMap::new();
     let mut extra: BTreeMap<String, Vec<collected::NeighbourRow>> = BTreeMap::new();
@@ -734,12 +748,49 @@ fn interfaces(
     .collect()
 }
 
-/// The BGP peer facts of the devices: into the summary of each device and
-/// into the estate.
+/// True if an unhandled or unread stanza of a BGP path can hold a neighbour
+/// or a listen range that the peer facts do not have: the stanza is a BGP
+/// process, a VRF, an address family, or a neighbour, group, template or
+/// listen stanza itself. A setting line, for example a password or a policy
+/// line below a neighbour, holds none. A segment `*` or `..` is the value of
+/// the segment before it.
+pub fn hides_peers(path: &str) -> bool {
+    let p = path.to_ascii_lowercase();
+    if !p.split(['/', ' ']).any(|w| w == "bgp") {
+        return false;
+    }
+    let segs: Vec<&str> = p.split('/').collect();
+    let mut last = segs.last().copied().unwrap_or_default();
+    if matches!(last, "*" | "..") && segs.len() > 1 {
+        last = segs[segs.len() - 2];
+    }
+    let words: Vec<&str> = last.split_whitespace().collect();
+    match words.first().copied().unwrap_or_default() {
+        "router" | "vrf" | "address-family" => true,
+        "bgp" => words.len() == 1 || words.get(1) == Some(&"listen"),
+        "neighbor" | "neighbour" | "neighbor-group" | "session-group" | "peer-group"
+        | "template" | "listen" | "range" => words.len() <= 2,
+        _ => false,
+    }
+}
+
+/// True if a stanza of a BGP path that can hold a neighbour or a listen
+/// range is unhandled with the table `bare`, the table of the device with
+/// no collected route rows. The collected rows make the routing lines of a
+/// BGP stanza known-irrelevant, and such a stanza can still hold a
+/// neighbour that the reader does not read.
+fn peers_hidden(doc: &Document, bare: &Table) -> bool {
+    classify(doc, bare).unhandled.keys().any(|p| hides_peers(p))
+}
+
+/// The BGP peer facts of the devices, into the summary of each device.
 struct Peers<'a> {
     sessions: &'a BTreeMap<String, SessionSections>,
     summaries: &'a mut BTreeMap<String, Summary>,
-    out: &'a mut BTreeMap<String, Vec<BgpPeerFact>>,
+    /// The devices with a BGP stanza that can hold a neighbour and that is
+    /// not handled.
+    hidden: &'a BTreeMap<String, bool>,
+    unread: &'a BTreeMap<String, Vec<String>>,
 }
 
 impl Peers<'_> {
@@ -753,12 +804,16 @@ impl Peers<'_> {
     ) {
         let none = SessionSections::new();
         let s = bgp::read(vendor, self.sessions.get(device).unwrap_or(&none));
-        let facts = crate::bgp_peers::facts(device, file, cfg, &s, &interfaces);
+        let mut facts = crate::bgp_peers::facts(device, file, cfg, &s, &interfaces);
         let sum = self.summaries.entry(device.to_string()).or_default();
+        let routes = std::mem::take(&mut sum.routes);
+        crate::bgp_peers::lookup_sources(&mut facts, &routes, &interfaces);
         sum.local_addresses = crate::bgp_peers::local_addresses(&interfaces);
-        if !facts.is_empty() {
-            self.out.insert(device.to_string(), facts.clone());
-        }
+        sum.bgp_read = !self.hidden.get(device).copied().unwrap_or(false)
+            && !self
+                .unread
+                .get(device)
+                .is_some_and(|u| u.iter().any(|p| hides_peers(p)));
         sum.bgp_peers = facts;
     }
 }

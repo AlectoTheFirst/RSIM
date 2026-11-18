@@ -137,7 +137,23 @@ cargo run -p rsim-api -- --listen 127.0.0.1:8787
 | The answer | `GET` the query resource, with `?form=summary`, `steps` or `full` |
 | A claim on the paths of the query | `GET <query resource>/claims/no-unknown` |
 
-The same server gives the MCP tools at `POST /mcp`, the Streamable HTTP transport of MCP, so many agents can share one server and its twins. Add `--store <data folder>` for the twin `store`, which redirects to its snapshot `snap-<cycle>`. A browser needs `--allow-origin <origin>`. The server has no authentication yet, so it accepts only a loopback listen address.
+The same server gives the MCP tools at `POST /mcp`, the Streamable HTTP transport of MCP, so many agents can share one server and its twins. Add `--store <data folder>` for the twin `store`, which redirects to its snapshot `snap-<cycle>`. A page of another origin needs `--allow-origin <origin>`. The server has no authentication yet, so it accepts only a loopback listen address.
+
+## Browser UI
+
+`rsim-api` serves the browser UI at `/` from its binary. The UI is in `ui/`: TypeScript with Preact, built with Vite. You need Node 24.
+
+1. Build the UI: `npm --prefix ui ci` and `npm --prefix ui run build`.
+2. Build and start the server: `cargo run -p rsim-api -- --listen 127.0.0.1:8787`.
+3. Open `http://127.0.0.1:8787/`, select a twin, for example `builtin.mini-enterprise`, state the fields of a path query and run it.
+
+A build of `rsim-api` with no built UI serves a page that says how to build it. The Trace view shows the ladder of a path query with its reply, and of a set query with one column for each part.
+
+| Task | Command |
+|---|---|
+| UI tests | `npm --prefix ui test` |
+| UI types from the OpenAPI document | `npm --prefix ui run api` |
+| UI with reload on change | `npm --prefix ui run dev` on port 5173, with `cargo run -p rsim-api -- --allow-origin http://localhost:5173` |
 
 ## Collection
 

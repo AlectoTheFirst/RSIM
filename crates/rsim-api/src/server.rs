@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
@@ -28,6 +29,34 @@ fn to_hyper(r: Response) -> hyper::Response<Full<Bytes>> {
     }
     b.body(Full::new(Bytes::from(r.body)))
         .unwrap_or_else(|_| hyper::Response::new(Full::new(Bytes::new())))
+}
+
+/// True for the resource of a query, `/v1/twins/{twin}/queries/{qid}`,
+/// which runs the query or answers 304 from the cache of the client.
+fn is_query_answer(req: &Request) -> bool {
+    req.method == "GET"
+        && matches!(
+            req.path
+                .trim_start_matches('/')
+                .split('/')
+                .collect::<Vec<_>>()[..],
+            ["v1", "twins", _, "queries", _]
+        )
+}
+
+/// Adds the `Server-Timing` header to the response of a query resource:
+/// `engine;dur=<ms>` with the time of the handler for an answer, or
+/// `cache;desc=hit` for 304. The body does not change.
+pub fn add_server_timing(req: &Request, res: &mut Response, elapsed: Duration) {
+    if !is_query_answer(req) {
+        return;
+    }
+    let value = match res.status {
+        200 => format!("engine;dur={:.1}", elapsed.as_secs_f64() * 1000.0),
+        304 => "cache;desc=hit".to_string(),
+        _ => return,
+    };
+    res.headers.push(("server-timing".into(), value));
 }
 
 fn query_pairs(q: Option<&str>) -> Vec<(String, String)> {
@@ -103,7 +132,9 @@ async fn serve_one(
         body,
     };
     let r = tokio::task::spawn_blocking(move || {
-        let r = handler::handle(&state, &request);
+        let start = Instant::now();
+        let mut r = handler::handle(&state, &request);
+        add_server_timing(&request, &mut r, start.elapsed());
         drop(permit);
         r
     })

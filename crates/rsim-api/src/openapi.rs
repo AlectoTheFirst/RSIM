@@ -149,6 +149,18 @@ pub const ROUTES: &[Route] = &[
         ok: (200, &[schema::<TableOut>]),
     },
     Route {
+        method: "get",
+        path: "/v1/twins/{twin}/coverage",
+        id: "getCoverage",
+        summary: "The coverage report of a twin: for each device in name order, the config lines that the ingestion handles, that have no effect on the twin and that it does not handle, with the number of unhandled paths and stanzas. A built-in topology has no report. The table coverage gives the unhandled paths.",
+        query: &[
+            ("limit", "The number of rows of a page."),
+            ("cursor", "The cursor of the next page."),
+        ],
+        body: &[],
+        ok: (200, &[schema::<TableOut>]),
+    },
+    Route {
         method: "post",
         path: "/v1/twins/{twin}/queries",
         id: "createQuery",
