@@ -98,6 +98,10 @@
   background: var(--ground);
   border-bottom: var(--hairline) solid var(--rule);
   align-items: end;
+  /* The head has the label line at each row height, so the filter row
+     sticks right below it. */
+  min-height: var(--label-line);
+  height: calc(var(--label-line) + var(--hairline));
 }
 
 .grid-head > * {

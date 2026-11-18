@@ -339,10 +339,10 @@ export function TablesView(props: {
       const n = grid?.rows.length ?? 0;
       switch (e.key) {
         case "j":
-          if (n) setSelected(selected === null ? 0 : Math.min(n - 1, selected + 1));
+          if (n) setSelected((s) => (s === null ? 0 : Math.min(n - 1, s + 1)));
           break;
         case "k":
-          if (n) setSelected(selected === null ? 0 : Math.max(0, selected - 1));
+          if (n) setSelected((s) => (s === null ? 0 : Math.max(0, s - 1)));
           break;
         case "Enter":
           if (selected === null) return;
