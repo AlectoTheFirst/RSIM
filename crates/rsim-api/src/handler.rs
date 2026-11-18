@@ -65,13 +65,13 @@ pub struct Settings {
     pub max_body: usize,
 }
 
-/// The state of a server: the settings, the twins that a request named,
-/// and the query texts above the inline limit. It keeps no answer.
+/// The state of a server: the settings, the tools of the MCP transport
+/// with the twins that a request named, and the query texts above the
+/// inline limit. The REST routes and the MCP tools share the twins. It
+/// keeps no answer.
 pub struct State {
     pub settings: Settings,
-    /// The tools of the MCP transport, with their own twin cache.
     mcp: rsim_mcp::tools::Tools,
-    twins: Mutex<BTreeMap<String, Arc<Loaded>>>,
     long_queries: Mutex<BTreeMap<String, String>>,
 }
 
@@ -84,7 +84,6 @@ impl State {
         State {
             settings,
             mcp,
-            twins: Mutex::new(BTreeMap::new()),
             long_queries: Mutex::new(BTreeMap::new()),
         }
     }
@@ -124,14 +123,9 @@ fn from_query_error(e: QueryError) -> Problem {
 }
 
 impl State {
-    fn load(&self, key: &str, source: &str) -> Result<Arc<Loaded>, Problem> {
-        let mut twins = self.twins.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(t) = twins.get(key) {
-            return Ok(Arc::clone(t));
-        }
-        let t = Arc::new(commands::load(source).map_err(from_query_error)?);
-        twins.insert(key.to_string(), Arc::clone(&t));
-        Ok(t)
+    /// The twin of a topology name of the MCP tools.
+    fn load(&self, topology: &str) -> Result<Arc<Loaded>, Problem> {
+        self.mcp.twin(topology).map_err(from_query_error)
     }
 
     /// The twin of a path segment: `builtin.<topology>`, `snap-<cycle>` or
@@ -140,7 +134,7 @@ impl State {
         let unknown = |d: String| problem(404, "unknown_twin", d);
         let store = |s: &Self| -> Result<Arc<Loaded>, Problem> {
             match &s.settings.store {
-                Some(folder) => s.load("store", &format!("{}{folder}", commands::STORE_PREFIX)),
+                Some(_) => s.load(rsim_mcp::tools::STORE),
                 None => Err(unknown("the server has no store".into())),
             }
         };
@@ -155,7 +149,7 @@ impl State {
                 if !commands::topology_names().contains(&name.as_str()) {
                     return Err(unknown(format!("{segment} is not a built-in topology")));
                 }
-                let loaded = self.load(&id.id, &name)?;
+                let loaded = self.load(&name)?;
                 Ok(Resolved::Twin(TwinRef {
                     topology: name,
                     loaded,
@@ -223,8 +217,10 @@ fn params(req: &Request) -> BTreeMap<&str, &str> {
         .collect()
 }
 
-/// The selection of a table request from its parameters.
-fn selection(req: &Request) -> Result<Selection, Problem> {
+/// The selection of a table request from its parameters. The names in
+/// `reserved` are the parameters of the verb; each other name is a column
+/// filter.
+fn selection(req: &Request, reserved: &[&str]) -> Result<Selection, Problem> {
     let mut sel = Selection::default();
     let list = |v: &str| v.split(',').map(str::to_string).collect::<Vec<_>>();
     for (k, v) in &req.query {
@@ -237,7 +233,7 @@ fn selection(req: &Request) -> Result<Selection, Problem> {
                 })?);
             }
             "cursor" => sel.cursor = Some(v.clone()),
-            "column" | "count" | "ascending" | "address" | "form" | "reply_of" | "device" => {}
+            k if reserved.contains(&k) => {}
             k if k.contains('.') => {
                 sel.typed.insert(k.to_string(), v.clone());
             }
@@ -263,14 +259,15 @@ fn form(req: &Request) -> Result<Form, Problem> {
 }
 
 /// The arguments of a stored query with the topology of the twin, and its
-/// mode.
-fn query_args(mut m: Map<String, Value>, topology: &str) -> (Map<String, Value>, bool) {
-    let set = m
-        .remove("mode")
-        .and_then(|v| v.as_str().map(|s| s == "set"))
-        == Some(true);
+/// mode: true for `set`. A mode other than `path` or `set` is an error.
+fn query_args(
+    mut m: Map<String, Value>,
+    topology: &str,
+) -> Result<(Map<String, Value>, bool), Problem> {
+    let set = args::mode(&m).map_err(from_query_error)?;
+    m.remove("mode");
     m.insert("topology".into(), json!(topology));
-    (m, set)
+    Ok((m, set))
 }
 
 /// Handles one request.
@@ -308,7 +305,8 @@ pub fn handle(state: &State, req: &Request) -> Response {
                 ),
                 (
                     "access-control-allow-headers".into(),
-                    "content-type, if-none-match".into(),
+                    "content-type, if-none-match, mcp-protocol-version, mcp-method, mcp-name"
+                        .into(),
                 ),
             ],
             body: Vec::new(),
@@ -374,6 +372,20 @@ fn method(req: &Request, allowed: &str) -> Result<(), Problem> {
     }
 }
 
+/// A query parameter in percent encoding: each byte other than a letter, a
+/// digit, `-`, `.`, `_`, `~` and `,` is encoded.
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b',') {
+            out.push(char::from(b));
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
 fn route(state: &State, req: &Request) -> Result<Response, Problem> {
     let parts: Vec<&str> = req.path.trim_end_matches('/').split('/').skip(1).collect();
     let contract = contract_version();
@@ -430,6 +442,12 @@ fn route(state: &State, req: &Request) -> Result<Response, Problem> {
                         location.push('/');
                         location.push_str(r);
                     }
+                    for (i, (k, v)) in req.query.iter().enumerate() {
+                        location.push(if i == 0 { '?' } else { '&' });
+                        location.push_str(&percent_encode(k));
+                        location.push('=');
+                        location.push_str(&percent_encode(v));
+                    }
                     return Ok(Response {
                         status: 307,
                         headers: vec![("location".into(), location)],
@@ -478,7 +496,12 @@ fn twin_route(
         }
         ["tables", table, verb] => {
             method(req, "GET")?;
-            let sel = selection(req)?;
+            let reserved: &[&str] = match *verb {
+                "top" => &["column", "count", "ascending"],
+                "lpm" => &["column", "address"],
+                _ => &[],
+            };
+            let sel = selection(req, reserved)?;
             let get = |k: &str| p.get(k).map(|s| s.to_string());
             match *verb {
                 "rows" => Ok(json_response(
@@ -500,7 +523,12 @@ fn twin_route(
                         l,
                         table,
                         &get("column").unwrap_or_default(),
-                        get("count").and_then(|c| c.parse().ok()).unwrap_or(5),
+                        match get("count") {
+                            None => 5,
+                            Some(c) => c.parse().map_err(|_| {
+                                problem(422, "invalid_filter", format!("count {c} is not a number"))
+                            })?,
+                        },
                         get("ascending").as_deref() == Some("true"),
                         &sel,
                     )
@@ -538,7 +566,7 @@ fn twin_route(
             m.remove("topology");
             m.remove("form");
             // Check the query before it gets an identifier.
-            let (a, set) = query_args(m.clone(), top);
+            let (a, set) = query_args(m.clone(), top)?;
             if set {
                 args::set_query(&a, &[]).map_err(err)?;
             } else {
@@ -556,7 +584,7 @@ fn twin_route(
         }
         ["queries", q] => {
             method(req, "GET")?;
-            let (a, set) = query_args(state.recall(q)?, top);
+            let (a, set) = query_args(state.recall(q)?, top)?;
             let f = form(req)?;
             if set {
                 let input = args::set_query(&a, &[]).map_err(err)?;
@@ -574,7 +602,7 @@ fn twin_route(
         }
         ["queries", q, "branches", b, "steps", s] => {
             method(req, "GET")?;
-            let (a, set) = query_args(state.recall(q)?, top);
+            let (a, set) = query_args(state.recall(q)?, top)?;
             let num = |x: &str, what: &str| {
                 x.parse::<usize>().map_err(|_| {
                     problem(422, "invalid_query", format!("{what} {x} is not a number"))
@@ -600,16 +628,14 @@ fn twin_route(
         ["queries", q, "claims", claim] => {
             method(req, "GET")?;
             let mut m = state.recall(q)?;
-            if m.remove("mode")
-                .and_then(|v| v.as_str().map(|s| s == "set"))
-                == Some(true)
-            {
+            if args::mode(&m).map_err(err)? {
                 return Err(problem(
                     422,
                     "invalid_query",
                     "a claim runs on the paths of a path query, not a set query".into(),
                 ));
             }
+            m.remove("mode");
             let a = ClaimArgs {
                 topology: top.to_string(),
                 claim: claim.to_string(),
@@ -640,7 +666,7 @@ fn twin_route(
         }
         ["queries", q, "topology"] => {
             method(req, "GET")?;
-            let (a, set) = query_args(state.recall(q)?, top);
+            let (a, set) = query_args(state.recall(q)?, top)?;
             let answer = if set {
                 commands::run_set(&args::set_query(&a, &[]).map_err(err)?, l).map_err(err)?
             } else {
@@ -737,7 +763,7 @@ fn batch(state: &State, req: &Request, t: &TwinRef) -> Result<Response, Problem>
                             "the item has no query".into(),
                         ));
                     };
-                    let (a, set) = query_args(m.clone(), top);
+                    let (a, set) = query_args(m.clone(), top)?;
                     let f = match item["form"].as_str() {
                         None | Some("summary") => Form::Summary,
                         Some("steps") => Form::Steps,
@@ -858,14 +884,18 @@ fn rpc_error(status: u16, id: &Value, code: i64, message: String) -> Response {
 /// 2026-07-28: one JSON-RPC message in the body of a POST. A request gets
 /// its response as JSON; a notification or a response gets 202 with no
 /// body. The headers `MCP-Protocol-Version`, `Mcp-Method` and, for a tool
-/// call, `Mcp-Name` must agree with the body. The server keeps no session.
+/// call, `Mcp-Name` must agree with the body. The server keeps no session,
+/// so `initialize` is not a method.
 fn mcp(state: &State, req: &Request) -> Result<Response, Problem> {
     method(req, "POST")?;
     let msg: Value = match serde_json::from_slice(&req.body) {
         Ok(v) => v,
         Err(_) => return Ok(rpc_error(400, &Value::Null, -32700, "Parse error".into())),
     };
-    let id = msg.get("id").cloned().unwrap_or(Value::Null);
+    let id = match msg.get("id") {
+        Some(v @ (Value::String(_) | Value::Number(_))) => v.clone(),
+        _ => Value::Null,
+    };
     let method_name = msg.get("method").and_then(Value::as_str);
     let header = |k: &str| req.headers.get(k).map(String::as_str);
     if let Some(m) = method_name {
@@ -919,7 +949,7 @@ fn mcp(state: &State, req: &Request) -> Result<Response, Problem> {
             }
         }
     }
-    let mut server = rsim_mcp::server::Server::new(state.mcp.clone());
+    let mut server = rsim_mcp::server::Server::without_handshake(state.mcp.clone());
     Ok(match server.handle_line(&req.body) {
         Some(line) => Response {
             status: 200,

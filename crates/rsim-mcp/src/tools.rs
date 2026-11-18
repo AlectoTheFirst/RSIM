@@ -23,14 +23,51 @@ pub struct Output {
 /// The topology name of the store of the server.
 pub const STORE: &str = "store";
 
+/// A cache of values by key. The build of a value holds only the slot of
+/// its key: a call for another key does not wait, and the calls for one key
+/// build its value once. A failed build is not kept.
+pub struct Cache<T> {
+    slots: Mutex<BTreeMap<String, Slot<T>>>,
+}
+
+type Slot<T> = Arc<Mutex<Option<Arc<T>>>>;
+
+impl<T> Default for Cache<T> {
+    fn default() -> Self {
+        Cache {
+            slots: Mutex::new(BTreeMap::new()),
+        }
+    }
+}
+
+impl<T> Cache<T> {
+    /// The value of `key`, built with `load` if the cache has none.
+    pub fn get_or_load<E>(
+        &self,
+        key: &str,
+        load: impl FnOnce() -> Result<T, E>,
+    ) -> Result<Arc<T>, E> {
+        let slot = {
+            let mut slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(slots.entry(key.to_string()).or_default())
+        };
+        let mut value = slot.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(v) = &*value {
+            return Ok(Arc::clone(v));
+        }
+        let v = Arc::new(load()?);
+        *value = Some(Arc::clone(&v));
+        Ok(v)
+    }
+}
+
 /// Runs tools. It keeps the twin of each topology that a call named, and no
 /// answer. With a store, the topology `store` is the newest snapshot of the
-/// store when the first call names it.
-/// The twins share one cache, so the tools of many requests at the same
-/// time build each twin once.
+/// store when the first call names it. The clones of one `Tools` share its
+/// cache of twins.
 #[derive(Clone, Default)]
 pub struct Tools {
-    twins: Arc<Mutex<BTreeMap<String, Arc<Loaded>>>>,
+    twins: Arc<Cache<Loaded>>,
     store: Option<String>,
 }
 
@@ -53,30 +90,24 @@ impl Tools {
         v
     }
 
-    fn twin(&mut self, topology: &str) -> Result<Arc<Loaded>, QueryError> {
-        let mut twins = self.twins.lock().unwrap_or_else(|p| p.into_inner());
-        if !twins.contains_key(topology) {
-            let source = match (&self.store, topology) {
-                (Some(folder), STORE) => format!("{}{folder}", commands::STORE_PREFIX),
-                (_, t) if t.starts_with(commands::STORE_PREFIX) => {
-                    return Err(QueryError::new(
-                        rsim_cli::ErrorCode::UnknownTopology,
-                        format!("{t}: a store is set only when the server starts"),
-                    ));
-                }
-                _ => topology.to_string(),
-            };
-            let twin = commands::load(&source)?;
-            twins.insert(topology.to_string(), Arc::new(twin));
-        }
-        match twins.get(topology) {
-            Some(t) => Ok(Arc::clone(t)),
-            None => unreachable!("the twin was inserted"),
-        }
+    /// The twin of a topology name: a built-in topology, or `store` for the
+    /// store of the server.
+    pub fn twin(&self, topology: &str) -> Result<Arc<Loaded>, QueryError> {
+        let source = match (&self.store, topology) {
+            (Some(folder), STORE) => format!("{}{folder}", commands::STORE_PREFIX),
+            (_, t) if t.starts_with(commands::STORE_PREFIX) => {
+                return Err(QueryError::new(
+                    rsim_cli::ErrorCode::UnknownTopology,
+                    format!("{t}: a store is set only when the server starts"),
+                ));
+            }
+            _ => topology.to_string(),
+        };
+        self.twins.get_or_load(topology, || commands::load(&source))
     }
 
     /// Calls the tool `name`. `None` is a name that is not a tool.
-    pub fn call(&mut self, name: &str, arguments: &Map<String, Value>) -> Option<Output> {
+    pub fn call(&self, name: &str, arguments: &Map<String, Value>) -> Option<Output> {
         let r = match name {
             "list_devices" => args::topology(arguments)
                 .and_then(|t| self.twin(&t).map(|twin| commands::devices(&t, &twin)))
@@ -208,4 +239,71 @@ pub fn definitions(names: &[&str]) -> Value {
             })
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Cache;
+    use std::sync::Arc;
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
+
+    #[test]
+    fn a_cached_key_does_not_wait_for_the_build_of_another_key() {
+        let cache: Arc<Cache<u32>> = Arc::default();
+        assert_eq!(*cache.get_or_load("a", || Ok::<_, ()>(1)).unwrap(), 1);
+        let (started_tx, started_rx) = channel();
+        let (go_tx, go_rx) = channel::<()>();
+        let slow = {
+            let cache = Arc::clone(&cache);
+            std::thread::spawn(move || {
+                cache
+                    .get_or_load("b", || {
+                        started_tx.send(()).unwrap();
+                        go_rx.recv().unwrap();
+                        Ok::<_, ()>(2)
+                    })
+                    .map(|v| *v)
+            })
+        };
+        started_rx.recv().unwrap();
+        let (done_tx, done_rx) = channel();
+        let fast = {
+            let cache = Arc::clone(&cache);
+            std::thread::spawn(move || {
+                let v = cache.get_or_load("a", || Ok::<_, ()>(9)).map(|v| *v);
+                done_tx.send(v).unwrap();
+            })
+        };
+        let got = done_rx.recv_timeout(Duration::from_secs(10));
+        go_tx.send(()).unwrap();
+        assert_eq!(got, Ok(Ok(1)), "the cached key waited for the build");
+        fast.join().unwrap();
+        assert_eq!(slow.join().unwrap(), Ok(2));
+    }
+
+    #[test]
+    fn the_calls_for_one_key_build_it_once_and_a_failed_build_is_not_kept() {
+        let cache: Arc<Cache<u32>> = Arc::default();
+        assert_eq!(cache.get_or_load("a", || Err::<u32, _>("no")), Err("no"));
+        let builds = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let threads: Vec<_> = (0..4)
+            .map(|i| {
+                let cache = Arc::clone(&cache);
+                let builds = Arc::clone(&builds);
+                std::thread::spawn(move || {
+                    *cache
+                        .get_or_load("a", || {
+                            builds.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            std::thread::yield_now();
+                            Ok::<_, ()>(i)
+                        })
+                        .unwrap()
+                })
+            })
+            .collect();
+        let values: Vec<u32> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+        assert_eq!(builds.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(values.windows(2).all(|w| w[0] == w[1]), "{values:?}");
+    }
 }

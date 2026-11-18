@@ -420,6 +420,11 @@ fn a_real_server_answers_on_a_loopback_port() {
         body.len()
     ));
     assert!(r.starts_with("HTTP/1.1 413"), "{r}");
+    // A raw character of more than one byte after a percent sign.
+    let r = ask(format!(
+        "GET /v1/twins/builtin.ecmp/tables/devices/rows?x=%1\u{e9} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
+    ));
+    assert!(r.starts_with("HTTP/1.1 422"), "{r}");
     rt.shutdown_background();
 }
 
@@ -641,4 +646,274 @@ fn the_mcp_tools_answer_through_the_streamable_http_transport() {
         ],
     );
     assert_eq!(r.status, 403);
+}
+
+#[test]
+fn the_table_verbs_filter_by_device_and_check_their_numbers() {
+    let s = state(None);
+    let device = |v: &Value| -> Vec<String> {
+        let i = v["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|c| c == "device")
+            .unwrap();
+        v["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r[i].as_str().unwrap().to_string())
+            .collect()
+    };
+    let all = json(&get(&s, "/v1/twins/builtin.leaf-spine/tables/fib/rows"));
+    let one = json(&get(
+        &s,
+        "/v1/twins/builtin.leaf-spine/tables/fib/rows?device=leaf1",
+    ));
+    assert!(one["total"].as_u64().unwrap() < all["total"].as_u64().unwrap());
+    assert!(device(&one).iter().all(|d| d == "leaf1"), "{one}");
+    let lpm = json(&get(
+        &s,
+        "/v1/twins/builtin.leaf-spine/tables/fib/lpm?address=10.2.0.10&device=leaf1",
+    ));
+    assert!(!device(&lpm).is_empty(), "{lpm}");
+    assert!(device(&lpm).iter().all(|d| d == "leaf1"), "{lpm}");
+    let top = json(&get(
+        &s,
+        "/v1/twins/builtin.leaf-spine/tables/fib/top?column=prefix&device=leaf2",
+    ));
+    assert!(!device(&top).is_empty(), "{top}");
+    assert!(device(&top).iter().all(|d| d == "leaf2"), "{top}");
+    let r = get(
+        &s,
+        "/v1/twins/builtin.leaf-spine/tables/fib/top?column=prefix&count=abc",
+    );
+    assert_eq!(
+        (r.status, json(&r)["code"].as_str()),
+        (422, Some("invalid_filter"))
+    );
+}
+
+#[test]
+fn a_mode_that_is_not_path_or_set_is_refused() {
+    let s = state(None);
+    let q = |mode: Value| json!({"mode": mode, "source.ip": "10.1.0.10", "destination.ip": "10.2.0.10", "network.transport": "tcp"});
+    for mode in [json!("Set"), json!(true)] {
+        let r = post(&s, "/v1/twins/builtin.leaf-spine/queries", &q(mode.clone()));
+        assert_eq!(
+            (r.status, json(&r)["code"].as_str()),
+            (422, Some("invalid_query")),
+            "{mode}"
+        );
+        let qid = rsim_api::qid::of(&q(mode.clone()).to_string());
+        for tail in ["", "/claims/no-unknown", "/topology", "/branches/0/steps/0"] {
+            let r = get(
+                &s,
+                &format!("/v1/twins/builtin.leaf-spine/queries/{qid}{tail}"),
+            );
+            assert_eq!(r.status, 422, "{mode} {tail}");
+        }
+        let body = json!({"items": [{"op": "query", "query": q(mode.clone())}]});
+        let r = post(&s, "/v1/twins/builtin.leaf-spine/batch", &body);
+        let line: Value = serde_json::from_slice(&r.body).unwrap();
+        assert_eq!(line["status"], 422, "{mode}");
+    }
+    let r = post(
+        &s,
+        "/v1/twins/builtin.leaf-spine/queries",
+        &q(json!("path")),
+    );
+    assert_eq!(r.status, 303);
+}
+
+#[test]
+fn the_store_alias_keeps_the_query_of_the_request() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-api-store-query");
+    fixture_store::write(&dir);
+    let s = state(Some(dir.display().to_string()));
+    let mut r = req("GET", "/v1/twins/store/tables/devices/rows");
+    r.query = vec![
+        ("limit".into(), "1".into()),
+        ("device".into(), "a&b c+=\u{e9}".into()),
+    ];
+    let res = handle(&s, &r);
+    assert_eq!(res.status, 307);
+    let location = res.header("location").unwrap();
+    let (path, query) = location.split_once('?').unwrap();
+    assert!(path.starts_with("/v1/twins/snap-"), "{location}");
+    assert_eq!(query, "limit=1&device=a%26b%20c%2B%3D%C3%A9");
+    let rows = json(&get(&s, &format!("{path}?limit=1")));
+    assert_eq!(rows["rows"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)]
+fn the_mcp_tools_and_the_rest_routes_share_the_twins() {
+    let base = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let dir = base.join("rsim-api-store-shared");
+    let moved = base.join("rsim-api-store-shared-moved");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&moved);
+    fixture_store::write(&dir);
+    let s = state(Some(dir.display().to_string()));
+    let r = get(&s, "/v1/twins/store");
+    assert_eq!(r.status, 307);
+    let id = r
+        .header("location")
+        .unwrap()
+        .rsplit('/')
+        .next()
+        .unwrap()
+        .to_string();
+    // The store folder is gone, so only a twin that the server holds
+    // answers.
+    std::fs::rename(&dir, &moved).unwrap();
+    let call = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+        "_meta": meta(),
+        "name": "list_devices",
+        "arguments": {"topology": "store"}
+    }});
+    let r = mcp(
+        &s,
+        &call,
+        &[
+            ("mcp-protocol-version", "2026-07-28"),
+            ("mcp-method", "tools/call"),
+            ("mcp-name", "list_devices"),
+        ],
+    );
+    let out = json(&r);
+    assert_eq!(out["result"]["isError"], false, "{out}");
+    assert_eq!(
+        out["result"]["structuredContent"]["twin"]["id"],
+        id.as_str()
+    );
+}
+
+#[test]
+fn the_mcp_transport_works_from_an_allowed_origin_and_answers_only_its_revision() {
+    let s = state(None);
+    let mut r = req("OPTIONS", "/mcp");
+    r.headers
+        .insert("origin".into(), "http://localhost:3000".into());
+    let res = handle(&s, &r);
+    assert_eq!(res.status, 204);
+    let allowed: Vec<String> = res
+        .header("access-control-allow-headers")
+        .unwrap()
+        .split(',')
+        .map(|h| h.trim().to_ascii_lowercase())
+        .collect();
+    for h in [
+        "content-type",
+        "mcp-protocol-version",
+        "mcp-method",
+        "mcp-name",
+    ] {
+        assert!(allowed.iter().any(|a| a == h), "{h}: {allowed:?}");
+    }
+    // The transport has no handshake: initialize is not a method.
+    let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}
+    }});
+    let r = mcp(
+        &s,
+        &init,
+        &[
+            ("mcp-protocol-version", "2026-07-28"),
+            ("mcp-method", "initialize"),
+        ],
+    );
+    let out = json(&r);
+    assert_eq!(out["error"]["code"], -32601, "{out}");
+    assert!(out.get("result").is_none(), "{out}");
+    // A header error answers an id that is not a string or a number with
+    // null.
+    for id in [json!({"x": 1}), json!([1]), json!(true)] {
+        let list = json!({"jsonrpc": "2.0", "id": id, "method": "tools/list", "params": {"_meta": meta()}});
+        let r = mcp(&s, &list, &[("mcp-method", "tools/list")]);
+        assert_eq!(r.status, 400);
+        assert_eq!(json(&r)["id"], Value::Null, "{id}");
+    }
+}
+
+#[test]
+fn the_tools_refuse_an_argument_that_is_not_in_their_schema() {
+    let s = state(None);
+    let call = |name: &str, arguments: Value| {
+        let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+            "_meta": meta(), "name": name, "arguments": arguments
+        }});
+        json(&mcp(
+            &s,
+            &body,
+            &[
+                ("mcp-protocol-version", "2026-07-28"),
+                ("mcp-method", "tools/call"),
+                ("mcp-name", name),
+            ],
+        ))
+    };
+    let out = call(
+        "table_query",
+        json!({"topology": "leaf-spine", "table": "fib", "device": ["leaf1"]}),
+    );
+    assert_eq!(out["result"]["isError"], true, "{out}");
+    let out = call(
+        "get_topology",
+        json!({"topology": "leaf-spine", "device": ["leaf1"]}),
+    );
+    assert_eq!(out["result"]["isError"], true, "{out}");
+    let out = call(
+        "table_query",
+        json!({"topology": "leaf-spine", "table": "fib", "verb": "show",
+            "filters": {"device": ["leaf1"]}, "typed": {"prefix.in_prefix": "10.0.0.0/8"},
+            "columns": ["device", "prefix"], "sort": ["prefix"], "limit": 2, "cursor": null}),
+    );
+    assert_eq!(out["result"]["isError"], false, "{out}");
+    let out = call(
+        "get_topology",
+        json!({"topology": "leaf-spine", "devices": ["leaf1"]}),
+    );
+    assert_eq!(out["result"]["isError"], false, "{out}");
+    let body = json!({"items": [{"op": "table", "table": "fib", "device": ["leaf1"]}]});
+    let r = post(&s, "/v1/twins/builtin.leaf-spine/batch", &body);
+    let line: Value = serde_json::from_slice(&r.body).unwrap();
+    assert_eq!(line["status"], 422, "{line}");
+}
+
+/// Kills the child process when the test ends.
+struct Kill(std::process::Child);
+
+impl Drop for Kill {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[test]
+#[allow(clippy::disallowed_types)]
+fn a_server_on_port_0_accepts_the_host_of_its_port() {
+    use std::io::{BufRead, Read, Write};
+    let mut child = Kill(
+        std::process::Command::new(env!("CARGO_BIN_EXE_rsim-api"))
+            .args(["--listen", "127.0.0.1:0"])
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let mut line = String::new();
+    std::io::BufReader::new(child.0.stderr.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let addr = line.trim().rsplit("http://").next().unwrap().to_string();
+    let mut c = std::net::TcpStream::connect(&addr).unwrap();
+    c.write_all(
+        format!("GET /v1 HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").as_bytes(),
+    )
+    .unwrap();
+    let mut out = String::new();
+    c.read_to_string(&mut out).unwrap();
+    assert!(out.starts_with("HTTP/1.1 200"), "{out}");
 }

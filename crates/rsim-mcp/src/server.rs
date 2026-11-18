@@ -80,11 +80,19 @@ struct ToolResult<'a> {
 }
 
 /// The state of one server process.
-#[derive(Default)]
 pub struct Server {
     /// True after an `initialize` request: the process uses `2025-11-25`.
     legacy: bool,
+    /// False for a server that serves only `2026-07-28`: `initialize` is
+    /// then not a method.
+    handshake: bool,
     tools: Tools,
+}
+
+impl Default for Server {
+    fn default() -> Self {
+        Server::new(Tools::default())
+    }
 }
 
 impl Server {
@@ -92,6 +100,17 @@ impl Server {
     pub fn new(tools: Tools) -> Server {
         Server {
             legacy: false,
+            handshake: true,
+            tools,
+        }
+    }
+
+    /// A server with these tools that serves only `2026-07-28`, for a
+    /// transport with no session.
+    pub fn without_handshake(tools: Tools) -> Server {
+        Server {
+            legacy: false,
+            handshake: false,
             tools,
         }
     }
@@ -211,7 +230,7 @@ impl Server {
 
     /// The result of a request as JSON text.
     fn request(&mut self, method: &str, params: Option<&Value>) -> Result<String, RpcError> {
-        if method == "initialize" {
+        if method == "initialize" && self.handshake {
             self.legacy = true;
             return Ok(to_line(&json!({
                 "protocolVersion": LEGACY,
