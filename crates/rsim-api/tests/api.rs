@@ -176,6 +176,55 @@ fn an_equal_etag_gives_304() {
 }
 
 #[test]
+fn a_query_answer_has_its_server_timing_and_the_same_body() {
+    use rsim_api::server::add_server_timing;
+    use std::time::Duration;
+    let s = state(None);
+    let stored: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../rsim-cli/tests/golden/mini-enterprise.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let location = make_query(&s, &stored);
+    let plain = get(&s, &location);
+    let mut timed = get(&s, &location);
+    add_server_timing(
+        &req("GET", &location),
+        &mut timed,
+        Duration::from_micros(4500),
+    );
+    assert_eq!(timed.status, 200);
+    assert_eq!(timed.header("server-timing"), Some("engine;dur=4.5"));
+    assert_eq!(timed.body, plain.body);
+    assert_eq!(plain.header("server-timing"), None);
+    // A 304 comes from the cache of the client and has no engine time.
+    let mut again = req("GET", &location);
+    again
+        .headers
+        .insert("if-none-match".into(), plain.header("etag").unwrap().into());
+    let mut hit = handle(&s, &again);
+    add_server_timing(&again, &mut hit, Duration::from_micros(10));
+    assert_eq!(hit.status, 304);
+    assert_eq!(hit.header("server-timing"), Some("cache;desc=hit"));
+    // Another resource has no server timing.
+    let path = "/v1/twins/builtin.ecmp/tables/devices/rows";
+    let mut rows = get(&s, path);
+    add_server_timing(&req("GET", path), &mut rows, Duration::from_millis(1));
+    assert_eq!(rows.header("server-timing"), None);
+    // An allowed origin can read the header.
+    let mut r = req("GET", &location);
+    r.headers
+        .insert("origin".into(), "http://localhost:3000".into());
+    assert_eq!(
+        handle(&s, &r).header("access-control-expose-headers"),
+        Some("Server-Timing")
+    );
+}
+
+#[test]
 fn the_security_checks_refuse_a_foreign_origin_a_foreign_host_and_a_large_body() {
     let s = state(None);
     let mut r = req("GET", "/v1");
@@ -425,6 +474,22 @@ fn a_real_server_answers_on_a_loopback_port() {
         "GET /v1/twins/builtin.ecmp/tables/devices/rows?x=%1\u{e9} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
     ));
     assert!(r.starts_with("HTTP/1.1 422"), "{r}");
+    let q = r#"{"source.ip":"10.1.0.10","destination.ip":"10.4.0.10","network.transport":"tcp","source.port":40000,"destination.port":22}"#;
+    let r = ask(format!(
+        "POST /v1/twins/builtin.ecmp/queries HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{q}",
+        q.len()
+    ));
+    assert!(r.starts_with("HTTP/1.1 303"), "{r}");
+    let location = r
+        .lines()
+        .find_map(|l| l.strip_prefix("location: "))
+        .unwrap()
+        .to_string();
+    let r = ask(format!(
+        "GET {location} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
+    ));
+    assert!(r.starts_with("HTTP/1.1 200"), "{r}");
+    assert!(r.contains("server-timing: engine;dur="), "{r}");
     rt.shutdown_background();
 }
 

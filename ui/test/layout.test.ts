@@ -68,14 +68,27 @@ describe("cells", () => {
 });
 
 describe("sources and the RIB guard", () => {
-  it("takes the span with the fewest lines and leaves out the device of the lane", () => {
+  it("takes the span with the fewest lines, the last of equal spans, and leaves out the device of the lane", () => {
     const spans = [
       { file: "fra01-fgt-01.conf", first_line: 60, last_line: 64 },
       { file: "fra01-fgt-01.conf", first_line: 60, last_line: 60 },
     ];
     expect(spanLabel(mostSpecific(spans)!, "fra01-fgt-01")).toBe("conf:60");
     expect(spanLabel(spans[0]!, "fra01-fgt-01")).toBe("conf:60-64");
-    expect(fileLabel("topology/links.yaml", "leaf1")).toBe("topology/links.yaml");
+    const tie = [
+      { file: "fra01-fgt-01.conf", first_line: 150, last_line: 150 },
+      { file: "fra01-fgt-01.arp", first_line: 1, last_line: 1 },
+    ];
+    expect(spanLabel(mostSpecific(tie)!, "fra01-fgt-01")).toBe("arp:1");
+  });
+
+  it("labels a span by the kind of its file and its lines", () => {
+    expect(fileLabel("topology/links.yaml", "leaf1")).toBe("links.yaml");
+    expect(spanLabel({ file: "core1/config@b156ff45a077", first_line: 37, last_line: 47 }, "core1")).toBe("config:37-47");
+    expect(spanLabel({ file: "unifi-default/devices@5224cb10", first_line: 120, last_line: 131 }, "sw1")).toBe(
+      "devices:120-131",
+    );
+    expect(fileLabel("leaf1", "leaf1")).toBe("leaf1");
   });
 
   it("marks a group by its strongest guard", () => {
@@ -103,8 +116,9 @@ describe("the ladder of mini-enterprise", () => {
   const fwd = rows.filter((r) => r.dir === "forward");
   const rep = rows.filter((r) => r.dir === "reply");
 
-  it("has a lane for each device in path order", () => {
-    expect(l.lanes.map((x) => x.name)).toEqual(["fra01-fgt-01", "fra01-ips-01", "fra01-core-01"]);
+  it("has a lane for each device in path order, between the lanes of the source and the destination", () => {
+    expect(l.lanes.map((x) => x.name)).toEqual(["guest-client", "fra01-fgt-01", "fra01-ips-01", "fra01-core-01", "fra01-dns"]);
+    expect(l.lanes.map((x) => x.endpoint !== null)).toEqual([true, false, false, false, true]);
   });
 
   it("prints each value on the first row only", () => {
@@ -143,14 +157,20 @@ describe("the ladder of mini-enterprise", () => {
     expect(fwd.filter((r) => r.enterFrom !== null).map((r) => [r.enterFrom, r.lane])).toEqual([
       [0, 1],
       [1, 2],
+      [2, 3],
     ]);
     expect(fwd[fwd.length - 1]!.end).toBe("deliver");
+    expect(fwd[fwd.length - 1]!.endLane).toBe(4);
     expect(fwd.slice(0, -1).every((r) => r.end === null)).toBe(true);
+    expect(rep[0]!.enterFrom).toBe(4);
+    expect(rep[rep.length - 1]!.endLane).toBe(0);
   });
 
   it("puts the reply under the row reply of branch 0", () => {
     const sec = l.rows.find((r) => r.type === "section");
     expect(sec && sec.type === "section" && sec.text).toBe("reply of branch 0");
+    // The result line gives the verdict of the reply.
+    expect(sec && sec.type === "section" && sec.verdict).toBe(null);
     expect(rep[0]!.start).toBe(true);
     expect(rep[0]!.cells[0]).toEqual({ kind: "value", text: "10.20.0.53" });
   });
@@ -158,9 +178,9 @@ describe("the ladder of mini-enterprise", () => {
   it("makes one row of the functions of a device at the device level", () => {
     const d = steps(ladder(a, "device").rows).filter((r) => r.dir === "forward");
     expect(d.map((r) => [r.label, r.fn, r.lane])).toEqual([
-      ["0-11", "12 functions", 0],
-      ["12-14", "3 functions", 1],
-      ["15-20", "6 functions", 2],
+      ["0-11", "12 functions", 1],
+      ["12-14", "3 functions", 2],
+      ["15-20", "6 functions", 3],
     ]);
     expect(d[0]!.cells[0]).toEqual({ kind: "changed", text: "10.20.0.254" });
     expect(d[1]!.cells.every((c) => c.kind === "same")).toBe(true);
@@ -174,7 +194,7 @@ describe("the ladder of leaf-spine", () => {
   const l = ladder(a, "function");
 
   it("keeps both spines between the leaves", () => {
-    expect(l.lanes.map((x) => x.name)).toEqual(["leaf1", "spine1", "spine2", "leaf2"]);
+    expect(l.lanes.map((x) => x.name)).toEqual(["host1", "leaf1", "spine1", "spine2", "leaf2", "host2"]);
   });
 
   it("has a section for each branch and for each reply branch", () => {
