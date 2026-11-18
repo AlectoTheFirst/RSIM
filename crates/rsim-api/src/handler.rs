@@ -279,6 +279,7 @@ pub fn handle(state: &State, req: &Request) -> Response {
     let origin = req.headers.get("origin").cloned();
     if let Some(o) = &origin
         && !state.settings.allow_origins.contains(o)
+        && !own_origin(state, o)
     {
         return problem(
             403,
@@ -326,15 +327,27 @@ pub fn handle(state: &State, req: &Request) -> Response {
     res
 }
 
-fn check_host(state: &State, req: &Request) -> Option<Problem> {
-    let host = req.headers.get("host")?;
+/// The `Host` values of the listen address.
+fn own_hosts(state: &State) -> [String; 4] {
     let port = state.settings.listen.port();
-    let allowed = [
+    [
         format!("{}:{port}", state.settings.listen.ip()),
         format!("localhost:{port}"),
         format!("127.0.0.1:{port}"),
         format!("[::1]:{port}"),
-    ];
+    ]
+}
+
+/// True for the origin of the server itself: the origin of its UI pages.
+fn own_origin(state: &State, origin: &str) -> bool {
+    origin
+        .strip_prefix("http://")
+        .is_some_and(|h| own_hosts(state).iter().any(|a| a.eq_ignore_ascii_case(h)))
+}
+
+fn check_host(state: &State, req: &Request) -> Option<Problem> {
+    let host = req.headers.get("host")?;
+    let allowed = own_hosts(state);
     (!allowed.iter().any(|a| a.eq_ignore_ascii_case(host))).then(|| {
         problem(
             403,
@@ -391,6 +404,22 @@ fn route(state: &State, req: &Request) -> Result<Response, Problem> {
     let contract = contract_version();
     let not_found = || problem(404, "not_found", format!("{} is not a resource", req.path));
     match parts.as_slice() {
+        [] | ["index.html"] | ["assets", _] | ["fonts", _] => {
+            method(req, "GET")?;
+            let f = crate::ui::get(&req.path).ok_or_else(not_found)?;
+            Ok(Response {
+                status: 200,
+                headers: vec![
+                    ("content-type".into(), f.content_type.into()),
+                    ("cache-control".into(), "no-cache".into()),
+                    (
+                        "content-security-policy".into(),
+                        crate::ui::CONTENT_SECURITY_POLICY.into(),
+                    ),
+                ],
+                body: f.body.to_vec(),
+            })
+        }
         ["v1"] => {
             method(req, "GET")?;
             let body = json!({
