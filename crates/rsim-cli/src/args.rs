@@ -40,6 +40,22 @@ fn invalid(detail: String) -> QueryError {
     QueryError::new(ErrorCode::InvalidQuery, detail)
 }
 
+/// One address: an address, or a host prefix of it (`/32` for IPv4,
+/// `/128` for IPv6).
+fn host_address(s: &str) -> Option<std::net::IpAddr> {
+    let (a, len) = match s.split_once('/') {
+        Some((a, len)) => (a, Some(len)),
+        None => (s, None),
+    };
+    let ip: std::net::IpAddr = a.parse().ok()?;
+    let full = if ip.is_ipv4() { "32" } else { "128" };
+    match len {
+        None => Some(ip),
+        Some(l) if l == full => Some(ip),
+        Some(_) => None,
+    }
+}
+
 /// Checks that each argument name is in `allowed`.
 pub fn check_names(args: &Map<String, Value>, allowed: &[&str]) -> Result<(), QueryError> {
     match args.keys().find(|k| !allowed.contains(&k.as_str())) {
@@ -97,8 +113,15 @@ pub fn query(args: &Map<String, Value>, extra: &[&str]) -> Result<QueryInput, Qu
     check_names(args, &allowed)?;
     let addr = |v: &Value, name: &str| {
         let s = string(v, name)?;
-        s.parse()
-            .map_err(|_| invalid(format!("{name} {s:?} is not an IP address")))
+        host_address(&s).ok_or_else(|| {
+            if s.contains('/') {
+                invalid(format!(
+                    "{name} {s:?} is a prefix; a path query takes one address, and a set query takes a prefix"
+                ))
+            } else {
+                invalid(format!("{name} {s:?} is not an IP address"))
+            }
+        })
     };
     let n8 = |name: &str, max: u64| opt(args, name, |v| Ok(number(v, name, max)? as u8));
     let n16 = |name: &str, max: u64| opt(args, name, |v| Ok(number(v, name, max)? as u16));
@@ -276,5 +299,22 @@ pub fn form(args: &Map<String, Value>) -> Result<rsim_contract::args::Form, Quer
             Some("full") => Ok(Form::Full),
             _ => Err(invalid(format!("form {v} is not summary, steps or full"))),
         },
+    }
+}
+
+#[cfg(test)]
+mod host_tests {
+    use super::host_address;
+
+    #[test]
+    fn a_host_prefix_is_one_address_and_a_wider_prefix_is_not() {
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().ok();
+        assert_eq!(host_address("192.0.2.89"), ip("192.0.2.89"));
+        assert_eq!(host_address("192.0.2.89/32"), ip("192.0.2.89"));
+        assert_eq!(host_address("2001:db8::1/128"), ip("2001:db8::1"));
+        assert_eq!(host_address("192.0.2.0/24"), None);
+        assert_eq!(host_address("2001:db8::1/32"), None);
+        assert_eq!(host_address("192.0.2.89/032"), None);
+        assert_eq!(host_address("not-an-address"), None);
     }
 }
