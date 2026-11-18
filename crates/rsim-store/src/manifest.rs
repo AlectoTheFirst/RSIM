@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -106,4 +106,9 @@ pub struct SnapshotManifest {
     pub schemas: BTreeMap<String, u32>,
     /// The manifest of each listed device, by device.
     pub devices: BTreeMap<String, Hash>,
+    /// The devices that leave the snapshot. They are in the parent and in
+    /// neither `devices` nor the snapshots after this one, until a later
+    /// manifest lists them again.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub removed: BTreeSet<String>,
 }

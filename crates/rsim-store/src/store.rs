@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -52,6 +52,7 @@ pub struct Cycle<'a> {
     cycle: u64,
     time: u64,
     updates: BTreeMap<String, DeviceUpdate>,
+    removed: BTreeSet<String>,
 }
 
 /// A cycle with all its files written except `HEAD`. A reader does not see
@@ -264,7 +265,9 @@ impl Store {
     }
 
     /// The snapshot of a cycle. The reader walks the parents back to the
-    /// newest checkpoint, and the newest manifest of each device wins.
+    /// newest checkpoint, and the newest manifest of each device wins. A
+    /// device that a snapshot removes is not in it, and is not in the
+    /// snapshots after it until one of them lists the device again.
     pub fn snapshot(&self, cycle: u64) -> Result<Snapshot, StoreError> {
         let top = self.snapshot_manifest(cycle)?;
         let mut chain = vec![top.clone()];
@@ -276,6 +279,9 @@ impl Store {
         }
         let mut names: BTreeMap<String, Hash> = BTreeMap::new();
         for m in chain.iter().rev() {
+            for d in &m.removed {
+                names.remove(d);
+            }
             names.extend(m.devices.iter().map(|(d, h)| (d.clone(), *h)));
         }
         let mut devices = BTreeMap::new();
@@ -308,6 +314,7 @@ impl Store {
             cycle,
             time,
             updates: BTreeMap::new(),
+            removed: BTreeSet::new(),
         })
     }
 
@@ -383,7 +390,8 @@ impl<'a> Cycle<'a> {
     }
 
     /// Adds the update of a device. A second update of the same device
-    /// replaces the first.
+    /// replaces the first, and an update cancels a removal of the device in
+    /// this cycle.
     pub fn add(&mut self, update: DeviceUpdate) -> Result<(), StoreError> {
         for (name, parts) in &update.tables {
             let schema = crate::table(name)
@@ -392,14 +400,32 @@ impl<'a> Cycle<'a> {
                 schema.check(rows)?;
             }
         }
+        self.removed.remove(&update.device);
         self.updates.insert(update.device.clone(), update);
         Ok(())
     }
 
+    /// Removes a device from the snapshot of this cycle and from the
+    /// snapshots after it, until a later cycle adds the device again. It
+    /// drops an update of the device in this cycle. A device that the base
+    /// does not have needs no removal, and the call does nothing for it.
+    pub fn remove(&mut self, device: &str) {
+        self.updates.remove(device);
+        if self
+            .base
+            .as_ref()
+            .is_some_and(|s| s.devices.contains_key(device))
+        {
+            self.removed.insert(device.to_string());
+        }
+    }
+
     /// Writes the table files, the device manifests and the snapshot
     /// manifest. A device manifest that differs from the base in no more
-    /// than the collection time is not written. If no device changed, the
-    /// cycle writes nothing and gives `None`. If another writer wrote a
+    /// than the collection time is not written. The snapshot manifest lists
+    /// the removed devices, and a checkpoint leaves them out. If no device
+    /// changed and no device is removed, the cycle writes nothing and gives
+    /// `None`. If another writer wrote a
     /// table file or the snapshot manifest of the same cycle number, the
     /// cycle fails with [`StoreError::Conflict`].
     pub fn prepare(self) -> Result<Option<Prepared<'a>>, StoreError> {
@@ -465,7 +491,7 @@ impl<'a> Cycle<'a> {
             .into_iter()
             .filter(|(d, m)| prev(d).is_none_or(|p| m.differs(p)))
             .collect();
-        if changed.is_empty() {
+        if changed.is_empty() && self.removed.is_empty() {
             return Ok(None);
         }
         for (path, buf) in &table_files {
@@ -488,6 +514,7 @@ impl<'a> Cycle<'a> {
             .as_ref()
             .map(|s| s.devices.clone())
             .unwrap_or_default();
+        devices.retain(|d, _| !self.removed.contains(d));
         devices.extend(changed);
         if checkpoint {
             for (d, m) in &devices {
@@ -507,6 +534,7 @@ impl<'a> Cycle<'a> {
                 .map(|t| (t.name.to_string(), t.version))
                 .collect(),
             devices: names,
+            removed: self.removed,
         };
         write_cycle_file(
             &store.snapshot_path(self.cycle),

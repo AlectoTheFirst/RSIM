@@ -122,6 +122,11 @@ impl Scheduler {
         }
     }
 
+    /// Drops the times of a device, so the device is new to the scheduler.
+    pub fn forget(&mut self, device: &str) {
+        self.states.remove(device);
+    }
+
     /// The number of failures in a row of a device.
     pub fn failures(&self, device: &str) -> u32 {
         self.states.get(device).map_or(0, |s| s.failures)
