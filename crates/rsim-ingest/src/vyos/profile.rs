@@ -64,8 +64,8 @@ pub const LEARNED_WORDS: &[(&str, RouteProtocol)] = &[
 pub const STATIC_WORDS: &[&str] = &["static", "kernel", "table"];
 
 /// True if the next hop of a computed route resolves through a default
-/// route. FRR resolves a next hop through the default route only with `ip
-/// nht resolve-via-default`, which the configuration does not read; the FRR
-/// documentation of zebra gives the rule. A collected route resolves the way
-/// the device shows it. Not confirmed against a device.
-pub const COMPUTED_THROUGH_DEFAULT: bool = false;
+/// route. The value comes from the name of the VyOS command `system ip nht
+/// no-resolve-via-default`, which turns the resolution off; no document or
+/// device confirms it. A collected route resolves the way the device shows
+/// it.
+pub const COMPUTED_THROUGH_DEFAULT: bool = true;

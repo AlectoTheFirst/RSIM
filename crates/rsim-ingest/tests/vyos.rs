@@ -834,6 +834,25 @@ mod twin {
             detail,
             "198.51.100.0/25 (bgp) in VRF default via 203.0.113.130 on eth1"
         );
+        // FRR gives a recursive next hop and the next hop that resolves it.
+        let mut col = collected();
+        col.routes.push(RouteRow {
+            interface: None,
+            next_hop: Some("198.51.100.250".into()),
+            ..route("198.51.100.0/25", "bgp", "eth1")
+        });
+        col.routes.push(RouteRow {
+            next_hop: Some("203.0.113.130".into()),
+            ..route("198.51.100.0/25", "bgp", "eth1")
+        });
+        let (t2, _) = build_with(CONFIG, &col);
+        let a = run(&t2, "eth0.10", tcp("192.0.2.30", "198.51.100.9", 443));
+        let (detail, _, unknown) = step(&a, "r1/route");
+        assert!(!unknown, "{detail}");
+        assert_eq!(
+            detail,
+            "198.51.100.0/25 (bgp) in VRF default via 203.0.113.130 on eth1"
+        );
         // A loop between 2 routes.
         let a = run(&t, "eth0.10", tcp("192.0.2.30", "198.51.100.140", 443));
         let (detail, code, unknown) = step(&a, "r1/route");

@@ -1564,3 +1564,32 @@ fn a_next_hop_that_resolves_through_a_gateway_group_route_is_unknown() {
         "{steps:#?}"
     );
 }
+
+#[test]
+fn a_direct_route_with_an_address_of_the_switch_as_next_hop_is_connected() {
+    let mut col = collected();
+    for r in &mut col.routes {
+        if r.vrf == "default" && r.prefix == "192.0.2.0/26" {
+            r.next_hop = Some("192.0.2.2".into());
+        }
+    }
+    let t = estate_of(CONFIG, col)
+        .builder
+        .build()
+        .expect("the twin builds");
+    let (_, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "192.0.2.10",
+        PROTO_TCP,
+        443,
+    ));
+    assert!(
+        has(
+            &steps,
+            "route 192.0.2.0/26 in VRF default connected on Vlan10"
+        ),
+        "{steps:#?}"
+    );
+}

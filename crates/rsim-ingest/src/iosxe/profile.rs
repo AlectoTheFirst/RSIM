@@ -187,8 +187,6 @@ pub const LEARNED_CODES: &[(&str, RouteProtocol)] = &[
 pub const STATIC_CODES: &[&str] = &["S", "U"];
 
 /// True if the next hop of a computed route resolves through a default
-/// route. Cisco IOS resolves a BGP next hop through any route of the table,
-/// the default route too, unless `bgp nexthop route-map` filters it. A
-/// collected route resolves the way the device shows it. Not confirmed
-/// against a device.
+/// route. No document or device confirms the value for IOS-XE. A collected
+/// route resolves the way the device shows it.
 pub const COMPUTED_THROUGH_DEFAULT: bool = true;

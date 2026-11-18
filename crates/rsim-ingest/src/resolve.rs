@@ -65,6 +65,17 @@ pub fn through_default(origin: Origin, computed_through_default: bool) -> bool {
     }
 }
 
+/// The spans in their first order, each once.
+fn unique(spans: Vec<SourceSpan>) -> Vec<SourceSpan> {
+    let mut out: Vec<SourceSpan> = Vec::with_capacity(spans.len());
+    for s in spans {
+        if !out.contains(&s) {
+            out.push(s);
+        }
+    }
+    out
+}
+
 #[derive(Clone, Debug, Default)]
 struct Table {
     trie: TriePrefixTable<usize>,
@@ -138,7 +149,7 @@ impl Resolver {
                             return Err(Unresolved {
                                 reason: format!("{NOT_RESOLVED}: {g}"),
                                 why,
-                                spans,
+                                spans: unique(spans),
                             });
                         }
                     }
@@ -154,7 +165,7 @@ impl Resolver {
         }
         hops.sort();
         hops.dedup();
-        Ok((hops, spans))
+        Ok((hops, unique(spans)))
     }
 
     fn gateway(
@@ -390,10 +401,11 @@ mod tests {
             ]),
             span(5),
         );
-        let (hops, _) = r
+        let (hops, spans) = r
             .resolve("default", &[via(None, Some("198.51.100.65"))], true)
             .unwrap();
         assert_eq!(hops.len(), 2);
+        assert_eq!(spans, [span(5), span(1)].concat());
     }
 
     #[test]

@@ -119,7 +119,7 @@ pub fn protocol_word(clientname: &str) -> &str {
 }
 
 /// True if the next hop of a computed route resolves through a default
-/// route. No source states the rule of NX-OS; the value gives no
-/// resolution, so such a route is unknown. A collected route resolves the
-/// way the device shows it. Not confirmed against a device.
+/// route. No document or device confirms the value for NX-OS; with no
+/// resolution, such a route is unknown. A collected route resolves the way
+/// the device shows it.
 pub const COMPUTED_THROUGH_DEFAULT: bool = false;

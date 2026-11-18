@@ -108,8 +108,8 @@ pub const LEARNED_CODES: &[(&str, RouteProtocol)] = &[
 pub const STATIC_CODES: &[&str] = &["S", "U"];
 
 /// True if the next hop of a computed route resolves through a default
-/// route. IOS-XR resolves a BGP next hop through the default route only
-/// with `nexthop resolution allow-default`, which the configuration does
-/// not read. A collected route resolves the way the device shows it. Not
-/// confirmed against a device.
+/// route. The value comes from the name of the IOS-XR command `nexthop
+/// resolution allow-default`, which turns the resolution on; no document or
+/// device confirms it. A collected route resolves the way the device shows
+/// it.
 pub const COMPUTED_THROUGH_DEFAULT: bool = false;

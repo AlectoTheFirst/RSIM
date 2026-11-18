@@ -784,7 +784,7 @@ impl L<'_> {
                 // A route whose next hop does not resolve stays in the table
                 // with no next hop, so its packets are unknown and do not
                 // fall to a shorter prefix.
-                let paths: Vec<Path> = rows.iter().map(|r| path_of(r)).collect();
+                let paths: Vec<Path> = forwarding_rows(&rows).iter().map(|r| path_of(r)).collect();
                 let through =
                     through_default(Origin::Collected, super::profile::COMPUTED_THROUGH_DEFAULT);
                 match resolver.resolve(VRF, &paths, through) {
@@ -1381,6 +1381,58 @@ fn range_prefixes(a: IpAddr, b: IpAddr) -> Option<Vec<Prefix>> {
     Some(out)
 }
 
+/// The path of a collected route row: its interface and its next hop.
+fn path_of(r: &crate::collected::RouteRow) -> Path {
+    Path {
+        interface: r.interface.clone(),
+        gateway: r.next_hop.as_deref().and_then(|g| g.parse().ok()),
+        vrf: None,
+    }
+}
+
+/// The rows of a route that forward. FRR gives a recursive next hop as a
+/// row with no interface, followed by a row with an interface for each
+/// next hop that resolves it; the rows with an interface are the next hops
+/// that the device uses. Only a route with no such row resolves its next
+/// hops.
+fn forwarding_rows<'a>(
+    rows: &[&'a crate::collected::RouteRow],
+) -> Vec<&'a crate::collected::RouteRow> {
+    if rows.iter().any(|r| r.interface.is_some()) {
+        rows.iter()
+            .copied()
+            .filter(|r| r.interface.is_some())
+            .collect()
+    } else {
+        rows.to_vec()
+    }
+}
+
+/// The collected routes of the main VRF and the addresses of the device for
+/// the resolution of a next hop: a local route gives no next hop.
+fn resolver(
+    by_prefix: &BTreeMap<String, Vec<&crate::collected::RouteRow>>,
+    locals: &[(Prefix, Route)],
+) -> Resolver {
+    let mut out = Resolver::new();
+    for (p, r) in locals {
+        out.add(VRF, *p, Target::Local, r.spans.clone());
+    }
+    for (prefix, rows) in by_prefix {
+        let Ok(p) = prefix.parse::<Prefix>() else {
+            continue;
+        };
+        let spans: Vec<SourceSpan> = rows.iter().map(|r| r.span.clone()).collect();
+        let target = if rows[0].protocol == "local" {
+            Target::Local
+        } else {
+            Target::Paths(forwarding_rows(rows).iter().map(|r| path_of(r)).collect())
+        };
+        out.add(VRF, p, target, spans);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1409,38 +1461,4 @@ mod tests {
         assert!(address_spec("!192.0.2.9").is_err());
         assert!(address_spec("192.0.2.9-192.0.2.1").is_err());
     }
-}
-
-/// The path of a collected route row: its interface and its next hop.
-fn path_of(r: &crate::collected::RouteRow) -> Path {
-    Path {
-        interface: r.interface.clone(),
-        gateway: r.next_hop.as_deref().and_then(|g| g.parse().ok()),
-        vrf: None,
-    }
-}
-
-/// The collected routes of the main VRF and the addresses of the device for
-/// the resolution of a next hop: a local route gives no next hop.
-fn resolver(
-    by_prefix: &BTreeMap<String, Vec<&crate::collected::RouteRow>>,
-    locals: &[(Prefix, Route)],
-) -> Resolver {
-    let mut out = Resolver::new();
-    for (p, r) in locals {
-        out.add(VRF, *p, Target::Local, r.spans.clone());
-    }
-    for (prefix, rows) in by_prefix {
-        let Ok(p) = prefix.parse::<Prefix>() else {
-            continue;
-        };
-        let spans: Vec<SourceSpan> = rows.iter().map(|r| r.span.clone()).collect();
-        let target = if rows[0].protocol == "local" {
-            Target::Local
-        } else {
-            Target::Paths(rows.iter().map(|r| path_of(r)).collect())
-        };
-        out.add(VRF, p, target, spans);
-    }
-    out
 }
