@@ -5,6 +5,7 @@
 pub mod collected;
 pub mod coverage;
 pub mod estate;
+pub mod iosxe;
 pub mod iosxr;
 pub mod links;
 pub mod nxos;

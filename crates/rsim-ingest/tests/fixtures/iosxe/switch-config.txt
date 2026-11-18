@@ -1,0 +1,145 @@
+Building configuration...
+
+Current configuration : 4321 bytes
+!
+! Last configuration change at 10:00:00 UTC Tue Nov 17 2026 by admin
+!
+version 17.6
+no service pad
+service timestamps debug datetime msec
+service timestamps log datetime msec
+service password-encryption
+service call-home
+no platform punt-keepalive disable-kernel-core
+!
+hostname acc1
+!
+vrf definition Mgmt-vrf
+ !
+ address-family ipv4
+ exit-address-family
+ !
+ address-family ipv6
+ exit-address-family
+!
+no logging console
+enable secret 9 $9$FAKESALT$FAKEHASH
+!
+no aaa new-model
+switch 1 provision c9300-48p
+!
+ip routing
+!
+no ip domain lookup
+ip domain name example.test
+login on-success log
+vtp domain LAB
+vtp mode transparent
+!
+license boot level network-essentials
+diagnostic bootup level minimal
+!
+spanning-tree mode rapid-pvst
+spanning-tree extend system-id
+!
+redundancy
+ mode sso
+!
+transceiver type all
+ monitoring
+!
+vlan 10
+ name USERS
+!
+vlan 20
+ name VOICE
+!
+vlan 99
+ name MGMT
+!
+vlan 100,200
+!
+interface Port-channel1
+ description uplink to dist1
+ switchport trunk allowed vlan 10,20,99
+ switchport mode trunk
+!
+interface GigabitEthernet0/0
+ vrf forwarding Mgmt-vrf
+ ip address 203.0.113.21 255.255.255.0
+ negotiation auto
+!
+interface GigabitEthernet1/0/1
+ description user port
+ switchport access vlan 10
+ switchport mode access
+ switchport voice vlan 20
+ switchport port-security
+ spanning-tree portfast
+ spanning-tree bpduguard enable
+!
+interface GigabitEthernet1/0/2
+ switchport access vlan 10
+ switchport mode access
+ storm-control broadcast level 10.00
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/3
+ shutdown
+!
+interface GigabitEthernet1/0/47
+ description uplink member
+ switchport trunk allowed vlan 10,20,99
+ switchport mode trunk
+ channel-group 1 mode active
+!
+interface GigabitEthernet1/0/48
+ description uplink member
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 10,20
+ switchport trunk allowed vlan add 99
+ switchport mode trunk
+ switchport nonegotiate
+ channel-group 1 mode active
+!
+interface Vlan1
+ no ip address
+ shutdown
+!
+interface Vlan10
+ ip address 192.0.2.1 255.255.255.128
+ ip helper-address 192.0.2.53
+!
+interface Vlan99
+ ip address 198.51.100.10 255.255.255.0
+!
+ip forward-protocol nd
+no ip http server
+no ip http secure-server
+ip route 0.0.0.0 0.0.0.0 198.51.100.1
+ip ssh version 2
+ip scp server enable
+!
+snmp-server community FAKECOMMUNITY RO
+!
+control-plane
+ service-policy input system-cpp-policy
+!
+banner login ^C
+Authorized access only.
+^C
+!
+line con 0
+ stopbits 1
+line vty 0 4
+ password 7 FAKEVTYPASSWORD
+ login
+ transport input ssh
+!
+call-home
+ contact-email-addr noc@example.test
+ profile "CiscoTAC-1"
+  active
+  destination transport-method http
+!
+end
