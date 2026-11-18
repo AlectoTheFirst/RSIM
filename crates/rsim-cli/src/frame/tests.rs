@@ -438,8 +438,13 @@ fn the_selection_on_columns_gives_the_answer_of_the_selection_on_json_rows() {
     let mut g = Gen(0x9e37_79b9_7f4a_7c15);
     for name in ["fib", "bgp-sessions", "coverage", "devices"] {
         let def = table::table(name).unwrap();
-        for round in 0..60 {
-            let n = [0, 1, 3, 12, 40, 150][round % 6];
+        for round in 0..62 {
+            // The last rounds have tables of many chunks of a parallel scan.
+            let n = if round >= 60 {
+                3000
+            } else {
+                [0, 1, 3, 12, 40, 150][round % 6]
+            };
             let rows: Vec<Vec<Value>> = (0..n)
                 .map(|_| def.columns.iter().map(|c| value(&mut g, c.kind)).collect())
                 .collect();

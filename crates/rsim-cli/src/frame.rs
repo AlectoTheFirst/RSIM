@@ -28,7 +28,12 @@ use rsim_contract::table::{ColumnSummary, ColumnType, Selection, TableDef};
 use serde_json::Value;
 
 /// The number of rows of one chunk of a parallel scan.
+#[cfg(not(test))]
 const CHUNK: usize = 1 << 16;
+/// The number of rows of one chunk of a parallel scan: small in the tests,
+/// so a scan of a test table has many chunks.
+#[cfg(test)]
+const CHUNK: usize = 16;
 
 /// The key of a null value while a column is built.
 const NULL: u32 = u32::MAX;
