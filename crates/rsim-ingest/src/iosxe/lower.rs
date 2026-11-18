@@ -1,9 +1,10 @@
 //! Lowering of an IOS-XE running config and its collected sections into the
 //! function instances of a router or a Catalyst switch: the interfaces with
 //! their VRFs, the input and output ACLs, the QoS policies, the NAT, the
-//! route table of each VRF, the next-hop resolution through ARP, the HSRP
-//! and VRRP groups, the hand-off and the egress of each port with a link,
-//! and the switch ports, the VLANs and the SVIs. The chain of an interface
+//! route table of each VRF, the next-hop resolution through the ARP table of
+//! the global table and of each VRF, the HSRP and VRRP groups, the hand-off
+//! and the egress of each port with a link, and the switch ports, the VLANs,
+//! the SVIs, the MAC table, the spanning tree state and the endpoints. The chain of an interface
 //! is the chain of NX-OS: ingress, input QoS, input ACL, VRF selection,
 //! session lookup, outside NAT, route lookup, inside NAT, session commit,
 //! next-hop resolution, output ACL, output QoS and egress. Gives the summary
@@ -25,9 +26,10 @@ use super::profile::{
 };
 use super::state::{self, State};
 use crate::iosxr::lower::{
-    Group, GroupRules, Hops, Port, RouterPort, edges, error, fib, group_note, group_state,
-    handoffs, inputs, next_hops, place_unreadable, routed_summary, vips,
+    Group, GroupRules, GroupState, Hops, Port, RouterPort, edges, error, fib, group_note,
+    group_state, handoffs, inputs, next_hops, place_unreadable, routed_summary, vips,
 };
+use crate::iosxr::state::HsrpRow;
 use crate::links::{External, Summary};
 use crate::nxos;
 use crate::nxos::config::{FhrpKind, Lines, NatRole};
@@ -50,6 +52,24 @@ const VRRP_RULES: GroupRules = GroupRules {
     active: VRRP_MASTER,
     not_active: VRRP_NOT_MASTER,
     no_vmac: "show vrrp brief gives no virtual MAC",
+};
+
+/// The words of `show standby`.
+const HSRP_DETAIL_RULES: GroupRules = GroupRules {
+    what: "HSRP",
+    command: "show standby",
+    active: HSRP_ACTIVE,
+    not_active: HSRP_NOT_ACTIVE,
+    no_vmac: "no mac-address line, and show standby gives no virtual MAC",
+};
+
+/// The words of `show vrrp`.
+const VRRP_DETAIL_RULES: GroupRules = GroupRules {
+    what: "VRRP",
+    command: "show vrrp",
+    active: VRRP_MASTER,
+    not_active: VRRP_NOT_MASTER,
+    no_vmac: "show vrrp gives no virtual MAC",
 };
 
 /// The MACs of the interfaces of a router or a switch in `show interfaces`.
@@ -84,12 +104,12 @@ pub fn lower(
     for acl in acls.values_mut() {
         place_unreadable(acl);
     }
-    let (vlans, unknown_vlans) = super::layer2::vlans(cfg);
+    let (vlans, unknown_vlans) = super::layer2::vlans(cfg, &st);
     let shared = nxos::Config {
         acls,
         nat_rules: cfg.nat_rules.clone(),
         nat_pools: cfg.nat_pools.clone(),
-        interfaces: super::layer2::interfaces(cfg),
+        interfaces: super::layer2::interfaces(cfg, &st),
         vlans,
         unknown_vlans,
         unreadable_vlans: cfg.unreadable_vlans.clone(),
@@ -106,10 +126,21 @@ pub fn lower(
         ("cdp", error(&st.l3.cdp)),
         ("hsrp", error(&st.l3.hsrp)),
         ("vrrp", error(&st.vrrp)),
+        ("hsrp_detail", error(&st.hsrp_detail)),
+        ("vrrp_detail", error(&st.vrrp_detail)),
+        ("mac_table", error(&st.mac_table)),
+        ("spanning_tree", error(&st.stp)),
+        ("vlans", error(&st.vlans)),
+        ("arp_vrfs", error(&st.arp_vrfs)),
     ] {
         if let Some(e) = e {
             l.note(format!("the section {name} is not read: {e}"));
         }
+    }
+    for (v, status) in super::layer2::inactive_vlans(cfg, &st) {
+        l.note(format!(
+            "VLAN {v}: show vlan brief gives the status {status}, so each port that carries it is unknown"
+        ));
     }
     let active = ports(&mut l, cfg, &st);
     let groups = groups(&mut l, cfg, &st, &active, &names);
@@ -144,7 +175,7 @@ pub fn lower(
             &shared_active,
             &gws,
             &nst,
-            &crate::collected::Collected::default(),
+            &super::layer2::collected(&st),
             &names,
             ext,
             &mut sum,
@@ -186,7 +217,23 @@ pub fn lower(
             .iter()
             .filter_map(|r| r.next_hop.as_deref()?.parse::<IpAddr>().ok()),
     );
-    for a in st.l3.arp.iter().flatten().flatten() {
+    // The ARP rows of the global table and of each VRF whose table is read.
+    let vrf_arp: Vec<&crate::iosxr::state::ArpRow> = st
+        .arp_vrfs
+        .iter()
+        .flatten()
+        .flat_map(|m| m.values())
+        .flatten()
+        .flatten()
+        .collect();
+    for a in st
+        .l3
+        .arp
+        .iter()
+        .flatten()
+        .flatten()
+        .chain(vrf_arp.iter().copied())
+    {
         if let Some(v) = nxos::layer2::svi_vlan(&a.interface)
             && svi_links.contains_key(&a.interface)
         {
@@ -230,7 +277,9 @@ pub fn lower(
 
     // The route lookup in the table of each VRF. The next hops of the
     // default VRF go to the NAT of the inside to outside direction; the
-    // next hops of another VRF need its ARP table, which is not collected.
+    // next hops of another VRF go to the next-hop resolution if the section
+    // `arp_vrfs` gives its ARP table, else to `arp/<vrf>`, which gives
+    // `Unknown`.
     let rib = st.l3.rib.as_ref().and_then(|x| x.as_ref().ok());
     if st.l3.rib.is_none() {
         l.note(
@@ -248,9 +297,13 @@ pub fn lower(
     let other_vrf = |v: &str| format!("a next hop in VRF {v} is not lowered");
     let mut tables = BTreeMap::new();
     let mut forwards = false;
+    let mut vrf_forwards = false;
     for v in &vrfs {
+        let arp_of_vrf = vrf_arp_state(&st, v);
         let next = if v == DEFAULT_VRF {
             "snat".to_string()
+        } else if arp_of_vrf.is_ok() {
+            "nexthop".to_string()
         } else {
             format!("arp/{v}")
         };
@@ -263,15 +316,18 @@ pub fn lower(
         if has_hops && v == DEFAULT_VRF {
             forwards = true;
         } else if has_hops {
-            let span = vrf_span(&l, cfg, rib, v);
-            let s = l.sink(
-                &next,
-                format!(
-                    "the ARP table of VRF {v} is not collected, so its next hops are not known"
-                ),
-                span,
-            );
-            l.add(s);
+            match arp_of_vrf {
+                Ok(()) => vrf_forwards = true,
+                Err(why) => {
+                    let span = vrf_span(&l, cfg, rib, v);
+                    let s = l.sink(
+                        &next,
+                        format!("{why}, so its next hops are not known"),
+                        span,
+                    );
+                    l.add(s);
+                }
+            }
         }
         tables.insert(VrfId::new(v), t);
     }
@@ -311,11 +367,38 @@ pub fn lower(
             next: l.id("nexthop"),
             keep_untranslated: KEEPS_UNTRANSLATED_FLOWS,
         });
-        next_hops(&mut l, &active, &st.l3, ext, &svi_links);
+    }
+    if forwards || vrf_forwards {
+        // One next-hop resolution for the global table and the VRFs: an
+        // ARP row names its interface, which is in one VRF.
+        let mut l3 = st.l3.clone();
+        let mut rows: Vec<crate::iosxr::state::ArpRow> =
+            st.l3.arp.iter().flatten().flatten().cloned().collect();
+        rows.extend(vrf_arp.iter().map(|a| (*a).clone()));
+        l3.arp = Some(Ok(rows));
+        next_hops(&mut l, &active, &l3, ext, &svi_links);
     }
     handoffs(&mut l, &active, &groups, &sum, ext);
     edges(&mut l, device, &active);
     (l.out, sum)
+}
+
+/// Whether the section `arp_vrfs` gives the ARP table of a VRF other than
+/// the default VRF, or why it does not.
+fn vrf_arp_state(st: &State, vrf: &str) -> Result<(), String> {
+    match &st.arp_vrfs {
+        None => Err(format!("the ARP table of VRF {vrf} is not collected")),
+        Some(Err(e)) => Err(format!(
+            "the section arp_vrfs is not read ({e}), so the ARP table of VRF {vrf} is not known"
+        )),
+        Some(Ok(m)) => match m.get(vrf) {
+            None => Err(format!(
+                "the section arp_vrfs has no ARP table of VRF {vrf}"
+            )),
+            Some(Err(e)) => Err(e.clone()),
+            Some(Ok(_)) => Ok(()),
+        },
+    }
 }
 
 /// The span of a VRF: its stanza in the config, else its first route in the
@@ -378,9 +461,12 @@ fn ports(l: &mut L, cfg: &Config, st: &State) -> Vec<Port> {
 }
 
 /// The IPv4 HSRP and VRRP groups of the lowered interfaces with their state
-/// from `show standby brief` and `show vrrp brief`. The virtual MAC is the
-/// MAC of `standby <group> mac-address`; the brief forms give none, so each
-/// other group has a virtual MAC that is not known.
+/// from `show standby` and `show vrrp`, else from `show standby brief` and
+/// `show vrrp brief`. The virtual MAC is the MAC of
+/// `standby <group> mac-address`, else the virtual MAC of `show standby` or
+/// `show vrrp`; the brief forms give none. A virtual MAC of the section that
+/// differs from the MAC of the config, and an HSRP state that contradicts
+/// the active router of `show standby`, make the state `Unknown`.
 fn groups(
     l: &mut L,
     cfg: &Config,
@@ -395,17 +481,31 @@ fn groups(
             continue;
         }
         for g in &i.fhrp {
-            let (rules, rows) = match g.kind {
-                FhrpKind::Hsrp => (&HSRP_RULES, &st.l3.hsrp),
-                FhrpKind::Vrrp => (&VRRP_RULES, &st.vrrp),
+            let (brief_rules, detail_rules, brief, detail) = match g.kind {
+                FhrpKind::Hsrp => (
+                    &HSRP_RULES,
+                    &HSRP_DETAIL_RULES,
+                    &st.l3.hsrp,
+                    &st.hsrp_detail,
+                ),
+                FhrpKind::Vrrp => (&VRRP_RULES, &VRRP_DETAIL_RULES, &st.vrrp, &st.vrrp_detail),
+            };
+            let detail_rows: Option<Result<Vec<HsrpRow>, String>> = detail.as_ref().map(|d| {
+                d.as_ref()
+                    .map(|v| v.iter().map(|x| x.row.clone()).collect())
+                    .map_err(Clone::clone)
+            });
+            let (rules, rows) = match &detail_rows {
+                Some(_) => (detail_rules, &detail_rows),
+                None => (brief_rules, brief),
             };
             let mut spans = vec![l.span(g.lines)];
             spans.extend(g.addresses.iter().map(|(_, x)| l.span(*x)));
-            let vmac = g.mac.map(|(m, x)| {
+            let mut vmac = g.mac.map(|(m, x)| {
                 spans.push(l.span(x));
                 m
             });
-            let state = group_state(
+            let mut state = group_state(
                 g.group,
                 g.addresses.first().map(|a| a.0),
                 &g.unhandled,
@@ -414,6 +514,38 @@ fn groups(
                 rules,
                 &mut spans,
             );
+            let row = detail.iter().flatten().flatten().find(|x| {
+                x.row.interface == iface
+                    && x.row.group == g.group
+                    && !x.row.address.is_some_and(|a| a.is_ipv6())
+            });
+            if let (Some(x), false) = (row, matches!(state, GroupState::Unknown(_))) {
+                let cmd = rules.command;
+                match (vmac, x.vmac) {
+                    (None, Some(m)) => vmac = Some(m),
+                    (Some(c), Some(m)) if c != m => {
+                        state = GroupState::Unknown(format!(
+                            "{cmd} gives the virtual MAC {m:?}, and the config gives {c:?}"
+                        ));
+                    }
+                    _ => {}
+                }
+                match (&state, x.active_local) {
+                    (GroupState::Active, Some(false)) => {
+                        state = GroupState::Unknown(format!(
+                            "{cmd} gives the state {} and another active router",
+                            x.row.state
+                        ));
+                    }
+                    (GroupState::NotActive, Some(true)) => {
+                        state = GroupState::Unknown(format!(
+                            "{cmd} gives the state {} and the router itself as the active router",
+                            x.row.state
+                        ));
+                    }
+                    _ => {}
+                }
+            }
             let group = Group {
                 what: rules.what,
                 group: g.group,

@@ -31,6 +31,12 @@ pub const SECTIONS: &[&str] = &[
     "cdp",
     "hsrp",
     "vrrp",
+    "mac_table",
+    "spanning_tree",
+    "vlans",
+    "hsrp_detail",
+    "vrrp_detail",
+    "arp_vrfs",
 ];
 
 /// The resolver of the interface names of the sections to the names of the

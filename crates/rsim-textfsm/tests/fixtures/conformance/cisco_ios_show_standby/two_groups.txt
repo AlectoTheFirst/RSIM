@@ -1,0 +1,30 @@
+Vlan10 - Group 10
+  State is Standby
+    4 state changes, last state change 2d03h
+  Virtual IP address is 192.0.2.1
+  Active virtual MAC address is 0000.0c07.ac0a (MAC Not In Use)
+    Local virtual MAC address is 0000.0c07.ac0a (v1 default)
+  Hello time 3 sec, hold time 10 sec
+    Next hello sent in 2.112 secs
+  Preemption disabled
+  Active router is 192.0.2.3, priority 120 (expires in 8.432 sec)
+    MAC address is 0000.5e00.5303
+  Standby router is local
+  Priority 100 (default 100)
+  Group name is "hsrp-Vl10-10" (default)
+Vlan20 - Group 20 (version 2)
+  State is Active
+    1 state change, last state change 3w2d
+  Virtual IP address is 198.51.100.1
+    Secondary virtual IP address 198.51.100.129
+  Active virtual MAC address is 0000.0c9f.f014 (MAC In Use)
+    Local virtual MAC address is 0000.0c9f.f014 (v2 default)
+  Hello time 3 sec, hold time 10 sec
+    Next hello sent in 0.880 secs
+  Authentication MD5, key-chain "FAKECHAIN"
+  Preemption enabled
+  Active router is local
+  Standby router is unknown
+  Priority 110 (configured 110)
+    Track object 1 state Up decrement 20
+  Group name is "hsrp-Vl20-20" (default)

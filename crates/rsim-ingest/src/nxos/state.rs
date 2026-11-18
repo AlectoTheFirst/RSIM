@@ -112,7 +112,18 @@ pub struct State {
     /// gives `Unknown` for a frame to a MAC that the twin does not place,
     /// except a broadcast frame, which floods.
     pub no_mac_table: bool,
+    /// The spanning tree state of each port in each VLAN, if a section
+    /// gives it: `Some(true)` for a port that forwards, `Some(false)` for a
+    /// port that does not, and `None` for a state that is not known. With
+    /// it, a flood copy goes to a port only if the port forwards in the
+    /// VLAN; a port with no row in a VLAN gives `Unknown`, except an edge
+    /// port.
+    pub stp: Option<StpPorts>,
 }
+
+/// The spanning tree state of each port, by the port and the VLAN: whether
+/// the port forwards, if known, and the span of the row.
+pub type StpPorts = BTreeMap<(String, u16), (Option<bool>, SourceSpan)>;
 
 /// The state of a vPC domain from `show vpc`, with the fields that HST
 /// reads. HST marks these names as not confirmed on a device.

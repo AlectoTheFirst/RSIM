@@ -245,6 +245,27 @@ fn the_index_selects_the_template_of_each_command_of_hst() {
         ),
         (
             "cisco_ios",
+            "show mac address-table",
+            "cisco_ios_show_mac-address-table.textfsm",
+        ),
+        (
+            "cisco_ios",
+            "show spanning-tree",
+            "cisco_ios_show_spanning-tree.textfsm",
+        ),
+        (
+            "cisco_ios",
+            "show vlan brief",
+            "cisco_ios_show_vlan.textfsm",
+        ),
+        (
+            "cisco_ios",
+            "show standby",
+            "cisco_ios_show_standby.textfsm",
+        ),
+        ("cisco_ios", "show vrrp", "cisco_ios_show_vrrp_all.textfsm"),
+        (
+            "cisco_ios",
             "show ip ospf neighbor",
             "cisco_ios_show_ip_ospf_neighbor.textfsm",
         ),

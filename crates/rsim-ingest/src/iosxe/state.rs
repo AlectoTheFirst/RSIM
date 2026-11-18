@@ -1,18 +1,23 @@
 //! The collected text sections of an IOS-XE router or switch that the
 //! lowering reads, each parsed by its TextFSM template: the interface state,
-//! the route table of each VRF, ARP, the access lists, the LLDP and CDP
-//! neighbours and the HSRP and VRRP groups. Each row keeps the line range of
-//! its record in the section.
+//! the route table of each VRF, ARP of the global table and of each VRF, the
+//! access lists, the LLDP and CDP neighbours, the HSRP and VRRP groups, the
+//! MAC table, the spanning tree and the VLANs. Each row keeps the line range
+//! of its record in the section.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
 use rsim_core::{Prefix, SourceSpan};
 
+use rsim_core::Mac;
+
 use super::profile::{
-    ARP_OWN_AGE, DEFAULT_VRF, PLATFORM, ROUTE_FLAGS_NOT_LOWERED, STATE_ADMIN_DOWN, STATE_DOWN,
-    STATE_UP, TABLE_HEADERS, VRF_HEADER,
+    ARP_OWN_AGE, ARP_VRF_FAILED, ARP_VRF_LINE, DEFAULT_VRF, HSRP_LOCAL, PLATFORM,
+    ROUTE_FLAGS_NOT_LOWERED, STATE_ADMIN_DOWN, STATE_DOWN, STATE_UP, STP_FORWARDING,
+    STP_MST_HEADER, STP_NOT_FORWARDING, TABLE_HEADERS, VRF_HEADER,
 };
+use crate::collected::MacRow;
 use crate::iosxr::state::{
     ArpRow, HsrpRow, IfState, Parsed, Rib, RoutePath, Section, UnreadRoute, cdp, hsrp, lldp,
     parse_on, prefix_on, speed,
@@ -32,6 +37,12 @@ pub const SECTIONS: &[(&str, &str)] = &[
     ("cdp", "show cdp neighbors detail"),
     ("hsrp", "show standby brief"),
     ("vrrp", "show vrrp brief"),
+    ("mac_table", "show mac address-table"),
+    ("spanning_tree", "show spanning-tree"),
+    ("vlans", "show vlan brief"),
+    ("hsrp_detail", "show standby"),
+    ("vrrp_detail", "show vrrp"),
+    ("arp_vrfs", "show ip arp"),
 ];
 
 /// An access list of `show ip access-lists`.
@@ -43,6 +54,41 @@ pub struct AclList {
     pub span: Option<SourceSpan>,
 }
 
+/// An HSRP or VRRP group of `show standby` or `show vrrp`: the row of the
+/// brief form, the virtual MAC, and for HSRP whether the active router is
+/// the router itself (`None` if the section does not say).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupDetail {
+    pub row: HsrpRow,
+    pub vmac: Option<Mac>,
+    pub active_local: Option<bool>,
+}
+
+/// The state of a port in the tree of a VLAN in `show spanning-tree`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StpState {
+    Forwarding,
+    NotForwarding,
+    /// A state word that is not known.
+    Unknown(String),
+}
+
+/// The state of each port in each VLAN: the port with the name of the
+/// config, the VLAN, the state and the span of the row.
+pub type Stp = BTreeMap<(String, u16), (StpState, SourceSpan)>;
+
+/// A VLAN of `show vlan brief`: its number, its status word and its span.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VlanRow {
+    pub vlan: u16,
+    pub status: String,
+    pub span: SourceSpan,
+}
+
+/// The ARP table of each VRF of the section `arp_vrfs`. A VRF whose
+/// command failed gives an error.
+pub type VrfArp = BTreeMap<String, Result<Vec<ArpRow>, String>>;
+
 /// The collected sections of a router. The interface state, the route
 /// table, ARP, the neighbours and the HSRP groups have the row types of
 /// IOS-XR, so the lowering shares the route table, the next-hop resolution,
@@ -53,6 +99,14 @@ pub struct State {
     pub acls: Section<BTreeMap<String, AclList>>,
     /// The VRRP groups of `show vrrp brief`.
     pub vrrp: Section<Vec<HsrpRow>>,
+    /// The HSRP groups of `show standby`.
+    pub hsrp_detail: Section<Vec<GroupDetail>>,
+    /// The VRRP groups of `show vrrp`.
+    pub vrrp_detail: Section<Vec<GroupDetail>>,
+    pub mac_table: Section<Vec<MacRow>>,
+    pub stp: Section<Stp>,
+    pub vlans: Section<Vec<VlanRow>>,
+    pub arp_vrfs: Section<VrfArp>,
 }
 
 /// An IOS-XE answer has no line before it.
@@ -93,7 +147,161 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
         },
         acls: section(sections, "acls", |p, _| acls(p)),
         vrrp: section(sections, "vrrp", |p, _| hsrp(p, names)),
+        hsrp_detail: section(sections, "hsrp_detail", |p, _| {
+            groups(p, names, "VIRTUAL_IP", "ACTIVE_VIRTUAL_MAC")
+        }),
+        vrrp_detail: section(sections, "vrrp_detail", |p, _| {
+            groups(p, names, "VIRTUAL_IP_ADDRESS", "VIRTUAL_MAC_ADDRESS")
+        }),
+        mac_table: section(sections, "mac_table", |p, _| Ok(mac_table(p))),
+        stp: section(sections, "spanning_tree", |p, text| stp(p, text, names)),
+        vlans: section(sections, "vlans", |p, _| vlans(p)),
+        arp_vrfs: sections
+            .get("arp_vrfs")
+            .map(|(bytes, file)| arp_vrfs(&String::from_utf8_lossy(bytes), file, names)),
     }
+}
+
+/// The groups of `show standby` or `show vrrp` with the address field and
+/// the virtual MAC field of the template. The HSRP field `ACTIVE_ROUTER`
+/// gives whether the router itself is the active router.
+fn groups(
+    p: &Parsed,
+    names: &Names,
+    address: &str,
+    vmac: &str,
+) -> Result<Vec<GroupDetail>, String> {
+    p.records()
+        .map(|(r, span)| {
+            let group = p.text(r, "GROUP");
+            let active = p.text(r, "ACTIVE_ROUTER");
+            Ok(GroupDetail {
+                row: HsrpRow {
+                    interface: names.resolve(p.text(r, "INTERFACE")),
+                    group: group
+                        .parse()
+                        .map_err(|_| format!("the group {group:?} is not a number"))?,
+                    state: p.text(r, "STATE").to_string(),
+                    address: p.text(r, address).parse().ok(),
+                    span,
+                },
+                vmac: mac(p.text(r, vmac)),
+                active_local: if active.eq_ignore_ascii_case(HSRP_LOCAL) {
+                    Some(true)
+                } else if active.parse::<IpAddr>().is_ok() {
+                    Some(false)
+                } else {
+                    None
+                },
+            })
+        })
+        .collect()
+}
+
+/// The rows of the MAC table. A row whose VLAN is not a number, such as
+/// `All`, is not a row of a bridge domain. A row with more than one port
+/// has no port.
+fn mac_table(p: &Parsed) -> Vec<MacRow> {
+    p.records()
+        .filter_map(|(r, span)| {
+            let vlan = p.text(r, "VLAN_ID").parse().ok()?;
+            let ports = p.list(r, "DESTINATION_PORT");
+            Some(MacRow {
+                vlan,
+                mac: p.text(r, "DESTINATION_ADDRESS").to_string(),
+                port: match ports.as_slice() {
+                    [one] => Some(one.clone()),
+                    _ => None,
+                },
+                kind: Some(p.text(r, "TYPE").to_ascii_lowercase()),
+                span,
+            })
+        })
+        .collect()
+}
+
+/// The state of each port in the tree of each VLAN. The template carries
+/// the VLAN of a tree down to the rows of the next tree, so a tree of
+/// another form, such as an MST instance, makes the section not read.
+fn stp(p: &Parsed, text: &str, names: &Names) -> Result<Stp, String> {
+    if let Some(line) = text
+        .lines()
+        .find(|l| l.trim_start().starts_with(STP_MST_HEADER))
+    {
+        return Err(format!(
+            "the tree {:?} is not the tree of a VLAN",
+            line.trim()
+        ));
+    }
+    let mut out = Stp::new();
+    for (r, span) in p.records() {
+        let vlan = p.text(r, "VLAN_ID");
+        let Ok(vlan) = vlan.parse::<u16>() else {
+            return Err(format!("the row at line {} has no VLAN", span.first_line));
+        };
+        let word = p.text(r, "STATUS").to_ascii_lowercase();
+        let state = if STP_FORWARDING.contains(&word.as_str()) {
+            StpState::Forwarding
+        } else if STP_NOT_FORWARDING.contains(&word.as_str()) {
+            StpState::NotForwarding
+        } else {
+            StpState::Unknown(p.text(r, "STATUS").to_string())
+        };
+        out.insert((names.resolve(p.text(r, "INTERFACE")), vlan), (state, span));
+    }
+    Ok(out)
+}
+
+/// The VLANs of `show vlan brief`.
+fn vlans(p: &Parsed) -> Result<Vec<VlanRow>, String> {
+    p.records()
+        .map(|(r, span)| {
+            let vlan = p.text(r, "VLAN_ID");
+            Ok(VlanRow {
+                vlan: vlan
+                    .parse()
+                    .map_err(|_| format!("the VLAN {vlan:?} is not a number"))?,
+                status: p.text(r, "STATUS").to_string(),
+                span,
+            })
+        })
+        .collect()
+}
+
+/// The ARP table of each VRF of the section `arp_vrfs`: each line
+/// `VRF: <name>` starts the answer of a VRF, and the line
+/// `VRF: <name> failed` gives a VRF whose command failed. A text before
+/// the first such line makes the section not read.
+fn arp_vrfs(text: &str, file: &str, names: &Names) -> Result<VrfArp, String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let starts: Vec<usize> = (0..lines.len())
+        .filter(|&i| lines[i].starts_with(ARP_VRF_LINE))
+        .collect();
+    let first = starts.first().copied().unwrap_or(lines.len());
+    if let Some(l) = lines[..first].iter().find(|l| !l.trim().is_empty()) {
+        return Err(format!("the line {:?} is before the first VRF", l.trim()));
+    }
+    let mut out = VrfArp::new();
+    for (k, &at) in starts.iter().enumerate() {
+        let end = starts.get(k + 1).copied().unwrap_or(lines.len());
+        let head = lines[at][ARP_VRF_LINE.len()..].trim();
+        if let Some(name) = head.strip_suffix(ARP_VRF_FAILED) {
+            let name = name.trim();
+            out.insert(
+                name.to_string(),
+                Err(format!("the command of the ARP table of VRF {name} failed")),
+            );
+            continue;
+        }
+        let mut body = lines[at + 1..end].join("\n");
+        body.push('\n');
+        let rows = parse("arp_vrfs", body.as_bytes(), file).map(|mut p| {
+            p.shift(at + 1);
+            arp(&p, names)
+        });
+        out.insert(head.to_string(), rows);
+    }
+    Ok(out)
 }
 
 /// The route tables. With the section `rib_global`, the global table comes
@@ -365,12 +573,18 @@ mod tests {
             let want = match *section {
                 "interfaces" => "cisco_ios_show_interfaces.textfsm",
                 "rib" | "rib_global" => "cisco_ios_show_ip_route.textfsm",
-                "arp" => "cisco_ios_show_ip_arp.textfsm",
                 "lldp" => "cisco_ios_show_lldp_neighbors_detail.textfsm",
                 "cdp" => "cisco_ios_show_cdp_neighbors_detail.textfsm",
                 "hsrp" => "cisco_ios_show_standby_brief.textfsm",
                 "vrrp" => "cisco_ios_show_vrrp_brief.textfsm",
-                _ => "cisco_ios_show_ip_access-lists.textfsm",
+                "mac_table" => "cisco_ios_show_mac-address-table.textfsm",
+                "spanning_tree" => "cisco_ios_show_spanning-tree.textfsm",
+                "vlans" => "cisco_ios_show_vlan.textfsm",
+                "hsrp_detail" => "cisco_ios_show_standby.textfsm",
+                "vrrp_detail" => "cisco_ios_show_vrrp_all.textfsm",
+                "arp" | "arp_vrfs" => "cisco_ios_show_ip_arp.textfsm",
+                "acls" => "cisco_ios_show_ip_access-lists.textfsm",
+                other => panic!("no template is expected for {other}"),
             };
             assert_eq!(name, want, "{command}");
         }

@@ -1,0 +1,9 @@
+Legend: * - primary entry
+        age - seconds since last seen
+        n/a - not available
+
+  vlan   mac address     type    learn     age              ports
+------+----------------+--------+-----+----------+--------------------------
+*   10  0000.5e00.5330   dynamic  Yes          5   Gi1/2
+*   20  0000.5e00.5332   dynamic  Yes        120   Po1
+*  ---  0000.5e00.5341   static   No           -   Router

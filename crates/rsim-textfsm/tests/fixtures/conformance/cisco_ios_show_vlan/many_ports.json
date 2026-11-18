@@ -1,0 +1,38 @@
+{
+ "template": "cisco_ios_show_vlan.textfsm",
+ "header": [
+  "VLAN_ID",
+  "VLAN_NAME",
+  "STATUS",
+  "INTERFACES"
+ ],
+ "records": [
+  [
+   "1",
+   "default",
+   "active",
+   [
+    "Gi1/0/1",
+    "Gi1/0/2",
+    "Gi1/0/3",
+    "Gi1/0/4",
+    "Gi1/0/5",
+    "Gi1/0/6"
+   ]
+  ],
+  [
+   "30",
+   "SERVERS",
+   "act/lshut",
+   [
+    "Gi1/0/7"
+   ]
+  ],
+  [
+   "40",
+   "LAB",
+   "suspended",
+   []
+  ]
+ ]
+}

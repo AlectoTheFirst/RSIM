@@ -1,0 +1,60 @@
+{
+ "template": "cisco_ios_show_vlan.textfsm",
+ "header": [
+  "VLAN_ID",
+  "VLAN_NAME",
+  "STATUS",
+  "INTERFACES"
+ ],
+ "records": [
+  [
+   "1",
+   "default",
+   "active",
+   [
+    "Gi1/0/4",
+    "Gi1/0/5"
+   ]
+  ],
+  [
+   "10",
+   "USERS",
+   "active",
+   [
+    "Gi1/0/2"
+   ]
+  ],
+  [
+   "20",
+   "VOICE",
+   "active",
+   [
+    "Gi1/0/3"
+   ]
+  ],
+  [
+   "1002",
+   "fddi-default",
+   "act/unsup",
+   []
+  ],
+  [
+   "1003",
+   "token-ring-default",
+   "act/unsup",
+   []
+  ],
+  [
+   "1004",
+   "fddinet-default",
+   "act/unsup",
+   []
+  ],
+  [
+   "1005",
+   "trnet-default",
+   "act/unsup",
+   []
+  ]
+ ]
+}

@@ -1,0 +1,43 @@
+{
+ "template": "cisco_ios_show_mac-address-table.textfsm",
+ "header": [
+  "DESTINATION_ADDRESS",
+  "TYPE",
+  "VLAN_ID",
+  "DESTINATION_PORT"
+ ],
+ "records": [
+  [
+   "0100.0ccc.cccc",
+   "STATIC",
+   "All",
+   [
+    "CPU"
+   ]
+  ],
+  [
+   "0000.5e00.5330",
+   "DYNAMIC",
+   "10",
+   [
+    "Gi1/0/2"
+   ]
+  ],
+  [
+   "0000.5e00.5331",
+   "DYNAMIC",
+   "10",
+   [
+    "Po1"
+   ]
+  ],
+  [
+   "0000.5e00.5332",
+   "DYNAMIC",
+   "20",
+   [
+    "Gi1/0/3"
+   ]
+  ]
+ ]
+}
