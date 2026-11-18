@@ -498,7 +498,8 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     let mut peers = Peers {
         sessions,
         summaries: &mut summaries,
-        out: &mut e.bgp,
+        coverage: &e.coverage,
+        unread: &e.unread,
     };
     for (d, r) in &routers {
         let i = r.cfg.interfaces.iter().map(|i| {
@@ -540,6 +541,10 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     for (d, notes) in std::mem::take(&mut joined.notes) {
         e.notes.entry(d).or_default().extend(notes);
     }
+    // The BGP peers with their far ends; a peer outside the twin is a
+    // router, not an endpoint.
+    e.bgp = std::mem::take(&mut joined.bgp);
+    next_hops.extend(joined.bgp_outside.iter().copied());
 
     let mut l2: BTreeMap<String, vyos::Layer2Links> = BTreeMap::new();
     let mut extra: BTreeMap<String, Vec<collected::NeighbourRow>> = BTreeMap::new();
@@ -734,12 +739,12 @@ fn interfaces(
     .collect()
 }
 
-/// The BGP peer facts of the devices: into the summary of each device and
-/// into the estate.
+/// The BGP peer facts of the devices, into the summary of each device.
 struct Peers<'a> {
     sessions: &'a BTreeMap<String, SessionSections>,
     summaries: &'a mut BTreeMap<String, Summary>,
-    out: &'a mut BTreeMap<String, Vec<BgpPeerFact>>,
+    coverage: &'a BTreeMap<String, Coverage>,
+    unread: &'a BTreeMap<String, Vec<String>>,
 }
 
 impl Peers<'_> {
@@ -753,12 +758,21 @@ impl Peers<'_> {
     ) {
         let none = SessionSections::new();
         let s = bgp::read(vendor, self.sessions.get(device).unwrap_or(&none));
-        let facts = crate::bgp_peers::facts(device, file, cfg, &s, &interfaces);
+        let mut facts = crate::bgp_peers::facts(device, file, cfg, &s, &interfaces);
         let sum = self.summaries.entry(device.to_string()).or_default();
+        crate::bgp_peers::lookup_sources(&mut facts, &sum.routes, &interfaces);
         sum.local_addresses = crate::bgp_peers::local_addresses(&interfaces);
-        if !facts.is_empty() {
-            self.out.insert(device.to_string(), facts.clone());
-        }
+        // The BGP config is read in full when no unhandled stanza and no
+        // unread handled stanza names BGP.
+        let bgp = |p: &str| p.to_ascii_lowercase().contains("bgp");
+        sum.bgp_read = !self
+            .coverage
+            .get(device)
+            .is_some_and(|c| c.unhandled.keys().any(|p| bgp(p)))
+            && !self
+                .unread
+                .get(device)
+                .is_some_and(|u| u.iter().any(|p| bgp(p)));
         sum.bgp_peers = facts;
     }
 }

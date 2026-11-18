@@ -46,9 +46,22 @@ pub const CLAIMS: &[ClaimDef] = &[
     },
     ClaimDef {
         name: "bgp-peers-up",
-        description: "Each BGP peer of the scope is established. No collector collects the BGP session state yet, so the claim is unknown.",
+        description: "Each configured BGP neighbour of the scope is established. A neighbour with no session row is refuted only when the session section was read in full and its scope covers the VRF and each address family of the neighbour; else it is unknown. A neighbour with shutdown and a neighbour whose peer is outside the twin give no row, and the detail counts them. A scope with no BGP neighbour is unknown.",
         scopes: &["twin", "devices", "query"],
-        reads: &["the BGP session state, which is not collected"],
+        reads: &[
+            "the BGP neighbours of the config after the inheritance",
+            "the BGP session sections: the state of each session and the outcome and the scope of the read",
+        ],
+    },
+    ClaimDef {
+        name: "bgp-peers-agree",
+        description: "The 2 sides of each configured BGP neighbour whose peer is a device of the twin agree. They pair on the exact transport addresses: the far device has a neighbour for the source address of the near side, or a listen range that holds it. A one-sided peering, a neighbour of the far side that names another address of the near device, an AS of the peer that is not the AS that the other side presents, and 2 sides with no common address family refute. An AS or a source address that does not resolve, different session states and different prefix counts give unknown. A neighbour with shutdown and a neighbour whose peer is outside the twin give no row, and the detail counts them. A scope with no BGP neighbour is unknown.",
+        scopes: &["twin", "devices", "query"],
+        reads: &[
+            "the BGP neighbours and listen ranges of the config after the inheritance, with the presented local AS",
+            "the local addresses of each device and the collected routes for the source address",
+            "the BGP session sections: the state and the prefix counts of each session",
+        ],
     },
 ];
 
@@ -92,6 +105,9 @@ pub struct ClaimOut {
     pub scope: String,
     pub result: ClaimResult,
     pub counts: Counts,
+    /// What the claim leaves out of its rows, or why it has none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub detail: String,
     pub evidence: Vec<Evidence>,
 }
 

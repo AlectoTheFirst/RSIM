@@ -307,7 +307,7 @@ pub fn lower(
     }
     cross_check(&mut l, cfg, &st);
     let groups = hsrp(&mut l, cfg, &st, &active, &names);
-    let sum = summary(&l, cfg, &st, &active, &names);
+    let mut sum = summary(&l, cfg, &st, &active, &names);
     if active.is_empty() {
         return (l.out, sum);
     }
@@ -333,6 +333,7 @@ pub fn lower(
         )
     };
     let resolver = resolver(rib, &vrfs);
+    sum.routes = resolver.clone();
     let hops = Hops {
         next: "nexthop",
         other_vrf: &other_vrf,

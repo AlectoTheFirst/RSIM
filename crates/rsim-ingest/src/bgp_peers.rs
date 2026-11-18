@@ -16,7 +16,10 @@ use std::net::IpAddr;
 use rsim_core::{Prefix, SourceSpan};
 
 use crate::bgp::{SessionRow, Sessions};
-use crate::links::{Asn, AsnValue, BgpPeer, BgpPeerFact, PeerSource};
+use crate::links::{
+    AddressValue, Asn, AsnValue, BgpPeer, BgpPeerFact, PeerSource, SOURCE_NOT_RESOLVED,
+};
+use crate::resolve::{Path, Resolver};
 use crate::stanza::Stanza;
 
 /// The name of the default VRF.
@@ -518,6 +521,17 @@ impl Ctx<'_> {
             source,
             update_source: s.update_source.as_ref().map(|u| u.value.clone()),
             local_address: local,
+            source_address: match local {
+                Some(a) => AddressValue::Known(a),
+                None => AddressValue::Unknown(match &s.update_source {
+                    Some(u) => format!(
+                        "{SOURCE_NOT_RESOLVED}: the update-source {} gives no one address of the family of the peer in VRF {}",
+                        u.value, n.vrf
+                    ),
+                    None => format!("{SOURCE_NOT_RESOLVED}: no route lookup on the peer address"),
+                }),
+            },
+            source_spans: Vec::new(),
             local_asn,
             peer_asn,
             observed_asn: observed_asn(&rows),
@@ -536,6 +550,7 @@ impl Ctx<'_> {
             router_id: None,
             section: self.sessions.outcome.clone(),
             spans: lines.into_iter().map(|l| self.span(l)).collect(),
+            far: None,
         }
     }
 
@@ -572,6 +587,10 @@ impl Ctx<'_> {
             source: PeerSource::Observed,
             update_source: None,
             local_address: None,
+            source_address: AddressValue::Unknown(format!(
+                "{SOURCE_NOT_RESOLVED}: an observed peer has no neighbour"
+            )),
+            source_spans: Vec::new(),
             local_asn,
             peer_asn,
             observed_asn,
@@ -585,6 +604,7 @@ impl Ctx<'_> {
             router_id: None,
             section: self.sessions.outcome.clone(),
             spans: row_spans,
+            far: None,
         }
     }
 }
@@ -623,6 +643,64 @@ fn local_address(
     {
         [a] => Some(**a),
         _ => None,
+    }
+}
+
+/// Gives each configured neighbour with a peer address and no update-source
+/// the source address of the route lookup on its peer address: the one
+/// address of the family of the peer of the egress interfaces of the
+/// lookup in the VRF of the neighbour, with the spans of the routes of the
+/// lookup. A lookup with no route, a route that is not known, an egress
+/// interface of another VRF or with no such one address, and egress
+/// interfaces with different addresses leave the source address unknown.
+pub fn lookup_sources(
+    facts: &mut [BgpPeerFact],
+    routes: &Resolver,
+    interfaces: &InterfaceAddresses,
+) {
+    for f in facts.iter_mut() {
+        let (BgpPeer::Address(peer), None, PeerSource::Configured) =
+            (&f.peer, &f.update_source, &f.source)
+        else {
+            continue;
+        };
+        let path = Path {
+            interface: None,
+            gateway: Some(*peer),
+            vrf: None,
+        };
+        let (hops, spans) = match routes.resolve(&f.vrf, &[path], true) {
+            Ok(r) => r,
+            Err(u) => {
+                f.source_address =
+                    AddressValue::Unknown(format!("{SOURCE_NOT_RESOLVED}: {}", u.why));
+                f.source_spans = u.spans;
+                continue;
+            }
+        };
+        f.source_spans = spans;
+        let mut found = BTreeSet::new();
+        let mut why = None;
+        for h in &hops {
+            match local_address(&h.interface, interfaces, &f.peer, &f.vrf) {
+                Some(a) => {
+                    found.insert(a);
+                }
+                None => {
+                    why = Some(format!(
+                        "the egress interface {} has no one address of the family of the peer in VRF {}",
+                        h.interface, f.vrf
+                    ));
+                }
+            }
+        }
+        f.source_address = match (why, found.len()) {
+            (Some(w), _) => AddressValue::Unknown(format!("{SOURCE_NOT_RESOLVED}: {w}")),
+            (None, 1) => AddressValue::Known(*found.iter().next().expect("one address")),
+            (None, _) => AddressValue::Unknown(format!(
+                "{SOURCE_NOT_RESOLVED}: the route lookup on {peer} gives more than one egress address"
+            )),
+        };
     }
 }
 
@@ -1184,5 +1262,78 @@ mod tests {
         assert_eq!(family(&["l2vpn", "evpn"]).as_deref(), Some("l2vpn-evpn"));
         assert_eq!(family(&["l2vpn-evpn"]).as_deref(), Some("l2vpn-evpn"));
         assert_eq!(family(&["rtfilter", "unicast"]), None);
+    }
+
+    #[test]
+    fn the_source_address_is_the_address_of_the_egress_interface_of_the_lookup() {
+        use crate::resolve::Target;
+        let a = |s: &str| s.parse::<IpAddr>().unwrap();
+        let i = InterfaceAddresses::from([
+            (
+                "eth0".to_string(),
+                ("default".to_string(), vec![a("198.51.100.1")]),
+            ),
+            (
+                "eth1".to_string(),
+                (
+                    "default".to_string(),
+                    vec![a("203.0.113.1"), a("203.0.113.2")],
+                ),
+            ),
+        ]);
+        let mut routes = Resolver::new();
+        let connected = |i: &str| {
+            Target::Paths(vec![Path {
+                interface: Some(i.to_string()),
+                gateway: None,
+                vrf: None,
+            }])
+        };
+        let route = SourceSpan::line("r1/routes", 3);
+        routes.add(
+            "default",
+            "198.51.100.0/30".parse().unwrap(),
+            connected("eth0"),
+            vec![route.clone()],
+        );
+        routes.add(
+            "default",
+            "203.0.113.0/24".parse().unwrap(),
+            connected("eth1"),
+            vec![SourceSpan::line("r1/routes", 4)],
+        );
+        let neighbour = |peer: &str| Neighbour {
+            vrf: DEFAULT_VRF.into(),
+            peer: BgpPeer::Address(a(peer)),
+            resolved: Resolved {
+                settings: remote(64510, 20),
+                ..Resolved::default()
+            },
+            lines: (20, 20),
+        };
+        let cfg = BgpConfig {
+            processes: BTreeMap::from([(DEFAULT_VRF.to_string(), process(64496, None))]),
+            neighbours: vec![
+                neighbour("198.51.100.2"),
+                neighbour("203.0.113.9"),
+                neighbour("192.0.2.9"),
+            ],
+        };
+        let mut f = facts("r1", "r1/config@0", &cfg, &sessions(Vec::new()), &i);
+        lookup_sources(&mut f, &routes, &i);
+        let at = |p: &str| f.iter().find(|x| x.peer.to_string() == p).unwrap();
+        assert_eq!(
+            at("198.51.100.2").source_address,
+            AddressValue::Known(a("198.51.100.1"))
+        );
+        assert_eq!(at("198.51.100.2").source_spans, vec![route]);
+        // An interface with 2 addresses, and no route.
+        for p in ["203.0.113.9", "192.0.2.9"] {
+            assert!(
+                matches!(&at(p).source_address, AddressValue::Unknown(r) if r.starts_with(SOURCE_NOT_RESOLVED)),
+                "{p}: {:?}",
+                at(p).source_address
+            );
+        }
     }
 }

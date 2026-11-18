@@ -248,6 +248,10 @@
           "counts": {
             "$ref": "#/components/schemas/Counts"
           },
+          "detail": {
+            "description": "What the claim leaves out of its rows, or why it has none.",
+            "type": "string"
+          },
           "evidence": {
             "items": {
               "$ref": "#/components/schemas/Evidence"

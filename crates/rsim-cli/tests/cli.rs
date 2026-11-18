@@ -973,12 +973,20 @@ fn a_claim_gives_its_result_its_evidence_and_its_exit_code() {
     assert_eq!(json_of(&o)["result"], "refuted");
 
     // Data that is not collected gives unknown, never confirmed.
-    for claim in ["bgp-peers-up", "link-speed-duplex"] {
+    let o = run("leaf-spine", "link-speed-duplex", &[]);
+    assert_eq!(o.status.code(), Some(3));
+    let v = json_of(&o);
+    assert_eq!(v["result"], "unknown");
+    assert_eq!(v["evidence"][0]["reason"], "not_collected");
+    // A built-in topology has no BGP neighbour, so the BGP claims are
+    // unknown with no row.
+    for claim in ["bgp-peers-up", "bgp-peers-agree"] {
         let o = run("leaf-spine", claim, &[]);
         assert_eq!(o.status.code(), Some(3), "{claim}");
         let v = json_of(&o);
         assert_eq!(v["result"], "unknown", "{claim}");
-        assert_eq!(v["evidence"][0]["reason"], "not_collected", "{claim}");
+        assert_eq!(v["evidence"], serde_json::json!([]), "{claim}");
+        assert_eq!(v["detail"], "no BGP neighbour in scope", "{claim}");
     }
 
     // The claim no-unknown needs a query.
