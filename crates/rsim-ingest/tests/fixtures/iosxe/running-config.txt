@@ -1,0 +1,306 @@
+Building configuration...
+
+Current configuration : 9876 bytes
+!
+! Last configuration change at 10:00:00 UTC Tue Nov 17 2026 by admin
+!
+version 17.9
+service timestamps debug datetime msec
+service timestamps log datetime msec
+service password-encryption
+no service pad
+platform qfp utilization monitor load 80
+platform punt-keepalive disable-kernel-core
+!
+hostname edge1
+!
+boot-start-marker
+boot system bootflash:packages.conf
+boot-end-marker
+!
+vrf definition MGMT
+ description out-of-band management
+ !
+ address-family ipv4
+ exit-address-family
+!
+vrf definition RED
+ rd 64496:100
+ !
+ address-family ipv4
+  route-target export 64496:100
+  route-target import 64496:100
+ exit-address-family
+ !
+ address-family ipv6
+ exit-address-family
+!
+ip vrf BLUE
+ description legacy servers
+ rd 64496:200
+ route-target export 64496:200
+ route-target import 64496:200
+!
+logging buffered 64000 informational
+no logging console
+enable secret 9 $9$FAKESALT$FAKEHASH
+!
+aaa new-model
+aaa authentication login default group tacacs+ local
+aaa authorization exec default group tacacs+ local
+aaa session-id common
+clock timezone UTC 0 0
+!
+ip domain name example.test
+ip name-server 192.0.2.53
+login on-success log
+subscriber templating
+multilink bundle-name authenticated
+!
+crypto pki trustpoint TP-self-signed-1234567890
+ enrollment selfsigned
+ subject-name cn=IOS-Self-Signed-Certificate-1234567890
+ revocation-check none
+ rsakeypair TP-self-signed-1234567890
+!
+crypto pki certificate chain TP-self-signed-1234567890
+ certificate self-signed 01
+  30820330 30820218 A0030201 02020101 300D0609 2A864886 F70D0101 05050030
+  quit
+!
+license udi pid C8300-1N1S-4T2X sn FAKESERIAL1
+license boot level network-advantage addon dna-advantage
+memory free low-watermark processor 68484
+diagnostic bootup level minimal
+spanning-tree extend system-id
+!
+username admin privilege 15 secret 9 $9$FAKESALT$FAKEHASH
+username netops privilege 15 password 0 FAKEPLAINPASSWORD
+!
+redundancy
+!
+crypto isakmp policy 10
+ encr aes 256
+ hash sha256
+ authentication pre-share
+ group 14
+crypto isakmp key FAKEISAKMPKEY address 198.51.100.200
+!
+crypto ipsec transform-set TS esp-aes 256 esp-sha256-hmac
+ mode tunnel
+!
+crypto map VPN 10 ipsec-isakmp
+ set peer 198.51.100.200
+ set transform-set TS
+ match address VPN-TRAFFIC
+!
+key chain HSRP-KEYS
+ key 1
+  key-string 7 FAKEKEYSTRING
+!
+track 1 ip sla 1 reachability
+!
+class-map match-any VOICE
+ match dscp ef
+!
+policy-map WAN-OUT
+ class VOICE
+  priority percent 20
+ class class-default
+  fair-queue
+!
+class-map type inspect match-any INSIDE-TO-OUTSIDE
+ match protocol tcp
+ match protocol udp
+ match protocol icmp
+!
+policy-map type inspect INSIDE-OUT-POLICY
+ class type inspect INSIDE-TO-OUTSIDE
+  inspect
+ class class-default
+  drop
+!
+zone security INSIDE
+zone security OUTSIDE
+zone-pair security IN-OUT source INSIDE destination OUTSIDE
+ service-policy type inspect INSIDE-OUT-POLICY
+!
+interface Loopback0
+ ip address 192.0.2.255 255.255.255.255
+!
+interface GigabitEthernet0/0/0
+ description WAN uplink to the provider
+ ip address 198.51.100.2 255.255.255.252
+ ip access-group EDGE-IN in
+ ip nat outside
+ zone-member security OUTSIDE
+ negotiation auto
+ crypto map VPN
+ service-policy output WAN-OUT
+ ip verify unicast source reachable-via rx
+!
+interface GigabitEthernet0/0/1
+ description LAN trunk
+ no ip address
+ negotiation auto
+!
+interface GigabitEthernet0/0/1.100
+ description RED users
+ encapsulation dot1Q 100
+ vrf forwarding RED
+ ip address 192.0.2.2 255.255.255.192
+ ip address 192.0.2.66 255.255.255.192 secondary
+ ip nat inside
+ ip access-group 101 out
+ standby version 2
+ standby 1 ip 192.0.2.1
+ standby 1 ip 192.0.2.65 secondary
+ standby 1 priority 110
+ standby 1 preempt delay minimum 30
+ standby 1 authentication md5 key-string FAKEHSRPKEY
+ standby 1 track 1 decrement 20
+ standby 2 ip 192.0.2.3
+ standby 2 mac-address 0000.5e00.53a2
+ zone-member security INSIDE
+!
+interface GigabitEthernet0/0/1.200
+ description BLUE servers
+ encapsulation dot1Q 200
+ ip vrf forwarding BLUE
+ ip address 192.0.2.129 255.255.255.192
+ ip mtu 1400
+ vrrp 10 ip 192.0.2.130
+ vrrp 10 priority 120
+ vrrp 10 preempt
+ vrrp 10 timers advertise 1
+ ip policy route-map PBR-BLUE
+!
+interface GigabitEthernet0/0/2
+ description spare
+ no ip address
+ shutdown
+ negotiation auto
+!
+interface GigabitEthernet0/0/3
+ description DHCP backup uplink
+ ip address dhcp
+ ip nat outside
+ mtu 1500
+ load-interval 30
+ no cdp enable
+ ipv6 address 2001:db8:3::2/64
+ ipv6 enable
+!
+interface Tunnel10
+ ip address 203.0.113.253 255.255.255.252
+ tunnel source GigabitEthernet0/0/0
+ tunnel destination 198.51.100.200
+!
+interface GigabitEthernet0
+ vrf forwarding MGMT
+ ip address 203.0.113.10 255.255.255.0
+ negotiation auto
+!
+router bgp 64496
+ bgp router-id 192.0.2.255
+ bgp log-neighbor-changes
+ neighbor 198.51.100.1 remote-as 64511
+ neighbor 198.51.100.1 password 7 FAKEBGPPASSWORD
+ !
+ address-family ipv4
+  network 192.0.2.0 mask 255.255.255.0
+  neighbor 198.51.100.1 activate
+  neighbor 198.51.100.1 route-map FROM-ISP in
+  neighbor 198.51.100.1 prefix-list OUR-NETS out
+ exit-address-family
+ !
+ address-family ipv4 vrf RED
+  redistribute connected
+ exit-address-family
+!
+ip forward-protocol nd
+no ip http server
+no ip http secure-server
+ip ssh version 2
+ip tftp source-interface GigabitEthernet0
+!
+ip nat pool PUBLIC 203.0.113.32 203.0.113.47 netmask 255.255.255.240
+ip nat inside source list NAT-INSIDE pool PUBLIC overload
+ip nat inside source list 10 interface GigabitEthernet0/0/3 overload
+ip nat inside source static tcp 192.0.2.10 443 198.51.100.2 443 extendable
+ip nat inside source static 192.0.2.20 203.0.113.20
+ip nat translation timeout 3600
+ip route 0.0.0.0 0.0.0.0 198.51.100.1 name DEFAULT
+ip route 0.0.0.0 0.0.0.0 GigabitEthernet0/0/3 198.51.100.9 250
+ip route 203.0.113.128 255.255.255.128 Null0
+ip route vrf RED 0.0.0.0 0.0.0.0 198.51.100.1 global
+ip route vrf MGMT 0.0.0.0 0.0.0.0 203.0.113.1
+!
+ip access-list standard NAT-INSIDE
+ 10 permit 192.0.2.0 0.0.0.127
+ 20 permit host 192.0.2.200
+ 30 deny   any log
+ip access-list extended EDGE-IN
+ 10 permit tcp any host 198.51.100.2 eq 443
+ 20 permit udp host 198.51.100.200 host 198.51.100.2 eq isakmp
+ 30 permit esp host 198.51.100.200 host 198.51.100.2
+ 40 permit icmp any any echo-reply
+ 50 permit tcp any any established
+ 60 permit ip object-group TRUSTED any
+ 70 deny   ip any any log
+ip access-list extended VPN-TRAFFIC
+ remark the traffic of the tunnel
+ permit ip 192.0.2.0 0.0.0.255 203.0.113.0 0.0.0.255
+!
+ip prefix-list DEFAULT-ONLY seq 5 permit 0.0.0.0/0
+ip prefix-list OUR-NETS seq 5 permit 192.0.2.0/24
+!
+ip sla 1
+ icmp-echo 198.51.100.1 source-interface GigabitEthernet0/0/0
+ip sla schedule 1 life forever start-time now
+!
+access-list 10 remark NAT of the backup uplink
+access-list 10 permit 192.0.2.128 0.0.0.63
+access-list 10 permit 192.0.2.250
+access-list 101 permit tcp 192.0.2.0 0.0.0.63 any eq www
+access-list 101 permit udp any any eq domain
+access-list 101 deny   ip any any
+!
+route-map FROM-ISP permit 10
+ match ip address prefix-list DEFAULT-ONLY
+ set local-preference 200
+!
+route-map PBR-BLUE permit 10
+ match ip address VPN-TRAFFIC
+ set ip next-hop 203.0.113.254
+!
+ipv6 route ::/0 2001:db8:3::1
+!
+snmp-server community FAKECOMMUNITY RO
+snmp-server location lab
+snmp-server host 192.0.2.7 version 2c FAKECOMMUNITYHOST
+!
+tacacs server TAC1
+ address ipv4 192.0.2.5
+ key 7 FAKETACACSKEY
+!
+control-plane
+!
+banner exec ^C
+Authorized access only.
+Disconnect now if you are not an authorized user.
+^C
+banner motd ^CLab router of the network team.^C
+!
+line con 0
+ exec-timeout 5 0
+ stopbits 1
+line aux 0
+line vty 0 4
+ password 7 FAKEVTYPASSWORD
+ transport input ssh
+!
+ntp authentication-key 1 md5 FAKENTPKEY 7
+ntp server 192.0.2.123
+!
+end

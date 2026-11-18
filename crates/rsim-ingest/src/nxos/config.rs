@@ -872,7 +872,7 @@ fn access_list(r: &mut R, s: &Stanza, name: &str) -> Acl {
 
 /// Reads an address of an ACL entry from the words at `i`, and moves `i`
 /// past it.
-fn addr_spec(w: &[&str], i: &mut usize) -> Option<AddrSpec> {
+pub(crate) fn addr_spec(w: &[&str], i: &mut usize) -> Option<AddrSpec> {
     let first = *w.get(*i)?;
     let out = match first {
         "any" => {
@@ -1012,7 +1012,7 @@ pub(crate) fn ace(seq: &str, action: AclAction, w: &[&str], lines: Lines) -> Opt
     Some(e)
 }
 
-fn static_route(vrf: &str, w: &[&str], lines: Lines) -> StaticRoute {
+pub(crate) fn static_route(vrf: &str, w: &[&str], lines: Lines) -> StaticRoute {
     let mut r = StaticRoute {
         vrf: vrf.to_string(),
         prefix: String::new(),
@@ -1057,7 +1057,7 @@ fn static_route(vrf: &str, w: &[&str], lines: Lines) -> StaticRoute {
     r
 }
 
-fn nat_rule(w: &[&str], table: &Table) -> NatKind {
+pub(crate) fn nat_rule(w: &[&str], table: &Table) -> NatKind {
     let other = || NatKind::Other(table.report_key(&w.join(" ")));
     match w {
         [
