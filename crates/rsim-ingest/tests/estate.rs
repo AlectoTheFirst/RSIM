@@ -365,3 +365,91 @@ interface Ethernet1/1
     );
     e.builder.build().expect("the twin builds");
 }
+
+/// The estate with the text `from` replaced by `to` in the UniFi section
+/// `name`.
+fn estate_replacing(name: &str, from: &str, to: &str) -> Estate {
+    estate_with(
+        |n, b| {
+            if n == name {
+                let s = String::from_utf8(b).unwrap();
+                assert!(s.contains(from), "{from}");
+                s.replace(from, to).into_bytes()
+            } else {
+                b
+            }
+        },
+        Vec::new(),
+    )
+}
+
+#[test]
+fn a_wired_client_of_another_network_than_its_port_is_not_placed() {
+    // h1 is on an access port of LAN, with the network of GUEST.
+    let e = estate_replacing(
+        "clients",
+        r#""name": "h1", "ip": "192.0.2.50", "network_id": "n-lan""#,
+        r#""name": "h1", "ip": "192.0.2.50", "network_id": "n-guest""#,
+    );
+    let notes = &e.notes["site1"];
+    assert!(
+        notes.iter().any(|n| n.starts_with("client h1:")),
+        "{notes:?}"
+    );
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
+    assert!(
+        matches!(a.verdict(), Some(Verdict::Unknown(_))),
+        "{:?}",
+        a.verdict()
+    );
+}
+
+/// A second WLAN `guest` of the network LAN.
+const SECOND_GUEST: (&str, &str) = (
+    r#""l2_isolation": false}"#,
+    r#""l2_isolation": false},
+  {"_id": "w-guest2", "name": "guest", "networkconf_id": "n-lan", "enabled": true}"#,
+);
+
+#[test]
+fn an_ssid_on_an_access_point_has_the_network_of_the_wlan_that_it_names() {
+    let e = estate_replacing("wlans", SECOND_GUEST.0, SECOND_GUEST.1);
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.50", "192.0.2.71", 443);
+    assert_eq!(
+        a.verdict(),
+        Some(&Verdict::Deliver(Destination::Endpoint(EndpointId::new(
+            "g2-005354"
+        ))))
+    );
+}
+
+#[test]
+fn the_clients_of_an_ssid_with_more_than_one_network_are_not_placed() {
+    // The access point names no WLAN.
+    let e = estate_with(
+        |n, b| {
+            let s = String::from_utf8(b).unwrap();
+            let s = match n {
+                "wlans" => s.replace(SECOND_GUEST.0, SECOND_GUEST.1),
+                "devices" => s.replace(r#""wlanconf_id": "w-guest", "#, ""),
+                _ => s,
+            };
+            s.into_bytes()
+        },
+        Vec::new(),
+    );
+    let notes = &e.notes["site1"];
+    assert!(
+        notes.iter().any(|n| n.starts_with("client g2:")),
+        "{notes:?}"
+    );
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.50", "192.0.2.71", 443);
+    assert!(
+        matches!(a.verdict(), Some(Verdict::Unknown(_))),
+        "{:?}",
+        a.verdict()
+    );
+}

@@ -15,7 +15,7 @@ use rsim_functions::{
     PortIngress, PortPeer, VendorProfile, WirelessAttachment,
 };
 
-use crate::unifi::site::{Client, Device, DeviceKind, Forward, Network, Port, Site};
+use crate::unifi::site::{Client, Device, DeviceKind, Forward, Network, Port, Site, Vap, Wlan};
 
 /// A router interface on the uplink of the site, found by LLDP.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -219,6 +219,23 @@ fn ports(d: &Device) -> Vec<Port> {
     }
 }
 
+/// The enabled WLAN of an SSID on an access point: the WLAN that the access
+/// point names, or else the one WLAN of the SSID. `Err` if the access point
+/// names no WLAN and the WLANs of the SSID have more than one network.
+fn vap_wlan<'s>(site: &'s Site, v: &Vap) -> Result<Option<&'s Wlan>, String> {
+    if let Some(id) = &v.wlan {
+        return Ok(site.wlans.iter().find(|w| w.id == *id && w.enabled));
+    }
+    let mut wlans = site.wlans.iter().filter(|w| w.ssid == v.ssid && w.enabled);
+    let first = wlans.next();
+    if let Some(f) = first
+        && wlans.any(|w| w.network != f.network)
+    {
+        return Err(format!("SSID {} has more than one network", v.ssid));
+    }
+    Ok(first)
+}
+
 /// Lowers a site. `prefix` names the bridge domains, for example the
 /// device of the site in the store. A client whose address is in
 /// `next_hops`, a next hop of a route, is a router and not an endpoint: it
@@ -256,34 +273,65 @@ pub fn lower(
         })
         .collect();
 
-    // The location and the bridge domain of each client MAC.
-    let wlan_net: BTreeMap<&str, &Network> = site
-        .wlans
-        .iter()
-        .filter_map(|w| site.network(&w.network).map(|n| (w.ssid.as_str(), n)))
-        .collect();
+    // The location and the bridge domain of each client MAC. A client whose
+    // network is not the network of its port or SSID is not placed.
     let mut located: Vec<(&Client, Location, &Network)> = Vec::new();
     for c in &site.clients {
         let (loc, net) = match (&c.switch, &c.ap) {
             (Some((sw, p)), _) => {
                 let dev = site.device(sw);
                 let port = dev.and_then(|d| ports(d).into_iter().find(|x| x.idx == *p));
-                let net = port.and_then(|p| l.membership(&p).0.cloned());
+                let net = port.and_then(|p| l.membership(&p).0);
                 ((sw.clone(), format!("port/{p}")), net)
             }
-            (None, Some((ap, ssid))) => (
-                (ap.clone(), format!("wlan/{ssid}")),
-                wlan_net.get(ssid.as_str()).map(|n| (*n).clone()),
-            ),
+            (None, Some((ap, ssid))) => {
+                let mut vaps: Vec<Vap> = site
+                    .device(ap)
+                    .map(|d| d.vaps.iter().filter(|v| v.ssid == *ssid).cloned().collect())
+                    .unwrap_or_default();
+                if vaps.is_empty() {
+                    vaps.push(Vap {
+                        ssid: ssid.clone(),
+                        wlan: None,
+                        up: true,
+                    });
+                }
+                let mut nets: BTreeSet<&str> = BTreeSet::new();
+                let mut problem = None;
+                for v in &vaps {
+                    match vap_wlan(site, v) {
+                        Ok(w) => nets.extend(w.map(|w| w.network.as_str())),
+                        Err(e) => problem = Some(e),
+                    }
+                }
+                if nets.len() > 1 {
+                    problem = Some(format!("SSID {ssid} has more than one network"));
+                }
+                if let Some(e) = problem {
+                    l.out.notes.push(format!("client {}: {e}", c.name));
+                    continue;
+                }
+                let net = nets.first().and_then(|id| site.network(id));
+                ((ap.clone(), format!("wlan/{ssid}")), net)
+            }
             _ => continue,
         };
-        let Some(net) = net.and_then(|n| site.network(&n.id)) else {
+        let Some(net) = net else {
             l.out.notes.push(format!(
                 "client {}: the network of its port is not known",
                 c.name
             ));
             continue;
         };
+        if let Some(id) = c.network.as_deref()
+            && id != net.id
+        {
+            l.out.notes.push(format!(
+                "client {}: its network {id} is not the network {} of {}",
+                c.name, net.name, loc.1
+            ));
+            continue;
+        }
         located.push((c, loc, net));
     }
 
@@ -433,8 +481,43 @@ pub fn lower(
 
         // SSIDs.
         for v in d.vaps.iter().filter(|v| v.up) {
-            let Some(w) = site.wlans.iter().find(|w| w.ssid == v.ssid && w.enabled) else {
-                continue;
+            let w = match vap_wlan(site, v) {
+                Ok(Some(w)) => w,
+                Ok(None) => continue,
+                Err(e) => {
+                    let note = format!("{}: {e}, so the SSID is not lowered", d.name);
+                    if !l.out.notes.contains(&note) {
+                        l.out.notes.push(note);
+                    }
+                    // A flood of each network of the SSID reaches the SSID,
+                    // where the frame is unknown.
+                    let pid = PortId::new(format!("wlan/{}", v.ssid));
+                    let nets: BTreeSet<&str> = site
+                        .wlans
+                        .iter()
+                        .filter(|w| w.ssid == v.ssid && w.enabled)
+                        .map(|w| w.network.as_str())
+                        .collect();
+                    for n in nets.into_iter().filter_map(|id| site.network(id)) {
+                        let name = format!("wlan/{}/out/{}", v.ssid, n.name);
+                        let out_id = l.id(d, &name);
+                        let ports = flood.entry(l.bd(n)).or_default();
+                        if ports.iter().any(|(_, f)| *f == out_id) {
+                            continue;
+                        }
+                        ports.push((pid.clone(), out_id));
+                        let meta = l.meta(d, &name, vec![l.dev_span(d)]);
+                        l.out.functions.push(Arc::new(PortEgress {
+                            meta,
+                            port: pid.clone(),
+                            native: Some(l.bd(n)),
+                            tagged: BTreeMap::new(),
+                            peers: Vec::new(),
+                            hosts: BTreeMap::new(),
+                        }));
+                    }
+                    continue;
+                }
             };
             let Some(n) = site.network(&w.network) else {
                 continue;
@@ -507,7 +590,7 @@ pub fn lower(
         let mut hairpin = BTreeSet::new();
         let mut blocked: BTreeMap<PortId, BTreeSet<Mac>> = BTreeMap::new();
         for v in d.vaps.iter().filter(|v| v.up) {
-            let Some(w) = site.wlans.iter().find(|w| w.ssid == v.ssid && w.enabled) else {
+            let Ok(Some(w)) = vap_wlan(site, v) else {
                 continue;
             };
             let pid = PortId::new(format!("wlan/{}", v.ssid));

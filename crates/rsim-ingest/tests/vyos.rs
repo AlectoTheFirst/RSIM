@@ -5,6 +5,129 @@ use rsim_ingest::{State, classify, read_json};
 
 const CONFIG: &[u8] = include_bytes!("fixtures/vyos/r1-config.json");
 
+/// The configuration with the change `f`.
+fn edited(f: impl FnOnce(&mut serde_json::Value)) -> Vec<u8> {
+    let mut v: serde_json::Value = serde_json::from_slice(CONFIG).unwrap();
+    f(&mut v);
+    serde_json::to_vec_pretty(&v).unwrap()
+}
+
+/// Sets the value at a path of keys, with the objects on the path.
+fn put(v: &mut serde_json::Value, path: &[&str], value: serde_json::Value) {
+    let mut cur = v;
+    for k in &path[..path.len() - 1] {
+        cur = cur
+            .as_object_mut()
+            .unwrap()
+            .entry(k.to_string())
+            .or_insert_with(|| serde_json::json!({}));
+    }
+    cur.as_object_mut()
+        .unwrap()
+        .insert(path[path.len() - 1].to_string(), value);
+}
+
+#[test]
+fn nested_rule_options_with_no_handler_make_the_rule_unhandled() {
+    use serde_json::json;
+    let config = edited(|v| {
+        put(
+            v,
+            &["firewall", "ipv4", "name", "LAN-WAN", "rule", "6"],
+            json!({"action": "drop", "inbound-interface": {"group": "IG"}}),
+        );
+        put(
+            v,
+            &["firewall", "ipv4", "name", "LAN-WAN", "rule", "7"],
+            json!({"action": "accept", "protocol": "icmp", "icmp": {"type": "8", "code": "0"}}),
+        );
+        put(
+            v,
+            &["nat", "source", "rule", "100", "translation"],
+            json!({"address": "203.0.113.5", "options": {"port-mapping": "random"}}),
+        );
+    });
+    let cfg = vyos::read(&read_json(&config).unwrap());
+    let lw = cfg.rule_set(Family::V4, "LAN-WAN").unwrap();
+    let rule = |n: u32| lw.rules.iter().find(|r| r.number == n).unwrap();
+    assert_eq!(rule(6).unhandled, ["inbound-interface group"]);
+    assert_eq!(rule(7).unhandled, ["icmp code", "icmp type"]);
+    let snat = cfg.source_nat.iter().find(|r| r.number == 100).unwrap();
+    assert_eq!(snat.unhandled, ["translation options"]);
+}
+
+#[test]
+fn a_group_has_the_members_of_its_include_and_each_family_has_its_own_groups() {
+    use serde_json::json;
+    let config = edited(|v| {
+        put(
+            v,
+            &[
+                "firewall",
+                "group",
+                "address-group",
+                "vpn-clients",
+                "include",
+            ],
+            json!("more"),
+        );
+        put(
+            v,
+            &["firewall", "group", "address-group", "more"],
+            json!({"address": "192.0.2.30", "include": "vpn-clients"}),
+        );
+        put(
+            v,
+            &["firewall", "group", "address-group", "broken"],
+            json!({"address": "192.0.2.31", "include": "missing"}),
+        );
+        put(
+            v,
+            &["firewall", "group", "ipv6-address-group", "vpn-clients"],
+            json!({"address": "2001:db8::10"}),
+        );
+    });
+    let cfg = vyos::read(&read_json(&config).unwrap());
+    assert_eq!(
+        cfg.address_groups["vpn-clients"],
+        Ok(vec![
+            "192.0.2.10".to_string(),
+            "192.0.2.20-192.0.2.23".to_string(),
+            "192.0.2.30".to_string(),
+        ])
+    );
+    assert!(cfg.address_groups["broken"].is_err());
+    assert_eq!(
+        cfg.ipv6_address_groups["vpn-clients"],
+        Ok(vec!["2001:db8::10".to_string()])
+    );
+}
+
+#[test]
+fn a_disabled_next_hop_is_left_out_and_another_next_hop_option_is_unhandled() {
+    use serde_json::json;
+    let config = edited(|v| {
+        put(
+            v,
+            &["protocols", "static", "route", "198.18.0.0/15"],
+            json!({"next-hop": {"192.0.2.40": {"disable": {}}, "192.0.2.41": {}}}),
+        );
+        put(
+            v,
+            &["protocols", "static", "route", "198.20.0.0/16"],
+            json!({"next-hop": {"192.0.2.42": {"distance": "10"}}}),
+        );
+    });
+    let cfg = vyos::read(&read_json(&config).unwrap());
+    let r = |p: &str| cfg.static_routes.iter().find(|r| r.prefix == p).unwrap();
+    assert_eq!(r("198.18.0.0/15").gateways, ["192.0.2.41"]);
+    assert!(r("198.18.0.0/15").unhandled.is_empty());
+    assert_eq!(
+        r("198.20.0.0/16").unhandled,
+        ["next-hop 192.0.2.42 distance"]
+    );
+}
+
 #[test]
 fn each_handled_stanza_is_read() {
     let doc = read_json(CONFIG).unwrap();
@@ -59,7 +182,7 @@ fn the_handlers_give_typed_structures() {
     );
     assert_eq!(gl.rules[2].unhandled, ["recent"]);
     assert_eq!(cfg.state_policy.invalid, Some(Action::Drop));
-    assert_eq!(cfg.address_groups["vpn-clients"].len(), 2);
+    assert_eq!(cfg.address_groups["vpn-clients"].as_ref().unwrap().len(), 2);
 
     assert_eq!(cfg.source_nat.len(), 2);
     assert_eq!(
@@ -131,13 +254,17 @@ mod twin {
     }
 
     fn build_from(config: &[u8]) -> (Twin, Vec<String>) {
+        build_with(config, &collected())
+    }
+
+    fn build_with(config: &[u8], col: &Collected) -> (Twin, Vec<String>) {
         let cfg = vyos::read(&read_json(config).unwrap());
         let low = vyos::lower(
             "r1",
             "r1/config",
             &vyos::profile(),
             &cfg,
-            &collected(),
+            col,
             &Default::default(),
         );
         let mut b = TwinBuilder::new();
@@ -381,5 +508,208 @@ mod twin {
         let a = run(&t, "eth0.10", tcp("192.0.2.30", "198.18.1.1", 443));
         let (_, v) = first(&a);
         assert_eq!(code(&v), Some(ReasonCode::IncompleteTable), "{v:?}");
+    }
+
+    /// The reason of the step of `f` on the first branch, and true if the
+    /// step is unknown.
+    fn step(a: &Answer, f: &str) -> (String, ReasonCode, bool) {
+        let b = &a.branches()[0];
+        let s = b
+            .steps
+            .iter()
+            .find(|s| s.function.as_str() == f)
+            .unwrap_or_else(|| panic!("the path has {f}"));
+        (
+            s.reason.detail.clone(),
+            s.reason.code,
+            s.outcome == rsim_core::Outcome::Unknown,
+        )
+    }
+
+    #[test]
+    fn a_firewall_rule_with_an_interface_group_gives_match_bounds() {
+        let config = super::edited(|v| {
+            super::put(
+                v,
+                &["firewall", "ipv4", "name", "LAN-WAN", "rule", "6"],
+                serde_json::json!({"action": "drop", "inbound-interface": {"group": "IG"}}),
+            );
+        });
+        let (t, _) = build_from(&config);
+        let a = run(&t, "eth0.10", tcp("192.0.2.30", "203.0.113.99", 443));
+        let (detail, code, unknown) = step(&a, "r1/policy");
+        assert!(unknown, "{detail}");
+        assert_ne!(code, ReasonCode::Denied, "{detail}");
+    }
+
+    #[test]
+    fn a_source_nat_rule_with_an_interface_group_or_a_wildcard_is_unknown() {
+        for out in [
+            serde_json::json!({"group": "WAN"}),
+            serde_json::json!({"name": "eth*"}),
+            serde_json::json!({"name": "!pppoe0"}),
+        ] {
+            let config = super::edited(|v| {
+                super::put(
+                    v,
+                    &["nat", "source", "rule", "100"],
+                    serde_json::json!({
+                        "outbound-interface": out.clone(),
+                        "translation": {"address": "203.0.113.5"}
+                    }),
+                );
+            });
+            let (t, _) = build_from(&config);
+            // A LAN client to eth1: the rule can apply on eth1.
+            let a = run(&t, "eth0.10", tcp("192.0.2.30", "203.0.113.130", 443));
+            let (detail, _, unknown) = step(&a, "r1/snat");
+            assert!(unknown, "{out}: {detail}");
+        }
+    }
+
+    #[test]
+    fn a_group_with_an_include_matches_the_members_of_the_included_group() {
+        let config = super::edited(|v| {
+            super::put(
+                v,
+                &[
+                    "firewall",
+                    "group",
+                    "address-group",
+                    "vpn-clients",
+                    "include",
+                ],
+                serde_json::json!("more"),
+            );
+            super::put(
+                v,
+                &["firewall", "group", "address-group", "more"],
+                serde_json::json!({"address": "192.0.2.30"}),
+            );
+        });
+        let (t, _) = build_from(&config);
+        let (path, _) = first(&run(&t, "eth0.10", tcp("192.0.2.30", "203.0.113.99", 443)));
+        assert!(path.contains(&"r1/route-table-100".to_string()), "{path:?}");
+    }
+
+    #[test]
+    fn an_ipv6_group_does_not_replace_the_ipv4_group_of_the_same_name() {
+        let config = super::edited(|v| {
+            super::put(
+                v,
+                &["firewall", "group", "ipv6-address-group", "vpn-clients"],
+                serde_json::json!({"address": "2001:db8::10"}),
+            );
+        });
+        let (t, _) = build_from(&config);
+        let (path, _) = first(&run(&t, "eth0.10", tcp("192.0.2.10", "203.0.113.99", 443)));
+        assert!(path.contains(&"r1/route-table-100".to_string()), "{path:?}");
+    }
+
+    #[test]
+    fn with_bgp_and_no_collected_rib_a_route_lookup_off_the_connected_networks_is_unknown() {
+        let mut col = collected();
+        col.routes.clear();
+        let (t, notes) = build_with(CONFIG, &col);
+        assert!(
+            notes.iter().any(|n| n.contains("protocols bgp")),
+            "{notes:?}"
+        );
+        let a = run(&t, "eth0.10", tcp("192.0.2.30", "198.51.100.99", 443));
+        let (_, v) = first(&a);
+        assert_eq!(code(&v), Some(ReasonCode::IncompleteTable), "{v:?}");
+        // A connected network stays definite.
+        let (path, _) = first(&run(&t, "eth0.110", tcp("192.0.2.70", "192.0.2.50", 8123)));
+        assert!(path.contains(&"r1/out/eth0.10".to_string()), "{path:?}");
+    }
+
+    #[test]
+    fn a_static_route_that_is_not_fully_lowered_is_unknown_and_hides_no_shorter_route() {
+        for route in [
+            serde_json::json!({"dhcp-interface": "eth2"}),
+            serde_json::json!({"next-hop": {"192.0.2.40": {"distance": "10"}}}),
+            serde_json::json!({"next-hop": {"198.51.100.200": {}}}),
+        ] {
+            let config = super::edited(|v| {
+                super::put(
+                    v,
+                    &[
+                        "protocols",
+                        "static",
+                        "table",
+                        "100",
+                        "route",
+                        "198.18.0.0/15",
+                    ],
+                    route.clone(),
+                );
+            });
+            let (t, _) = build_from(&config);
+            // A VPN client takes table 100.
+            let a = run(&t, "eth0.10", tcp("192.0.2.10", "198.18.1.1", 443));
+            let (path, v) = first(&a);
+            assert!(path.contains(&"r1/route-table-100".to_string()), "{path:?}");
+            assert_eq!(
+                code(&v),
+                Some(ReasonCode::IncompleteTable),
+                "{route}: {v:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_ipv6_packets_of_an_interface_with_a_route6_policy_are_unknown() {
+        let config = super::edited(|v| {
+            super::put(
+                v,
+                &["policy", "route6", "PBR6"],
+                serde_json::json!({"interface": "eth0.10", "rule": {"10": {"set": {"table": "100"}}}}),
+            );
+        });
+        let (t, notes) = build_from(&config);
+        assert!(notes.iter().any(|n| n.contains("PBR6")), "{notes:?}");
+        let a = run(&t, "eth0.10", tcp("2001:db8::10", "2001:db8:1::1", 443));
+        let (detail, _, unknown) = step(&a, "r1/pbr");
+        assert!(unknown, "{detail}");
+        // The IPv4 packets still take the IPv4 policy.
+        let (path, _) = first(&run(&t, "eth0.10", tcp("192.0.2.10", "203.0.113.99", 443)));
+        assert!(path.contains(&"r1/route-table-100".to_string()), "{path:?}");
+    }
+
+    #[test]
+    fn the_packets_of_an_interface_in_a_vrf_are_unknown_at_the_route_lookup() {
+        let config = super::edited(|v| {
+            super::put(
+                v,
+                &["interfaces", "ethernet", "eth1", "vrf"],
+                serde_json::json!("BLUE"),
+            );
+        });
+        let (t, _) = build_from(&config);
+        let a = run(&t, "eth1", tcp("203.0.113.130", "192.0.2.30", 443));
+        let (detail, code, unknown) = step(&a, "r1/route");
+        assert!(unknown, "{detail}");
+        assert_eq!(code, ReasonCode::IncompleteTable, "{detail}");
+    }
+
+    #[test]
+    fn an_interface_of_a_zone_vrf_has_an_unknown_zone() {
+        let config = super::edited(|v| {
+            super::put(
+                v,
+                &["interfaces", "ethernet", "eth1", "vrf"],
+                serde_json::json!("BLUE"),
+            );
+            super::put(
+                v,
+                &["firewall", "zone", "LAN", "member", "vrf"],
+                serde_json::json!("BLUE"),
+            );
+        });
+        let (t, _) = build_from(&config);
+        let a = run(&t, "eth1", tcp("203.0.113.130", "192.0.2.30", 443));
+        let (detail, code, unknown) = step(&a, "r1/zone-src");
+        assert!(unknown, "{detail}");
+        assert_eq!(code, ReasonCode::NotInZone, "{detail}");
     }
 }
