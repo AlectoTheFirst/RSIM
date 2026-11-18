@@ -496,6 +496,63 @@ fn the_topology_and_the_path_drawing_give_the_stored_files() {
 }
 
 #[test]
+fn each_underlay_edge_of_a_drawing_names_the_overlay_edge_of_its_own_tunnel() {
+    let s = state(None);
+    let q = post(
+        &s,
+        "/v1/twins/builtin.leaf-spine/queries",
+        &json!({"mode": "set", "source.ip": "10.1.0.10", "destination.ip": "10.2.0.10,10.3.0.10",
+                "network.transport": "tcp", "destination.port": 22}),
+    );
+    let loc = q.header("location").unwrap().to_string();
+    let d = json(&get(&s, &format!("{loc}/topology")));
+    let edges = d["edges"].as_array().unwrap();
+    let mut overlays: Vec<&str> = edges
+        .iter()
+        .filter(|e| e["layer"] == "overlay")
+        .map(|e| e["id"].as_str().unwrap())
+        .collect();
+    overlays.sort();
+    assert_eq!(overlays, ["overlay:leaf1>leaf2", "overlay:leaf1>leaf3"]);
+    let branches = |e: &Value| -> Vec<u64> {
+        e["branches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|b| b.as_u64().unwrap())
+            .collect()
+    };
+    let underlay: Vec<&Value> = edges.iter().filter(|e| e["layer"] == "underlay").collect();
+    for e in &underlay {
+        let Some(o) = e["overlay"].as_str() else {
+            continue;
+        };
+        let o = edges.iter().find(|x| x["id"] == o).unwrap();
+        if e["to"] == "leaf2" || e["to"] == "leaf3" {
+            assert_eq!(e["to"], o["to"], "{e}");
+        }
+        assert!(
+            branches(e).iter().all(|b| branches(o).contains(b)),
+            "{e} {o}"
+        );
+    }
+    // leaf1 to spine1 carries both tunnels: one underlay edge for each.
+    let first: Vec<&str> = underlay
+        .iter()
+        .filter(|e| e["from"] == "leaf1" && e["to"] == "spine1")
+        .map(|e| e["overlay"].as_str().unwrap())
+        .collect();
+    assert_eq!(first.len(), 2, "{first:?}");
+    assert_ne!(first[0], first[1]);
+    // spine2 drops the tunnel to leaf3: its hop names no overlay edge.
+    let dropped = underlay
+        .iter()
+        .find(|e| e["id"] == "underlay:leaf1>spine2:leaf1")
+        .unwrap();
+    assert!(dropped["overlay"].is_null());
+}
+
+#[test]
 fn a_batch_gives_one_line_for_each_item() {
     let s = state(None);
     let r = post(
