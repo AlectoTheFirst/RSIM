@@ -53,6 +53,7 @@ pub struct Cycle<'a> {
     time: u64,
     updates: BTreeMap<String, DeviceUpdate>,
     removed: BTreeSet<String>,
+    inventory_version: Option<u64>,
 }
 
 /// A cycle with all its files written except `HEAD`. A reader does not see
@@ -315,6 +316,7 @@ impl Store {
             time,
             updates: BTreeMap::new(),
             removed: BTreeSet::new(),
+            inventory_version: None,
         })
     }
 
@@ -403,6 +405,12 @@ impl<'a> Cycle<'a> {
         self.removed.remove(&update.device);
         self.updates.insert(update.device.clone(), update);
         Ok(())
+    }
+
+    /// Sets the version of the inventory database that the cycle read. The
+    /// snapshot manifest records it.
+    pub fn set_inventory_version(&mut self, version: Option<u64>) {
+        self.inventory_version = version;
     }
 
     /// Removes a device from the snapshot of this cycle and from the
@@ -535,6 +543,7 @@ impl<'a> Cycle<'a> {
                 .collect(),
             devices: names,
             removed: self.removed,
+            inventory_version: self.inventory_version,
         };
         write_cycle_file(
             &store.snapshot_path(self.cycle),

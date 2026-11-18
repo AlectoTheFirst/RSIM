@@ -74,6 +74,7 @@ pub struct State {
     pub settings: Settings,
     mcp: rsim_mcp::tools::Tools,
     long_queries: Mutex<BTreeMap<String, String>>,
+    pub(crate) inventory: Option<crate::inventory::InventoryHandle>,
 }
 
 impl State {
@@ -86,7 +87,15 @@ impl State {
             settings,
             mcp,
             long_queries: Mutex::new(BTreeMap::new()),
+            inventory: None,
         }
+    }
+
+    /// The server with the inventory database of the routes
+    /// `/v1/inventory`.
+    pub fn with_inventory(mut self, inventory: crate::inventory::InventoryHandle) -> Self {
+        self.inventory = Some(inventory);
+        self
     }
 }
 
@@ -303,7 +312,7 @@ pub fn handle(state: &State, req: &Request) -> Response {
             headers: vec![
                 (
                     "access-control-allow-methods".into(),
-                    "GET, POST, OPTIONS".into(),
+                    "GET, POST, PUT, DELETE, OPTIONS".into(),
                 ),
                 (
                     "access-control-allow-headers".into(),
@@ -467,6 +476,7 @@ fn route(state: &State, req: &Request) -> Result<Response, Problem> {
             Ok(json_response(&body))
         }
         ["mcp"] => mcp(state, req),
+        ["v1", "inventory", rest @ ..] => crate::inventory::route(state, req, rest),
         ["v1", "twins", twin, rest @ ..] => {
             let t = match state.twin(twin)? {
                 Resolved::Twin(t) => t,

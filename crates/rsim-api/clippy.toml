@@ -1,5 +1,7 @@
-# The server writes only to its sockets, stdout and stderr. It writes no
-# file. It opens only the TCP listener of its loopback address.
+# The server writes only to its sockets, stdout, stderr and the inventory
+# database, through rsim-inventory. It writes no file. It opens the TCP
+# listener of its loopback address and, with --inventory, its connection to
+# the inventory database. The database gives the time of an audit record.
 disallowed-methods = [
     "std::fs::write",
     "std::fs::copy",

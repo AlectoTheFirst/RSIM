@@ -1,0 +1,69 @@
+//! The inventory of rsim in PostgreSQL: the device groups, the devices, the
+//! credential references, the routes, the Equinix bindings, the inventory
+//! version and the audit log.
+//!
+//! `rsim-api` writes the inventory and `rsim-collect` reads it at the start
+//! of each cycle. The engine does not read it. A credential is a reference
+//! to its source, for example a key of the env file of the collector; no
+//! secret is in the database.
+//!
+//! The schema is in `migrations/`, applied in order by [`Db::migrate`],
+//! which records each version in the table `schema_migrations`.
+
+mod db;
+pub mod env;
+mod resolve;
+mod types;
+
+pub use db::{Change, Db, Error, MIGRATIONS, import_changes, schema_version};
+pub use resolve::{
+    DEFAULT_PAGED_SECTION_TIMEOUT_SECONDS, DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    DEFAULT_SECTION_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS, Origin, Resolved, ResolvedDevice,
+    ResolvedDevices, ResolvedSettings, resolve_device, resolve_settings,
+};
+pub use types::{
+    Action, AuditPage, AuditRecord, Bindings, CaptureBgp, Credential, CredentialSource, Device,
+    EdgeDeviceBinding, FabricPortBinding, Group, Ha, Inventory, JumpHost, NxosJson, Route,
+    Settings, SshAlgorithms, SshMode, TlsTrust, valid_device_name, valid_name,
+};
+
+/// The environment variable of the URL of the inventory database.
+pub const URL_VAR: &str = "RSIM_INVENTORY_URL";
+/// The environment variable of the PEM file of the CA bundle of the
+/// inventory database.
+pub const CA_FILE_VAR: &str = "RSIM_INVENTORY_CA_FILE";
+/// The environment variable of the URL of the database of the SQL tests.
+pub const TEST_URL_VAR: &str = "RSIM_TEST_DATABASE_URL";
+
+/// A database of a test in its own schema, migrated. `None`, with a line on
+/// stderr, if `RSIM_TEST_DATABASE_URL` is not set. Each name gets a new
+/// empty schema, so tests that run at the same time do not share records.
+pub async fn test_database(name: &str) -> Option<Db> {
+    let Ok(url) = std::env::var(TEST_URL_VAR) else {
+        eprintln!("skipped {name}: {TEST_URL_VAR} is not set");
+        return None;
+    };
+    let schema = format!(
+        "t_{}_{}",
+        name.chars()
+            .map(|c| if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            })
+            .collect::<String>(),
+        std::process::id()
+    );
+    let admin = Db::new(&url, None).expect("the test database URL");
+    admin
+        .batch(&format!(
+            "DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema}"
+        ))
+        .await
+        .expect("the schema of the test");
+    let mut config: tokio_postgres::Config = url.parse().expect("the test database URL");
+    config.options(format!("-c search_path={schema}"));
+    let db = Db::with_config(config, None).expect("the test database");
+    db.migrate().await.expect("the migrations");
+    Some(db)
+}

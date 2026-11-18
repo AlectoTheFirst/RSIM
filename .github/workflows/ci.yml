@@ -21,7 +21,22 @@ env:
 jobs:
   check:
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_USER: rsim
+          POSTGRES_PASSWORD: rsim-test
+          POSTGRES_DB: rsim_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rsim -d rsim_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
+      RSIM_TEST_DATABASE_URL: postgres://rsim:rsim-test@localhost:5432/rsim_test
       # rsim-api embeds the built UI; a missing UI is a build error.
       RSIM_UI_REQUIRED: "1"
     steps:

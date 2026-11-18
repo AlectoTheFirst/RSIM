@@ -56,31 +56,18 @@ pub enum Proxy {
 
 impl Proxy {
     /// Reads `http://[user:password@]host:port` or
-    /// `socks5://[user:password@]host:port`. An error does not show the
-    /// login.
+    /// `socks5://[user:password@]host:port`, with the reader of the
+    /// inventory. An error does not show the login.
     pub fn parse(url: &str) -> Result<Proxy, String> {
-        let (scheme, rest) = url
-            .split_once("://")
-            .ok_or_else(|| "the proxy has no scheme".to_string())?;
-        let (login, hostport) = match rest.rsplit_once('@') {
-            Some((l, h)) => {
-                let (u, p) = l
-                    .split_once(':')
-                    .ok_or_else(|| format!("the login of the proxy {h} has no password"))?;
-                let login = ProxyLogin {
-                    user: u.to_string(),
-                    password: p.to_string(),
-                };
-                (Some(login), h)
-            }
-            None => (None, rest),
-        };
-        let hostport = hostport.trim_end_matches('/');
-        let (host, port) = host_port(hostport)?;
-        match scheme {
-            "http" => Ok(Proxy::Http { host, port, login }),
-            "socks5" | "socks5h" => Ok(Proxy::Socks5 { host, port, login }),
-            other => Err(format!("the proxy scheme {other} is not supported")),
+        let p = rsim_inventory::env::parse_proxy(url)?;
+        let login = p
+            .login
+            .map(|(user, password)| ProxyLogin { user, password });
+        let (host, port) = (p.host, p.port);
+        if p.scheme == "http" {
+            Ok(Proxy::Http { host, port, login })
+        } else {
+            Ok(Proxy::Socks5 { host, port, login })
         }
     }
 
@@ -96,24 +83,6 @@ impl Proxy {
             }
         }
     }
-}
-
-/// The host and the port of a proxy address. The port is necessary.
-fn host_port(address: &str) -> Result<(String, u16), String> {
-    let (host, port) = if let Some(rest) = address.strip_prefix('[') {
-        let (h, tail) = rest
-            .split_once("]:")
-            .ok_or_else(|| format!("the proxy {address} has no port"))?;
-        (h, tail)
-    } else {
-        address
-            .rsplit_once(':')
-            .ok_or_else(|| format!("the proxy {address} has no port"))?
-    };
-    let port = port
-        .parse()
-        .map_err(|_| format!("the proxy {address} has a bad port"))?;
-    Ok((host.to_string(), port))
 }
 
 /// An SSH jump host. It has its own credential and its own pinned host

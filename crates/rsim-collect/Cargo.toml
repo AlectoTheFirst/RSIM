@@ -20,12 +20,13 @@ https = ["ssh", "dep:ring", "dep:rustls", "dep:tokio-rustls", "dep:hyper", "dep:
 [dependencies]
 futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
 bytes = { version = "1.12.1", optional = true }
-clap = { version = "4.6.7", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
 getrandom = "0.3.4"
 http-body-util = { version = "0.1.5", optional = true }
 hyper = { version = "1.12.0", features = ["client", "http1"], optional = true }
 hyper-util = { version = "0.1.21", features = ["tokio"], optional = true }
 ring = { version = "0.17.14", optional = true }
+rsim-inventory.workspace = true
 rsim-store.workspace = true
 russh = { version = "=0.65.1", default-features = false, features = ["ring", "rsa"], optional = true }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"], optional = true }

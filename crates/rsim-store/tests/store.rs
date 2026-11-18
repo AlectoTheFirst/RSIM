@@ -458,3 +458,29 @@ fn a_snapshot_manifest_without_removed_devices_reads() {
     let m: SnapshotManifest = serde_json::from_str(plain).unwrap();
     assert!(m.removed.is_empty());
 }
+
+#[test]
+fn a_snapshot_records_the_inventory_version_and_an_older_manifest_has_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    commit(&store, 0, vec![update(&store, "r1", "a", None)]);
+    let mut c = store.begin(1).unwrap();
+    c.set_inventory_version(Some(7));
+    c.add(update(&store, "r1", "a1", None)).unwrap();
+    let s1 = c.prepare().unwrap().unwrap().publish().unwrap();
+    assert_eq!(s1.manifest.inventory_version, Some(7));
+    assert_eq!(
+        store.snapshot(1).unwrap().manifest.inventory_version,
+        Some(7)
+    );
+    let path = |c: u64| dir.path().join("snapshots").join(format!("{c:020}"));
+    let text = fs::read_to_string(path(1)).unwrap();
+    assert!(text.contains("\"inventory_version\": 7"), "{text}");
+    // A cycle with no inventory database writes no field.
+    let text = fs::read_to_string(path(0)).unwrap();
+    assert!(!text.contains("inventory_version"), "{text}");
+    assert_eq!(store.snapshot(0).unwrap().manifest.inventory_version, None);
+    let plain = r#"{"cycle":1,"time":1,"parent":0,"checkpoint":false,"schemas":{},"devices":{}}"#;
+    let m: SnapshotManifest = serde_json::from_str(plain).unwrap();
+    assert_eq!(m.inventory_version, None);
+}
