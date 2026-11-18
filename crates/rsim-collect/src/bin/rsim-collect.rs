@@ -34,8 +34,9 @@
 //! A `<NAME>` of a device or a jump host is in upper case with `_`; the id
 //! is in lower case with `-`. Two devices with one id are an error. A jump
 //! host gets only its own credential. A key of a device wins over the key
-//! of its vendor. A device named `SECTION` with `<P>_SECTION_TIMEOUT` set is
-//! an error, because the key is also the section time of the vendor.
+//! of its vendor. A device named `SECTION`, or with a name that ends in
+//! `_SECTION`, with its `<P>_<NAME>_TIMEOUT` set is an error, because the
+//! key is also the section time of the vendor or of another device name.
 //!
 //! The data folder holds the store, the store keys and the pin file. The
 //! keys are made at the first run.
@@ -155,10 +156,16 @@ fn time_limits(
         };
         Ok(device.or(vendor))
     };
-    if name == Some("SECTION") && env.contains_key(&format!("{prefix}_SECTION_TIMEOUT")) {
+    if let Some(n) = name
+        && (n == "SECTION" || n.ends_with("_SECTION"))
+        && env.contains_key(&format!("{prefix}_{n}_TIMEOUT"))
+    {
+        let other = n
+            .strip_suffix("_SECTION")
+            .map_or(prefix.to_string(), |base| format!("{prefix}_{base}"));
         return Err(format!(
-            "{prefix}_SECTION_TIMEOUT is the section time of {prefix} and the device time \
-             of {prefix}_SECTION_IP; give the device another name"
+            "{prefix}_{n}_TIMEOUT is the device time of {prefix}_{n}_IP and the section \
+             time of {other}; give the device another name"
         ));
     }
     let device = pick("TIMEOUT")?;
@@ -765,6 +772,12 @@ mod tests {
         .err()
         .expect("a device named SECTION makes the key ambiguous");
         assert!(err.contains("VYOS_SECTION_TIMEOUT"), "{err}");
+        let err = setup(&parse_env(&format!(
+            "{base}VYOS_R1_SECTION_IP=192.0.2.3\nVYOS_R1_SECTION_TIMEOUT=10\n"
+        )))
+        .err()
+        .expect("a device name that ends in _SECTION makes the key ambiguous");
+        assert!(err.starts_with("VYOS_R1_SECTION_TIMEOUT"), "{err}");
     }
 
     #[test]
