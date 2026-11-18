@@ -1,6 +1,6 @@
 //! The snapshot store: content addressing, the cycle that writes nothing,
-//! the load of a table across parents and a checkpoint, a stopped cycle,
-//! the keys and the determinism of the files.
+//! the load of a table across parents and a checkpoint, the removal of a
+//! device, a stopped cycle, the keys and the determinism of the files.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -329,4 +329,132 @@ fn a_second_writer_of_the_same_cycle_fails_and_publishes_nothing() {
         speeds(&a, &latest),
         vec![("r1".to_string(), vec!["eth0".to_string()])]
     );
+}
+
+fn commit_removing(
+    store: &Store,
+    time: u64,
+    remove: &[&str],
+    updates: Vec<DeviceUpdate>,
+) -> Option<Snapshot> {
+    let mut c = store.begin(time).unwrap();
+    for d in remove {
+        c.remove(d);
+    }
+    for u in updates {
+        c.add(u).unwrap();
+    }
+    c.prepare().unwrap().map(|p| p.publish().unwrap())
+}
+
+fn names(s: &Snapshot) -> Vec<&str> {
+    s.devices.keys().map(String::as_str).collect()
+}
+
+#[test]
+fn a_removed_device_leaves_the_later_snapshots_and_the_checkpoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    commit(
+        &store,
+        0,
+        vec![
+            update(&store, "r1", "a", Some(&[("eth0", 1000)])),
+            update(&store, "r2", "b", Some(&[("eth1", 100)])),
+        ],
+    );
+    // A cycle with only a removal publishes a snapshot.
+    let s1 = commit_removing(&store, 1, &["r2"], vec![]).unwrap();
+    assert_eq!(s1.manifest.cycle, 1);
+    assert!(s1.manifest.devices.is_empty());
+    assert_eq!(s1.manifest.removed, ["r2".to_string()].into());
+    assert_eq!(names(&s1), ["r1"]);
+    assert_eq!(store.snapshot(1).unwrap(), s1);
+    assert_eq!(names(&store.snapshot(0).unwrap()), ["r1", "r2"]);
+    let r1 = ("r1".to_string(), vec!["eth0".to_string()]);
+    assert_eq!(speeds(&store, &s1), vec![r1.clone()]);
+    assert_eq!(
+        speeds(&store, &store.snapshot(0).unwrap()),
+        vec![r1.clone(), ("r2".into(), vec!["eth1".into()])]
+    );
+
+    // The removal of a device that the base does not have writes nothing.
+    let before = files(dir.path());
+    assert!(commit_removing(&store, 2, &["r2", "r9"], vec![]).is_none());
+    assert_eq!(files(dir.path()), before);
+
+    for c in 2..=CHECKPOINT_INTERVAL {
+        let s = commit(
+            &store,
+            c,
+            vec![update(&store, "r1", &format!("a{c}"), None)],
+        )
+        .unwrap();
+        assert_eq!(names(&s), ["r1"]);
+        assert!(s.manifest.removed.is_empty());
+    }
+    let cp = store.snapshot(CHECKPOINT_INTERVAL).unwrap();
+    assert!(cp.manifest.checkpoint);
+    assert_eq!(cp.manifest.devices.keys().collect::<Vec<_>>(), ["r1"]);
+    for c in 0..CHECKPOINT_INTERVAL {
+        fs::remove_file(dir.path().join("snapshots").join(format!("{c:020}"))).unwrap();
+    }
+    let last = store.latest().unwrap().unwrap();
+    assert_eq!(names(&last), ["r1"]);
+    assert_eq!(speeds(&store, &last), vec![r1]);
+}
+
+#[test]
+fn a_removed_device_that_comes_back_has_only_its_new_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    commit(
+        &store,
+        0,
+        vec![
+            update(&store, "r1", "a", None),
+            update(&store, "r2", "b", Some(&[("eth1", 100)])),
+        ],
+    );
+    commit_removing(&store, 1, &["r2"], vec![]).unwrap();
+    // The device comes back with the same config and no table rows.
+    let s2 = commit(&store, 2, vec![update(&store, "r2", "b", None)]).unwrap();
+    assert!(s2.manifest.removed.is_empty());
+    assert_eq!(names(&s2), ["r1", "r2"]);
+    assert!(s2.devices["r2"].tables.is_empty());
+    assert!(speeds(&store, &s2).is_empty());
+    assert_eq!(names(&store.snapshot(1).unwrap()), ["r1"]);
+    assert_eq!(store.snapshot(2).unwrap(), s2);
+
+    // A removal and an update of one device in one cycle: the last call
+    // wins.
+    let s3 = commit_removing(&store, 3, &["r2"], vec![update(&store, "r2", "b3", None)]).unwrap();
+    assert!(s3.manifest.removed.is_empty());
+    assert_eq!(names(&s3), ["r1", "r2"]);
+    let mut c = store.begin(4).unwrap();
+    c.add(update(&store, "r2", "b4", None)).unwrap();
+    c.remove("r2");
+    let s4 = c.prepare().unwrap().unwrap().publish().unwrap();
+    assert_eq!(s4.manifest.removed, ["r2".to_string()].into());
+    assert!(s4.manifest.devices.is_empty());
+    assert_eq!(names(&store.snapshot(4).unwrap()), ["r1"]);
+}
+
+#[test]
+fn a_snapshot_manifest_without_removed_devices_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    commit(&store, 0, vec![update(&store, "r1", "a", None)]);
+    let s1 = commit(&store, 1, vec![update(&store, "r1", "a1", None)]).unwrap();
+    // A manifest with no removed device has no field `removed`.
+    for c in 0..2u64 {
+        let path = dir.path().join("snapshots").join(format!("{c:020}"));
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("removed"), "{text}");
+    }
+    assert_eq!(store.snapshot(1).unwrap(), s1);
+    // A manifest with no field `removed` removes no device.
+    let plain = r#"{"cycle":1,"time":1,"parent":0,"checkpoint":false,"schemas":{},"devices":{}}"#;
+    let m: SnapshotManifest = serde_json::from_str(plain).unwrap();
+    assert!(m.removed.is_empty());
 }

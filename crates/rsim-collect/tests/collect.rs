@@ -1,7 +1,8 @@
 //! Collection cycles on fake transports: the first snapshot, a cycle with
 //! no change, volatile changes, the forced full collection, the change of
 //! each class, failed reads, a failed half of a table, an extract error,
-//! the limits of concurrency and the sink.
+//! the limits of concurrency, the sink and a device that leaves the
+//! inventory.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -603,6 +604,99 @@ async fn a_collector_continues_from_the_store() {
     let r = c.run_cycle().await.unwrap();
     assert_eq!(r.snapshot, Some(1));
     assert!(r.changed.is_empty(), "{r:?}");
+}
+
+/// An inventory that the test changes between cycles.
+#[derive(Clone, Default)]
+struct Shared(Arc<Mutex<Vec<Device>>>);
+
+impl Inventory for Shared {
+    fn devices(&self) -> Vec<Device> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+fn table_devices(store: &Store, s: &Snapshot, t: &str) -> Vec<String> {
+    store
+        .read_table(s, table(t).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|(d, _)| d)
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_device_that_leaves_the_inventory_leaves_the_store_and_can_come_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = Arc::new(FakeTransport::new(Duration::from_millis(5)));
+    load(&t, &vyos("r1"));
+    load(&t, &vyos("r2"));
+    let inv = Shared::default();
+    *inv.0.lock().unwrap() = vec![vyos("r1"), vyos("r2")];
+    let sink = Arc::new(Recorder::default());
+    let mut c = Collector::new(
+        Store::open(dir.path(), keys()).unwrap(),
+        Box::new(inv.clone()),
+        Schedule {
+            spread: false,
+            ..Schedule::default()
+        },
+        Limits::default(),
+        Arc::new(TokioClock::new(T0)),
+    )
+    .unwrap()
+    .with_source(Arc::new(VyosSource::new(t.clone())))
+    .with_sink(sink.clone());
+    let r = c.run_cycle().await.unwrap();
+    assert_eq!(r.snapshot, Some(0));
+    assert!(r.removed.is_empty());
+
+    // r2 leaves the inventory. No device is due, and the cycle removes r2
+    // with no fetch.
+    inv.0.lock().unwrap().retain(|d| d.id != "r2");
+    let calls = t.calls();
+    let r = c.run_cycle().await.unwrap();
+    assert_eq!((r.due, r.snapshot), (0, Some(1)), "{r:?}");
+    assert_eq!(r.removed, ["r2"]);
+    assert!(r.changed.is_empty());
+    assert_eq!(t.calls(), calls);
+    let store = c.store();
+    let s1 = store.latest().unwrap().unwrap();
+    assert_eq!(s1.devices.keys().collect::<Vec<_>>(), ["r1"]);
+    assert_eq!(s1.manifest.removed.iter().collect::<Vec<_>>(), ["r2"]);
+    assert_eq!(table_devices(store, &s1, "links"), ["r1"]);
+    let s0 = store.snapshot(0).unwrap();
+    assert_eq!(s0.devices.keys().collect::<Vec<_>>(), ["r1", "r2"]);
+    assert_eq!(table_devices(store, &s0, "links"), ["r1", "r2"]);
+
+    // The removal is in one snapshot only.
+    tokio::time::advance(Duration::from_secs(10)).await;
+    let r = c.run_cycle().await.unwrap();
+    assert_eq!((r.due, r.snapshot), (0, None), "{r:?}");
+    assert!(r.removed.is_empty());
+
+    // r2 comes back before the end of its interval. It is due at once, and
+    // the store has it again with its new state.
+    tokio::time::advance(Duration::from_secs(10)).await;
+    inv.0.lock().unwrap().push(vyos("r2"));
+    let r = c.run_cycle().await.unwrap();
+    assert_eq!((r.due, r.snapshot), (1, Some(2)), "{r:?}");
+    assert!(r.removed.is_empty());
+    let all = vec![Class::Configuration, Class::Observation];
+    assert_eq!(r.changed, [("r2".to_string(), all)]);
+    let s2 = c.store().latest().unwrap().unwrap();
+    assert_eq!(s2.devices.keys().collect::<Vec<_>>(), ["r1", "r2"]);
+    assert_eq!(s2.devices["r2"].tables["links"].cycle, 2);
+    assert_eq!(table_devices(c.store(), &s2, "links"), ["r1", "r2"]);
+    assert_eq!(
+        sink.0
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(s, _)| *s)
+            .collect::<Vec<_>>(),
+        [0, 2]
+    );
 }
 
 /// This test uses real time. With paused time, the runtime moves the time

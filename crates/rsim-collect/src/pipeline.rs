@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
@@ -145,6 +145,9 @@ pub struct CycleReport {
     pub changed: Vec<(String, Vec<Class>)>,
     /// The device, the section and the error of each extract that failed.
     pub extract_errors: Vec<(String, String, String)>,
+    /// The devices of the store that are not in the inventory. The
+    /// published snapshot removes them.
+    pub removed: Vec<String>,
 }
 
 /// Collects the devices of an inventory into a store.
@@ -233,12 +236,13 @@ impl Collector {
         }
     }
 
-    /// Collects the due devices and writes one snapshot.
+    /// Collects the due devices and writes one snapshot. The snapshot
+    /// removes each device of the store that is not in the inventory.
     pub async fn run_cycle(&mut self) -> Result<CycleReport, CollectError> {
         let now = self.clock.now_ms();
         let devices = self.inventory.devices();
-        let mut ids = std::collections::BTreeSet::new();
-        if let Some(d) = devices.iter().find(|d| !ids.insert(d.id.as_str())) {
+        let mut ids = BTreeSet::new();
+        if let Some(d) = devices.iter().find(|d| !ids.insert(d.id.clone())) {
             return Err(CollectError::Inventory(format!(
                 "two devices have the id {}",
                 d.id
@@ -250,7 +254,7 @@ impl Collector {
             due: due.len(),
             ..CycleReport::default()
         };
-        if due.is_empty() {
+        if due.is_empty() && self.state.keys().all(|d| ids.contains(d)) {
             return Ok(report);
         }
 
@@ -286,12 +290,16 @@ impl Collector {
         std::thread::Builder::new()
             .name("rsim-store-writer".into())
             .spawn(move || {
-                let _ = done_tx.send(store_stage(cls_rx, &store, now));
+                let _ = done_tx.send(store_stage(cls_rx, &store, now, &ids));
             })
             .map_err(|e| CollectError::Stage(e.to_string()))?;
 
         let stage = |e: tokio::task::JoinError| CollectError::Stage(e.to_string());
-        let (snapshot, mut results) = done_rx
+        let Stored {
+            snapshot,
+            mut results,
+            removed,
+        } = done_rx
             .await
             .map_err(|_| CollectError::Stage("the store stage stopped".into()))??;
         results.sort_by(|a, b| a.device.id.cmp(&b.device.id));
@@ -312,6 +320,10 @@ impl Collector {
         }
         if let Some(s) = snapshot {
             report.snapshot = Some(s.manifest.cycle);
+            for d in &removed {
+                self.scheduler.forget(d);
+            }
+            report.removed = removed;
             report.changed = results
                 .iter()
                 .filter(|r| !r.changed.is_empty())
@@ -431,12 +443,37 @@ struct DeviceResult {
     extract_errors: Vec<(String, String)>,
 }
 
+/// The output of the store stage.
+struct Stored {
+    /// The published snapshot. `None` if no device changed and no device
+    /// is removed.
+    snapshot: Option<Snapshot>,
+    results: Vec<DeviceResult>,
+    removed: Vec<String>,
+}
+
+/// Writes the classified devices as one snapshot that removes each device
+/// of the base snapshot that is not in `inventory`.
 fn store_stage(
     mut rx: mpsc::Receiver<(Result<Classified, StoreError>, bool)>,
     store: &Store,
     time: u64,
-) -> Result<(Option<Snapshot>, Vec<DeviceResult>), StoreError> {
+    inventory: &BTreeSet<String>,
+) -> Result<Stored, StoreError> {
     let mut cycle = store.begin(time)?;
+    let removed: Vec<String> = cycle
+        .base()
+        .map(|s| {
+            s.devices
+                .keys()
+                .filter(|d| !inventory.contains(*d))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    for d in &removed {
+        cycle.remove(d);
+    }
     let mut results = Vec::new();
     while let Some((c, forced)) = rx.blocking_recv() {
         let c = c?;
@@ -470,7 +507,11 @@ fn store_stage(
         Some(p) => Some(p.publish()?),
         None => None,
     };
-    Ok((snapshot, results))
+    Ok(Stored {
+        snapshot,
+        results,
+        removed,
+    })
 }
 
 #[cfg(test)]
