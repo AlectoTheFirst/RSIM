@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
 use rsim_core::{
-    AddrField, Alternative, Attr, Branch, Context, ContextAttr, Dependency, Destination,
-    FieldValue, FlowState, FunctionId, FunctionKind, InterfaceId, Mac, NeighbourTarget,
+    AddrCond, AddrField, Alternative, Attr, Branch, Context, ContextAttr, Dependency, Destination,
+    FieldValue, FlowState, FunctionId, FunctionKind, InterfaceId, Mac, Match, NeighbourTarget,
     NetFunction, NextHop, ObjectId, Outcome, PacketSet, Prefix, PrefixTable, Reason, ReasonCode,
     Rewrite, RulePredicate, SourceSpan, Tri, TriePrefixTable, VrfId,
 };
@@ -410,6 +410,19 @@ impl RouteLookup {
     }
 }
 
+/// The destination address of a set whose members all have the same known
+/// destination address.
+fn single_destination(set: &PacketSet) -> Option<IpAddr> {
+    let FieldValue::Known(addr) = set.witness()?.current.dst_ip else {
+        return None;
+    };
+    let split = set.split(&RulePredicate::exact(Match {
+        dst_ip: AddrCond::In(vec![Prefix::host(addr)]),
+        ..Match::any()
+    }));
+    (split.unmatched.is_empty() && split.uncertain.is_empty()).then_some(addr)
+}
+
 /// One neighbour entry, from the collected ARP or neighbour table.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Neighbour {
@@ -469,16 +482,26 @@ impl NextHopResolution {
                     state,
                 ),
             ),
-            [] => push_nonempty(
-                out,
-                self.meta.unknown(
-                    set,
-                    ReasonCode::IncompleteTable,
-                    format!("neighbour {addr} not in table, table incomplete · {iface}"),
-                    ctx,
-                    state,
-                ),
-            ),
+            [] => {
+                let table = match addr.parse::<IpAddr>() {
+                    Ok(IpAddr::V4(_)) => "ARP table",
+                    Ok(IpAddr::V6(_)) => "neighbour table",
+                    Err(_) => "ARP or neighbour table",
+                };
+                push_nonempty(
+                    out,
+                    self.meta.unknown(
+                        set,
+                        ReasonCode::IncompleteTable,
+                        format!(
+                            "{addr} is not in the {table} of {} on {iface}; the collected table is incomplete",
+                            self.meta.device
+                        ),
+                        ctx,
+                        state,
+                    ),
+                );
+            }
             [one] => {
                 let Some(next) = self.egress.get(iface) else {
                     push_nonempty(
@@ -615,15 +638,9 @@ impl NetFunction for NextHopResolution {
                         state,
                     );
                 }
-                self.resolve(
-                    &mut out,
-                    "the destination".to_string(),
-                    &[],
-                    iface,
-                    part.unmatched,
-                    ctx,
-                    state,
-                );
+                let dest = single_destination(&part.unmatched)
+                    .map_or_else(|| "the destination".to_string(), |a| a.to_string());
+                self.resolve(&mut out, dest, &[], iface, part.unmatched, ctx, state);
                 push_nonempty(
                     &mut out,
                     self.meta.unknown(
