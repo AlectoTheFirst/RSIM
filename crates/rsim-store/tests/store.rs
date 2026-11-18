@@ -446,15 +446,15 @@ fn a_snapshot_manifest_without_removed_devices_reads() {
     let store = Store::open(dir.path(), keys()).unwrap();
     commit(&store, 0, vec![update(&store, "r1", "a", None)]);
     let s1 = commit(&store, 1, vec![update(&store, "r1", "a1", None)]).unwrap();
-    // The manifests with no removed device have no field for them, so a
-    // reader of the older format reads them.
+    // A manifest with no removed device has no field `removed`.
     for c in 0..2u64 {
         let path = dir.path().join("snapshots").join(format!("{c:020}"));
         let text = fs::read_to_string(&path).unwrap();
         assert!(!text.contains("removed"), "{text}");
     }
     assert_eq!(store.snapshot(1).unwrap(), s1);
-    let old = r#"{"cycle":1,"time":1,"parent":0,"checkpoint":false,"schemas":{},"devices":{}}"#;
-    let m: SnapshotManifest = serde_json::from_str(old).unwrap();
+    // A manifest with no field `removed` removes no device.
+    let plain = r#"{"cycle":1,"time":1,"parent":0,"checkpoint":false,"schemas":{},"devices":{}}"#;
+    let m: SnapshotManifest = serde_json::from_str(plain).unwrap();
     assert!(m.removed.is_empty());
 }
