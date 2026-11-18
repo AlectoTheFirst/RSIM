@@ -166,7 +166,7 @@ fn linked() -> Twin {
         .collect(),
         ..External::default()
     };
-    let low = iosxe::lower(
+    let (low, _) = iosxe::lower(
         "edge1",
         "edge1/config",
         &iosxe::profile(),
@@ -720,7 +720,6 @@ fn the_unhandled_lines_of_an_interface_make_its_packets_unknown() {
         "GigabitEthernet0/0/0: options not lowered: zone-member security OUTSIDE, crypto map VPN, ip verify unicast source reachable-via rx",
         "GigabitEthernet0/0/1.100: options not lowered: zone-member security INSIDE, ip nat inside in VRF RED",
         "GigabitEthernet0/0/1.200: options not lowered: ip policy route-map PBR-BLUE",
-        "GigabitEthernet0/0/1.100: HSRP group 1: the group state is not read, so the packets to its virtual addresses are unknown",
         "route 0.0.0.0/0 in VRF RED: a next hop in VRF default is not lowered",
         "static route 0.0.0.0/0 via 198.51.100.9 in VRF default: the route table has no such static path",
         "IPv6 is not lowered: each IPv6 packet is unknown at the route lookup",
@@ -733,7 +732,7 @@ fn the_unhandled_lines_of_an_interface_make_its_packets_unknown() {
 fn a_shut_interface_and_an_interface_with_no_address_are_not_lowered() {
     let doc = iosxe::read_text(CONFIG);
     let cfg = iosxe::read(&doc, &iosxe::table(true));
-    let low = iosxe::lower(
+    let (low, _) = iosxe::lower(
         "edge1",
         "edge1/config",
         &iosxe::profile(),

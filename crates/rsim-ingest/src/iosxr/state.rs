@@ -42,7 +42,8 @@ pub struct IfState {
     pub span: SourceSpan,
 }
 
-/// An HSRP group of `show hsrp`.
+/// An HSRP group of `show hsrp`, or an HSRP or VRRP group of a brief
+/// form.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HsrpRow {
     pub interface: String,
@@ -342,15 +343,17 @@ pub(crate) fn speed(s: &str) -> Option<u64> {
 }
 
 /// The LLDP neighbours. The port ID is the MAC of the far port if it has
-/// the form of a MAC.
-fn lldp(p: &Parsed, names: &Names) -> Vec<Neighbour> {
+/// the form of a MAC. The name is the field `NEIGHBOR`, else the field
+/// `NEIGHBOR_NAME`.
+pub(crate) fn lldp(p: &Parsed, names: &Names) -> Vec<Neighbour> {
     p.records()
         .filter(|(r, _)| !p.text(r, "LOCAL_INTERFACE").is_empty())
         .map(|(r, span)| {
             let remote = p.text(r, "NEIGHBOR_PORT_ID").trim();
             Neighbour {
                 port: names.resolve(p.text(r, "LOCAL_INTERFACE")),
-                name: neighbour_name(p.text(r, "NEIGHBOR")),
+                name: neighbour_name(p.text(r, "NEIGHBOR"))
+                    .or_else(|| neighbour_name(p.text(r, "NEIGHBOR_NAME"))),
                 remote_port: (!remote.is_empty()).then(|| remote.to_string()),
                 chassis: mac(p.text(r, "CHASSIS_ID")),
                 port_mac: mac(remote),
@@ -361,7 +364,7 @@ fn lldp(p: &Parsed, names: &Names) -> Vec<Neighbour> {
 }
 
 /// The CDP neighbours. The name is the system name, else the device ID.
-fn cdp(p: &Parsed, names: &Names) -> Vec<Neighbour> {
+pub(crate) fn cdp(p: &Parsed, names: &Names) -> Vec<Neighbour> {
     p.records()
         .filter(|(r, _)| !p.text(r, "LOCAL_INTERFACE").trim().is_empty())
         .map(|(r, span)| {
@@ -379,9 +382,10 @@ fn cdp(p: &Parsed, names: &Names) -> Vec<Neighbour> {
         .collect()
 }
 
-/// The HSRP groups. A record with a group number that is not a number
-/// makes the section unread.
-fn hsrp(p: &Parsed, names: &Names) -> Result<Vec<HsrpRow>, String> {
+/// The HSRP or VRRP groups. The group address is the field `GROUP_ADDR`,
+/// else the field `VIRTUAL_IP_ADDRESS`. A record with a group number that
+/// is not a number makes the section unread.
+pub(crate) fn hsrp(p: &Parsed, names: &Names) -> Result<Vec<HsrpRow>, String> {
     p.records()
         .map(|(r, span)| {
             let group = p.text(r, "GROUP");
@@ -391,7 +395,11 @@ fn hsrp(p: &Parsed, names: &Names) -> Result<Vec<HsrpRow>, String> {
                     .parse()
                     .map_err(|_| format!("the group {group:?} is not a number"))?,
                 state: p.text(r, "STATE").to_string(),
-                address: p.text(r, "GROUP_ADDR").parse().ok(),
+                address: p
+                    .text(r, "GROUP_ADDR")
+                    .parse()
+                    .or_else(|_| p.text(r, "VIRTUAL_IP_ADDRESS").parse())
+                    .ok(),
                 span,
             })
         })

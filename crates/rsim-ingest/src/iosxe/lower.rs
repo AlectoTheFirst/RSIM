@@ -1,35 +1,75 @@
 //! Lowering of an IOS-XE running config and its collected sections into the
-//! layer 3 function instances of a router: the interfaces with their VRFs,
-//! the input and output ACLs, the QoS policies, the NAT, the route table of
-//! each VRF and the next-hop resolution through ARP. The chain of an
-//! interface is the chain of NX-OS: ingress, input QoS, input ACL, VRF
-//! selection, session lookup, outside NAT, route lookup, inside NAT, session
-//! commit, next-hop resolution, output ACL, output QoS and egress.
+//! function instances of a router or a Catalyst switch: the interfaces with
+//! their VRFs, the input and output ACLs, the QoS policies, the NAT, the
+//! route table of each VRF, the next-hop resolution through ARP, the HSRP
+//! and VRRP groups, the hand-off and the egress of each port with a link,
+//! and the switch ports, the VLANs and the SVIs. The chain of an interface
+//! is the chain of NX-OS: ingress, input QoS, input ACL, VRF selection,
+//! session lookup, outside NAT, route lookup, inside NAT, session commit,
+//! next-hop resolution, output ACL, output QoS and egress. Gives the summary
+//! of the device for the link join too.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
-use rsim_core::{InterfaceId, ObjectId, SourceSpan, VrfId};
+use rsim_core::{InterfaceId, Mac, ObjectId, SourceSpan, VrfId};
 use rsim_functions::{
-    DestinationNat, DeviceDelivery, LocalInput, RouteLookup, SessionCommit, SessionLookup,
+    DestinationNat, DeviceDelivery, LinkEnd, LocalInput, RouteLookup, SessionCommit, SessionLookup,
     SourceNat, VendorProfile,
 };
 
 use super::config::{Config, Interface};
-use super::profile::{DEFAULT_VRF, KEEPS_UNTRANSLATED_FLOWS, UP_WITHOUT_SHUTDOWN};
+use super::profile::{
+    DEFAULT_VRF, HSRP_ACTIVE, HSRP_NOT_ACTIVE, KEEPS_UNTRANSLATED_FLOWS, NO_LINK,
+    UP_WITHOUT_SHUTDOWN, VRRP_MASTER, VRRP_NOT_MASTER,
+};
 use super::state::{self, State};
 use crate::iosxr::lower::{
-    Hops, Port, Vip, edges, error, fib, inputs, next_hops, place_unreadable,
+    Group, GroupRules, Hops, Port, RouterPort, edges, error, fib, group_note, group_state,
+    handoffs, inputs, next_hops, place_unreadable, routed_summary, vips,
 };
-use crate::links::External;
+use crate::links::{External, Summary};
 use crate::nxos;
 use crate::nxos::config::{FhrpKind, Lines, NatRole};
 use crate::nxos::lower::L;
 use crate::vyos::Lowered;
 
-/// Lowers one IOS-XE router. `sections` holds the text sections of
-/// [`super::SECTIONS`], each with its file name. `ext` gives the links from
-/// the estate.
+/// The words of `show standby brief`.
+const HSRP_RULES: GroupRules = GroupRules {
+    what: "HSRP",
+    command: "show standby brief",
+    active: HSRP_ACTIVE,
+    not_active: HSRP_NOT_ACTIVE,
+    no_vmac: "no mac-address line, and show standby brief gives no virtual MAC",
+};
+
+/// The words of `show vrrp brief`.
+const VRRP_RULES: GroupRules = GroupRules {
+    what: "VRRP",
+    command: "show vrrp brief",
+    active: VRRP_MASTER,
+    not_active: VRRP_NOT_MASTER,
+    no_vmac: "show vrrp brief gives no virtual MAC",
+};
+
+/// The MACs of the interfaces of a router or a switch in `show interfaces`.
+pub fn device_macs(cfg: &Config, sections: &BTreeMap<String, (Vec<u8>, String)>) -> BTreeSet<Mac> {
+    let only: BTreeMap<String, (Vec<u8>, String)> = sections
+        .iter()
+        .filter(|(k, _)| k.as_str() == "interfaces")
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    state::read(&only, &super::names(cfg))
+        .l3
+        .interfaces
+        .and_then(Result::ok)
+        .map(|m| m.values().filter_map(|s| s.mac).collect())
+        .unwrap_or_default()
+}
+
+/// Lowers one IOS-XE router or switch. `sections` holds the text sections
+/// of [`super::SECTIONS`], each with its file name. `ext` gives the links
+/// from the estate. Gives the summary of the device for the estate too.
 pub fn lower(
     device: &str,
     file: &str,
@@ -37,17 +77,23 @@ pub fn lower(
     cfg: &Config,
     sections: &BTreeMap<String, (Vec<u8>, String)>,
     ext: &External,
-) -> Lowered {
+) -> (Lowered, Summary) {
     let names = super::names(cfg);
     let st = state::read(sections, &names);
     let mut acls = cfg.acls.clone();
     for acl in acls.values_mut() {
         place_unreadable(acl);
     }
+    let (vlans, unknown_vlans) = super::layer2::vlans(cfg);
     let shared = nxos::Config {
         acls,
         nat_rules: cfg.nat_rules.clone(),
         nat_pools: cfg.nat_pools.clone(),
+        interfaces: super::layer2::interfaces(cfg),
+        vlans,
+        unknown_vlans,
+        unreadable_vlans: cfg.unreadable_vlans.clone(),
+        hostname: cfg.hostname.clone(),
         ..nxos::Config::default()
     };
     let mut l = L::new(device, file, profile, &shared);
@@ -56,16 +102,99 @@ pub fn lower(
         ("rib", error(&st.l3.rib)),
         ("arp", error(&st.l3.arp)),
         ("acls", error(&st.acls)),
+        ("lldp", error(&st.l3.lldp)),
+        ("cdp", error(&st.l3.cdp)),
+        ("hsrp", error(&st.l3.hsrp)),
+        ("vrrp", error(&st.vrrp)),
     ] {
         if let Some(e) = e {
             l.note(format!("the section {name} is not read: {e}"));
         }
     }
-    let (active, vips) = ports(&mut l, cfg, &st);
+    let active = ports(&mut l, cfg, &st);
+    let groups = groups(&mut l, cfg, &st, &active, &names);
+    let vips = vips(&groups, &active);
     cross_check_acls(&mut l, &shared, &st);
     cross_check_routes(&mut l, cfg, &st);
+
+    // The summary: the switch ports from the layer 2 part, then the routed
+    // ports.
+    let mut sum = Summary::default();
+    let states = st.l3.interfaces.as_ref().and_then(|x| x.as_ref().ok());
+    for (name, s) in states.into_iter().flatten() {
+        if s.speed_mbps.is_some() || s.full_duplex.is_some() {
+            sum.facts.insert(
+                name.clone(),
+                LinkEnd {
+                    speed_mbps: s.speed_mbps,
+                    full_duplex: s.full_duplex,
+                    media: None,
+                    spans: vec![s.span.clone()],
+                },
+            );
+        }
+    }
+    let mut svi_links = BTreeMap::new();
+    if super::layer2::has_layer2(cfg) {
+        let nst = super::layer2::switch_state(&st);
+        let gws = super::layer2::gateways(&active, &groups, &st);
+        let shared_active: Vec<nxos::config::Interface> =
+            active.iter().map(|p| p.i.clone()).collect();
+        svi_links = l.switch_layer2(
+            &shared_active,
+            &gws,
+            &nst,
+            &crate::collected::Collected::default(),
+            &names,
+            ext,
+            &mut sum,
+        );
+        for p in sum.ports.keys() {
+            sum.entries.insert(p.clone(), l.id(&format!("port/{p}/in")));
+            if let Some(s) = states.and_then(|m| m.get(p)) {
+                if let Some(m) = s.mac {
+                    sum.port_macs.insert(p.clone(), m);
+                }
+                sum.port_spans.insert(p.clone(), s.span.clone());
+            }
+        }
+    }
+    sum.names = names.clone();
+    sum.host_name = cfg
+        .hostname
+        .as_deref()
+        .and_then(nxos::state::neighbour_name);
+    let channel = |n: u32| {
+        let want = format!("port-channel{n}");
+        cfg.interfaces
+            .iter()
+            .find(|i| i.name.eq_ignore_ascii_case(&want))
+            .map_or_else(|| format!("Port-channel{n}"), |i| i.name.clone())
+    };
+    let router_ports: Vec<RouterPort> = cfg
+        .interfaces
+        .iter()
+        .map(|i| RouterPort {
+            name: &i.name,
+            channel: i.channel_group.map(|(n, _)| channel(n)),
+            shut: i.admin_up == Some(false),
+        })
+        .collect();
+    routed_summary(&l, &mut sum, &router_ports, NO_LINK, &st.l3, &active);
+    sum.next_hops.extend(
+        cfg.static_routes
+            .iter()
+            .filter_map(|r| r.next_hop.as_deref()?.parse::<IpAddr>().ok()),
+    );
+    for a in st.l3.arp.iter().flatten().flatten() {
+        if let Some(v) = nxos::layer2::svi_vlan(&a.interface)
+            && svi_links.contains_key(&a.interface)
+        {
+            sum.arp.push((v, a.ip, a.mac, a.span.clone()));
+        }
+    }
     if active.is_empty() {
-        return l.out;
+        return (l.out, sum);
     }
     let nat_ifs = |role: NatRole| -> BTreeSet<InterfaceId> {
         active
@@ -182,10 +311,11 @@ pub fn lower(
             next: l.id("nexthop"),
             keep_untranslated: KEEPS_UNTRANSLATED_FLOWS,
         });
-        next_hops(&mut l, &active, &st.l3, ext);
+        next_hops(&mut l, &active, &st.l3, ext, &svi_links);
     }
+    handoffs(&mut l, &active, &groups, &sum, ext);
     edges(&mut l, device, &active);
-    l.out
+    (l.out, sum)
 }
 
 /// The span of a VRF: its stanza in the config, else its first route in the
@@ -198,15 +328,13 @@ fn vrf_span(l: &L, cfg: &Config, rib: Option<&crate::iosxr::state::Rib>, vrf: &s
         .map_or_else(|| l.span(Lines { first: 1, last: 1 }), |p| p.span.clone())
 }
 
-/// The layer 3 interfaces that are lowered, and the virtual addresses of
-/// their HSRP and VRRP groups. A layer 3 interface has an IPv4 address of
-/// the config, is not a switch port, is not shut and is not down in
-/// `show interfaces`. A line of an interface that the lowering does not
+/// The layer 3 interfaces that are lowered. A layer 3 interface has an IPv4
+/// address of the config, is not a switch port, is not shut and is not down
+/// in `show interfaces`. A line of an interface that the lowering does not
 /// model makes each packet in or out of it `Unknown`.
-fn ports(l: &mut L, cfg: &Config, st: &State) -> (Vec<Port>, Vec<Vip>) {
+fn ports(l: &mut L, cfg: &Config, st: &State) -> Vec<Port> {
     let states = st.l3.interfaces.as_ref().and_then(|x| x.as_ref().ok());
     let mut active = Vec::new();
-    let mut vips = Vec::new();
     for i in &cfg.interfaces {
         if i.switchport == Some(true) {
             continue;
@@ -238,35 +366,68 @@ fn ports(l: &mut L, cfg: &Config, st: &State) -> (Vec<Port>, Vec<Vip>) {
         if i.addresses.is_empty() {
             continue;
         }
-        let p = port(i, admin, cfg);
-        let vrf = p.vrf.clone().unwrap_or_else(|| DEFAULT_VRF.to_string());
-        for g in &i.fhrp {
-            let kind = match g.kind {
-                FhrpKind::Hsrp => "HSRP",
-                FhrpKind::Vrrp => "VRRP",
-            };
-            l.note(format!(
-                "{}: {kind} group {}: the group state is not read, so the packets to its virtual addresses are unknown",
-                i.name, g.group
-            ));
-            for (a, lines) in &g.addresses {
-                vips.push(Vip {
-                    vrf: vrf.clone(),
-                    ip: IpAddr::V4(*a),
-                    local: false,
-                    spans: vec![l.span(g.lines), l.span(*lines)],
-                });
-            }
-        }
         active.push(Port {
-            i: p,
+            i: port(i, admin, cfg),
             state: s.map(|s| s.span.clone()),
             dot1q: i.dot1q.filter(|d| !d.1).map(|d| d.0),
             ipv6: i.ipv6.iter().map(|a| a.0.clone()).collect(),
             mac: s.and_then(|s| s.mac),
         });
     }
-    (active, vips)
+    active
+}
+
+/// The IPv4 HSRP and VRRP groups of the lowered interfaces with their state
+/// from `show standby brief` and `show vrrp brief`. The virtual MAC is the
+/// MAC of `standby <group> mac-address`; the brief forms give none, so each
+/// other group has a virtual MAC that is not known.
+fn groups(
+    l: &mut L,
+    cfg: &Config,
+    st: &State,
+    active: &[Port],
+    names: &nxos::names::Names,
+) -> Vec<Group> {
+    let mut out = Vec::new();
+    for i in &cfg.interfaces {
+        let iface = names.resolve(&i.name);
+        if !active.iter().any(|p| p.i.name == iface) {
+            continue;
+        }
+        for g in &i.fhrp {
+            let (rules, rows) = match g.kind {
+                FhrpKind::Hsrp => (&HSRP_RULES, &st.l3.hsrp),
+                FhrpKind::Vrrp => (&VRRP_RULES, &st.vrrp),
+            };
+            let mut spans = vec![l.span(g.lines)];
+            spans.extend(g.addresses.iter().map(|(_, x)| l.span(*x)));
+            let vmac = g.mac.map(|(m, x)| {
+                spans.push(l.span(x));
+                m
+            });
+            let state = group_state(
+                g.group,
+                g.addresses.first().map(|a| a.0),
+                &g.unhandled,
+                &iface,
+                rows,
+                rules,
+                &mut spans,
+            );
+            let group = Group {
+                what: rules.what,
+                group: g.group,
+                addresses: g.addresses.iter().map(|a| a.0).collect(),
+                interface: iface.clone(),
+                state,
+                vmac,
+                spans,
+            };
+            group_note(l, &group, rules);
+            out.push(group);
+        }
+    }
+    out
 }
 
 /// An interface in the form of the shared ACL and NAT functions. The lines

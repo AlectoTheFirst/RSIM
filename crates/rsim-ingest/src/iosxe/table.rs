@@ -191,6 +191,7 @@ const FORWARDING: &[Entry] = &[
     e("ip nat inside source ..", Handled, Subtree),
     e("ip nat pool ..", Handled, Subtree),
     e("ip nat translation ..", Irrelevant, Subtree),
+    e("vtp mode *", Handled, Subtree),
     e("vlan *", Handled, Node),
     e("vlan */name ..", Handled, Subtree),
     e("ipv6 ..", Irrelevant, Subtree),

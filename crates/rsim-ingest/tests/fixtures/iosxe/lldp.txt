@@ -1,0 +1,63 @@
+------------------------------------------------
+Local Intf: Gi0
+Chassis id: 0000.5e00.53f1
+Port id: Gi0/0/0/3
+Port Description: internet edge
+System Name: pe1.example.test
+
+System Description:
+Example XR Software, Version 7.11.2
+
+Time remaining: 101 seconds
+System Capabilities: R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 192.0.2.250
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Gi0/0/1
+Chassis id: 0000.5e00.53f3
+Port id: GigabitEthernet0/0/0/0
+Port Description: to-edge1-lan
+System Name: pe3
+
+System Description:
+Example XR Software, Version 7.11.2
+
+Time remaining: 97 seconds
+System Capabilities: R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 198.51.100.5
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Gi0/0/4
+Chassis id: 0000.5e00.53f3
+Port id: GigabitEthernet0/0/0/5
+Port Description: to-edge1-wan
+System Name: pe3
+
+System Description:
+Example XR Software, Version 7.11.2
+
+Time remaining: 97 seconds
+System Capabilities: R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 198.51.100.5
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+
+Total entries displayed: 3
+

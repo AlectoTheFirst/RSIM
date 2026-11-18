@@ -1,7 +1,8 @@
-//! The collected text sections of an IOS-XE router that the lowering reads,
-//! each parsed by its TextFSM template: the interface state, the route
-//! table of each VRF, ARP and the access lists. Each row keeps the line
-//! range of its record in the section.
+//! The collected text sections of an IOS-XE router or switch that the
+//! lowering reads, each parsed by its TextFSM template: the interface state,
+//! the route table of each VRF, ARP, the access lists, the LLDP and CDP
+//! neighbours and the HSRP and VRRP groups. Each row keeps the line range of
+//! its record in the section.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
@@ -13,7 +14,8 @@ use super::profile::{
     STATE_UP, TABLE_HEADERS, VRF_HEADER,
 };
 use crate::iosxr::state::{
-    ArpRow, IfState, Parsed, Rib, RoutePath, Section, UnreadRoute, parse_on, prefix_on, speed,
+    ArpRow, HsrpRow, IfState, Parsed, Rib, RoutePath, Section, UnreadRoute, cdp, hsrp, lldp,
+    parse_on, prefix_on, speed,
 };
 use crate::nxos::names::Names;
 use crate::nxos::state::mac;
@@ -26,6 +28,10 @@ pub const SECTIONS: &[(&str, &str)] = &[
     ("rib_global", "show ip route"),
     ("arp", "show ip arp"),
     ("acls", "show ip access-lists"),
+    ("lldp", "show lldp neighbors detail"),
+    ("cdp", "show cdp neighbors detail"),
+    ("hsrp", "show standby brief"),
+    ("vrrp", "show vrrp brief"),
 ];
 
 /// An access list of `show ip access-lists`.
@@ -38,12 +44,15 @@ pub struct AclList {
 }
 
 /// The collected sections of a router. The interface state, the route
-/// table and ARP have the row types of IOS-XR, so the lowering shares the
-/// route table and the next-hop resolution.
+/// table, ARP, the neighbours and the HSRP groups have the row types of
+/// IOS-XR, so the lowering shares the route table, the next-hop resolution,
+/// the summary and the hand-off.
 #[derive(Clone, Debug, Default)]
 pub struct State {
     pub l3: crate::iosxr::state::State,
     pub acls: Section<BTreeMap<String, AclList>>,
+    /// The VRRP groups of `show vrrp brief`.
+    pub vrrp: Section<Vec<HsrpRow>>,
 }
 
 /// An IOS-XE answer has no line before it.
@@ -77,9 +86,13 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
             interfaces: section(sections, "interfaces", |p, _| Ok(interfaces(p, names))),
             rib: routes(sections, names),
             arp: section(sections, "arp", |p, _| Ok(arp(p, names))),
+            lldp: section(sections, "lldp", |p, _| Ok(lldp(p, names))),
+            cdp: section(sections, "cdp", |p, _| Ok(cdp(p, names))),
+            hsrp: section(sections, "hsrp", |p, _| hsrp(p, names)),
             ..Default::default()
         },
         acls: section(sections, "acls", |p, _| acls(p)),
+        vrrp: section(sections, "vrrp", |p, _| hsrp(p, names)),
     }
 }
 
@@ -353,6 +366,10 @@ mod tests {
                 "interfaces" => "cisco_ios_show_interfaces.textfsm",
                 "rib" | "rib_global" => "cisco_ios_show_ip_route.textfsm",
                 "arp" => "cisco_ios_show_ip_arp.textfsm",
+                "lldp" => "cisco_ios_show_lldp_neighbors_detail.textfsm",
+                "cdp" => "cisco_ios_show_cdp_neighbors_detail.textfsm",
+                "hsrp" => "cisco_ios_show_standby_brief.textfsm",
+                "vrrp" => "cisco_ios_show_vrrp_brief.textfsm",
                 _ => "cisco_ios_show_ip_access-lists.textfsm",
             };
             assert_eq!(name, want, "{command}");

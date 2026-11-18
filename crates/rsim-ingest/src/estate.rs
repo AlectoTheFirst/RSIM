@@ -1,6 +1,6 @@
 //! The twin of a snapshot: the VyOS, IOS-XR and IOS-XE routers, the UniFi
-//! sites and the NX-OS switches, with the links between them. An IOS-XE
-//! router has no link.
+//! sites, the NX-OS switches and the IOS-XE switches, with the links between
+//! them.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
@@ -190,12 +190,12 @@ pub fn build(store: &Store, snap: &Snapshot) -> Result<Estate, StoreError> {
     Ok(e)
 }
 
-/// Builds the twin of the inputs. The first lowering of each NX-OS switch
-/// and each IOS-XR router gives its summary, and the routers and the root
-/// devices of the UniFi sites give theirs; the link join of the summaries
-/// gives the links. Then each UniFi site, each VyOS router, each NX-OS
-/// switch and each IOS-XR router is lowered with its links, and each IOS-XE
-/// router with no link.
+/// Builds the twin of the inputs. The first lowering of each NX-OS switch,
+/// each IOS-XR router and each IOS-XE router or switch gives its summary,
+/// and the VyOS routers and the root devices of the UniFi sites give theirs;
+/// the link join of the summaries gives the links. Then each UniFi site,
+/// each VyOS router, each NX-OS switch, each IOS-XR router and each IOS-XE
+/// device is lowered with its links.
 pub fn assemble(inputs: Vec<Input>) -> Estate {
     let mut e = Estate {
         builder: TwinBuilder::new(),
@@ -342,6 +342,19 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         );
         summaries.insert(d.clone(), sum);
     }
+    // The first lowering of each IOS-XE device gives its summary.
+    let xe_profile = iosxe::profile();
+    for (d, (cfg, file, sections)) in &xe {
+        let (_, sum) = iosxe::lower(
+            d,
+            file,
+            &xe_profile,
+            cfg,
+            sections,
+            &crate::links::External::default(),
+        );
+        summaries.insert(d.clone(), sum);
+    }
     for s in summaries.values() {
         next_hops.extend(s.next_hops.iter().copied());
     }
@@ -363,6 +376,9 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
     }
     for (cfg, _, sections) in xr.values() {
         device_macs.extend(iosxr::device_macs(cfg, sections));
+    }
+    for (cfg, _, sections) in xe.values() {
+        device_macs.extend(iosxe::device_macs(cfg, sections));
     }
     for (_, col, _, _) in switches.values() {
         device_macs.extend(
@@ -583,17 +599,10 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
         }
     }
 
-    // The IOS-XE routers, with no link.
-    let xe_profile = iosxe::profile();
+    // The IOS-XE routers and switches, with their links.
     for (device, (cfg, file, sections)) in &xe {
-        let low = iosxe::lower(
-            device,
-            file,
-            &xe_profile,
-            cfg,
-            sections,
-            &crate::links::External::default(),
-        );
+        let ext = joined.devices.remove(device).unwrap_or_default();
+        let (low, _) = iosxe::lower(device, file, &xe_profile, cfg, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         for f in low.functions {
             e.builder.add_arc(f);
