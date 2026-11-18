@@ -123,7 +123,7 @@ Tunnel10 is up, line protocol is up
   5 minute input rate 1000 bits/sec, 1 packets/sec
   5 minute output rate 1000 bits/sec, 1 packets/sec
 GigabitEthernet0 is up, line protocol is up 
-  Hardware is BUILT-IN-2T+6X1GE, address is 0000.5e00.5300 (bia 0000.5e00.5300)
+  Hardware is BUILT-IN-2T+6X1GE, address is 0000.5e00.5331 (bia 0000.5e00.5331)
   Internet address is 203.0.113.10/24
   MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec, 
      reliability 255/255, txload 1/255, rxload 1/255

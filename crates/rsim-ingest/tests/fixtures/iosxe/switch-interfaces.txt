@@ -1,0 +1,64 @@
+Vlan1 is administratively down, line protocol is down
+  Hardware is Ethernet SVI, address is 0000.5e00.5380 (bia 0000.5e00.5380)
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+Vlan10 is up, line protocol is up
+  Hardware is Ethernet SVI, address is 0000.5e00.5381 (bia 0000.5e00.5381)
+  Internet address is 192.0.2.1/25
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+Vlan99 is up, line protocol is up
+  Hardware is Ethernet SVI, address is 0000.5e00.5382 (bia 0000.5e00.5382)
+  Internet address is 198.51.100.10/24
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+GigabitEthernet0/0 is up, line protocol is up
+  Hardware is RP management port, address is 0000.5e00.5383 (bia 0000.5e00.5383)
+  Internet address is 203.0.113.21/24
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+  Full Duplex, 1000Mbps, link type is auto, media type is RJ45
+GigabitEthernet1/0/1 is up, line protocol is up (connected)
+  Hardware is Gigabit Ethernet, address is 0000.5e00.5384 (bia 0000.5e00.5384)
+  Description: user port
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+  Full-duplex, 1000Mb/s, media type is 10/100/1000BaseTX
+GigabitEthernet1/0/2 is up, line protocol is up (connected)
+  Hardware is Gigabit Ethernet, address is 0000.5e00.5385 (bia 0000.5e00.5385)
+  MTU 1500 bytes, BW 100000 Kbit/sec, DLY 100 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+  Full-duplex, 100Mb/s, media type is 10/100/1000BaseTX
+GigabitEthernet1/0/3 is administratively down, line protocol is down (disabled)
+  Hardware is Gigabit Ethernet, address is 0000.5e00.5386 (bia 0000.5e00.5386)
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+  Auto-duplex, Auto-speed, media type is 10/100/1000BaseTX
+GigabitEthernet1/0/47 is up, line protocol is up (connected)
+  Hardware is Gigabit Ethernet, address is 0000.5e00.5387 (bia 0000.5e00.5387)
+  Description: uplink member
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+  Full-duplex, 1000Mb/s, media type is 10/100/1000BaseTX
+GigabitEthernet1/0/48 is up, line protocol is up (connected)
+  Hardware is Gigabit Ethernet, address is 0000.5e00.5388 (bia 0000.5e00.5388)
+  Description: uplink member
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+  Full-duplex, 1000Mb/s, media type is 10/100/1000BaseTX
+Port-channel1 is up, line protocol is up (connected)
+  Hardware is EtherChannel, address is 0000.5e00.5387 (bia 0000.5e00.5387)
+  Description: uplink to dist1
+  MTU 1500 bytes, BW 2000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+  Full-duplex, 1000Mb/s, link type is auto, media type is N/A

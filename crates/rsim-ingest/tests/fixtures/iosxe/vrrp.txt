@@ -1,0 +1,2 @@
+Interface          Grp Pri Time  Own Pre State   Master addr     Group addr
+Gi0/0/1.200        10  120 3531       Y  Backup  192.0.2.131     192.0.2.130

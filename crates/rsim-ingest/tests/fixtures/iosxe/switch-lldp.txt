@@ -1,0 +1,43 @@
+------------------------------------------------
+Local Intf: Gi1/0/47
+Chassis id: 0000.5e00.53e0
+Port id: Gi0/0/0
+Port Description: to acc1 a
+System Name: dist1.example.test
+
+System Description:
+Example IOS XE Software, Version 17.09.04
+
+Time remaining: 108 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 198.51.100.1
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Gi1/0/48
+Chassis id: 0000.5e00.53e0
+Port id: Gi0/0/1
+Port Description: to acc1 b
+System Name: dist1.example.test
+
+System Description:
+Example IOS XE Software, Version 17.09.04
+
+Time remaining: 108 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 198.51.100.1
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+
+Total entries displayed: 2
+

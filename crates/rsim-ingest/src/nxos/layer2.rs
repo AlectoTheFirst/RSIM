@@ -1,13 +1,15 @@
 //! Lowering of the layer 2 part of an NX-OS switch: the switch ports, the
 //! MAC table, the flood, the SVI hand-off, HSRP and VRRP, and the endpoints.
+//! The IOS-XE lowering gives its switch ports, VLANs and SVIs to the same
+//! functions.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 use std::sync::Arc;
 
 use rsim_core::{
-    BridgeDomainId, EndpointId, FunctionId, InterfaceId, Mac, Match, ObjectId, PortId, Prefix,
-    PrefixTable, RulePredicate, SourceSpan,
+    BridgeDomainId, EndpointId, FunctionId, InterfaceId, Mac, MacCond, Match, ObjectId, PortId,
+    Prefix, PrefixTable, RulePredicate, SourceSpan,
 };
 use rsim_engine::{AttachmentKind, AttachmentRecord, Endpoint};
 use rsim_functions::{
@@ -25,7 +27,7 @@ use crate::links::{External, PortVlans, Summary, VlanInfo, VpcSummary};
 
 /// The gateway facts of a layer 3 interface.
 #[derive(Clone, Debug, Default)]
-pub(super) struct Gateway {
+pub(crate) struct Gateway {
     /// The collected MAC of the interface.
     pub svi_mac: Option<(Mac, SourceSpan)>,
     /// The virtual MAC and the virtual address of each active group.
@@ -40,7 +42,7 @@ pub(super) struct Gateway {
 }
 
 /// The VLAN of an SVI name such as `Vlan10`.
-pub(super) fn svi_vlan(name: &str) -> Option<u16> {
+pub(crate) fn svi_vlan(name: &str) -> Option<u16> {
     let lower = name.to_ascii_lowercase();
     lower.strip_prefix("vlan")?.parse().ok()
 }
@@ -50,10 +52,12 @@ pub(super) fn bd_of(dev: &str, vlan: u16) -> BridgeDomainId {
     BridgeDomainId::new(format!("{dev}/vlan{vlan}"))
 }
 
-/// True for the name of a physical port or a port channel.
+/// True for the name of a physical port or a port channel: `Ethernet1/1`
+/// and `port-channel10` of NX-OS, and `GigabitEthernet1/0/1`,
+/// `TwentyFiveGigE1/0/1` and `Port-channel1` of IOS-XE.
 fn is_switch_port(name: &str) -> bool {
     let l = name.to_ascii_lowercase();
-    l.starts_with("ethernet") || l.starts_with("port-channel")
+    l.starts_with("port-channel") || l.contains("ethernet") || l.contains("gige")
 }
 
 /// The plan of a switch port.
@@ -212,11 +216,18 @@ impl L<'_> {
             .collect();
         let l3: BTreeSet<&str> = active.iter().map(|i| i.name.as_str()).collect();
 
-        // The port channel of each member port.
+        // The port channel of each member port, with the name of the
+        // config.
         let mut channel: BTreeMap<String, String> = BTreeMap::new();
         for i in &cfg.interfaces {
             if let Some(n) = i.channel_group {
-                channel.insert(i.name.clone(), format!("port-channel{n}"));
+                let want = format!("port-channel{n}");
+                let name = cfg
+                    .interfaces
+                    .iter()
+                    .find(|x| x.name.eq_ignore_ascii_case(&want))
+                    .map_or(want, |x| x.name.clone());
+                channel.insert(i.name.clone(), name);
             }
         }
         let port_of = |name: &str| -> String {
@@ -964,13 +975,18 @@ impl L<'_> {
             });
         }
         self.vxlan_split_horizon(tunnel, &tables, &egress, &flood, &bdf);
+        let mut miss = self.id("flood");
+        if st.no_mac_table && (!plans.is_empty() || !svis.is_empty()) {
+            self.far_macs(&plans, &own, ext, &mut tables);
+            miss = self.mac_miss();
+        }
         if !plans.is_empty() || !svis.is_empty() {
             let meta = self.meta("mac", Vec::new());
             self.out.functions.push(Arc::new(MacLookup {
                 meta,
                 tables,
                 egress,
-                flood: self.id("flood"),
+                flood: miss,
                 hairpin: BTreeSet::new(),
                 blocked: BTreeMap::new(),
             }));
@@ -1021,5 +1037,103 @@ impl L<'_> {
             });
         }
         links
+    }
+
+    /// With no collected MAC table: the MAC of the routed port at the far
+    /// end of the link of an exact switch port with one peer is on that
+    /// port, in each VLAN of the port. A MAC that 2 ports claim in one VLAN,
+    /// or a MAC of the switch, gets no entry.
+    fn far_macs(
+        &mut self,
+        plans: &BTreeMap<String, Plan>,
+        own: &BTreeSet<(u16, Mac)>,
+        ext: &External,
+        tables: &mut BTreeMap<BridgeDomainId, BTreeMap<Mac, MacEntry>>,
+    ) {
+        // The ports that claim each MAC in each VLAN, with the spans of their
+        // links.
+        type Claims<'a> = BTreeMap<(u16, Mac), Vec<(&'a str, Vec<SourceSpan>)>>;
+        let mut claims: Claims = BTreeMap::new();
+        for (name, plan) in plans {
+            let Plan::Exact { native, tagged, .. } = plan else {
+                continue;
+            };
+            let (Some([peer]), Some(m)) = (
+                ext.peers.get(name).map(Vec::as_slice),
+                ext.far_macs.get(name),
+            ) else {
+                continue;
+            };
+            for v in native.iter().chain(tagged.iter()) {
+                if !own.contains(&(*v, *m)) {
+                    claims
+                        .entry((*v, *m))
+                        .or_default()
+                        .push((name.as_str(), peer.provenance.clone()));
+                }
+            }
+        }
+        for ((v, m), list) in claims {
+            match list.as_slice() {
+                [(port, spans)] => {
+                    tables.entry(self.bd(v)).or_default().insert(
+                        m,
+                        MacEntry {
+                            port: PortId::new(*port),
+                            spans: spans.clone(),
+                        },
+                    );
+                }
+                _ => self.note(format!(
+                    "VLAN {v}: the MAC {m:?} is at the far end of more than one port, so it has no entry"
+                )),
+            }
+        }
+    }
+
+    /// The function of a frame that the MAC lookup does not find, with no
+    /// collected MAC table: a broadcast frame floods, and each other frame
+    /// gives `Unknown`, because its port or its flood is not known.
+    fn mac_miss(&mut self) -> FunctionId {
+        let f = "mac-miss";
+        let span = SourceSpan::new(self.file_name(), 1, 1);
+        let broadcast = FRule::new(
+            "a broadcast frame floods",
+            RulePredicate::exact(Match {
+                dst_mac: MacCond::In(BTreeSet::from([rsim_functions::layer2::BROADCAST])),
+                ..Match::any()
+            }),
+            RuleAction::Permit,
+        );
+        let rest = FRule::unhandled(
+            "the MAC table is not collected, so the port of a unicast or multicast frame is not known",
+            span.clone(),
+        );
+        self.add(AclMatch {
+            meta: self.meta(f, vec![span]),
+            acl: ObjectId::new(format!("{}:{f}", self.dev)),
+            rules: vec![broadcast, rest],
+            default: RuleAction::Deny,
+            next: self.id("flood"),
+        });
+        self.id(f)
+    }
+
+    /// Lowers the switch ports, the VLANs and the SVIs of a switch with no
+    /// tunnel end. Gives the ingress function of the SVI port and the MAC of
+    /// each SVI that has one, for the routed egress of the SVI.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn switch_layer2(
+        &mut self,
+        active: &[Interface],
+        gws: &BTreeMap<String, Gateway>,
+        st: &State,
+        col: &Collected,
+        names: &Names,
+        ext: &External,
+        sum: &mut Summary,
+    ) -> BTreeMap<String, (FunctionId, Mac)> {
+        let none = super::vxlan::Plan::None;
+        self.layer2(active, gws, st, col, names, ext, &none, sum)
     }
 }

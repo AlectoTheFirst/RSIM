@@ -171,6 +171,10 @@ pub struct External {
     pub endpoints: Vec<Placed>,
     /// The peer switch of the vPC pair, if it is in the estate.
     pub vpc_peer: Option<VpcPeer>,
+    /// The MAC of the far end of the link of each port with one peer, when
+    /// the far end is a routed port: a port that is not a switch port and
+    /// has layer 3 addresses.
+    pub far_macs: BTreeMap<String, Mac>,
 }
 
 /// One end of a link: a device and a port.
@@ -450,6 +454,20 @@ pub fn join(
             l2_far.insert((b.0.clone(), b.1.clone()), (a.0.clone(), a.1.clone()));
         }
         for (End(d, p), to, t) in [(&a, &b, tb), (&b, &a, ta)] {
+            // The MAC of a routed far end, if no other port of the estate
+            // has it.
+            let far = &switches[&to.0];
+            if !far.ports.contains_key(&to.1)
+                && far.l3.contains_key(&to.1)
+                && let Some(m) = far.port_macs.get(&to.1)
+                && port_of_mac(*m).as_ref() == Some(&(to.0.clone(), to.1.clone()))
+            {
+                out.devices
+                    .entry(d.clone())
+                    .or_default()
+                    .far_macs
+                    .insert(p.clone(), *m);
+            }
             out.devices
                 .entry(d.clone())
                 .or_default()

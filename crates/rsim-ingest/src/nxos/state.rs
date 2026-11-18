@@ -108,6 +108,10 @@ pub struct State {
     /// The VNI of each route path with a VXLAN encapsulation, by VRF,
     /// prefix and next hop, from the route table section.
     pub vxlan_paths: BTreeMap<(String, String, String), (u32, SourceSpan)>,
+    /// True if the switch has no collected MAC table: the MAC lookup then
+    /// gives `Unknown` for a frame to a MAC that the twin does not place,
+    /// except a broadcast frame, which floods.
+    pub no_mac_table: bool,
 }
 
 /// The state of a vPC domain from `show vpc`, with the fields that HST

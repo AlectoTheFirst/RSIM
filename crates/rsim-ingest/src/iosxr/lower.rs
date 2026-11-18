@@ -6,11 +6,11 @@
 //! for the link join too.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 use rsim_core::{
-    FieldValue, InterfaceId, Mac, MacCond, Match, NeighbourTarget, ObjectId, Prefix, PrefixTable,
-    Rewrite, RulePredicate, SourceSpan, TriePrefixTable, VrfId,
+    FieldValue, FunctionId, InterfaceId, Mac, MacCond, Match, NeighbourTarget, ObjectId, Prefix,
+    PrefixTable, Rewrite, RulePredicate, SourceSpan, TriePrefixTable, VrfId,
 };
 use rsim_engine::EdgeInterface;
 use rsim_functions::{
@@ -19,12 +19,12 @@ use rsim_functions::{
     RouteNextHop, Rule as FRule, RuleAction, Tag, VendorProfile, VrfSelection,
 };
 
-use super::config::{Config, HsrpGroup, Interface};
+use super::config::{Config, Interface};
 use super::profile::{
     ALL_IPV4, CONNECTED_CODE, DEFAULT_VRF, HSRP_ACTIVE, HSRP_NOT_ACTIVE, LOCAL_CODE,
     UP_WITHOUT_SHUTDOWN,
 };
-use super::state::{self, Rib, RoutePath, Section, UnreadRoute};
+use super::state::{self, HsrpRow, Rib, RoutePath, Section, UnreadRoute};
 use crate::links::{External, Summary, VlanAddrs};
 use crate::nxos;
 use crate::nxos::config::{Ace, AclAction, AddrSpec, PortSpec};
@@ -55,28 +55,47 @@ impl Port {
 }
 
 /// The port of an interface: the name without the sub-interface number.
-fn parent(name: &str) -> &str {
+pub(crate) fn parent(name: &str) -> &str {
     name.split_once('.').map_or(name, |x| x.0)
 }
 
 /// The interface types that cannot end a link, in lower case.
 const NO_LINK: &[&str] = &["loopback", "null", "tunnel", "bvi"];
 
-/// The state of an HSRP group from the config and `show hsrp`.
-enum GroupState {
+/// The state of an HSRP or a VRRP group from the config and its section.
+pub(crate) enum GroupState {
     Active,
     NotActive,
     Unknown(String),
 }
 
-/// An IPv4 HSRP group of a lowered interface.
-struct Group<'a> {
-    g: &'a HsrpGroup,
+/// An IPv4 HSRP or VRRP group of a lowered interface.
+pub(crate) struct Group {
+    /// `HSRP` or `VRRP`.
+    pub(crate) what: &'static str,
+    pub(crate) group: u32,
+    /// The virtual addresses, the primary first.
+    pub(crate) addresses: Vec<Ipv4Addr>,
     /// The config name of the interface.
-    interface: String,
-    state: GroupState,
-    vmac: Option<Mac>,
-    spans: Vec<SourceSpan>,
+    pub(crate) interface: String,
+    pub(crate) state: GroupState,
+    pub(crate) vmac: Option<Mac>,
+    pub(crate) spans: Vec<SourceSpan>,
+}
+
+/// The words of the state section of a group protocol.
+pub(crate) struct GroupRules<'a> {
+    /// `HSRP` or `VRRP`.
+    pub(crate) what: &'static str,
+    /// The command of the section, for the notes.
+    pub(crate) command: &'a str,
+    /// The state word of the router that owns the virtual address, in
+    /// lower case.
+    pub(crate) active: &'a str,
+    /// The state words of a router that does not own it, in lower case.
+    pub(crate) not_active: &'a [&'a str],
+    /// Why a group with no MAC of the config has no known virtual MAC.
+    pub(crate) no_vmac: &'a str,
 }
 
 /// A virtual address in the route table: a local route of an active group,
@@ -293,29 +312,7 @@ pub fn lower(
         vrfs.extend(r.paths.iter().map(|p| p.vrf.clone()));
         vrfs.extend(r.unread.iter().filter_map(|u| u.vrf.clone()));
     }
-    let vips: Vec<Vip> = groups
-        .iter()
-        .flat_map(|g| {
-            let local = match g.state {
-                GroupState::Active => true,
-                GroupState::Unknown(_) => false,
-                GroupState::NotActive => return Vec::new(),
-            };
-            let vrf = active
-                .iter()
-                .find(|p| p.i.name == g.interface)
-                .map_or(DEFAULT_VRF, Port::vrf);
-            g.g.addresses
-                .iter()
-                .map(|(a, _)| Vip {
-                    vrf: vrf.to_string(),
-                    ip: IpAddr::V4(*a),
-                    local,
-                    spans: g.spans.clone(),
-                })
-                .collect()
-        })
-        .collect();
+    let vips = vips(&groups, &active);
     let other_vrf = |v: &str| {
         format!(
             "a next hop in VRF {v} is reached through a label switched path, which is not lowered"
@@ -353,7 +350,7 @@ pub fn lower(
     l.add(DeviceDelivery { meta });
 
     if forwards {
-        next_hops(&mut l, &active, &st, ext);
+        next_hops(&mut l, &active, &st, ext, &BTreeMap::new());
     }
     handoffs(&mut l, &active, &groups, &sum, ext);
     edges(&mut l, device, &active);
@@ -403,13 +400,7 @@ pub(crate) fn inputs(l: &mut L, active: &[Port], default_vrf: Option<VrfId>, nex
     });
 }
 
-/// The summary of the router for the link join. A port that can end a
-/// link is a physical port or a bundle that is not a bundle member and not
-/// shut, with a MAC in `show interfaces`, and with a lowered interface: the
-/// port or a sub-interface. A frame enters it at its hand-off. Its layer 3
-/// addresses are the addresses of the port and of its sub-interfaces by
-/// their dot1q VLAN. The ARP rows of the sub-interfaces with a VLAN are the
-/// ARP rows of the summary.
+/// The summary of the router for the link join.
 fn summary(
     l: &L,
     cfg: &Config,
@@ -425,20 +416,56 @@ fn summary(
         names: names.clone(),
         ..Summary::default()
     };
+    let ports: Vec<RouterPort> = cfg
+        .interfaces
+        .iter()
+        .map(|i| RouterPort {
+            name: &i.name,
+            channel: i.bundle.map(|(n, _)| format!("Bundle-Ether{n}")),
+            shut: i.shutdown,
+        })
+        .collect();
+    routed_summary(l, &mut sum, &ports, NO_LINK, st, active);
+    sum
+}
+
+/// An interface of a router for the summary: its config name, the bundle
+/// or port channel of a member port, and true for a shut interface.
+pub(crate) struct RouterPort<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) channel: Option<String>,
+    pub(crate) shut: bool,
+}
+
+/// Adds the routed ports of a router to its summary. A port that can end a
+/// link is a physical port or a bundle that is not a bundle member and not
+/// shut, whose type is not in `no_link`, with a MAC in `show interfaces`,
+/// and with a lowered interface: the port or a sub-interface. A frame
+/// enters it at its hand-off. Its layer 3 addresses are the addresses of
+/// the port and of its sub-interfaces by their dot1q VLAN. The ARP rows of
+/// the sub-interfaces with a VLAN are ARP rows of the summary. The LLDP and
+/// CDP rows and the next hops of the route table complete it.
+pub(crate) fn routed_summary(
+    l: &L,
+    sum: &mut Summary,
+    ports: &[RouterPort],
+    no_link: &[&str],
+    st: &state::State,
+    active: &[Port],
+) {
     let states = st.interfaces.as_ref().and_then(|x| x.as_ref().ok());
-    for i in &cfg.interfaces {
-        if let Some((n, _)) = i.bundle {
-            sum.channel
-                .insert(i.name.clone(), format!("Bundle-Ether{n}"));
+    for i in ports {
+        if let Some(c) = &i.channel {
+            sum.channel.insert(i.name.to_string(), c.clone());
         }
     }
-    for i in &cfg.interfaces {
+    for i in ports {
         let lower_name = i.name.to_ascii_lowercase();
-        let s = states.and_then(|m| m.get(&i.name));
+        let s = states.and_then(|m| m.get(i.name));
         if i.name.contains('.')
-            || i.bundle.is_some()
-            || i.shutdown
-            || NO_LINK.iter().any(|t| lower_name.starts_with(t))
+            || i.channel.is_some()
+            || i.shut
+            || no_link.iter().any(|t| lower_name.starts_with(t))
             || s.and_then(|s| s.oper_up) == Some(false)
             || !active.iter().any(|p| parent(&p.i.name) == i.name)
         {
@@ -448,12 +475,12 @@ fn summary(
             continue;
         };
         sum.entries
-            .insert(i.name.clone(), l.id(&format!("handoff/{}", i.name)));
-        sum.port_macs.insert(i.name.clone(), m);
-        sum.port_spans.insert(i.name.clone(), s.span.clone());
+            .insert(i.name.to_string(), l.id(&format!("handoff/{}", i.name)));
+        sum.port_macs.insert(i.name.to_string(), m);
+        sum.port_spans.insert(i.name.to_string(), s.span.clone());
         if s.speed_mbps.is_some() || s.full_duplex.is_some() {
             sum.facts.insert(
-                i.name.clone(),
+                i.name.to_string(),
                 LinkEnd {
                     speed_mbps: s.speed_mbps,
                     full_duplex: s.full_duplex,
@@ -475,7 +502,7 @@ fn summary(
             list.extend(p.i.addresses.iter().filter_map(|a| iface_addr(&a.prefix)));
             list.extend(p.ipv6.iter().filter_map(|a| iface_addr(a)));
         }
-        sum.l3.insert(i.name.clone(), vlans);
+        sum.l3.insert(i.name.to_string(), vlans);
     }
     for n in [&st.lldp, &st.cdp] {
         if n.is_some() {
@@ -497,71 +524,124 @@ fn summary(
             sum.arp.push((*v, a.ip, a.mac, a.span.clone()));
         }
     }
-    sum
 }
 
-/// The state of an HSRP group from `show hsrp`: the state word of the IPv4
-/// row of the interface and the group, with the group address of the
-/// config. `spans` takes the span of the row.
-fn group_state(
-    g: &HsrpGroup,
+/// The state of a group from the rows of its section: the state word of the
+/// IPv4 row of the interface and the group, with the primary virtual
+/// address of the config. `spans` takes the span of the row. A group with a
+/// line that is not read has a state that is not known.
+pub(crate) fn group_state(
+    group: u32,
+    primary: Option<Ipv4Addr>,
+    unhandled: &[String],
     iface: &str,
-    st: &state::State,
+    rows: &Section<Vec<HsrpRow>>,
+    rules: &GroupRules,
     spans: &mut Vec<SourceSpan>,
 ) -> GroupState {
-    if !g.unhandled.is_empty() {
-        return GroupState::Unknown(format!("the lines {} are not read", g.unhandled.join(", ")));
+    if !unhandled.is_empty() {
+        return GroupState::Unknown(format!("the lines {} are not read", unhandled.join(", ")));
     }
-    let Some(primary) = g.addresses.first() else {
+    let Some(primary) = primary else {
         return GroupState::Unknown("the config gives no virtual address".into());
     };
-    let rows = match &st.hsrp {
-        None => return GroupState::Unknown("no show hsrp section".into()),
-        Some(Err(e)) => return GroupState::Unknown(format!("show hsrp is not read: {e}")),
+    let cmd = rules.command;
+    let rows = match rows {
+        None => return GroupState::Unknown(format!("no {cmd} section")),
+        Some(Err(e)) => return GroupState::Unknown(format!("{cmd} is not read: {e}")),
         Some(Ok(rows)) => rows,
     };
-    let mine: Vec<&state::HsrpRow> = rows
+    let mine: Vec<&HsrpRow> = rows
         .iter()
-        .filter(|r| r.interface == iface && r.group == g.group)
+        .filter(|r| r.interface == iface && r.group == group)
         .filter(|r| !r.address.is_some_and(|a| a.is_ipv6()))
         .collect();
     let [r] = mine.as_slice() else {
-        return GroupState::Unknown(format!(
-            "show hsrp has {} IPv4 rows of the group",
-            mine.len()
-        ));
+        return GroupState::Unknown(format!("{cmd} has {} IPv4 rows of the group", mine.len()));
     };
     spans.push(r.span.clone());
     if let Some(a) = r.address
-        && a != IpAddr::V4(primary.0)
+        && a != IpAddr::V4(primary)
     {
         return GroupState::Unknown(format!(
-            "show hsrp gives the address {a}, and the config gives {}",
-            primary.0
+            "{cmd} gives the address {a}, and the config gives {primary}"
         ));
     }
     let word = r.state.to_ascii_lowercase();
-    if word == HSRP_ACTIVE {
+    if word == rules.active {
         GroupState::Active
-    } else if HSRP_NOT_ACTIVE.contains(&word.as_str()) {
+    } else if rules.not_active.contains(&word.as_str()) {
         GroupState::NotActive
     } else {
         GroupState::Unknown(format!("the state {:?} is not known", r.state))
     }
 }
 
+/// The note of a group whose state or virtual MAC is not known.
+pub(crate) fn group_note(l: &mut L, g: &Group, rules: &GroupRules) {
+    match (&g.state, g.vmac) {
+        (GroupState::Unknown(why), _) => l.note(format!(
+            "{}: {} group {}: {why}, so the packets to its virtual address and MAC are unknown",
+            g.interface, g.what, g.group
+        )),
+        (GroupState::Active, None) => l.note(format!(
+            "{}: {} group {}: {}, so the virtual MAC is not known",
+            g.interface, g.what, g.group, rules.no_vmac
+        )),
+        _ => {}
+    }
+}
+
+/// The virtual addresses of the groups in the route table: a local route
+/// for an active group, and a route with no next hop for a group whose
+/// state is not known.
+pub(crate) fn vips(groups: &[Group], active: &[Port]) -> Vec<Vip> {
+    groups
+        .iter()
+        .flat_map(|g| {
+            let local = match g.state {
+                GroupState::Active => true,
+                GroupState::Unknown(_) => false,
+                GroupState::NotActive => return Vec::new(),
+            };
+            let vrf = active
+                .iter()
+                .find(|p| p.i.name == g.interface)
+                .map_or(DEFAULT_VRF, Port::vrf);
+            g.addresses
+                .iter()
+                .map(|a| Vip {
+                    vrf: vrf.to_string(),
+                    ip: IpAddr::V4(*a),
+                    local,
+                    spans: g.spans.clone(),
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// The words of `show hsrp`.
+const HSRP_RULES: GroupRules = GroupRules {
+    what: "HSRP",
+    command: "show hsrp",
+    active: HSRP_ACTIVE,
+    not_active: HSRP_NOT_ACTIVE,
+    no_vmac: "no mac-address line",
+};
+
 /// The IPv4 HSRP groups of the lowered interfaces with their state and
 /// their virtual MAC. A group whose state cannot be read, or with a line
 /// that is not read, has a state that is not known. The virtual MAC is the
 /// MAC of the `mac-address` line; a group with no such line has a virtual
 /// MAC that is not known.
-fn hsrp<'a>(
+fn hsrp(
     l: &mut L,
-    cfg: &'a Config,
+    cfg: &Config,
     st: &state::State,
     active: &[Port],
     names: &nxos::names::Names,
-) -> Vec<Group<'a>> {
+) -> Vec<Group> {
     let mut out = Vec::new();
     for g in &cfg.hsrp {
         let iface = names.resolve(&g.interface);
@@ -580,36 +660,43 @@ fn hsrp<'a>(
             spans.push(l.span(x));
             m
         });
-        let state = group_state(g, &iface, st, &mut spans);
-        match (&state, vmac) {
-            (GroupState::Unknown(why), _) => l.note(format!(
-                "{iface}: HSRP group {}: {why}, so the packets to its virtual address and MAC are unknown",
-                g.group
-            )),
-            (GroupState::Active, None) => l.note(format!(
-                "{iface}: HSRP group {}: no mac-address line, so the virtual MAC is not known",
-                g.group
-            )),
-            _ => {}
-        }
-        out.push(Group {
-            g,
+        let state = group_state(
+            g.group,
+            g.addresses.first().map(|a| a.0),
+            &g.unhandled,
+            &iface,
+            &st.hsrp,
+            &HSRP_RULES,
+            &mut spans,
+        );
+        let group = Group {
+            what: HSRP_RULES.what,
+            group: g.group,
+            addresses: g.addresses.iter().map(|a| a.0).collect(),
             interface: iface,
             state,
             vmac,
             spans,
-        });
+        };
+        group_note(l, &group, &HSRP_RULES);
+        out.push(group);
     }
     out
 }
 
 /// The hand-off of each port with a link: the MACs of the port, of its
-/// sub-interfaces and of its active HSRP groups go to the ingress of the
-/// port or of the sub-interface of the dot1q VLAN. A frame to the virtual
-/// MAC of a group whose state is not known gives `Unknown`. If an active
-/// group or a group whose state is not known has no known virtual MAC,
-/// each frame of the port gives `Unknown`.
-fn handoffs(l: &mut L, active: &[Port], groups: &[Group], sum: &Summary, ext: &External) {
+/// sub-interfaces and of its active groups go to the ingress of the port or
+/// of the sub-interface of the dot1q VLAN. A frame to the virtual MAC of a
+/// group whose state is not known gives `Unknown`. If an active group or a
+/// group whose state is not known has no known virtual MAC, each frame of
+/// the port gives `Unknown`.
+pub(crate) fn handoffs(
+    l: &mut L,
+    active: &[Port],
+    groups: &[Group],
+    sum: &Summary,
+    ext: &External,
+) {
     for (port, peers) in &ext.peers {
         if !sum.entries.contains_key(port) || peers.is_empty() {
             continue;
@@ -639,7 +726,7 @@ fn handoffs(l: &mut L, active: &[Port], groups: &[Group], sum: &Summary, ext: &E
                     unknown.insert(m);
                 }
                 (GroupState::Unknown(_) | GroupState::Active, None) => {
-                    blind.push(format!("HSRP group {} of {}", g.g.group, g.interface));
+                    blind.push(format!("{} group {} of {}", g.what, g.group, g.interface));
                 }
                 (GroupState::NotActive, _) => {}
             }
@@ -663,8 +750,17 @@ fn handoffs(l: &mut L, active: &[Port], groups: &[Group], sum: &Summary, ext: &E
                 .filter(|g| matches!(g.state, GroupState::Unknown(_)))
                 .flat_map(|g| g.spans.clone())
                 .collect();
+            let what: BTreeSet<&str> = on_port
+                .iter()
+                .filter(|g| matches!(g.state, GroupState::Unknown(_)))
+                .map(|g| g.what)
+                .collect();
+            let what: Vec<&str> = what.into_iter().collect();
             let mut rule = FRule::new(
-                format!("{port}: the virtual MAC of an HSRP group whose state is not known"),
+                format!(
+                    "{port}: the virtual MAC of an {} group whose state is not known",
+                    what.join(" or ")
+                ),
                 RulePredicate::bounded(
                     Match {
                         dst_mac: MacCond::In(BTreeSet::new()),
@@ -707,8 +803,15 @@ fn handoffs(l: &mut L, active: &[Port], groups: &[Group], sum: &Summary, ext: &E
 /// The next hops through ARP, the output ACLs, the output QoS and egress.
 /// An egress whose port has one peer goes over the link, with the MAC of
 /// the interface as the source MAC and the dot1q VLAN of a sub-interface as
-/// the tag.
-pub(crate) fn next_hops(l: &mut L, active: &[Port], st: &state::State, ext: &External) {
+/// the tag. The egress of an interface in `svis` goes untagged to the
+/// function of its SVI port, with the MAC of the SVI as the source MAC.
+pub(crate) fn next_hops(
+    l: &mut L,
+    active: &[Port],
+    st: &state::State,
+    ext: &External,
+    svis: &BTreeMap<String, (FunctionId, Mac)>,
+) {
     let mut neighbours: TriePrefixTable<Vec<Neighbour>> = TriePrefixTable::new();
     for a in st.arp.iter().flatten().flatten() {
         let p = Prefix::host(a.ip);
@@ -760,7 +863,22 @@ pub(crate) fn next_hops(l: &mut L, active: &[Port], st: &state::State, ext: &Ext
             l.add(f);
         }
         let meta = l.meta(&out, vec![l.span(i.lines)]);
-        let (link, rewrite, tag) = egress_link(l, p, st, ext);
+        let (link, rewrite, tag) = match svis.get(&i.name) {
+            Some((port, m)) => (
+                Some(Link {
+                    peer: Some(port.clone()),
+                    delay_ns: None,
+                    provenance: Vec::new(),
+                    facts: None,
+                }),
+                Rewrite {
+                    src_mac: Some(FieldValue::Known(*m)),
+                    ..Rewrite::default()
+                },
+                Tag::Untagged,
+            ),
+            None => egress_link(l, p, st, ext),
+        };
         l.add(Egress {
             meta,
             interface: InterfaceId::new(&i.name),

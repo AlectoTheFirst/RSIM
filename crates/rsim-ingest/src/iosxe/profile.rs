@@ -97,3 +97,36 @@ pub const VRF_HEADER: &str = "Routing Table:";
 /// The lines that start the header of a route table: the code legend and
 /// the gateway of last resort.
 pub const TABLE_HEADERS: &[&str] = &["Codes:", "Gateway of last resort"];
+
+/// The HSRP state word of the active router in `show standby brief`, in
+/// lower case.
+pub const HSRP_ACTIVE: &str = "active";
+
+/// The HSRP state words of a router that is not the active router, in lower
+/// case. Each other word is a state that is not known.
+pub const HSRP_NOT_ACTIVE: &[&str] = &["standby", "speak", "listen", "init"];
+
+/// The VRRP state word of the master in `show vrrp brief`, in lower case.
+pub const VRRP_MASTER: &str = "master";
+
+/// The VRRP state words of a router that is not the master, in lower case.
+/// Each other word is a state that is not known.
+pub const VRRP_NOT_MASTER: &[&str] = &["backup", "init"];
+
+/// The interface types that cannot end a link, in lower case.
+pub const NO_LINK: &[&str] = &["loopback", "null", "tunnel", "vlan", "bdi"];
+
+/// VLAN 1 is the default VLAN of a Catalyst switch: it exists with no
+/// `vlan` line. Not confirmed against a device.
+pub const DEFAULT_VLAN: u16 = 1;
+
+/// The VTP modes in which the running config holds the VLANs of a switch.
+/// In the modes `server` and `client`, and with no `vtp mode` line, the
+/// VLANs are in the VLAN database and not in the running config, so the
+/// VLANs of a switch port are not known. Not confirmed against a device.
+pub const VTP_MODES_WITH_VLAN_LINES: &[&str] = &["transparent", "off"];
+
+/// A switch port with a `switchport` line and no `switchport mode` line
+/// negotiates its mode with its neighbour (DTP), so its mode is not known.
+/// Not confirmed against a device.
+pub const MODE_WITHOUT_LINE: &str = "no switchport mode line, so the mode is negotiated";

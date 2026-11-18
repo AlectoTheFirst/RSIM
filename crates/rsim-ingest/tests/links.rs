@@ -232,3 +232,47 @@ fn a_mac_on_more_than_one_port_proves_no_link() {
         "{notes:?}"
     );
 }
+
+/// A router whose port `eth0` is routed: it has layer 3 addresses and is
+/// not a switch port.
+fn router(
+    name: &str,
+    port_mac: &str,
+    seen: &[(&str, Option<&str>, &str, Option<&str>)],
+) -> Summary {
+    let mut r = device(name, &[("eth0", port_mac)], seen, true);
+    r.ports.clear();
+    r.l3.insert("eth0".to_string(), BTreeMap::new());
+    r
+}
+
+#[test]
+fn the_mac_of_a_routed_far_end_is_known_to_the_switch_port() {
+    let mut devices = BTreeMap::from([
+        (
+            "s".to_string(),
+            device(
+                "s",
+                &[("p1", "00:00:5e:00:53:01")],
+                &[("p1", Some("r"), "eth0", None)],
+                true,
+            ),
+        ),
+        (
+            "r".to_string(),
+            router("r", "00:00:5e:00:53:09", &[("eth0", Some("s"), "p1", None)]),
+        ),
+    ]);
+    let j = join(&devices, &BTreeSet::new(), &BTreeSet::new());
+    assert_eq!(j.devices["s"].far_macs["p1"], mac("00:00:5e:00:53:09"));
+    // The far end of the router is a switch port, so it has no MAC there.
+    assert!(j.devices["r"].far_macs.is_empty());
+    // A MAC that another port of the estate has too is no evidence.
+    devices.insert(
+        "x".to_string(),
+        device("x", &[("q1", "00:00:5e:00:53:09")], &[], false),
+    );
+    let j = join(&devices, &BTreeSet::new(), &BTreeSet::new());
+    assert_eq!(j.devices["s"].peers["p1"].len(), 1);
+    assert!(j.devices["s"].far_macs.is_empty());
+}

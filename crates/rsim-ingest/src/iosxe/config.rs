@@ -129,6 +129,8 @@ pub struct Config {
     pub vlans: Vec<Vlan>,
     /// The masked `vlan` lines whose list the handler cannot read.
     pub unreadable_vlans: Vec<String>,
+    /// The mode of `vtp mode`.
+    pub vtp_mode: Option<(String, Lines)>,
     /// The first line of each stanza that a handler read.
     pub read: BTreeSet<u32>,
 }
@@ -273,6 +275,10 @@ pub fn read(doc: &Document, table: &Table) -> Config {
                 for c in s.children() {
                     r.mark(c);
                 }
+            }
+            ["vtp", "mode", m] if r.state(&[&s.key]) == State::Handled => {
+                r.mark(s);
+                cfg.vtp_mode = Some(((*m).to_string(), lines_of(s)));
             }
             ["vlan", list] if r.state(&[&s.key]) == State::Handled => {
                 r.mark(s);
