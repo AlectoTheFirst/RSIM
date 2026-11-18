@@ -57,6 +57,22 @@ fn nested_rule_options_with_no_handler_make_the_rule_unhandled() {
 }
 
 #[test]
+fn a_state_option_with_no_state_names_makes_the_rule_unhandled() {
+    use serde_json::json;
+    let config = edited(|v| {
+        put(
+            v,
+            &["firewall", "ipv4", "name", "LAN-WAN", "rule", "6"],
+            json!({"action": "accept", "state": {"established": "enable"}}),
+        );
+    });
+    let cfg = vyos::read(&read_json(&config).unwrap());
+    let lw = cfg.rule_set(Family::V4, "LAN-WAN").unwrap();
+    let rule = lw.rules.iter().find(|r| r.number == 6).unwrap();
+    assert_eq!(rule.unhandled, ["state"]);
+}
+
+#[test]
 fn a_group_has_the_members_of_its_include_and_each_family_has_its_own_groups() {
     use serde_json::json;
     let config = edited(|v| {

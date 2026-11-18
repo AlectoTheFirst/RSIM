@@ -728,6 +728,10 @@ fn read_rules(r: &mut Reader, rules: &Stanza) -> Vec<Rule> {
             }
             r.text(s, "table")
         });
+        let state = r.texts(x, "state");
+        if state.is_empty() && x.get("state").is_some() {
+            unhandled.push("state".to_string());
+        }
         out.push(Rule {
             number: x.key.parse().unwrap_or(u32::MAX),
             action: r.text(x, "action").map(|a| Action::parse(&a)),
@@ -738,7 +742,7 @@ fn read_rules(r: &mut Reader, rules: &Stanza) -> Vec<Rule> {
                 inbound_interface,
                 outbound_interface,
                 icmp_type_name,
-                state: r.texts(x, "state"),
+                state,
             },
             disabled: r.flag(x, "disable"),
             translation_address,
