@@ -237,10 +237,12 @@ fn vap_wlan<'s>(site: &'s Site, v: &Vap) -> Result<Option<&'s Wlan>, String> {
 }
 
 /// An SSID port of an access point: the WLAN of its vaps and their radios.
+/// `radios_known` is false if a vap of the port names no radio.
 struct SsidPort<'s> {
     port: String,
     wlan: &'s Wlan,
     radios: BTreeSet<String>,
+    radios_known: bool,
 }
 
 /// The SSID ports of the up vaps of an access point, and each SSID whose
@@ -248,7 +250,7 @@ struct SsidPort<'s> {
 /// point has the port `wlan/<ssid>`, and an SSID with more than one WLAN has
 /// the port `wlan/<ssid>/wlan-<id>` for each WLAN.
 fn ssid_ports<'s>(site: &'s Site, vaps: &[Vap]) -> (Vec<SsidPort<'s>>, BTreeMap<String, String>) {
-    type Wlans<'s> = BTreeMap<&'s str, (&'s Wlan, BTreeSet<String>)>;
+    type Wlans<'s> = BTreeMap<&'s str, (&'s Wlan, BTreeSet<String>, bool)>;
     let mut by_ssid: BTreeMap<String, Wlans<'s>> = BTreeMap::new();
     let mut errs = BTreeMap::new();
     for v in vaps.iter().filter(|v| v.up) {
@@ -258,8 +260,9 @@ fn ssid_ports<'s>(site: &'s Site, vaps: &[Vap]) -> (Vec<SsidPort<'s>>, BTreeMap<
                     .entry(v.ssid.clone())
                     .or_default()
                     .entry(w.id.as_str())
-                    .or_insert((w, BTreeSet::new()));
+                    .or_insert((w, BTreeSet::new(), true));
                 e.1.extend(v.radio.clone());
+                e.2 &= v.radio.is_some();
             }
             Ok(None) => {}
             Err(e) => {
@@ -273,13 +276,18 @@ fn ssid_ports<'s>(site: &'s Site, vaps: &[Vap]) -> (Vec<SsidPort<'s>>, BTreeMap<
             continue;
         }
         let one = wlans.len() == 1;
-        for (id, (wlan, radios)) in wlans {
+        for (id, (wlan, radios, radios_known)) in wlans {
             let port = if one {
                 format!("wlan/{ssid}")
             } else {
                 format!("wlan/{ssid}/wlan-{id}")
             };
-            out.push(SsidPort { port, wlan, radios });
+            out.push(SsidPort {
+                port,
+                wlan,
+                radios,
+                radios_known,
+            });
         }
     }
     (out, errs)
@@ -324,7 +332,8 @@ pub fn lower(
 
     // The location and the bridge domain of each client MAC. A client whose
     // network is not the network of its port or SSID, or whose SSID port is
-    // not known, is not placed, and each packet from it is unknown.
+    // not known, is not placed, and each packet from it is unknown. A client
+    // whose port has no known network is not placed either.
     let mut located: Vec<(&Client, Location, &Network)> = Vec::new();
     let mut client_wlan: BTreeMap<usize, &Wlan> = BTreeMap::new();
     let mut unplaced: Vec<(&Client, String, String)> = Vec::new();
@@ -358,11 +367,17 @@ pub fn lower(
                     not_placed(ap, e.clone(), &mut l.out.notes);
                     continue;
                 }
+                // With more than one port, the radio of the client picks the
+                // port only if each vap of the SSID names its radio.
                 let chosen: Vec<&SsidPort> = if ports.len() > 1 {
-                    ports
-                        .iter()
-                        .filter(|p| c.radio.as_ref().is_some_and(|r| p.radios.contains(r)))
-                        .collect()
+                    if ports.iter().all(|p| p.radios_known) {
+                        ports
+                            .iter()
+                            .filter(|p| c.radio.as_ref().is_some_and(|r| p.radios.contains(r)))
+                            .collect()
+                    } else {
+                        Vec::new()
+                    }
                 } else {
                     ports.iter().collect()
                 };
@@ -389,11 +404,10 @@ pub fn lower(
             _ => continue,
         };
         let Some(net) = net else {
-            not_placed(
-                &loc.0,
-                format!("the network of {} is not known", loc.1),
-                &mut l.out.notes,
-            );
+            l.out.notes.push(format!(
+                "client {}: the network of its port is not known",
+                c.name
+            ));
             continue;
         };
         if let Some(id) = c.network.as_deref()
@@ -766,6 +780,7 @@ pub fn lower(
     }
 
     // The clients that are not placed: each packet from one is unknown.
+    let mut ids: BTreeSet<String> = BTreeSet::new();
     for (c, dev, why) in unplaced {
         let (Some(d), Some(ip)) = (
             site.device(&dev),
@@ -773,7 +788,14 @@ pub fn lower(
         ) else {
             continue;
         };
+        if d.kind == DeviceKind::Other {
+            continue;
+        }
         let id = endpoint_id(c);
+        if !ids.insert(id.clone()) {
+            l.out.notes.push(format!("client {id} is listed twice"));
+            continue;
+        }
         let interface = format!("unplaced/{id}");
         let meta = l.meta(d, &interface, vec![l.client_span(c)]);
         l.out.functions.push(Arc::new(Unplaced {

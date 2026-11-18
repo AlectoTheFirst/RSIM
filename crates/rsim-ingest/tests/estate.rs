@@ -420,12 +420,41 @@ fn a_wired_client_of_another_network_than_its_port_is_not_placed() {
         let t = e.builder.build().unwrap();
         let a = run(&t, "192.0.2.70", ip, 8123);
         unknown_reason(&a);
+        let a = run(&t, "192.0.2.30", ip, 443);
+        unknown_reason(&a);
         let a = run(&t, ip, "192.0.2.70", 443);
         let r = unknown_reason(&a);
         assert!(r.detail.contains("client h1 is not placed"), "{r:?}");
         let first = a.branches()[0].steps[0].function.to_string();
         assert_eq!(first, "sw1/unplaced/h1-005351");
     }
+}
+
+#[test]
+fn a_client_listed_twice_that_is_not_placed_gives_one_ingress() {
+    let h1 = r#"{"mac": "00:00:5e:00:53:51", "name": "h1", "ip": "192.0.2.50", "network_id": "n-lan", "is_wired": true, "sw_mac": "00:00:5e:00:53:a1", "sw_port": 2},"#;
+    let e = estate_with(
+        |n, b| {
+            let s = String::from_utf8(b).unwrap();
+            if n != "clients" {
+                return s.into_bytes();
+            }
+            let wrong = h1.replace("n-lan", "n-guest");
+            s.replace(h1, &format!("{wrong}\n  {wrong}")).into_bytes()
+        },
+        Vec::new(),
+    );
+    let notes = &e.notes["site1"];
+    assert!(
+        notes
+            .iter()
+            .any(|n| n == "client h1-005351 is listed twice"),
+        "{notes:?}"
+    );
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.50", "192.0.2.70", 443);
+    let r = unknown_reason(&a);
+    assert!(r.detail.contains("client h1 is not placed"), "{r:?}");
 }
 
 /// A second WLAN `guest` of the network LAN.
@@ -649,4 +678,38 @@ fn a_client_of_an_ssid_with_a_network_on_each_radio_needs_its_radio() {
             "g2-005354"
         ))))
     );
+}
+
+#[test]
+fn a_vap_with_no_radio_leaves_the_radio_of_a_client_unmatched() {
+    // The vap of the network LAN names no radio, so g1 on the radio `ng`
+    // can be on either WLAN.
+    let e = estate_with(
+        |n, b| {
+            let s = String::from_utf8(b).unwrap();
+            let s = match n {
+                "wlans" => s.replace(SECOND_GUEST.0, SECOND_GUEST.1),
+                "devices" => s.replace(
+                    r#""wlanconf_id": "w-guest", "radio": "na""#,
+                    r#""wlanconf_id": "w-guest2""#,
+                ),
+                "clients" => s.replace(
+                    r#""name": "g1", "ip": "192.0.2.70", "network_id": "n-guest","#,
+                    r#""name": "g1", "ip": "192.0.2.70", "network_id": "n-guest", "radio": "ng","#,
+                ),
+                _ => s,
+            };
+            s.into_bytes()
+        },
+        Vec::new(),
+    );
+    let notes = &e.notes["site1"];
+    assert!(
+        notes.iter().any(|n| n.starts_with("client g1:")),
+        "{notes:?}"
+    );
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
+    let r = unknown_reason(&a);
+    assert!(r.detail.contains("client g1 is not placed"), "{r:?}");
 }
