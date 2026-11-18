@@ -29,6 +29,7 @@ use crate::links::{External, Summary, VlanAddrs};
 use crate::nxos;
 use crate::nxos::config::{Ace, AclAction, AddrSpec, Lines, PortSpec};
 use crate::nxos::lower::{L, iface_addr};
+use crate::resolve::{Origin, Path, Resolver, Target, through_default};
 use crate::route_tables::{TABLE_NOT_COLLECTED, route_kind};
 use crate::vyos::Lowered;
 
@@ -119,6 +120,12 @@ pub(crate) struct Hops<'a> {
     pub(crate) statics: &'a [&'a str],
     /// The VRFs with a dynamic routing protocol in the config.
     pub(crate) dynamic: &'a BTreeMap<String, Vec<(u32, u32)>>,
+    /// The routes of the route table section of each VRF, for the
+    /// resolution of a next hop with no interface.
+    pub(crate) resolver: &'a Resolver,
+    /// The flag of the vendor profile: true if the next hop of a computed
+    /// route resolves through a default route.
+    pub(crate) computed_through_default: bool,
 }
 
 fn port(i: &Interface) -> nxos::config::Interface {
@@ -325,12 +332,15 @@ pub fn lower(
             "a next hop in VRF {v} is reached through a label switched path, which is not lowered"
         )
     };
+    let resolver = resolver(rib, &vrfs);
     let hops = Hops {
         next: "nexthop",
         other_vrf: &other_vrf,
         learned: super::profile::LEARNED_CODES,
         statics: super::profile::STATIC_CODES,
         dynamic: &cfg.dynamic_vrfs,
+        resolver: &resolver,
+        computed_through_default: super::profile::COMPUTED_THROUGH_DEFAULT,
     };
     let mut tables = BTreeMap::new();
     for v in &vrfs {
@@ -1291,6 +1301,64 @@ pub(crate) fn fib(
     t
 }
 
+/// The routes of the route table section for the resolution of a next hop:
+/// a route with a line that is not read is unknown, as is a route with only
+/// backup paths or with a next hop in another VRF; a line with no prefix
+/// makes each resolution in its VRF unknown, or in each VRF for a line
+/// before the first VRF.
+pub(crate) fn resolver(rib: Option<&Rib>, vrfs: &BTreeSet<String>) -> Resolver {
+    let mut r = Resolver::new();
+    let Some(rib) = rib else {
+        return r;
+    };
+    let mut by_prefix: BTreeMap<(&str, Prefix), Vec<&RoutePath>> = BTreeMap::new();
+    for p in &rib.paths {
+        by_prefix.entry((&p.vrf, p.prefix)).or_default().push(p);
+    }
+    for ((vrf, prefix), paths) in &by_prefix {
+        let spans: Vec<SourceSpan> = paths.iter().map(|p| p.span.clone()).collect();
+        let first = primary(paths);
+        let target = match first.first() {
+            None => Target::Unknown,
+            Some(head) if code(&head.protocol) == LOCAL_CODE => Target::Local,
+            Some(_)
+                if first.iter().any(|p| {
+                    p.interface
+                        .as_deref()
+                        .is_some_and(|i| i.eq_ignore_ascii_case("null0"))
+                }) =>
+            {
+                Target::Null
+            }
+            Some(_) if first.iter().any(|p| p.other_vrf.is_some()) => Target::Unknown,
+            Some(_) => Target::Paths(
+                first
+                    .iter()
+                    .map(|p| Path {
+                        interface: p.interface.clone(),
+                        gateway: p.gateway,
+                        vrf: None,
+                    })
+                    .collect(),
+            ),
+        };
+        r.add(vrf, *prefix, target, spans);
+    }
+    for u in &rib.unread {
+        let of: Vec<&str> = match &u.vrf {
+            Some(v) => vec![v.as_str()],
+            None => vrfs.iter().map(String::as_str).collect(),
+        };
+        for v in of {
+            match u.prefix {
+                Some(p) => r.add(v, p, Target::Unknown, vec![u.span.clone()]),
+                None => r.unknown_vrf(v, vec![u.span.clone()]),
+            }
+        }
+    }
+    r
+}
+
 /// The routes of the paths of a VRF, and the routes of the lines that are
 /// not read.
 fn routes(
@@ -1311,35 +1379,6 @@ fn routes(
     for p in rib.paths.iter().filter(|p| p.vrf == vrf) {
         by_prefix.entry(p.prefix).or_default().push(p);
     }
-    // The next hop of a path with no interface: the interface of the
-    // connected route that is the longest match of the next hop.
-    let resolve = |g: IpAddr| -> Result<String, String> {
-        let best = by_prefix
-            .iter()
-            .filter(|(_, paths)| !primary(paths).is_empty())
-            .map(|(p, _)| p)
-            .chain(unread.keys())
-            .filter(|p| p.contains(g))
-            .max_by_key(|p| p.len())
-            .ok_or_else(|| format!("the next hop {g} has no route"))?;
-        if unread.contains_key(best) {
-            return Err(format!(
-                "the next hop {g} resolves through {best}, a route that is not read"
-            ));
-        }
-        let paths = primary(&by_prefix[best]);
-        let ifaces: BTreeSet<&str> = paths
-            .iter()
-            .filter(|p| code(&p.protocol) == CONNECTED_CODE && p.gateway.is_none())
-            .filter_map(|p| p.interface.as_deref())
-            .collect();
-        match ifaces.into_iter().collect::<Vec<_>>().as_slice() {
-            [one] if paths.len() == 1 => Ok((*one).to_string()),
-            _ => Err(format!(
-                "the next hop {g} does not resolve through one connected route"
-            )),
-        }
-    };
     let hop = |l: &L, iface: &str, gw: Option<IpAddr>| RouteNextHop {
         interface: InterfaceId::new(iface),
         gateway: gw,
@@ -1378,33 +1417,40 @@ fn routes(
         } else {
             route_kind(c, to.learned, to.statics)
         };
-        let mut hops = Vec::new();
-        let mut problem = None;
-        for p in &first {
-            if let Some(v) = &p.other_vrf {
-                problem = Some((to.other_vrf)(v));
-                break;
+        if let Some(v) = first.iter().find_map(|p| p.other_vrf.as_ref()) {
+            notes.push(format!(
+                "route {prefix} in VRF {vrf}: {}",
+                (to.other_vrf)(v)
+            ));
+            out.push((*prefix, Route::new(kind, Vec::new(), spans)));
+            continue;
+        }
+        let paths: Vec<Path> = first
+            .iter()
+            .map(|p| Path {
+                interface: p.interface.clone(),
+                gateway: p.gateway,
+                vrf: None,
+            })
+            .collect();
+        let through = through_default(Origin::Collected, to.computed_through_default);
+        match to.resolver.resolve(vrf, &paths, through) {
+            Ok((found, more)) => {
+                let hops = found
+                    .iter()
+                    .map(|h| hop(l, &h.interface, h.gateway))
+                    .collect();
+                let mut all = spans;
+                all.extend(more);
+                out.push((*prefix, Route::new(kind, hops, all)));
             }
-            match (&p.interface, p.gateway) {
-                (Some(i), gw) => hops.push(hop(l, i, gw)),
-                (None, Some(g)) => match resolve(g) {
-                    Ok(i) => hops.push(hop(l, &i, Some(g))),
-                    Err(why) => {
-                        problem = Some(why);
-                        break;
-                    }
-                },
-                (None, None) => {
-                    problem = Some("a path with no next hop and no interface".to_string());
-                    break;
-                }
+            Err(u) => {
+                notes.push(format!("route {prefix} in VRF {vrf}: {}", u.why));
+                let mut all = spans;
+                all.extend(u.spans);
+                out.push((*prefix, Route::unknown(kind, u.reason, all)));
             }
         }
-        if let Some(why) = problem {
-            notes.push(format!("route {prefix} in VRF {vrf}: {why}"));
-            hops.clear();
-        }
-        out.push((*prefix, Route::new(kind, hops, spans)));
     }
     for (prefix, lines) in &unread {
         for u in lines {

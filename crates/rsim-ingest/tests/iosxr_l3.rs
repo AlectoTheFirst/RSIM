@@ -442,19 +442,6 @@ fn what_is_not_lowered_gives_unknown() {
         &steps,
         "route 198.51.100.96/27 (bgp) in VRF RED has no next hop"
     ));
-    // A next hop that resolves through a route that is not connected.
-    let (verdict, steps) = only(&run(
-        &t,
-        "Bundle-Ether10",
-        "198.51.100.2",
-        "198.51.100.40",
-        80,
-    ));
-    assert_eq!(verdict, VerdictKind::Unknown);
-    assert!(has(
-        &steps,
-        "route 198.51.100.32/27 (bgp) in VRF default has no next hop"
-    ));
     // The uRPF line of the interface.
     let (verdict, steps) = only(&run(
         &t,
@@ -468,7 +455,6 @@ fn what_is_not_lowered_gives_unknown() {
     let notes = &estate().notes["pe1"];
     for n in [
         "route 198.51.100.96/27 in VRF RED: a next hop in VRF default is reached through a label switched path, which is not lowered",
-        "route 198.51.100.32/27 in VRF default: the next hop 203.0.113.9 does not resolve through one connected route",
         "GigabitEthernet0/0/0/4: VRF BLUE in show vrf all detail, and the default VRF in the config; the config decides",
         "IPv6 is not lowered: each IPv6 packet is unknown at the route lookup",
     ] {
@@ -560,4 +546,176 @@ fn a_learned_route_keeps_its_protocol() {
     assert_eq!(kinds["0.0.0.0/0"], "static");
     assert_eq!(kinds["198.51.100.0/30"], "connected");
     assert_eq!(kinds["198.51.100.1/32"], "local");
+}
+
+/// The twin with the route lines `lines` above the connected route of
+/// 203.0.113.0/24.
+fn twin_with_routes(lines: &str) -> Twin {
+    let mut s = sections();
+    let rib = String::from_utf8(s["rib"].0.clone()).unwrap().replace(
+        "C    203.0.113.0/24 is directly connected",
+        &format!("{lines}C    203.0.113.0/24 is directly connected"),
+    );
+    s.get_mut("rib").unwrap().0 = rib.into_bytes();
+    estate_with(s).builder.build().expect("the twin builds")
+}
+
+#[test]
+fn an_ibgp_route_through_a_loopback_forwards_on_the_igp_interface() {
+    let a = run(
+        &twin(),
+        "Bundle-Ether10",
+        "198.51.100.2",
+        "198.51.100.40",
+        80,
+    );
+    let (_, steps) = only(&a);
+    assert!(
+        has(
+            &steps,
+            "route 198.51.100.32/27 (bgp) in VRF default via 198.51.100.2 on Bundle-Ether10"
+        ),
+        "{steps:#?}"
+    );
+    let bgp = rib_line("B    198.51.100.32/27");
+    let igp = rib_line("O    203.0.113.9/32");
+    assert_eq!(
+        spans_of(&a, "pe1/route"),
+        [
+            format!("pe1/rib:{bgp}-{bgp}"),
+            format!("pe1/rib:{igp}-{igp}")
+        ]
+    );
+}
+
+#[test]
+fn a_next_hop_through_an_igp_with_two_equal_paths_gives_two_alternatives() {
+    let t = twin_with_routes("B    198.51.100.248/29 [200/0] via 198.51.100.65, 1d00h\n");
+    let a = run(&t, "Bundle-Ether10", "198.51.100.2", "198.51.100.250", 80);
+    let routes: Vec<String> = show(&a)
+        .into_iter()
+        .flat_map(|(_, steps)| steps)
+        .filter(|s| s.starts_with("pe1/route "))
+        .collect();
+    assert_eq!(
+        routes,
+        [
+            "pe1/route 198.51.100.248/29 (bgp) in VRF default via 198.51.100.2 on Bundle-Ether10",
+            "pe1/route 198.51.100.248/29 (bgp) in VRF default via 203.0.113.254 on GigabitEthernet0/0/0/3",
+        ],
+        "{:#?}",
+        show(&a)
+    );
+}
+
+#[test]
+fn a_collected_route_through_the_default_route_resolves() {
+    let t = twin_with_routes("B    198.51.100.240/29 [200/0] via 198.18.0.1, 1d00h\n");
+    let (_, steps) = only(&run(
+        &t,
+        "Bundle-Ether10",
+        "198.51.100.2",
+        "198.51.100.241",
+        80,
+    ));
+    assert!(
+        has(
+            &steps,
+            "route 198.51.100.240/29 (bgp) in VRF default via 203.0.113.254 on GigabitEthernet0/0/0/3"
+        ),
+        "{steps:#?}"
+    );
+}
+
+#[test]
+fn a_resolution_loop_and_a_route_that_is_not_read_give_unknown() {
+    let t = twin_with_routes(
+        "B    198.51.100.224/28 [200/0] via 198.51.100.250, 1d00h\n\
+         B    198.51.100.248/29 [200/0] via 198.51.100.230, 1d00h\n\
+         B    198.51.100.208/28 [200/0] via 198.51.100.200, 1d00h\n",
+    );
+    let (verdict, steps) = only(&run(
+        &t,
+        "Bundle-Ether10",
+        "198.51.100.2",
+        "198.51.100.226",
+        80,
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown);
+    assert!(
+        has(
+            &steps,
+            "route 198.51.100.224/28 (bgp) in VRF default: next hop not resolved: 198.51.100.250"
+        ),
+        "{steps:#?}"
+    );
+    let a = run(&t, "Bundle-Ether10", "198.51.100.2", "198.51.100.210", 80);
+    let (verdict, steps) = only(&a);
+    assert_eq!(verdict, VerdictKind::Unknown);
+    assert!(
+        has(
+            &steps,
+            "route 198.51.100.208/28 (bgp) in VRF default: next hop not resolved: 198.51.100.200"
+        ),
+        "{steps:#?}"
+    );
+    let unread = rib_line("B    198.51.100.192/27");
+    assert!(
+        spans_of(&a, "pe1/route").contains(&format!("pe1/rib:{unread}-{unread}")),
+        "{:?}",
+        spans_of(&a, "pe1/route")
+    );
+}
+
+#[test]
+fn a_set_query_agrees_with_the_path_query_of_a_member_of_each_part() {
+    let t = twin_with_routes(
+        "B    198.51.100.248/29 [200/0] via 198.51.100.65, 1d00h\n\
+         B    198.51.100.240/29 [200/0] via 198.18.0.1, 1d00h\n\
+         B    198.51.100.224/28 [200/0] via 198.51.100.230, 1d00h\n",
+    );
+    let arena = t.arena(None);
+    let spec = rsim_core::SetSpec {
+        src_ip: Some(vec!["198.51.100.2/32".parse().unwrap()]),
+        dst_ip: Some(vec!["198.51.100.0/24".parse().unwrap()]),
+        protocol: Some(vec![(rsim_core::PROTO_TCP, rsim_core::PROTO_TCP)]),
+        src_port: Some(vec![(40000, 40000)]),
+        dst_port: Some(vec![(80, 80)]),
+        ..rsim_core::SetSpec::default()
+    };
+    let ex = Executor::new(&t);
+    let set = ex
+        .run(
+            &Query::set(rsim_core::PacketSet::from_spec(&arena, &spec))
+                .with_ingress("pe1", "Bundle-Ether10")
+                .without_reply(),
+        )
+        .expect("the query runs");
+    assert!(set.summary.len() >= 3, "{:#?}", set.summary.len());
+    for part in &set.summary {
+        let w = part.packets.witness().expect("a member");
+        let one = ex
+            .run(
+                &Query::path(&t, &w.original)
+                    .with_ingress("pe1", "Bundle-Ether10")
+                    .without_reply(),
+            )
+            .expect("the query runs");
+        assert_eq!(
+            one.single_summary().map(outcome),
+            Some(outcome(&part.summary)),
+            "{:?}",
+            w.original
+        );
+    }
+}
+
+/// The verdict of a summary with its reason code, without the text.
+fn outcome(s: &rsim_engine::Summary) -> String {
+    match s {
+        rsim_engine::Summary::Same(
+            v @ (rsim_core::Verdict::Unknown(r) | rsim_core::Verdict::Drop(r)),
+        ) => format!("{:?} {:?}", v.kind(), r.code),
+        other => format!("{other:?}"),
+    }
 }

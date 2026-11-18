@@ -62,3 +62,10 @@ pub const LEARNED_WORDS: &[(&str, RouteProtocol)] = &[
 /// `static`, `kernel` for a route that another process installed, for
 /// example PPPoE or DHCP, and `table` for a route of another kernel table.
 pub const STATIC_WORDS: &[&str] = &["static", "kernel", "table"];
+
+/// True if the next hop of a computed route resolves through a default
+/// route. FRR resolves a next hop through the default route only with `ip
+/// nht resolve-via-default`, which the configuration does not read; the FRR
+/// documentation of zebra gives the rule. A collected route resolves the way
+/// the device shows it. Not confirmed against a device.
+pub const COMPUTED_THROUGH_DEFAULT: bool = false;

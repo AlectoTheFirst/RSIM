@@ -505,7 +505,7 @@ mod twin {
             prefix: "198.18.0.0/15".into(),
             protocol: "bgp".into(),
             selected: true,
-            next_hop: Some("203.0.113.1".into()),
+            next_hop: Some("203.0.113.10".into()),
             interface: None,
             span: row_span("r1", "routes", "b1", 9),
         });
@@ -528,6 +528,11 @@ mod twin {
         let a = run(&t, "eth0.10", tcp("192.0.2.30", "198.18.1.1", 443));
         let (_, v) = first(&a);
         assert_eq!(code(&v), Some(ReasonCode::IncompleteTable), "{v:?}");
+        let (detail, _, _) = step(&a, "r1/route");
+        assert_eq!(
+            detail,
+            "route 198.18.0.0/15 (bgp) in VRF default: next hop not resolved: 203.0.113.10"
+        );
     }
 
     /// The reason of the step of `f` on the first branch, and true if the
@@ -800,6 +805,43 @@ mod twin {
         assert_eq!(
             table.state(&["vrf", "name", "BLUE", "protocols", "bgp"]),
             rsim_ingest::State::Unhandled
+        );
+    }
+
+    #[test]
+    fn a_learned_route_with_no_interface_resolves_through_the_table() {
+        let mut col = collected();
+        col.routes.push(RouteRow {
+            interface: None,
+            next_hop: Some("203.0.113.130".into()),
+            ..route("198.51.100.0/25", "bgp", "eth1")
+        });
+        col.routes.push(RouteRow {
+            interface: None,
+            next_hop: Some("198.51.100.200".into()),
+            ..route("198.51.100.128/26", "bgp", "eth1")
+        });
+        col.routes.push(RouteRow {
+            interface: None,
+            next_hop: Some("198.51.100.130".into()),
+            ..route("198.51.100.192/26", "bgp", "eth1")
+        });
+        let (t, _) = build_with(CONFIG, &col);
+        let a = run(&t, "eth0.10", tcp("192.0.2.30", "198.51.100.9", 443));
+        let (detail, _, unknown) = step(&a, "r1/route");
+        assert!(!unknown, "{detail}");
+        assert_eq!(
+            detail,
+            "198.51.100.0/25 (bgp) in VRF default via 203.0.113.130 on eth1"
+        );
+        // A loop between 2 routes.
+        let a = run(&t, "eth0.10", tcp("192.0.2.30", "198.51.100.140", 443));
+        let (detail, code, unknown) = step(&a, "r1/route");
+        assert!(unknown, "{detail}");
+        assert_eq!(code, ReasonCode::IncompleteTable);
+        assert_eq!(
+            detail,
+            "route 198.51.100.128/26 (bgp) in VRF default: next hop not resolved: 198.51.100.200"
         );
     }
 }

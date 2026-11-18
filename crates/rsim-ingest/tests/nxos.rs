@@ -368,17 +368,6 @@ fn the_static_nat_translates_the_outside_destination_before_the_route_lookup() {
 #[test]
 fn what_is_not_lowered_gives_unknown() {
     let t = twin();
-    // A next hop in another VRF.
-    let (verdict, steps) = only(&run(
-        &t,
-        "Vlan20",
-        "192.0.2.70",
-        "203.0.113.200",
-        PROTO_TCP,
-        443,
-    ));
-    assert_eq!(verdict, VerdictKind::Unknown);
-    assert!(has(&steps, "route 0.0.0.0/0 in VRF RED has no next hop"));
     // IPv6.
     let (verdict, steps) = only(&run(
         &t,
@@ -397,7 +386,6 @@ fn what_is_not_lowered_gives_unknown() {
         &[
             "leaf1/vlan10/00:00:5e:00:53:e1: a next hop of a route, so it is not an endpoint",
             "Ethernet1/9: the vPC domain is not known",
-            "route 0.0.0.0/0 in VRF RED: a next hop in another VRF is not lowered",
             "IPv6 is not lowered: each IPv6 packet is unknown at the route lookup",
         ]
     );
@@ -1464,4 +1452,115 @@ fn a_vrf_with_bgp_and_no_rows_is_unknown_outside_its_connected_and_static_routes
     let k = kinds(&t, "RED");
     assert_eq!(k["10.0.0.0/8"], "static");
     assert_eq!(k["192.0.2.64/26"], "connected");
+}
+
+#[test]
+fn a_next_hop_in_another_vrf_resolves_in_that_vrf() {
+    let (_, steps) = only(&run(
+        &twin(),
+        "Vlan20",
+        "192.0.2.70",
+        "203.0.113.200",
+        PROTO_TCP,
+        443,
+    ));
+    assert!(
+        has(
+            &steps,
+            "route 0.0.0.0/0 in VRF RED via 198.51.100.2 on Ethernet1/2"
+        ),
+        "{steps:#?}"
+    );
+    let mut col = collected();
+    col.routes.push(RouteRow {
+        interface: None,
+        ..route(
+            "RED",
+            "198.51.100.64/26",
+            "bgp-65000",
+            "Eth1/2",
+            Some("198.51.100.2%default"),
+        )
+    });
+    col.routes.push(RouteRow {
+        interface: None,
+        ..route(
+            "RED",
+            "198.51.100.128/26",
+            "bgp-65000",
+            "Eth1/2",
+            Some("198.51.100.2"),
+        )
+    });
+    let t = estate_of(CONFIG, col)
+        .builder
+        .build()
+        .expect("the twin builds");
+    let (_, steps) = only(&run(
+        &t,
+        "Vlan20",
+        "192.0.2.70",
+        "198.51.100.70",
+        PROTO_TCP,
+        443,
+    ));
+    assert!(
+        has(
+            &steps,
+            "route 198.51.100.64/26 (bgp) in VRF RED via 198.51.100.2 on Ethernet1/2"
+        ),
+        "{steps:#?}"
+    );
+    // With no suffix, the next hop resolves in VRF RED, which has no route
+    // to it other than the default route through the other VRF.
+    let (_, steps) = only(&run(
+        &t,
+        "Vlan20",
+        "192.0.2.70",
+        "198.51.100.130",
+        PROTO_TCP,
+        443,
+    ));
+    assert!(
+        has(
+            &steps,
+            "route 198.51.100.128/26 (bgp) in VRF RED via 198.51.100.2 on Ethernet1/2"
+        ),
+        "{steps:#?}"
+    );
+}
+
+#[test]
+fn a_next_hop_that_resolves_through_a_gateway_group_route_is_unknown() {
+    let mut col = collected();
+    col.routes.push(RouteRow {
+        interface: None,
+        ..route(
+            "default",
+            "198.51.100.64/26",
+            "bgp-65000",
+            "Vlan10",
+            Some("192.0.2.1"),
+        )
+    });
+    let t = estate_of(CONFIG, col)
+        .builder
+        .build()
+        .expect("the twin builds");
+    let (verdict, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "198.51.100.70",
+        PROTO_TCP,
+        443,
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown);
+    assert!(
+        has(
+            &steps,
+            "route 198.51.100.64/26 (bgp) in VRF default: next hop not resolved: 192.0.2.1"
+        ),
+        "{steps:#?}"
+    );
 }

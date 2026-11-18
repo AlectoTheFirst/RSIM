@@ -24,6 +24,7 @@ use super::config::{
 use super::names::Names;
 use crate::collected::Collected;
 use crate::links::{External, Summary};
+use crate::resolve::{Origin, Path, Resolver, Target, through_default};
 use crate::route_tables::{TABLE_NOT_COLLECTED, route_kind};
 use crate::vyos::Lowered;
 
@@ -36,6 +37,9 @@ pub(super) struct Vx<'a> {
     pub st: &'a super::state::State,
     pub tunnel: &'a super::vxlan::Plan,
     pub encap: Option<&'a FunctionId>,
+    /// The collected routes of each VRF, for the resolution of a next hop
+    /// with no interface.
+    pub resolver: &'a Resolver,
 }
 
 /// The lowering of one device: its name, the file of its config, its
@@ -278,10 +282,12 @@ pub fn lower(
     vrfs.insert(DEFAULT_VRF.to_string());
     vrfs.extend(active.iter().map(|i| vrf_of(i).to_string()));
     let encap_l3 = l.vxlan_encap_l3(&tunnel);
+    let resolver = resolver(col, &names, &st);
     let vx = Vx {
         st: &st,
         tunnel: &tunnel,
         encap: encap_l3.as_ref(),
+        resolver: &resolver,
     };
     let mut tables = BTreeMap::new();
     for v in &vrfs {
@@ -1433,50 +1439,45 @@ impl L<'_> {
                     .any(|r| matches!(r.protocol.as_str(), "hsrp" | "vrrp"))
                 {
                     Some("a route of a gateway group that is not active on this switch")
-                } else if rows.iter().zip(&tunnelled).any(|(r, t)| {
-                    // The next hop of a VXLAN path can name the VRF of the
-                    // underlay.
-                    r.next_hop
-                        .as_deref()
-                        .is_some_and(|g| match g.split_once('%') {
-                            Some((_, v)) => !(t.is_some() && v == DEFAULT_VRF),
-                            None => false,
-                        })
-                }) {
-                    Some("a next hop in another VRF is not lowered")
-                } else if rows
-                    .iter()
-                    .zip(&tunnelled)
-                    .any(|(r, t)| r.interface.is_none() && t.is_none())
-                {
-                    Some("a next hop with no interface")
                 } else {
                     None
                 };
-                let hops = match problem {
-                    Some(why) => {
-                        self.note(format!("route {prefix} in VRF {vrf}: {why}"));
-                        Vec::new()
+                if let Some(why) = problem {
+                    self.note(format!("route {prefix} in VRF {vrf}: {why}"));
+                    t.insert(p, Route::new(kind, Vec::new(), spans));
+                    continue;
+                }
+                let mut hops = Vec::new();
+                let mut paths = Vec::new();
+                for (r, tun) in rows.iter().zip(&tunnelled) {
+                    let gw = r
+                        .next_hop
+                        .as_deref()
+                        .and_then(|g| g.split('%').next()?.parse().ok());
+                    if tun.is_some()
+                        && let super::vxlan::Plan::Exact(tunnel) = vx.tunnel
+                    {
+                        hops.push(hop(self, &tunnel.nve, gw));
+                    } else {
+                        paths.push(path_of(r, vrf, names));
                     }
-                    None => rows
-                        .iter()
-                        .zip(&tunnelled)
-                        .filter_map(|(r, t)| {
-                            let gw = r
-                                .next_hop
-                                .as_deref()
-                                .and_then(|g| g.split('%').next()?.parse().ok());
-                            if t.is_some()
-                                && let super::vxlan::Plan::Exact(tun) = vx.tunnel
-                            {
-                                return Some(hop(self, &tun.nve, gw));
-                            }
-                            let i = names.resolve(r.interface.as_deref()?);
-                            Some(hop(self, &i, gw))
-                        })
-                        .collect(),
-                };
-                t.insert(p, Route::new(kind, hops, spans));
+                }
+                let through =
+                    through_default(Origin::Collected, super::profile::COMPUTED_THROUGH_DEFAULT);
+                match vx.resolver.resolve(vrf, &paths, through) {
+                    Ok((found, more)) => {
+                        hops.extend(found.iter().map(|h| hop(self, &h.interface, h.gateway)));
+                        let mut all = spans;
+                        all.extend(more);
+                        t.insert(p, Route::new(kind, hops, all));
+                    }
+                    Err(u) => {
+                        self.note(format!("route {prefix} in VRF {vrf}: {}", u.why));
+                        let mut all = spans;
+                        all.extend(u.spans);
+                        t.insert(p, Route::unknown(kind, u.reason, all));
+                    }
+                }
             }
         }
         for i in active.iter().filter(|i| vrf_of(i) == vrf) {
@@ -1499,4 +1500,70 @@ impl L<'_> {
         t.insert(v6, Route::new(RouteKind::Static, Vec::new(), Vec::new()));
         t
     }
+}
+
+/// The path of a collected route row: its interface, and its next hop with
+/// the VRF of a `%vrf` suffix that names another VRF. A connected row has
+/// no next hop.
+fn path_of(r: &crate::collected::RouteRow, vrf: &str, names: &Names) -> Path {
+    let (gateway, other) = match r.next_hop.as_deref() {
+        Some(g) if r.protocol != "direct" => {
+            let (addr, suffix) = match g.split_once('%') {
+                Some((a, v)) => (a, Some(v)),
+                None => (g, None),
+            };
+            (
+                addr.parse().ok(),
+                suffix.filter(|v| *v != vrf).map(str::to_string),
+            )
+        }
+        _ => (None, None),
+    };
+    Path {
+        interface: r.interface.as_deref().map(|i| names.resolve(i)),
+        gateway,
+        vrf: other,
+    }
+}
+
+/// The collected routes of each VRF for the resolution of a next hop: a
+/// local route, a discard route, the route of a gateway group and a route
+/// with a VXLAN path give no next hop.
+fn resolver(col: &Collected, names: &Names, st: &super::state::State) -> Resolver {
+    let mut by: BTreeMap<(&str, &str), Vec<&crate::collected::RouteRow>> = BTreeMap::new();
+    for r in col.routes.iter().filter(|r| r.selected) {
+        by.entry((&r.vrf, &r.prefix)).or_default().push(r);
+    }
+    let mut out = Resolver::new();
+    for ((vrf, prefix), rows) in by {
+        let Ok(p) = prefix.parse::<Prefix>() else {
+            continue;
+        };
+        let spans: Vec<SourceSpan> = rows.iter().map(|r| r.span.clone()).collect();
+        let tunnelled = rows.iter().any(|r| {
+            r.next_hop.as_ref().is_some_and(|g| {
+                st.vxlan_paths
+                    .contains_key(&(vrf.to_string(), prefix.to_string(), g.clone()))
+            })
+        });
+        let target = if rows[0].protocol == "local" {
+            Target::Local
+        } else if rows.iter().any(|r| {
+            r.interface
+                .as_deref()
+                .is_some_and(|i| i.eq_ignore_ascii_case("null0"))
+        }) {
+            Target::Null
+        } else if tunnelled
+            || rows
+                .iter()
+                .any(|r| matches!(r.protocol.as_str(), "hsrp" | "vrrp"))
+        {
+            Target::Unknown
+        } else {
+            Target::Paths(rows.iter().map(|r| path_of(r, vrf, names)).collect())
+        };
+        out.add(vrf, p, target, spans);
+    }
+    out
 }
