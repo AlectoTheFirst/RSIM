@@ -56,23 +56,6 @@ fn host_address(s: &str) -> Option<std::net::IpAddr> {
     }
 }
 
-#[cfg(test)]
-mod host_tests {
-    use super::host_address;
-
-    #[test]
-    fn a_host_prefix_is_one_address_and_a_wider_prefix_is_not() {
-        let ip = |s: &str| s.parse::<std::net::IpAddr>().ok();
-        assert_eq!(host_address("192.0.2.89"), ip("192.0.2.89"));
-        assert_eq!(host_address("192.0.2.89/32"), ip("192.0.2.89"));
-        assert_eq!(host_address("2001:db8::1/128"), ip("2001:db8::1"));
-        assert_eq!(host_address("192.0.2.0/24"), None);
-        assert_eq!(host_address("2001:db8::1/32"), None);
-        assert_eq!(host_address("192.0.2.89/032"), None);
-        assert_eq!(host_address("not-an-address"), None);
-    }
-}
-
 /// Checks that each argument name is in `allowed`.
 pub fn check_names(args: &Map<String, Value>, allowed: &[&str]) -> Result<(), QueryError> {
     match args.keys().find(|k| !allowed.contains(&k.as_str())) {
@@ -316,5 +299,22 @@ pub fn form(args: &Map<String, Value>) -> Result<rsim_contract::args::Form, Quer
             Some("full") => Ok(Form::Full),
             _ => Err(invalid(format!("form {v} is not summary, steps or full"))),
         },
+    }
+}
+
+#[cfg(test)]
+mod host_tests {
+    use super::host_address;
+
+    #[test]
+    fn a_host_prefix_is_one_address_and_a_wider_prefix_is_not() {
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().ok();
+        assert_eq!(host_address("192.0.2.89"), ip("192.0.2.89"));
+        assert_eq!(host_address("192.0.2.89/32"), ip("192.0.2.89"));
+        assert_eq!(host_address("2001:db8::1/128"), ip("2001:db8::1"));
+        assert_eq!(host_address("192.0.2.0/24"), None);
+        assert_eq!(host_address("2001:db8::1/32"), None);
+        assert_eq!(host_address("192.0.2.89/032"), None);
+        assert_eq!(host_address("not-an-address"), None);
     }
 }
