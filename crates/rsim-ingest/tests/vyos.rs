@@ -483,6 +483,100 @@ mod twin {
         }
     }
 
+    /// The path and the verdict of a VPN client to the internet through
+    /// the tunnel, on the configuration with the change `f`.
+    fn through_the_tunnel(f: impl FnOnce(&mut serde_json::Value)) -> (Vec<String>, Verdict) {
+        let (t, _) = build_from(&super::edited(f));
+        first(&run(&t, "eth0.10", tcp("192.0.2.10", "203.0.113.99", 443)))
+    }
+
+    fn local_wan_drops(v: &mut serde_json::Value) {
+        put(
+            v,
+            &["firewall", "ipv4", "name", "LOCAL-WAN", "default-action"],
+            serde_json::json!("drop"),
+        );
+    }
+
+    #[test]
+    fn a_local_policy_that_differs_for_a_new_and_an_established_tunnel_flow_is_unknown() {
+        // New packets of the tunnel flow are dropped; packets of a flow
+        // that the peer started are established and the state policy
+        // accepts them.
+        let (path, v) = through_the_tunnel(local_wan_drops);
+        assert!(path.contains(&"r1/wireguard/wg0".to_string()), "{path:?}");
+        match v {
+            Verdict::Unknown(r) => assert!(
+                r.detail.contains("new and an established connection"),
+                "{}",
+                r.detail
+            ),
+            v => panic!("{v:?}"),
+        }
+    }
+
+    #[test]
+    fn a_local_policy_that_drops_a_new_and_an_established_tunnel_flow_drops() {
+        let (_, v) = through_the_tunnel(|v| {
+            local_wan_drops(v);
+            put(
+                v,
+                &[
+                    "firewall",
+                    "global-options",
+                    "state-policy",
+                    "established",
+                    "action",
+                ],
+                serde_json::json!("drop"),
+            );
+        });
+        assert!(matches!(v, Verdict::Drop(_)), "{v:?}");
+    }
+
+    #[test]
+    fn a_local_rule_for_new_packets_only_makes_the_tunnel_flow_unknown() {
+        // With no state policy for established packets, the rules evaluate
+        // them, and only new packets match the accept rule.
+        let (_, v) = through_the_tunnel(|v| {
+            local_wan_drops(v);
+            put(
+                v,
+                &["firewall", "ipv4", "name", "LOCAL-WAN", "rule", "10"],
+                serde_json::json!({"action": "accept", "state": "new"}),
+            );
+            v["firewall"]["global-options"]["state-policy"]
+                .as_object_mut()
+                .unwrap()
+                .remove("established");
+        });
+        assert!(matches!(v, Verdict::Unknown(_)), "{v:?}");
+    }
+
+    #[test]
+    fn two_peers_with_the_same_allowed_ip_are_unknown() {
+        let (path, v) = through_the_tunnel(|v| {
+            put(
+                v,
+                &["interfaces", "wireguard", "wg0", "peer", "b"],
+                serde_json::json!({
+                    "address": "198.51.100.3",
+                    "allowed-ips": "0.0.0.0/0",
+                    "port": "51820",
+                    "public-key": "DDDD"
+                }),
+            );
+        });
+        assert_eq!(path.last().map(String::as_str), Some("r1/wireguard/wg0"));
+        match v {
+            Verdict::Unknown(r) => {
+                assert_eq!(r.code, ReasonCode::AmbiguousOwner);
+                assert_eq!(r.detail, "more than one WireGuard peer allows 0.0.0.0/0");
+            }
+            v => panic!("{v:?}"),
+        }
+    }
+
     #[test]
     fn the_private_key_stays_out_of_the_functions_and_the_notes() {
         let config = edited(|v| {

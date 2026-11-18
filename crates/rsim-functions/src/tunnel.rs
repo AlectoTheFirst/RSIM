@@ -394,9 +394,10 @@ pub struct WireguardPeer {
 
 /// Puts the packets that a device routes to a WireGuard interface into the
 /// tunnel to one peer. The peer is the peer with the longest allowed IP
-/// that contains the destination; of 2 peers with the same allowed IP, the
-/// peer that is last in the order of `peers` has it. A destination that no
-/// allowed IP contains is dropped. The encapsulated packets are packets of
+/// that contains the destination. When more than one peer has that allowed
+/// IP, the device gives it to one of them by an order that is not
+/// collected, so its packets are unknown. A destination that no allowed IP
+/// contains is dropped. The encapsulated packets are packets of
 /// the device itself: they continue at the route lookup of the underlay
 /// with the source zone of the device, and the inner header stays as the
 /// inner level.
@@ -405,7 +406,8 @@ pub struct WireguardEncap {
     pub meta: Meta,
     pub interface: InterfaceId,
     peers: Vec<WireguardPeer>,
-    allowed: TriePrefixTable<usize>,
+    /// The peers of each allowed IP, by their index in `peers`.
+    allowed: TriePrefixTable<Vec<usize>>,
     /// The UDP source port of the outer header: the listen port of the
     /// interface. `None` if the device picks it at run time.
     pub listen_port: Option<u16>,
@@ -437,11 +439,18 @@ impl WireguardEncap {
         peers: Vec<WireguardPeer>,
         s: WireguardSettings,
     ) -> Self {
-        let mut allowed = TriePrefixTable::new();
+        let mut by_prefix: BTreeMap<Prefix, Vec<usize>> = BTreeMap::new();
         for (i, p) in peers.iter().enumerate() {
             for a in &p.allowed {
-                allowed.insert(*a, i);
+                let v = by_prefix.entry(*a).or_default();
+                if !v.contains(&i) {
+                    v.push(i);
+                }
             }
+        }
+        let mut allowed = TriePrefixTable::new();
+        for (a, v) in by_prefix {
+            allowed.insert(a, v);
         }
         WireguardEncap {
             meta,
@@ -533,7 +542,9 @@ impl WireguardEncap {
                 c.vrf = Attr::Known(self.underlay.clone());
                 c.src_zone = self.src_zone.clone();
                 c.dst_zone = Attr::Unset;
-                c.session = Attr::Known(SessionMatch::New {
+                // The outer flow is new or established: its state depends on
+                // which end started it, which is not collected.
+                c.session = Attr::Known(SessionMatch::Untracked {
                     entry: e.done.clone(),
                 });
                 c.egress_interface = Attr::Unset;
@@ -602,14 +613,29 @@ impl NetFunction for WireguardEncap {
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
         let part = input.partition_by_prefix(AddrField::Dst, &self.allowed);
         let mut by_peer: BTreeMap<usize, PacketSet> = BTreeMap::new();
-        for (_, &i, set) in part.matched {
+        let mut out = Vec::new();
+        for (prefix, owners, set) in part.matched {
+            let [i] = owners[..] else {
+                let mut b = self.meta.unknown(
+                    set,
+                    ReasonCode::AmbiguousOwner,
+                    format!("more than one WireGuard peer allows {prefix}"),
+                    ctx,
+                    state,
+                );
+                b.spans = owners
+                    .iter()
+                    .flat_map(|&i| self.peers[i].spans.iter().cloned())
+                    .collect();
+                push_nonempty(&mut out, b);
+                continue;
+            };
             let s = match by_peer.remove(&i) {
                 Some(s) => s.union(&set),
                 None => set,
             };
             by_peer.insert(i, s);
         }
-        let mut out = Vec::new();
         for (i, set) in by_peer {
             self.to_peer(&mut out, &self.peers[i], set, ctx, state);
         }

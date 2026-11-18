@@ -209,7 +209,9 @@ impl NetFunction for SessionCommit {
         vec![self.next.clone()]
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
-        let Attr::Known(SessionMatch::New { entry }) = &ctx.session else {
+        let Attr::Known(SessionMatch::New { entry } | SessionMatch::Untracked { entry }) =
+            &ctx.session
+        else {
             return vec![self.meta.forward(
                 input.clone(),
                 &self.next,

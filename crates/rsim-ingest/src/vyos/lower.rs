@@ -380,15 +380,9 @@ pub fn lower(
 
     // Zone policy, the local input and the delivery to the router.
     let (forward_rules, local_rules) = l.zone_rules(local_zone.as_deref());
-    // With no action of the state policy for established packets, the
-    // rules evaluate the packets of a session.
-    let evaluate = |p: FirewallPolicy| {
-        if states.established == StateAction::Continue {
-            p.evaluating_sessions()
-        } else {
-            p
-        }
-    };
+    // The action of the state policy for established packets; with none,
+    // the rules evaluate the packets of a session.
+    let evaluate = |p: FirewallPolicy| p.with_established(states.established);
     let meta = l.meta("policy", zone_spans.clone());
     l.add(evaluate(FirewallPolicy::new(
         meta,
