@@ -1,5 +1,5 @@
 // The calls of the UI to the REST API of rsim-api, on the origin of the page.
-import type { PathAnswer, SetAnswer, Twin } from "./types";
+import type { PathAnswer, SetAnswer, TableOut, TablesOut, Twin } from "./types";
 
 /** A refused request: the problem object of RFC 9457. */
 export class ApiProblem extends Error {
@@ -107,4 +107,28 @@ export function stepUrl(
 ): string {
   const base = `/v1/twins/${encodeURIComponent(twin)}/queries/${encodeURIComponent(qid)}/branches/${branch}/steps/${step}`;
   return replyOf === null ? base : `${base}?reply_of=${replyOf}`;
+}
+
+/** The catalog of the tables. */
+export async function getCatalog(): Promise<TablesOut> {
+  return getJson("/v1/tables");
+}
+
+/** The answer of a table request, by its path and query below the origin. */
+export async function getTable<T>(path: string): Promise<T> {
+  return getJson(path);
+}
+
+/** One page of the coverage report of a twin. */
+export async function getCoverage(twin: string, limit: number, cursor: string | null): Promise<TableOut> {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (cursor) q.set("cursor", cursor);
+  return getJson(`/v1/twins/${encodeURIComponent(twin)}/coverage?${q.toString()}`);
+}
+
+/** One page of the unhandled paths of one device, from the table coverage. */
+export async function getUnhandled(twin: string, device: string, limit: number, cursor: string | null): Promise<TableOut> {
+  const q = new URLSearchParams({ device, limit: String(limit) });
+  if (cursor) q.set("cursor", cursor);
+  return getJson(`/v1/twins/${encodeURIComponent(twin)}/tables/coverage/rows?${q.toString()}`);
 }

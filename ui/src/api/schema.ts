@@ -157,6 +157,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/twins/{twin}/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The coverage report of a twin: for each device in name order, the config lines that the ingestion handles, that have no effect on the twin and that it does not handle, with the number of unhandled paths and stanzas. A built-in topology has no report. The table coverage gives the unhandled paths. */
+        get: operations["getCoverage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/twins/{twin}/queries": {
         parameters: {
             query?: never;
@@ -1422,6 +1439,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClaimOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getCoverage: {
+        parameters: {
+            query?: {
+                /** @description The number of rows of a page. */
+                limit?: string;
+                /** @description The cursor of the next page. */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                twin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableOut"];
                 };
             };
             /** @description A problem */

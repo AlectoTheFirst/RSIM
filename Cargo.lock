@@ -2622,6 +2622,7 @@ dependencies = [
  "hyper-util",
  "rsim-cli",
  "rsim-contract",
+ "rsim-ingest",
  "rsim-mcp",
  "rsim-store",
  "serde",
