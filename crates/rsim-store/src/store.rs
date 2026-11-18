@@ -80,6 +80,20 @@ fn write_once(path: &Path, bytes: &[u8]) -> Result<bool, StoreError> {
     }
 }
 
+/// Writes a file that only one cycle number names, such as a table file or
+/// a snapshot manifest. If the file exists, another writer took the same
+/// cycle number, and the cycle fails with [`StoreError::Conflict`].
+fn write_cycle_file(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+    if write_once(path, bytes)? {
+        Ok(())
+    } else {
+        Err(StoreError::Conflict(format!(
+            "{} exists: another writer wrote the same cycle",
+            path.display()
+        )))
+    }
+}
+
 /// Writes the files with [`write_once`] on some threads at the same time.
 fn write_all_once(files: &[(PathBuf, Vec<u8>)]) -> Result<(), StoreError> {
     const THREADS: usize = 16;
@@ -385,7 +399,9 @@ impl<'a> Cycle<'a> {
     /// Writes the table files, the device manifests and the snapshot
     /// manifest. A device manifest that differs from the base in no more
     /// than the collection time is not written. If no device changed, the
-    /// cycle writes nothing and gives `None`.
+    /// cycle writes nothing and gives `None`. If another writer wrote a
+    /// table file or the snapshot manifest of the same cycle number, the
+    /// cycle fails with [`StoreError::Conflict`].
     pub fn prepare(self) -> Result<Option<Prepared<'a>>, StoreError> {
         let store = self.store;
         let prev = |d: &str| self.base.as_ref().and_then(|s| s.devices.get(d));
@@ -453,7 +469,7 @@ impl<'a> Cycle<'a> {
             return Ok(None);
         }
         for (path, buf) in &table_files {
-            write_once(path, buf)?;
+            write_cycle_file(path, buf)?;
         }
 
         let mut files = Vec::with_capacity(changed.len());
@@ -492,7 +508,7 @@ impl<'a> Cycle<'a> {
                 .collect(),
             devices: names,
         };
-        write_once(
+        write_cycle_file(
             &store.snapshot_path(self.cycle),
             &serde_json::to_vec_pretty(&manifest)?,
         )?;

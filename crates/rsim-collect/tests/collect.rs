@@ -627,3 +627,33 @@ async fn run_collects_at_each_interval_until_it_stops() {
     assert!(start.elapsed() >= 3 * interval, "{:?}", start.elapsed());
     assert_eq!(c.store().head().unwrap(), Some(0));
 }
+
+/// A bridge and one bridge port in the form of `ip -d -j link show`.
+fn bridge_links(gc: &str, hold: &str, mtu: u32) -> Vec<u8> {
+    format!(
+        r#"[{{"ifindex":3,"ifname":"br0","flags":["UP"],"mtu":{mtu},"operstate":"UP",
+"address":"00:00:5e:00:53:10",
+"linkinfo":{{"info_kind":"bridge","info_data":{{"forward_delay":1500,"hello_time":200,
+"hello_timer":0.00,"tcn_timer":0.00,"topology_change_timer":0.00,"gc_timer":{gc}}}}}}},
+{{"ifindex":4,"ifname":"eth1","flags":["UP"],"mtu":1500,"operstate":"UP","master":"br0",
+"address":"00:00:5e:00:53:11",
+"linkinfo":{{"info_slave_kind":"bridge","info_slave_data":{{"state":"forwarding",
+"message_age_timer":0.00,"forward_delay_timer":0.00,"hold_timer":{hold}}}}}}}]"#
+    )
+    .into_bytes()
+}
+
+#[test]
+fn the_timers_of_a_bridge_do_not_change_the_hash_of_the_links() {
+    let keys = Keys::new([1; 32], [2; 32]);
+    let spec = rsim_collect::vyos::sections()
+        .into_iter()
+        .find(|s| s.name == "links")
+        .unwrap();
+    let hash = |b: &[u8]| {
+        rsim_store::change_hash_kept(&keys, spec.format, b, spec.volatile, spec.keep).unwrap()
+    };
+    let a = hash(&bridge_links("287.31", "0.00", 1500));
+    assert_eq!(a, hash(&bridge_links("12.04", "0.76", 1500)));
+    assert_ne!(a, hash(&bridge_links("287.31", "0.00", 9000)));
+}

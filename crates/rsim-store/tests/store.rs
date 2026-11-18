@@ -302,3 +302,31 @@ fn the_same_input_gives_the_same_files() {
     };
     assert_eq!(make(), make());
 }
+
+#[test]
+fn a_second_writer_of_the_same_cycle_fails_and_publishes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = Store::open(dir.path(), keys()).unwrap();
+    let b = Store::open(dir.path(), keys()).unwrap();
+    commit(&a, 0, vec![update(&a, "r1", "a", Some(&[("eth0", 1)]))]).unwrap();
+    // All 3 cycles take the number 1.
+    let mut ca = a.begin(1).unwrap();
+    let mut cb = b.begin(1).unwrap();
+    let mut cc = b.begin(1).unwrap();
+    assert_eq!((ca.number(), cb.number(), cc.number()), (1, 1, 1));
+    ca.add(update(&a, "r1", "b", Some(&[("eth0", 2)]))).unwrap();
+    cb.add(update(&b, "r2", "x", Some(&[("eth9", 9)]))).unwrap();
+    cc.add(update(&b, "r3", "y", None)).unwrap();
+    let sa = ca.prepare().unwrap().unwrap().publish().unwrap();
+    // The table file of the cycle exists.
+    assert!(matches!(cb.prepare(), Err(StoreError::Conflict(_))));
+    // The snapshot manifest of the cycle exists.
+    assert!(matches!(cc.prepare(), Err(StoreError::Conflict(_))));
+    assert_eq!(a.head().unwrap(), Some(1));
+    let latest = a.latest().unwrap().unwrap();
+    assert_eq!(latest, sa);
+    assert_eq!(
+        speeds(&a, &latest),
+        vec![("r1".to_string(), vec!["eth0".to_string()])]
+    );
+}

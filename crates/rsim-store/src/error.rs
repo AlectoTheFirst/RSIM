@@ -22,6 +22,9 @@ pub enum StoreError {
     NotFound(String),
     /// A value is not valid for its field.
     Invalid(String),
+    /// A file of the cycle exists, because another writer took the same
+    /// cycle number. The cycle publishes nothing.
+    Conflict(String),
 }
 
 impl StoreError {
@@ -50,6 +53,7 @@ impl fmt::Display for StoreError {
             ),
             StoreError::NotFound(e) => write!(f, "not found: {e}"),
             StoreError::Invalid(e) => write!(f, "invalid: {e}"),
+            StoreError::Conflict(e) => write!(f, "conflict: {e}"),
         }
     }
 }
