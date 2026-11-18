@@ -128,18 +128,24 @@ export function ribOfGroup(guards: string[]): Rib {
   return r;
 }
 
-/** The span with the fewest lines; the first of equal spans. */
+/** The span with the fewest lines; the last of equal spans. */
 export function mostSpecific(spans: readonly Span[]): Span | null {
   let best: Span | null = null;
   for (const s of spans) {
-    if (!best || s.last_line - s.first_line < best.last_line - best.first_line) best = s;
+    if (!best || s.last_line - s.first_line <= best.last_line - best.first_line) best = s;
   }
   return best;
 }
 
-/** The file of a span with the device prefix that the lane gives left out. */
+/**
+ * The kind of the file of a span: its name after the last `/`, with the
+ * device prefix that the lane gives and the content hash after `@` left out.
+ */
 export function fileLabel(file: string, device: string | null | undefined): string {
-  return device && file.startsWith(`${device}.`) ? file.slice(device.length + 1) : file;
+  let f = file.slice(file.lastIndexOf("/") + 1);
+  const at = f.indexOf("@");
+  if (at > 0) f = f.slice(0, at);
+  return device && f.startsWith(`${device}.`) && f.length > device.length + 1 ? f.slice(device.length + 1) : f;
 }
 
 export function spanLabel(s: Span, device: string | null | undefined): string {
@@ -189,7 +195,17 @@ export interface PathRef {
 
 export interface Lane {
   device: string | null;
+  /** The endpoint of a lane at the start or the end of a path. */
+  endpoint: string | null;
   name: string;
+}
+
+/** A lane of a path: a device, no device (`null`), or an endpoint. */
+export type LaneKey = string | null | { endpoint: string };
+
+function laneId(k: LaneKey): string {
+  if (k === null) return "n";
+  return typeof k === "string" ? `d:${k}` : `e:${k.endpoint}`;
 }
 
 export interface StepRow {
@@ -206,10 +222,15 @@ export interface StepRow {
   cells: Cell[];
   rib: Rib;
   source: string;
-  /** The lane of the row above when the path steps across at this row. */
+  /**
+   * The lane from which the path steps across at the top of this row: the
+   * lane of the row above, or the source endpoint at the start.
+   */
   enterFrom: number | null;
   start: boolean;
   end: End | null;
+  /** The lane of the end square when the path ends at an endpoint lane. */
+  endLane: number | null;
   /** A device-level row with more than one function. */
   group: boolean;
 }
@@ -256,17 +277,54 @@ export function allBranches(a: Answer): Branch[] {
  * next device of that path that has a lane, so that equal-cost paths keep
  * their devices side by side.
  */
-export function lanesOf(paths: readonly (readonly (string | null)[])[]): Lane[] {
-  const lanes: (string | null)[] = [];
+export function lanesOf(paths: readonly (readonly LaneKey[])[]): Lane[] {
+  const lanes: LaneKey[] = [];
+  const ids: string[] = [];
   for (const seq of paths) {
+    const sids = seq.map(laneId);
     seq.forEach((d, i) => {
-      if (lanes.includes(d)) return;
-      const next = seq.slice(i + 1).find((x) => lanes.includes(x));
-      const at = next === undefined ? lanes.length : lanes.indexOf(next);
+      if (ids.includes(sids[i]!)) return;
+      const next = sids.slice(i + 1).find((x) => ids.includes(x));
+      const at = next === undefined ? ids.length : ids.indexOf(next);
       lanes.splice(at, 0, d);
+      ids.splice(at, 0, sids[i]!);
     });
   }
-  return lanes.map((d) => ({ device: d, name: d ?? "no device" }));
+  return lanes.map((d) =>
+    d !== null && typeof d === "object"
+      ? { device: null, endpoint: d.endpoint, name: d.endpoint }
+      : { device: d, endpoint: null, name: d ?? "no device" },
+  );
+}
+
+/** The index of the lane of a device, or of an endpoint. */
+export function laneIndex(lanes: readonly Lane[], k: LaneKey): number {
+  const id = laneId(k);
+  return lanes.findIndex((l) => laneId(l.endpoint !== null ? { endpoint: l.endpoint } : l.device) === id);
+}
+
+/** The endpoint that a verdict delivers to, if it names one. */
+export function endpointOf(v: Verdict): string | null {
+  return v.kind === "deliver" ? (v.destination?.endpoint ?? null) : null;
+}
+
+/**
+ * The endpoint at the start of each forward branch: the endpoint to which
+ * its reply delivers.
+ */
+export function sourceEndpoints(a: Answer): Map<number, string> {
+  const out = new Map<number, string>();
+  for (const r of a.replies) {
+    const ends = [...new Set((r.answer?.branches ?? []).map((b) => endpointOf(b.verdict)))];
+    if (ends.length === 1 && ends[0]) out.set(r.forward_branch, ends[0]);
+  }
+  return out;
+}
+
+/** The lane sequence of a branch: its start endpoint, its devices, its end endpoint. */
+export function laneSeq(b: Branch, start: string | null): LaneKey[] {
+  const end = endpointOf(b.verdict);
+  return [...(start ? [{ endpoint: start }] : []), ...devicesOf(b), ...(end ? [{ endpoint: end }] : [])];
 }
 
 /** The groups of steps of one row each at a level. */
@@ -287,10 +345,13 @@ export function pathRows(
   dir: Dir,
   level: Level,
   lanes: readonly Lane[],
+  start: string | null = null,
 ): StepRow[] {
   const gs = groups(b.steps, level);
-  const laneOf = (d: string | null | undefined) =>
-    Math.max(0, lanes.findIndex((l) => l.device === (d ?? null)));
+  const laneOf = (d: string | null | undefined) => Math.max(0, laneIndex(lanes, d ?? null));
+  const startLane = start ? laneIndex(lanes, { endpoint: start }) : -1;
+  const endEp = endpointOf(b.verdict);
+  const endLane = endEp ? laneIndex(lanes, { endpoint: endEp }) : -1;
   const prefix = `${path.replyOf === null ? "f" : `r${path.replyOf}`}.${path.branch}`;
   let prevLane: number | null = null;
   return gs.map((g, gi) => {
@@ -316,9 +377,11 @@ export function pathRows(
               return s ? spanLabel(s, first.device) : "";
             })()
           : groupSource(g, first.device),
-      enterFrom: prevLane !== null && prevLane !== lane ? prevLane : null,
+      enterFrom:
+        prevLane !== null && prevLane !== lane ? prevLane : gi === 0 && startLane >= 0 && startLane !== lane ? startLane : null,
       start: gi === 0,
       end: gi === gs.length - 1 ? endOf(b.verdict) : null,
+      endLane: gi === gs.length - 1 && endLane >= 0 && endLane !== lane ? endLane : null,
       group: g.length > 1,
     };
     prevLane = lane;
@@ -328,14 +391,19 @@ export function pathRows(
 
 /** The ladder of a path query answer: the forward branches, then the replies. */
 export function ladder(a: Answer, level: Level): Ladder {
-  const lanes = lanesOf(allBranches(a).map(devicesOf));
+  const starts = sourceEndpoints(a);
+  const seqs: LaneKey[][] = a.branches.map((b) => laneSeq(b, starts.get(b.index) ?? null));
+  const fwdEnd = new Map(a.branches.map((b) => [b.index, endpointOf(b.verdict)]));
+  for (const r of a.replies) for (const b of r.answer?.branches ?? []) seqs.push(laneSeq(b, fwdEnd.get(r.forward_branch) ?? null));
+  const lanes = lanesOf(seqs);
   const rows: Row[] = [];
   const multi = a.branches.length > 1;
   for (const b of a.branches) {
     if (multi) {
-      rows.push({ type: "section", key: `f.${b.index}`, dir: "forward", text: `branch ${b.index}`, verdict: b.verdict, note: null });
+      // The result line gives the verdict of each branch.
+      rows.push({ type: "section", key: `f.${b.index}`, dir: "forward", text: `branch ${b.index}`, verdict: null, note: null });
     }
-    rows.push(...pathRows(b, { replyOf: null, branch: b.index }, "forward", level, lanes));
+    rows.push(...pathRows(b, { replyOf: null, branch: b.index }, "forward", level, lanes, starts.get(b.index) ?? null));
   }
   for (const r of a.replies) {
     const fb = r.forward_branch;
@@ -350,10 +418,11 @@ export function ladder(a: Answer, level: Level): Ladder {
         key: `r${fb}.${b.index}`,
         dir: "reply",
         text: rmulti ? `reply of branch ${fb}, branch ${b.index}` : `reply of branch ${fb}`,
-        verdict: b.verdict,
+        // The result line gives the verdict of a reply with one branch.
+        verdict: rmulti ? b.verdict : null,
         note: null,
       });
-      rows.push(...pathRows(b, { replyOf: fb, branch: b.index }, "reply", level, lanes));
+      rows.push(...pathRows(b, { replyOf: fb, branch: b.index }, "reply", level, lanes, fwdEnd.get(fb) ?? null));
     }
   }
   return { lanes, rows };

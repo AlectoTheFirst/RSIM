@@ -704,6 +704,9 @@ fn claim_command(cli: &Cli, args: &[String]) -> ExitCode {
             "{} {:?} on the scope {}: {} confirmed, {} refuted, {} unknown\n",
             o.claim, o.result, o.scope, o.counts.confirmed, o.counts.refuted, o.counts.unknown
         );
+        if !o.detail.is_empty() {
+            t.push_str(&format!("{}\n", o.detail));
+        }
         for e in &o.evidence {
             t.push_str(&format!(
                 "{:<10} {}  {} {}\n",

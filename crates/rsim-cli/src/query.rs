@@ -45,8 +45,9 @@ impl Protocol {
 impl FromStr for Protocol {
     type Err = String;
 
+    /// A name in any case: `tcp`, `UDP` and `Icmp` are names.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
+        match s.to_ascii_lowercase().as_str() {
             "tcp" => Ok(Protocol(PROTO_TCP)),
             "udp" => Ok(Protocol(PROTO_UDP)),
             "icmp" => Ok(Protocol(PROTO_ICMP)),
@@ -335,5 +336,23 @@ impl fmt::Display for ProtocolText {
             Some(n) => f.write_str(n),
             None => write!(f, "{}", self.0.0),
         }
+    }
+}
+
+#[cfg(test)]
+mod protocol_case_tests {
+    use super::Protocol;
+
+    #[test]
+    fn a_protocol_name_is_read_in_any_case() {
+        for (a, b) in [
+            ("UDP", "udp"),
+            ("Tcp", "tcp"),
+            ("ICMP", "icmp"),
+            ("ICMPv6", "icmpv6"),
+        ] {
+            assert_eq!(a.parse::<Protocol>(), b.parse::<Protocol>());
+        }
+        assert!("Udp6".parse::<Protocol>().is_err());
     }
 }

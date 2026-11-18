@@ -5,7 +5,8 @@ import type { Dir, End, Lane } from "./layout";
 import { hatchLines } from "../page/Hatch";
 import { useMemo } from "preact/hooks";
 
-export const laneX = (i: number) => i * SIZE.lane + SIZE.lane / 2;
+/** The centre of a lane, on a pixel centre so that a hairline is sharp. */
+export const laneX = (i: number) => i * SIZE.lane + SIZE.lane / 2 + SIZE.hairline / 2;
 
 let next = 0;
 
@@ -15,6 +16,8 @@ export interface LaneMarks {
   enterFrom: number | null;
   start: boolean;
   end: End | null;
+  /** The lane of the end square, if it is not the lane of the row. */
+  endLane?: number | null;
   group: boolean;
   /** The width of the path line. */
   line?: number;
@@ -40,7 +43,8 @@ export function Lanes(props: { lanes: number; h: number; marks: LaneMarks | null
   const x = laneX(marks.lane);
   const lw = marks.line ?? SIZE.pathLine;
   const sq = SIZE.endSquare;
-  const bottom = marks.end ? h - sq / 2 : h;
+  const endLane = marks.endLane ?? null;
+  const bottom = marks.end && endLane === null ? h - sq / 2 : h;
   const parts = [<rect class={cls} x={x - lw / 2} y={0} width={lw} height={Math.max(0, bottom)} />];
   if (marks.enterFrom !== null) {
     const a = laneX(marks.enterFrom);
@@ -56,10 +60,17 @@ export function Lanes(props: { lanes: number; h: number; marks: LaneMarks | null
     }
   }
   if (marks.start) {
-    parts.push(<rect class={cls} x={x - sq / 2} y={-sq / 3} width={sq} height={sq} />);
+    const sx = laneX(marks.enterFrom ?? marks.lane);
+    parts.push(<rect class={cls} x={sx - sq / 2} y={-sq / 3} width={sq} height={sq} />);
   }
   if (marks.end) {
     const y = h - (2 * sq) / 3;
+    let x = laneX(marks.lane);
+    if (endLane !== null) {
+      const b = laneX(endLane);
+      parts.push(<rect class={cls} x={Math.min(b, x) - lw / 2} y={h - lw} width={Math.abs(b - x) + lw} height={lw} />);
+      x = b;
+    }
     if (marks.end === "unknown") {
       parts.push(
         <g>
@@ -88,18 +99,13 @@ export function Lanes(props: { lanes: number; h: number; marks: LaneMarks | null
   );
 }
 
-/** The names of the lanes, on 2 lines so that long names do not meet. */
-export function LaneNames(props: { lanes: readonly Lane[]; line: number }) {
-  const { lanes, line } = props;
-  const w = lanes.length * SIZE.lane;
-  const lines = lanes.length > 1 ? 2 : 1;
+/** The name of each lane, centred over the lane, with the full name as its title. */
+export function LaneNames(props: { lanes: readonly Lane[] }) {
   return (
-    <svg class="lane-names t-index" width={w} height={line * lines} role="img" aria-label={`lanes: ${lanes.map((l) => l.name).join(", ")}`}>
-      {lanes.map((l, i) => (
-        <text x={laneX(i)} y={line * ((i % lines) + 1) - line / 4}>
-          {l.name}
-        </text>
+    <span class="lane-names t-index" aria-label={`lanes: ${props.lanes.map((l) => l.name).join(", ")}`}>
+      {props.lanes.map((l) => (
+        <span title={l.name}>{l.name}</span>
       ))}
-    </svg>
+    </span>
   );
 }

@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use rsim_cli::json::{PathAnswerOut, PathBriefOut, SetAnswerOut, SetBriefOut, to_text};
+use rsim_contract::claim::ClaimOut;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -74,6 +75,10 @@ fn each_stored_answer_is_valid_and_keeps_its_bytes() {
             Some("set_brief") => {
                 validate(rsim_contract::schema::<SetBriefOut>(), &v, &name);
                 round_trip::<SetBriefOut>(&text, &name);
+            }
+            Some("claim") => {
+                validate(rsim_contract::schema::<ClaimOut>(), &v, &name);
+                round_trip::<ClaimOut>(&text, &name);
             }
             k => panic!("{name}: kind {k:?}"),
         }

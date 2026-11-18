@@ -10,11 +10,15 @@ import {
   type Rib,
   fieldText,
   functionLabel,
+  endpointOf,
   groupSource,
+  laneIndex,
+  laneSeq,
   lanesOf,
   mostSpecific,
   ribOfGroup,
   type Shown,
+  sourceEndpoints,
   spanLabel,
 } from "./layout";
 
@@ -55,6 +59,9 @@ export interface SetRow {
   source: string;
   enterFrom: number | null;
   start: boolean;
+  /** The end of the path of the rows, on its last row. */
+  end: End | null;
+  endLane: number | null;
   /** The number of parts on the row. */
   parts: number;
   cells: PartCell[];
@@ -78,13 +85,13 @@ function endOf(v: Verdict): End {
 export function setLadder(a: Answer, level: Level): SetLadder {
   const branches = a.branches;
   const spine = branches.reduce<Branch | null>((m, b) => (!m || b.steps.length > m.steps.length ? b : m), null);
-  const devs = (b: Branch) => {
-    const out: (string | null)[] = [];
-    for (const s of b.steps) if (out[out.length - 1] !== (s.device ?? null)) out.push(s.device ?? null);
-    return out;
-  };
-  const lanes = lanesOf(branches.map(devs));
+  const starts = sourceEndpoints(a);
+  const lanes = lanesOf(branches.map((b) => laneSeq(b, starts.get(b.index) ?? null)));
   if (!spine) return { lanes, heads: [], rows: [] };
+  const start = starts.get(spine.index);
+  const startLane = start ? laneIndex(lanes, { endpoint: start }) : -1;
+  const endEp = endpointOf(spine.verdict);
+  const endLane = endEp ? laneIndex(lanes, { endpoint: endEp }) : -1;
   // The last step index at which each part is on the rows of the spine.
   const reach = branches.map((b) => {
     let i = 0;
@@ -97,7 +104,7 @@ export function setLadder(a: Answer, level: Level): SetLadder {
     if (level === "device" && last && last[0]!.device === s.device) last.push(s);
     else groups.push([s]);
   }
-  const laneOf = (d: string | null | undefined) => Math.max(0, lanes.findIndex((l) => l.device === (d ?? null)));
+  const laneOf = (d: string | null | undefined) => Math.max(0, laneIndex(lanes, d ?? null));
   let prev: number | null = null;
   const rows = groups.map((g, gi) => {
     const first = g[0]!;
@@ -122,8 +129,10 @@ export function setLadder(a: Answer, level: Level): SetLadder {
       reason: last.reason.detail,
       rib: ribOfGroup(g.map((x) => x.rib_guard)),
       source: g.length === 1 ? (s ? spanLabel(s, first.device) : "") : groupSource(g, first.device),
-      enterFrom: prev !== null && prev !== lane ? prev : null,
+      enterFrom: prev !== null && prev !== lane ? prev : gi === 0 && startLane >= 0 && startLane !== lane ? startLane : null,
       start: gi === 0,
+      end: gi === groups.length - 1 ? endOf(spine.verdict) : null,
+      endLane: gi === groups.length - 1 && endLane >= 0 && endLane !== lane ? endLane : null,
       parts: cells.filter((c) => c.kind !== "none").length,
       cells,
       group: g.length > 1,
