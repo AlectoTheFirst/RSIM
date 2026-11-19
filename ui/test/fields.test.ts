@@ -15,6 +15,7 @@ import {
   insertValue,
   kindOf,
   modeHelp,
+  modeValue,
   parseIp,
   valueToken,
   valuesOf,
@@ -240,5 +241,33 @@ describe("query of the bar", () => {
       reply: "false",
     });
     expect(fieldsOf({ "network.iana_number": 47 })).toEqual({ "network.iana_number": "47" });
+  });
+});
+
+describe("the value of a field after a change of the mode", () => {
+  it("writes the flags of one packet as one flag set and back", () => {
+    expect(modeValue("path", "set", "tcp_flags", "syn,ack")).toBe("syn+ack");
+    expect(modeValue("path", "set", "tcp_flags", "syn, ack")).toBe("syn+ack");
+    expect(modeValue("path", "set", "tcp_flags", "syn")).toBe("syn");
+    expect(modeValue("set", "path", "tcp_flags", "syn+ack")).toBe("syn,ack");
+    expect(modeValue("set", "path", "tcp_flags", "syn")).toBe("syn");
+    const back = modeValue("path", "set", "tcp_flags", "syn,ack") ?? "";
+    expect(checkValue("set", "tcp_flags", back)).toBeNull();
+    expect(modeValue("set", "path", "tcp_flags", back)).toBe("syn,ack");
+  });
+
+  it("gives null for a set value with more than one flag set", () => {
+    expect(modeValue("set", "path", "tcp_flags", "syn,ack")).toBeNull();
+    expect(modeValue("set", "path", "tcp_flags", "syn,syn+ack")).toBeNull();
+    expect(modeValue("set", "path", "tcp_flags", "16-18")).toBe("16-18");
+  });
+
+  it("keeps a value with a wrong form, an empty value and the other fields", () => {
+    expect(modeValue("path", "set", "tcp_flags", "syn+ack")).toBe("syn+ack");
+    expect(modeValue("set", "path", "tcp_flags", "syn+bad")).toBe("syn+bad");
+    expect(modeValue("set", "path", "tcp_flags", "")).toBe("");
+    expect(modeValue("path", "set", "destination.port", "53")).toBe("53");
+    expect(modeValue("set", "path", "source.ip", "192.0.2.0/24")).toBe("192.0.2.0/24");
+    expect(modeValue("path", "path", "tcp_flags", "syn,ack")).toBe("syn,ack");
   });
 });

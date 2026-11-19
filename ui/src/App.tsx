@@ -27,6 +27,7 @@ import { keyForElement, keyPlace } from "./tables/model";
 import { KeyLine, LEVELS, QueryBar, ResultLine, TopBar } from "./page/Parts";
 import { viewOf, viewSearch, withTwin } from "./page/url";
 import { type Fields, type Mode, explainCommand, fieldsOf, mcpCall, requestBody, rsimCommand } from "./page/query";
+import { QUERY_FIELDS, modeValue } from "./page/fields";
 import { TablesView } from "./tables/TablesView";
 import { type Prefs, applyTheme, loadPrefs, savePrefs } from "./theme";
 
@@ -244,6 +245,22 @@ export function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  /** A change of the mode, with each value in the form of the new mode. */
+  function changeMode(next: Mode) {
+    const out: Fields = { ...fields };
+    const cleared: string[] = [];
+    for (const k of QUERY_FIELDS) {
+      const v = fields[k];
+      if (v === undefined) continue;
+      const w = modeValue(mode, next, k, v);
+      if (w === null) cleared.push(k);
+      out[k] = w ?? "";
+    }
+    setFields(out);
+    setMode(next);
+    setNotice(cleared.length ? `${cleared.join(", ")} is cleared: a path query takes the flags of one packet.` : null);
+  }
+
   async function run() {
     if (!twin) return;
     setBusy(true);
@@ -435,7 +452,7 @@ export function App() {
         fields={fields}
         ingressHint={answer && !busy ? ingressHint(answer) : null}
         notStated={echo && !setMode_ ? notStated(echo).length : null}
-        onMode={setMode}
+        onMode={changeMode}
         onField={(k, v) => setFields({ ...fields, [k]: v })}
         onRun={() => void run()}
         onCopyCommand={() => copy(rsimCommand(mode, twin, fields), "rsim command")}

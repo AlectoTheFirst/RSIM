@@ -286,6 +286,28 @@ export function checkValue(mode: Mode, k: QueryField, value: string): string | n
   }
 }
 
+/**
+ * The value of a field after a change of the mode, or null when the value
+ * has no form in the new mode. The TCP flags of a path query are a comma
+ * list of the flags of one packet, and those of a set query are a comma
+ * list of flag sets with the flags of a set joined by +: "syn,ack" of a
+ * path query is "syn+ack" of a set query. A set value with more than one
+ * flag set has no path form. Each other value stays as it is.
+ */
+export function modeValue(from: Mode, to: Mode, k: QueryField, value: string): string | null {
+  const v = value.trim();
+  if (from === to || kindOf(k) !== "flags" || v === "") return value;
+  const vs = FIELD_SCHEMA[k].values as readonly string[];
+  const items = listItems(v);
+  if (to === "set") {
+    return items.every((x) => vs.includes(x)) ? items.join("+") : value;
+  }
+  if (checkValue("set", k, v) !== null) return value;
+  if (items.length > 1) return null;
+  const parts = (items[0] ?? "").split("+").map((x) => x.trim());
+  return parts.every((x) => vs.includes(x)) ? parts.join(",") : value;
+}
+
 /** The first stated field of the shown fields whose value has a wrong form, with its message. */
 export function firstError(mode: Mode, fields: Partial<Record<QueryField, string>>): { field: QueryField; message: string } | null {
   for (const k of QUERY_FIELDS) {
