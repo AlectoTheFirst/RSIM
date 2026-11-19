@@ -399,6 +399,33 @@ export function reasonColumns(columns: readonly string[]): number[] {
   return columns.map((c) => columns.indexOf(`${c}_reason`));
 }
 
+/** The semantic of a column of source spans. */
+export const SPAN_SEMANTIC = "source_span";
+
+/** True for a column `<x>_reason` whose column `<x>` is in the columns: it gives the reason of `<x>`. */
+export function isReasonOf(columns: readonly string[], name: string): boolean {
+  return name.endsWith("_reason") && columns.includes(name.slice(0, -"_reason".length));
+}
+
+/**
+ * The indices of the columns that the grid shows: each column except a
+ * reason column of another column, and, when the opened row lists the
+ * source lines, except a column of source spans.
+ */
+export function shownColumns(
+  columns: readonly string[],
+  defs: readonly (Column | undefined)[],
+  detail: boolean,
+): number[] {
+  const out: number[] = [];
+  columns.forEach((c, j) => {
+    if (isReasonOf(columns, c)) return;
+    if (detail && defs[j]?.semantic === SPAN_SEMANTIC) return;
+    out.push(j);
+  });
+  return out;
+}
+
 /** True for a column whose values align right. */
 export const alignsRight = (c: Column | undefined): boolean => c?.type === "integer";
 

@@ -33,8 +33,11 @@ import {
   prefixColumn,
   previousPage,
   readState,
+  isReasonOf,
   reasonColumns,
+  SPAN_SEMANTIC,
   setColumnFilters,
+  shownColumns,
   sortOf,
   syncPages,
   tableCommand,
@@ -45,8 +48,6 @@ type Body =
   | { verb: "show" | "top" | "lpm"; out: TableOut }
   | { verb: "summarize"; out: SummarizeOut }
   | { verb: "unique"; out: UniqueOut };
-
-const SPAN_SEMANTIC = "source_span";
 
 /** The rows of the verb `describe`: the columns of the catalog entry. */
 function describeRows(def: TableDef): unknown[][] {
@@ -126,7 +127,7 @@ function Detail(props: {
         <div class="t-label">row</div>
         <div class="facts">
           {columns.map((c, j) => {
-            if (defs[j]?.semantic === SPAN_SEMANTIC) return null;
+            if (defs[j]?.semantic === SPAN_SEMANTIC || isReasonOf(columns, c)) return null;
             const t = props.cell(j);
             const v = row[j];
             return (
@@ -304,10 +305,14 @@ export function TablesView(props: {
     return n;
   }, [grid]);
 
+  const tableOut = body && (body.verb === "show" || body.verb === "top" || body.verb === "lpm") ? body.out : null;
+  const shown = useMemo(() => (grid ? shownColumns(grid.columns, grid.defs, tableOut !== null) : []), [grid, tableOut]);
+  const shownRows = useMemo(() => (grid ? grid.rows.map((r) => shown.map((j) => r[j])) : []), [grid, shown]);
   const widths = useMemo(() => (grid ? columnWidths(grid.columns, grid.rows, 4, 48, (i, j) => cellOf(i, j).known) : []), [grid]);
   const sortable = st.verb === "show";
   const gridColumns: GridColumn[] = grid
-    ? grid.columns.map((name, j) => {
+    ? shown.map((j) => {
+        const name = grid.columns[j]!;
         const d = grid.defs[j];
         const s = sortable ? sortOf(st.sort, name) : null;
         const right = d ? alignsRight(d) : name === "distinct" || name === "nulls" || name === "count";
@@ -328,7 +333,7 @@ export function TablesView(props: {
 
   const filterable = grid && (st.verb === "show" || st.verb === "top" || st.verb === "lpm");
   const filters = filterable
-    ? grid.columns.map((name, j) => (
+    ? shown.map((j) => grid.columns[j]!).map((name, j) => (
         <FilterCell
           col={grid.defs[j]}
           name={name}
@@ -340,7 +345,6 @@ export function TablesView(props: {
       ))
     : null;
 
-  const tableOut = body && (body.verb === "show" || body.verb === "top" || body.verb === "lpm") ? body.out : null;
   const next = body?.verb === "show" ? (body.out.next_cursor ?? null) : null;
 
   const goNext = () => {
@@ -558,8 +562,8 @@ export function TablesView(props: {
           <Grid
             label={st.table}
             columns={gridColumns}
-            rows={grid.rows}
-            cell={cellOf}
+            rows={shownRows}
+            cell={(i, k) => cellOf(i, shown[k]!)}
             h={props.row}
             selected={selected}
             open={open}

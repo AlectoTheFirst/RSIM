@@ -28,6 +28,7 @@ import {
   rowWindow,
   scrollFor,
   setColumnFilters,
+  shownColumns,
   syncPages,
   tableCommand,
   writeState,
@@ -267,6 +268,19 @@ describe("device rows", () => {
   it("opens the functions table filtered to the device of the row", () => {
     expect(deviceFunctions(["device", "vendor"], ["leaf1", "nxos"])).toEqual([{ column: "device", op: "=", value: "leaf1" }]);
     expect(deviceFunctions(["vendor"], ["nxos"])).toBeNull();
+  });
+});
+
+describe("shown columns", () => {
+  const cols = ["device", "serial", "serial_reason", "drop_reason", "provenance"];
+  const defs = cols.map((n) => (n === "provenance" ? { ...col(n, "list"), semantic: "source_span" } : col(n, "text")));
+
+  it("hides the reason column of another column and the source spans that the opened row lists", () => {
+    expect(shownColumns(cols, defs, true)).toEqual([0, 1, 3]);
+  });
+
+  it("keeps the source spans when no row opens", () => {
+    expect(shownColumns(cols, defs, false)).toEqual([0, 1, 3, 4]);
   });
 });
 
