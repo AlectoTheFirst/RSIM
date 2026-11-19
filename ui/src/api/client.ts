@@ -132,3 +132,9 @@ export async function getUnhandled(twin: string, device: string, limit: number, 
   if (cursor) q.set("cursor", cursor);
   return getJson(`/v1/twins/${encodeURIComponent(twin)}/tables/coverage/rows?${q.toString()}`);
 }
+
+/** One page of rows of a table, with the filters, columns and limit as query parameters. */
+export async function tableRows(twin: string, table: string, params: Record<string, string>): Promise<TableOut> {
+  const q = new URLSearchParams(params).toString();
+  return getJson(`/v1/twins/${encodeURIComponent(twin)}/tables/${encodeURIComponent(table)}/rows?${q}`);
+}

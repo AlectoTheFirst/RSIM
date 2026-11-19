@@ -37,6 +37,10 @@ pub fn title(code: &str) -> &'static str {
         "forbidden_host" => "The host is not allowed",
         "store" => "The store cannot be read",
         "contract_violation" => "A function broke its contract",
+        "conflict" => "The change conflicts with another record",
+        "invalid_record" => "The record is not valid",
+        "no_inventory" => "The server has no inventory database",
+        "inventory_unavailable" => "The inventory database cannot be used",
         _ => "An internal error",
     }
 }

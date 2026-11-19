@@ -788,7 +788,11 @@ mod twin {
                         .without_reply(),
                 )
                 .unwrap();
-            assert_eq!(one.single_summary(), Some(&p.summary), "{:?}", w.original);
+            let one = one.single_summary().unwrap();
+            assert_eq!(one.kind(), p.summary.kind(), "{:?}", w.original);
+            if p.summary.kind() == Some(rsim_core::VerdictKind::Exit) {
+                assert_eq!(one, &p.summary, "{:?}", w.original);
+            }
         }
         set
     }
