@@ -373,7 +373,7 @@ fn no_mask_store(dir: &Path) {
 }
 
 #[test]
-fn a_section_of_a_vendor_with_no_mask_is_refused() {
+fn a_section_of_a_vendor_with_no_mask_is_not_served() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-api-sources-no-mask");
     no_mask_store(&dir);
     let s = state(&dir);
@@ -384,10 +384,7 @@ fn a_section_of_a_vendor_with_no_mask_is_refused() {
     let v = json(&r);
     // The device is not lowered, so no span names its config and the span
     // gate refuses it before the mask is asked.
-    assert!(
-        ["not_masked", "not_a_source_span"].contains(&v["code"].as_str().unwrap()),
-        "{v}"
-    );
+    assert_eq!(v["code"], "not_a_source_span", "{v}");
     assert!(!String::from_utf8_lossy(&r.body).contains("FAKEPASSWORD"));
 }
 
