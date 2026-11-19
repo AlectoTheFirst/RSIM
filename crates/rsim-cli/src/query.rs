@@ -381,11 +381,9 @@ fn default_text(d: &UnstatedDefault) -> String {
                 .join("+");
             format!("tcp {flags}")
         }
-        (HeaderField::IcmpType, DefaultValue::Number(8), Some(PROTO_ICMP)) => {
-            "icmp echo-request".to_string()
-        }
-        (HeaderField::IcmpType, DefaultValue::Number(128), Some(PROTO_ICMPV6)) => {
-            "icmpv6 echo-request".to_string()
+        (HeaderField::IcmpType, DefaultValue::Number(8), Some(PROTO_ICMP))
+        | (HeaderField::IcmpType, DefaultValue::Number(128), Some(PROTO_ICMPV6)) => {
+            format!("{name} echo-request")
         }
         (_, DefaultValue::Number(n), _) => format!("{name} {n}"),
         (_, DefaultValue::Fragment(Fragment::Unfragmented), _) => "unfragmented".to_string(),

@@ -1282,7 +1282,7 @@ fn unstated_defaults_give_an_icmp_echo_request() {
     let out = json_of(&rsim(&path_args("mini-enterprise", &flags)));
     assert_eq!(
         out["notes"][0],
-        "defaults: dscp 0, ecn 0, no VLAN, icmp echo-request, icmp_code 0"
+        "defaults: dscp 0, ecn 0, no VLAN, icmp_type echo-request, icmp_code 0"
     );
     let twin = commands::load("mini-enterprise").unwrap();
     let mut input = stored_input("mini-enterprise");
