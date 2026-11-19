@@ -504,6 +504,10 @@ impl<'t> Executor<'t> {
                     let v = Verdict::Deliver(d.clone());
                     terminal(step, v, b)
                 }
+                Outcome::Exit(x) => {
+                    let v = Verdict::Exit(x.clone());
+                    terminal(step, v, b)
+                }
                 Outcome::Drop => {
                     let v = Verdict::Drop(b.reason.clone());
                     terminal(step, v, b)

@@ -149,7 +149,7 @@ fn no_unknown(a: &Answer, prefix: &str, out: &mut Vec<Evidence>) {
             out.push(Evidence {
                 subject: format!("{prefix}summary part {i}"),
                 result: ClaimResult::Refuted,
-                expected: Some(json!("deliver or drop")),
+                expected: Some(json!("deliver, exit or drop")),
                 observed: Some(json!(format!("{kind:?}").to_lowercase())),
                 reason: "unknown".into(),
                 detail,
@@ -169,9 +169,10 @@ fn no_unknown(a: &Answer, prefix: &str, out: &mut Vec<Evidence>) {
         out.push(Evidence {
             subject: format!("{prefix}branch {}", b.index),
             result,
-            expected: Some(json!("deliver or drop")),
+            expected: Some(json!("deliver, exit or drop")),
             observed: Some(json!(match b.verdict.kind() {
                 VerdictKind::Deliver => "deliver",
+                VerdictKind::Exit => "exit",
                 VerdictKind::Drop => "drop",
                 VerdictKind::Unknown => "unknown",
             })),

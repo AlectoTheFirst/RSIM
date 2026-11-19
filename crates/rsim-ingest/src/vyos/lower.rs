@@ -12,8 +12,8 @@ use rsim_core::{
 };
 use rsim_engine::EdgeInterface;
 use rsim_functions::{
-    ConnState, DestinationNat, DeviceDelivery, Egress, EgressMode, Fib, FirewallPolicy, Ingress,
-    Layer3HandOff, Link, LinkEnd, LinkFacts, LocalInput, Meta, NatAction, Neighbour,
+    ConnState, DestinationNat, DeviceDelivery, Egress, EgressMode, ExitMark, Fib, FirewallPolicy,
+    Ingress, Layer3HandOff, Link, LinkEnd, LinkFacts, LocalInput, Meta, NatAction, Neighbour,
     NextHopResolution, PolicyRoute, QosNotEvaluated, Route, RouteKind, RouteLookup, RouteNextHop,
     Rule as FRule, RuleAction, SessionCommit, SessionLookup, SourceNat, StateAction, StateActions,
     Tag, VendorProfile, VrfSelection, ZoneLookup, ZoneRole, ZoneScope,
@@ -142,6 +142,7 @@ pub fn lower(
     cfg: &Config,
     col: &Collected,
     l2: &Layer2Links,
+    twin: &BTreeSet<IpAddr>,
 ) -> Lowered {
     let mut l = L {
         dev: device,
@@ -351,6 +352,7 @@ pub fn lower(
     }
     let local_routes = local_routes(&main_addrs);
     let main_fib = l.main_fib(col, &main_addrs, &local_routes);
+    let exits = exit_marks(&active, &main_fib, twin, &addrs);
     let local_id = l.id("local");
     let meta = l.meta("route", Vec::new());
     l.add(RouteLookup {
@@ -560,6 +562,7 @@ pub fn lower(
             link,
             rewrite,
             tag,
+            exit: exits.get(i.name.as_str()).cloned(),
         });
     }
     for (phys, (_, prov, _)) in l2 {
@@ -606,6 +609,54 @@ pub fn lower(
         }
     }
     l.out
+}
+
+/// The edge interfaces of the twin. A PPPoE interface is an access link.
+/// An interface of a next hop of the default route of the main table is a
+/// default route edge for the gateways of that route that are not
+/// addresses of a device of the twin (`twin`) or of the router itself. A
+/// next hop with no gateway, a link-local gateway and a WireGuard interface
+/// give no mark. The packets of an edge with no link leave the twin.
+fn exit_marks<'a>(
+    active: &[&'a Interface],
+    main: &Fib,
+    twin: &BTreeSet<IpAddr>,
+    own: &Addrs,
+) -> BTreeMap<&'a str, ExitMark> {
+    let mine: BTreeSet<IpAddr> = own.values().flatten().map(|(a, _, _)| *a).collect();
+    let mut gateways: BTreeMap<&'a str, BTreeSet<IpAddr>> = BTreeMap::new();
+    for all in ["0.0.0.0/0", "::/0"] {
+        let p: Prefix = all.parse().expect("a valid prefix");
+        let Some(r) = main.get(&p) else {
+            continue;
+        };
+        for h in r.next_hops() {
+            let Some(g) = h.gateway else {
+                continue;
+            };
+            let link_local = match g {
+                IpAddr::V4(v) => v.is_link_local(),
+                IpAddr::V6(v) => v.is_unicast_link_local(),
+            };
+            if link_local || twin.contains(&g) || mine.contains(&g) {
+                continue;
+            }
+            if let Some(i) = active
+                .iter()
+                .find(|i| i.name == h.interface.as_str() && i.kind != Kind::Wireguard)
+            {
+                gateways.entry(i.name.as_str()).or_default().insert(g);
+            }
+        }
+    }
+    let mut out: BTreeMap<&'a str, ExitMark> = gateways
+        .into_iter()
+        .map(|(i, gateways)| (i, ExitMark::DefaultRoute { gateways }))
+        .collect();
+    for i in active.iter().filter(|i| i.kind == Kind::Pppoe) {
+        out.insert(i.name.as_str(), ExitMark::AccessLink);
+    }
+    out
 }
 
 /// The addresses of each interface with their prefix length: the config,

@@ -221,10 +221,14 @@ fn the_handlers_give_typed_structures() {
 }
 
 mod twin {
+    use std::collections::BTreeSet;
     use std::net::IpAddr;
 
-    use rsim_core::{Destination, FieldValue, Header, PROTO_TCP, PROTO_UDP, ReasonCode, Verdict};
-    use rsim_engine::{Answer, Executor, Query, Twin, TwinBuilder};
+    use rsim_core::{
+        Destination, ExitPoint, FieldValue, Header, PROTO_TCP, PROTO_UDP, PacketSet, Prefix,
+        ReasonCode, SetSpec, Verdict,
+    };
+    use rsim_engine::{Answer, Executor, Query, Summary, Twin, TwinBuilder};
     use rsim_ingest::collected::{AddressRow, Collected, NeighbourRow, RouteRow, row_span};
     use rsim_ingest::{read_json, vyos};
 
@@ -278,6 +282,11 @@ mod twin {
     }
 
     fn build_with(config: &[u8], col: &Collected) -> (Twin, Vec<String>) {
+        build_in(config, col, &BTreeSet::new())
+    }
+
+    /// The twin of r1 in an estate whose devices have the addresses `twin`.
+    fn build_in(config: &[u8], col: &Collected, twin: &BTreeSet<IpAddr>) -> (Twin, Vec<String>) {
         let cfg = vyos::read(&read_json(config).unwrap());
         let low = vyos::lower(
             "r1",
@@ -286,6 +295,7 @@ mod twin {
             &cfg,
             col,
             &Default::default(),
+            twin,
         );
         let mut b = TwinBuilder::new();
         for f in low.functions {
@@ -329,7 +339,7 @@ mod twin {
     fn code(v: &Verdict) -> Option<ReasonCode> {
         match v {
             Verdict::Drop(r) | Verdict::Unknown(r) => Some(r.code),
-            Verdict::Deliver(_) => None,
+            Verdict::Deliver(_) | Verdict::Exit(_) => None,
         }
     }
 
@@ -384,7 +394,181 @@ mod twin {
             qos.output.witness().unwrap().current.dscp,
             FieldValue::Unknown
         );
+        assert_eq!(v, exit("pppoe0"));
+        let last = b.steps.last().unwrap();
+        assert_eq!(last.reason.code, ReasonCode::Exited);
+        assert_eq!(last.reason.detail, "exit at r1 pppoe0 · access link");
+    }
+
+    fn exit(iface: &str) -> Verdict {
+        Verdict::Exit(ExitPoint {
+            device: "r1".into(),
+            interface: iface.into(),
+        })
+    }
+
+    #[test]
+    fn an_egress_with_no_link_that_is_not_an_edge_stays_unknown() {
+        let (t, _) = build();
+        // eth0.10 has no layer 2 link in this twin and is not an edge.
+        let (path, v) = first(&run(&t, "eth0.110", tcp("192.0.2.70", "192.0.2.50", 8123)));
+        assert!(path.ends_with(&["r1/out/eth0.10".to_string()]), "{path:?}");
         assert_eq!(code(&v), Some(ReasonCode::NoLink));
+        // wg0 carries the default route of table 100 only, so it is not an
+        // edge.
+        let (path, v) = first(&run(&t, "eth0.10", tcp("192.0.2.10", "203.0.113.99", 443)));
+        assert!(path.ends_with(&["r1/out/wg0".to_string()]), "{path:?}");
+        assert_eq!(code(&v), Some(ReasonCode::NoLink));
+    }
+
+    #[test]
+    fn the_interface_of_the_default_route_is_an_edge() {
+        let mut col = collected();
+        col.routes[0] = RouteRow {
+            next_hop: Some("203.0.113.140".into()),
+            ..route("0.0.0.0/0", "static", "eth1")
+        };
+        col.neighbours.push(NeighbourRow {
+            interface: "eth1".into(),
+            ip: "203.0.113.140".into(),
+            mac: Some("00:00:5e:00:53:40".into()),
+            state: Some("REACHABLE".into()),
+            span: row_span("r1", "neighbours", "b3", 1),
+        });
+        let (t, _) = build_with(CONFIG, &col);
+        let a = run(&t, "eth0", tcp("192.0.2.200", "198.18.0.1", 443));
+        let b = &a.branches()[0];
+        assert_eq!(*b.verdict, exit("eth1"), "{:?}", b.steps.last());
+        assert_eq!(
+            b.steps.last().unwrap().reason.detail,
+            "exit at r1 eth1 · default route"
+        );
+    }
+
+    fn neighbour(ip: &str, iface: &str, i: u64) -> NeighbourRow {
+        NeighbourRow {
+            interface: iface.into(),
+            ip: ip.into(),
+            mac: Some(format!("00:00:5e:00:53:{:02x}", 0x40 + i)),
+            state: Some("REACHABLE".into()),
+            span: row_span("r1", "neighbours", "b3", i),
+        }
+    }
+
+    /// The collected state with the default route of the main table via
+    /// 203.0.113.140 on eth1.
+    fn default_via_eth1() -> Collected {
+        let mut col = collected();
+        col.routes[0] = RouteRow {
+            next_hop: Some("203.0.113.140".into()),
+            ..route("0.0.0.0/0", "static", "eth1")
+        };
+        col.neighbours.push(neighbour("203.0.113.140", "eth1", 1));
+        col
+    }
+
+    #[test]
+    fn a_default_route_to_a_device_of_the_twin_is_not_an_edge() {
+        let twin = BTreeSet::from([ip("203.0.113.140")]);
+        let (t, _) = build_in(CONFIG, &default_via_eth1(), &twin);
+        let (path, v) = first(&run(&t, "eth0", tcp("192.0.2.200", "198.18.0.1", 443)));
+        assert!(path.ends_with(&["r1/out/eth1".to_string()]), "{path:?}");
+        assert_eq!(code(&v), Some(ReasonCode::NoLink), "{v:?}");
+    }
+
+    #[test]
+    fn a_route_to_another_gateway_on_the_edge_interface_stays_unknown() {
+        let mut col = default_via_eth1();
+        col.routes.push(RouteRow {
+            next_hop: Some("203.0.113.141".into()),
+            ..route("10.50.0.0/16", "static", "eth1")
+        });
+        col.neighbours.push(neighbour("203.0.113.141", "eth1", 2));
+        let twin = BTreeSet::from([ip("203.0.113.141")]);
+        let (t, _) = build_in(CONFIG, &col, &twin);
+        let (path, v) = first(&run(&t, "eth0", tcp("192.0.2.200", "10.50.0.5", 443)));
+        assert!(path.ends_with(&["r1/out/eth1".to_string()]), "{path:?}");
+        assert_eq!(code(&v), Some(ReasonCode::NoLink), "{v:?}");
+        let (_, v) = first(&run(&t, "eth0", tcp("192.0.2.200", "198.18.0.1", 443)));
+        assert_eq!(v, exit("eth1"));
+    }
+
+    #[test]
+    fn an_ipv6_default_route_does_not_make_ipv4_packets_exit() {
+        let mut col = collected();
+        col.routes.push(RouteRow {
+            next_hop: Some("2001:db8:ffff::1".into()),
+            ..route("::/0", "static", "eth1")
+        });
+        col.routes.push(RouteRow {
+            next_hop: Some("203.0.113.141".into()),
+            ..route("198.51.100.128/25", "static", "eth1")
+        });
+        col.neighbours
+            .push(neighbour("2001:db8:ffff::1", "eth1", 1));
+        col.neighbours.push(neighbour("203.0.113.141", "eth1", 2));
+        let (t, _) = build_with(CONFIG, &col);
+        let (path, v) = first(&run(&t, "eth0", tcp("192.0.2.200", "198.51.100.130", 443)));
+        assert!(path.ends_with(&["r1/out/eth1".to_string()]), "{path:?}");
+        assert_eq!(code(&v), Some(ReasonCode::NoLink), "{v:?}");
+    }
+
+    #[test]
+    fn a_main_default_route_over_wireguard_is_not_an_edge() {
+        let mut col = collected();
+        col.routes[0] = RouteRow {
+            next_hop: Some("198.51.100.1".into()),
+            ..route("0.0.0.0/0", "static", "wg0")
+        };
+        let (t, _) = build_with(CONFIG, &col);
+        let (path, v) = first(&run(&t, "eth0", tcp("192.0.2.200", "198.18.0.1", 443)));
+        assert!(path.iter().any(|f| f == "r1/out/wg0"), "{path:?}");
+        assert!(!matches!(v, Verdict::Exit(_)), "{v:?}");
+    }
+
+    #[test]
+    fn set_mode_agrees_with_path_mode_on_an_exit() {
+        let (t, _) = build();
+        let arena = t.arena(None);
+        let pfx = |s: &str| s.parse::<Prefix>().unwrap();
+        let spec = SetSpec {
+            src_ip: Some(vec![pfx("192.0.2.30/32")]),
+            dst_ip: Some(vec![pfx("203.0.113.0/26"), pfx("192.0.2.64/30")]),
+            protocol: Some(vec![(PROTO_TCP, PROTO_TCP)]),
+            src_port: Some(vec![(40000, 40000)]),
+            dst_port: Some(vec![(443, 443)]),
+            ..SetSpec::default()
+        };
+        let ex = Executor::new(&t);
+        let set = ex
+            .run(
+                &Query::set(PacketSet::from_spec(&arena, &spec))
+                    .with_ingress("r1", "eth0.10")
+                    .without_reply(),
+            )
+            .unwrap();
+        assert!(
+            set.summary
+                .iter()
+                .any(|p| p.summary == Summary::Same(exit("pppoe0"))),
+            "{:?}",
+            set.summary
+        );
+        for p in &set.summary {
+            let w = p.packets.witness().unwrap();
+            let one = ex
+                .run(
+                    &Query::path(&t, &w.original)
+                        .with_ingress("r1", "eth0.10")
+                        .without_reply(),
+                )
+                .unwrap();
+            let one = one.single_summary().unwrap();
+            assert_eq!(one.kind(), p.summary.kind(), "{:?}", w.original);
+            if p.summary.kind() == Some(rsim_core::VerdictKind::Exit) {
+                assert_eq!(one, &p.summary, "{:?}", w.original);
+            }
+        }
     }
 
     #[test]
@@ -515,6 +699,7 @@ mod twin {
             &vyos::profile(),
             &cfg,
             &col,
+            &Default::default(),
             &Default::default(),
         );
         let mut b = TwinBuilder::new();

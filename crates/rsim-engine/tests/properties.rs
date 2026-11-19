@@ -260,7 +260,7 @@ proptest! {
             Outcome::Forward(_) => Some(RuleAction::Permit),
             Outcome::Drop => Some(RuleAction::Deny),
             Outcome::Unknown => None,
-            Outcome::Deliver(_) => unreachable!(),
+            Outcome::Deliver(_) | Outcome::Exit(_) => unreachable!(),
         };
         // A definite result of the concrete oracle holds for each member.
         if let Some(a) = oracle(&rules, default, &h) {

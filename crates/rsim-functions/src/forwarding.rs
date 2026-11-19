@@ -1,11 +1,12 @@
 //! Ingress, VRF selection, zone lookup and egress.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::net::IpAddr;
 
 use rsim_core::{
-    Attr, Branch, Context, ContextAttr, Delay, DelayGap, Dependency, Destination, FlowState,
-    FunctionId, FunctionKind, InterfaceId, NeighbourTarget, NetFunction, Outcome, PacketSet,
-    Reason, ReasonCode, Rewrite, SourceSpan, VrfId, ZoneId,
+    Attr, Branch, Context, ContextAttr, Delay, DelayGap, Dependency, Destination, ExitPoint,
+    FlowState, FunctionId, FunctionKind, InterfaceId, NeighbourTarget, NetFunction, NextHop,
+    Outcome, PacketSet, Reason, ReasonCode, Rewrite, SourceSpan, VrfId, ZoneId,
 };
 
 use crate::common::Meta;
@@ -274,6 +275,44 @@ pub struct Egress {
     pub rewrite: Rewrite,
     /// The 802.1Q tag of the frames that leave on the link.
     pub tag: Tag,
+    /// Why the interface is an edge of the twin, if it is one. With no
+    /// link, the packets of an edge leave the twin; the packets of an
+    /// interface that is not an edge, and the packets of a default route
+    /// edge with another next hop, are unknown.
+    pub exit: Option<ExitMark>,
+}
+
+/// Why an interface with no link is an edge of the twin.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ExitMark {
+    /// An access link to a provider, for example PPPoE.
+    AccessLink,
+    /// The interface carries a default route to the next hops `gateways`,
+    /// which are outside the twin. Only the packets whose next hop is one
+    /// of them leave the twin.
+    DefaultRoute { gateways: BTreeSet<IpAddr> },
+    /// The owner marks the interface as an edge.
+    Owner,
+}
+
+impl ExitMark {
+    fn text(&self) -> &'static str {
+        match self {
+            ExitMark::AccessLink => "access link",
+            ExitMark::DefaultRoute { .. } => "default route",
+            ExitMark::Owner => "marked by the owner",
+        }
+    }
+
+    /// Whether the packets with the next hop `next_hop` leave the twin.
+    fn exits(&self, next_hop: &Attr<NextHop>) -> bool {
+        match self {
+            ExitMark::AccessLink | ExitMark::Owner => true,
+            ExitMark::DefaultRoute { gateways } => {
+                matches!(next_hop, Attr::Known(NextHop::Gateway(g)) if gateways.contains(g))
+            }
+        }
+    }
 }
 
 /// What an egress does with the 802.1Q tag.
@@ -326,13 +365,29 @@ impl Egress {
                 }
                 b
             }
-            None => self.meta.unknown(
-                input.clone(),
-                ReasonCode::NoLink,
-                format!("no link · interface {}", self.interface),
-                ctx,
-                state,
-            ),
+            None => match &self.exit {
+                Some(mark) if mark.exits(&ctx.next_hop) => {
+                    let at = ExitPoint {
+                        device: self.meta.device.clone(),
+                        interface: self.interface.clone(),
+                    };
+                    let detail = format!("exit at {at} · {}", mark.text());
+                    self.meta.branch(
+                        input.clone(),
+                        Outcome::Exit(at),
+                        Reason::new(ReasonCode::Exited, detail),
+                        ctx.clone(),
+                        state,
+                    )
+                }
+                _ => self.meta.unknown(
+                    input.clone(),
+                    ReasonCode::NoLink,
+                    format!("no link · interface {}", self.interface),
+                    ctx,
+                    state,
+                ),
+            },
         }
     }
 }

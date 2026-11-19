@@ -131,6 +131,7 @@ impl Dev {
             }),
             rewrite: Default::default(),
             tag: Default::default(),
+            exit: None,
         }
     }
 

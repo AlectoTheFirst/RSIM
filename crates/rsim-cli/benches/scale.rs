@@ -108,6 +108,7 @@ fn kinds(a: &Answer) -> Vec<String> {
         .iter()
         .map(|p| match p.summary.kind() {
             Some(VerdictKind::Deliver) => "deliver".to_string(),
+            Some(VerdictKind::Exit) => "exit".to_string(),
             Some(VerdictKind::Drop) => "drop".to_string(),
             Some(VerdictKind::Unknown) => "unknown".to_string(),
             None => "depends on the path".to_string(),
