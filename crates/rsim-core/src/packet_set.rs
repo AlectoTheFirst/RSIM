@@ -13,7 +13,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use rsim_dd::{DdError, Edge};
+use rsim_dd::{Dd, DdError, Edge};
 
 use crate::addr::{Mac, Prefix};
 use crate::bits::{self, Bank, FieldBits, level};
@@ -22,6 +22,10 @@ use crate::header::{Header, HeaderField, PROTO_ICMP, PROTO_ICMPV6};
 use crate::predicate::RulePredicate;
 use crate::prefix_table::PrefixTable;
 use crate::set::{Builder, MapKind, Ops, SetArena, prefix_lits};
+
+/// The most pairs of flows of a session relation that the lookup of one
+/// flow compares one by one.
+const ONE_FLOW_PAIRS: usize = 16;
 
 const MEMO_ORIGINAL: u8 = 0;
 const MEMO_DSCP: u8 = 1;
@@ -1220,7 +1224,47 @@ impl PacketSet {
     /// packets get the flow of the other side of the relation. In the reply
     /// direction, the relation applies in reverse: a reply of the flow at
     /// the commit gets the reply of the flow at the lookup.
+    ///
+    /// A set with one flow and a relation of at most a few pairs of flows
+    /// take [`PacketSet::session_lookup_one_flow`]; each other lookup takes
+    /// [`PacketSet::session_lookup_sets`]. Both give the same result.
     pub fn session_lookup(&self, relation: &PacketSet, dir: SessionDirection) -> SessionSplit {
+        match self.session_lookup_one_flow(relation, dir) {
+            Some(s) => s,
+            None => self.session_lookup_sets(relation, dir),
+        }
+    }
+
+    /// The session lookup of a set whose current header has one flow: each
+    /// flow bit of the current bank has one value in the whole set, a known
+    /// value or the unknown mark of its field. The flows of the relation
+    /// are read as pairs, and the lookup compares them with the flow of the
+    /// set. `None` if the set has more than one flow, or if the relation
+    /// has more than `ONE_FLOW_PAIRS` pairs, a flow bit with more than one
+    /// value in a pair, or a level outside the flow bits.
+    #[doc(hidden)]
+    pub fn session_lookup_one_flow(
+        &self,
+        relation: &PacketSet,
+        dir: SessionDirection,
+    ) -> Option<SessionSplit> {
+        let [m, u, a, n] = self
+            .run(&[relation], |ops| {
+                one_flow_lookup(ops, self.edge, relation.edge, dir)
+            })
+            .unwrap_or(Some([Edge::FALSE; 4]))?;
+        Some(SessionSplit {
+            matched: self.with(m),
+            uncertain: self.with(u),
+            ambiguous: self.with(a),
+            unmatched: self.with(n),
+        })
+    }
+
+    /// The session lookup with set operations, for each set and each
+    /// relation.
+    #[doc(hidden)]
+    pub fn session_lookup_sets(&self, relation: &PacketSet, dir: SessionDirection) -> SessionSplit {
         let r = self.run(&[relation], |ops| {
             let mut rel = relation.edge;
             if dir == SessionDirection::Reply {
@@ -1334,6 +1378,190 @@ impl PacketSet {
     pub(crate) fn edge(&self) -> Edge {
         self.edge
     }
+}
+
+/// The session lookup of the set `s` with one flow in the relation `rel`,
+/// as the edges of the matched, uncertain, ambiguous and unmatched packets.
+/// `Ok(None)` if `s` or `rel` does not fit; see
+/// [`PacketSet::session_lookup_one_flow`].
+fn one_flow_lookup(
+    ops: &mut Ops<'_>,
+    s: Edge,
+    rel: Edge,
+    dir: SessionDirection,
+) -> Result<Option<[Edge; 4]>, DdError> {
+    let none = Edge::FALSE;
+    let Some(path) = ops.dd.pick_one(s)? else {
+        return Ok(Some([none; 4]));
+    };
+    let flow = bits::flow_bits();
+    // The flow of the current header: the values of one path, which must
+    // hold for the whole set.
+    let mut f = Vec::with_capacity(flow.len());
+    for &x in &flow {
+        let l = level(x, Bank::Current);
+        match path.binary_search_by_key(&l, |(pl, _)| *pl) {
+            Ok(i) => f.push(path[i].1),
+            Err(_) => return Ok(None),
+        }
+    }
+    let Some(pairs) = relation_pairs(ops.dd, rel, &flow)? else {
+        return Ok(None);
+    };
+    let lits: Vec<(u32, bool)> = flow
+        .iter()
+        .zip(&f)
+        .map(|(&x, &v)| (level(x, Bank::Current), v))
+        .collect();
+    let one = ops.dd.literals(&lits)?;
+    if ops.dd.diff(s, one)? != Edge::FALSE {
+        return Ok(None);
+    }
+    let pos = |b: u32| flow.binary_search(&b).expect("a flow bit");
+    // In the reply direction, the lookup side is the reply of the flow at
+    // the commit, and the other side is the reply of the flow at the lookup.
+    let pairs: Vec<(Vec<bool>, Vec<bool>)> = match dir {
+        SessionDirection::Forward => pairs,
+        SessionDirection::Reply => {
+            let swaps = bits::swap_pairs();
+            let perm: Vec<usize> = flow
+                .iter()
+                .map(|&x| {
+                    let y = swaps
+                        .iter()
+                        .find_map(|&(a, b)| match (a == x, b == x) {
+                            (true, _) => Some(b),
+                            (_, true) => Some(a),
+                            _ => None,
+                        })
+                        .unwrap_or(x);
+                    pos(y)
+                })
+                .collect();
+            let reverse = |v: &[bool]| {
+                let mut out = vec![false; v.len()];
+                for (i, &b) in v.iter().enumerate() {
+                    out[perm[i]] = b;
+                }
+                out
+            };
+            pairs
+                .into_iter()
+                .map(|(l, c)| (reverse(&c), reverse(&l)))
+                .collect()
+        }
+    };
+    let mut images: Vec<&Vec<bool>> = pairs
+        .iter()
+        .filter(|(l, _)| *l == f)
+        .map(|(_, c)| c)
+        .collect();
+    images.sort();
+    images.dedup();
+    match images.as_slice() {
+        [] => {
+            // An unknown port can be equal to each known port: the flow can
+            // match a flow of the lookup side that is equal on each bit other
+            // than the ports, when one of the two has an unknown port.
+            let mut port = vec![false; flow.len()];
+            for b in bits::SRC_PORT
+                .value_bits()
+                .chain(bits::DST_PORT.value_bits())
+                .chain([bits::U_SRC_PORT, bits::U_DST_PORT])
+            {
+                port[pos(b)] = true;
+            }
+            let unknown = |v: &[bool]| v[pos(bits::U_SRC_PORT)] || v[pos(bits::U_DST_PORT)];
+            let uncertain = pairs.iter().any(|(l, _)| {
+                (unknown(l) || unknown(&f))
+                    && l.iter().zip(&f).zip(&port).all(|((a, b), p)| *p || a == b)
+            });
+            Ok(Some(if uncertain {
+                [none, s, none, none]
+            } else {
+                [none, none, none, s]
+            }))
+        }
+        [c] if **c == f => Ok(Some([s, none, none, none])),
+        [c] => {
+            let cube = ops.cube(&flow, Bank::Current)?;
+            let rest = ops.dd.exists(s, cube)?;
+            let lits: Vec<(u32, bool)> = flow
+                .iter()
+                .zip(c.iter())
+                .map(|(&x, &v)| (level(x, Bank::Current), v))
+                .collect();
+            let to = ops.dd.literals(&lits)?;
+            Ok(Some([ops.dd.and(rest, to)?, none, none, none]))
+        }
+        _ => Ok(Some([none, none, s, none])),
+    }
+}
+
+/// The pairs of flows of a session relation.
+type FlowPairs = Vec<(Vec<bool>, Vec<bool>)>;
+
+/// The pairs of a session relation as the values of the flow bits at the
+/// lookup (the original bank) and at the commit (the current bank), in the
+/// order of `flow`. `None` if the relation has more than `ONE_FLOW_PAIRS`
+/// pairs, a path that leaves a flow bit free, or a level outside the flow
+/// bits.
+fn relation_pairs(dd: &Dd, rel: Edge, flow: &[u32]) -> Result<Option<FlowPairs>, DdError> {
+    // The levels of the flow bits in level order: for each bit, the
+    // original level and then the current level.
+    let levels: Vec<u32> = flow
+        .iter()
+        .flat_map(|&x| [level(x, Bank::Original), level(x, Bank::Current)])
+        .collect();
+    /// The paths below `e` from the level index `i`; false to give up.
+    fn walk(
+        dd: &Dd,
+        e: Edge,
+        i: usize,
+        levels: &[u32],
+        vals: &mut Vec<bool>,
+        out: &mut Vec<Vec<bool>>,
+    ) -> Result<bool, DdError> {
+        if e == Edge::FALSE {
+            return Ok(true);
+        }
+        if i == levels.len() {
+            if e != Edge::TRUE || out.len() == ONE_FLOW_PAIRS {
+                return Ok(false);
+            }
+            out.push(vals.clone());
+            return Ok(true);
+        }
+        let Some((l, lo, hi)) = dd.branch(e)? else {
+            return Ok(false);
+        };
+        if l != levels[i] {
+            return Ok(false);
+        }
+        for (v, child) in [(false, lo), (true, hi)] {
+            vals.push(v);
+            let ok = walk(dd, child, i + 1, levels, vals, out)?;
+            vals.pop();
+            if !ok {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+    let mut out = Vec::new();
+    let mut vals = Vec::with_capacity(levels.len());
+    if !walk(dd, rel, 0, &levels, &mut vals, &mut out)? {
+        return Ok(None);
+    }
+    Ok(Some(
+        out.into_iter()
+            .map(|v| {
+                let l = v.iter().step_by(2).copied().collect();
+                let c = v.iter().skip(1).step_by(2).copied().collect();
+                (l, c)
+            })
+            .collect(),
+    ))
 }
 
 /// The bits of the original request, the current header and the inner
