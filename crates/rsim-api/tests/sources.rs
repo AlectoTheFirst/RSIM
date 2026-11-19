@@ -226,8 +226,17 @@ fn no_answer_gives_the_line_count_of_a_section() {
         );
         let left_out = v["source"]["left_out"].as_array().unwrap();
         let shown = last.min(first + 199);
-        assert!(
-            left_out.last().unwrap()["last_line"] == shown,
+        let mut seen: Vec<u64> = lines
+            .iter()
+            .map(|l| l["number"].as_u64().unwrap())
+            .collect();
+        for r in left_out {
+            seen.extend(r["first_line"].as_u64().unwrap()..=r["last_line"].as_u64().unwrap());
+        }
+        seen.sort_unstable();
+        assert_eq!(
+            seen,
+            (first as u64..=shown as u64).collect::<Vec<_>>(),
             "{first}-{last}: {text}"
         );
     }
