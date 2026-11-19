@@ -355,7 +355,7 @@ function HelpLine(props: { mode: Mode; focus: QueryField | "add" | null; error: 
   if (focus === "add") {
     return (
       <div class="qhelp" id={HELP_ID}>
-        <span class="t-label">Add field</span> {modeHelp(mode)}
+        <span class="muted">Add field</span> {modeHelp(mode)}
       </div>
     );
   }
@@ -364,7 +364,7 @@ function HelpLine(props: { mode: Mode; focus: QueryField | "add" | null; error: 
   const message = error && error.field === k ? error.message : null;
   return (
     <div class="qhelp" id={HELP_ID}>
-      <span class="t-label">{k}</span> {message ? <span class="c-drop">{message}. </span> : null}
+      <span class="muted">{k}</span> {message ? <span class="c-drop">{message}. </span> : null}
       {focus ? (
         <>
           {descriptionOf(mode, k)} {formOf(mode, k)} Example: <span class="t-query">{exampleOf(mode, k)}</span>
@@ -451,6 +451,7 @@ export function QueryBar(props: {
       <Choice<Mode> value={props.mode} options={["path", "set"]} onChange={props.onMode} />
       {shown.map((k, i) => (
         <QueryValue
+          key={k}
           twin={props.twin}
           mode={props.mode}
           name={k}
