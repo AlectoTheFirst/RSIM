@@ -168,6 +168,18 @@ fn build(t: &Loaded, def: &'static TableDef) -> Frame {
                 }
             }
         }
+        "neighbours" => {
+            for n in &t.seen {
+                b.push(&[
+                    Cell::Text(&n.device),
+                    Cell::Text(&n.port),
+                    Cell::Text(&n.name),
+                    n.remote_port.as_deref().map_or(Cell::Null, Cell::Text),
+                    Cell::Text(n.protocol),
+                    Cell::List(&spans(std::slice::from_ref(&n.span))),
+                ]);
+            }
+        }
         "bgp-sessions" => {
             for facts in t.bgp.values() {
                 for f in facts {
@@ -190,6 +202,7 @@ fn device_row(device: &str, facts: Option<&DeviceFacts>) -> Vec<Value> {
             row.push(Value::Null);
             row.push(not_collected.clone());
         }
+        row.push(Value::Null);
         row.push(json!(Vec::<String>::new()));
         return row;
     };
@@ -200,6 +213,7 @@ fn device_row(device: &str, facts: Option<&DeviceFacts>) -> Vec<Value> {
     }
     row.push(json!(utc_time(f.collected_at)));
     row.push(Value::Null);
+    row.push(json!(f.store_device));
     let spans: Vec<SourceSpan> = f.spans().into_iter().cloned().collect();
     row.push(json!(self::spans(&spans)));
     row

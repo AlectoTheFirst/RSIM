@@ -311,3 +311,57 @@ fn the_mac_of_a_routed_far_end_is_known_to_the_switch_port() {
     assert_eq!(j.devices["s"].peers["p1"].len(), 1);
     assert!(j.devices["s"].far_macs.is_empty());
 }
+
+#[test]
+fn a_named_neighbour_with_no_device_is_seen_by_its_section() {
+    let mut a = device(
+        "a",
+        &[("p1", "00:00:5e:00:53:01"), ("p2", "00:00:5e:00:53:02")],
+        &[],
+        true,
+    );
+    let record = |port: &str, name: Option<&str>, rp: &str, file: &str| Neighbour {
+        port: port.to_string(),
+        name: name.map(str::to_string),
+        remote_port: Some(rp.to_string()),
+        chassis: None,
+        port_mac: None,
+        span: SourceSpan::line(file, 1),
+    };
+    // A neighbour outside the twin by LLDP and by CDP, the device b of the
+    // twin, a record with no name, and a record of another section.
+    a.neighbours
+        .push(record("p1", Some("x"), "e1", "a/lldp@00"));
+    a.neighbours.push(record("p2", Some("y"), "e2", "a/cdp@00"));
+    a.neighbours.push(record("p2", Some("b"), "q1", "a/cdp@00"));
+    a.neighbours.push(record("p1", None, "e3", "a/lldp@00"));
+    a.neighbours
+        .push(record("p1", Some("z"), "e4", "a/uplinks@00"));
+    // A long name of the device b by its chassis MAC, with a port that b
+    // does not have.
+    let mut by_chassis = record("p1", Some("b.example.net"), "e9", "a/lldp@00");
+    by_chassis.chassis = Some(mac("00:00:5e:00:53:03"));
+    a.neighbours.push(by_chassis);
+    let devices = BTreeMap::from([
+        ("a".to_string(), a),
+        (
+            "b".to_string(),
+            device("b", &[("q1", "00:00:5e:00:53:03")], &[], false),
+        ),
+    ]);
+    let j = join(&devices, &BTreeSet::new(), &BTreeSet::new());
+    let seen: Vec<(&str, &str, &str, &str)> = j
+        .seen
+        .iter()
+        .map(|s| {
+            (
+                s.device.as_str(),
+                s.port.as_str(),
+                s.name.as_str(),
+                s.protocol,
+            )
+        })
+        .collect();
+    assert_eq!(seen, [("a", "p1", "x", "lldp"), ("a", "p2", "y", "cdp")]);
+    assert_eq!(j.seen[0].remote_port.as_deref(), Some("e1"));
+}

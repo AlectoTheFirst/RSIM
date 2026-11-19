@@ -169,6 +169,12 @@ pub const TABLES: &[TableDef] = &[
                 "Why the time is not known.",
             ),
             col(
+                "store_device",
+                ColumnType::Text,
+                "device",
+                "The device of the store whose manifest gives the facts: the console of a UniFi device, else the device itself; null with no facts.",
+            ),
+            col(
                 "provenance",
                 ColumnType::List,
                 "source_span",
@@ -334,6 +340,41 @@ pub const TABLES: &[TableDef] = &[
         ],
         verbs: BASE_VERBS,
         needs: "a twin of a store snapshot; a built-in topology has no coverage report",
+    },
+    TableDef {
+        name: "neighbours",
+        description: "The LLDP and CDP records of the twin that name a neighbour with no device in the twin: no device has its name or its host name, and its MACs name no device.",
+        key: &["device", "port", "neighbour", "protocol"],
+        columns: &[
+            DEVICE,
+            col("port", ColumnType::Text, "interface", "The local port."),
+            col(
+                "neighbour",
+                ColumnType::Text,
+                "device",
+                "The name of the neighbour.",
+            ),
+            col(
+                "remote_port",
+                ColumnType::Text,
+                "interface",
+                "The port of the neighbour as it sends it.",
+            ),
+            col(
+                "protocol",
+                ColumnType::Text,
+                "neighbour_protocol",
+                "lldp or cdp.",
+            ),
+            col(
+                "provenance",
+                ColumnType::List,
+                "source_span",
+                "The source span of the record: file:first-last.",
+            ),
+        ],
+        verbs: BASE_VERBS,
+        needs: "a twin of a store snapshot with an LLDP or CDP section",
     },
     TableDef {
         name: "bgp-sessions",

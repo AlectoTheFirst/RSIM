@@ -134,3 +134,25 @@ impl Inventory for InventoryList {
         self.version
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Vendor;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn the_inventory_names_the_vendors_of_the_collector() {
+        let here: BTreeSet<&str> = Vendor::ALL.iter().map(|v| v.name()).collect();
+        let inventory: BTreeSet<&str> = rsim_inventory::COLLECTOR_VENDORS
+            .iter()
+            .map(|(v, _)| *v)
+            .collect();
+        assert_eq!(here, inventory);
+        let https: Vec<&str> = rsim_inventory::COLLECTOR_VENDORS
+            .iter()
+            .filter(|(_, t)| *t == rsim_inventory::CollectorTransport::Https)
+            .map(|(v, _)| *v)
+            .collect();
+        assert_eq!(https, [Vendor::Unifi.name()]);
+    }
+}

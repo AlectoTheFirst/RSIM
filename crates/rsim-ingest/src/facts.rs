@@ -114,6 +114,9 @@ pub struct DeviceFacts {
     /// The time of the device manifest, in milliseconds since the Unix
     /// epoch.
     pub collected_at: u64,
+    /// The device of the store whose manifest gives the facts: the console
+    /// of a UniFi device, else the device itself.
+    pub store_device: String,
 }
 
 impl DeviceFacts {
@@ -274,6 +277,7 @@ pub fn device(
         serial: id.serial,
         management_address,
         collected_at,
+        store_device: name.to_string(),
     };
     let id = match vendor {
         "vyos" => get("version").map_or(Identity::all(Reason::NotCollected), |(b, f)| {

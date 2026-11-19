@@ -778,6 +778,11 @@ fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
     let cov: Value = serde_json::from_slice(&cov.stdout).unwrap();
     assert_eq!(cov["kind"], "table_rows");
     assert!(cov["total"].as_u64().unwrap() > 0, "{cov}");
+    // The fixture store has no LLDP or CDP section, so no neighbour is seen.
+    let seen = rsim(&[topology.as_str(), "neighbours", "--format", "json"]);
+    assert_eq!(seen.status.code(), Some(0));
+    let seen: Value = serde_json::from_slice(&seen.stdout).unwrap();
+    assert_eq!(seen["total"], 0, "{seen}");
     // The BGP peers of a store twin: the configured neighbours joined with
     // the session rows, the listen range, the dynamic peer of the range and
     // the observed peers with no neighbour.
@@ -860,6 +865,7 @@ fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
     assert_eq!(*r1["serial_reason"], Value::Null);
     assert_eq!(*r1["management_address"], "192.0.2.254");
     assert_eq!(*r1["collected_at"], "1970-01-01T00:00:00Z");
+    assert_eq!(*r1["store_device"], "r1");
     let spans = r1["provenance"].as_array().unwrap();
     assert_eq!(spans.len(), 3, "{spans:?}");
     assert!(
@@ -871,6 +877,7 @@ fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
     assert_eq!(*sw1["vendor"], "unifi");
     assert_eq!(*sw1["serial"], "FAKESW0001");
     assert_eq!(*sw1["management_address"], "198.51.100.11");
+    assert_eq!(*sw1["store_device"], "site1");
     // The 4 facts of a UniFi record share the row span of the record.
     assert_eq!(sw1["provenance"].as_array().unwrap().len(), 1, "{sw1:?}");
     assert_eq!(*by_device["ap1"]["serial"], Value::Null);

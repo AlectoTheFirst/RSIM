@@ -8,8 +8,9 @@ use std::sync::Arc;
 
 use rsim_contract::schema;
 use rsim_inventory::{
-    AuditPage, Bindings, Change, Credential, Db, Device, EdgeDeviceBinding, Error,
-    FabricPortBinding, Group, Inventory, JumpHost, ResolvedDevice, ResolvedDevices, Route,
+    AuditPage, Bindings, COLLECTOR_VENDORS, Change, CollectorTransport, Credential, Db, Device,
+    EdgeDeviceBinding, Error, FabricPortBinding, Group, Inventory, JumpHost, ResolvedDevice,
+    ResolvedDevices, Route,
 };
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -81,6 +82,31 @@ pub struct BindingsOut {
     pub bindings: Bindings,
 }
 
+/// A vendor that has a collector, with its transport.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct VendorOut {
+    pub vendor: String,
+    pub transport: CollectorTransport,
+}
+
+/// The vendors that have a collector, in name order.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct VendorsOut {
+    pub vendors: Vec<VendorOut>,
+}
+
+fn vendors() -> VendorsOut {
+    VendorsOut {
+        vendors: COLLECTOR_VENDORS
+            .iter()
+            .map(|(v, t)| VendorOut {
+                vendor: (*v).to_string(),
+                transport: *t,
+            })
+            .collect(),
+    }
+}
+
 const ONE: &[(&str, &str)] = &[];
 
 /// The inventory routes, in a fixed order.
@@ -93,6 +119,15 @@ pub const ROUTES: &[ApiRoute] = &[
         query: ONE,
         body: &[],
         ok: (200, &[schema::<Inventory>]),
+    },
+    ApiRoute {
+        method: "get",
+        path: "/v1/inventory/vendors",
+        id: "listVendors",
+        summary: "The vendors that have a collector, each with its transport. A group of another vendor is allowed; the collector skips its devices.",
+        query: ONE,
+        body: &[],
+        ok: (200, &[schema::<VendorsOut>]),
     },
     ApiRoute {
         method: "get",
@@ -409,6 +444,10 @@ fn allow(req: &Request, methods: &[&str]) -> Result<(), Problem> {
 
 /// Handles a request below `/v1/inventory`; `rest` is the path after it.
 pub fn route(state: &State, req: &Request, rest: &[&str]) -> Result<Response, Problem> {
+    if rest == ["vendors"] {
+        allow(req, &["GET"])?;
+        return Ok(json_out(&vendors()));
+    }
     let Some(h) = state.inventory.as_ref() else {
         return Err(problem(
             404,

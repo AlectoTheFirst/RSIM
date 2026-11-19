@@ -469,6 +469,14 @@
         "title": "ClaimsOut",
         "type": "object"
       },
+      "CollectorTransport": {
+        "description": "The transport of a collector.",
+        "enum": [
+          "ssh",
+          "https"
+        ],
+        "type": "string"
+      },
       "Column": {
         "description": "One column of a table.",
         "properties": {
@@ -4163,6 +4171,38 @@
           }
         ]
       },
+      "VendorOut": {
+        "description": "A vendor that has a collector, with its transport.",
+        "properties": {
+          "transport": {
+            "$ref": "#/components/schemas/CollectorTransport"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "vendor",
+          "transport"
+        ],
+        "type": "object"
+      },
+      "VendorsOut": {
+        "description": "The vendors that have a collector, in name order.",
+        "properties": {
+          "vendors": {
+            "items": {
+              "$ref": "#/components/schemas/VendorOut"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "vendors"
+        ],
+        "title": "VendorsOut",
+        "type": "object"
+      },
       "VerdictJson": {
         "properties": {
           "destination": {
@@ -5467,6 +5507,42 @@
           }
         ],
         "summary": "Makes or replaces a route. A proxy URL holds no login; the login is a credential reference."
+      }
+    },
+    "/v1/inventory/vendors": {
+      "get": {
+        "operationId": "listVendors",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VendorsOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The vendors that have a collector, each with its transport. A group of another vendor is allowed; the collector skips its devices."
       }
     },
     "/v1/openapi.json": {

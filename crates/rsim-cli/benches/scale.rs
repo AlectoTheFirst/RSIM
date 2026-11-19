@@ -285,6 +285,7 @@ fn main() {
             coverage: BTreeMap::new(),
             bgp: BTreeMap::new(),
             facts: BTreeMap::new(),
+            seen: Vec::new(),
             tables: Default::default(),
             source: None,
         };
