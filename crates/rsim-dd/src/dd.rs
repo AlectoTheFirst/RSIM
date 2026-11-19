@@ -240,9 +240,20 @@ impl Dd {
 
     /// Reserves room for `nodes` more nodes and their table entries.
     pub fn reserve(&mut self, nodes: usize) {
+        self.reserve_tables(nodes, nodes);
+    }
+
+    /// Reserves room for `nodes` more nodes with their entries of the unique
+    /// table, and for `cache` more entries of the operation caches.
+    pub fn reserve_tables(&mut self, nodes: usize, cache: usize) {
         self.nodes.reserve(nodes);
         self.unique.reserve(nodes);
-        self.cache.reserve(nodes);
+        self.cache.reserve(cache);
+    }
+
+    /// The number of entries of the operation caches.
+    pub fn cache_entries(&self) -> usize {
+        self.cache.len()
     }
 
     /// Turns the operation caches on or off.

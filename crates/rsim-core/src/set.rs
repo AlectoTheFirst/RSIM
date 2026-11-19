@@ -2,6 +2,7 @@
 //! arena of one query.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use rsim_dd::{Dd, DdError, Edge, Frozen, MapId};
@@ -30,6 +31,22 @@ pub struct SetBase {
     pub(crate) eq_flow: Edge,
     pub(crate) definite: BTreeMap<Match, Edge>,
     pub(crate) upper: BTreeMap<Match, Edge>,
+    /// The largest table sizes of the run arenas on this base so far.
+    room: Room,
+}
+
+/// The table room of a new arena when no run arena has given a size: nodes
+/// and cache entries.
+const ROOM: usize = 1 << 16;
+/// The most table room that a run arena takes from the sizes of the run
+/// arenas before it.
+const MAX_ROOM: usize = 1 << 18;
+
+/// The largest number of local nodes and of cache entries of a run arena.
+#[derive(Debug, Default)]
+struct Room {
+    nodes: AtomicUsize,
+    cache: AtomicUsize,
 }
 
 impl SetBase {
@@ -74,6 +91,7 @@ impl SetBase {
             eq_flow,
             definite,
             upper,
+            room: Room::default(),
         }))
     }
 
@@ -128,6 +146,9 @@ pub(crate) struct Inner {
 pub struct SetArena {
     pub(crate) base: Arc<SetBase>,
     budget: Option<usize>,
+    /// True for a run arena: it records its table sizes on the base when
+    /// it drops.
+    run: bool,
     inner: Mutex<Inner>,
 }
 
@@ -141,13 +162,38 @@ impl std::fmt::Debug for Inner {
 }
 
 impl SetArena {
+    /// An arena whose tables start with room for 65,536 nodes and cache
+    /// entries, or for the budget if it is smaller.
     pub fn new(base: &Arc<SetBase>, budget: Option<usize>) -> Arc<SetArena> {
+        SetArena::with_room(base, budget, false, ROOM, ROOM)
+    }
+
+    /// An arena for one run of a query. Its tables start with room for the
+    /// largest number of nodes and of cache entries of the run arenas on
+    /// the base before it, at least 65,536 and at most 262,144 each,
+    /// and at most the budget. When it drops, it records its own sizes on
+    /// the base. The room changes no result.
+    pub fn for_run(base: &Arc<SetBase>, budget: Option<usize>) -> Arc<SetArena> {
+        let room = |seen: &AtomicUsize| seen.load(Ordering::Relaxed).clamp(ROOM, MAX_ROOM);
+        let (nodes, cache) = (room(&base.room.nodes), room(&base.room.cache));
+        SetArena::with_room(base, budget, true, nodes, cache)
+    }
+
+    fn with_room(
+        base: &Arc<SetBase>,
+        budget: Option<usize>,
+        run: bool,
+        nodes: usize,
+        cache: usize,
+    ) -> Arc<SetArena> {
         let mut dd = Dd::scratch(Arc::clone(&base.frozen), budget);
         dd.set_shadow(false);
-        dd.reserve(budget.unwrap_or(1 << 16).min(1 << 16));
+        let cap = budget.unwrap_or(usize::MAX);
+        dd.reserve_tables(nodes.min(cap), cache.min(cap));
         Arc::new(SetArena {
             base: Arc::clone(base),
             budget,
+            run,
             inner: Mutex::new(Inner {
                 dd,
                 fault: None,
@@ -230,6 +276,20 @@ impl SetArena {
         if g.fault.is_none() {
             g.fault = Some(e);
         }
+    }
+}
+
+impl Drop for SetArena {
+    fn drop(&mut self) {
+        if !self.run {
+            return;
+        }
+        let inner = self.inner.get_mut().unwrap_or_else(|e| e.into_inner());
+        let room = &self.base.room;
+        room.nodes
+            .fetch_max(inner.dd.local_nodes(), Ordering::Relaxed);
+        room.cache
+            .fetch_max(inner.dd.cache_entries(), Ordering::Relaxed);
     }
 }
 
