@@ -257,14 +257,15 @@ fn serve(
     lines: &[String],
 ) -> SourceTextJson {
     let count = u32::try_from(lines.len()).unwrap_or(u32::MAX);
-    let present: Vec<(u32, u32)> = covered
-        .iter()
-        .filter(|r| r.0 <= count)
-        .map(|&(a, b)| (a, b.min(count)))
-        .collect();
-    let left_out = gaps(&present, first, last);
     let shown = last.min(first.saturating_add(MAX_LINES - 1));
     let cut = last - shown;
+    let end = count.min(shown);
+    let present: Vec<(u32, u32)> = covered
+        .iter()
+        .filter(|r| r.0 <= end)
+        .map(|&(a, b)| (a, b.min(end)))
+        .collect();
+    let left_out = gaps(&present, first, shown);
     let mut notes = Vec::new();
     if !left_out.is_empty() {
         notes.push(format!(
@@ -387,5 +388,24 @@ mod tests {
             assert_eq!(all, (1..=40).collect::<Vec<_>>(), "length {n}");
             assert_eq!(t.cut, 0);
         }
+    }
+
+    #[test]
+    fn the_lines_after_the_cut_give_no_line_count() {
+        let covered = [(5, 10), (250, 260)];
+        let of = |n: usize| {
+            let lines: Vec<String> = (1..=n).map(|i| format!("line {i}")).collect();
+            serve("d/s@x", 1, 300, &covered, &lines)
+        };
+        let base = of(100);
+        for n in [255, 270, 400] {
+            let t = of(n);
+            assert_eq!(numbers(&t), numbers(&base), "{n}");
+            assert_eq!(left(&t), left(&base), "{n}");
+        }
+        let mut seen = numbers(&base);
+        seen.extend(left(&base));
+        seen.sort_unstable();
+        assert_eq!(seen, (1..=MAX_LINES).collect::<Vec<_>>());
     }
 }

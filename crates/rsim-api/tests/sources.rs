@@ -225,8 +225,9 @@ fn no_answer_gives_the_line_count_of_a_section() {
                 .all(|l| l["number"].as_u64().unwrap() <= n as u64)
         );
         let left_out = v["source"]["left_out"].as_array().unwrap();
+        let shown = last.min(first + 199);
         assert!(
-            left_out.last().unwrap()["last_line"] == last,
+            left_out.last().unwrap()["last_line"] == shown,
             "{first}-{last}: {text}"
         );
     }
