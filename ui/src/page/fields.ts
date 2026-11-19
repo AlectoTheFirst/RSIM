@@ -36,7 +36,6 @@ export const BASE_FIELDS: ReadonlySet<QueryField> = new Set([
   "destination.ip",
   "destination.port",
   "network.transport",
-  "ingress",
 ]);
 
 /** The form of the values of a field. */

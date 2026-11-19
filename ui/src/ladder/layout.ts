@@ -625,3 +625,8 @@ export function ingressHint(a: Pick<Answer, "ingress">): string | null {
   ];
   return found.length === 1 ? found[0]! : null;
 }
+
+/** Whether a run of an answer found no entry point, so that its packets are Unknown. */
+export function noIngress(a: Pick<Answer, "ingress">): boolean {
+  return a.ingress.some((i) => !i.found);
+}

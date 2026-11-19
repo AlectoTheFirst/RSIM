@@ -3,9 +3,14 @@ import { useEffect, useState } from "preact/hooks";
 import { tableRows } from "../api/client";
 import {
   type EndpointRow,
+  type EntryOption,
   PICKER_MAX,
   type Suggestion,
+  deviceOptions,
   endpointRows,
+  ingressRequest,
+  ingressStage,
+  interfaceOptions,
   matchEndpoints,
   pickerQuery,
   placesByHost,
@@ -70,6 +75,37 @@ export function useEndpoints(twin: string, value: string, active: boolean): Sugg
     };
   }, [twin, value, active]);
   return list;
+}
+
+/**
+ * The entry point list of the ingress field while `active`: the devices,
+ * or the entry interfaces of the device of the text, with `found` first in
+ * the device list. The rows of another stage do not show.
+ */
+export function useEntryPoints(twin: string, value: string, active: boolean, found: string | null): EntryOption[] {
+  const stage = ingressStage(value);
+  const key = stage.stage === "device" ? "device" : `interface ${stage.device}`;
+  const [rows, setRows] = useState<{ key: string; records: Record<string, unknown>[] }>({ key: "", records: [] });
+  useEffect(() => {
+    if (!active || !twin) return;
+    let live = true;
+    const req = ingressRequest(ingressStage(value));
+    const timer = setTimeout(() => {
+      tableRows(twin, req.table, req.params)
+        .then((t) => {
+          if (live) setRows({ key, records: recordsOf(t) });
+        })
+        .catch(() => {
+          if (live) setRows({ key, records: [] });
+        });
+    }, PICKER_WAIT_MS);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [twin, value, active]);
+  const records = rows.key === key ? rows.records : [];
+  return stage.stage === "device" ? deviceOptions(records, found, value) : interfaceOptions(records, value);
 }
 
 export function PickerList(props: {

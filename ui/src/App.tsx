@@ -16,6 +16,7 @@ import {
   devicesOnPath,
   ingressHint,
   ladder,
+  noIngress,
   notStated,
   partCounts,
   ribNotChecked,
@@ -166,6 +167,8 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // A count that the button "Select entry point" raises.
+  const [askIngress, setAskIngress] = useState(0);
   const firstInput = useRef<HTMLInputElement | null>(null);
   // Whether the next ladder opens the deciding step of its answer.
   const autoOpen = useRef(false);
@@ -450,7 +453,8 @@ export function App() {
         twin={twin}
         mode={mode}
         fields={fields}
-        ingressHint={answer && !busy ? ingressHint(answer) : null}
+        found={answer && !busy ? ingressHint(answer) : null}
+        askIngress={askIngress}
         notStated={echo && !setMode_ ? notStated(echo) : null}
         onMode={changeMode}
         onField={(k, v) => setFields({ ...fields, [k]: v })}
@@ -465,11 +469,14 @@ export function App() {
         ) : problem ? (
           <span>{problem}</span>
         ) : answer ? (
-          setMode_ ? (
-            <SetFacts a={answer} />
-          ) : (
-            <PathFacts a={answer} onStep={openStep} />
-          )
+          <>
+            {setMode_ ? <SetFacts a={answer} /> : <PathFacts a={answer} onStep={openStep} />}
+            {noIngress(answer) ? (
+              <button type="button" onClick={() => setAskIngress((n) => n + 1)}>
+                Select entry point
+              </button>
+            ) : null}
+          </>
         ) : (
           <span class="muted">State the fields of a query and run it.</span>
         )}

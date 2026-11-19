@@ -20,8 +20,8 @@ import {
   valueToken,
   valuesOf,
 } from "./fields";
-import { NameList, PickerList, useEndpoints } from "./Picker";
-import { PICKER_CLOSED, type PickerState, type Suggestion, pickerKey } from "./pick";
+import { NameList, PickerList, useEndpoints, useEntryPoints } from "./Picker";
+import { type EntryOption, PICKER_CLOSED, type PickerState, type Suggestion, ingressStage, pickerKey } from "./pick";
 import { type Fields, type Mode, QUERY_FIELDS, type QueryField } from "./query";
 import { twinOption } from "./url";
 
@@ -164,16 +164,17 @@ const edits = (el: EventTarget | null) => el instanceof HTMLElement && el.datase
 /**
  * One field of the query bar: its name and its value, which a click edits
  * in place. The input takes the width of its text. An address field
- * proposes the endpoints of the twin while it is edited, and a field with
- * names proposes its names while it has the focus; `hint` shows in an
- * empty field and is not part of the query.
+ * proposes the endpoints of the twin while it is edited, a field with
+ * names proposes its names while it has the focus, and the ingress field
+ * proposes the devices of the twin, with `found` first, then the entry
+ * interfaces of the chosen device.
  */
 function QueryValue(props: {
   twin: string;
   mode: Mode;
   name: QueryField;
   value: string;
-  hint?: string | null;
+  found?: string | null;
   invalid: boolean;
   onInput: (v: string) => void;
   onRun: () => void;
@@ -181,15 +182,16 @@ function QueryValue(props: {
   onBlur: () => void;
   inputRef?: { current: HTMLInputElement | null };
 }) {
-  const shown = props.value || props.hint || "";
   const endpoints = PICKED.has(props.name);
+  const entry = props.name === "ingress";
   const names = valuesOf(props.mode, props.name);
-  const picks = endpoints || names.length > 0;
+  const picks = endpoints || entry || names.length > 0;
   const [edited, setEdited] = useState(false);
   const [state, setState] = useState<PickerState>(PICKER_CLOSED);
   const found = useEndpoints(props.twin, props.value, endpoints && edited);
+  const entries = useEntryPoints(props.twin, props.value, entry && state.open, entry ? (props.found ?? null) : null);
   const named = names.length ? filterValues(names, valueToken(props.mode, props.name, props.value)) : [];
-  const count = endpoints ? found.length : named.length;
+  const count = endpoints ? found.length : entry ? entries.length : named.length;
   const open = state.open && count > 0;
   const id = `pick-${props.name.replace(/\./g, "-")}`;
   useEffect(() => {
@@ -204,11 +206,22 @@ function QueryValue(props: {
     props.onInput(insertValue(props.mode, props.name, props.value, n));
     setState(PICKER_CLOSED);
   };
+  // A device keeps the list open on its interfaces; an interface or the found entry point closes it.
+  const chooseEntry = (o: EntryOption) => {
+    props.onInput(o.value);
+    setState(o.done ? PICKER_CLOSED : { open: true, active: -1 });
+  };
+  const choose = (i: number) => {
+    if (endpoints) chooseEndpoint(found[i]!);
+    else if (entry) chooseEntry(entries[i]!);
+    else chooseName(named[i]!);
+  };
+  const stage = entry ? ingressStage(props.value) : null;
   const classes = ["autosize", "t-query", props.value ? "" : "empty", props.invalid ? "invalid" : ""].filter(Boolean).join(" ");
   return (
     <label class="qfield">
       <span class="muted">{props.name} </span>
-      <span class={classes} data-value={shown}>
+      <span class={classes} data-value={props.value}>
         <input
           ref={props.inputRef}
           id={inputId(props.name)}
@@ -216,7 +229,6 @@ function QueryValue(props: {
           class="t-query"
           size={1}
           value={props.value}
-          placeholder={props.hint ?? undefined}
           spellcheck={false}
           autocomplete="off"
           aria-invalid={props.invalid || undefined}
@@ -235,7 +247,10 @@ function QueryValue(props: {
           }}
           onFocus={() => {
             props.onFocus();
-            if (names.length) setState({ open: true, active: -1 });
+            if (names.length || entry) setState({ open: true, active: -1 });
+          }}
+          onClick={() => {
+            if (entry && !state.open) setState({ open: true, active: -1 });
           }}
           onBlur={() => {
             setState(PICKER_CLOSED);
@@ -247,10 +262,7 @@ function QueryValue(props: {
               if (r.handled) {
                 e.preventDefault();
                 setState(r.state);
-                if (r.action === "choose") {
-                  if (endpoints) chooseEndpoint(found[state.active]!);
-                  else chooseName(named[state.active]!);
-                }
+                if (r.action === "choose") choose(state.active);
                 return;
               }
             }
@@ -263,7 +275,17 @@ function QueryValue(props: {
         />
       </span>
       {open && endpoints ? <PickerList id={id} list={found} active={state.active} onChoose={chooseEndpoint} /> : null}
-      {open && !endpoints ? (
+      {open && entry ? (
+        <NameList
+          id={id}
+          label={stage?.stage === "interface" ? `Entry interfaces of ${stage.device}` : "Devices"}
+          names={entries.map((o) => o.name)}
+          detail={(n) => entries.find((o) => o.name === n)?.detail ?? ""}
+          active={state.active}
+          onChoose={(n) => choose(entries.findIndex((o) => o.name === n))}
+        />
+      ) : null}
+      {open && !endpoints && !entry ? (
         <NameList id={id} label={`Values of ${props.name}`} names={named} active={state.active} onChoose={chooseName} />
       ) : null}
     </label>
@@ -378,7 +400,10 @@ export function QueryBar(props: {
   twin: string;
   mode: Mode;
   fields: Fields;
-  ingressHint: string | null;
+  /** The entry point that the shown answer found, or null. */
+  found: string | null;
+  /** A count that shows the ingress field and opens its list each time it grows. */
+  askIngress: number;
   /** The fields that the query of the answer does not state, or null. */
   notStated: readonly string[] | null;
   onMode: (m: Mode) => void;
@@ -394,22 +419,22 @@ export function QueryBar(props: {
   const [checked, setChecked] = useState<ReadonlySet<QueryField>>(new Set());
   const [focusNext, setFocusNext] = useState<QueryField | null>(null);
   useEffect(() => {
+    if (props.askIngress === 0) return;
+    setAdded((a) => new Set(a).add("ingress"));
+    setFocusNext("ingress");
+  }, [props.askIngress]);
+  useEffect(() => {
     if (!focusNext) return;
     document.getElementById(inputId(focusNext))?.focus();
     setFocusNext(null);
   }, [focusNext]);
   // A base field shows when it has a value or the bar is being edited; with
   // no stated field, each base field of a query shows so that a click can
-  // edit it. Each other field shows when it has a value or is added. An
-  // empty ingress field shows the entry point of the last answer while the
-  // bar is being edited.
+  // edit it. Each other field shows when it has a value or is added.
   const value = (k: QueryField) => props.fields[k] ?? "";
   const none = QUERY_FIELDS.every((k) => value(k).trim() === "");
-  const shown = QUERY_FIELDS.filter(
-    (k) => value(k) !== "" || added.has(k) || (BASE_FIELDS.has(k) && (editing || (k !== "ingress" && none))),
-  );
+  const shown = QUERY_FIELDS.filter((k) => value(k) !== "" || added.has(k) || (BASE_FIELDS.has(k) && (editing || none)));
   const hidden = QUERY_FIELDS.filter((k) => !shown.includes(k));
-  const hintOf = (k: QueryField) => (k === "ingress" ? props.ingressHint : null);
   const errorOf = (k: QueryField) => (checked.has(k) ? checkValue(props.mode, k, value(k)) : null);
   const focused = focus && focus !== "add" ? focus : null;
   let shownError: { field: QueryField; message: string } | null = null;
@@ -457,7 +482,7 @@ export function QueryBar(props: {
           mode={props.mode}
           name={k}
           value={value(k)}
-          hint={hintOf(k)}
+          found={k === "ingress" ? props.found : null}
           invalid={errorOf(k) !== null}
           onInput={(v) => props.onField(k, v)}
           onRun={run}
