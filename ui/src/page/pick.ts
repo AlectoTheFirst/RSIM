@@ -180,18 +180,33 @@ export function deviceOptions(
 }
 
 /**
- * The interface list of a device: the part after `<device>/in/` of each
- * function of rows of the table `functions` that starts with that prefix,
- * each once, in name order, that starts with the text after the `/`.
+ * The forms of the name of an entry function of a device: `<device>/in/<interface>`
+ * for an interface of a router or a routed port, and `<device>/host/<port>`
+ * for a switch port or a wireless network with hosts behind it.
+ */
+export const ENTRY_FORMS = ["in", "host"] as const;
+
+/** The entry interface of a function of `device`, or null for a name of another form. */
+export function entryInterface(device: string, fn: string): string | null {
+  for (const form of ENTRY_FORMS) {
+    const prefix = `${device}/${form}/`;
+    if (fn.startsWith(prefix) && fn.length > prefix.length) return fn.slice(prefix.length);
+  }
+  return null;
+}
+
+/**
+ * The interface list of a device: the entry interface of each function of
+ * rows of the table `functions` of that device, each once, in name order,
+ * that starts with the text after the `/`.
  */
 export function interfaceOptions(records: readonly Record<string, unknown>[], value: string, max = PICKER_MAX): EntryOption[] {
   const s = ingressStage(value);
   if (s.stage !== "interface") return [];
-  const prefix = `${s.device}/in/`;
   const names = new Set<string>();
   for (const r of records) {
-    const f = text(r["function"]);
-    if (f.startsWith(prefix) && f.length > prefix.length) names.add(f.slice(prefix.length));
+    const n = entryInterface(s.device, text(r["function"]));
+    if (n !== null) names.add(n);
   }
   return [...names]
     .filter((n) => startsWith(n, s.text))
@@ -200,9 +215,22 @@ export function interfaceOptions(records: readonly Record<string, unknown>[], va
     .map((n) => ({ name: n, detail: "", value: `${s.device}/${n}`, done: true }));
 }
 
-/** The table request of the list of a stage: the table and its parameters. */
-export function ingressRequest(s: IngressStage, max = PICKER_MAX): { table: string; params: Record<string, string> } {
+/** A table request: the table and its parameters. */
+export interface TableRequest {
+  table: string;
+  params: Record<string, string>;
+}
+
+/**
+ * The table requests of the list of a stage: the devices, or one request
+ * for each form of the entry functions of the device, by the prefix
+ * `<device>/<form>/<text>`.
+ */
+export function ingressRequests(s: IngressStage, max = PICKER_MAX): TableRequest[] {
   const limit = String(max);
-  if (s.stage === "device") return { table: "devices", params: s.text ? { "device.prefix": s.text, limit } : { limit } };
-  return { table: "functions", params: { device: s.device, "function.prefix": `${s.device}/in/${s.text}`, columns: "function", limit } };
+  if (s.stage === "device") return [{ table: "devices", params: s.text ? { "device.prefix": s.text, limit } : { limit } }];
+  return ENTRY_FORMS.map((form) => ({
+    table: "functions",
+    params: { device: s.device, kind: "ingress", "function.prefix": `${s.device}/${form}/${s.text}`, columns: "function", limit },
+  }));
 }

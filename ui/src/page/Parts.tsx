@@ -20,7 +20,7 @@ import {
   valueToken,
   valuesOf,
 } from "./fields";
-import { NameList, PickerList, useEndpoints, useEntryPoints } from "./Picker";
+import { NameList, PickerList, useAsk, useEndpoints, useEntryPoints } from "./Picker";
 import { type EntryOption, PICKER_CLOSED, type PickerState, type Suggestion, ingressStage, pickerKey } from "./pick";
 import { type Fields, type Mode, QUERY_FIELDS, type QueryField } from "./query";
 import { twinOption } from "./url";
@@ -426,14 +426,10 @@ export function QueryBar(props: {
   const [focus, setFocus] = useState<QueryField | "add" | null>(null);
   const [checked, setChecked] = useState<ReadonlySet<QueryField>>(new Set());
   const [focusNext, setFocusNext] = useState<QueryField | null>(null);
-  // The count at the last request; a count that the bar finds when it mounts is not a new request.
-  const asked = useRef(props.askIngress);
-  useEffect(() => {
-    if (props.askIngress === asked.current) return;
-    asked.current = props.askIngress;
+  useAsk(props.askIngress, () => {
     setAdded((a) => new Set(a).add("ingress"));
     setFocusNext("ingress");
-  }, [props.askIngress]);
+  });
   useEffect(() => {
     if (!focusNext) return;
     document.getElementById(inputId(focusNext))?.focus();

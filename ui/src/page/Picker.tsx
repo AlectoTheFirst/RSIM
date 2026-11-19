@@ -1,5 +1,5 @@
 // The list of the endpoint picker under an address field of the query bar.
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { tableRows } from "../api/client";
 import {
   type EndpointRow,
@@ -8,7 +8,7 @@ import {
   type Suggestion,
   deviceOptions,
   endpointRows,
-  ingressRequest,
+  ingressRequests,
   ingressStage,
   interfaceOptions,
   matchEndpoints,
@@ -78,6 +78,19 @@ export function useEndpoints(twin: string, value: string, active: boolean): Sugg
 }
 
 /**
+ * Calls `onAsk` each time `count` changes. The count at the mount is not a
+ * new request, so a view that mounts again with the same count calls nothing.
+ */
+export function useAsk(count: number, onAsk: () => void): void {
+  const asked = useRef(count);
+  useEffect(() => {
+    if (count === asked.current) return;
+    asked.current = count;
+    onAsk();
+  }, [count]);
+}
+
+/**
  * The entry point list of the ingress field while `active`: the devices,
  * or the entry interfaces of the device of the text, with `found` first in
  * the device list. The rows of another twin or another stage do not show.
@@ -89,11 +102,11 @@ export function useEntryPoints(twin: string, value: string, active: boolean, fou
   useEffect(() => {
     if (!active || !twin) return;
     let live = true;
-    const req = ingressRequest(ingressStage(value));
+    const reqs = ingressRequests(ingressStage(value));
     const timer = setTimeout(() => {
-      tableRows(twin, req.table, req.params)
-        .then((t) => {
-          if (live) setRows({ key, records: recordsOf(t) });
+      Promise.all(reqs.map((r) => tableRows(twin, r.table, r.params)))
+        .then((ts) => {
+          if (live) setRows({ key, records: ts.flatMap(recordsOf) });
         })
         .catch(() => {
           if (live) setRows({ key, records: [] });

@@ -8,10 +8,12 @@ import type { PathAnswer } from "../src/api/types";
 import { ingressHint, noIngress } from "../src/ladder/layout";
 import { BASE_FIELDS } from "../src/page/fields";
 import {
+  ENTRY_FORMS,
   FOUND,
   PICKER_CLOSED,
   deviceOptions,
-  ingressRequest,
+  entryInterface,
+  ingressRequests,
   ingressStage,
   interfaceOptions,
   pickerKey,
@@ -32,6 +34,11 @@ const FUNCTIONS = [
   { function: "r1/route" },
   { function: "r10/in/eth0" },
   { function: "r1/in/eth0" },
+  { function: "sw1/host/port/1" },
+  { function: "sw1/host/port/12" },
+  { function: "sw1/port/1/in" },
+  { function: "ap1/host/wlan/Guest Net" },
+  { function: "ap1/unplaced/h1" },
 ];
 
 describe("ingress field", () => {
@@ -83,6 +90,12 @@ describe("interface list", () => {
     expect(list.every((o) => o.done && o.detail === "")).toBe(true);
   });
 
+  it("is the part after <device>/host/ of the host functions of a switch port or a wireless network", () => {
+    expect(interfaceOptions(FUNCTIONS, "sw1/").map((o) => o.value)).toEqual(["sw1/port/1", "sw1/port/12"]);
+    expect(interfaceOptions(FUNCTIONS, "sw1/port/12").map((o) => o.value)).toEqual(["sw1/port/12"]);
+    expect(interfaceOptions(FUNCTIONS, "ap1/wlan/g").map((o) => o.value)).toEqual(["ap1/wlan/Guest Net"]);
+  });
+
   it("filters by the text after the slash, and an interface name keeps its slashes", () => {
     expect(interfaceOptions(FUNCTIONS, "r1/ge").map((o) => o.value)).toEqual(["r1/ge-0/0/1"]);
     expect(interfaceOptions(FUNCTIONS, "r1/ge-0/0").map((o) => o.value)).toEqual(["r1/ge-0/0/1"]);
@@ -93,17 +106,29 @@ describe("interface list", () => {
   });
 });
 
+describe("entry interface", () => {
+  it("is the interface of a name of each entry form, and null for a name of another form", () => {
+    expect(ENTRY_FORMS).toEqual(["in", "host"]);
+    expect(entryInterface("r1", "r1/in/eth0")).toBe("eth0");
+    expect(entryInterface("sw1", "sw1/host/port/1")).toBe("port/1");
+    expect(entryInterface("sw1", "sw1/port/1/in")).toBeNull();
+    expect(entryInterface("ap1", "ap1/unplaced/h1")).toBeNull();
+    expect(entryInterface("r1", "r10/in/eth0")).toBeNull();
+    expect(entryInterface("r1", "r1/in/")).toBeNull();
+  });
+});
+
 describe("ingress table request", () => {
   it("asks for the devices by prefix, or the first page with no text", () => {
-    expect(ingressRequest(ingressStage(""), 10)).toEqual({ table: "devices", params: { limit: "10" } });
-    expect(ingressRequest(ingressStage("fra"), 10)).toEqual({ table: "devices", params: { "device.prefix": "fra", limit: "10" } });
+    expect(ingressRequests(ingressStage(""), 10)).toEqual([{ table: "devices", params: { limit: "10" } }]);
+    expect(ingressRequests(ingressStage("fra"), 10)).toEqual([{ table: "devices", params: { "device.prefix": "fra", limit: "10" } }]);
   });
 
-  it("asks for the functions of the device by the prefix <device>/in/<text>", () => {
-    expect(ingressRequest(ingressStage("r1/ge"), 10)).toEqual({
-      table: "functions",
-      params: { device: "r1", "function.prefix": "r1/in/ge", columns: "function", limit: "10" },
-    });
+  it("asks for the entry functions of the device once for each form, by the prefix <device>/<form>/<text>", () => {
+    expect(ingressRequests(ingressStage("r1/ge"), 10)).toEqual([
+      { table: "functions", params: { device: "r1", kind: "ingress", "function.prefix": "r1/in/ge", columns: "function", limit: "10" } },
+      { table: "functions", params: { device: "r1", kind: "ingress", "function.prefix": "r1/host/ge", columns: "function", limit: "10" } },
+    ]);
   });
 });
 
