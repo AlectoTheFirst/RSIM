@@ -9,6 +9,7 @@ import { type ColourPref, type Prefs, ROW_HEIGHTS, type RowHeight, SIZE, type Th
 import { Hatch } from "./Hatch";
 import {
   BASE_FIELDS,
+  FIELD_CHARS,
   checkValue,
   fieldsOfMode,
   filterValues,
@@ -221,7 +222,7 @@ function QueryValue(props: {
   return (
     <label class="qfield" title={props.hint}>
       <span class="muted">{props.name} </span>
-      <span class={classes} data-value={props.value}>
+      <span class={classes} data-value={props.value} style={{ "--chars": String(FIELD_CHARS[props.name] ?? 8) }}>
         <input
           ref={props.inputRef}
           id={inputId(props.name)}
@@ -463,6 +464,7 @@ export function QueryBar(props: {
           inputRef={i === 0 ? props.firstInput : undefined}
         />
       ))}
+      <button type="submit">Run</button>
       {hidden.length ? (
         <AddField
           mode={props.mode}
