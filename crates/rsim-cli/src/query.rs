@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use rsim_core::{
     DefaultValue, DeviceId, FieldValue, Fragment, Header, HeaderField, InterfaceId, Mac,
-    PROTO_ICMP, PROTO_ICMPV6, PROTO_TCP, PROTO_UDP, UNSTATED_DEFAULTS,
+    PROTO_ICMP, PROTO_ICMPV6, PROTO_TCP, PROTO_UDP, PacketSet, UnstatedDefault,
 };
 use rsim_engine::{Query, Twin};
 use serde::Serialize;
@@ -268,38 +268,29 @@ impl QueryInput {
         Ok(self.header_with_defaults()?.0)
     }
 
-    /// The notes of the answer: the default value of each field that took
-    /// one. A query that does not give its header has no notes.
+    /// The notes of the answer: one note that names each default that
+    /// applied, for example `defaults: dscp 0, ecn 0, no VLAN, tcp syn,
+    /// source.port 49152-65535`. A query that does not give its header has
+    /// no notes.
     pub fn notes(&self) -> Vec<String> {
-        let Ok((_, fields)) = self.header_with_defaults() else {
+        let Ok((_, applied)) = self.header_with_defaults() else {
             return Vec::new();
         };
-        if fields.is_empty() {
+        if applied.is_empty() {
             return Vec::new();
         }
-        let parts: Vec<String> = fields
+        let untagged = applied.iter().any(|d| d.field == HeaderField::Vlan);
+        let parts: Vec<String> = applied
             .iter()
-            .filter_map(|f| {
-                let (_, v) = UNSTATED_DEFAULTS.iter().find(|(g, _)| g == f)?;
-                let value = match v {
-                    DefaultValue::Absent => "absent".to_string(),
-                    DefaultValue::Number(n) => n.to_string(),
-                    DefaultValue::Fragment(Fragment::Unfragmented) => "unfragmented".to_string(),
-                    DefaultValue::Fragment(Fragment::First) => "first".to_string(),
-                    DefaultValue::Fragment(Fragment::Later) => "later".to_string(),
-                };
-                Some(format!("{} {value}", field_name(*f)))
-            })
+            .filter(|d| !(untagged && d.field == HeaderField::L2Priority))
+            .map(default_text)
             .collect();
-        vec![format!(
-            "unstated defaults: the query does not state these fields, and they take a default value: {}",
-            parts.join(", ")
-        )]
+        vec![format!("defaults: {}", parts.join(", "))]
     }
 
-    /// The request header of the query, and the fields that took their
-    /// default value with `unstated` `defaults`.
-    fn header_with_defaults(&self) -> Result<(Header, Vec<HeaderField>), QueryError> {
+    /// The request header of the query, and the defaults that applied with
+    /// `unstated` `defaults`.
+    fn header_with_defaults(&self) -> Result<(Header, Vec<UnstatedDefault>), QueryError> {
         let p = self.validate()?;
         let mut h = Header::request(self.source_ip, self.destination_ip, p.0);
         if let Some(x) = self.source_port {
@@ -349,8 +340,14 @@ impl QueryInput {
 
     /// Validates the input and makes the engine query for one packet.
     pub fn to_query(&self, twin: &Twin) -> Result<Query, QueryError> {
-        let h = self.header()?;
+        let (h, applied) = self.header_with_defaults()?;
         let mut q = Query::path(twin, &h);
+        let ranges = UnstatedDefault::ranges(&applied);
+        if ranges != rsim_core::SetSpec::default() {
+            q.packets = q
+                .packets
+                .intersect(&PacketSet::from_spec(q.packets.arena(), &ranges));
+        }
         if let Some(i) = &self.ingress {
             let (d, f) = (DeviceId::new(&i.device), InterfaceId::new(&i.interface));
             if twin.ingress(&d, &f).is_none() {
@@ -366,6 +363,35 @@ impl QueryInput {
         }
         q.reply = self.reply.unwrap_or(true);
         Ok(q)
+    }
+}
+
+/// The short text of a default in the note of an answer.
+fn default_text(d: &UnstatedDefault) -> String {
+    let name = field_name(d.field);
+    match (d.field, d.value, d.protocol) {
+        (HeaderField::Vlan, DefaultValue::Absent, _) => "no VLAN".to_string(),
+        (_, DefaultValue::Absent, _) => format!("no {name}"),
+        (HeaderField::TcpFlags, DefaultValue::Number(n), _) => {
+            let flags = TcpFlag::ALL
+                .iter()
+                .filter(|f| n & f.bit() != 0)
+                .map(|f| f.name())
+                .collect::<Vec<_>>()
+                .join("+");
+            format!("tcp {flags}")
+        }
+        (HeaderField::IcmpType, DefaultValue::Number(8), Some(PROTO_ICMP)) => {
+            "icmp echo-request".to_string()
+        }
+        (HeaderField::IcmpType, DefaultValue::Number(128), Some(PROTO_ICMPV6)) => {
+            "icmpv6 echo-request".to_string()
+        }
+        (_, DefaultValue::Number(n), _) => format!("{name} {n}"),
+        (_, DefaultValue::Fragment(Fragment::Unfragmented), _) => "unfragmented".to_string(),
+        (_, DefaultValue::Fragment(Fragment::First), _) => "first fragment".to_string(),
+        (_, DefaultValue::Fragment(Fragment::Later), _) => "later fragment".to_string(),
+        (_, DefaultValue::PortRange(lo, hi), _) => format!("{name} {lo}-{hi}"),
     }
 }
 

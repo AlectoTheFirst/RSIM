@@ -26,8 +26,26 @@ export const QUERY_FIELDS = [
   "network.vlan.id",
   "l2_priority",
   "reply",
+  "unstated",
 ] as const satisfies readonly FieldName[];
 export type QueryField = (typeof QUERY_FIELDS)[number];
+
+/** Whether a mode takes a field: a set query does not take the fields of a path query only. */
+export function takes(mode: Mode, k: QueryField): boolean {
+  return mode === "path" || FIELD_SCHEMA[k].set !== null;
+}
+
+/** The fields of a mode, in the order of the query bar. */
+export function fieldsOfMode(mode: Mode): QueryField[] {
+  return QUERY_FIELDS.filter((k) => takes(mode, k));
+}
+
+/**
+ * The value of `unstated` that leaves the query as it is: an unstated
+ * field has all values. The request, the commands and the MCP call leave
+ * the field out with this value.
+ */
+export const UNSTATED_ALL = "all";
 
 /** The fields that show while the query bar is edited. Each other field shows when it has a value or is added. */
 export const BASE_FIELDS: ReadonlySet<QueryField> = new Set([
@@ -77,6 +95,7 @@ const EXAMPLES: Record<QueryField, { path: string; set: string }> = {
   "network.vlan.id": { path: "10", set: "10-20" },
   l2_priority: { path: "5", set: "0-7" },
   reply: { path: "false", set: "false" },
+  unstated: { path: "defaults", set: "" },
 };
 
 export function exampleOf(mode: Mode, k: QueryField): string {
@@ -103,6 +122,7 @@ export const FIELD_LABELS: Record<QueryField, string> = {
   "network.vlan.id": "VLAN tag",
   l2_priority: "layer 2 priority",
   reply: "reply run",
+  unstated: "unstated fields",
 };
 
 export function labelOf(k: QueryField): string {
@@ -326,7 +346,7 @@ export function modeValue(from: Mode, to: Mode, k: QueryField, value: string): s
 
 /** The first stated field of the shown fields whose value has a wrong form, with its message. */
 export function firstError(mode: Mode, fields: Partial<Record<QueryField, string>>): { field: QueryField; message: string } | null {
-  for (const k of QUERY_FIELDS) {
+  for (const k of fieldsOfMode(mode)) {
     const message = checkValue(mode, k, fields[k] ?? "");
     if (message) return { field: k, message };
   }

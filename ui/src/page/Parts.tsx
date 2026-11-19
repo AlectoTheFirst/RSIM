@@ -10,6 +10,7 @@ import { HatchMark } from "./Hatch";
 import {
   BASE_FIELDS,
   checkValue,
+  fieldsOfMode,
   exampleOf,
   filterValues,
   firstError,
@@ -22,7 +23,7 @@ import {
 } from "./fields";
 import { NameList, PickerList, useAsk, useEndpoints, useEntryPoints } from "./Picker";
 import { type EntryOption, PICKER_CLOSED, type PickerState, type Suggestion, ingressStage, pickerKey } from "./pick";
-import { type Fields, type Mode, QUERY_FIELDS, type QueryField } from "./query";
+import { type Fields, type Mode, type QueryField } from "./query";
 import { twinOption } from "./url";
 
 export const VIEWS = ["Trace", "Tables", "Coverage", "Compare", "Inventory", "Admin"] as const;
@@ -439,9 +440,11 @@ export function QueryBar(props: {
   // no stated field, each base field of a query shows so that a click can
   // edit it. Each other field shows when it has a value or is added.
   const value = (k: QueryField) => props.fields[k] ?? "";
-  const none = QUERY_FIELDS.every((k) => value(k).trim() === "");
-  const shown = QUERY_FIELDS.filter((k) => value(k) !== "" || added.has(k) || (BASE_FIELDS.has(k) && (editing || none)));
-  const hidden = QUERY_FIELDS.filter((k) => !shown.includes(k));
+  // A field that the mode does not take does not show.
+  const ofMode = fieldsOfMode(props.mode);
+  const none = ofMode.every((k) => value(k).trim() === "");
+  const shown = ofMode.filter((k) => value(k) !== "" || added.has(k) || (BASE_FIELDS.has(k) && (editing || none)));
+  const hidden = ofMode.filter((k) => !shown.includes(k));
   const errorOf = (k: QueryField) => (checked.has(k) ? checkValue(props.mode, k, value(k)) : null);
   const focused = focus && focus !== "add" ? focus : null;
   let shownError: { field: QueryField; message: string } | null = null;

@@ -1,13 +1,19 @@
 // The query of the query bar: its fields, its request body, and its forms
 // as an rsim command and as an MCP tool call.
-import { type Mode, QUERY_FIELDS, type QueryField, kindOf, listItems } from "./fields";
+import { type Mode, QUERY_FIELDS, type QueryField, UNSTATED_ALL, kindOf, listItems, takes } from "./fields";
 
 export { type Mode, QUERY_FIELDS, type QueryField } from "./fields";
 export type Fields = Partial<Record<QueryField, string>>;
 
-/** The stated fields, in the order of the query bar. */
-export function stated(f: Fields): [QueryField, string][] {
-  return QUERY_FIELDS.map((k) => [k, (f[k] ?? "").trim()] as [QueryField, string]).filter(([, v]) => v !== "");
+/**
+ * The stated fields of a mode, in the order of the query bar. A field
+ * that the mode does not take and `unstated` with the value `all` are
+ * not stated.
+ */
+export function stated(f: Fields, mode: Mode = "path"): [QueryField, string][] {
+  return QUERY_FIELDS.map((k) => [k, (f[k] ?? "").trim()] as [QueryField, string]).filter(
+    ([k, v]) => v !== "" && takes(mode, k) && !(k === "unstated" && v === UNSTATED_ALL),
+  );
 }
 
 /**
@@ -30,7 +36,7 @@ export function jsonValue(mode: Mode, k: QueryField, v: string): string | number
  * with no spaces.
  */
 function commandArgs(mode: Mode, f: Fields): string[] {
-  return stated(f).flatMap(([k, v]) => {
+  return stated(f, mode).flatMap(([k, v]) => {
     const kind = kindOf(k);
     if (kind === "boolean" && (v === "true" || v === "false")) return v === "false" ? [`--no-${k}`] : [];
     if (kind === "flags" && mode === "path") return [`--${k}`, shellWord(listItems(v).join(","))];
@@ -41,7 +47,7 @@ function commandArgs(mode: Mode, f: Fields): string[] {
 /** The body of `POST /v1/twins/{twin}/queries`. */
 export function requestBody(mode: Mode, f: Fields): Record<string, unknown> {
   const body: Record<string, unknown> = mode === "set" ? { mode: "set" } : {};
-  for (const [k, v] of stated(f)) body[k] = jsonValue(mode, k, v);
+  for (const [k, v] of stated(f, mode)) body[k] = jsonValue(mode, k, v);
   return body;
 }
 
@@ -84,7 +90,7 @@ export function explainCommand(
 /** The query as an MCP tool call. */
 export function mcpCall(mode: Mode, twin: string, f: Fields): string {
   const args: Record<string, unknown> = { topology: topologyOf(twin) };
-  for (const [k, v] of stated(f)) args[k] = jsonValue(mode, k, v);
+  for (const [k, v] of stated(f, mode)) args[k] = jsonValue(mode, k, v);
   return JSON.stringify({ name: mode === "set" ? "set_query" : "path_query", arguments: args });
 }
 

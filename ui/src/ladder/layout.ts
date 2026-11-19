@@ -485,9 +485,25 @@ export function destinationOf(v: Verdict): string | null {
   return v.destination?.endpoint ?? v.destination?.device ?? null;
 }
 
-/** The query fields that the query does not state. */
+/** The notes of an answer: a path answer names the defaults that its unstated fields took. */
+export function answerNotes(out: { kind: string; notes?: string[] | null }): string[] {
+  return out.kind === "set_answer" ? [] : (out.notes ?? []);
+}
+
+/**
+ * The query fields of a path query with `unstated` `defaults` that take a
+ * default value when the query does not state them. The layer 2 priority
+ * takes its default only with no VLAN tag.
+ */
+const DEFAULTED = ["dscp", "ecn", "network.vlan.id", "fragment", "tcp_flags", "icmp_type", "icmp_code", "source.port"];
+
+/** The query fields that the query does not state and that have no default value. */
 export function notStated(echo: Record<string, unknown>): string[] {
-  const skip = new Set(["topology", "ingress", "reply", "network.iana_number", "network.transport"]);
+  const skip = new Set(["topology", "ingress", "reply", "unstated", "network.iana_number", "network.transport"]);
+  if (echo["unstated"] === "defaults") {
+    for (const k of DEFAULTED) skip.add(k);
+    if (echo["network.vlan.id"] == null) skip.add("l2_priority");
+  }
   const stated = echo["network.transport"] != null || echo["network.iana_number"] != null;
   const out = Object.keys(echo).filter((k) => !skip.has(k) && echo[k] == null);
   if (!stated) out.push("network.transport");

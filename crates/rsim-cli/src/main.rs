@@ -185,8 +185,9 @@ struct QueryArgs {
     #[arg(long)]
     no_reply: bool,
     /// all (the default): an unstated field has all values. defaults: an
-    /// unstated field takes its default value where it has one: an untagged
-    /// frame, dscp 0, ecn 0 and an unfragmented packet.
+    /// unstated field takes its default value where it has one: dscp 0, ecn
+    /// 0, an untagged frame, an unfragmented packet, tcp syn, an icmp echo
+    /// request and a source port in 49152-65535.
     #[arg(long)]
     unstated: Option<rsim_cli::query::Unstated>,
 }

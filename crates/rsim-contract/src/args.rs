@@ -65,10 +65,11 @@ pub enum Unstated {
     /// An unstated field has all values.
     #[default]
     All,
-    /// An unstated field takes its default value where it has one: an
-    /// untagged frame, dscp 0, ecn 0 and an unfragmented packet. The MAC
-    /// addresses, the ports, the TCP flags and the ICMP fields have no
-    /// default. The answer names each default in its notes.
+    /// An unstated field takes its default value where it has one: dscp 0,
+    /// ecn 0, an untagged frame, an unfragmented packet, the TCP flag SYN,
+    /// an ICMP or ICMPv6 echo request with code 0, and a source port in the
+    /// range 49152 to 65535. The MAC addresses and the destination port
+    /// have no default. The answer names each default in its notes.
     Defaults,
 }
 

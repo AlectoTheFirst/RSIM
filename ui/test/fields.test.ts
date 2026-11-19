@@ -18,10 +18,12 @@ import {
   notStatedNote,
   modeValue,
   parseIp,
+  fieldsOfMode,
+  takes,
   valueToken,
   valuesOf,
 } from "../src/page/fields";
-import { fieldsOf, mcpCall, requestBody, rsimCommand } from "../src/page/query";
+import { explainCommand, fieldsOf, mcpCall, requestBody, rsimCommand } from "../src/page/query";
 
 const openapi = JSON.parse(readFileSync(new URL("../../crates/rsim-api/openapi.json", import.meta.url), "utf8"));
 const schemas = openapi.components.schemas;
@@ -30,7 +32,10 @@ describe("field module", () => {
   it("has each argument of a path query and of a set query, except topology and form", () => {
     const args = Object.keys(schemas.PathQueryArgs.properties).filter((k) => k !== "topology" && k !== "form");
     expect(Object.keys(FIELD_SCHEMA).sort()).toEqual(args.sort());
-    expect(Object.keys(schemas.SetQueryArgs.properties).filter((k) => k !== "topology" && k !== "form").sort()).toEqual(args.sort());
+    const setArgs = Object.keys(schemas.SetQueryArgs.properties).filter((k) => k !== "topology" && k !== "form");
+    expect(setArgs.sort()).toEqual(args.filter((k) => k !== "unstated").sort());
+    expect(FIELD_SCHEMA.unstated.set).toBeNull();
+    expect(FIELD_SCHEMA.unstated.values).toEqual(["all", "defaults"]);
   });
 
   it("puts each field in the query bar once", () => {
@@ -285,5 +290,51 @@ describe("the value of a field after a change of the mode", () => {
     expect(modeValue("path", "set", "destination.port", "53")).toBe("53");
     expect(modeValue("set", "path", "source.ip", "192.0.2.0/24")).toBe("192.0.2.0/24");
     expect(modeValue("path", "path", "tcp_flags", "syn,ack")).toBe("syn,ack");
+  });
+});
+
+describe("unstated setting", () => {
+  it("is a field of a path query only, with the names all and defaults", () => {
+    expect(takes("path", "unstated")).toBe(true);
+    expect(takes("set", "unstated")).toBe(false);
+    expect(fieldsOfMode("path")).toContain("unstated");
+    expect(fieldsOfMode("set")).not.toContain("unstated");
+    expect(fieldsOfMode("set").length).toBe(QUERY_FIELDS.length - 1);
+    expect(kindOf("unstated")).toBe("names");
+    expect(valuesOf("path", "unstated")).toEqual(["all", "defaults"]);
+    expect(formOf("path", "unstated")).toBe("all, defaults");
+    expect(labelOf("unstated")).toBe("unstated fields");
+    expect(checkValue("path", "unstated", "defaults")).toBeNull();
+    expect(checkValue("path", "unstated", "some")).toBe("not one of all, defaults: some");
+  });
+
+  it("goes into the request, the rsim command, the explain command and the MCP call with defaults", () => {
+    const f = { "source.ip": "172.31.10.20", "destination.ip": "10.20.0.53", "network.transport": "udp", unstated: "defaults" };
+    expect(requestBody("path", f)).toEqual({ "source.ip": "172.31.10.20", "destination.ip": "10.20.0.53", "network.transport": "udp", unstated: "defaults" });
+    expect(rsimCommand("path", "builtin.mini-enterprise", f)).toBe(
+      "rsim path mini-enterprise --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --unstated defaults",
+    );
+    expect(explainCommand("path", "builtin.mini-enterprise", f, 0, 3, null)).toContain(" --unstated defaults --branch 0 --step 3");
+    expect(JSON.parse(mcpCall("path", "builtin.mini-enterprise", f))).toEqual({
+      name: "path_query",
+      arguments: { topology: "mini-enterprise", "source.ip": "172.31.10.20", "destination.ip": "10.20.0.53", "network.transport": "udp", unstated: "defaults" },
+    });
+  });
+
+  it("changes nothing with all, and a set query leaves it out", () => {
+    const base = { "source.ip": "172.31.10.20", "network.transport": "udp" };
+    const all = { ...base, unstated: "all" };
+    expect(requestBody("path", all)).toEqual(requestBody("path", base));
+    expect(rsimCommand("path", "builtin.mini-enterprise", all)).toBe(rsimCommand("path", "builtin.mini-enterprise", base));
+    expect(mcpCall("path", "builtin.mini-enterprise", all)).toBe(mcpCall("path", "builtin.mini-enterprise", base));
+    const defaults = { ...base, unstated: "defaults" };
+    expect(requestBody("set", defaults)).toEqual(requestBody("set", base));
+    expect(rsimCommand("set", "builtin.mini-enterprise", defaults)).toBe(rsimCommand("set", "builtin.mini-enterprise", base));
+    expect(mcpCall("set", "builtin.mini-enterprise", defaults)).toBe(mcpCall("set", "builtin.mini-enterprise", base));
+    expect(firstError("set", { unstated: "some" })).toBeNull();
+  });
+
+  it("comes back from the echo of a path query", () => {
+    expect(fieldsOf({ "source.ip": "172.31.10.20", unstated: "defaults" })).toEqual({ "source.ip": "172.31.10.20", unstated: "defaults" });
   });
 });

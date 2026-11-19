@@ -6,14 +6,14 @@ export const SET_SYNTAX = "A set: an address, a prefix, a number, a range such a
 
 /** The description of the fields of a path query and of a set query. */
 export const MODE_TEXT = {
-  "path": "The fields of a path query. A field that the query does not state is not known.",
+  "path": "The fields of a path query. A field that the query does not state is not known, or takes its default value with `unstated` `defaults`.",
   "set": "The fields of a set query. Each field takes a set. A field that is not given has all values."
 } as const;
 
 /**
  * Each field of a path query and of a set query: the description of each
- * mode, the JSON type of the path query value, its largest number, and
- * its names.
+ * mode, null for a mode that does not take the field, the JSON type of
+ * the path query value, its largest number, and its names.
  */
 export const FIELD_SCHEMA = {
   "destination.ip": {
@@ -161,6 +161,16 @@ export const FIELD_SCHEMA = {
       "urg",
       "ece",
       "cwr"
+    ]
+  },
+  "unstated": {
+    "path": "all (the default): an unstated field has all values. defaults: an unstated field takes its default value where it has one.",
+    "set": null,
+    "type": "string",
+    "maximum": null,
+    "values": [
+      "all",
+      "defaults"
     ]
   }
 } as const;
