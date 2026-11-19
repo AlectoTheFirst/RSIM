@@ -9,6 +9,7 @@ import { type ColourPref, type Prefs, ROW_HEIGHTS, type RowHeight, SIZE, type Th
 import { Hatch } from "./Hatch";
 import {
   BASE_FIELDS,
+  FIELD_CHARS,
   checkValue,
   fieldsOfMode,
   filterValues,
@@ -221,7 +222,7 @@ function QueryValue(props: {
   return (
     <label class="qfield" title={props.hint}>
       <span class="muted">{props.name} </span>
-      <span class={classes} data-value={props.value}>
+      <span class={classes} data-value={props.value} style={{ "--chars": String(FIELD_CHARS[props.name] ?? 8) }}>
         <input
           ref={props.inputRef}
           id={inputId(props.name)}
@@ -381,6 +382,8 @@ export function QueryBar(props: {
   found: string | null;
   /** A count that shows the ingress field and opens its list each time it changes while the bar shows. */
   askIngress: number;
+  /** Whether an answer shows. */
+  answered: boolean;
   /** The fields that the query of the answer does not state, or null. */
   notStated: readonly string[] | null;
   onMode: (m: Mode) => void;
@@ -388,8 +391,6 @@ export function QueryBar(props: {
   /** Switches `unstated` between all and defaults. */
   onDefaults: () => void;
   onRun: () => void;
-  onCopyCommand: () => void;
-  onCopyMcp: () => void;
   firstInput: { current: HTMLInputElement | null };
 }) {
   const [editing, setEditing] = useState(false);
@@ -463,6 +464,7 @@ export function QueryBar(props: {
           inputRef={i === 0 ? props.firstInput : undefined}
         />
       ))}
+      <button type="submit">Run</button>
       {hidden.length ? (
         <AddField
           mode={props.mode}
@@ -473,20 +475,12 @@ export function QueryBar(props: {
           }}
         />
       ) : null}
+      {/* The mark of the fields not stated shows beside an answer, or while defaults is set. */}
       {props.mode === "set" ? (
-        <span class="muted">{notStatedNote("set")}</span>
-      ) : (
+        props.answered ? <span class="muted">{notStatedNote("set")}</span> : null
+      ) : props.answered || hasDefaults(props.fields) ? (
         <UnstatedButton fields={props.fields} notStated={props.notStated ?? []} onToggle={props.onDefaults} />
-      )}
-      <span class="grow" />
-      <span class="group end">
-        <button type="button" onClick={props.onCopyCommand}>
-          Copy as rsim command
-        </button>
-        <button type="button" onClick={props.onCopyMcp}>
-          Copy as MCP call
-        </button>
-      </span>
+      ) : null}
     </form>
   );
 }

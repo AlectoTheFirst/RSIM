@@ -279,6 +279,8 @@ select.twin {
 .autosize {
   display: inline-grid;
   vertical-align: baseline;
+  min-width: calc((var(--chars, 8) + 1) * 1ch);
+  margin-left: var(--button-gap);
   cursor: text;
 }
 
@@ -318,7 +320,6 @@ select.twin {
 
 /* An empty field: a hairline to click on, or its hint in the label style. */
 .autosize.empty {
-  min-width: var(--field-min);
   border-bottom: var(--hairline) solid var(--rule);
 }
 

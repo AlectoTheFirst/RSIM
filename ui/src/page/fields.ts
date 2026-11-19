@@ -75,6 +75,22 @@ export function maxOf(k: QueryField): number | null {
   return FIELD_SCHEMA[k].maximum;
 }
 
+/**
+ * The width of the value of each field in characters: room for a normal
+ * value, so that a value that is typed does not move the fields after it.
+ */
+export const FIELD_CHARS: Partial<Record<QueryField, number>> = {
+  "source.ip": 15,
+  "destination.ip": 15,
+  "source.port": 5,
+  "destination.port": 5,
+  "network.transport": 6,
+  ingress: 18,
+  "source.mac": 17,
+  "destination.mac": 17,
+  tcp_flags: 7,
+};
+
 /** The label of each field in the UI: a short noun phrase. */
 export const FIELD_LABELS: Record<QueryField, string> = {
   "source.ip": "source address",
