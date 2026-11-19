@@ -225,6 +225,19 @@ impl Collector {
         self
     }
 
+    /// Replaces the inventory, the sources and the time limits of the
+    /// devices before a cycle. The schedule state of each device stays.
+    pub fn reconfigure(
+        &mut self,
+        inventory: Box<dyn Inventory>,
+        sources: Vec<Arc<dyn Source>>,
+        times: BTreeMap<String, TimeLimits>,
+    ) {
+        self.inventory = inventory;
+        self.sources = sources.into_iter().map(|s| (s.vendor(), s)).collect();
+        self.times = Arc::new(times);
+    }
+
     /// Adds a sink.
     pub fn with_sink(mut self, sink: Arc<dyn Sink>) -> Collector {
         self.sinks.push(sink);
@@ -260,6 +273,7 @@ impl Collector {
     pub async fn run_cycle(&mut self) -> Result<CycleReport, CollectError> {
         let now = self.clock.now_ms();
         let devices = self.inventory.devices();
+        let inventory_version = self.inventory.version();
         let mut ids = BTreeSet::new();
         if let Some(d) = devices.iter().find(|d| !ids.insert(d.id.clone())) {
             return Err(CollectError::Inventory(format!(
@@ -310,7 +324,7 @@ impl Collector {
         std::thread::Builder::new()
             .name("rsim-store-writer".into())
             .spawn(move || {
-                let _ = done_tx.send(store_stage(cls_rx, &store, now, &ids));
+                let _ = done_tx.send(store_stage(cls_rx, &store, now, &ids, inventory_version));
             })
             .map_err(|e| CollectError::Stage(e.to_string()))?;
 
@@ -478,14 +492,17 @@ struct Stored {
 }
 
 /// Writes the classified devices as one snapshot that removes each device
-/// of the base snapshot that is not in `inventory`.
+/// of the base snapshot that is not in `inventory` and records the
+/// inventory version.
 fn store_stage(
     mut rx: mpsc::Receiver<(Result<Classified, StoreError>, bool)>,
     store: &Store,
     time: u64,
     inventory: &BTreeSet<String>,
+    inventory_version: Option<u64>,
 ) -> Result<Stored, StoreError> {
     let mut cycle = store.begin(time)?;
+    cycle.set_inventory_version(inventory_version);
     let removed: Vec<String> = cycle
         .base()
         .map(|s| {

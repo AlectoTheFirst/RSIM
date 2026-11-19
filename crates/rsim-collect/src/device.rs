@@ -104,10 +104,33 @@ impl CaptureBgp {
 /// The devices to collect.
 pub trait Inventory: Send + Sync {
     fn devices(&self) -> Vec<Device>;
+
+    /// The version of the inventory database that gave the devices. The
+    /// snapshot manifest records it. `None` with no inventory database.
+    fn version(&self) -> Option<u64> {
+        None
+    }
 }
 
 impl Inventory for Vec<Device> {
     fn devices(&self) -> Vec<Device> {
         self.clone()
+    }
+}
+
+/// The devices of one read of the inventory database, with its version.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct InventoryList {
+    pub devices: Vec<Device>,
+    pub version: Option<u64>,
+}
+
+impl Inventory for InventoryList {
+    fn devices(&self) -> Vec<Device> {
+        self.devices.clone()
+    }
+
+    fn version(&self) -> Option<u64> {
+        self.version
     }
 }

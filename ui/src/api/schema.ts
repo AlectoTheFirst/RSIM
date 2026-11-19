@@ -55,6 +55,270 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The whole inventory at its version: the credential references, the jump hosts, the routes, the groups, the devices as stored and the bindings. */
+        get: operations["getInventory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The audit log, the newest record first: who changed which record when, with its old and its new value. */
+        get: operations["listAudit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The Equinix bindings: each Fabric port with its device port, and each Network Edge device with its device of the estate. */
+        get: operations["listBindings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/bindings/edge-devices/{account}/{edge_device}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Binds a Network Edge device of an account to a device of the estate. */
+        put: operations["putEdgeDeviceBinding"];
+        post?: never;
+        /** Removes the binding of a Network Edge device. */
+        delete: operations["deleteEdgeDeviceBinding"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/bindings/fabric-ports/{account}/{fabric_port}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Binds a Fabric port of an account to a device port. */
+        put: operations["putFabricPortBinding"];
+        post?: never;
+        /** Removes the binding of a Fabric port. */
+        delete: operations["deleteFabricPortBinding"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The credential references. No secret is in the inventory. */
+        get: operations["listCredentials"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/credentials/{credential}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Makes or replaces a credential reference: its source and its key. */
+        put: operations["putCredential"];
+        post?: never;
+        /** Removes a credential reference that nothing uses. */
+        delete: operations["deleteCredential"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The devices with the settings of their groups resolved: each setting has its value and its origin device, group or default. */
+        get: operations["listDevices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/devices/{device}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A device with the settings of its group resolved. */
+        get: operations["getDevice"];
+        /** Makes or replaces a device. A setting that is not given inherits from the group. The path gives the name. */
+        put: operations["putDevice"];
+        post?: never;
+        /** Removes a device with no binding. */
+        delete: operations["deleteDevice"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The device groups. */
+        get: operations["listGroups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/groups/{group}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A device group. */
+        get: operations["getGroup"];
+        /** Makes or replaces a device group. The path gives the name. */
+        put: operations["putGroup"];
+        post?: never;
+        /** Removes a device group with no device. */
+        delete: operations["deleteGroup"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/jump-hosts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The SSH jump hosts. */
+        get: operations["listJumpHosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/jump-hosts/{jump_host}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Makes or replaces a jump host. */
+        put: operations["putJumpHost"];
+        post?: never;
+        /** Removes a jump host that no route uses. */
+        delete: operations["deleteJumpHost"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/routes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The routes: the proxy and the jump hosts in order. */
+        get: operations["listRoutes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/routes/{route}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Makes or replaces a route. A proxy URL holds no login; the login is a credential reference. */
+        put: operations["putRoute"];
+        post?: never;
+        /** Removes a route that no group and no device uses. */
+        delete: operations["deleteRoute"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/openapi.json": {
         parameters: {
             query?: never;
@@ -365,6 +629,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description The kind of a change of the audit log.
+         * @enum {string}
+         */
+        Action: "create" | "update" | "delete";
         AlternativeJson: {
             choice: string;
             /** Format: uint32 */
@@ -398,6 +667,58 @@ export interface components {
             known: number;
         } | ("unset" | "unknown");
         /**
+         * AuditPage
+         * @description A page of the audit log, the newest record first.
+         */
+        AuditPage: {
+            /**
+             * Format: int64
+             * @description The `before` value of the next page, if there is one.
+             */
+            next_before?: number | null;
+            records: components["schemas"]["AuditRecord"][];
+        };
+        /**
+         * @description One record of the audit log: who changed what and when, with the old
+         *     and the new value of the record.
+         */
+        AuditRecord: {
+            action: components["schemas"]["Action"];
+            actor: string;
+            /** @description The time of the change in UTC, RFC 3339. */
+            at: string;
+            /** Format: int64 */
+            id: number;
+            /** @description The key of the record, for example the device name. */
+            key: string;
+            /**
+             * @description `credential`, `jump_host`, `route`, `group`, `device`,
+             *     `fabric_port_binding` or `edge_device_binding`.
+             */
+            kind: string;
+            new?: unknown;
+            old?: unknown;
+            /**
+             * Format: uint64
+             * @description The inventory version that the change made.
+             */
+            version: number;
+        };
+        /** @description The bindings of the inventory. */
+        Bindings: {
+            edge_devices: components["schemas"]["EdgeDeviceBinding"][];
+            fabric_ports: components["schemas"]["FabricPortBinding"][];
+        };
+        /**
+         * BindingsOut
+         * @description The bindings at one version.
+         */
+        BindingsOut: {
+            bindings: components["schemas"]["Bindings"];
+            /** Format: uint64 */
+            version: number;
+        };
+        /**
          * @description A branch with its verdict, its delay, the number of its steps and, in
          *     the form `steps`, one line for each step.
          */
@@ -418,6 +739,8 @@ export interface components {
             steps: components["schemas"]["TraceStepJson"][];
             verdict: components["schemas"]["VerdictJson"];
         };
+        /** @description The BGP sections that the collector reads of a router. */
+        CaptureBgp: "off" | "sessions" | "all";
         /** @description One claim of the catalog. */
         ClaimDef: {
             description: string;
@@ -502,6 +825,33 @@ export interface components {
             /** Format: uint */
             unknown: number;
         };
+        /**
+         * Credential
+         * @description A reference to a credential. The secret stays in its source.
+         */
+        Credential: {
+            description?: string | null;
+            /** @description The key in the source. */
+            key: string;
+            /**
+             * @description The name of the reference. In a PUT body it can be left out; the
+             *     path gives it.
+             * @default
+             */
+            name: string;
+            source: components["schemas"]["CredentialSource"];
+        };
+        /** @description The source of a credential. */
+        CredentialSource: "env" | "env-url";
+        /**
+         * CredentialsOut
+         * @description The credential references at one version.
+         */
+        CredentialsOut: {
+            credentials: components["schemas"]["Credential"][];
+            /** Format: uint64 */
+            version: number;
+        };
         DelayGapJson: {
             function: string;
             kind: string;
@@ -515,6 +865,46 @@ export interface components {
         DestinationJson: {
             device?: string | null;
             endpoint?: string | null;
+        };
+        /**
+         * Device
+         * @description A device of the inventory. Its name is the device of the snapshot
+         *     store.
+         */
+        Device: {
+            /** @description The host name or the address of the management plane. */
+            address: string;
+            /**
+             * @description The site of a controller that the device reads, for example the
+             *     UniFi site of a console.
+             */
+            console_site?: string | null;
+            /** @description The name of the device group. */
+            group: string;
+            location?: string | null;
+            /** @default  */
+            name: string;
+            /**
+             * @description The settings that the device sets in place of its group.
+             * @default {}
+             */
+            settings: components["schemas"]["Settings"];
+            site?: string | null;
+        };
+        /**
+         * EdgeDeviceBinding
+         * @description A Network Edge device of an Equinix account and the device of the
+         *     estate that it is.
+         */
+        EdgeDeviceBinding: {
+            /** @default  */
+            account: string;
+            device: string;
+            /**
+             * @description The uuid of the Network Edge device.
+             * @default
+             */
+            edge_device: string;
         };
         /** @description An encapsulation header. The values are field values. */
         EncapJson: {
@@ -536,6 +926,26 @@ export interface components {
             result: components["schemas"]["ClaimResult"];
             /** @description What the row is about, for example a link or a branch. */
             subject: string;
+        };
+        /**
+         * FabricPortBinding
+         * @description A Fabric port of an Equinix account and the device port at the other
+         *     end of its cross connect.
+         */
+        FabricPortBinding: {
+            /**
+             * @description The device of the account. In a PUT body it can be left out; the
+             *     path gives it.
+             * @default
+             */
+            account: string;
+            device: string;
+            /**
+             * @description The uuid or the name of the Fabric port.
+             * @default
+             */
+            fabric_port: string;
+            port: string;
         };
         /** @description A header field value: {"known": value}, {"in": [...]}, "unknown", "absent" or "original". */
         Field_string: {
@@ -579,6 +989,37 @@ export interface components {
          * @enum {string}
          */
         FragmentName: "unfragmented" | "first" | "later";
+        /**
+         * Group
+         * @description A device group: the vendor and the settings of its devices.
+         */
+        Group: {
+            description?: string | null;
+            /** @default  */
+            name: string;
+            /** @default {} */
+            settings: components["schemas"]["Settings"];
+            /**
+             * @description The vendor, for example `vyos`, `nxos`, `iosxr`, `iosxe` or `unifi`.
+             *     A vendor with no collector is allowed; the collector skips its
+             *     devices.
+             */
+            vendor: string;
+        };
+        /**
+         * GroupsOut
+         * @description The device groups at one version.
+         */
+        GroupsOut: {
+            groups: components["schemas"]["Group"][];
+            /** Format: uint64 */
+            version: number;
+        };
+        /**
+         * @description What a trace does at an HA pair or a cluster whose active node is
+         *     not collected.
+         */
+        Ha: "none" | "all" | "one";
         HeaderJson: {
             "destination.ip": components["schemas"]["Field_string"];
             "destination.mac": components["schemas"]["Field_string"];
@@ -637,10 +1078,54 @@ export interface components {
         };
         /** @description An ingress point as <device>/<interface>. */
         IngressRef: string;
+        /**
+         * Inventory
+         * @description The whole inventory at one version, with each list sorted by its key.
+         */
+        Inventory: {
+            bindings: components["schemas"]["Bindings"];
+            credentials: components["schemas"]["Credential"][];
+            devices: components["schemas"]["Device"][];
+            groups: components["schemas"]["Group"][];
+            jump_hosts: components["schemas"]["JumpHost"][];
+            routes: components["schemas"]["Route"][];
+            /**
+             * Format: uint64
+             * @description The version. Each change of the inventory increases it by 1.
+             */
+            version: number;
+        };
+        /**
+         * JumpHost
+         * @description An SSH jump host with its own credential.
+         */
+        JumpHost: {
+            /** @description The host name or the address, with an optional port. */
+            address: string;
+            /** @description The name of the credential reference. */
+            credential: string;
+            /** @default  */
+            name: string;
+            /** @default modern */
+            ssh_algorithms: components["schemas"]["SshAlgorithms"];
+        };
+        /**
+         * JumpHostsOut
+         * @description The jump hosts at one version.
+         */
+        JumpHostsOut: {
+            jump_hosts: components["schemas"]["JumpHost"][];
+            /** Format: uint64 */
+            version: number;
+        };
         MemberJson: {
             current: components["schemas"]["HeaderJson"];
             original: components["schemas"]["HeaderJson"];
         };
+        /** @description The JSON form of the NX-OS answers. */
+        NxosJson: "plain" | "native";
+        /** @description Where a resolved setting comes from. */
+        Origin: "device" | "group" | "default";
         OutcomeJson: {
             destination?: components["schemas"]["DestinationJson"] | null;
             /** @description `forward`, `deliver`, `exit`, `drop` or `unknown`. */
@@ -839,6 +1324,125 @@ export interface components {
             not_run_reason?: string | null;
             ran: boolean;
         };
+        /** @description A setting with its origin. */
+        Resolved: {
+            origin: components["schemas"]["Origin"];
+            value?: string | null;
+        };
+        /** @description A setting with its origin. */
+        Resolved2: {
+            origin: components["schemas"]["Origin"];
+            value: components["schemas"]["SshAlgorithms"];
+        };
+        /** @description A setting with its origin. */
+        Resolved3: {
+            origin: components["schemas"]["Origin"];
+            value: components["schemas"]["SshMode"];
+        };
+        /** @description A setting with its origin. */
+        Resolved4: {
+            origin: components["schemas"]["Origin"];
+            /** Format: uint32 */
+            value: number;
+        };
+        /** @description A setting with its origin. */
+        Resolved5: {
+            origin: components["schemas"]["Origin"];
+            value: components["schemas"]["NxosJson"];
+        };
+        /** @description A setting with its origin. */
+        Resolved6: {
+            origin: components["schemas"]["Origin"];
+            value: components["schemas"]["TlsTrust"];
+        };
+        /** @description A setting with its origin. */
+        Resolved7: {
+            origin: components["schemas"]["Origin"];
+            value: components["schemas"]["CaptureBgp"];
+        };
+        /** @description A setting with its origin. */
+        Resolved8: {
+            origin: components["schemas"]["Origin"];
+            value: components["schemas"]["Ha"];
+        };
+        /**
+         * ResolvedDevice
+         * @description A device with the settings of its group resolved.
+         */
+        ResolvedDevice: {
+            address: string;
+            console_site?: string | null;
+            group: string;
+            location?: string | null;
+            name: string;
+            settings: components["schemas"]["ResolvedSettings"];
+            site?: string | null;
+            /** @description The vendor of the group. */
+            vendor: string;
+        };
+        /**
+         * ResolvedDevices
+         * @description The devices of the inventory resolved, at its version.
+         */
+        ResolvedDevices: {
+            devices: components["schemas"]["ResolvedDevice"][];
+            /** Format: uint64 */
+            version: number;
+        };
+        /** @description The settings of a device after the inheritance. */
+        ResolvedSettings: {
+            capture_bgp: components["schemas"]["Resolved7"];
+            /**
+             * @description The credential reference; none if neither the device nor the group
+             *     names one.
+             */
+            credential: components["schemas"]["Resolved"];
+            ha: components["schemas"]["Resolved8"];
+            nxos_json: components["schemas"]["Resolved5"];
+            paged_section_timeout_seconds: components["schemas"]["Resolved4"];
+            request_timeout_seconds: components["schemas"]["Resolved4"];
+            retries: components["schemas"]["Resolved4"];
+            /** @description The route; none is a direct connection. */
+            route: components["schemas"]["Resolved"];
+            section_timeout_seconds: components["schemas"]["Resolved4"];
+            ssh_algorithms: components["schemas"]["Resolved2"];
+            ssh_channels: components["schemas"]["Resolved4"];
+            ssh_mode: components["schemas"]["Resolved3"];
+            timeout_seconds: components["schemas"]["Resolved4"];
+            tls_ca_file: components["schemas"]["Resolved"];
+            tls_trust: components["schemas"]["Resolved6"];
+        };
+        /**
+         * Route
+         * @description The network path to a device: an optional proxy for the first TCP
+         *     connection, then the jump hosts in order. A route with no proxy and no
+         *     jump host is a direct connection.
+         */
+        Route: {
+            /**
+             * @description The names of the jump hosts, in order.
+             * @default []
+             */
+            jumps: string[];
+            /** @default  */
+            name: string;
+            /**
+             * @description `http://host:port`, `socks5://host:port` or `socks5h://host:port`,
+             *     with no login.
+             */
+            proxy?: string | null;
+            /** @description The credential reference of the login of the proxy. */
+            proxy_credential?: string | null;
+        };
+        /**
+         * RoutesOut
+         * @description The routes at one version.
+         */
+        RoutesOut: {
+            routes: components["schemas"]["Route"][];
+            /** Format: uint64 */
+            version: number;
+        };
         /** SetAnswerOut */
         SetAnswerOut: {
             answer: components["schemas"]["AnswerJson"];
@@ -948,6 +1552,56 @@ export interface components {
              */
             topology: string;
         };
+        /**
+         * @description The settings of a device group or of a device. On a device, a setting
+         *     that is not given takes the value of the group; on a group, a setting
+         *     that is not given takes the default.
+         */
+        Settings: {
+            capture_bgp?: components["schemas"]["CaptureBgp"] | null;
+            /** @description The name of the credential reference. */
+            credential?: string | null;
+            ha?: components["schemas"]["Ha"] | null;
+            nxos_json?: components["schemas"]["NxosJson"] | null;
+            /**
+             * Format: uint32
+             * @description The time for the read of all pages of one section, from 1 to 86400
+             *     seconds.
+             */
+            paged_section_timeout_seconds?: number | null;
+            /**
+             * Format: uint32
+             * @description The time for one HTTP request, from 1 to 86400 seconds.
+             */
+            request_timeout_seconds?: number | null;
+            /**
+             * Format: uint32
+             * @description The retries of a failed section, from 0 to 10.
+             */
+            retries?: number | null;
+            /** @description The name of the route. The default is a direct connection. */
+            route?: string | null;
+            /**
+             * Format: uint32
+             * @description The time for one section, from 1 to 86400 seconds.
+             */
+            section_timeout_seconds?: number | null;
+            ssh_algorithms?: components["schemas"]["SshAlgorithms"] | null;
+            /**
+             * Format: uint32
+             * @description The exec channels at one time. The default is 1.
+             */
+            ssh_channels?: number | null;
+            ssh_mode?: components["schemas"]["SshMode"] | null;
+            /**
+             * Format: uint32
+             * @description The time for all sections of a device, from 1 to 86400 seconds.
+             */
+            timeout_seconds?: number | null;
+            /** @description The PEM file of the CA bundle of `tls_trust` `ca`. */
+            tls_ca_file?: string | null;
+            tls_trust?: components["schemas"]["TlsTrust"] | null;
+        };
         SpanJson: {
             file: string;
             /** Format: uint32 */
@@ -955,6 +1609,10 @@ export interface components {
             /** Format: uint32 */
             last_line: number;
         };
+        /** @description The SSH algorithm set of a connection. */
+        SshAlgorithms: "modern" | "legacy";
+        /** @description How SSH sends the commands of a device. */
+        SshMode: "exec" | "shell" | "connection";
         /** @description One trace step with no packet set. */
         StepLineJson: {
             device?: string | null;
@@ -1050,6 +1708,8 @@ export interface components {
          * @enum {string}
          */
         TcpFlag: "fin" | "syn" | "rst" | "psh" | "ack" | "urg" | "ece" | "cwr";
+        /** @description The check of the TLS certificate of an HTTPS device. */
+        TlsTrust: "pin" | "ca" | "none";
         /** @description One edge. */
         TopoEdge: {
             /** @description In a path drawing: the branches that cross the edge. */
@@ -1171,6 +1831,14 @@ export interface components {
             kind: string;
             reason?: components["schemas"]["ReasonJson"] | null;
         };
+        /**
+         * WrittenOut
+         * @description The answer of a write: the inventory version after it.
+         */
+        WrittenOut: {
+            /** Format: uint64 */
+            version: number;
+        };
     };
     responses: never;
     parameters: never;
@@ -1258,6 +1926,771 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClaimsOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getInventory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Inventory"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listAudit: {
+        parameters: {
+            query?: {
+                /** @description The records of a page, from 1 to 1000; 100 if not given. */
+                limit?: string;
+                /** @description Only the records with an id below this id: the next_before of the page before. */
+                before?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditPage"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listBindings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BindingsOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    putEdgeDeviceBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account: string;
+                edge_device: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EdgeDeviceBinding"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteEdgeDeviceBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account: string;
+                edge_device: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    putFabricPortBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account: string;
+                fabric_port: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FabricPortBinding"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteFabricPortBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account: string;
+                fabric_port: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listCredentials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialsOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    putCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credential: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Credential"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credential: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolvedDevices"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolvedDevice"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    putDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Device"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listGroups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupsOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Group"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    putGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Group"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listJumpHosts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JumpHostsOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    putJumpHost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jump_host: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JumpHost"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteJumpHost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jump_host: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listRoutes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutesOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    putRoute: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                route: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Route"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteRoute: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                route: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
                 };
             };
             /** @description A problem */

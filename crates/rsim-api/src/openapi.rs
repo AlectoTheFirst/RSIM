@@ -311,7 +311,7 @@ fn one_of(list: &[fn() -> Value], components: &mut Map<String, Value>) -> Value 
 pub fn document() -> Value {
     let mut components = Map::new();
     let mut paths = Map::new();
-    for r in ROUTES {
+    for r in ROUTES.iter().chain(crate::inventory::ROUTES) {
         let mut params: Vec<Value> = r
             .path
             .split('/')
@@ -338,7 +338,7 @@ pub fn document() -> Value {
                     "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}
                 }
             },
-            "security": [{"rsim": ["rsim.read"]}]
+            "security": [{"rsim": [if matches!(r.method, "put" | "delete") { "rsim.inventory.write" } else { "rsim.read" }]}]
         });
         if !r.body.is_empty() {
             op["requestBody"] = json!({
@@ -386,7 +386,8 @@ pub fn document() -> Value {
                             "tokenUrl": "/oauth/token",
                             "scopes": {
                                 "rsim.read": "Read the twins, the tables, the queries and the claims.",
-                                "rsim.scenario.write": "Make and change what-if scenarios."
+                                "rsim.scenario.write": "Make and change what-if scenarios.",
+                                "rsim.inventory.write": "Change the inventory."
                             }
                         }
                     }

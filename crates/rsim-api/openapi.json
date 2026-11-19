@@ -1,6 +1,15 @@
 {
   "components": {
     "schemas": {
+      "Action": {
+        "description": "The kind of a change of the audit log.",
+        "enum": [
+          "create",
+          "update",
+          "delete"
+        ],
+        "type": "string"
+      },
       "AlternativeJson": {
         "properties": {
           "choice": {
@@ -140,6 +149,116 @@
           }
         ]
       },
+      "AuditPage": {
+        "description": "A page of the audit log, the newest record first.",
+        "properties": {
+          "next_before": {
+            "description": "The `before` value of the next page, if there is one.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/AuditRecord"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "records"
+        ],
+        "title": "AuditPage",
+        "type": "object"
+      },
+      "AuditRecord": {
+        "description": "One record of the audit log: who changed what and when, with the old\nand the new value of the record.",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/Action"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "at": {
+            "description": "The time of the change in UTC, RFC 3339.",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "key": {
+            "description": "The key of the record, for example the device name.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`credential`, `jump_host`, `route`, `group`, `device`,\n`fabric_port_binding` or `edge_device_binding`.",
+            "type": "string"
+          },
+          "new": true,
+          "old": true,
+          "version": {
+            "description": "The inventory version that the change made.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "actor",
+          "version",
+          "kind",
+          "key",
+          "action"
+        ],
+        "type": "object"
+      },
+      "Bindings": {
+        "description": "The bindings of the inventory.",
+        "properties": {
+          "edge_devices": {
+            "items": {
+              "$ref": "#/components/schemas/EdgeDeviceBinding"
+            },
+            "type": "array"
+          },
+          "fabric_ports": {
+            "items": {
+              "$ref": "#/components/schemas/FabricPortBinding"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "fabric_ports",
+          "edge_devices"
+        ],
+        "type": "object"
+      },
+      "BindingsOut": {
+        "description": "The bindings at one version.",
+        "properties": {
+          "bindings": {
+            "$ref": "#/components/schemas/Bindings"
+          },
+          "version": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "bindings"
+        ],
+        "title": "BindingsOut",
+        "type": "object"
+      },
       "BranchBriefJson": {
         "description": "A branch with its verdict, its delay, the number of its steps and, in\nthe form `steps`, one line for each step.",
         "properties": {
@@ -206,6 +325,27 @@
           "steps"
         ],
         "type": "object"
+      },
+      "CaptureBgp": {
+        "description": "The BGP sections that the collector reads of a router.",
+        "oneOf": [
+          {
+            "enum": [
+              "off"
+            ],
+            "type": "string"
+          },
+          {
+            "const": "sessions",
+            "description": "The summary of each session.",
+            "type": "string"
+          },
+          {
+            "const": "all",
+            "description": "The summaries, the neighbour detail and the tables of each\nneighbour.",
+            "type": "string"
+          }
+        ]
       },
       "ClaimDef": {
         "description": "One claim of the catalog.",
@@ -473,6 +613,73 @@
         ],
         "type": "object"
       },
+      "Credential": {
+        "additionalProperties": false,
+        "description": "A reference to a credential. The secret stays in its source.",
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "key": {
+            "description": "The key in the source.",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "description": "The name of the reference. In a PUT body it can be left out; the\npath gives it.",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/CredentialSource"
+          }
+        },
+        "required": [
+          "source",
+          "key"
+        ],
+        "title": "Credential",
+        "type": "object"
+      },
+      "CredentialSource": {
+        "description": "The source of a credential.",
+        "oneOf": [
+          {
+            "const": "env",
+            "description": "The keys `<KEY>_USER` and `<KEY>_PASS`, `<KEY>_KEY_FILE` with\n`<KEY>_KEY_PASS`, `<KEY>_AGENT` or `<KEY>_API_KEY` of the env\nfile of the collector.",
+            "type": "string"
+          },
+          {
+            "const": "env-url",
+            "description": "The user and the password in the URL of the env key `<KEY>`,\nfor example the login of a proxy URL.",
+            "type": "string"
+          }
+        ]
+      },
+      "CredentialsOut": {
+        "description": "The credential references at one version.",
+        "properties": {
+          "credentials": {
+            "items": {
+              "$ref": "#/components/schemas/Credential"
+            },
+            "type": "array"
+          },
+          "version": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "credentials"
+        ],
+        "title": "CredentialsOut",
+        "type": "object"
+      },
       "DelayGapJson": {
         "properties": {
           "function": {
@@ -527,6 +734,77 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "Device": {
+        "additionalProperties": false,
+        "description": "A device of the inventory. Its name is the device of the snapshot\nstore.",
+        "properties": {
+          "address": {
+            "description": "The host name or the address of the management plane.",
+            "type": "string"
+          },
+          "console_site": {
+            "description": "The site of a controller that the device reads, for example the\nUniFi site of a console.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "group": {
+            "description": "The name of the device group.",
+            "type": "string"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "default": "",
+            "type": "string"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/Settings",
+            "default": {},
+            "description": "The settings that the device sets in place of its group."
+          },
+          "site": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "group",
+          "address"
+        ],
+        "title": "Device",
+        "type": "object"
+      },
+      "EdgeDeviceBinding": {
+        "additionalProperties": false,
+        "description": "A Network Edge device of an Equinix account and the device of the\nestate that it is.",
+        "properties": {
+          "account": {
+            "default": "",
+            "type": "string"
+          },
+          "device": {
+            "type": "string"
+          },
+          "edge_device": {
+            "default": "",
+            "description": "The uuid of the Network Edge device.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "title": "EdgeDeviceBinding",
         "type": "object"
       },
       "EncapJson": {
@@ -615,6 +893,34 @@
           "detail",
           "provenance"
         ],
+        "type": "object"
+      },
+      "FabricPortBinding": {
+        "additionalProperties": false,
+        "description": "A Fabric port of an Equinix account and the device port at the other\nend of its cross connect.",
+        "properties": {
+          "account": {
+            "default": "",
+            "description": "The device of the account. In a PUT body it can be left out; the\npath gives it.",
+            "type": "string"
+          },
+          "device": {
+            "type": "string"
+          },
+          "fabric_port": {
+            "default": "",
+            "description": "The uuid or the name of the Fabric port.",
+            "type": "string"
+          },
+          "port": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "device",
+          "port"
+        ],
+        "title": "FabricPortBinding",
         "type": "object"
       },
       "Field_string": {
@@ -824,6 +1130,77 @@
           "later"
         ],
         "type": "string"
+      },
+      "Group": {
+        "additionalProperties": false,
+        "description": "A device group: the vendor and the settings of its devices.",
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "default": "",
+            "type": "string"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/Settings",
+            "default": {}
+          },
+          "vendor": {
+            "description": "The vendor, for example `vyos`, `nxos`, `iosxr`, `iosxe` or `unifi`.\nA vendor with no collector is allowed; the collector skips its\ndevices.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "vendor"
+        ],
+        "title": "Group",
+        "type": "object"
+      },
+      "GroupsOut": {
+        "description": "The device groups at one version.",
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            },
+            "type": "array"
+          },
+          "version": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "groups"
+        ],
+        "title": "GroupsOut",
+        "type": "object"
+      },
+      "Ha": {
+        "description": "What a trace does at an HA pair or a cluster whose active node is\nnot collected.",
+        "oneOf": [
+          {
+            "const": "none",
+            "description": "The trace stops at the pair with `Unknown`.",
+            "type": "string"
+          },
+          {
+            "const": "all",
+            "description": "The trace follows each node.",
+            "type": "string"
+          },
+          {
+            "const": "one",
+            "description": "The trace follows one node, chosen in a fixed order.",
+            "type": "string"
+          }
+        ]
       },
       "HeaderJson": {
         "properties": {
@@ -1054,6 +1431,111 @@
         "pattern": "^[^/]+/.+$",
         "type": "string"
       },
+      "Inventory": {
+        "description": "The whole inventory at one version, with each list sorted by its key.",
+        "properties": {
+          "bindings": {
+            "$ref": "#/components/schemas/Bindings"
+          },
+          "credentials": {
+            "items": {
+              "$ref": "#/components/schemas/Credential"
+            },
+            "type": "array"
+          },
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/Device"
+            },
+            "type": "array"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            },
+            "type": "array"
+          },
+          "jump_hosts": {
+            "items": {
+              "$ref": "#/components/schemas/JumpHost"
+            },
+            "type": "array"
+          },
+          "routes": {
+            "items": {
+              "$ref": "#/components/schemas/Route"
+            },
+            "type": "array"
+          },
+          "version": {
+            "description": "The version. Each change of the inventory increases it by 1.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "credentials",
+          "jump_hosts",
+          "routes",
+          "groups",
+          "devices",
+          "bindings"
+        ],
+        "title": "Inventory",
+        "type": "object"
+      },
+      "JumpHost": {
+        "additionalProperties": false,
+        "description": "An SSH jump host with its own credential.",
+        "properties": {
+          "address": {
+            "description": "The host name or the address, with an optional port.",
+            "type": "string"
+          },
+          "credential": {
+            "description": "The name of the credential reference.",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "type": "string"
+          },
+          "ssh_algorithms": {
+            "$ref": "#/components/schemas/SshAlgorithms",
+            "default": "modern"
+          }
+        },
+        "required": [
+          "address",
+          "credential"
+        ],
+        "title": "JumpHost",
+        "type": "object"
+      },
+      "JumpHostsOut": {
+        "description": "The jump hosts at one version.",
+        "properties": {
+          "jump_hosts": {
+            "items": {
+              "$ref": "#/components/schemas/JumpHost"
+            },
+            "type": "array"
+          },
+          "version": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "jump_hosts"
+        ],
+        "title": "JumpHostsOut",
+        "type": "object"
+      },
       "MemberJson": {
         "properties": {
           "current": {
@@ -1068,6 +1550,41 @@
           "current"
         ],
         "type": "object"
+      },
+      "NxosJson": {
+        "description": "The JSON form of the NX-OS answers.",
+        "oneOf": [
+          {
+            "const": "plain",
+            "description": "`| json`.",
+            "type": "string"
+          },
+          {
+            "const": "native",
+            "description": "`| json native`, NX-OS 9.3 and later.",
+            "type": "string"
+          }
+        ]
+      },
+      "Origin": {
+        "description": "Where a resolved setting comes from.",
+        "oneOf": [
+          {
+            "const": "device",
+            "description": "The device sets it.",
+            "type": "string"
+          },
+          {
+            "const": "group",
+            "description": "The device inherits it from its group.",
+            "type": "string"
+          },
+          {
+            "const": "default",
+            "description": "Neither sets it.",
+            "type": "string"
+          }
+        ]
       },
       "OutcomeJson": {
         "properties": {
@@ -1720,6 +2237,334 @@
         ],
         "type": "object"
       },
+      "Resolved": {
+        "description": "A setting with its origin.",
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "origin"
+        ],
+        "type": "object"
+      },
+      "Resolved2": {
+        "description": "A setting with its origin.",
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "value": {
+            "$ref": "#/components/schemas/SshAlgorithms"
+          }
+        },
+        "required": [
+          "value",
+          "origin"
+        ],
+        "type": "object"
+      },
+      "Resolved3": {
+        "description": "A setting with its origin.",
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "value": {
+            "$ref": "#/components/schemas/SshMode"
+          }
+        },
+        "required": [
+          "value",
+          "origin"
+        ],
+        "type": "object"
+      },
+      "Resolved4": {
+        "description": "A setting with its origin.",
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "value": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "value",
+          "origin"
+        ],
+        "type": "object"
+      },
+      "Resolved5": {
+        "description": "A setting with its origin.",
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "value": {
+            "$ref": "#/components/schemas/NxosJson"
+          }
+        },
+        "required": [
+          "value",
+          "origin"
+        ],
+        "type": "object"
+      },
+      "Resolved6": {
+        "description": "A setting with its origin.",
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "value": {
+            "$ref": "#/components/schemas/TlsTrust"
+          }
+        },
+        "required": [
+          "value",
+          "origin"
+        ],
+        "type": "object"
+      },
+      "Resolved7": {
+        "description": "A setting with its origin.",
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "value": {
+            "$ref": "#/components/schemas/CaptureBgp"
+          }
+        },
+        "required": [
+          "value",
+          "origin"
+        ],
+        "type": "object"
+      },
+      "Resolved8": {
+        "description": "A setting with its origin.",
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "value": {
+            "$ref": "#/components/schemas/Ha"
+          }
+        },
+        "required": [
+          "value",
+          "origin"
+        ],
+        "type": "object"
+      },
+      "ResolvedDevice": {
+        "description": "A device with the settings of its group resolved.",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "console_site": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "group": {
+            "type": "string"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/ResolvedSettings"
+          },
+          "site": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "vendor": {
+            "description": "The vendor of the group.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "group",
+          "vendor",
+          "address",
+          "settings"
+        ],
+        "title": "ResolvedDevice",
+        "type": "object"
+      },
+      "ResolvedDevices": {
+        "description": "The devices of the inventory resolved, at its version.",
+        "properties": {
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/ResolvedDevice"
+            },
+            "type": "array"
+          },
+          "version": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "devices"
+        ],
+        "title": "ResolvedDevices",
+        "type": "object"
+      },
+      "ResolvedSettings": {
+        "description": "The settings of a device after the inheritance.",
+        "properties": {
+          "capture_bgp": {
+            "$ref": "#/components/schemas/Resolved7"
+          },
+          "credential": {
+            "$ref": "#/components/schemas/Resolved",
+            "description": "The credential reference; none if neither the device nor the group\nnames one."
+          },
+          "ha": {
+            "$ref": "#/components/schemas/Resolved8"
+          },
+          "nxos_json": {
+            "$ref": "#/components/schemas/Resolved5"
+          },
+          "paged_section_timeout_seconds": {
+            "$ref": "#/components/schemas/Resolved4"
+          },
+          "request_timeout_seconds": {
+            "$ref": "#/components/schemas/Resolved4"
+          },
+          "retries": {
+            "$ref": "#/components/schemas/Resolved4"
+          },
+          "route": {
+            "$ref": "#/components/schemas/Resolved",
+            "description": "The route; none is a direct connection."
+          },
+          "section_timeout_seconds": {
+            "$ref": "#/components/schemas/Resolved4"
+          },
+          "ssh_algorithms": {
+            "$ref": "#/components/schemas/Resolved2"
+          },
+          "ssh_channels": {
+            "$ref": "#/components/schemas/Resolved4"
+          },
+          "ssh_mode": {
+            "$ref": "#/components/schemas/Resolved3"
+          },
+          "timeout_seconds": {
+            "$ref": "#/components/schemas/Resolved4"
+          },
+          "tls_ca_file": {
+            "$ref": "#/components/schemas/Resolved"
+          },
+          "tls_trust": {
+            "$ref": "#/components/schemas/Resolved6"
+          }
+        },
+        "required": [
+          "credential",
+          "route",
+          "ssh_algorithms",
+          "ssh_mode",
+          "ssh_channels",
+          "nxos_json",
+          "tls_trust",
+          "tls_ca_file",
+          "capture_bgp",
+          "timeout_seconds",
+          "section_timeout_seconds",
+          "request_timeout_seconds",
+          "paged_section_timeout_seconds",
+          "retries",
+          "ha"
+        ],
+        "type": "object"
+      },
+      "Route": {
+        "additionalProperties": false,
+        "description": "The network path to a device: an optional proxy for the first TCP\nconnection, then the jump hosts in order. A route with no proxy and no\njump host is a direct connection.",
+        "properties": {
+          "jumps": {
+            "default": [],
+            "description": "The names of the jump hosts, in order.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "default": "",
+            "type": "string"
+          },
+          "proxy": {
+            "description": "`http://host:port`, `socks5://host:port` or `socks5h://host:port`,\nwith no login.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "proxy_credential": {
+            "description": "The credential reference of the login of the proxy.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "Route",
+        "type": "object"
+      },
+      "RoutesOut": {
+        "description": "The routes at one version.",
+        "properties": {
+          "routes": {
+            "items": {
+              "$ref": "#/components/schemas/Route"
+            },
+            "type": "array"
+          },
+          "version": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "routes"
+        ],
+        "title": "RoutesOut",
+        "type": "object"
+      },
       "SetAnswerOut": {
         "properties": {
           "answer": {
@@ -2165,6 +3010,148 @@
         "title": "SetQueryArgs",
         "type": "object"
       },
+      "Settings": {
+        "additionalProperties": false,
+        "description": "The settings of a device group or of a device. On a device, a setting\nthat is not given takes the value of the group; on a group, a setting\nthat is not given takes the default.",
+        "properties": {
+          "capture_bgp": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CaptureBgp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credential": {
+            "description": "The name of the credential reference.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ha": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Ha"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nxos_json": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NxosJson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paged_section_timeout_seconds": {
+            "description": "The time for the read of all pages of one section, from 1 to 86400\nseconds.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "request_timeout_seconds": {
+            "description": "The time for one HTTP request, from 1 to 86400 seconds.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "retries": {
+            "description": "The retries of a failed section, from 0 to 10.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "route": {
+            "description": "The name of the route. The default is a direct connection.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "section_timeout_seconds": {
+            "description": "The time for one section, from 1 to 86400 seconds.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "ssh_algorithms": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SshAlgorithms"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ssh_channels": {
+            "description": "The exec channels at one time. The default is 1.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "ssh_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SshMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeout_seconds": {
+            "description": "The time for all sections of a device, from 1 to 86400 seconds.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tls_ca_file": {
+            "description": "The PEM file of the CA bundle of `tls_trust` `ca`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tls_trust": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TlsTrust"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
       "SpanJson": {
         "properties": {
           "file": {
@@ -2187,6 +3174,42 @@
           "last_line"
         ],
         "type": "object"
+      },
+      "SshAlgorithms": {
+        "description": "The SSH algorithm set of a connection.",
+        "oneOf": [
+          {
+            "enum": [
+              "modern"
+            ],
+            "type": "string"
+          },
+          {
+            "const": "legacy",
+            "description": "The modern set with the SHA-1 and CBC algorithms that older\nnetwork operating systems need.",
+            "type": "string"
+          }
+        ]
+      },
+      "SshMode": {
+        "description": "How SSH sends the commands of a device.",
+        "oneOf": [
+          {
+            "const": "exec",
+            "description": "One exec channel for each command.",
+            "type": "string"
+          },
+          {
+            "const": "shell",
+            "description": "One interactive shell for all commands.",
+            "type": "string"
+          },
+          {
+            "const": "connection",
+            "description": "One connection for each command.",
+            "type": "string"
+          }
+        ]
       },
       "StepLineJson": {
         "description": "One trace step with no packet set.",
@@ -2490,6 +3513,26 @@
           "cwr"
         ],
         "type": "string"
+      },
+      "TlsTrust": {
+        "description": "The check of the TLS certificate of an HTTPS device.",
+        "oneOf": [
+          {
+            "const": "pin",
+            "description": "The certificate is pinned at first contact.",
+            "type": "string"
+          },
+          {
+            "const": "ca",
+            "description": "The certificate chains to the CA bundle of `tls_ca_file`.",
+            "type": "string"
+          },
+          {
+            "const": "none",
+            "description": "No check of the certificate.",
+            "type": "string"
+          }
+        ]
       },
       "TopoEdge": {
         "description": "One edge.",
@@ -2880,6 +3923,21 @@
           "kind"
         ],
         "type": "object"
+      },
+      "WrittenOut": {
+        "description": "The answer of a write: the inventory version after it.",
+        "properties": {
+          "version": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "WrittenOut",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -2888,6 +3946,7 @@
         "flows": {
           "clientCredentials": {
             "scopes": {
+              "rsim.inventory.write": "Change the inventory.",
               "rsim.read": "Read the twins, the tables, the queries and the claims.",
               "rsim.scenario.write": "Make and change what-if scenarios."
             },
@@ -3026,6 +4085,1117 @@
           }
         ],
         "summary": "The catalog of the claims."
+      }
+    },
+    "/v1/inventory": {
+      "get": {
+        "operationId": "getInventory",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Inventory"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The whole inventory at its version: the credential references, the jump hosts, the routes, the groups, the devices as stored and the bindings."
+      }
+    },
+    "/v1/inventory/audit": {
+      "get": {
+        "operationId": "listAudit",
+        "parameters": [
+          {
+            "description": "The records of a page, from 1 to 1000; 100 if not given.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only the records with an id below this id: the next_before of the page before.",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditPage"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The audit log, the newest record first: who changed which record when, with its old and its new value."
+      }
+    },
+    "/v1/inventory/bindings": {
+      "get": {
+        "operationId": "listBindings",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindingsOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The Equinix bindings: each Fabric port with its device port, and each Network Edge device with its device of the estate."
+      }
+    },
+    "/v1/inventory/bindings/edge-devices/{account}/{edge_device}": {
+      "delete": {
+        "operationId": "deleteEdgeDeviceBinding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "edge_device",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Removes the binding of a Network Edge device."
+      },
+      "put": {
+        "operationId": "putEdgeDeviceBinding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "edge_device",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EdgeDeviceBinding"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Binds a Network Edge device of an account to a device of the estate."
+      }
+    },
+    "/v1/inventory/bindings/fabric-ports/{account}/{fabric_port}": {
+      "delete": {
+        "operationId": "deleteFabricPortBinding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "fabric_port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Removes the binding of a Fabric port."
+      },
+      "put": {
+        "operationId": "putFabricPortBinding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "fabric_port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FabricPortBinding"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Binds a Fabric port of an account to a device port."
+      }
+    },
+    "/v1/inventory/credentials": {
+      "get": {
+        "operationId": "listCredentials",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialsOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The credential references. No secret is in the inventory."
+      }
+    },
+    "/v1/inventory/credentials/{credential}": {
+      "delete": {
+        "operationId": "deleteCredential",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credential",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Removes a credential reference that nothing uses."
+      },
+      "put": {
+        "operationId": "putCredential",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credential",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Credential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Makes or replaces a credential reference: its source and its key."
+      }
+    },
+    "/v1/inventory/devices": {
+      "get": {
+        "operationId": "listDevices",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolvedDevices"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The devices with the settings of their groups resolved: each setting has its value and its origin device, group or default."
+      }
+    },
+    "/v1/inventory/devices/{device}": {
+      "delete": {
+        "operationId": "deleteDevice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Removes a device with no binding."
+      },
+      "get": {
+        "operationId": "getDevice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolvedDevice"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "A device with the settings of its group resolved."
+      },
+      "put": {
+        "operationId": "putDevice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Device"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Makes or replaces a device. A setting that is not given inherits from the group. The path gives the name."
+      }
+    },
+    "/v1/inventory/groups": {
+      "get": {
+        "operationId": "listGroups",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupsOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The device groups."
+      }
+    },
+    "/v1/inventory/groups/{group}": {
+      "delete": {
+        "operationId": "deleteGroup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Removes a device group with no device."
+      },
+      "get": {
+        "operationId": "getGroup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Group"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "A device group."
+      },
+      "put": {
+        "operationId": "putGroup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Group"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Makes or replaces a device group. The path gives the name."
+      }
+    },
+    "/v1/inventory/jump-hosts": {
+      "get": {
+        "operationId": "listJumpHosts",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JumpHostsOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The SSH jump hosts."
+      }
+    },
+    "/v1/inventory/jump-hosts/{jump_host}": {
+      "delete": {
+        "operationId": "deleteJumpHost",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "jump_host",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Removes a jump host that no route uses."
+      },
+      "put": {
+        "operationId": "putJumpHost",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "jump_host",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JumpHost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Makes or replaces a jump host."
+      }
+    },
+    "/v1/inventory/routes": {
+      "get": {
+        "operationId": "listRoutes",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutesOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The routes: the proxy and the jump hosts in order."
+      }
+    },
+    "/v1/inventory/routes/{route}": {
+      "delete": {
+        "operationId": "deleteRoute",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Removes a route that no group and no device uses."
+      },
+      "put": {
+        "operationId": "putRoute",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Route"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Makes or replaces a route. A proxy URL holds no login; the login is a credential reference."
       }
     },
     "/v1/openapi.json": {
