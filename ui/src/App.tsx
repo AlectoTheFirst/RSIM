@@ -130,6 +130,11 @@ function SetFacts(props: { a: Answer }) {
       <span>
         <OutcomeWord kind="deliver" /> {n.deliver}
       </span>
+      {n.exit ? (
+        <span>
+          <OutcomeWord kind="exit" /> {n.exit}
+        </span>
+      ) : null}
       <span>
         <OutcomeWord kind="drop" /> {n.drop}
       </span>

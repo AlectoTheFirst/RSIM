@@ -1,14 +1,15 @@
 //! Ingress, VRF selection, zone lookup and egress.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::net::IpAddr;
 
 use rsim_core::{
-    Attr, Branch, Context, ContextAttr, Delay, DelayGap, Dependency, Destination, FlowState,
-    FunctionId, FunctionKind, InterfaceId, NeighbourTarget, NetFunction, Outcome, PacketSet,
-    Reason, ReasonCode, Rewrite, SourceSpan, VrfId, ZoneId,
+    Attr, Branch, Context, ContextAttr, Delay, DelayGap, Dependency, Destination, ExitPoint,
+    FlowState, FunctionId, FunctionKind, InterfaceId, NeighbourTarget, NetFunction, NextHop,
+    Outcome, PacketSet, Reason, ReasonCode, Rewrite, SourceSpan, VrfId, ZoneId,
 };
 
-use crate::common::Meta;
+use crate::common::{Meta, push_nonempty};
 use crate::profile::UnzonedInterface;
 
 macro_rules! meta_methods {
@@ -274,6 +275,44 @@ pub struct Egress {
     pub rewrite: Rewrite,
     /// The 802.1Q tag of the frames that leave on the link.
     pub tag: Tag,
+    /// Why the interface is an edge of the twin, if it is one. With no
+    /// link, the packets of an edge leave the twin; the packets of an
+    /// interface that is not an edge, and the packets of a default route
+    /// edge with another next hop, are unknown.
+    pub exit: Option<ExitMark>,
+}
+
+/// Why an interface with no link is an edge of the twin.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ExitMark {
+    /// An access link to a provider, for example PPPoE.
+    AccessLink,
+    /// The interface carries a default route to the next hops `gateways`,
+    /// which are outside the twin. Only the packets whose next hop is one
+    /// of them leave the twin.
+    DefaultRoute { gateways: BTreeSet<IpAddr> },
+    /// The owner marks the interface as an edge.
+    Owner,
+}
+
+impl ExitMark {
+    fn text(&self) -> &'static str {
+        match self {
+            ExitMark::AccessLink => "access link",
+            ExitMark::DefaultRoute { .. } => "default route",
+            ExitMark::Owner => "marked by the owner",
+        }
+    }
+
+    /// Whether the packets with the next hop `next_hop` leave the twin.
+    fn exits(&self, next_hop: &Attr<NextHop>) -> bool {
+        match self {
+            ExitMark::AccessLink | ExitMark::Owner => true,
+            ExitMark::DefaultRoute { gateways } => {
+                matches!(next_hop, Attr::Known(NextHop::Gateway(g)) if gateways.contains(g))
+            }
+        }
+    }
 }
 
 /// What an egress does with the 802.1Q tag.
@@ -326,13 +365,29 @@ impl Egress {
                 }
                 b
             }
-            None => self.meta.unknown(
-                input.clone(),
-                ReasonCode::NoLink,
-                format!("no link · interface {}", self.interface),
-                ctx,
-                state,
-            ),
+            None => match &self.exit {
+                Some(mark) if mark.exits(&ctx.next_hop) => {
+                    let at = ExitPoint {
+                        device: self.meta.device.clone(),
+                        interface: self.interface.clone(),
+                    };
+                    let detail = format!("exit at {at} · {}", mark.text());
+                    self.meta.branch(
+                        input.clone(),
+                        Outcome::Exit(at),
+                        Reason::new(ReasonCode::Exited, detail),
+                        ctx.clone(),
+                        state,
+                    )
+                }
+                _ => self.meta.unknown(
+                    input.clone(),
+                    ReasonCode::NoLink,
+                    format!("no link · interface {}", self.interface),
+                    ctx,
+                    state,
+                ),
+            },
         }
     }
 }
@@ -447,7 +502,9 @@ impl NetFunction for LocalInput {
     }
 }
 
-/// Delivers the packets to the device itself.
+/// Delivers the packets to the device itself. An encapsulated packet that
+/// reaches it is unknown: the device has no decapsulation for it here, and
+/// what the inner packet does after a decapsulation is not modelled.
 #[derive(Clone, Debug)]
 pub struct DeviceDelivery {
     pub meta: Meta,
@@ -469,12 +526,95 @@ impl NetFunction for DeviceDelivery {
         Vec::new()
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
-        vec![self.meta.branch(
-            input.clone(),
-            Outcome::Deliver(Destination::Device(self.meta.device.clone())),
-            Reason::new(ReasonCode::Delivered, format!("to {}", self.meta.device)),
-            ctx.clone(),
-            state,
-        )]
+        let plain = input.decapsulate().plain;
+        let encapsulated = input.difference(&plain);
+        let wireguard = encapsulated.wireguard();
+        let other = encapsulated.difference(&wireguard);
+        let dev = &self.meta.device;
+        let mut out = Vec::new();
+        push_nonempty(
+            &mut out,
+            self.meta.branch(
+                plain,
+                Outcome::Deliver(Destination::Device(dev.clone())),
+                Reason::new(ReasonCode::Delivered, format!("to {dev}")),
+                ctx.clone(),
+                state,
+            ),
+        );
+        for (set, what) in [(wireguard, "WireGuard"), (other, "encapsulated")] {
+            push_nonempty(
+                &mut out,
+                self.meta.unknown(
+                    set,
+                    ReasonCode::UnhandledStanza,
+                    format!("{what} packet reaches {dev}; decapsulation is not modelled"),
+                    ctx,
+                    state,
+                ),
+            );
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rsim_core::{Encap, FieldValue, Fragment, Header, PROTO_UDP, SetArena};
+
+    use super::*;
+
+    fn deliver() -> DeviceDelivery {
+        DeviceDelivery {
+            meta: Meta {
+                id: FunctionId::new("r1/deliver"),
+                device: rsim_core::DeviceId::new("r1"),
+                provenance: Vec::new(),
+                processing_delay_ns: None,
+                profile: "test".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn an_encapsulated_packet_at_the_delivery_is_unknown() {
+        let arena = SetArena::standalone();
+        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
+        let inner = PacketSet::single(
+            &arena,
+            &Header::request(ip("192.0.2.10"), ip("192.0.2.200"), PROTO_UDP).with_dst_port(53),
+        );
+        let src = ip("198.51.100.1");
+        let dst = ip("198.51.100.2");
+        let mut outer = Header::request(src, dst, PROTO_UDP)
+            .with_src_port(51820)
+            .with_dst_port(51820);
+        outer.dscp = FieldValue::Known(0);
+        outer.ecn = FieldValue::Unknown;
+        outer.fragment = FieldValue::Known(Fragment::Unfragmented);
+        outer.src_mac = FieldValue::Unknown;
+        outer.dst_mac = FieldValue::Unknown;
+        outer.vlan = FieldValue::Absent;
+        outer.l2_priority = FieldValue::Absent;
+        outer.encap = vec![Encap::Wireguard { src, dst }];
+        let plain = PacketSet::single(
+            &arena,
+            &Header::request(ip("192.0.2.11"), dst, PROTO_UDP).with_dst_port(53),
+        );
+        let input = inner.encapsulate(&outer).done.union(&plain);
+        let out = deliver().apply(&input, &Context::default(), &FlowState::default());
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert_eq!(out[0].packets, plain);
+        assert!(
+            matches!(out[0].outcome, Outcome::Deliver(_)),
+            "{:?}",
+            out[0].outcome
+        );
+        assert_eq!(out[1].packets, input.difference(&plain));
+        assert_eq!(out[1].outcome, Outcome::Unknown);
+        assert_eq!(
+            out[1].reason.detail,
+            "WireGuard packet reaches r1; decapsulation is not modelled"
+        );
     }
 }

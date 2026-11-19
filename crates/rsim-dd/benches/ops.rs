@@ -5,7 +5,7 @@ use std::hint::black_box;
 use criterion::{Criterion, criterion_group, criterion_main};
 use rsim_dd::{Dd, Edge};
 
-const BITS: u32 = 763;
+const BITS: u32 = 764;
 const LEVELS: u32 = BITS * 4;
 /// The first header bit of the destination address in the bit table.
 const DST_IP: u32 = 5 + 11 + 1 + 8;

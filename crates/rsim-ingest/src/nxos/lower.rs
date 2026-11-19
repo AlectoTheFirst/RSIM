@@ -568,6 +568,7 @@ pub fn lower(
                 link: link.clone(),
                 rewrite: rewrite.clone(),
                 tag,
+                exit: None,
             });
         }
         l.add(Egress {
@@ -577,6 +578,7 @@ pub fn lower(
             link: link.clone(),
             rewrite: rewrite.clone(),
             tag,
+            exit: None,
         });
     }
 

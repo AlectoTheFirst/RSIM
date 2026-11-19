@@ -39,7 +39,8 @@ impl Values {
 /// The encapsulation of a member.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EncapDesc {
-    /// One of [`bits::ENCAP_GRE`], [`bits::ENCAP_VXLAN`] and [`bits::ENCAP_MPLS`].
+    /// One of [`bits::ENCAP_GRE`], [`bits::ENCAP_VXLAN`], [`bits::ENCAP_MPLS`]
+    /// and [`bits::ENCAP_WIREGUARD`].
     pub kind: u128,
     pub src: Values,
     pub dst: Values,
@@ -192,8 +193,9 @@ fn describe_edge(ops: &mut Ops<'_>, s: Edge) -> Result<Vec<Member>, DdError> {
 
 /// The encapsulation kind of `bank` from the flags.
 fn encap_kind(flag: &dyn Fn(u32, Bank) -> bool, bank: Bank) -> u128 {
-    u128::from(flag(bits::ENCAP_KIND.start, bank)) << 1
-        | u128::from(flag(bits::ENCAP_KIND.start + 1, bank))
+    bits::ENCAP_KIND
+        .value_bits()
+        .fold(0, |k, b| k << 1 | u128::from(flag(b, bank)))
 }
 
 /// The values of each value field for one bank, with the flags.

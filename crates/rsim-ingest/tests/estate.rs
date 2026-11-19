@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
-use rsim_core::{Destination, EndpointId, FieldValue, Header, PROTO_TCP, ReasonCode, Verdict};
+use rsim_core::{
+    Destination, EndpointId, ExitPoint, FieldValue, Header, PROTO_TCP, ReasonCode, Verdict,
+};
 use rsim_engine::{Answer, Executor, Query, Twin};
 use rsim_ingest::State;
 use rsim_ingest::collected::{AddressRow, Collected, LinkRow, RouteRow, SpeedRow, row_span};
@@ -177,6 +179,32 @@ fn a_guest_reaches_a_lan_host_through_the_access_point_the_switch_and_the_router
     assert_eq!(tag("ap1/port/1/out"), FieldValue::Known(110));
     assert_eq!(tag("r1/out/eth0.10"), FieldValue::Known(10));
     assert_eq!(tag("sw1/port/2/out"), FieldValue::Absent);
+}
+
+#[test]
+fn a_lan_host_reaches_the_internet_through_the_switch_and_leaves_the_twin_on_pppoe() {
+    let t = twin();
+    let a = run(&t, "192.0.2.50", "198.18.0.1", 443);
+    assert_eq!(
+        a.verdict(),
+        Some(&Verdict::Exit(ExitPoint {
+            device: "r1".into(),
+            interface: "pppoe0".into(),
+        }))
+    );
+    let b = &a.branches()[0];
+    let f: Vec<&str> = b.steps.iter().map(|s| s.function.as_str()).collect();
+    for want in [
+        "sw1/port/2/in",
+        "r1/handoff/eth0",
+        "r1/in/eth0.10",
+        "r1/snat",
+    ] {
+        assert!(f.contains(&want), "{want} not in {f:?}");
+    }
+    assert_eq!(f.last(), Some(&"r1/out/pppoe0"));
+    // The destination is outside the twin, so the answer has no reply.
+    assert!(a.replies.is_empty(), "{:?}", a.replies);
 }
 
 #[test]

@@ -998,6 +998,16 @@ impl PacketSet {
         Decapsulated { done, plain }
     }
 
+    /// The packets with a WireGuard encapsulation.
+    pub fn wireguard(&self) -> PacketSet {
+        self.op(&[], |ops| {
+            let kind =
+                ops.builder()
+                    .value(bits::ENCAP_KIND, Bank::Current, bits::ENCAP_WIREGUARD)?;
+            ops.dd.and(self.edge, kind)
+        })
+    }
+
     /// The packets with a VXLAN encapsulation with the network identifier
     /// `vni`.
     pub fn vxlan_vni(&self, vni: u32) -> PacketSet {

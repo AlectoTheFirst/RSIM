@@ -19,8 +19,8 @@ pub mod tunnel;
 pub use common::Meta;
 pub use fib::{Fib, GroupRoutes, NextHopGroup};
 pub use forwarding::{
-    DeviceDelivery, Egress, EgressMode, Ingress, Link, LocalInput, Tag, VrfSelection, ZoneLookup,
-    ZoneRole,
+    DeviceDelivery, Egress, EgressMode, ExitMark, Ingress, Link, LocalInput, Tag, VrfSelection,
+    ZoneLookup, ZoneRole,
 };
 pub use layer2::{
     BROADCAST, Flood, HostMac, HostResolution, Layer3HandOff, LinkEnd, LinkFacts, MacEntry,
@@ -37,4 +37,7 @@ pub use routing::{
 };
 pub use rules::{Rule, RuleBody};
 pub use session::{SessionCommit, SessionLookup, StateAction, StateActions};
-pub use tunnel::{OuterFields, Segment, TunnelPeer, Unmatched, VxlanDecap, VxlanEncap};
+pub use tunnel::{
+    OuterFields, Segment, TunnelPeer, Unmatched, VxlanDecap, VxlanEncap, WireguardEncap,
+    WireguardPeer, WireguardSettings,
+};

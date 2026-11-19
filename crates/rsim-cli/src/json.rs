@@ -5,8 +5,8 @@ use std::fmt::Debug;
 
 use rsim_core::{
     Alternative, Attr, Delay, DelayGap, Destination, EncapDesc, FieldValue, FloodCopy, HeaderDesc,
-    HeaderField, Outcome, PacketSet, QosView, RateCondition, Reason, SourceSpan, TraceStep,
-    Uniform, Values, Verdict, VerdictKind, bits,
+    HeaderField, Outcome, PacketSet, QosView, RateCondition, Reason, ReasonCode, SourceSpan,
+    TraceStep, Uniform, Values, Verdict, VerdictKind, bits,
 };
 use rsim_engine::{Answer, BranchView, Ingress, IngressBasis, Mode, ReplyResult, Summary};
 
@@ -149,6 +149,13 @@ impl FromEngine<Verdict> for VerdictJson {
     fn new(v: &Verdict) -> Self {
         let (destination, reason) = match v {
             Verdict::Deliver(d) => (Some(DestinationJson::new(d)), None),
+            Verdict::Exit(x) => (
+                None,
+                Some(ReasonJson {
+                    code: snake(&ReasonCode::Exited),
+                    detail: format!("exit at {x}"),
+                }),
+            ),
             Verdict::Drop(r) | Verdict::Unknown(r) => (None, Some(ReasonJson::new(r))),
         };
         VerdictJson {
@@ -258,6 +265,11 @@ impl FromEngine<Outcome> for OutcomeJson {
                 kind: "deliver".into(),
                 next: None,
                 destination: Some(DestinationJson::new(d)),
+            },
+            Outcome::Exit(_) => OutcomeJson {
+                kind: "exit".into(),
+                next: None,
+                destination: None,
             },
             Outcome::Drop => OutcomeJson {
                 kind: "drop".into(),
@@ -469,6 +481,13 @@ impl FromEngine<EncapDesc> for EncapJson {
                 src: Some(addr(&e.src)),
                 dst: Some(addr(&e.dst)),
                 vni: Some(num(&e.vni)),
+                label: None,
+            },
+            bits::ENCAP_WIREGUARD => EncapJson {
+                kind: "wireguard".into(),
+                src: Some(addr(&e.src)),
+                dst: Some(addr(&e.dst)),
+                vni: None,
                 label: None,
             },
             _ => EncapJson {

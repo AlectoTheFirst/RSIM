@@ -172,11 +172,14 @@ pub struct PartJson {
 pub struct SummaryResultJson {
     pub kind: String,
     pub verdict: Option<VerdictJson>,
+    /// `deliver`, `exit`, `drop`, `unknown` or `null`.
     pub verdict_kind: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct VerdictJson {
+    /// `deliver`, `exit`, `drop` or `unknown`. `exit`: the packets left the
+    /// twin on an edge interface, which the reason names.
     pub kind: String,
     pub destination: Option<DestinationJson>,
     pub reason: Option<ReasonJson>,
@@ -247,6 +250,7 @@ pub struct TraceStepJson {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct OutcomeJson {
+    /// `forward`, `deliver`, `exit`, `drop` or `unknown`.
     pub kind: String,
     pub next: Option<String>,
     pub destination: Option<DestinationJson>,
@@ -644,6 +648,7 @@ pub struct StepLineJson {
     pub index: usize,
     pub function: String,
     pub device: Option<String>,
+    /// `forward`, `deliver`, `exit`, `drop` or `unknown`.
     pub outcome: String,
     pub reason: ReasonJson,
 }

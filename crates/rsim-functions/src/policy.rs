@@ -13,6 +13,7 @@ use crate::profile::RuleAction;
 use crate::rules::{
     Decision, Rule, describe_all, each_rule_span, evaluate, explain, predicates_of, spans_of,
 };
+use crate::session::StateAction;
 
 fn qos_reads_of(rules: &[Rule<RuleAction>]) -> Vec<HeaderField> {
     let mut v: Vec<HeaderField> = rules
@@ -181,6 +182,12 @@ impl ZoneScope {
     }
 
     fn eval(&self, ctx: &Context) -> Tri {
+        self.eval_as(ctx, None)
+    }
+
+    /// The scope with the connection state `as_state` in place of the state
+    /// of the session of `ctx`, if it is given.
+    fn eval_as(&self, ctx: &Context, as_state: Option<ConnState>) -> Tri {
         fn one<T: Ord>(scope: &Option<BTreeSet<T>>, z: &Attr<T>) -> Tri {
             match scope {
                 None => Tri::True,
@@ -192,6 +199,7 @@ impl ZoneScope {
         }
         let state = match &self.states {
             None => Tri::True,
+            Some(s) if as_state.is_some() => Tri::from(as_state.is_some_and(|a| s.contains(&a))),
             Some(s) => match &ctx.session {
                 Attr::Known(SessionMatch::New { .. }) => Tri::from(s.contains(&ConnState::New)),
                 Attr::Known(SessionMatch::Forward { .. } | SessionMatch::Reply { .. }) => {
@@ -209,8 +217,11 @@ impl ZoneScope {
 }
 
 /// A stateful firewall policy between zones. Packets of an existing session
-/// pass without a policy check, unless `sessions_pass` is false; then the
-/// rules evaluate them too.
+/// pass without a policy check, unless the action of the state established
+/// (`established`) is `Continue`; then the rules evaluate them too. The
+/// packets of an untracked flow are new or established: the policy gives
+/// the result of both, and the packets for which the two differ are
+/// unknown.
 #[derive(Clone, Debug)]
 pub struct FirewallPolicy {
     pub meta: Meta,
@@ -221,7 +232,9 @@ pub struct FirewallPolicy {
     /// From the vendor profile.
     pub default: RuleAction,
     pub next: FunctionId,
-    pub sessions_pass: bool,
+    /// The action of the state policy of the device for the packets of a
+    /// session.
+    pub established: StateAction,
 }
 
 impl FirewallPolicy {
@@ -240,14 +253,94 @@ impl FirewallPolicy {
             rules,
             default,
             next,
-            sessions_pass: true,
+            established: StateAction::Accept,
         }
     }
 
-    /// The policy with the rules evaluating the packets of a session.
-    pub fn evaluating_sessions(mut self) -> Self {
-        self.sessions_pass = false;
+    /// The policy with the action `a` of the state policy for the packets
+    /// of a session.
+    pub fn with_established(mut self, a: StateAction) -> Self {
+        self.established = a;
         self
+    }
+
+    /// The branches of the packets of an untracked flow: the rules as for a
+    /// new connection, and the packets for which an established connection
+    /// gives another result are unknown.
+    fn untracked(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
+        let new = evaluate(&self.rules, &self.default, input, &|i| {
+            self.scopes[i].eval_as(ctx, Some(ConnState::New))
+        });
+        let empty = input.empty();
+        let (permit, deny) = match self.established {
+            StateAction::Accept => (input.clone(), empty.clone()),
+            StateAction::Drop => (empty.clone(), input.clone()),
+            StateAction::Unknown => (empty.clone(), empty.clone()),
+            StateAction::Continue => {
+                let mut permit = empty.clone();
+                let mut deny = empty.clone();
+                let parts = evaluate(&self.rules, &self.default, input, &|i| {
+                    self.scopes[i].eval_as(ctx, Some(ConnState::Established))
+                });
+                for (set, d) in parts {
+                    match d {
+                        Decision::Action {
+                            action: RuleAction::Permit,
+                            ..
+                        } => permit = permit.union(&set),
+                        Decision::Action {
+                            action: RuleAction::Deny,
+                            ..
+                        } => deny = deny.union(&set),
+                        Decision::Unknown { .. } => {}
+                    }
+                }
+                (permit, deny)
+            }
+        };
+        let mut agree = Vec::new();
+        let mut differ = empty;
+        for (set, d) in new {
+            let same = match &d {
+                Decision::Action {
+                    action: RuleAction::Permit,
+                    ..
+                } => set.intersect(&permit),
+                Decision::Action {
+                    action: RuleAction::Deny,
+                    ..
+                } => set.intersect(&deny),
+                Decision::Unknown { .. } => set.clone(),
+            };
+            differ = differ.union(&set.difference(&same));
+            if !same.is_empty() {
+                agree.push((same, d));
+            }
+        }
+        let mut out = branches_of(
+            &self.meta,
+            &self.rules,
+            &format!("policy {}", self.policy),
+            agree,
+            &self.next,
+            ctx,
+            state,
+        );
+        push_nonempty(
+            &mut out,
+            self.meta.unknown(
+                differ,
+                ReasonCode::MatchUnknown,
+                format!(
+                    "policy {}: a new and an established connection give different results, \
+                     and the connection state of the flow is not collected",
+                    self.policy
+                ),
+                ctx,
+                state,
+            ),
+        );
+        out
     }
 }
 
@@ -297,9 +390,12 @@ impl NetFunction for FirewallPolicy {
         predicates_of(&self.rules)
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
+        if let Attr::Known(SessionMatch::Untracked { .. }) = &ctx.session {
+            return self.untracked(input, ctx, state);
+        }
         if let Attr::Known(SessionMatch::Forward { index, .. } | SessionMatch::Reply { index, .. }) =
             &ctx.session
-            && self.sessions_pass
+            && self.established != StateAction::Continue
         {
             return vec![self.meta.forward(
                 input.clone(),

@@ -381,7 +381,7 @@ proptest! {
 
     /// Rule 1: for a packet with all fields stated, the path query and the
     /// set query give the same result. Rule 2: a path query with unstated
-    /// fields that gives `Deliver` or `Drop` gives it for each member.
+    /// fields that gives `Deliver`, `Exit` or `Drop` gives it for each member.
     #[test]
     fn concrete_mode_and_set_mode_agree(t in 0..3usize, h in header()) {
         let twins = twins();
@@ -390,7 +390,9 @@ proptest! {
         let path = ex.run(&Query::path(twin, &h).without_reply()).unwrap();
         let set = ex.run(&Query::set(Query::path(twin, &h).packets).without_reply()).unwrap();
         let path_summary = path.single_summary().unwrap().clone();
-        if let Summary::Same(v @ (Verdict::Deliver(_) | Verdict::Drop(_))) = &path_summary {
+        if let Summary::Same(v @ (Verdict::Deliver(_) | Verdict::Exit(_) | Verdict::Drop(_))) =
+            &path_summary
+        {
             for p in &set.summary {
                 prop_assert_eq!(&p.summary, &Summary::Same(v.clone()));
             }

@@ -54,6 +54,7 @@ fn main() {
         &cfg,
         &col,
         &Default::default(),
+        &Default::default(),
     );
     println!(
         "collected: {} addresses, {} routes, {} neighbours",

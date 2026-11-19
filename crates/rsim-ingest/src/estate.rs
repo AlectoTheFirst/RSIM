@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
-use rsim_core::SourceSpan;
+use rsim_core::{PrefixTable, SourceSpan};
 use rsim_engine::TwinBuilder;
 use rsim_store::{Hash, Snapshot, Store, StoreError};
 use serde_json::Value;
@@ -646,8 +646,10 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         }
     }
 
-    // The routers, with the layer 2 links.
+    // The routers, with the layer 2 links and the addresses of the devices
+    // of the twin.
     let profile = vyos::profile();
+    let twin_addresses = device_addresses(&summaries);
     for (device, r) in &routers {
         let links = l2.get(device).cloned().unwrap_or_default();
         let mut col = r.col.clone();
@@ -668,7 +670,15 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
             col.neighbours.retain(|n| !same(n));
             col.neighbours.push(row);
         }
-        let low = vyos::lower(device, &r.file, &profile, &r.cfg, &col, &links);
+        let low = vyos::lower(
+            device,
+            &r.file,
+            &profile,
+            &r.cfg,
+            &col,
+            &links,
+            &twin_addresses,
+        );
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         for f in low.functions {
             e.builder.add_arc(f);
@@ -781,6 +791,27 @@ pub fn hides_peers(path: &str) -> bool {
 /// neighbour that the reader does not read.
 fn peers_hidden(doc: &Document, bare: &Table) -> bool {
     classify(doc, bare).unhandled.keys().any(|p| hides_peers(p))
+}
+
+/// The layer 3 addresses of the devices of the twin: the local addresses,
+/// the addresses of the ports and the host addresses of the VLANs, which
+/// hold the SVI addresses and the active virtual addresses.
+fn device_addresses(summaries: &BTreeMap<String, Summary>) -> BTreeSet<IpAddr> {
+    let mut out = BTreeSet::new();
+    for s in summaries.values() {
+        out.extend(s.local_addresses.values().flatten().copied());
+        for vlans in s.l3.values() {
+            out.extend(vlans.values().flatten().map(|(a, _)| *a));
+        }
+        for v in s.vlans.values() {
+            for (p, _) in v.hosts.entries() {
+                if p.len() == if p.addr().is_ipv4() { 32 } else { 128 } {
+                    out.insert(p.addr());
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The BGP peer facts of the devices, into the summary of each device.

@@ -88,6 +88,10 @@ pub enum SessionMatch {
     /// No session matched. `entry` is the packet set at the session lookup,
     /// before any translation on this device.
     New { entry: PacketSet },
+    /// No session of the twin matched, and the device can hold a session of
+    /// the flow that the twin does not know, so the packets are new or
+    /// established. `entry` is as for `New`.
+    Untracked { entry: PacketSet },
     /// A session matched in the forward direction.
     Forward { device: DeviceId, index: u32 },
     /// A session matched in the reply direction.

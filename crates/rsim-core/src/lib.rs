@@ -35,7 +35,7 @@ pub use id::{
     ApplicationId, BridgeDomainId, DeviceId, EndpointId, FunctionId, InterfaceId, ObjectId, PortId,
     VrfId, ZoneId,
 };
-pub use outcome::{Destination, Outcome, Reason, ReasonCode, Verdict, VerdictKind};
+pub use outcome::{Destination, ExitPoint, Outcome, Reason, ReasonCode, Verdict, VerdictKind};
 pub use packet_set::{
     AddrField, Decapsulated, Encapsulated, GroupPart, GroupPartition, PacketPair, PacketSet,
     PrefixPartition, Rewrite, SessionDirection, SessionSplit, Split, Uniform,
