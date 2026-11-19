@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { PathAnswer } from "../src/api/types";
 import {
+  laneGroups,
   cell,
   fieldText,
   fileLabel,
@@ -271,5 +272,22 @@ describe("note label", () => {
   it("is the word before the colon, and the whole note goes in the title", () => {
     expect(noteLabel("defaults: dscp 0, ecn 0, no VLAN, tcp syn, source.port 49152-65535")).toBe("defaults");
     expect(noteLabel("no colon")).toBe("no colon");
+  });
+});
+
+describe("lane groups", () => {
+  const lane = (name: string) => ({ device: name, endpoint: null, name });
+  it("puts adjacent lanes of one site under the site and shortens their names", () => {
+    const { groups, names } = laneGroups(["guest-client", "fra01-fgt-01", "fra01-ips-01", "fra01-core-01", "fra01-dns"].map(lane));
+    expect(groups).toEqual([
+      { site: null, first: 0, count: 1 },
+      { site: "fra01", first: 1, count: 4 },
+    ]);
+    expect(names).toEqual(["guest-client", "fgt-01", "ips-01", "core-01", "dns"]);
+  });
+  it("keeps a lone lane and a name with no dash whole", () => {
+    const { groups, names } = laneGroups(["r1", "fra01-fw", "ber01-fw"].map(lane));
+    expect(groups.every((g) => g.site === null)).toBe(true);
+    expect(names).toEqual(["r1", "fra01-fw", "ber01-fw"]);
   });
 });

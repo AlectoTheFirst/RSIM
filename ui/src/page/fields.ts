@@ -75,33 +75,6 @@ export function maxOf(k: QueryField): number | null {
   return FIELD_SCHEMA[k].maximum;
 }
 
-/** One example value of each field in each mode. */
-const EXAMPLES: Record<QueryField, { path: string; set: string }> = {
-  "source.ip": { path: "192.0.2.10", set: "192.0.2.0/24,198.51.100.7" },
-  "source.port": { path: "40000", set: "1024-65535" },
-  "destination.ip": { path: "198.51.100.20", set: "203.0.113.0/24" },
-  "destination.port": { path: "443", set: "53,80,443" },
-  "network.transport": { path: "udp", set: "tcp,udp" },
-  ingress: { path: "r1/eth0", set: "r1/eth0" },
-  "network.iana_number": { path: "6", set: "6,17" },
-  tcp_flags: { path: "syn,ack", set: "syn,syn+ack" },
-  icmp_type: { path: "echo-request", set: "0,8" },
-  icmp_code: { path: "0", set: "0-3" },
-  fragment: { path: "first", set: "unfragmented,first" },
-  dscp: { path: "46", set: "0,46" },
-  ecn: { path: "0", set: "0-3" },
-  "source.mac": { path: "00:00:5e:00:53:01", set: "00:00:5e:00:53:01,00:00:5e:00:53:02" },
-  "destination.mac": { path: "00:00:5e:00:53:02", set: "00:00:5e:00:53:02" },
-  "network.vlan.id": { path: "10", set: "10-20" },
-  l2_priority: { path: "5", set: "0-7" },
-  reply: { path: "false", set: "false" },
-  unstated: { path: "defaults", set: "" },
-};
-
-export function exampleOf(mode: Mode, k: QueryField): string {
-  return EXAMPLES[k][mode];
-}
-
 /** The label of each field in the UI: a short noun phrase. */
 export const FIELD_LABELS: Record<QueryField, string> = {
   "source.ip": "source address",

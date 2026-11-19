@@ -206,6 +206,43 @@ export interface Lane {
   name: string;
 }
 
+/** A group of adjacent lanes of one site, and the short names of its lanes. */
+export interface LaneGroup {
+  /** The site, or null for a lane that is in no group. */
+  site: string | null;
+  /** The first lane and the count of lanes. */
+  first: number;
+  count: number;
+}
+
+/**
+ * The site header of the lanes: adjacent lanes whose names start with the
+ * same word before the first `-` are one group of that site, when the group
+ * has 2 lanes or more. Each lane gets its name with no site prefix.
+ */
+export function laneGroups(lanes: readonly Lane[]): { groups: LaneGroup[]; names: string[] } {
+  const siteOf = (n: string) => {
+    const i = n.indexOf("-");
+    return i > 0 && i < n.length - 1 ? n.slice(0, i) : null;
+  };
+  const groups: LaneGroup[] = [];
+  const names = lanes.map((l) => l.name);
+  let i = 0;
+  while (i < lanes.length) {
+    const site = siteOf(lanes[i]!.name);
+    let j = i + 1;
+    while (site && j < lanes.length && siteOf(lanes[j]!.name) === site) j++;
+    if (site && j - i >= 2) {
+      groups.push({ site, first: i, count: j - i });
+      for (let k = i; k < j; k++) names[k] = lanes[k]!.name.slice(site.length + 1);
+    } else {
+      for (let k = i; k < j; k++) groups.push({ site: null, first: k, count: 1 });
+    }
+    i = j;
+  }
+  return { groups, names };
+}
+
 /** A lane of a path: a device, no device (`null`), or an endpoint. */
 export type LaneKey = string | null | { endpoint: string };
 

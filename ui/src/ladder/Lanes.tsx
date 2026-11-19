@@ -2,6 +2,7 @@
 // its ring, the step across at a link, and the start and end squares.
 import { SIZE } from "../theme";
 import type { Dir, End, Lane } from "./layout";
+import { laneGroups } from "./layout";
 import { hatchLines } from "../page/Hatch";
 import { useMemo } from "preact/hooks";
 
@@ -99,12 +100,26 @@ export function Lanes(props: { lanes: number; h: number; marks: LaneMarks | null
   );
 }
 
-/** The name of each lane, centred over the lane, with the full name as its title. */
+/**
+ * The names of the lanes, centred over each lane, with the full name as
+ * the title. A site header above a group of lanes of one site gives the
+ * site, and the lanes of the group have no site prefix.
+ */
 export function LaneNames(props: { lanes: readonly Lane[] }) {
+  const { groups, names } = laneGroups(props.lanes);
   return (
     <span class="lane-names t-index" aria-label={`lanes: ${props.lanes.map((l) => l.name).join(", ")}`}>
-      {props.lanes.map((l) => (
-        <span title={l.name}>{l.name}</span>
+      {groups.map((g) =>
+        g.site ? (
+          <span class="lane-site" style={{ gridColumn: `${g.first + 1} / span ${g.count}` }}>
+            {g.site}
+          </span>
+        ) : null,
+      )}
+      {props.lanes.map((l, i) => (
+        <span class={names[i] === l.name ? "lane-name whole" : "lane-name"} style={{ gridColumn: `${i + 1}`, gridRow: "2" }} title={l.name}>
+          {names[i]}
+        </span>
       ))}
     </span>
   );

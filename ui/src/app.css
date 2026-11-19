@@ -278,13 +278,7 @@ select.twin {
 
 .autosize {
   display: inline-grid;
-  align-items: center;
-  vertical-align: middle;
-  height: var(--input);
-  padding: 0 var(--input-pad);
-  background: var(--ground);
-  border: var(--hairline) solid var(--control);
-  border-radius: var(--input-radius);
+  vertical-align: baseline;
   cursor: text;
 }
 
@@ -322,9 +316,10 @@ select.twin {
   outline: none;
 }
 
-/* An empty field: an empty box, or its hint in the label style. */
+/* An empty field: a hairline to click on, or its hint in the label style. */
 .autosize.empty {
   min-width: var(--field-min);
+  border-bottom: var(--hairline) solid var(--rule);
 }
 
 .autosize.empty::after,
@@ -530,6 +525,21 @@ button.mark {
   white-space: nowrap;
   text-align: center;
   padding: 0 var(--hairline);
+}
+
+/* A lane name with no site group shows whole and can run over the
+   lanes next to it. */
+.lane-names > .lane-name.whole {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* The site header over a group of lanes of one site, with a hairline
+   below it. */
+.lane-names > .lane-site {
+  grid-row: 1;
+  margin: 0 var(--mark-gap);
+  border-bottom: var(--hairline) solid var(--rule);
 }
 
 /* A header cell: the value starts after the cell padding, and the hairline
@@ -787,14 +797,10 @@ button.link {
 }
 
 /* A field whose value has a wrong form. */
-.autosize.invalid {
-  border-color: var(--drop);
+.autosize.invalid input {
+  color: var(--drop);
 }
 
-/* The help line of the query bar: the field in focus, its description,
-   the form of its value and an example. It wraps on a narrow window. */
-.qhelp {
-  flex-basis: 100%;
-  min-width: 0;
-  overflow-wrap: anywhere;
+.autosize.invalid.empty {
+  border-bottom-color: var(--drop);
 }
