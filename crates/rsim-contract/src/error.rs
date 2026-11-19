@@ -23,6 +23,9 @@ pub enum ErrorCode {
     /// The section has no mask of its secrets for its vendor and format, so
     /// its lines are not given.
     NotMasked,
+    /// The lines are outside every source span of a function of the twin,
+    /// so they are not given.
+    NotASourceSpan,
     Internal,
 }
 
@@ -40,6 +43,7 @@ impl ErrorCode {
             ErrorCode::InvalidFilter => "invalid_filter",
             ErrorCode::NoSourceText => "no_source_text",
             ErrorCode::NotMasked => "not_masked",
+            ErrorCode::NotASourceSpan => "not_a_source_span",
             ErrorCode::Internal => "internal",
         }
     }

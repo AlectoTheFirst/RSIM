@@ -890,6 +890,11 @@
             "const": "not_masked",
             "description": "The section has no mask of its secrets for its vendor and format, so\nits lines are not given.",
             "type": "string"
+          },
+          {
+            "const": "not_a_source_span",
+            "description": "The lines are outside every source span of a function of the twin,\nso they are not given.",
+            "type": "string"
           }
         ]
       },
@@ -1568,6 +1573,26 @@
           "jump_hosts"
         ],
         "title": "JumpHostsOut",
+        "type": "object"
+      },
+      "LineRangeJson": {
+        "description": "An inclusive range of line numbers.",
+        "properties": {
+          "first_line": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_line": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "first_line",
+          "last_line"
+        ],
         "type": "object"
       },
       "MemberJson": {
@@ -3252,7 +3277,7 @@
         "type": "object"
       },
       "SourceTextJson": {
-        "description": "The masked lines of one source span: the lines from `first_line` to\n`last_line`, at most `MAX_LINES` of them. `cut` is the number of lines\nafter the limit that the answer leaves out, with a note.",
+        "description": "The masked lines of one source span: the lines from `first_line` to\n`last_line` that lie inside a source span of a function of the twin, at\nmost `MAX_LINES` lines from `first_line`. `left_out` lists the ranges of\nthe request that are outside every such span; `cut` is the number of\nlines after the limit that the answer leaves out. A note names both.",
         "properties": {
           "cut": {
             "format": "uint32",
@@ -3272,6 +3297,12 @@
             "minimum": 0,
             "type": "integer"
           },
+          "left_out": {
+            "items": {
+              "$ref": "#/components/schemas/LineRangeJson"
+            },
+            "type": "array"
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/SourceLineJson"
@@ -3290,6 +3321,7 @@
           "first_line",
           "last_line",
           "lines",
+          "left_out",
           "cut"
         ],
         "type": "object"

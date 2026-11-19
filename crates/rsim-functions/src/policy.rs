@@ -10,7 +10,9 @@ use rsim_core::{
 
 use crate::common::{Meta, push_nonempty};
 use crate::profile::RuleAction;
-use crate::rules::{Decision, Rule, describe_all, evaluate, explain, predicates_of, spans_of};
+use crate::rules::{
+    Decision, Rule, describe_all, each_rule_span, evaluate, explain, predicates_of, spans_of,
+};
 
 fn qos_reads_of(rules: &[Rule<RuleAction>]) -> Vec<HeaderField> {
     let mut v: Vec<HeaderField> = rules
@@ -101,6 +103,9 @@ impl NetFunction for AclMatch {
     }
     fn provenance(&self) -> &[SourceSpan] {
         &self.meta.provenance
+    }
+    fn each_span(&self, f: &mut dyn FnMut(&SourceSpan)) {
+        each_rule_span(&self.meta.provenance, &self.rules, f);
     }
     fn qos_reads(&self) -> Vec<HeaderField> {
         qos_reads_of(&self.rules)
@@ -258,6 +263,9 @@ impl NetFunction for FirewallPolicy {
     }
     fn provenance(&self) -> &[SourceSpan] {
         &self.meta.provenance
+    }
+    fn each_span(&self, f: &mut dyn FnMut(&SourceSpan)) {
+        each_rule_span(&self.meta.provenance, &self.rules, f);
     }
     fn qos_reads(&self) -> Vec<HeaderField> {
         qos_reads_of(&self.rules)

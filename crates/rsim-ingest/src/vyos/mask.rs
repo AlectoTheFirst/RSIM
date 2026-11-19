@@ -11,7 +11,7 @@ pub const MASK: JsonMask = JsonMask {
 
 /// The parts of a VyOS config in which the user names the secret, so its
 /// values are all masked: the environment variables, the arguments, the
-/// command and the entry point of a container, the environment variables
+/// command, the entry point and the labels of a container, the environment variables
 /// and the arguments of the script of an event handler, the arguments of a
 /// scheduled task, the free options of an OpenVPN interface and the
 /// authentication secret of an NHRP tunnel of VyOS 1.5.
@@ -20,6 +20,7 @@ pub const SUBTREES: &[&[&str]] = &[
     &["container", "name", "*", "arguments"],
     &["container", "name", "*", "command"],
     &["container", "name", "*", "entrypoint"],
+    &["container", "name", "*", "label"],
     &[
         "service",
         "event-handler",
@@ -275,5 +276,23 @@ mod tests {
                 .join("\n");
             assert!(!text.contains("FAKESECRET"), "{w}: {text}");
         }
+    }
+
+    #[test]
+    fn a_container_label_value_is_masked() {
+        let v = json!({"container": {"name": {"app": {
+            "image": "registry.example/app:1",
+            "label": {"traefik.http.middlewares.a.basicauth.users": {"value": "admin:$apr1$FAKESALT$FAKEHASH"}}
+        }}}});
+        check::masked(
+            "vyos",
+            Format::Json,
+            v.to_string().as_bytes(),
+            &[],
+            &[
+                "traefik.http.middlewares.a.basicauth.users",
+                "registry.example/app:1",
+            ],
+        );
     }
 }

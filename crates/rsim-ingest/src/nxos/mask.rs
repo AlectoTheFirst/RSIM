@@ -22,7 +22,8 @@ pub fn json_key(key: &str, snmp: bool) -> bool {
     auth || secret_key(key, snmp)
 }
 
-/// The words after which the rest of a line can be a secret.
+/// The words after which the rest of a line can be a secret, with the
+/// options of a container and the keys of a wireless network.
 const SECRET_WORDS: &[&str] = &[
     "area-password",
     "auth",
@@ -30,6 +31,8 @@ const SECRET_WORDS: &[&str] = &[
     "authentication-key",
     "community",
     "community-map",
+    "docker-run-cmd",
+    "docker-run-opts",
     "domain-password",
     "encrypted-password",
     "hello-authentication",
@@ -42,26 +45,31 @@ const SECRET_WORDS: &[&str] = &[
     "message-digest-key",
     "passphrase",
     "password",
+    "pin",
     "plaintext-password",
     "pre-shared-key",
+    "prepend-pkg-opts",
     "priv",
-    "pin",
     "private-key",
     "psk",
+    "run-opts",
     "secret",
     "server-key",
+    "set-key",
     "sha",
     "sha1",
     "sha256",
     "text-authentication",
     "user-pin",
+    "wpa-psk",
 ];
 
 /// The text that takes the place of the masked words.
 const MASKED: &str = "<secret>";
 
 /// The report form of a line of an NX-OS config. The words up to the first
-/// secret word stay, and the rest becomes `<secret>`. In a line of
+/// secret word stay, and the rest becomes `<secret>`, by
+/// `crate::mask::cisco_secret_start`. In a line of
 /// `crate::mask::cisco_kept_words`, such as `snmp-server host`, a trap host
 /// of `snmp-server vrf` or `event manager environment`, the words after its
 /// kept words become `<secret>`. Each word with the form of a hash becomes
@@ -70,15 +78,8 @@ const MASKED: &str = "<secret>";
 /// between them.
 pub fn mask(line: &str) -> String {
     let words: Vec<&str> = line.split_whitespace().collect();
-    let keep = crate::mask::cisco_kept_words(&words).unwrap_or_else(|| {
-        words
-            .iter()
-            .position(|w| {
-                let w = w.to_ascii_lowercase();
-                SECRET_WORDS.contains(&w.as_str())
-            })
-            .map_or(words.len(), |i| i + 1)
-    });
+    let keep = crate::mask::cisco_kept_words(&words)
+        .unwrap_or_else(|| crate::mask::cisco_secret_start(&words, SECRET_WORDS));
     let mut out: Vec<String> = words[..keep]
         .iter()
         .map(|w| {
@@ -328,5 +329,66 @@ event manager applet MAIL
         assert_eq!(mask("enable $1$salt$hash"), "enable <secret>");
         assert_eq!(mask("value 0x1234567890abcdef"), "value <secret>");
         assert_eq!(mask("value 0x12"), "value 0x12");
+    }
+
+    #[test]
+    fn the_options_of_a_container_are_masked() {
+        for line in [
+            "run-opts 1 \"--restart=unless-stopped -e API_TOKEN=FAKETOKEN -e DB_PASSWORD=FAKEPW\"",
+            "prepend-pkg-opts \"-e X=FAKEX\"",
+            "activate type docker source tg docker-run-opts \"-itd --net=host -e PASSWORD=FAKEPW\"",
+            "activate type docker source tg docker-run-cmd \"/bin/app --pw FAKECMD\"",
+        ] {
+            let got = mask(line);
+            assert!(!got.contains("FAKE"), "{line}: {got}");
+        }
+        assert_eq!(mask("run-opts 1 \"-e A=FAKE\""), "run-opts <secret>");
+    }
+
+    #[test]
+    fn a_wireless_key_is_masked() {
+        assert_eq!(
+            mask("priority 0 set-key ascii 0 FAKEMPSK"),
+            "priority 0 set-key <secret>"
+        );
+        assert_eq!(
+            mask("mpsk-key 0 priority 0 set-key ascii 0 FAKEMPSK"),
+            "mpsk-key 0 priority 0 set-key <secret>"
+        );
+        assert_eq!(mask("wpa-psk ascii 7 FAKEPSK"), "wpa-psk <secret>");
+    }
+
+    #[test]
+    fn a_secret_word_with_quotes_or_punctuation_is_found() {
+        for (line, want) in [
+            (
+                "action 2.0 cli command \"key 7 FAKETACKEY\"",
+                "action 2.0 cli command \"key <secret>",
+            ),
+            (
+                "action 3.0 cli command \"username u password FAKEPW\"",
+                "action 3.0 cli command \"username u password <secret>",
+            ),
+            (
+                "action 1 cli command \"key-string FAKE\"",
+                "action 1 cli command \"key-string <secret>",
+            ),
+            (
+                "action 1 cli command 'password' FAKE",
+                "action 1 cli command 'password' <secret>",
+            ),
+            (
+                "description (password: FAKE)",
+                "description (password: <secret>",
+            ),
+            ("x --password=FAKE y", "x <secret>"),
+            ("x DB_PASSWORD=FAKE y", "x <secret>"),
+        ] {
+            assert_eq!(mask(line), want, "{line}");
+        }
+        assert_eq!(
+            mask("description \"uplink to core\""),
+            "description \"uplink to core\""
+        );
     }
 }

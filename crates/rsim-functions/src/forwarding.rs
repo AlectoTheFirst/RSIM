@@ -340,6 +340,20 @@ impl Egress {
 impl NetFunction for Egress {
     meta_methods!(FunctionKind::Egress);
 
+    fn each_span(&self, f: &mut dyn FnMut(&rsim_core::SourceSpan)) {
+        for s in &self.meta.provenance {
+            f(s);
+        }
+        if let Some(l) = &self.link {
+            for s in &l.provenance {
+                f(s);
+            }
+            for s in l.facts.iter().flat_map(crate::layer2::LinkFacts::spans) {
+                f(&s);
+            }
+        }
+    }
+
     fn requires(&self) -> Vec<ContextAttr> {
         match self.mode {
             EgressMode::Routed => vec![ContextAttr::NeighbourTarget],

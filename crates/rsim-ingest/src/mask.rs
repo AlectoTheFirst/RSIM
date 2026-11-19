@@ -93,15 +93,16 @@ const SECRET_PARAMS: &[&str] = &[
 ];
 
 /// The text with the secrets of each URL masked, or `None` for a text with
-/// none. A word is a run of text with no white space, with no quote at
-/// its ends. In a
-/// word with `scheme://`, the userinfo up to the last `@` of the word
-/// becomes `<secret>`, except a user name with no `:` for the schemes
-/// `ssh` and `git`. In a word with no `://`, the text before the last `@`
-/// becomes `<secret>` when it holds a `:`, the form `user:password@host`.
-/// In each word, the value of a query parameter after the first `?` past
-/// the userinfo, whose name is a word of `SECRET_PARAMS`, ends with `sig`
-/// or `signature`, or is a secret key of the common rule, becomes `<secret>` up to the next `&`, `;` or `#`.
+/// none. A word is a run of text with no white space, with no quote at its
+/// ends, and each part of a word between commas is read alone. In a part,
+/// the text before the first `://` becomes `<secret>` up to its last `@`
+/// when it holds a `:` before that `@`, the form `user:password@host`.
+/// After `scheme://`, the userinfo up to the last `@` of the part becomes
+/// `<secret>`, except a user name with no `:` for the schemes `ssh` and
+/// `git`. After the userinfo of each part, the value of a query parameter
+/// after the next `?` of the word, whose name is a word of `SECRET_PARAMS`,
+/// ends with `sig` or `signature`, or is a secret key of the common rule,
+/// becomes `<secret>` up to the next `&`, `;` or `#`.
 pub fn url_secrets(text: &str) -> Option<String> {
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     let mut start = None;
@@ -135,28 +136,59 @@ fn word_secrets(text: &str, s: usize, e: usize, ranges: &mut Vec<(usize, usize)>
     let s = s + (text[s..e].len() - text[s..e].trim_start_matches(quote).len());
     let e = s + text[s..e].trim_end_matches(quote).len();
     let word = &text[s..e];
+    let mut found = Vec::new();
+    let mut part = 0;
+    for piece in word.split(',') {
+        let host = part + userinfo(piece, part, &mut found);
+        query_secrets(word, host, &mut found);
+        part += piece.len() + 1;
+    }
+    found.sort_unstable();
+    for (a, b) in found {
+        match ranges.last_mut() {
+            Some(last) if s + a <= last.1 => last.1 = last.1.max(s + b),
+            _ => ranges.push((s + a, s + b)),
+        }
+    }
+}
+
+/// Adds the userinfo range of the part `piece` of a word, which starts at
+/// `at` in the word, and gives the position of the host in the part. The
+/// text before the first `://` is the form `user:password@host` when it
+/// has a `@` with a `:` before it; after the first `://`, the text up to
+/// the last `@` is the userinfo of a URL.
+fn userinfo(piece: &str, at: usize, found: &mut Vec<(usize, usize)>) -> usize {
     let mut host = 0;
-    if let Some(i) = word.find("://") {
-        let scheme = word[..i]
+    let scheme_at = piece.find("://");
+    let head = &piece[..scheme_at.unwrap_or(piece.len())];
+    if let Some(a) = head.rfind('@')
+        && head[..a].contains(':')
+    {
+        found.push((at, at + a));
+        host = a + 1;
+    }
+    if let Some(i) = scheme_at {
+        let scheme = piece[..i]
             .rsplit(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')))
             .next()
             .unwrap_or("")
             .to_ascii_lowercase();
         let from = i + 3;
-        if let Some(at) = word[from..].rfind('@').map(|a| from + a) {
-            let user = &word[from..at];
+        if let Some(a) = piece[from..].rfind('@').map(|a| from + a) {
+            let user = &piece[from..a];
             let kept = !user.contains(':') && USER_SCHEMES.contains(&scheme.as_str());
             if !user.is_empty() && !kept {
-                ranges.push((s + from, s + at));
+                found.push((at + from, at + a));
             }
-            host = at + 1;
+            host = a + 1;
         }
-    } else if let Some(at) = word.rfind('@')
-        && word[..at].contains(':')
-    {
-        ranges.push((s, s + at));
-        host = at + 1;
     }
+    host
+}
+
+/// Adds the ranges of the values of the secret query parameters after the
+/// first `?` from `host` in the word.
+fn query_secrets(word: &str, host: usize, found: &mut Vec<(usize, usize)>) {
     let Some(q) = word[host..].find('?').map(|q| host + q) else {
         return;
     };
@@ -172,7 +204,7 @@ fn word_secrets(text: &str, s: usize, e: usize, ranges: &mut Vec<(usize, usize)>
                 || name.ends_with("sig")
                 || secret_key(&name, false);
             if secret && p + eq + 1 < end {
-                ranges.push((s + p + eq + 1, s + end));
+                found.push((p + eq + 1, end));
             }
         }
         if word[end..].starts_with('#') {
@@ -450,6 +482,37 @@ pub fn cisco_kept_words(words: &[&str]) -> Option<usize> {
     } else {
         None
     }
+}
+
+/// The number of the words of a Cisco line before its masked rest: the
+/// words up to and with the first word of `secret_words`, or the words
+/// before the first word `name=value` whose name is a word of
+/// `secret_words` or a secret key of the common rule; a name with `://` or
+/// `?` is a part of a URL, for `url_secrets`. Each word and each name is
+/// read in lower case with the quotes and the punctuation at its
+/// ends trimmed. A line with no such word keeps each word.
+pub fn cisco_secret_start(words: &[&str], secret_words: &[&str]) -> usize {
+    let trim = |w: &str| {
+        w.trim_matches(|c: char| !c.is_ascii_alphanumeric())
+            .to_ascii_lowercase()
+    };
+    for (i, w) in words.iter().enumerate() {
+        match w.split_once('=') {
+            Some((name, _)) if name.contains("://") || name.contains('?') => {}
+            Some((name, _)) => {
+                let name = trim(name);
+                if secret_words.contains(&name.as_str()) || secret_key(&name, false) {
+                    return i;
+                }
+            }
+            None => {
+                if secret_words.contains(&trim(w).as_str()) {
+                    return i + 1;
+                }
+            }
+        }
+    }
+    words.len()
 }
 
 fn masked_line(line: &str, mask: fn(&str) -> String) -> String {
@@ -763,6 +826,28 @@ mod tests {
                 ),
                 "{vendor}"
             );
+        }
+    }
+
+    #[test]
+    fn the_userinfo_of_each_part_of_a_word_is_masked() {
+        for (text, want) in [
+            (
+                "admin:FAKEPW@192.0.2.25/?next=http://x",
+                "<secret>@192.0.2.25/?next=http://x",
+            ),
+            ("b:FAKE2@h2,ftp://h3/x", "<secret>@h2,ftp://h3/x"),
+            ("ftp://h3/x,b:FAKE2@h2", "ftp://h3/x,<secret>@h2"),
+            (
+                "ftp://u:FAKE1@h1,b:FAKE2@h2",
+                "ftp://<secret>@h1,<secret>@h2",
+            ),
+            (
+                "http://h/?token=FAKE1,u:FAKE2@h2",
+                "http://h/?token=<secret>",
+            ),
+        ] {
+            assert_eq!(url_secrets(text).as_deref(), Some(want), "{text}");
         }
     }
 }

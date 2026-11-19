@@ -126,7 +126,7 @@ fn from_query_error(e: QueryError) -> Problem {
         | ErrorCode::NoSuchStep
         | ErrorCode::UnknownTable
         | ErrorCode::NoSourceText => 404,
-        ErrorCode::NotMasked => 403,
+        ErrorCode::NotMasked | ErrorCode::NotASourceSpan => 403,
         ErrorCode::InvalidQuery
         | ErrorCode::InvalidFilter
         | ErrorCode::UnknownIngress

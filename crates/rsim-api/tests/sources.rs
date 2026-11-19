@@ -85,6 +85,20 @@ fn fixture_dir(name: &str) -> std::path::PathBuf {
     dir
 }
 
+/// The served lines of a range of a file, or the code of the refusal.
+fn served(s: &State, id: &str, file: &str, first: usize, last: usize) -> Result<Value, String> {
+    let r = get(
+        s,
+        &format!("/v1/twins/{id}/sources?file={file}&lines={first}-{last}"),
+    );
+    let v = json(&r);
+    match r.status {
+        200 => Ok(v),
+        403 => Err(v["code"].as_str().unwrap().to_string()),
+        n => panic!("{n}: {v}"),
+    }
+}
+
 #[test]
 fn the_lines_of_a_vyos_config_have_no_secret_and_the_same_bytes_each_time() {
     let dir = fixture_dir("rsim-api-sources-vyos");
@@ -94,29 +108,44 @@ fn the_lines_of_a_vyos_config_have_no_secret_and_the_same_bytes_each_time() {
     let n = fixture_lines("vyos/r1-config.json");
     let mut first = 1;
     let mut seen = 0;
+    let mut given = 0;
     while first <= n {
         let last = (first + 199).min(n);
         let path = format!("/v1/twins/{id}/sources?file={file}&lines={first}-{last}");
         let r = get(&s, &path);
-        assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
         assert_eq!(get(&s, &path).body, r.body);
         let text = String::from_utf8(r.body.clone()).unwrap();
         for secret in ["FAKEVYOSPASSWORD", "FAKEPEERGROUPPASSWORD", "BBBB"] {
             assert!(!text.contains(secret), "{secret} in lines {first}-{last}");
         }
+        if r.status == 403 {
+            assert_eq!(json(&r)["code"], "not_a_source_span");
+            first = last + 1;
+            continue;
+        }
+        assert_eq!(r.status, 200, "{text}");
         let v = json(&r);
         assert_eq!(v["kind"], "source_lines");
         assert_eq!(v["source"]["cut"], 0);
         let lines = v["source"]["lines"].as_array().unwrap();
-        assert_eq!(lines.len(), last - first + 1);
-        assert_eq!(lines[0]["number"], first);
+        let left: usize = v["source"]["left_out"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| {
+                (x["last_line"].as_u64().unwrap() - x["first_line"].as_u64().unwrap() + 1) as usize
+            })
+            .sum();
+        assert_eq!(lines.len() + left, last - first + 1);
+        given += lines.len();
         seen += lines
             .iter()
             .filter(|l| l["text"].as_str().unwrap().contains("<secret>"))
             .count();
         first = last + 1;
     }
-    assert!(seen >= 3, "{seen} masked lines");
+    assert!(given > 0);
+    assert!(seen >= 1, "{seen} masked lines");
 }
 
 #[test]
@@ -127,11 +156,10 @@ fn a_long_span_is_cut_with_a_note() {
     let file = file_of(&dir, "r1", "config");
     let n = fixture_lines("vyos/r1-config.json");
     assert!(n > 210, "{n}");
-    let v = json(&get(
-        &s,
-        &format!("/v1/twins/{id}/sources?file={file}&lines=1-{n}"),
-    ));
-    assert_eq!(v["source"]["lines"].as_array().unwrap().len(), 200);
+    let v = served(&s, &id, &file, 1, n).unwrap();
+    let lines = v["source"]["lines"].as_array().unwrap();
+    assert!(!lines.is_empty() && lines.len() <= 200);
+    assert!(lines.iter().all(|l| l["number"].as_u64().unwrap() <= 200));
     assert_eq!(v["source"]["cut"], n - 200);
     assert!(v["source"]["note"].as_str().unwrap().contains("cut"));
 }
@@ -290,4 +318,167 @@ fn a_section_of_a_vendor_with_no_mask_is_refused() {
     let v = json(&r);
     assert_eq!(v["code"], "not_masked");
     assert!(!String::from_utf8_lossy(&r.body).contains("FAKEPASSWORD"));
+}
+
+/// A data folder with the VyOS router `r1` of the fixture, whose config has
+/// a container section, and the canonical lines of that config.
+#[allow(clippy::disallowed_methods)]
+fn container_store(dir: &Path) -> Vec<String> {
+    let _ = std::fs::remove_dir_all(dir);
+    std::fs::create_dir_all(dir).unwrap();
+    let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+    let (hash, wrap) = ([5u8; 32], [6u8; 32]);
+    std::fs::write(
+        dir.join("keys"),
+        format!("{}\n{}\n", hex(&hash), hex(&wrap)),
+    )
+    .unwrap();
+    let p = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../rsim-ingest/tests/fixtures/vyos/r1-config.json");
+    let mut config: Value = serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap();
+    config["container"] = json!({"name": {"app": {
+        "image": "registry.example/app:1",
+        "environment": {"MODE": {"value": "kept-mode"}},
+        "label": {"traefik.example.users": {"value": "admin:$apr1$FAKESALT$FAKEHASH"}}
+    }}});
+    let bytes = config.to_string().into_bytes();
+    let store = Store::open(dir.join("store"), Keys::new(hash, wrap)).unwrap();
+    let blob = store.put_blob(&bytes, &mut Counter(0)).unwrap();
+    let mut c = store.begin(1).unwrap();
+    c.add(DeviceUpdate {
+        device: "r1".into(),
+        vendor: "vyos".into(),
+        collected_at: 1,
+        sections: vec![SectionEntry {
+            name: "config".into(),
+            command: "config".into(),
+            class: Class::Configuration,
+            format: Format::Json,
+            change_hash: Some(blob),
+            blob: Some(blob),
+            status: SectionStatus::Fresh,
+            collected_at: Some(1),
+        }],
+        tables: Default::default(),
+    })
+    .unwrap();
+    c.prepare().unwrap().unwrap().publish().unwrap();
+    let canon = rsim_store::canonical(Format::Json, &bytes).unwrap();
+    String::from_utf8(canon)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+/// The first and the last line number of the container section.
+fn container_lines(lines: &[String]) -> (usize, usize) {
+    let i = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with("\"container\""))
+        .unwrap();
+    let indent = lines[i].len() - lines[i].trim_start().len();
+    let j = (i + 1..lines.len())
+        .find(|&j| {
+            let l = &lines[j];
+            l.len() - l.trim_start().len() == indent && l.trim_start().starts_with('}')
+        })
+        .unwrap();
+    (i + 1, j + 1)
+}
+
+#[test]
+fn a_range_outside_every_span_is_refused() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-api-sources-outside");
+    let lines = container_store(&dir);
+    let (a, b) = container_lines(&lines);
+    let s = state(&dir);
+    let id = twin(&s);
+    let file = file_of(&dir, "r1", "config");
+    assert_eq!(
+        served(&s, &id, &file, a, b).unwrap_err(),
+        "not_a_source_span"
+    );
+    for n in a..=b {
+        let r = get(&s, &format!("/v1/twins/{id}/sources?file={file}&lines={n}"));
+        assert_eq!(r.status, 403, "line {n}");
+        let text = String::from_utf8_lossy(&r.body).to_string();
+        assert_eq!(json(&r)["code"], "not_a_source_span", "line {n}");
+        for word in ["registry.example", "traefik", "kept-mode", "FAKE"] {
+            assert!(!text.contains(word), "{word} in line {n}");
+        }
+    }
+}
+
+#[test]
+fn a_partly_covered_range_gives_only_the_covered_lines() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-api-sources-partly");
+    let lines = container_store(&dir);
+    let (a, b) = container_lines(&lines);
+    let s = state(&dir);
+    let id = twin(&s);
+    let file = file_of(&dir, "r1", "config");
+    let k = (b + 1..=lines.len())
+        .find(|&k| served(&s, &id, &file, k, k).is_ok())
+        .expect("a line of a span after the container section");
+    let v = served(&s, &id, &file, a, k).unwrap();
+    let got: Vec<usize> = v["source"]["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["number"].as_u64().unwrap() as usize)
+        .collect();
+    assert_eq!(got, vec![k]);
+    assert_eq!(
+        v["source"]["left_out"],
+        json!([{"first_line": a, "last_line": k - 1}])
+    );
+    assert!(v["source"]["note"].as_str().unwrap().contains("left out"));
+    let text = v.to_string();
+    for word in ["registry.example", "traefik", "kept-mode", "FAKE"] {
+        assert!(!text.contains(word), "{word}");
+    }
+}
+
+#[test]
+fn each_span_of_a_step_is_served_whole() {
+    let dir = fixture_dir("rsim-api-sources-whole");
+    let s = state(&dir);
+    let id = twin(&s);
+    let mut r = req("POST", &format!("/v1/twins/{id}/queries"));
+    r.body = json!({
+        "source.ip": "192.0.2.70",
+        "destination.ip": "192.0.2.50",
+        "network.transport": "tcp",
+        "source.port": 40000,
+        "destination.port": 8123
+    })
+    .to_string()
+    .into_bytes();
+    let q = handle(&s, &r).header("location").unwrap().to_string();
+    let answer = json(&get(&s, &format!("{q}?form=full")));
+    let steps = answer["answer"]["branches"][0]["steps"].as_array().unwrap();
+    let mut seen = 0;
+    for i in 0..steps.len() {
+        let v = json(&get(
+            &s,
+            &format!("{q}/branches/0/steps/{i}?source_lines=true"),
+        ));
+        for src in v["source_lines"].as_array().unwrap() {
+            let file = src["file"].as_str().unwrap();
+            // The table sections of the fixture store hold no readable text.
+            if !file.contains("/config@") && !file.starts_with("site1/") {
+                continue;
+            }
+            assert!(src.get("error").is_none(), "step {i}: {src}");
+            assert_eq!(src["left_out"], json!([]), "step {i}: {src}");
+            let a = src["first_line"].as_u64().unwrap() as usize;
+            let b = src["last_line"].as_u64().unwrap() as usize;
+            assert_eq!(src["lines"].as_array().unwrap().len(), (b - a + 1).min(200));
+            let r = served(&s, &id, file, a, b).unwrap();
+            assert_eq!(r["source"], *src);
+            seen += 1;
+        }
+    }
+    assert!(seen > 0);
 }

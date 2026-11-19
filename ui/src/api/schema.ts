@@ -932,7 +932,7 @@ export interface components {
             vni?: components["schemas"]["Field_uint32"] | null;
         };
         /** @description The code of a query error. */
-        ErrorCode: ("unknown_topology" | "unknown_ingress" | "invalid_query" | "no_such_step" | "start_requires_context" | "contract_violation" | "unknown_table" | "invalid_filter" | "internal") | "store" | "no_source_text" | "not_masked";
+        ErrorCode: ("unknown_topology" | "unknown_ingress" | "invalid_query" | "no_such_step" | "start_requires_context" | "contract_violation" | "unknown_table" | "invalid_filter" | "internal") | "store" | "no_source_text" | "not_masked" | "not_a_source_span";
         /** @description One evidence row. */
         Evidence: {
             detail: string;
@@ -1136,6 +1136,13 @@ export interface components {
             jump_hosts: components["schemas"]["JumpHost"][];
             /** Format: uint64 */
             version: number;
+        };
+        /** @description An inclusive range of line numbers. */
+        LineRangeJson: {
+            /** Format: uint32 */
+            first_line: number;
+            /** Format: uint32 */
+            last_line: number;
         };
         MemberJson: {
             current: components["schemas"]["HeaderJson"];
@@ -1646,8 +1653,10 @@ export interface components {
         };
         /**
          * @description The masked lines of one source span: the lines from `first_line` to
-         *     `last_line`, at most `MAX_LINES` of them. `cut` is the number of lines
-         *     after the limit that the answer leaves out, with a note.
+         *     `last_line` that lie inside a source span of a function of the twin, at
+         *     most `MAX_LINES` lines from `first_line`. `left_out` lists the ranges of
+         *     the request that are outside every such span; `cut` is the number of
+         *     lines after the limit that the answer leaves out. A note names both.
          */
         SourceTextJson: {
             /** Format: uint32 */
@@ -1657,6 +1666,7 @@ export interface components {
             first_line: number;
             /** Format: uint32 */
             last_line: number;
+            left_out: components["schemas"]["LineRangeJson"][];
             lines: components["schemas"]["SourceLineJson"][];
             note?: string | null;
         };

@@ -180,6 +180,15 @@ impl RouteLookup {
 impl NetFunction for RouteLookup {
     meta_methods!(FunctionKind::RouteLookup);
 
+    fn each_span(&self, f: &mut dyn FnMut(&rsim_core::SourceSpan)) {
+        for s in &self.meta.provenance {
+            f(s);
+        }
+        for t in self.tables.values() {
+            t.each_span(f);
+        }
+    }
+
     fn requires(&self) -> Vec<ContextAttr> {
         vec![ContextAttr::Vrf]
     }
@@ -565,6 +574,17 @@ impl NextHopResolution {
 
 impl NetFunction for NextHopResolution {
     meta_methods!(FunctionKind::NextHopResolution);
+
+    fn each_span(&self, f: &mut dyn FnMut(&rsim_core::SourceSpan)) {
+        for s in &self.meta.provenance {
+            f(s);
+        }
+        for (_, v) in self.neighbours.entries() {
+            for s in v.iter().flat_map(|n| &n.spans) {
+                f(s);
+            }
+        }
+    }
 
     fn requires(&self) -> Vec<ContextAttr> {
         vec![ContextAttr::EgressInterface, ContextAttr::NextHop]

@@ -102,10 +102,7 @@ pub fn load_store(folder: &str) -> Result<Loaded, QueryError> {
         coverage,
         bgp,
         tables: Default::default(),
-        source: Some(crate::sources::SourceStore {
-            store,
-            snapshot: snap,
-        }),
+        source: Some(crate::sources::SourceStore::new(store, snap)),
     })
 }
 

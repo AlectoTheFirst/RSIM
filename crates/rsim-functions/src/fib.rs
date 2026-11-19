@@ -193,6 +193,22 @@ impl Fib {
         &self.groups
     }
 
+    /// Calls `f` with the provenance of each route.
+    pub fn each_span(&self, f: &mut dyn FnMut(&SourceSpan)) {
+        for e in &self.entries {
+            if e.span.file != NONE {
+                f(&SourceSpan {
+                    file: self.files[e.span.file as usize].clone(),
+                    first_line: e.span.first,
+                    last_line: e.span.last,
+                });
+            }
+        }
+        for s in self.extra_spans.values().flatten() {
+            f(s);
+        }
+    }
+
     fn spans_of(&self, id: u32) -> Vec<SourceSpan> {
         let e = self.entries[id as usize];
         let mut v = Vec::new();
