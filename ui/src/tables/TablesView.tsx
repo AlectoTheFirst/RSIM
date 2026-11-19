@@ -24,7 +24,11 @@ import {
   cellText,
   columnWidths,
   defaultBy,
+  deviceFunctions,
   filterCellText,
+  filterCells,
+  filterWords,
+  hiddenSelection,
   nextPage,
   nextSort,
   opsOf,
@@ -32,8 +36,11 @@ import {
   prefixColumn,
   previousPage,
   readState,
+  isReasonOf,
   reasonColumns,
+  SPAN_SEMANTIC,
   setColumnFilters,
+  shownColumns,
   sortOf,
   syncPages,
   tableCommand,
@@ -44,8 +51,6 @@ type Body =
   | { verb: "show" | "top" | "lpm"; out: TableOut }
   | { verb: "summarize"; out: SummarizeOut }
   | { verb: "unique"; out: UniqueOut };
-
-const SPAN_SEMANTIC = "source_span";
 
 /** The rows of the verb `describe`: the columns of the catalog entry. */
 function describeRows(def: TableDef): unknown[][] {
@@ -109,6 +114,8 @@ function Detail(props: {
   /** The addresses of an endpoint row, which the Trace view can take as its source or destination. */
   addresses?: string[];
   onUse?: (field: "source.ip" | "destination.ip", address: string) => void;
+  /** Opens the functions table of the device of a device row. */
+  onFunctions?: () => void;
 }) {
   const { columns, defs, row } = props;
   const addresses = props.addresses ?? [];
@@ -123,7 +130,7 @@ function Detail(props: {
         <div class="t-label">row</div>
         <div class="facts">
           {columns.map((c, j) => {
-            if (defs[j]?.semantic === SPAN_SEMANTIC) return null;
+            if (defs[j]?.semantic === SPAN_SEMANTIC || isReasonOf(columns, c)) return null;
             const t = props.cell(j);
             const v = row[j];
             return (
@@ -136,11 +143,11 @@ function Detail(props: {
                     </HatchMark>
                   </span>
                 ) : Array.isArray(v) ? (
-                  <ul class="spans">
+                  <div>
                     {v.map((x) => (
-                      <li class="t-value">{typeof x === "string" ? x : JSON.stringify(x)}</li>
+                      <div class="t-value">{typeof x === "string" ? x : JSON.stringify(x)}</div>
                     ))}
-                  </ul>
+                  </div>
                 ) : (
                   <span class="t-value">{t.text}</span>
                 )}
@@ -153,17 +160,22 @@ function Detail(props: {
         <div class="t-label">source lines</div>
         {spans.length ? (
           <>
-            <ul class="spans">
+            <div>
               {spans.map((l) => (
-                <li class="t-value">{l}</li>
+                <div class="t-value">{l}</div>
               ))}
-            </ul>
+            </div>
             <div class="muted">no source text</div>
           </>
         ) : (
           <div class="muted">no source lines</div>
         )}
         <div class="group actions wrap">
+          {props.onFunctions ? (
+            <button type="button" onClick={props.onFunctions}>
+              View functions
+            </button>
+          ) : null}
           {refers.map((x) => (
             <button type="button" onClick={() => props.onRefer(x.d!.refers_to![0], x.d!.refers_to![1], x.v as string)}>
               Show {x.v as string} in {x.d!.refers_to![0]}
@@ -296,10 +308,14 @@ export function TablesView(props: {
     return n;
   }, [grid]);
 
-  const widths = useMemo(() => (grid ? columnWidths(grid.columns, grid.rows) : []), [grid]);
+  const tableOut = body && (body.verb === "show" || body.verb === "top" || body.verb === "lpm") ? body.out : null;
+  const shown = useMemo(() => (grid ? shownColumns(grid.columns, grid.defs, tableOut !== null) : []), [grid, tableOut]);
+  const shownRows = useMemo(() => (grid ? grid.rows.map((r) => shown.map((j) => r[j])) : []), [grid, shown]);
+  const widths = useMemo(() => (grid ? columnWidths(grid.columns, grid.rows, 4, 48, (i, j) => cellOf(i, j).known) : []), [grid]);
   const sortable = st.verb === "show";
   const gridColumns: GridColumn[] = grid
-    ? grid.columns.map((name, j) => {
+    ? shown.map((j) => {
+        const name = grid.columns[j]!;
         const d = grid.defs[j];
         const s = sortable ? sortOf(st.sort, name) : null;
         const right = d ? alignsRight(d) : name === "distinct" || name === "nulls" || name === "count";
@@ -320,19 +336,20 @@ export function TablesView(props: {
 
   const filterable = grid && (st.verb === "show" || st.verb === "top" || st.verb === "lpm");
   const filters = filterable
-    ? grid.columns.map((name, j) => (
+    ? filterCells(grid.columns, grid.defs, shown).map(({ name, col, first }) => (
         <FilterCell
-          col={grid.defs[j]}
+          col={col}
           name={name}
           text={filterCellText(name, st.filters)}
-          first={j === 0}
+          first={first}
           inputRef={firstFilter}
           onApply={(t) => go({ filters: setColumnFilters(st.filters, name, t) })}
         />
       ))
     : null;
 
-  const tableOut = body && (body.verb === "show" || body.verb === "top" || body.verb === "lpm") ? body.out : null;
+  const hidden = grid ? hiddenSelection(grid.columns, shown, st.filters, st.sort) : { filters: [], sort: [] };
+
   const next = body?.verb === "show" ? (body.out.next_cursor ?? null) : null;
 
   const goNext = () => {
@@ -445,7 +462,29 @@ export function TablesView(props: {
       parts.push(
         <span>
           <span class="t-label">filters </span>
-          <span class="t-value">{st.filters.map((f) => `${f.op === "=" ? f.column : `${f.column}.${f.op}`}=${f.value}`).join(" ")}</span>
+          <span class="t-value">{filterWords(st.filters)}</span>
+        </span>,
+      );
+    }
+    if (filterable && hidden.filters.length) {
+      parts.push(
+        <span>
+          <span class="t-label">hidden filters </span>
+          <span class="t-value">{filterWords(hidden.filters)}</span>{" "}
+          <button type="button" class="plain" onClick={() => go({ filters: st.filters.filter((f) => !hidden.filters.includes(f)) })}>
+            Clear
+          </button>
+        </span>,
+      );
+    }
+    if (sortable && hidden.sort.length) {
+      parts.push(
+        <span>
+          <span class="t-label">hidden order </span>
+          <span class="t-value">{hidden.sort.join(",")}</span>{" "}
+          <button type="button" class="plain" onClick={() => go({ sort: st.sort.filter((x) => !hidden.sort.includes(x)) })}>
+            Clear
+          </button>
         </span>,
       );
     }
@@ -550,8 +589,8 @@ export function TablesView(props: {
           <Grid
             label={st.table}
             columns={gridColumns}
-            rows={grid.rows}
-            cell={cellOf}
+            rows={shownRows}
+            cell={(i, k) => cellOf(i, shown[k]!)}
             h={props.row}
             selected={selected}
             open={open}
@@ -568,6 +607,10 @@ export function TablesView(props: {
                       cell={(j) => cellOf(i, j)}
                       addresses={st.table === "endpoints" ? endpointAddresses(grid.columns, grid.rows[i]!) : []}
                       onUse={props.onUseAddress}
+                      onFunctions={(() => {
+                        const f = st.table === "devices" ? deviceFunctions(grid.columns, grid.rows[i]!) : null;
+                        return f ? () => go({ table: "functions", verb: "show", filters: f, sort: [], by: [] }) : undefined;
+                      })()}
                       onRefer={(table, column, value) =>
                         go({ table, verb: "show", filters: [{ column, op: "=", value }], sort: [], by: [] })
                       }

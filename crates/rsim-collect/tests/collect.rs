@@ -257,6 +257,12 @@ async fn the_first_cycle_stores_all_devices_and_their_tables() {
     let zones = site.section("firewall_zones").unwrap();
     assert!(matches!(zones.status, SectionStatus::Absent { .. }));
     assert!(zones.blob.is_none());
+    // Each manifest records the address to which the collector connected.
+    assert_eq!(
+        s.devices["r1"].management_address.as_deref(),
+        Some("192.0.2.1")
+    );
+    assert_eq!(site.management_address.as_deref(), Some("192.0.2.5"));
     let cfg = s.devices["r1"].section("config").unwrap();
     let raw = e.c.store().read_blob(&cfg.blob.unwrap()).unwrap();
     assert!(
@@ -466,6 +472,42 @@ async fn a_change_of_each_class_is_reported_with_its_class() {
     assert_eq!(
         rows(&e, table("neighbours").unwrap(), "r2")[0][1],
         "192.0.2.11"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_device_that_the_collector_does_not_reach_keeps_its_previous_address() {
+    // With no previous manifest, a failed device records no address.
+    let mut e = env(vec![vyos("r1"), vyos("r2")], Limits::default());
+    e.t.clear("r1");
+    let r = e.c.run_cycle().await.unwrap();
+    assert_eq!(r.failed, vec!["r1".to_string()]);
+    let s = latest(&e);
+    assert_eq!(s.devices["r1"].management_address, None);
+    assert_eq!(
+        s.devices["r2"].management_address.as_deref(),
+        Some("192.0.2.1")
+    );
+
+    // A device that fails after a good cycle keeps the address of its
+    // previous manifest.
+    let mut e = env(vec![vyos("r1"), vyos("r2")], Limits::default());
+    e.c.run_cycle().await.unwrap();
+    e.t.clear("r1");
+    tokio::time::advance(MINUTE).await;
+    let r = e.c.run_cycle().await.unwrap();
+    assert_eq!(r.failed, vec!["r1".to_string()]);
+    assert_eq!(r.snapshot, Some(1));
+    let s = latest(&e);
+    assert!(
+        s.devices["r1"]
+            .sections
+            .iter()
+            .all(|sec| matches!(sec.status, SectionStatus::Old { .. }))
+    );
+    assert_eq!(
+        s.devices["r1"].management_address.as_deref(),
+        Some("192.0.2.1")
     );
 }
 

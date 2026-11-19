@@ -142,8 +142,18 @@
   border-bottom: var(--hairline) solid var(--rule);
 }
 
+.grid-row .cell.hatched {
+  gap: var(--button-gap);
+}
+
 .grid-row .cell.hatched svg {
   flex: none;
+}
+
+.grid-row .cell.hatched .not-known {
+  color: var(--ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The opened row has the width of the window, so its text does not widen

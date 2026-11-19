@@ -399,22 +399,93 @@ export function reasonColumns(columns: readonly string[]): number[] {
   return columns.map((c) => columns.indexOf(`${c}_reason`));
 }
 
+/** The semantic of a column of source spans. */
+export const SPAN_SEMANTIC = "source_span";
+
+/** True for a column `<x>_reason` whose column `<x>` is in the columns: it gives the reason of `<x>`. */
+export function isReasonOf(columns: readonly string[], name: string): boolean {
+  return name.endsWith("_reason") && columns.includes(name.slice(0, -"_reason".length));
+}
+
+/**
+ * The indices of the columns that the grid shows: each column except a
+ * reason column of another column, and, when the opened row lists the
+ * source lines, except a column of source spans.
+ */
+export function shownColumns(
+  columns: readonly string[],
+  defs: readonly (Column | undefined)[],
+  detail: boolean,
+): number[] {
+  const out: number[] = [];
+  columns.forEach((c, j) => {
+    if (isReasonOf(columns, c)) return;
+    if (detail && defs[j]?.semantic === SPAN_SEMANTIC) return;
+    out.push(j);
+  });
+  return out;
+}
+
+/** The filter cells of the shown columns, each with the name and the definition of its own column. */
+export function filterCells(
+  columns: readonly string[],
+  defs: readonly (Column | undefined)[],
+  shown: readonly number[],
+): { name: string; col: Column | undefined; first: boolean }[] {
+  return shown.map((j, k) => ({ name: columns[j]!, col: defs[j], first: k === 0 }));
+}
+
+/**
+ * The filters and the sort keys of the columns that the grid does not show,
+ * which no filter cell and no column head gives.
+ */
+export function hiddenSelection(
+  columns: readonly string[],
+  shown: readonly number[],
+  filters: readonly Filter[],
+  sort: readonly string[],
+): { filters: Filter[]; sort: string[] } {
+  const names = new Set(shown.map((j) => columns[j]!));
+  return {
+    filters: filters.filter((f) => !names.has(f.column)),
+    sort: sort.filter((s) => !names.has(s.startsWith("-") ? s.slice(1) : s)),
+  };
+}
+
+/** The text of filters as the URL gives them. */
+export const filterWords = (filters: readonly Filter[]): string =>
+  filters.map((f) => `${f.op === "=" ? f.column : `${f.column}.${f.op}`}=${f.value}`).join(" ");
+
 /** True for a column whose values align right. */
 export const alignsRight = (c: Column | undefined): boolean => c?.type === "integer";
 
-/** The widths of the columns in characters of the value font. */
+/** The words of a cell whose value the twin does not know. */
+export const NOT_KNOWN = "not known";
+
+/** The width in characters of a cell that the twin does not know: the hatch square and the words. */
+export const NOT_KNOWN_WIDTH = NOT_KNOWN.length + 3;
+
+/**
+ * The widths of the columns in characters of the value font. `known`
+ * tells if the twin knows the value of a cell; a cell that it does not
+ * know has the width of the hatch square and the words.
+ */
 export function columnWidths(
   columns: readonly string[],
   rows: readonly (readonly unknown[])[],
   min = 4,
   max = 48,
+  known?: (row: number, col: number) => boolean,
 ): number[] {
   return columns.map((name, i) => {
     let w = name.length;
-    for (const r of rows) {
-      const v = r[i];
-      const t = v === null || v === undefined ? "" : Array.isArray(v) ? v.map(String).join(", ") : String(v);
-      if (t.length > w) w = t.length;
+    for (let k = 0; k < rows.length; k++) {
+      const v = rows[k]![i];
+      const n =
+        known && !known(k, i)
+          ? NOT_KNOWN_WIDTH
+          : (v === null || v === undefined ? "" : Array.isArray(v) ? v.map(String).join(", ") : String(v)).length;
+      if (n > w) w = n;
       if (w >= max) break;
     }
     return Math.max(min, Math.min(max, w));
@@ -471,4 +542,10 @@ export function scrollFor(i: number, top: number, height: number, h: number, ope
   if (y < top) return y;
   if (y + h > top + height) return y + h - height;
   return null;
+}
+
+/** The filter of the functions table for the device of a row of the devices table, or null for no device. */
+export function deviceFunctions(columns: readonly string[], row: readonly unknown[]): Filter[] | null {
+  const v = row[columns.indexOf("device")];
+  return typeof v === "string" && v !== "" ? [{ column: "device", op: "=", value: v }] : null;
 }

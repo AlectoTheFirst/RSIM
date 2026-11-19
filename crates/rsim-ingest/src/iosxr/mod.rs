@@ -5,7 +5,7 @@ pub mod bgp;
 pub mod config;
 pub mod lower;
 mod mask;
-mod profile;
+pub(crate) mod profile;
 pub mod state;
 mod table;
 

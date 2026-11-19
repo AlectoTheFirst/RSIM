@@ -2,7 +2,7 @@
 //! built once for each twin and table, and the table commands.
 
 use std::any::Any;
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt::Write;
 use std::sync::OnceLock;
 
@@ -11,6 +11,7 @@ use rsim_contract::table::{
 };
 use rsim_core::SourceSpan;
 use rsim_functions::RouteLookup;
+use rsim_ingest::facts::{DeviceFacts, Reason};
 use rsim_ingest::links::{AsnValue, BgpPeerFact, PeerSource};
 use serde_json::{Value, json};
 
@@ -81,15 +82,10 @@ fn build(t: &Loaded, def: &'static TableDef) -> Frame {
     let mut b = FrameBuilder::new(def);
     match def.name {
         "devices" => {
-            let mut count: BTreeMap<String, usize> = BTreeMap::new();
-            for f in t.functions() {
-                if let Some(d) = f.device() {
-                    *count.entry(d.to_string()).or_default() += 1;
-                }
-            }
-            for d in t.devices() {
-                let n = count.get(d.as_str()).copied().unwrap_or(0);
-                b.push(&[Cell::Text(d.as_str()), Cell::Integer(n as u64)]);
+            let mut names: BTreeSet<String> = t.devices().iter().map(ToString::to_string).collect();
+            names.extend(t.facts.keys().cloned());
+            for d in &names {
+                b.push_values(&device_row(d, t.facts.get(d)));
             }
         }
         "functions" => {
@@ -182,6 +178,54 @@ fn build(t: &Loaded, def: &'static TableDef) -> Frame {
         _ => {}
     }
     b.finish(&key_text)
+}
+
+/// The row of a device: its facts, each with its reason, or with no facts
+/// each fact `not_collected`.
+fn device_row(device: &str, facts: Option<&DeviceFacts>) -> Vec<Value> {
+    let not_collected = json!(Reason::NotCollected.name());
+    let Some(f) = facts else {
+        let mut row = vec![json!(device)];
+        for _ in 0..6 {
+            row.push(Value::Null);
+            row.push(not_collected.clone());
+        }
+        row.push(json!(Vec::<String>::new()));
+        return row;
+    };
+    let mut row = vec![json!(device), json!(f.vendor), Value::Null];
+    for fact in [&f.platform, &f.os_version, &f.serial, &f.management_address] {
+        row.push(fact.value().map_or(Value::Null, |v| json!(v)));
+        row.push(fact.reason().map_or(Value::Null, |r| json!(r.name())));
+    }
+    row.push(json!(utc_time(f.collected_at)));
+    row.push(Value::Null);
+    let spans: Vec<SourceSpan> = f.spans().into_iter().cloned().collect();
+    row.push(json!(self::spans(&spans)));
+    row
+}
+
+/// A time in milliseconds since the Unix epoch as `YYYY-MM-DDTHH:MM:SSZ`.
+pub fn utc_time(ms: u64) -> String {
+    let secs = ms / 1000;
+    let days = i64::try_from(secs / 86_400).unwrap_or(i64::MAX / 2);
+    let rest = secs % 86_400;
+    // The civil date of a day number, from the algorithm of Howard Hinnant.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        rest / 3_600,
+        rest % 3_600 / 60,
+        rest % 60
+    )
 }
 
 /// The row of a BGP peer fact.
@@ -364,4 +408,17 @@ pub fn summarize(
         total,
         columns,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::utc_time;
+
+    #[test]
+    fn a_time_prints_as_its_utc_date_and_time() {
+        assert_eq!(utc_time(0), "1970-01-01T00:00:00Z");
+        assert_eq!(utc_time(951_782_400_000), "2000-02-29T00:00:00Z");
+        assert_eq!(utc_time(1_700_000_000_999), "2023-11-14T22:13:20Z");
+        assert_eq!(utc_time(4_107_542_399_000), "2100-02-28T23:59:59Z");
+    }
 }

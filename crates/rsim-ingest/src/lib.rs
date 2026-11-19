@@ -7,6 +7,7 @@ pub mod bgp_peers;
 pub mod collected;
 pub mod coverage;
 pub mod estate;
+pub mod facts;
 pub mod iosxe;
 pub mod iosxr;
 pub mod links;

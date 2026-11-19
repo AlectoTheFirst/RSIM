@@ -69,3 +69,18 @@ pub const STATIC_WORDS: &[&str] = &["static", "kernel", "table"];
 /// device confirms it. A collected route resolves the way the device shows
 /// it.
 pub const COMPUTED_THROUGH_DEFAULT: bool = true;
+
+/// The label of the version line of `show version`, for example
+/// `Version:          VyOS 1.4.0`. The word after [`VERSION_NAME`] is the
+/// version.
+pub const VERSION_LINE: &str = "Version:";
+
+/// The word before the version on the version line.
+pub const VERSION_NAME: &str = "VyOS";
+
+/// The label of the hardware model line of `show version`.
+pub const MODEL_LINE: &str = "Hardware model:";
+
+/// The label of the serial line of `show version`. The serial is the rest
+/// of that line only.
+pub const SERIAL_LINE: &str = "Hardware S/N:";

@@ -1,0 +1,16 @@
+Version:          VyOS 1.4.0
+Release train:    sagitta
+
+Built on:         Mon 01 Jan 2026 00:00 UTC
+Build UUID:       00000000-0000-4000-8000-000000000001
+
+Architecture:     x86_64
+Boot via:         installed image
+System type:      KVM guest
+
+Hardware vendor:  Example Hardware
+Hardware model:   Fake Router 1000
+Hardware S/N:     FAKER10001
+Hardware UUID:    00000000-0000-4000-8000-000000000002
+
+Copyright:        VyOS maintainers and contributors

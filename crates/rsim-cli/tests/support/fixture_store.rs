@@ -1,6 +1,6 @@
 //! Writes a store with the synthetic VyOS router `r1`, with its BGP session
-//! section, and the synthetic UniFi site `site1` of `rsim-ingest`, for the
-//! tests of `rsim` and `rsim-mcp`.
+//! and version sections, and the synthetic UniFi site `site1` of
+//! `rsim-ingest`, for the tests of `rsim` and `rsim-mcp`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -66,6 +66,7 @@ pub fn write(dir: &Path) {
     let links = put(b"links");
     let addresses = put(b"addresses");
     let sessions = put(&fixture("vyos/r1-bgp-sessions.json"));
+    let version = put(&fixture("vyos/version.txt"));
     let route = |p: &str, proto: &str, i: &str| -> Row {
         vec![
             s("default"),
@@ -99,6 +100,10 @@ pub fn write(dir: &Path) {
             entry("links", links, Class::Observation),
             entry("addresses", addresses, Class::Observation),
             entry("bgp_sessions", sessions, Class::Observation),
+            SectionEntry {
+                format: Format::Text,
+                ..entry("version", version, Class::Configuration)
+            },
         ],
         tables: BTreeMap::from([
             (
@@ -129,6 +134,7 @@ pub fn write(dir: &Path) {
                 vec![(addresses, vec![vec![s("pppoe0"), s("203.0.113.10/32")]])],
             ),
         ]),
+        management_address: Some("192.0.2.254".into()),
     };
     let mut sections = Vec::new();
     for name in ["networks", "wlans", "devices", "clients", "port_profiles"] {
@@ -141,6 +147,7 @@ pub fn write(dir: &Path) {
         collected_at: 1,
         sections,
         tables: BTreeMap::new(),
+        management_address: Some("192.0.2.253".into()),
     };
     let mut c = store.begin(1).unwrap();
     c.add(r1).unwrap();

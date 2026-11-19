@@ -29,6 +29,9 @@ pub struct Loaded {
     /// The BGP peer facts of each device of a store twin; empty for a
     /// built-in topology.
     pub bgp: BTreeMap<String, Vec<rsim_ingest::links::BgpPeerFact>>,
+    /// The facts of each device of a store twin, by twin device; empty for
+    /// a built-in topology.
+    pub facts: BTreeMap<String, rsim_ingest::facts::DeviceFacts>,
     /// The columns of the tables of the twin, built when a request first
     /// names a table.
     pub tables: crate::tables::TableCache,
@@ -67,6 +70,7 @@ pub fn load(topology: &str) -> Result<Loaded, QueryError> {
         identity,
         coverage: BTreeMap::new(),
         bgp: BTreeMap::new(),
+        facts: BTreeMap::new(),
         tables: Default::default(),
         source: None,
     })
@@ -92,6 +96,7 @@ pub fn load_store(folder: &str) -> Result<Loaded, QueryError> {
     let estate = rsim_ingest::estate::build(&store, &snap).map_err(|e| err(e.to_string()))?;
     let coverage = estate.coverage.clone();
     let bgp = estate.bgp.clone();
+    let facts = estate.facts.clone();
     let twin = estate.builder.build().map_err(|errors| {
         let text: Vec<String> = errors.iter().map(ToString::to_string).collect();
         err(format!("the twin does not build: {}", text.join("; ")))
@@ -101,6 +106,7 @@ pub fn load_store(folder: &str) -> Result<Loaded, QueryError> {
         identity: TwinJson::snapshot(snap.manifest.cycle),
         coverage,
         bgp,
+        facts,
         tables: Default::default(),
         source: Some(crate::sources::SourceStore::new(store, snap)),
     })

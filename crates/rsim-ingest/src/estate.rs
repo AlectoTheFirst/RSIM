@@ -14,13 +14,14 @@ use crate::bgp::{self, SessionSections};
 use crate::bgp_peers::{BgpConfig, InterfaceAddresses, address_of};
 use crate::collected::{self, Collected};
 use crate::coverage::{Coverage, Table, classify};
+use crate::facts::{self, DeviceFacts};
 use crate::links::{BgpPeerFact, Summary};
 use crate::route_tables::RouteTables;
 use crate::stanza::{Document, read_json};
 use crate::{iosxe, iosxr, nxos, unifi, vyos};
 
 /// The twin builder of a snapshot, with the coverage, the unread handled
-/// stanzas, the lowering notes and the BGP peers of each device.
+/// stanzas, the lowering notes, the BGP peers and the facts of each device.
 pub struct Estate {
     pub builder: TwinBuilder,
     pub coverage: BTreeMap<String, Coverage>,
@@ -29,6 +30,9 @@ pub struct Estate {
     /// The BGP peer facts of each device with a BGP neighbour, a listen
     /// range or an observed peer.
     pub bgp: BTreeMap<String, Vec<BgpPeerFact>>,
+    /// The facts of each device of the snapshot, by twin device; empty for
+    /// a twin of inputs with no snapshot.
+    pub facts: BTreeMap<String, DeviceFacts>,
 }
 
 fn short(h: &Hash) -> String {
@@ -219,6 +223,7 @@ pub fn build(store: &Store, snap: &Snapshot) -> Result<Estate, StoreError> {
     let (inputs, skipped) = inputs(store, snap)?;
     let sessions = session_inputs(store, snap)?;
     let mut e = assemble_with(inputs, &sessions);
+    e.facts = facts::of_snapshot(store, snap)?;
     for s in skipped {
         e.notes.entry("estate".into()).or_default().push(s);
     }
@@ -245,6 +250,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         unread: BTreeMap::new(),
         notes: BTreeMap::new(),
         bgp: BTreeMap::new(),
+        facts: BTreeMap::new(),
     };
     let mut routers: BTreeMap<String, Router> = BTreeMap::new();
     #[allow(clippy::type_complexity)]

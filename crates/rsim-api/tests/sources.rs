@@ -377,6 +377,7 @@ fn no_mask_store(dir: &Path) {
             collected_at: Some(1),
         }],
         tables: Default::default(),
+        management_address: None,
     })
     .unwrap();
     c.prepare().unwrap().unwrap().publish().unwrap();
@@ -438,6 +439,7 @@ fn container_store(dir: &Path) -> Vec<String> {
             collected_at: Some(1),
         }],
         tables: Default::default(),
+        management_address: None,
     })
     .unwrap();
     c.prepare().unwrap().unwrap().publish().unwrap();

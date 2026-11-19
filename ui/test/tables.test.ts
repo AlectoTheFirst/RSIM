@@ -1,6 +1,8 @@
 // The state and the layout of the Tables view: the URL, the parameters of
 // the API, the filters of a column, the pages, the hairlines and the
-// virtual rows.
+// virtual rows, the shown columns and the words of the view.
+/// <reference types="node" />
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Column, TableDef } from "../src/api/types";
 import {
@@ -15,7 +17,11 @@ import {
   apiUrl,
   cellText,
   columnWidths,
+  deviceFunctions,
   filterCellText,
+  filterCells,
+  filterWords,
+  hiddenSelection,
   nextPage,
   nextSort,
   pageWords,
@@ -27,6 +33,7 @@ import {
   rowWindow,
   scrollFor,
   setColumnFilters,
+  shownColumns,
   syncPages,
   tableCommand,
   writeState,
@@ -254,6 +261,71 @@ describe("cells", () => {
     expect(columnWidths(["device", "x", "prefix"], [["r1", 12345, "2001:db8::/32"], ["router-01", 1, null]])).toEqual([9, 5, 13]);
     expect(columnWidths(["p"], [["x".repeat(100)]])).toEqual([48]);
   });
+
+  it("gives a cell that the twin does not know the width of the hatch square and the words", () => {
+    const rows = [["r1", null, "not_collected"]];
+    const known = (_: number, j: number) => j !== 1;
+    expect(columnWidths(["device", "serial", "serial_reason"], rows, 4, 48, known)).toEqual([6, 12, 13]);
+  });
+});
+
+describe("device rows", () => {
+  it("opens the functions table filtered to the device of the row", () => {
+    expect(deviceFunctions(["device", "vendor"], ["leaf1", "nxos"])).toEqual([{ column: "device", op: "=", value: "leaf1" }]);
+    expect(deviceFunctions(["vendor"], ["nxos"])).toBeNull();
+  });
+});
+
+describe("shown columns", () => {
+  const cols = ["device", "serial", "serial_reason", "drop_reason", "provenance"];
+  const defs = cols.map((n) => (n === "provenance" ? { ...col(n, "list"), semantic: "source_span" } : col(n, "text")));
+
+  it("hides the reason column of another column and the source spans that the opened row lists", () => {
+    expect(shownColumns(cols, defs, true)).toEqual([0, 1, 3]);
+  });
+
+  it("keeps the source spans when no row opens", () => {
+    expect(shownColumns(cols, defs, false)).toEqual([0, 1, 3, 4]);
+  });
+});
+
+describe("filter cells with hidden columns", () => {
+  const cols = ["device", "platform", "platform_reason", "management_address", "asn", "provenance"];
+  const defs = cols.map((n) =>
+    n === "management_address"
+      ? col(n, "address")
+      : n === "asn"
+        ? col(n, "integer")
+        : n === "provenance"
+          ? { ...col(n, "list"), semantic: "source_span" }
+          : col(n, "text"),
+  );
+  const shown = shownColumns(cols, defs, true);
+
+  it("gives each cell the definition of its own column after a hidden column", () => {
+    const cells = filterCells(cols, defs, shown);
+    expect(cells.map((c) => [c.name, c.col?.name, c.first])).toEqual([
+      ["device", "device", true],
+      ["platform", "platform", false],
+      ["management_address", "management_address", false],
+      ["asn", "asn", false],
+    ]);
+    expect(cells[2]!.col?.type).toBe("address");
+    expect(cells[3]!.col?.type).toBe("integer");
+  });
+
+  it("names the filters and the sort keys of the hidden columns", () => {
+    const filters = [
+      { column: "platform_reason", op: "=" as const, value: "not_read" },
+      { column: "device", op: "=" as const, value: "r1" },
+      { column: "provenance", op: "contains" as const, value: "r1/" },
+    ];
+    const h = hiddenSelection(cols, shown, filters, ["-platform_reason", "device"]);
+    expect(h.filters).toEqual([filters[0], filters[2]]);
+    expect(h.sort).toEqual(["-platform_reason"]);
+    expect(filterWords(h.filters)).toBe("platform_reason=not_read provenance.contains=r1/");
+    expect(hiddenSelection(cols, shown, [filters[1]!], ["device"])).toEqual({ filters: [], sort: [] });
+  });
 });
 
 describe("virtual rows", () => {
@@ -343,5 +415,22 @@ describe("answer of a request", () => {
     expect(answerOf(a, a.key)).toBe(1);
     expect(answerOf(a, "/v1/twins/b/tables/fib/rows")).toBeNull();
     expect(answerOf(null, a.key)).toBeNull();
+  });
+});
+
+describe("words of the Tables view", () => {
+  const source = (f: string) => readFileSync(new URL(`../src/tables/${f}`, import.meta.url), "utf8");
+  const code = (f: string) =>
+    source(f)
+      .split("\n")
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+      .join("\n");
+
+  it("lists the source lines of the opened row as plain lines", () => {
+    expect(source("TablesView.tsx")).not.toMatch(/<(ul|li)[ >]/);
+  });
+
+  it("has labels and no sentences", () => {
+    for (const f of ["TablesView.tsx", "Grid.tsx", "model.ts"]) expect(code(f)).not.toMatch(/[a-z]{2,}\.(<\/|`|")/);
   });
 });
