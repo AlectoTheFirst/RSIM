@@ -8,13 +8,14 @@ import { FIELD_SCHEMA, MODE_TEXT, SET_SYNTAX } from "../src/api/fields";
 import {
   QUERY_FIELDS,
   checkValue,
-  descriptionOf,
   filterValues,
   firstError,
   formOf,
   insertValue,
   kindOf,
-  modeHelp,
+  FIELD_LABELS,
+  labelOf,
+  notStatedNote,
   modeValue,
   parseIp,
   valueToken,
@@ -38,8 +39,8 @@ describe("field module", () => {
   });
 
   it("takes the descriptions, the ranges and the names from the OpenAPI document", () => {
-    expect(descriptionOf("path", "destination.port")).toBe(schemas.PathQueryArgs.properties["destination.port"].description);
-    expect(descriptionOf("set", "tcp_flags")).toBe(schemas.SetQueryArgs.properties["tcp_flags"].description);
+    expect(FIELD_SCHEMA["destination.port"].path).toBe(schemas.PathQueryArgs.properties["destination.port"].description);
+    expect(FIELD_SCHEMA.tcp_flags.set).toBe(schemas.SetQueryArgs.properties["tcp_flags"].description);
     expect(FIELD_SCHEMA["network.vlan.id"].maximum).toBe(4095);
     expect(FIELD_SCHEMA["network.transport"].values).toEqual(schemas.Transport.enum);
     expect(FIELD_SCHEMA.fragment.values).toEqual(schemas.FragmentName.enum);
@@ -58,13 +59,28 @@ describe("field module", () => {
     expect(kindOf("tcp_flags")).toBe("flags");
     expect(kindOf("fragment")).toBe("names");
     expect(kindOf("reply")).toBe("boolean");
-    expect(formOf("path", "destination.port")).toBe("A number 0 to 65535.");
-    expect(formOf("set", "destination.port")).toBe("A comma list of numbers 0 to 65535 and ranges a-b.");
-    expect(formOf("path", "network.transport")).toBe("One of tcp, udp, icmp, icmpv6.");
-    expect(modeHelp("set")).toContain(SET_SYNTAX);
+    expect(formOf("path", "source.ip")).toBe("address, no prefix");
+    expect(formOf("path", "destination.port")).toBe("0 to 65535");
+    expect(formOf("set", "destination.port")).toBe("0 to 65535 and ranges a-b, comma list");
+    expect(formOf("path", "network.transport")).toBe("tcp, udp, icmp, icmpv6");
+    expect(notStatedNote("path")).toBe("not stated: not known");
+    expect(notStatedNote("set")).toBe("not stated: all values");
     for (const k of QUERY_FIELDS) {
       expect(formOf("path", k).length).toBeGreaterThan(0);
       expect(formOf("set", k).length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("field labels", () => {
+  it("give each field of the query bar a short label of its own", () => {
+    expect(Object.keys(FIELD_LABELS).sort()).toEqual([...QUERY_FIELDS].sort());
+    for (const k of QUERY_FIELDS) {
+      const label = labelOf(k);
+      expect(label.length, k).toBeGreaterThan(0);
+      expect(label.split(" ").length, k).toBeLessThanOrEqual(3);
+      expect(label, k).not.toMatch(/[.!?]$/);
+      expect(label, k).not.toBe(FIELD_SCHEMA[k].path);
     }
   });
 });
@@ -85,21 +101,21 @@ describe("form check", () => {
     expect(checkValue("path", "source.ip", "192.0.2.10")).toBeNull();
     expect(checkValue("path", "source.ip", "192.0.2.10/32")).toBeNull();
     expect(checkValue("path", "source.ip", "2001:db8::1/128")).toBeNull();
-    expect(checkValue("path", "source.ip", "192.0.2.0/24")).toContain("is a prefix");
-    expect(checkValue("path", "source.ip", "192.0.2.")).toBe('"192.0.2." is not an IP address');
+    expect(checkValue("path", "source.ip", "192.0.2.0/24")).toBe("prefix in a path query: 192.0.2.0/24");
+    expect(checkValue("path", "source.ip", "192.0.2.")).toBe("not an IP address: 192.0.2.");
     expect(checkValue("path", "source.ip", "")).toBeNull();
   });
 
   it("takes addresses and prefixes with no host bits in a set query", () => {
     expect(checkValue("set", "source.ip", "192.0.2.0/24, 198.51.100.7, 2001:db8::/32")).toBeNull();
-    expect(checkValue("set", "source.ip", "192.0.2.5/24")).toBe('"192.0.2.5/24" is not an address or a prefix');
+    expect(checkValue("set", "source.ip", "192.0.2.5/24")).toBe("not an address or a prefix: 192.0.2.5/24");
     expect(checkValue("set", "source.ip", "192.0.2.0/33")).not.toBeNull();
-    expect(checkValue("set", "source.ip", "192.0.2.0/24,")).toBe('"" is not an address or a prefix');
+    expect(checkValue("set", "source.ip", "192.0.2.0/24,")).toBe("not an address or a prefix: empty item");
   });
 
   it("takes numbers in range in a path query and ranges in a set query", () => {
     expect(checkValue("path", "destination.port", "65535")).toBeNull();
-    expect(checkValue("path", "destination.port", "65536")).toBe('"65536" is not a number 0 to 65535');
+    expect(checkValue("path", "destination.port", "65536")).toBe("not 0 to 65535: 65536");
     expect(checkValue("path", "destination.port", "80,443")).not.toBeNull();
     expect(checkValue("path", "dscp", "64")).not.toBeNull();
     expect(checkValue("set", "destination.port", "53,80,1024-65535")).toBeNull();
@@ -146,7 +162,7 @@ describe("form check", () => {
   it("names the first stated field with a wrong form", () => {
     expect(firstError("path", { "source.ip": "192.0.2.10", "destination.port": "99999", dscp: "70" })).toEqual({
       field: "destination.port",
-      message: '"99999" is not a number 0 to 65535',
+      message: "not 0 to 65535: 99999",
     });
     expect(firstError("path", { "source.ip": "192.0.2.10", "destination.ip": "", dscp: "46" })).toBeNull();
   });

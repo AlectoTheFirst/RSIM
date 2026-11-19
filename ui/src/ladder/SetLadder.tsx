@@ -123,7 +123,7 @@ export function SetLadder(props: { answer: Answer; level: Level; h: number }) {
     SIZE.colReasonSet,
   );
   const width = (parts: number) => SIZE.partLine[Math.min(parts, SIZE.partLine.length) - 1] ?? SIZE.pathLine;
-  const notRun = new Map(answer.replies.filter((r) => !r.ran).map((r) => [r.forward_branch, r.not_run_reason ?? "no reply runs"]));
+  const notRun = new Map(answer.replies.filter((r) => !r.ran).map((r) => [r.forward_branch, r.not_run_reason ?? "no reply"]));
   const ran = answer.replies.filter((r) => r.ran && r.answer);
   const heads = l.heads.map((head) => (
     <span class="part-head">

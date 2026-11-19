@@ -44,8 +44,8 @@ interface Result {
 /** The time of a query: the round trip, then the engine time or a cache hit. */
 export function timingText(ms: number, t: ServerTiming): string {
   const fmt = (x: number) => (x < 10 ? x.toFixed(1) : String(Math.round(x)));
-  const server = t.engineMs !== null ? ` · engine ${fmt(t.engineMs)} ms` : t.cacheHit ? " · from the cache" : "";
-  return `answered in ${fmt(ms)} ms${server}`;
+  const server = t.engineMs !== null ? ` · engine ${fmt(t.engineMs)} ms` : t.cacheHit ? " · cache hit" : "";
+  return `round trip ${fmt(ms)} ms${server}`;
 }
 
 const isSet = (out: PathAnswer | SetAnswer) => out.kind === "set_answer";
@@ -113,12 +113,11 @@ function PathFacts(props: { a: Answer; onStep: (d: DecidingStep) => void }) {
         const g = delayGaps(b);
         return (
           <HatchMark>
-            {multi ? `branch ${b.index}: ` : ""}delay at least {b.delay.known_ns} ns: {g.functions} functions and {g.links} links have
-            no delay data
+            {multi ? `branch ${b.index}: ` : ""}delay at least {b.delay.known_ns} ns · no data: {g.functions} functions, {g.links} links
           </HatchMark>
         );
       })}
-      {rib ? <HatchMark>{rib} route lookups not checked against a collected RIB</HatchMark> : null}
+      {rib ? <HatchMark>{rib} route lookups, no RIB check</HatchMark> : null}
     </>
   );
 }
@@ -143,7 +142,7 @@ function SetFacts(props: { a: Answer }) {
       <span>
         <span class="strong">{verdictWord("unknown")}</span> {n.unknown}
       </span>
-      {n.dependsOnPath ? <span class="muted">{n.dependsOnPath} parts depend on the path</span> : null}
+      {n.dependsOnPath ? <span class="muted">depends on path {n.dependsOnPath}</span> : null}
     </>
   );
 }
@@ -229,7 +228,7 @@ export function App() {
       autoOpen.current = true;
     } catch (e) {
       setResult(null);
-      setProblem(e instanceof ApiProblem ? `The query is refused: ${e.detail}` : String(e));
+      setProblem(e instanceof ApiProblem ? `query refused: ${e.detail}` : String(e));
     } finally {
       setBusy(false);
     }
@@ -261,7 +260,7 @@ export function App() {
     }
     setFields(out);
     setMode(next);
-    setNotice(cleared.length ? `${cleared.join(", ")} is cleared: a path query takes the flags of one packet.` : null);
+    setNotice(cleared.length ? `${cleared.join(", ")} cleared: one flag set in a path query` : null);
   }
 
   async function run() {
@@ -276,7 +275,7 @@ export function App() {
       await load(made.twin, made.qid, since);
     } catch (e) {
       setResult(null);
-      setProblem(e instanceof ApiProblem ? `The query is refused: ${e.detail}` : String(e));
+      setProblem(e instanceof ApiProblem ? `query refused: ${e.detail}` : String(e));
       setBusy(false);
     }
   }
@@ -301,8 +300,8 @@ export function App() {
   function copy(text: string, what: string) {
     navigator.clipboard
       .writeText(text)
-      .then(() => setNotice(`Copied the ${what}.`))
-      .catch(() => setNotice(`The browser did not copy the ${what}.`));
+      .then(() => setNotice(`${what} copied`))
+      .catch(() => setNotice(`${what} not copied`));
   }
 
   const sourceTwin = result && !result.twin.startsWith("builtin.") ? result.twin : null;
@@ -465,7 +464,7 @@ export function App() {
       />
       <ResultLine level={level} onLevel={setLevel}>
         {busy ? (
-          <span class="muted">The query runs.</span>
+          <span class="muted">running</span>
         ) : problem ? (
           <span>{problem}</span>
         ) : answer ? (
@@ -478,7 +477,7 @@ export function App() {
             ) : null}
           </>
         ) : (
-          <span class="muted">State the fields of a query and run it.</span>
+          <span class="muted">no query</span>
         )}
       </ResultLine>
       <main class="body">

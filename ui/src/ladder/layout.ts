@@ -424,7 +424,7 @@ export function ladder(a: Answer, level: Level, reply = true): Ladder {
         type: "section",
         key: `n${b.index}`,
         dir: "reply",
-        text: multi ? `no reply of branch ${b.index}: the forward path does not deliver` : "no reply: the forward path does not deliver",
+        text: multi ? `no reply of branch ${b.index}: forward path not delivered` : "no reply: forward path not delivered",
         verdict: null,
         note: null,
         muted: true,
@@ -532,7 +532,7 @@ export function delayShown(d: Branch["delay"]): Shown {
   const g = delayGaps({ delay: d });
   return {
     known: false,
-    text: `at least ${d.known_ns} ns: ${g.functions} functions and ${g.links} links have no delay data`,
+    text: `at least ${d.known_ns} ns · no data: ${g.functions} functions, ${g.links} links`,
   };
 }
 

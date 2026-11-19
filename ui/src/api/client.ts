@@ -56,7 +56,7 @@ export async function createQuery(
   });
   if (!r.ok) throw await problem(r);
   const m = /^\/v1\/twins\/([^/]+)\/queries\/([^/]+)$/.exec(new URL(r.url).pathname);
-  if (!m) throw new ApiProblem(r.status, "", `the answer has no query resource: ${r.url}`);
+  if (!m) throw new ApiProblem(r.status, "", `no query resource: ${r.url}`);
   return { twin: decodeURIComponent(m[1]!), qid: decodeURIComponent(m[2]!) };
 }
 

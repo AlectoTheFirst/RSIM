@@ -1,8 +1,8 @@
-// The fields of the query bar: their order, their help text, the names
-// that a field takes, and the check of the form of a value. The
-// descriptions, the number ranges and the names come from the OpenAPI
-// document; the checks follow the argument parser of the server.
-import { FIELD_SCHEMA, type FieldName, MODE_TEXT, SET_SYNTAX } from "../api/fields";
+// The fields of the query bar: their order, their labels and help text,
+// the names that a field takes, and the check of the form of a value. The
+// number ranges and the names come from the OpenAPI document; the checks
+// follow the argument parser of the server.
+import { FIELD_SCHEMA, type FieldName } from "../api/fields";
 
 export type Mode = "path" | "set";
 
@@ -83,44 +83,61 @@ export function exampleOf(mode: Mode, k: QueryField): string {
   return EXAMPLES[k][mode];
 }
 
-/** The description of a field for a mode, from the OpenAPI document. */
-export function descriptionOf(mode: Mode, k: QueryField): string {
-  return FIELD_SCHEMA[k][mode];
+/** The label of each field in the UI: a short noun phrase. */
+export const FIELD_LABELS: Record<QueryField, string> = {
+  "source.ip": "source address",
+  "source.port": "source port",
+  "destination.ip": "destination address",
+  "destination.port": "destination port",
+  "network.transport": "transport protocol",
+  ingress: "entry point",
+  "network.iana_number": "IP protocol number",
+  tcp_flags: "TCP flags",
+  icmp_type: "ICMP type",
+  icmp_code: "ICMP code",
+  fragment: "fragment state",
+  dscp: "DSCP",
+  ecn: "ECN",
+  "source.mac": "source MAC",
+  "destination.mac": "destination MAC",
+  "network.vlan.id": "VLAN tag",
+  l2_priority: "layer 2 priority",
+  reply: "reply run",
+};
+
+export function labelOf(k: QueryField): string {
+  return FIELD_LABELS[k];
 }
 
 const names = (vs: readonly string[]) => vs.join(", ");
 
-/** The form of a value of a field for a mode. */
+/** The form of a value of a field for a mode, as a short phrase. */
 export function formOf(mode: Mode, k: QueryField): string {
   const max = maxOf(k);
   const vs = FIELD_SCHEMA[k].values;
   switch (kindOf(k)) {
     case "address":
-      return mode === "path"
-        ? "One IPv4 or IPv6 address, with no prefix length."
-        : "A comma list of addresses and prefixes; a prefix has no host bits set.";
+      return mode === "path" ? "address, no prefix" : "addresses and prefixes, comma list";
     case "mac":
-      return mode === "path" ? "6 hexadecimal bytes with colons." : "A comma list of MAC addresses, each 6 hexadecimal bytes with colons.";
+      return mode === "path" ? "6 hex bytes with colons" : "MAC addresses, comma list";
     case "ingress":
-      return "<device>/<interface>.";
+      return "<device>/<interface>";
     case "boolean":
-      return "true or false.";
+      return "true or false";
     case "number":
-      return mode === "path" ? `A number 0 to ${max}.` : `A comma list of numbers 0 to ${max} and ranges a-b.`;
+      return mode === "path" ? `0 to ${max}` : `0 to ${max} and ranges a-b, comma list`;
     case "icmp":
-      return mode === "path" ? `A number 0 to ${max}, or one of ${names(vs)}.` : `A comma list of numbers 0 to ${max} and ranges a-b.`;
+      return mode === "path" ? `0 to ${max}, ${names(vs)}` : `0 to ${max} and ranges a-b, comma list`;
     case "names":
-      return mode === "path" ? `One of ${names(vs)}.` : `A comma list of ${names(vs)}.`;
+      return mode === "path" ? names(vs) : `${names(vs)}, comma list`;
     case "flags":
-      return mode === "path"
-        ? `A comma list of the flags that are set: ${names(vs)}.`
-        : `A comma list of values; each value is a number 0 to 255, a range a-b, or names joined with +, such as syn+ack.`;
+      return mode === "path" ? `flags set, comma list` : `flag sets with +, 0 to 255, ranges a-b, comma list`;
   }
 }
 
-/** The help of the query bar for a mode, from the OpenAPI document. */
-export function modeHelp(mode: Mode): string {
-  return mode === "set" ? `${MODE_TEXT.set} ${SET_SYNTAX}` : MODE_TEXT.path;
+/** The value of a field that a query does not state, in a mode. */
+export function notStatedNote(mode: Mode): string {
+  return mode === "set" ? "not stated: all values" : "not stated: not known";
 }
 
 // The forms of the values, as the parser of the server reads them.
@@ -202,8 +219,8 @@ function hostAddressError(s: string): string | null {
   const slash = s.indexOf("/");
   const ip = parseIp(slash < 0 ? s : s.slice(0, slash));
   if (ip && (slash < 0 || s.slice(slash + 1) === String(ip.width))) return null;
-  if (ip || s.includes("/")) return `"${s}" is a prefix; a path query takes one address, and a set query takes a prefix`;
-  return `"${s}" is not an IP address`;
+  if (ip || s.includes("/")) return `prefix in a path query: ${s}`;
+  return `not an IP address: ${s}`;
 }
 
 function isMac(s: string): boolean {
@@ -245,9 +262,9 @@ export function checkValue(mode: Mode, k: QueryField, value: string): string | n
   const vs = FIELD_SCHEMA[k].values as readonly string[];
   const each = (ok: (item: string) => boolean, what: string): string | null => {
     const bad = listItems(v).find((x) => !ok(x));
-    return bad === undefined ? null : `"${bad}" is not ${what}`;
+    return bad === undefined ? null : `not ${what}: ${bad === "" ? "empty item" : bad}`;
   };
-  const single = (ok: boolean, what: string) => (ok ? null : `"${v}" is not ${what}`);
+  const single = (ok: boolean, what: string) => (ok ? null : `not ${what}: ${v}`);
   switch (kindOf(k)) {
     case "ingress": {
       const slash = v.indexOf("/");
@@ -258,29 +275,29 @@ export function checkValue(mode: Mode, k: QueryField, value: string): string | n
     case "address":
       return mode === "path" ? hostAddressError(v) : each(isPrefix, "an address or a prefix");
     case "mac":
-      return mode === "path" ? single(isMac(v), "6 hexadecimal bytes with colons") : each(isMac, "6 hexadecimal bytes with colons");
+      return mode === "path" ? single(isMac(v), "6 hex bytes with colons") : each(isMac, "6 hex bytes with colons");
     case "number":
       if (mode === "path") {
         const n = /^\d+$/.test(v) ? Number(v) : null;
-        return single(n !== null && n <= max, `a number 0 to ${max}`);
+        return single(n !== null && n <= max, `0 to ${max}`);
       }
-      return each((x) => isRange(x, max), `a number 0 to ${max} or a range a-b`);
+      return each((x) => isRange(x, max), `0 to ${max} or a range a-b`);
     case "icmp":
       if (mode === "path") {
         const n = /^\d+$/.test(v) ? Number(v) : null;
-        return single((n !== null && n <= max) || vs.includes(v), `a number 0 to ${max}, ${vs.join(" or ")}`);
+        return single((n !== null && n <= max) || vs.includes(v), `0 to ${max}, ${vs.join(" or ")}`);
       }
-      return each((x) => isRange(x, max), `a number 0 to ${max} or a range a-b`);
+      return each((x) => isRange(x, max), `0 to ${max} or a range a-b`);
     case "names":
       if (k === "network.transport") {
-        return mode === "path" ? single(isTransport(v), names(vs)) : each(isTransport, names(vs));
+        return mode === "path" ? single(isTransport(v), `one of ${names(vs)}`) : each(isTransport, `one of ${names(vs)}`);
       }
-      return mode === "path" ? single(vs.includes(v), names(vs)) : each((x) => vs.includes(x), names(vs));
+      return mode === "path" ? single(vs.includes(v), `one of ${names(vs)}`) : each((x) => vs.includes(x), `one of ${names(vs)}`);
     case "flags":
-      if (mode === "path") return each((x) => vs.includes(x), `a TCP flag: ${names(vs)}`);
+      if (mode === "path") return each((x) => vs.includes(x), `a TCP flag, ${names(vs)}`);
       return each(
         (x) => (/^[A-Za-z]/.test(x) ? x.split("+").every((f) => vs.includes(f)) : isRange(x, 255)),
-        "a number 0 to 255, a range a-b or flag names joined with +",
+        "0 to 255, a range a-b or flags with +",
       );
   }
 }

@@ -95,7 +95,7 @@ export function VerdictText(props: {
       {at ? (
         <>
           {" at "}
-          <button type="button" class="link t-value" title="Select and open this step" onClick={() => props.onStep?.(at)}>
+          <button type="button" class="link t-value" title="Open step" onClick={() => props.onStep?.(at)}>
             {at.step.device ? `${at.step.device} ${functionLabel(at.step)}` : at.step.function}
           </button>
           {reason ? ":" : ""}
@@ -130,7 +130,7 @@ export function RibCell(props: { rib: Rib; h: number }) {
     case "hatch":
       return (
         <span class="rib hatched">
-          <Hatch w={SIZE.colRib - 2 * SIZE.ribPadX} h={props.h - SIZE.ribPadY * 2} title="not checked against a collected RIB" />
+          <Hatch w={SIZE.colRib - 2 * SIZE.ribPadX} h={props.h - SIZE.ribPadY * 2} title="no RIB check" />
         </span>
       );
     case "matches":

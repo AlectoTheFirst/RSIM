@@ -10,13 +10,13 @@ import { HatchMark } from "./Hatch";
 import {
   BASE_FIELDS,
   checkValue,
-  descriptionOf,
   exampleOf,
   filterValues,
   firstError,
   formOf,
   insertValue,
-  modeHelp,
+  labelOf,
+  notStatedNote,
   valueToken,
   valuesOf,
 } from "./fields";
@@ -99,7 +99,7 @@ function AccountMenu(props: { prefs: Prefs; onPrefs: (p: Prefs) => void }) {
             <span class="t-label">Row height</span>
             <Choice<RowHeight> value={p.row} options={ROW_HEIGHTS} onChange={(row) => props.onPrefs({ ...p, row })} />
           </div>
-          <div class="muted">Blue and orange take the place of the colours of Deliver and Drop.</div>
+          <div class="muted">blue and orange: colours of Deliver and Drop</div>
         </div>
       ) : null}
     </span>
@@ -138,7 +138,7 @@ export function TopBar(props: {
               {v}
             </button>
           ) : (
-            <button type="button" disabled title="Not in this build">
+            <button type="button" disabled title="not in this build">
               {v}
             </button>
           ),
@@ -292,12 +292,6 @@ function QueryValue(props: {
   );
 }
 
-/** The first sentence of a text. */
-const firstSentence = (s: string) => {
-  const at = s.indexOf(". ");
-  return at < 0 ? s : s.slice(0, at + 1);
-};
-
 /** The button "Add field" and its list of the fields that do not show. */
 function AddField(props: {
   mode: Mode;
@@ -357,7 +351,7 @@ function AddField(props: {
           id={id}
           label="Fields of the query"
           names={props.fields}
-          detail={(k) => firstSentence(descriptionOf(props.mode, k as QueryField))}
+          detail={(k) => labelOf(k as QueryField)}
           active={state.active}
           onChoose={(k) => choose(k as QueryField)}
         />
@@ -366,18 +360,23 @@ function AddField(props: {
   );
 }
 
+/** The separator of the parts of the help line. */
+const SEP = " · ";
+
 /**
- * The help line of the query bar. For the field that has the focus: the
- * message of a value with a wrong form, the description, the form of a
- * value in the mode and an example. With no field in focus: the message
- * of the first shown field whose value has a wrong form.
+ * The help line of the query bar, in short parts. For the field that has
+ * the focus: its name, the message of a value with a wrong form, the form
+ * of a value in the mode and an example. With no field in focus: the name
+ * and the message of the first shown field whose value has a wrong form.
  */
 function HelpLine(props: { mode: Mode; focus: QueryField | "add" | null; error: { field: QueryField; message: string } | null }) {
   const { mode, focus, error } = props;
   if (focus === "add") {
     return (
       <div class="qhelp" id={HELP_ID}>
-        <span class="muted">Add field</span> {modeHelp(mode)}
+        <span class="muted">Add field</span>
+        {SEP}
+        {notStatedNote(mode)}
       </div>
     );
   }
@@ -386,10 +385,19 @@ function HelpLine(props: { mode: Mode; focus: QueryField | "add" | null; error: 
   const message = error && error.field === k ? error.message : null;
   return (
     <div class="qhelp" id={HELP_ID}>
-      <span class="muted">{k}</span> {message ? <span class="c-drop">{message}. </span> : null}
+      <span class="muted">{k}</span>
+      {message ? (
+        <>
+          {SEP}
+          <span class="c-drop">{message}</span>
+        </>
+      ) : null}
       {focus ? (
         <>
-          {descriptionOf(mode, k)} {formOf(mode, k)} Example: <span class="t-query">{exampleOf(mode, k)}</span>
+          {SEP}
+          {formOf(mode, k)}
+          {SEP}
+          <span class="t-query">{exampleOf(mode, k)}</span>
         </>
       ) : null}
     </div>
@@ -506,7 +514,7 @@ export function QueryBar(props: {
         />
       ) : null}
       {props.mode === "set" ? (
-        <span class="muted">Fields not stated have all values.</span>
+        <span class="muted">{notStatedNote("set")}</span>
       ) : props.notStated?.length ? (
         <HatchMark title={props.notStated.join(", ")}>{props.notStated.length} not stated</HatchMark>
       ) : null}
@@ -531,7 +539,7 @@ export function LevelControl(props: { level: Level; onLevel: (l: Level) => void 
     <span class="group" role="group" aria-label="Level">
       <span class="muted">Level</span>
       {(["estate", "site"] as const).map((l) => (
-        <button type="button" disabled title="Not in this build">
+        <button type="button" disabled title="not in this build">
           {l}
         </button>
       ))}
