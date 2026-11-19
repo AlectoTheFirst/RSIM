@@ -128,7 +128,12 @@
     "wireguard": {
       "wg0": {
         "address": "198.51.100.2/32",
+        "port": "51821",
         "peer": {
+          "roam": {
+            "allowed-ips": "198.51.100.64/26",
+            "public-key": "CCCC"
+          },
           "vpn": {
             "address": "198.51.100.1",
             "allowed-ips": "0.0.0.0/0",

@@ -483,6 +483,13 @@ impl FromEngine<EncapDesc> for EncapJson {
                 vni: Some(num(&e.vni)),
                 label: None,
             },
+            bits::ENCAP_WIREGUARD => EncapJson {
+                kind: "wireguard".into(),
+                src: Some(addr(&e.src)),
+                dst: Some(addr(&e.dst)),
+                vni: None,
+                label: None,
+            },
             _ => EncapJson {
                 kind: "mpls".into(),
                 src: None,

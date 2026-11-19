@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use rsim_core::{
-    AddrCond, FieldValue, FunctionId, InterfaceId, Mac, Match, NeighbourTarget, NetFunction,
+    AddrCond, Attr, FieldValue, FunctionId, InterfaceId, Mac, Match, NeighbourTarget, NetFunction,
     ObjectId, PortCond, Prefix, PrefixTable, Rewrite, RulePredicate, SourceSpan, TriePrefixTable,
     ValueCond, VrfId, ZoneId,
 };
@@ -16,7 +16,8 @@ use rsim_functions::{
     Ingress, Layer3HandOff, Link, LinkEnd, LinkFacts, LocalInput, Meta, NatAction, Neighbour,
     NextHopResolution, PolicyRoute, QosNotEvaluated, Route, RouteKind, RouteLookup, RouteNextHop,
     Rule as FRule, RuleAction, SessionCommit, SessionLookup, SourceNat, StateAction, StateActions,
-    Tag, VendorProfile, VrfSelection, ZoneLookup, ZoneRole, ZoneScope,
+    Tag, VendorProfile, VrfSelection, WireguardEncap, WireguardPeer, WireguardSettings, ZoneLookup,
+    ZoneRole, ZoneScope,
 };
 
 use crate::collected::Collected;
@@ -353,6 +354,11 @@ pub fn lower(
     let local_routes = local_routes(&main_addrs);
     let main_fib = l.main_fib(col, &main_addrs, &local_routes);
     let exits = exit_marks(&active, &main_fib, twin, &addrs);
+    let wireguard: Vec<WireguardEncap> = active
+        .iter()
+        .filter(|i| i.kind == Kind::Wireguard)
+        .map(|i| l.wireguard(i, &main_fib, &main_addrs, local_zone.as_deref()))
+        .collect();
     let local_id = l.id("local");
     let meta = l.meta("route", Vec::new());
     l.add(RouteLookup {
@@ -374,15 +380,9 @@ pub fn lower(
 
     // Zone policy, the local input and the delivery to the router.
     let (forward_rules, local_rules) = l.zone_rules(local_zone.as_deref());
-    // With no action of the state policy for established packets, the
-    // rules evaluate the packets of a session.
-    let evaluate = |p: FirewallPolicy| {
-        if states.established == StateAction::Continue {
-            p.evaluating_sessions()
-        } else {
-            p
-        }
-    };
+    // The action of the state policy for established packets; with none,
+    // the rules evaluate the packets of a session.
+    let evaluate = |p: FirewallPolicy| p.with_established(states.established);
     let meta = l.meta("policy", zone_spans.clone());
     l.add(evaluate(FirewallPolicy::new(
         meta,
@@ -511,7 +511,7 @@ pub fn lower(
                 let f = if qos.contains_key(i.name.as_str()) {
                     format!("qos/{}", i.name)
                 } else {
-                    format!("out/{}", i.name)
+                    out_name(i)
                 };
                 (InterfaceId::new(&i.name), l.id(&f))
             })
@@ -529,8 +529,11 @@ pub fn lower(
             l.add(QosNotEvaluated {
                 meta,
                 stanza: ObjectId::new(format!("{device}:qos:{}", q.policy)),
-                next: l.id(&format!("out/{}", i.name)),
+                next: l.id(&out_name(i)),
             });
+        }
+        if i.kind == Kind::Wireguard {
+            continue;
         }
         let span = l.span(i.lines);
         let meta = l.meta(&format!("out/{}", i.name), vec![span]);
@@ -564,6 +567,9 @@ pub fn lower(
             tag,
             exit: exits.get(i.name.as_str()).cloned(),
         });
+    }
+    for w in wireguard {
+        l.add(w);
     }
     for (phys, (_, prov, _)) in l2 {
         let Some(m) = interface_mac(col, phys) else {
@@ -609,6 +615,15 @@ pub fn lower(
         }
     }
     l.out
+}
+
+/// The name of the function after the next-hop resolution and the QoS of
+/// an interface: the egress, or the encapsulation of a WireGuard interface.
+fn out_name(i: &Interface) -> String {
+    match i.kind {
+        Kind::Wireguard => format!("wireguard/{}", i.name),
+        _ => format!("out/{}", i.name),
+    }
 }
 
 /// The edge interfaces of the twin. A PPPoE interface is an access link.
@@ -657,6 +672,43 @@ fn exit_marks<'a>(
         out.insert(i.name.as_str(), ExitMark::AccessLink);
     }
     out
+}
+
+/// The source address of the packets of the router to `endpoint` and its
+/// interface: the one address of the family of the endpoint on the one
+/// interface of the route of the main table to it.
+fn tunnel_source<'a>(
+    main: &'a Fib,
+    addrs: &Addrs,
+    endpoint: IpAddr,
+) -> Result<(IpAddr, &'a str), String> {
+    let not_known = |why: String| Err(format!("the WireGuard source address is not known: {why}"));
+    let Some((p, g)) = main.lookup(endpoint) else {
+        return not_known(format!("no route to {endpoint}"));
+    };
+    if g.unknown.is_some() {
+        return not_known(format!("the route {p} is not known"));
+    }
+    let ifaces: BTreeSet<&str> = g.next_hops.iter().map(|h| h.interface.as_str()).collect();
+    let [iface] = ifaces.into_iter().collect::<Vec<_>>()[..] else {
+        return not_known(format!("the route {p} has no single interface"));
+    };
+    let mine: Vec<IpAddr> = addrs
+        .get(iface)
+        .map(|v| {
+            v.iter()
+                .map(|(a, _, _)| *a)
+                .filter(|a| a.is_ipv6() == endpoint.is_ipv6())
+                .collect()
+        })
+        .unwrap_or_default();
+    match mine[..] {
+        [a] => Ok((a, iface)),
+        [] => not_known(format!(
+            "{iface} has no address of the family of {endpoint}"
+        )),
+        _ => not_known(format!("{iface} has more than one address")),
+    }
 }
 
 /// The addresses of each interface with their prefix length: the config,
@@ -738,6 +790,81 @@ fn local_routes(addrs: &Addrs) -> Vec<(Prefix, Route)> {
 }
 
 impl L<'_> {
+    /// The WireGuard encapsulation of an interface. The outer source address
+    /// toward a peer is the address of the interface of the route of the
+    /// main table to the endpoint of the peer; with no such route, or with
+    /// more than one interface or address of that family, it is not known.
+    /// The encapsulated packets are packets of the router: they go to the
+    /// route lookup of the main table, with the local zone as their source
+    /// zone.
+    fn wireguard(
+        &mut self,
+        i: &Interface,
+        main: &Fib,
+        addrs: &Addrs,
+        local_zone: Option<&str>,
+    ) -> WireguardEncap {
+        let mut peers = Vec::new();
+        for p in &i.peers {
+            let mut allowed = Vec::new();
+            for a in &p.allowed_ips {
+                match a.parse::<Prefix>() {
+                    Ok(x) => allowed.push(x),
+                    Err(_) => self.note(format!(
+                        "{} peer {}: the allowed IP {a} is not valid",
+                        i.name, p.name
+                    )),
+                }
+            }
+            let endpoint = p
+                .address
+                .as_deref()
+                .and_then(|a| a.parse::<IpAddr>().ok())
+                .zip(p.port.as_deref().and_then(|x| x.parse::<u16>().ok()));
+            let (source, source_interface) = match endpoint {
+                Some((ep, _)) => match tunnel_source(main, addrs, ep) {
+                    Ok((a, i)) => (Ok(a), Some(InterfaceId::new(i))),
+                    Err(why) => (Err(why), None),
+                },
+                None => (Err("WireGuard peer endpoint not known".to_string()), None),
+            };
+            peers.push(WireguardPeer {
+                name: p.name.clone(),
+                allowed,
+                endpoint,
+                source,
+                source_interface,
+                spans: vec![self.span(p.lines)],
+            });
+        }
+        let unknown = if self.cfg.output_filter {
+            Some("the global output filter is not lowered".to_string())
+        } else if self.cfg.local_route {
+            Some("the policy routes of the router itself are not lowered".to_string())
+        } else {
+            None
+        };
+        let src_zone = match local_zone {
+            Some(z) => Attr::Known(ZoneId::new(z)),
+            None if self.cfg.zones.is_empty() => Attr::Known(ZoneId::new(NO_ZONE)),
+            None => Attr::Unknown,
+        };
+        let name = format!("wireguard/{}", i.name);
+        let meta = self.meta(&name, vec![self.span(i.lines)]);
+        WireguardEncap::new(
+            meta,
+            InterfaceId::new(&i.name),
+            peers,
+            WireguardSettings {
+                listen_port: i.port.as_deref().and_then(|x| x.parse().ok()),
+                unknown,
+                src_zone,
+                underlay: VrfId::new(VRF),
+                next: self.id("route"),
+            },
+        )
+    }
+
     fn hop(&self, interface: &str, gateway: Option<IpAddr>) -> RouteNextHop {
         RouteNextHop {
             interface: InterfaceId::new(interface),

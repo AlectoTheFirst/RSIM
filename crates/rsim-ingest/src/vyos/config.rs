@@ -48,8 +48,23 @@ pub struct Interface {
     pub source_interface: Option<String>,
     /// The VRF of the interface, `None` for the default VRF.
     pub vrf: Option<String>,
-    /// The allowed IPs of the WireGuard peers.
+    /// The listen port of a WireGuard interface.
+    pub port: Option<String>,
+    /// The peers of a WireGuard interface that are not disabled, in name
+    /// order.
+    pub peers: Vec<WireguardPeer>,
+    pub lines: Lines,
+}
+
+/// A peer of a WireGuard interface. The keys are not read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WireguardPeer {
+    pub name: String,
     pub allowed_ips: Vec<String>,
+    /// The address of the endpoint.
+    pub address: Option<String>,
+    /// The UDP port of the endpoint.
+    pub port: Option<String>,
     pub lines: Lines,
 }
 
@@ -221,6 +236,13 @@ pub struct Config {
     /// True if the config has a global input filter, which the handlers do
     /// not read.
     pub input_filter: bool,
+    /// True if the config has a global output filter, which the handlers
+    /// do not read.
+    pub output_filter: bool,
+    /// True if the config has policy routes of the packets of the router
+    /// itself (`policy local-route` or `local-route6`), which the handlers
+    /// do not read.
+    pub local_route: bool,
     /// The children of `protocols` that can add routes, for example `bgp`
     /// or `ospf`.
     pub routing_protocols: Vec<(String, Lines)>,
@@ -326,6 +348,9 @@ pub fn read(doc: &Document) -> Config {
         if let Some(dst) = r.at(nat, &["destination", "rule"]) {
             c.destination_nat = read_rules(&mut r, dst);
         }
+    }
+    if let Some(policy) = root.get("policy") {
+        c.local_route = policy.get("local-route").is_some() || policy.get("local-route6").is_some();
     }
     if let Some(policy) = r.at(root, &["policy"]) {
         for (key, family) in [("route", Family::V4), ("route6", Family::V6)] {
@@ -456,14 +481,24 @@ fn read_interface(r: &mut Reader, s: &Stanza, name: String, kind: Kind) -> Inter
         dynamic.push("pppoe".to_string());
         r.flag(s, "default-route");
     }
-    let mut allowed_ips = Vec::new();
-    if let Some(peers) = s.get("peer") {
-        r.mark(peers);
-        for p in members(peers) {
+    let mut peers = Vec::new();
+    if let Some(ps) = s.get("peer") {
+        r.mark(ps);
+        for p in members(ps) {
             r.mark(p);
-            allowed_ips.extend(r.texts(p, "allowed-ips"));
+            let peer = WireguardPeer {
+                name: p.key.clone(),
+                allowed_ips: r.texts(p, "allowed-ips"),
+                address: r.text(p, "address"),
+                port: r.text(p, "port"),
+                lines: Lines::of(p),
+            };
+            if !r.flag(p, "disable") {
+                peers.push(peer);
+            }
         }
     }
+    peers.sort_by(|a, b| a.name.cmp(&b.name));
     Interface {
         name,
         kind,
@@ -472,7 +507,8 @@ fn read_interface(r: &mut Reader, s: &Stanza, name: String, kind: Kind) -> Inter
         disabled: r.flag(s, "disable"),
         source_interface: r.text(s, "source-interface"),
         vrf: r.text(s, "vrf"),
-        allowed_ips,
+        port: r.text(s, "port"),
+        peers,
         lines: Lines::of(s),
     }
 }
@@ -481,6 +517,7 @@ fn read_firewall(r: &mut Reader, fw: &Stanza, c: &mut Config) {
     for family in ["ipv4", "ipv6"] {
         c.forward_filter |= fw.at(&[family, "forward"]).is_some();
         c.input_filter |= fw.at(&[family, "input"]).is_some();
+        c.output_filter |= fw.at(&[family, "output"]).is_some();
     }
     if let Some(groups) = fw.get("group") {
         r.mark(groups);
