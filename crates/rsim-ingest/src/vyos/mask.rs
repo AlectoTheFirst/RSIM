@@ -295,4 +295,17 @@ mod tests {
             ],
         );
     }
+
+    #[test]
+    fn the_fixture_config_of_r1_shows_no_secret() {
+        let bytes = include_bytes!("../../tests/fixtures/vyos/r1-config.json");
+        let lines = check::masked(
+            "vyos",
+            Format::Json,
+            bytes,
+            &["FAKEVYOSPASSWORD", "FAKEPEERGROUPPASSWORD", "BBBB"],
+            &[],
+        );
+        assert!(lines.iter().filter(|l| l.contains(MASKED)).count() >= 3);
+    }
 }

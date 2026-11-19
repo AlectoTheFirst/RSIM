@@ -530,7 +530,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The source lines of a span of a twin with the secrets masked: at most 200 lines, the rest cut with a note. A built-in topology has no source text, and a section with no mask for its vendor is refused. */
+        /** The source lines of a span of a twin with the secrets masked: only the lines inside a source span of a function of the twin, at most 200 lines, with the lines left out and the cut lines named in a note. A built-in topology has no source text, a section with no mask for its vendor is refused, and a range with no line inside a source span is refused. */
         get: operations["getSourceLines"];
         put?: never;
         post?: never;

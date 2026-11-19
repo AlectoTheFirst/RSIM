@@ -47,6 +47,7 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | A table of a twin | `cargo run -p rsim-cli -- leaf-spine fib show --device leaf1`. The verbs are `show`, `summarize`, `unique --columns a,b`, `top --column c`, `lpm <address>` and `describe`; `--<column> v1,v2` and `--<column>.<op> v` filter, `--columns`, `--sort`, `--limit` and `--cursor` select. `rsim tables` lists the tables. |
 | REST API on a loopback port | `cargo run -p rsim-api -- --listen 127.0.0.1:8787`. Add `--store <data folder>` for the twin `store`, and `--allow-origin <origin>` for a browser. `rsim-api --openapi` prints the OpenAPI document. |
 | API tests | `cargo test -p rsim-api` |
+| Span index tests of the source lines | `cargo test -p rsim-cli --test span_index` |
 | REST API with the inventory | `cargo run -p rsim-api -- --inventory <postgres URL>`. It applies the migrations at the start and serves `/v1/inventory`. |
 | Install the UI dependencies | `npm --prefix ui ci`. The versions are exact and the lockfile is committed. |
 | Build the UI | `npm --prefix ui run build`: the type check and the Vite build into `ui/dist`, which `rsim-api` embeds at build time. Build `rsim-api` again after it. With `RSIM_UI_REQUIRED=1`, as in CI, a missing UI is a build error of `rsim-api`. |
@@ -65,7 +66,7 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 | One trace step of a set query | `cargo run -p rsim-cli -- explain-set mini-enterprise --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --destination.port 53,80 --branch 1 --step 7` |
 | Set query benchmark | `cargo bench -p rsim-engine --bench set_query` |
 | One trace step | `cargo run -p rsim-cli -- explain mini-enterprise --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --destination.port 53 --branch 0 --step 7`. Add `--source-lines` for the masked source lines of each span of the step; a built-in topology has no source text. |
-| Masked source lines of a span | `GET /v1/twins/{twin}/sources?file=<device>/<section>@<blob>&lines=a-b` on `rsim-api` with `--store`: at most 200 lines, the rest cut with a note. The step resource takes `?source_lines=true`, and the MCP tool `explain_step` the argument `source_lines`. |
+| Masked source lines of a span | `GET /v1/twins/{twin}/sources?file=<device>/<section>@<blob>&lines=a-b` on `rsim-api` with `--store`: only the lines inside a source span of a function of the twin (`not_a_source_span` for a range with none, `left_out` for the lines outside), at most 200 lines, the rest cut with a note. The step resource takes `?source_lines=true`, and the MCP tool `explain_step` the argument `source_lines`. |
 | Source line mask tests | `cargo test -p rsim-ingest --lib mask` and `cargo test -p rsim-api --test sources` |
 | MCP server on stdio | `cargo run -p rsim-mcp` |
 | Path query on the newest snapshot of a store | `cargo run -p rsim-cli -- path store:<data folder> --source.ip <a> --destination.ip <b> ...`. The data folder is the folder of `rsim-collect` with `store` and `keys`. |

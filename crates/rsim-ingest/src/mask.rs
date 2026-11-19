@@ -94,12 +94,14 @@ const SECRET_PARAMS: &[&str] = &[
 
 /// The text with the secrets of each URL masked, or `None` for a text with
 /// none. A word is a run of text with no white space, with no quote at its
-/// ends, and each part of a word between commas is read alone. In a part,
+/// ends. The word is read whole, and each part of it between commas is
+/// read alone too. In a word or a part,
 /// the text before the first `://` becomes `<secret>` up to its last `@`
 /// when it holds a `:` before that `@`, the form `user:password@host`.
-/// After `scheme://`, the userinfo up to the last `@` of the part becomes
+/// After `scheme://`, the userinfo up to the last `@` of the word or part becomes
 /// `<secret>`, except a user name with no `:` for the schemes `ssh` and
-/// `git`. After the userinfo of each part, the value of a query parameter
+/// `git`. After the userinfo of the word and of each part, the value of a
+/// query parameter
 /// after the next `?` of the word, whose name is a word of `SECRET_PARAMS`,
 /// ends with `sig` or `signature`, or is a secret key of the common rule,
 /// becomes `<secret>` up to the next `&`, `;` or `#`.
@@ -137,6 +139,8 @@ fn word_secrets(text: &str, s: usize, e: usize, ranges: &mut Vec<(usize, usize)>
     let e = s + text[s..e].trim_end_matches(quote).len();
     let word = &text[s..e];
     let mut found = Vec::new();
+    let host = userinfo(word, 0, &mut found);
+    query_secrets(word, host, &mut found);
     let mut part = 0;
     for piece in word.split(',') {
         let host = part + userinfo(piece, part, &mut found);
@@ -837,15 +841,12 @@ mod tests {
                 "<secret>@192.0.2.25/?next=http://x",
             ),
             ("b:FAKE2@h2,ftp://h3/x", "<secret>@h2,ftp://h3/x"),
-            ("ftp://h3/x,b:FAKE2@h2", "ftp://h3/x,<secret>@h2"),
-            (
-                "ftp://u:FAKE1@h1,b:FAKE2@h2",
-                "ftp://<secret>@h1,<secret>@h2",
-            ),
-            (
-                "http://h/?token=FAKE1,u:FAKE2@h2",
-                "http://h/?token=<secret>",
-            ),
+            ("ftp://h3/x,b:FAKE2@h2", "ftp://<secret>@h2"),
+            ("ftp://u:FAKE1@h1,b:FAKE2@h2", "ftp://<secret>@h2"),
+            ("http://h/?token=FAKE1,u:FAKE2@h2", "http://<secret>"),
+            ("ftp://u:FA,KE@192.0.2.5/x", "ftp://<secret>@192.0.2.5/x"),
+            ("u:FA,KE@192.0.2.5", "<secret>@192.0.2.5"),
+            ("x,u:FAKE@h/?next=ftp://y", "<secret>@h/?next=ftp://y"),
         ] {
             assert_eq!(url_secrets(text).as_deref(), Some(want), "{text}");
         }
