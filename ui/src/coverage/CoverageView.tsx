@@ -31,7 +31,7 @@ function UnhandledCount(props: { n: number; h: number }) {
   if (!props.n) return <span class="cell num">0</span>;
   const s = props.h - 2 * SIZE.buttonGap;
   return (
-    <span class="cell num unhandled" title="Functions from these lines give Unknown">
+    <span class="cell num unhandled" title="functions from these lines: Unknown">
       <Hatch w={s} h={s} />
       <span>{props.n}</span>
     </span>
@@ -63,9 +63,9 @@ function Paths(props: { twin: string; device: string; onTables: () => void }) {
         {problem ? (
           <div>{problem}</div>
         ) : !out ? (
-          <div class="muted">The paths load.</div>
+          <div class="muted">loading</div>
         ) : out.rows.length === 0 ? (
-          <div class="muted">The device has no unhandled stanzas.</div>
+          <div class="muted">no unhandled stanzas</div>
         ) : (
           <table class="paths">
             <thead class="t-label">
@@ -93,7 +93,7 @@ function Paths(props: { twin: string; device: string; onTables: () => void }) {
         )}
         {st.shown && st.shown.out.total > st.shown.out.rows.length ? (
           <div class="group actions">
-            <span class="muted">{problem ? null : current ? pageWords(want, current.rows.length, current.total) : "The page loads."}</span>
+            <span class="muted">{problem ? null : current ? pageWords(want, current.rows.length, current.total) : "loading"}</span>
             <button type="button" disabled={!want.back.length} onClick={() => go(previousPage(want, PATHS_LIMIT))}>
               Previous page
             </button>
@@ -108,10 +108,9 @@ function Paths(props: { twin: string; device: string; onTables: () => void }) {
         ) : null}
       </div>
       <div>
-        <div class="t-label">about the report</div>
+        <div class="t-label">paths</div>
         <p class="note">
-          A path has <span class="t-value">*</span> in place of each key that the classification table matches, and each key goes through the
-          mask of the secrets. The report gives the paths and their counts; it has no line numbers.
+          <span class="t-value">*</span> key of the classification table · secrets masked · counts, no line numbers
         </p>
         <div class="group actions">
           <button type="button" onClick={props.onTables}>
@@ -162,7 +161,7 @@ export function CoverageView(props: {
       })
       .catch((e: unknown) => {
         if (!live) return;
-        setRefusal({ key, value: e instanceof ApiProblem ? `The request is refused: ${e.detail}` : String(e) });
+        setRefusal({ key, value: e instanceof ApiProblem ? `request refused: ${e.detail}` : String(e) });
       });
     return () => {
       live = false;
@@ -252,15 +251,15 @@ export function CoverageView(props: {
     <>
       <ResultLine>
         {busy ? (
-          <span class="muted">The report loads.</span>
+          <span class="muted">loading</span>
         ) : problem ? (
           <span>{problem}</span>
         ) : !out ? (
-          <span class="muted">Choose a twin.</span>
+          <span class="muted">no twin</span>
         ) : out.total === 0 ? (
           <>
             <span class="t-headline">No coverage report</span>
-            {needs ? <span class="muted">The report needs {needs}.</span> : null}
+            {needs ? <span class="muted">needs {needs}</span> : null}
           </>
         ) : (
           <>

@@ -1862,7 +1862,7 @@
                 "type": "null"
               }
             ],
-            "description": "0 to 255, echo-request or echo-reply."
+            "description": "The ICMP type: 0 to 255, echo-request or echo-reply."
           },
           "ingress": {
             "description": "The ingress point as <device>/<interface>. Without it, the\nattachment records of the source address give the ingress.",

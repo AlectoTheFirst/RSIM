@@ -1227,7 +1227,7 @@ export interface components {
              * @description The ICMP code.
              */
             icmp_code?: number | null;
-            /** @description 0 to 255, echo-request or echo-reply. */
+            /** @description The ICMP type: 0 to 255, echo-request or echo-reply. */
             icmp_type?: components["schemas"]["IcmpTypeArg"] | null;
             /**
              * @description The ingress point as <device>/<interface>. Without it, the

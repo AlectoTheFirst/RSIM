@@ -102,7 +102,7 @@ pub struct PathQueryArgs {
     pub l2_priority: Option<u8>,
     /// The TCP flags that are set.
     pub tcp_flags: Option<Vec<TcpFlag>>,
-    /// 0 to 255, echo-request or echo-reply.
+    /// The ICMP type: 0 to 255, echo-request or echo-reply.
     pub icmp_type: Option<IcmpTypeArg>,
     /// The ICMP code.
     pub icmp_code: Option<u8>,

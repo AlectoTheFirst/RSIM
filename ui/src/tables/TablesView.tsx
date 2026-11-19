@@ -88,7 +88,7 @@ function FilterCell(props: { col: Column | undefined; name: string; text: string
         ref={props.first ? props.inputRef : undefined}
         class="t-value"
         aria-label={`filter of ${props.name}`}
-        title={ops.length ? `values by commas, or op value: ${ops.join(", ")}; parts by ;` : "values by commas"}
+        title={ops.length ? `values, comma list · op and value: ${ops.join(", ")} · parts separated by ;` : "values, comma list"}
         value={v}
         spellcheck={false}
         autocomplete="off"
@@ -192,7 +192,7 @@ function Detail(props: {
               ])
             : null}
           <button type="button" onClick={props.onCopy}>
-            Copy the row as JSON
+            Copy row as JSON
           </button>
         </div>
       </div>
@@ -251,7 +251,7 @@ export function TablesView(props: {
       .catch((e: unknown) => {
         if (!live) return;
         setAnswer(null);
-        setProblem(e instanceof ApiProblem ? `The request is refused: ${e.detail}` : String(e));
+        setProblem(e instanceof ApiProblem ? `request refused: ${e.detail}` : String(e));
       })
     return () => {
       live = false;
@@ -323,7 +323,7 @@ export function TablesView(props: {
           <button
             type="button"
             class="plain head"
-            title={`${d?.description ?? ""} Sort: click; add a key: shift-click`}
+            title={`${d?.description ?? ""} · click: sort · shift-click: add to the sort`}
             onClick={(e) => go({ sort: nextSort(st.sort, name, e.shiftKey) })}
           >
             {name}
@@ -431,10 +431,8 @@ export function TablesView(props: {
   const verbs: Verb[] = def ? VERBS.filter((v) => v === "describe" || def.verbs.includes(v)) : [];
 
   let facts: JSX.Element;
-  if (!catalog) facts = <span class="muted">catalog loading</span>;
-  else if (!def) facts = <span>
-      <span class="t-value">{st.table}</span> <span class="muted">not in the catalog</span>
-    </span>;
+  if (!catalog) facts = <span class="muted">loading catalog</span>;
+  else if (!def) facts = <span>not a table: {st.table}</span>;
   else if (busy) facts = <span class="muted">running</span>;
   else if (problem) facts = <span>{problem}</span>;
   else {
@@ -449,7 +447,7 @@ export function TablesView(props: {
       );
       parts.push(<span class="muted">needs {def.needs}</span>);
     } else if (st.verb === "lpm" && !st.address) {
-      parts.push(<span class="muted">no address for lpm on {prefixColumn(def)}</span>);
+      parts.push(<span class="muted">no address · longest prefix match on {prefixColumn(def)}</span>);
     } else if (body?.verb === "show") {
       parts.push(<span>{pageWords(pages, body.out.rows.length, body.out.total)}</span>);
       if (body.out.total === 0) parts.push(<span class="muted">needs {def.needs}</span>);
@@ -552,7 +550,7 @@ export function TablesView(props: {
         <span class="grow" />
         {st.verb === "show" ? (
           <label class="field">
-            <span class="t-label">rows of a page</span>
+            <span class="t-label">rows per page</span>
             <select class="t-value" value={String(st.limit)} onChange={(e) => go({ limit: Number(e.currentTarget.value) })}>
               {limitOptions(st.limit).map((l) => (
                 <option value={String(l)}>{l}</option>
@@ -569,7 +567,7 @@ export function TablesView(props: {
             disabled={!request}
             onClick={() => request && copy(new URL(request, window.location.href).href, "API URL")}
           >
-            Copy the API URL
+            Copy API URL
           </button>
         </span>
       </form>

@@ -7,8 +7,21 @@ import type { Twin } from "../api/types";
 import type { Level } from "../ladder/layout";
 import { type ColourPref, type Prefs, ROW_HEIGHTS, type RowHeight, type ThemePref } from "../theme";
 import { HatchMark } from "./Hatch";
-import { PickerList, useEndpoints } from "./Picker";
-import { PICKER_CLOSED, type PickerState, type Suggestion, pickerKey } from "./pick";
+import {
+  BASE_FIELDS,
+  checkValue,
+  exampleOf,
+  filterValues,
+  firstError,
+  formOf,
+  insertValue,
+  labelOf,
+  notStatedNote,
+  valueToken,
+  valuesOf,
+} from "./fields";
+import { NameList, PickerList, useAsk, useEndpoints, useEntryPoints } from "./Picker";
+import { type EntryOption, PICKER_CLOSED, type PickerState, type Suggestion, ingressStage, pickerKey } from "./pick";
 import { type Fields, type Mode, QUERY_FIELDS, type QueryField } from "./query";
 import { twinOption } from "./url";
 
@@ -86,7 +99,7 @@ function AccountMenu(props: { prefs: Prefs; onPrefs: (p: Prefs) => void }) {
             <span class="t-label">Row height</span>
             <Choice<RowHeight> value={p.row} options={ROW_HEIGHTS} onChange={(row) => props.onPrefs({ ...p, row })} />
           </div>
-          <div class="muted">Blue and orange take the place of the colours of Deliver and Drop.</div>
+          <div class="muted">blue and orange: colours of Deliver and Drop</div>
         </div>
       ) : null}
     </span>
@@ -125,7 +138,7 @@ export function TopBar(props: {
               {v}
             </button>
           ) : (
-            <button type="button" disabled title="Not in this build">
+            <button type="button" disabled title="not in this build">
               {v}
             </button>
           ),
@@ -139,53 +152,87 @@ export function TopBar(props: {
 /** The fields whose value the endpoint picker proposes. */
 const PICKED = new Set<QueryField>(["source.ip", "destination.ip"]);
 
-/** The title of a field of the query bar. */
-const FIELD_TITLES: Partial<Record<QueryField, string>> = {
-  ingress: "Where the packet enters, as <device>/<interface>. Empty: rsim finds it from the source address.",
-};
+/** The id of the input of a field of the query bar. */
+const inputId = (k: QueryField) => `q-${k.replace(/\./g, "-")}`;
+
+/** The id of the help line of the query bar. */
+const HELP_ID = "query-help";
+
+/** True for an element whose focus keeps the query bar in its edit state. */
+const edits = (el: EventTarget | null) => el instanceof HTMLElement && el.dataset["edit"] !== undefined;
 
 /**
  * One field of the query bar: its name and its value, which a click edits
  * in place. The input takes the width of its text. An address field
- * proposes the endpoints of the twin while it is edited; `hint` shows in
- * an empty field and is not part of the query.
+ * proposes the endpoints of the twin while it is edited, a field with
+ * names proposes its names while it has the focus, and the ingress field
+ * proposes the devices of the twin, with `found` first, then the entry
+ * interfaces of the chosen device.
  */
 function QueryValue(props: {
   twin: string;
+  mode: Mode;
   name: QueryField;
   value: string;
-  hint?: string | null;
+  found?: string | null;
+  invalid: boolean;
   onInput: (v: string) => void;
   onRun: () => void;
+  onFocus: () => void;
+  onBlur: () => void;
   inputRef?: { current: HTMLInputElement | null };
 }) {
-  const shown = props.value || props.hint || "not stated";
-  const picks = PICKED.has(props.name);
+  const endpoints = PICKED.has(props.name);
+  const entry = props.name === "ingress";
+  const names = valuesOf(props.mode, props.name);
+  const picks = endpoints || entry || names.length > 0;
   const [edited, setEdited] = useState(false);
   const [state, setState] = useState<PickerState>(PICKER_CLOSED);
-  const list = useEndpoints(props.twin, props.value, picks && edited);
-  const open = state.open && list.length > 0;
-  const id = `pick-${props.name.replace(".", "-")}`;
+  const found = useEndpoints(props.twin, props.value, endpoints && edited);
+  const entries = useEntryPoints(props.twin, props.value, entry && state.open, entry ? (props.found ?? null) : null);
+  const named = names.length ? filterValues(names, valueToken(props.mode, props.name, props.value)) : [];
+  const count = endpoints ? found.length : entry ? entries.length : named.length;
+  const open = state.open && count > 0;
+  const id = `pick-${props.name.replace(/\./g, "-")}`;
   useEffect(() => {
-    setState((s) => (s.active >= list.length ? { ...s, active: list.length - 1 } : s));
-  }, [list]);
-  const choose = (sg: Suggestion) => {
+    setState((s) => (s.active >= count ? { ...s, active: count - 1 } : s));
+  }, [count]);
+  const chooseEndpoint = (sg: Suggestion) => {
     props.onInput(sg.address);
     setEdited(false);
     setState(PICKER_CLOSED);
   };
+  const chooseName = (n: string) => {
+    props.onInput(insertValue(props.mode, props.name, props.value, n));
+    setState(PICKER_CLOSED);
+  };
+  // A device keeps the list open on its interfaces; an interface or the found entry point closes it.
+  const chooseEntry = (o: EntryOption) => {
+    props.onInput(o.value);
+    setState(o.done ? PICKER_CLOSED : { open: true, active: -1 });
+  };
+  const choose = (i: number) => {
+    if (endpoints) chooseEndpoint(found[i]!);
+    else if (entry) chooseEntry(entries[i]!);
+    else chooseName(named[i]!);
+  };
+  const stage = entry ? ingressStage(props.value) : null;
+  const classes = ["autosize", "t-query", props.value ? "" : "empty", props.invalid ? "invalid" : ""].filter(Boolean).join(" ");
   return (
-    <label class="qfield" title={FIELD_TITLES[props.name]}>
+    <label class="qfield">
       <span class="muted">{props.name} </span>
-      <span class="autosize t-query" data-value={shown}>
+      <span class={classes} data-value={props.value}>
         <input
           ref={props.inputRef}
+          id={inputId(props.name)}
+          data-edit=""
           class="t-query"
           size={1}
           value={props.value}
-          placeholder={props.hint || "not stated"}
           spellcheck={false}
           autocomplete="off"
+          aria-invalid={props.invalid || undefined}
+          aria-describedby={HELP_ID}
           role={picks ? "combobox" : undefined}
           aria-autocomplete={picks ? "list" : undefined}
           aria-expanded={picks ? open : undefined}
@@ -198,14 +245,24 @@ function QueryValue(props: {
               setState({ open: true, active: -1 });
             }
           }}
-          onBlur={() => setState(PICKER_CLOSED)}
+          onFocus={() => {
+            props.onFocus();
+            if (names.length || entry) setState({ open: true, active: -1 });
+          }}
+          onClick={() => {
+            if (entry && !state.open) setState({ open: true, active: -1 });
+          }}
+          onBlur={() => {
+            setState(PICKER_CLOSED);
+            props.onBlur();
+          }}
           onKeyDown={(e) => {
             if (picks) {
-              const r = pickerKey(state, e.key, list.length);
+              const r = pickerKey(state, e.key, count);
               if (r.handled) {
                 e.preventDefault();
                 setState(r.state);
-                if (r.action === "choose") choose(list[state.active]!);
+                if (r.action === "choose") choose(state.active);
                 return;
               }
             }
@@ -217,8 +274,133 @@ function QueryValue(props: {
           }}
         />
       </span>
-      {open ? <PickerList id={id} list={list} active={state.active} onChoose={choose} /> : null}
+      {open && endpoints ? <PickerList id={id} list={found} active={state.active} onChoose={chooseEndpoint} /> : null}
+      {open && entry ? (
+        <NameList
+          id={id}
+          label={stage?.stage === "interface" ? `Entry interfaces of ${stage.device}` : "Devices"}
+          names={entries.map((o) => o.name)}
+          detail={(n) => entries.find((o) => o.name === n)?.detail ?? ""}
+          active={state.active}
+          onChoose={(n) => choose(entries.findIndex((o) => o.name === n))}
+        />
+      ) : null}
+      {open && !endpoints && !entry ? (
+        <NameList id={id} label={`Values of ${props.name}`} names={named} active={state.active} onChoose={chooseName} />
+      ) : null}
     </label>
+  );
+}
+
+/** The button "Add field" and its list of the fields that do not show. */
+function AddField(props: {
+  mode: Mode;
+  fields: readonly QueryField[];
+  onAdd: (k: QueryField) => void;
+  onFocus: () => void;
+  onBlur: () => void;
+}) {
+  const [state, setState] = useState<PickerState>(PICKER_CLOSED);
+  const open = state.open && props.fields.length > 0;
+  const id = "pick-field";
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setState(PICKER_CLOSED);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  const choose = (k: QueryField) => {
+    setState(PICKER_CLOSED);
+    props.onAdd(k);
+  };
+  return (
+    <span class="qadd" ref={ref}>
+      <button
+        type="button"
+        data-edit=""
+        // A press keeps the focus in the field that has it, so that the query bar stays open.
+        onMouseDown={(e) => {
+          if (document.activeElement && edits(document.activeElement)) e.preventDefault();
+        }}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        aria-activedescendant={open && state.active >= 0 ? `${id}-${state.active}` : undefined}
+        aria-describedby={HELP_ID}
+        onClick={() => setState((s) => (s.open ? PICKER_CLOSED : { open: true, active: -1 }))}
+        onFocus={props.onFocus}
+        onBlur={() => {
+          setState(PICKER_CLOSED);
+          props.onBlur();
+        }}
+        onKeyDown={(e) => {
+          const r = pickerKey(state, e.key, props.fields.length);
+          if (!r.handled) return;
+          e.preventDefault();
+          setState(r.state);
+          if (r.action === "choose") choose(props.fields[state.active]!);
+        }}
+      >
+        Add field
+      </button>
+      {open ? (
+        <NameList
+          id={id}
+          label="Fields of the query"
+          names={props.fields}
+          detail={(k) => labelOf(k as QueryField)}
+          active={state.active}
+          onChoose={(k) => choose(k as QueryField)}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+/** The separator of the parts of the help line. */
+const SEP = " · ";
+
+/**
+ * The help line of the query bar, in short parts. For the field that has
+ * the focus: its name, the message of a value with a wrong form, the form
+ * of a value in the mode and an example. With no field in focus: the name
+ * and the message of the first shown field whose value has a wrong form.
+ */
+function HelpLine(props: { mode: Mode; focus: QueryField | "add" | null; error: { field: QueryField; message: string } | null }) {
+  const { mode, focus, error } = props;
+  if (focus === "add") {
+    return (
+      <div class="qhelp" id={HELP_ID}>
+        <span class="muted">Add field</span>
+        {SEP}
+        {notStatedNote(mode)}
+      </div>
+    );
+  }
+  const k = focus ?? error?.field ?? null;
+  if (!k) return <div class="qhelp" id={HELP_ID} hidden />;
+  const message = error && error.field === k ? error.message : null;
+  return (
+    <div class="qhelp" id={HELP_ID}>
+      <span class="muted">{k}</span>
+      {message ? (
+        <>
+          {SEP}
+          <span class="c-drop">{message}</span>
+        </>
+      ) : null}
+      {focus ? (
+        <>
+          {SEP}
+          {formOf(mode, k)}
+          {SEP}
+          <span class="t-query">{exampleOf(mode, k)}</span>
+        </>
+      ) : null}
+    </div>
   );
 }
 
@@ -226,8 +408,12 @@ export function QueryBar(props: {
   twin: string;
   mode: Mode;
   fields: Fields;
-  ingressHint: string | null;
-  notStated: number | null;
+  /** The entry point that the shown answer found, or null. */
+  found: string | null;
+  /** A count that shows the ingress field and opens its list each time it changes while the bar shows. */
+  askIngress: number;
+  /** The fields that the query of the answer does not state, or null. */
+  notStated: readonly string[] | null;
   onMode: (m: Mode) => void;
   onField: (k: QueryField, v: string) => void;
   onRun: () => void;
@@ -236,52 +422,111 @@ export function QueryBar(props: {
   firstInput: { current: HTMLInputElement | null };
 }) {
   const [editing, setEditing] = useState(false);
-  // A field shows when it has a value or the bar is being edited; with no
-  // stated field, each field of a query shows so that a click can edit it.
-  // An empty ingress field shows the entry point of the last answer while
-  // the bar is being edited.
-  const none = QUERY_FIELDS.every((k) => (props.fields[k] ?? "").trim() === "");
-  const hintOf = (k: QueryField) => (k === "ingress" ? props.ingressHint : null);
+  const [added, setAdded] = useState<ReadonlySet<QueryField>>(new Set());
+  const [focus, setFocus] = useState<QueryField | "add" | null>(null);
+  const [checked, setChecked] = useState<ReadonlySet<QueryField>>(new Set());
+  const [focusNext, setFocusNext] = useState<QueryField | null>(null);
+  useAsk(props.askIngress, () => {
+    setAdded((a) => new Set(a).add("ingress"));
+    setFocusNext("ingress");
+  });
+  useEffect(() => {
+    if (!focusNext) return;
+    document.getElementById(inputId(focusNext))?.focus();
+    setFocusNext(null);
+  }, [focusNext]);
+  // A base field shows when it has a value or the bar is being edited; with
+  // no stated field, each base field of a query shows so that a click can
+  // edit it. Each other field shows when it has a value or is added.
+  const value = (k: QueryField) => props.fields[k] ?? "";
+  const none = QUERY_FIELDS.every((k) => value(k).trim() === "");
+  const shown = QUERY_FIELDS.filter((k) => value(k) !== "" || added.has(k) || (BASE_FIELDS.has(k) && (editing || none)));
+  const hidden = QUERY_FIELDS.filter((k) => !shown.includes(k));
+  const errorOf = (k: QueryField) => (checked.has(k) ? checkValue(props.mode, k, value(k)) : null);
+  const focused = focus && focus !== "add" ? focus : null;
+  let shownError: { field: QueryField; message: string } | null = null;
+  for (const k of focused ? [focused] : shown) {
+    const message = errorOf(k);
+    if (message) {
+      shownError = { field: k, message };
+      break;
+    }
+  }
+  const mark = (k: QueryField) => setChecked((c) => (c.has(k) ? c : new Set(c).add(k)));
+  // A value with a wrong form stops the run: its field gets the focus and
+  // the help line gives the message.
+  const run = () => {
+    const bad = firstError(props.mode, props.fields);
+    if (bad) {
+      mark(bad.field);
+      setFocusNext(bad.field);
+      return;
+    }
+    props.onRun();
+  };
   return (
     <form
       class="bar query"
       aria-label="Query"
       onSubmit={(e) => {
         e.preventDefault();
-        props.onRun();
+        run();
       }}
-      onFocusIn={(e) => setEditing((e.target as HTMLElement).tagName === "INPUT")}
+      onFocusIn={(e) => setEditing(edits(e.target))}
       onFocusOut={(e) => {
         const next = e.relatedTarget as Node | null;
-        if (!next || !e.currentTarget.contains(next) || (next as HTMLElement).tagName !== "INPUT") setEditing(false);
+        if (!next || !e.currentTarget.contains(next) || !edits(next)) {
+          setEditing(false);
+          setFocus(null);
+        }
       }}
     >
       <Choice<Mode> value={props.mode} options={["path", "set"]} onChange={props.onMode} />
-      {QUERY_FIELDS.filter((k) => editing || (props.fields[k] ?? "") !== "" || (k !== "ingress" && none)).map(
-        (k, i) => (
-          <QueryValue
-            twin={props.twin}
-            name={k}
-            value={props.fields[k] ?? ""}
-            hint={hintOf(k)}
-            onInput={(v) => props.onField(k, v)}
-            onRun={props.onRun}
-            inputRef={i === 0 ? props.firstInput : undefined}
-          />
-        ),
-      )}
+      {shown.map((k, i) => (
+        <QueryValue
+          key={k}
+          twin={props.twin}
+          mode={props.mode}
+          name={k}
+          value={value(k)}
+          found={k === "ingress" ? props.found : null}
+          invalid={errorOf(k) !== null}
+          onInput={(v) => props.onField(k, v)}
+          onRun={run}
+          onFocus={() => setFocus(k)}
+          onBlur={() => {
+            if (value(k).trim() !== "") mark(k);
+          }}
+          inputRef={i === 0 ? props.firstInput : undefined}
+        />
+      ))}
+      {hidden.length ? (
+        <AddField
+          mode={props.mode}
+          fields={hidden}
+          onAdd={(k) => {
+            setAdded((a) => new Set(a).add(k));
+            setFocusNext(k);
+          }}
+          onFocus={() => setFocus("add")}
+          onBlur={() => setFocus((f) => (f === "add" ? null : f))}
+        />
+      ) : null}
       {props.mode === "set" ? (
-        <span class="muted">Fields not stated have all values.</span>
-      ) : props.notStated ? (
-        <HatchMark>{props.notStated} fields not stated, so not known</HatchMark>
+        <span class="muted">{notStatedNote("set")}</span>
+      ) : props.notStated?.length ? (
+        <HatchMark title={props.notStated.join(", ")}>{props.notStated.length} not stated</HatchMark>
       ) : null}
       <span class="grow" />
-      <button type="button" onClick={props.onCopyCommand}>
-        Copy as rsim command
-      </button>
-      <button type="button" onClick={props.onCopyMcp}>
-        Copy as MCP call
-      </button>
+      <span class="group end">
+        <button type="button" onClick={props.onCopyCommand}>
+          Copy as rsim command
+        </button>
+        <button type="button" onClick={props.onCopyMcp}>
+          Copy as MCP call
+        </button>
+      </span>
+      <HelpLine mode={props.mode} focus={focus} error={shownError} />
     </form>
   );
 }
@@ -293,7 +538,7 @@ export function LevelControl(props: { level: Level; onLevel: (l: Level) => void 
     <span class="group" role="group" aria-label="Level">
       <span class="muted">Level</span>
       {(["estate", "site"] as const).map((l) => (
-        <button type="button" disabled title="Not in this build">
+        <button type="button" disabled title="not in this build">
           {l}
         </button>
       ))}

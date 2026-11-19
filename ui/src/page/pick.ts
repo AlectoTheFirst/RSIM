@@ -122,3 +122,115 @@ export function endpointAddresses(columns: readonly string[], row: readonly unkn
   const j = columns.indexOf("addresses");
   return j < 0 ? [] : list(row[j]).filter((a) => a !== "");
 }
+
+// The entry point picker of the ingress field: a list of the devices of the
+// twin, then a list of the entry interfaces of the chosen device.
+
+/** The stage of the entry point list for a text of the ingress field. */
+export type IngressStage = { stage: "device"; text: string } | { stage: "interface"; device: string; text: string };
+
+/**
+ * The stage of a text: with no `/`, the list of devices filtered by the
+ * text; with a `/`, the list of the entry interfaces of the device before
+ * it, filtered by the text after it.
+ */
+export function ingressStage(value: string): IngressStage {
+  const v = value.trim();
+  const at = v.indexOf("/");
+  return at < 0 ? { stage: "device", text: v } : { stage: "interface", device: v.slice(0, at), text: v.slice(at + 1) };
+}
+
+/** One item of the entry point list: its name, the text after it, the value of the field after a choice, and whether the choice ends the list. */
+export interface EntryOption {
+  name: string;
+  detail: string;
+  value: string;
+  done: boolean;
+}
+
+/** The word after the entry point of the shown answer. */
+export const FOUND = "found";
+
+const startsWith = (s: string, t: string) => s.toLowerCase().startsWith(t.toLowerCase());
+
+/**
+ * The device list: the entry point of the shown answer first, then the
+ * devices of rows of the table `devices` that start with the text, each
+ * once, with the vendor when the table has it. A choice of a device
+ * fills in `<device>/`, and a choice of the entry point fills it in whole.
+ */
+export function deviceOptions(
+  records: readonly Record<string, unknown>[],
+  found: string | null,
+  value: string,
+  max = PICKER_MAX,
+): EntryOption[] {
+  const q = value.trim();
+  const out: EntryOption[] = [];
+  if (found && startsWith(found, q)) out.push({ name: found, detail: FOUND, value: found, done: true });
+  const seen = new Set<string>();
+  for (const r of records) {
+    const name = text(r["device"]);
+    if (!name || seen.has(name) || !startsWith(name, q)) continue;
+    seen.add(name);
+    out.push({ name, detail: text(r["vendor"]), value: `${name}/`, done: false });
+    if (seen.size === max) break;
+  }
+  return out;
+}
+
+/**
+ * The forms of the name of an entry function of a device: `<device>/in/<interface>`
+ * for an interface of a router or a routed port, and `<device>/host/<port>`
+ * for a switch port or a wireless network with hosts behind it.
+ */
+export const ENTRY_FORMS = ["in", "host"] as const;
+
+/** The entry interface of a function of `device`, or null for a name of another form. */
+export function entryInterface(device: string, fn: string): string | null {
+  for (const form of ENTRY_FORMS) {
+    const prefix = `${device}/${form}/`;
+    if (fn.startsWith(prefix) && fn.length > prefix.length) return fn.slice(prefix.length);
+  }
+  return null;
+}
+
+/**
+ * The interface list of a device: the entry interface of each function of
+ * rows of the table `functions` of that device, each once, in name order,
+ * that starts with the text after the `/`.
+ */
+export function interfaceOptions(records: readonly Record<string, unknown>[], value: string, max = PICKER_MAX): EntryOption[] {
+  const s = ingressStage(value);
+  if (s.stage !== "interface") return [];
+  const names = new Set<string>();
+  for (const r of records) {
+    const n = entryInterface(s.device, text(r["function"]));
+    if (n !== null) names.add(n);
+  }
+  return [...names]
+    .filter((n) => startsWith(n, s.text))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    .slice(0, max)
+    .map((n) => ({ name: n, detail: "", value: `${s.device}/${n}`, done: true }));
+}
+
+/** A table request: the table and its parameters. */
+export interface TableRequest {
+  table: string;
+  params: Record<string, string>;
+}
+
+/**
+ * The table requests of the list of a stage: the devices, or one request
+ * for each form of the entry functions of the device, by the prefix
+ * `<device>/<form>/<text>`.
+ */
+export function ingressRequests(s: IngressStage, max = PICKER_MAX): TableRequest[] {
+  const limit = String(max);
+  if (s.stage === "device") return [{ table: "devices", params: s.text ? { "device.prefix": s.text, limit } : { limit } }];
+  return ENTRY_FORMS.map((form) => ({
+    table: "functions",
+    params: { device: s.device, kind: "ingress", "function.prefix": `${s.device}/${form}/${s.text}`, columns: "function", limit },
+  }));
+}

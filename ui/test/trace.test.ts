@@ -94,7 +94,7 @@ describe("no reply", () => {
   it("says why in one muted line in the place of the reply", () => {
     const s = sections(golden("routing-loop").answer);
     expect(s).toEqual([
-      expect.objectContaining({ dir: "reply", text: "no reply: the forward path does not deliver", muted: true, verdict: null, note: null }),
+      expect.objectContaining({ dir: "reply", text: "no reply: forward path not delivered", muted: true, verdict: null, note: null }),
     ]);
   });
 
@@ -103,7 +103,7 @@ describe("no reply", () => {
     expect(s).toEqual([
       "branch 0",
       "branch 1",
-      "no reply of branch 0: the forward path does not deliver",
+      "no reply of branch 0: forward path not delivered",
       "reply of branch 1, branch 0",
       "reply of branch 1, branch 1",
     ]);
