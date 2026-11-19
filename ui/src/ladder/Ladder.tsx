@@ -329,7 +329,7 @@ function Detail(props: { row: StepRow; lanes: number; actions: DetailActions }) 
               Copy as rsim explain
             </button>
             <button type="button" onClick={() => actions.copyUrl(row)}>
-              Copy the step URL
+              Copy step URL
             </button>
           </div>
         </div>

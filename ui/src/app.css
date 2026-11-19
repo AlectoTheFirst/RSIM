@@ -763,7 +763,7 @@ button.link {
 }
 
 /* The list of the names of a field, and the list of the fields that a
-   query can add, with the first sentence of each description. */
+   query can add, with the label of each field. */
 .picker.one {
   grid-template-columns: max-content;
 }

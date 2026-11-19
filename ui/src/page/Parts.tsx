@@ -410,7 +410,7 @@ export function QueryBar(props: {
   fields: Fields;
   /** The entry point that the shown answer found, or null. */
   found: string | null;
-  /** A count that shows the ingress field and opens its list each time it grows. */
+  /** A count that shows the ingress field and opens its list each time it changes while the bar shows. */
   askIngress: number;
   /** The fields that the query of the answer does not state, or null. */
   notStated: readonly string[] | null;
@@ -426,8 +426,11 @@ export function QueryBar(props: {
   const [focus, setFocus] = useState<QueryField | "add" | null>(null);
   const [checked, setChecked] = useState<ReadonlySet<QueryField>>(new Set());
   const [focusNext, setFocusNext] = useState<QueryField | null>(null);
+  // The count at the last request; a count that the bar finds when it mounts is not a new request.
+  const asked = useRef(props.askIngress);
   useEffect(() => {
-    if (props.askIngress === 0) return;
+    if (props.askIngress === asked.current) return;
+    asked.current = props.askIngress;
     setAdded((a) => new Set(a).add("ingress"));
     setFocusNext("ingress");
   }, [props.askIngress]);

@@ -80,11 +80,11 @@ export function useEndpoints(twin: string, value: string, active: boolean): Sugg
 /**
  * The entry point list of the ingress field while `active`: the devices,
  * or the entry interfaces of the device of the text, with `found` first in
- * the device list. The rows of another stage do not show.
+ * the device list. The rows of another twin or another stage do not show.
  */
 export function useEntryPoints(twin: string, value: string, active: boolean, found: string | null): EntryOption[] {
   const stage = ingressStage(value);
-  const key = stage.stage === "device" ? "device" : `interface ${stage.device}`;
+  const key = `${twin} ${stage.stage === "device" ? "device" : `interface ${stage.device}`}`;
   const [rows, setRows] = useState<{ key: string; records: Record<string, unknown>[] }>({ key: "", records: [] });
   useEffect(() => {
     if (!active || !twin) return;
