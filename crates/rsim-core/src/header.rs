@@ -50,6 +50,45 @@ pub enum Encap {
     },
 }
 
+/// How a path query treats a field that it does not state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Unstated {
+    /// An unstated field has all values.
+    #[default]
+    All,
+    /// An unstated field with an entry in [`UNSTATED_DEFAULTS`] takes its
+    /// default value; each other unstated field has all values.
+    Defaults,
+}
+
+/// The default value of a field of a path query with [`Unstated::Defaults`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DefaultValue {
+    /// The header of the field is absent.
+    Absent,
+    /// A number.
+    Number(u8),
+    /// A fragment state.
+    Fragment(Fragment),
+}
+
+/// The default value of each field that a path query with
+/// [`Unstated::Defaults`] does not state, in the order of application: an
+/// untagged frame (no VLAN tag, so no layer 2 priority), DSCP 0, ECN 0 and
+/// an unfragmented packet. The layer 2 priority is absent only when the VLAN
+/// tag is absent. The MAC addresses, the ports, the TCP flags and the ICMP
+/// fields have no default.
+pub const UNSTATED_DEFAULTS: [(HeaderField, DefaultValue); 5] = [
+    (HeaderField::Vlan, DefaultValue::Absent),
+    (HeaderField::L2Priority, DefaultValue::Absent),
+    (HeaderField::Dscp, DefaultValue::Number(0)),
+    (HeaderField::Ecn, DefaultValue::Number(0)),
+    (
+        HeaderField::Fragment,
+        DefaultValue::Fragment(Fragment::Unfragmented),
+    ),
+];
+
 /// The names of the header fields. Functions declare which fields they read
 /// and which QoS fields they write.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -215,6 +254,45 @@ impl Header {
         assert!(self.tcp_flags.is_present(), "the protocol is not TCP");
         self.tcp_flags = FieldValue::Known(flags);
         self
+    }
+
+    /// Gives each unstated field of [`UNSTATED_DEFAULTS`] its default value,
+    /// and returns the fields that took one, in the order of the table. A
+    /// stated field keeps its value.
+    pub fn apply_defaults(&mut self) -> Vec<HeaderField> {
+        fn fill<T: Copy>(slot: &mut FieldValue<T>, v: FieldValue<T>) -> bool {
+            if slot.is_unstated() {
+                *slot = v;
+                true
+            } else {
+                false
+            }
+        }
+        let mut out = Vec::new();
+        for (f, v) in UNSTATED_DEFAULTS {
+            let done = match (f, v) {
+                (HeaderField::Vlan, DefaultValue::Absent) => {
+                    fill(&mut self.vlan, FieldValue::Absent)
+                }
+                (HeaderField::L2Priority, DefaultValue::Absent) => {
+                    !self.vlan.is_present() && fill(&mut self.l2_priority, FieldValue::Absent)
+                }
+                (HeaderField::Dscp, DefaultValue::Number(n)) => {
+                    fill(&mut self.dscp, FieldValue::Known(n))
+                }
+                (HeaderField::Ecn, DefaultValue::Number(n)) => {
+                    fill(&mut self.ecn, FieldValue::Known(n))
+                }
+                (HeaderField::Fragment, DefaultValue::Fragment(x)) => {
+                    fill(&mut self.fragment, FieldValue::Known(x))
+                }
+                _ => false,
+            };
+            if done {
+                out.push(f);
+            }
+        }
+        out
     }
 
     /// Makes the packet a later fragment. The transport fields become absent.
@@ -481,5 +559,27 @@ mod tests {
         let udp = Header::request(ip("10.0.0.1"), ip("10.0.0.2"), PROTO_UDP).reply();
         assert_eq!(udp.tcp_flags, FieldValue::Absent);
         assert_eq!(udp.icmp_type, FieldValue::Absent);
+    }
+
+    #[test]
+    fn each_default_applies_to_an_unstated_field_and_a_stated_field_keeps_its_value() {
+        let mut h = tcp();
+        h.fragment = FieldValue::Unstated;
+        let filled = h.apply_defaults();
+        let all: Vec<HeaderField> = UNSTATED_DEFAULTS.iter().map(|(f, _)| *f).collect();
+        assert_eq!(filled, all);
+        assert_eq!(h.vlan, FieldValue::Absent);
+        assert_eq!(h.l2_priority, FieldValue::Absent);
+        assert_eq!(h.dscp, FieldValue::Known(0));
+        assert_eq!(h.ecn, FieldValue::Known(0));
+        assert_eq!(h.fragment, FieldValue::Known(Fragment::Unfragmented));
+        assert!(h.src_mac.is_unstated() && h.dst_mac.is_unstated());
+        assert!(h.tcp_flags.is_unstated());
+
+        let mut tagged = tcp().with_dscp(46);
+        tagged.vlan = FieldValue::Known(10);
+        assert_eq!(tagged.apply_defaults(), vec![HeaderField::Ecn]);
+        assert_eq!(tagged.dscp, FieldValue::Known(46));
+        assert_eq!(tagged.l2_priority, FieldValue::Unstated);
     }
 }

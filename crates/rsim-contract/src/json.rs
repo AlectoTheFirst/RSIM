@@ -88,6 +88,9 @@ pub struct PathAnswerOut {
     pub topology: String,
     pub twin: crate::twin::TwinJson,
     pub query: QueryEcho,
+    /// The notes of the query: the defaults that the unstated fields took.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
     pub answer: AnswerJson,
 }
 
@@ -594,6 +597,9 @@ pub struct PathBriefOut {
     pub twin: crate::twin::TwinJson,
     pub form: crate::args::Form,
     pub query: QueryEcho,
+    /// The notes of the query: the defaults that the unstated fields took.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
     pub answer: AnswerBriefJson,
 }
 
@@ -733,6 +739,7 @@ impl PathBriefOut {
             twin: o.twin.clone(),
             form,
             query: o.query.clone(),
+            notes: o.notes.clone(),
             answer: AnswerBriefJson::from_answer(&o.answer, form),
         }
     }

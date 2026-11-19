@@ -6,12 +6,13 @@ use std::net::IpAddr;
 use std::str::FromStr;
 
 use rsim_core::{
-    DeviceId, FieldValue, Fragment, Header, InterfaceId, Mac, PROTO_ICMP, PROTO_ICMPV6, PROTO_TCP,
-    PROTO_UDP,
+    DefaultValue, DeviceId, FieldValue, Fragment, Header, HeaderField, InterfaceId, Mac,
+    PROTO_ICMP, PROTO_ICMPV6, PROTO_TCP, PROTO_UDP, UNSTATED_DEFAULTS,
 };
 use rsim_engine::{Query, Twin};
 use serde::Serialize;
 
+pub use rsim_contract::args::Unstated;
 pub use rsim_contract::query::{FragmentName, IngressRef, QueryEcho, TcpFlag};
 
 use crate::error::{ErrorCode, QueryError};
@@ -146,6 +147,7 @@ pub struct QueryInput {
     pub ecn: Option<u8>,
     pub fragment: Option<FragmentName>,
     pub reply: Option<bool>,
+    pub unstated: Option<Unstated>,
 }
 
 impl QueryInput {
@@ -184,6 +186,7 @@ impl QueryInput {
             ecn: self.ecn,
             fragment: self.fragment,
             reply: self.reply,
+            unstated: self.unstated,
         }
     }
 
@@ -262,6 +265,41 @@ impl QueryInput {
 
     /// The request header of the query.
     pub fn header(&self) -> Result<Header, QueryError> {
+        Ok(self.header_with_defaults()?.0)
+    }
+
+    /// The notes of the answer: the default value of each field that took
+    /// one. A query that does not give its header has no notes.
+    pub fn notes(&self) -> Vec<String> {
+        let Ok((_, fields)) = self.header_with_defaults() else {
+            return Vec::new();
+        };
+        if fields.is_empty() {
+            return Vec::new();
+        }
+        let parts: Vec<String> = fields
+            .iter()
+            .filter_map(|f| {
+                let (_, v) = UNSTATED_DEFAULTS.iter().find(|(g, _)| g == f)?;
+                let value = match v {
+                    DefaultValue::Absent => "absent".to_string(),
+                    DefaultValue::Number(n) => n.to_string(),
+                    DefaultValue::Fragment(Fragment::Unfragmented) => "unfragmented".to_string(),
+                    DefaultValue::Fragment(Fragment::First) => "first".to_string(),
+                    DefaultValue::Fragment(Fragment::Later) => "later".to_string(),
+                };
+                Some(format!("{} {value}", field_name(*f)))
+            })
+            .collect();
+        vec![format!(
+            "unstated defaults: the query does not state these fields, and they take a default value: {}",
+            parts.join(", ")
+        )]
+    }
+
+    /// The request header of the query, and the fields that took their
+    /// default value with `unstated` `defaults`.
+    fn header_with_defaults(&self) -> Result<(Header, Vec<HeaderField>), QueryError> {
         let p = self.validate()?;
         let mut h = Header::request(self.source_ip, self.destination_ip, p.0);
         if let Some(x) = self.source_port {
@@ -302,7 +340,11 @@ impl QueryInput {
             Some(FragmentName::First) => h.fragment = FieldValue::Known(Fragment::First),
             Some(FragmentName::Unfragmented) | None => {}
         }
-        Ok(h)
+        let defaults = match self.unstated.unwrap_or_default() {
+            Unstated::All => Vec::new(),
+            Unstated::Defaults => h.apply_defaults(),
+        };
+        Ok((h, defaults))
     }
 
     /// Validates the input and makes the engine query for one packet.
@@ -324,6 +366,28 @@ impl QueryInput {
         }
         q.reply = self.reply.unwrap_or(true);
         Ok(q)
+    }
+}
+
+/// The name of the query field of a header field.
+fn field_name(f: HeaderField) -> &'static str {
+    match f {
+        HeaderField::SrcMac => "source.mac",
+        HeaderField::DstMac => "destination.mac",
+        HeaderField::Vlan => "network.vlan.id",
+        HeaderField::L2Priority => "l2_priority",
+        HeaderField::SrcIp => "source.ip",
+        HeaderField::DstIp => "destination.ip",
+        HeaderField::Protocol => "network.iana_number",
+        HeaderField::Dscp => "dscp",
+        HeaderField::Ecn => "ecn",
+        HeaderField::Fragment => "fragment",
+        HeaderField::SrcPort => "source.port",
+        HeaderField::DstPort => "destination.port",
+        HeaderField::TcpFlags => "tcp_flags",
+        HeaderField::IcmpType => "icmp_type",
+        HeaderField::IcmpCode => "icmp_code",
+        HeaderField::MplsTrafficClass => "mpls_tc",
     }
 }
 

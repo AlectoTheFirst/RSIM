@@ -507,9 +507,18 @@ fn the_query_echo_is_normalized_and_lists_each_field() {
     assert_eq!(a.echo(), b.echo());
     let v = serde_json::to_value(a.echo()).unwrap();
     let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
-    let mut want = rsim_cli::args::QUERY_FIELDS.to_vec();
+    // `unstated` is in the echo only when the query gives it.
+    let mut want: Vec<&str> = rsim_cli::args::QUERY_FIELDS
+        .into_iter()
+        .filter(|k| *k != "unstated")
+        .collect();
     want.sort();
     assert_eq!(keys, want);
+    let d = q(serde_json::json!({"network.transport": "tcp", "unstated": "defaults"}));
+    assert_eq!(
+        serde_json::to_value(d.echo()).unwrap()["unstated"],
+        "defaults"
+    );
     assert_eq!(v["network.iana_number"], 6);
     assert_eq!(v["network.transport"], "tcp");
     assert_eq!(v["tcp_flags"], serde_json::json!(["syn", "ack"]));
@@ -1111,4 +1120,60 @@ fn a_claim_gives_its_result_its_evidence_and_its_exit_code() {
     assert_eq!(json_of(&o)["error"]["code"], "invalid_query");
     let o = rsim(&["leaf-spine", "claim", "list", "--format", "json"]);
     assert_eq!(json_of(&o)["claims"][0]["name"], "link-speed-duplex");
+}
+
+#[test]
+fn unstated_defaults_give_the_answer_of_the_stated_defaults_and_a_note() {
+    let flags = QUERIES[0].1;
+    let mut a = path_args("mini-enterprise", flags);
+    a.extend_from_slice(&["--unstated", "defaults"]);
+    let defaults = json_of(&rsim(&a));
+    let note = defaults["notes"][0].as_str().expect("a note");
+    for part in [
+        "network.vlan.id absent",
+        "l2_priority absent",
+        "dscp 0",
+        "ecn 0",
+    ] {
+        assert!(note.contains(part), "{note}");
+    }
+    assert_eq!(defaults["query"]["unstated"], "defaults");
+
+    // The same answer as the query with each default stated.
+    let twin = commands::load("mini-enterprise").unwrap();
+    let mut input = stored_input("mini-enterprise");
+    let mut h = input.header().unwrap();
+    h.vlan = rsim_core::FieldValue::Absent;
+    h.l2_priority = rsim_core::FieldValue::Absent;
+    h = h.with_dscp(0).with_ecn(0);
+    let stated = rsim_engine::Executor::new(&twin)
+        .run(&rsim_engine::Query::path(&twin, &h))
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(
+            <rsim_contract::json::AnswerJson as rsim_cli::json::FromEngine<_>>::new(&stated)
+        )
+        .unwrap(),
+        defaults["answer"]
+    );
+
+    // `all` is the default: the same answer as no setting, with no note.
+    input.unstated = Some(rsim_cli::query::Unstated::All);
+    let all = serde_json::to_value(commands::path(&input, &twin).unwrap()).unwrap();
+    let golden: Value = serde_json::from_str(&stored("mini-enterprise")).unwrap();
+    assert_eq!(all["answer"], golden["answer"]);
+    assert!(all.get("notes").is_none());
+    assert_eq!(all["query"]["unstated"], "all");
+    assert!(golden["query"].get("unstated").is_none());
+
+    // A set query does not take the setting.
+    let o = rsim(&[
+        "set",
+        "mini-enterprise",
+        "--source.ip",
+        "172.31.10.20",
+        "--unstated",
+        "defaults",
+    ]);
+    assert!(!o.status.success());
 }

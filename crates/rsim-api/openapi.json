@@ -1711,6 +1711,13 @@
           "kind": {
             "type": "string"
           },
+          "notes": {
+            "description": "The notes of the query: the defaults that the unstated fields took.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "query": {
             "$ref": "#/components/schemas/QueryEcho"
           },
@@ -1749,6 +1756,13 @@
           "kind": {
             "type": "string"
           },
+          "notes": {
+            "description": "The notes of the query: the defaults that the unstated fields took.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "query": {
             "$ref": "#/components/schemas/QueryEcho"
           },
@@ -1778,7 +1792,7 @@
       },
       "PathQueryArgs": {
         "additionalProperties": false,
-        "description": "The fields of a path query. A field that the query does not state is\nnot known.",
+        "description": "The fields of a path query. A field that the query does not state is\nnot known, or takes its default value with `unstated` `defaults`.",
         "properties": {
           "destination.ip": {
             "description": "The destination IP address.",
@@ -1953,6 +1967,17 @@
           "topology": {
             "description": "A built-in topology, or `store` for the newest snapshot of the store\nof the server.",
             "type": "string"
+          },
+          "unstated": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Unstated"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "all (the default): an unstated field has all values. defaults: an\nunstated field takes its default value where it has one."
           }
         },
         "required": [
@@ -2167,6 +2192,17 @@
           },
           "topology": {
             "type": "string"
+          },
+          "unstated": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Unstated"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The treatment of the unstated fields, when the query gives it."
           }
         },
         "required": [
@@ -4111,6 +4147,21 @@
         ],
         "title": "UniqueOut",
         "type": "object"
+      },
+      "Unstated": {
+        "description": "How a path query treats a field that it does not state.",
+        "oneOf": [
+          {
+            "const": "all",
+            "description": "An unstated field has all values.",
+            "type": "string"
+          },
+          {
+            "const": "defaults",
+            "description": "An unstated field takes its default value where it has one: an\nuntagged frame, dscp 0, ecn 0 and an unfragmented packet. The MAC\naddresses, the ports, the TCP flags and the ICMP fields have no\ndefault. The answer names each default in its notes.",
+            "type": "string"
+          }
+        ]
       },
       "VerdictJson": {
         "properties": {
