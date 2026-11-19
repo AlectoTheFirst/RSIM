@@ -144,10 +144,16 @@ The same server gives the MCP tools at `POST /mcp`, the Streamable HTTP transpor
 `rsim-api` serves the browser UI at `/` from its binary. The UI is in `ui/`: TypeScript with Preact, built with Vite. You need Node 24.
 
 1. Build the UI: `npm --prefix ui ci` and `npm --prefix ui run build`.
-2. Build and start the server: `cargo run -p rsim-api -- --listen 127.0.0.1:8787`.
+2. Build and start the server: `cargo run -p rsim-api -- --listen 127.0.0.1:8787`. Add `--store <data folder>` for the twin `store` of a collected estate.
 3. Open `http://127.0.0.1:8787/`, select a twin, for example `builtin.mini-enterprise`, state the fields of a path query and run it.
 
-A build of `rsim-api` with no built UI serves a page that says how to build it. The Trace view shows the ladder of a path query with its reply, and of a set query with one column for each part.
+A build of `rsim-api` with no built UI serves a page that says how to build it. The UI has these views:
+
+| View | Content |
+|---|---|
+| Trace | The ladder of a path query with its reply, and of a set query with one column for each part. A click on a value of the query bar, or `/`, edits it, and Enter runs the query. An address field proposes the endpoints of the twin. The result line names the step that decides a result that is not `Deliver`, and that step opens. The key line gives the time of the query. |
+| Tables | The tables of the twin, for example `endpoints`, `fib` and `bgp-sessions`, with filters, sort and pages. An `endpoints` row can fill the source or the destination of a query. |
+| Coverage | The handled, known-irrelevant and unhandled lines of each device, and the unhandled paths of a device. |
 
 | Task | Command |
 |---|---|
