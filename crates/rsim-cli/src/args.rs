@@ -10,8 +10,8 @@ use crate::set_query::{
     parse_transports,
 };
 
-/// The names of the query arguments, in the order of the query input.
-pub const QUERY_FIELDS: [&str; 19] = [
+/// The names of the path query arguments, in the order of the query input.
+pub const QUERY_FIELDS: [&str; 20] = [
     "topology",
     "ingress",
     "source.ip",
@@ -31,6 +31,7 @@ pub const QUERY_FIELDS: [&str; 19] = [
     "ecn",
     "fragment",
     "reply",
+    "unstated",
 ];
 
 /// The names of the arguments that select a trace step.
@@ -173,6 +174,9 @@ pub fn query(args: &Map<String, Value>, extra: &[&str]) -> Result<QueryInput, Qu
             string(v, "fragment")?.parse().map_err(invalid)
         })?,
         reply: opt(args, "reply", |v| boolean(v, "reply"))?,
+        unstated: opt(args, "unstated", |v| {
+            string(v, "unstated")?.parse().map_err(invalid)
+        })?,
     })
 }
 
@@ -190,9 +194,29 @@ pub fn step(args: &Map<String, Value>) -> Result<(QueryInput, StepRef), QueryErr
     Ok((input, at))
 }
 
-/// The names of the set query arguments: the path query names without the
-/// required fields.
-pub const SET_FIELDS: [&str; 19] = QUERY_FIELDS;
+/// The names of the set query arguments: the path query names without
+/// `unstated`.
+pub const SET_FIELDS: [&str; 19] = [
+    "topology",
+    "ingress",
+    "source.ip",
+    "destination.ip",
+    "network.iana_number",
+    "network.transport",
+    "source.port",
+    "destination.port",
+    "source.mac",
+    "destination.mac",
+    "network.vlan.id",
+    "l2_priority",
+    "tcp_flags",
+    "icmp_type",
+    "icmp_code",
+    "dscp",
+    "ecn",
+    "fragment",
+    "reply",
+];
 
 /// The text of a set argument: a string, a number, or a list of strings
 /// and numbers that joins with commas.

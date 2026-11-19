@@ -57,6 +57,9 @@ pub fn path(p: &PathAnswerOut) -> String {
         "topology {}, source {}, destination {}",
         p.topology, p.query.source_ip, p.query.destination_ip
     );
+    for n in &p.notes {
+        let _ = writeln!(s, "note: {n}");
+    }
     answer(&mut s, &p.answer, "");
     replies(&mut s, &p.answer);
     s

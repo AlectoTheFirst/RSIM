@@ -29,7 +29,8 @@ pub use field::{FieldValue, Tri};
 pub use flow_state::{FlowState, Session};
 pub use function::{Dependency, FunctionKind, NetFunction};
 pub use header::{
-    Encap, Fragment, Header, HeaderField, PROTO_ICMP, PROTO_ICMPV6, PROTO_TCP, PROTO_UDP,
+    DefaultValue, Encap, Fragment, Header, HeaderField, PROTO_ICMP, PROTO_ICMPV6, PROTO_TCP,
+    PROTO_UDP, UNSTATED_DEFAULTS, Unstated,
 };
 pub use id::{
     ApplicationId, BridgeDomainId, DeviceId, EndpointId, FunctionId, InterfaceId, ObjectId, PortId,

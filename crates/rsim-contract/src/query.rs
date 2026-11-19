@@ -151,6 +151,9 @@ pub struct QueryEcho {
     pub ecn: Option<u8>,
     pub fragment: Option<FragmentName>,
     pub reply: Option<bool>,
+    /// The treatment of the unstated fields, when the query gives it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unstated: Option<crate::args::Unstated>,
 }
 
 /// The set query input in the JSON output. Each field is the normalized

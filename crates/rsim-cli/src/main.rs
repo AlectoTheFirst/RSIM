@@ -81,7 +81,8 @@ enum Command {
         topology: String,
     },
     /// The answer for one packet, with the trace and the reply. A field
-    /// that the query does not state is not known.
+    /// that the query does not state is not known, or takes its default
+    /// value with `--unstated defaults`.
     Path(QueryArgs),
     /// The answer for a set of packets: the parts of the set with their
     /// results, the traces and the replies. A field that the query does not
@@ -183,6 +184,11 @@ struct QueryArgs {
     /// Do not run the reply.
     #[arg(long)]
     no_reply: bool,
+    /// all (the default): an unstated field has all values. defaults: an
+    /// unstated field takes its default value where it has one: an untagged
+    /// frame, dscp 0, ecn 0 and an unfragmented packet.
+    #[arg(long)]
+    unstated: Option<rsim_cli::query::Unstated>,
 }
 
 /// The fields of a set query. Each field takes a set: an address, a
@@ -300,6 +306,7 @@ impl QueryArgs {
             ecn: a.ecn,
             fragment: a.fragment,
             reply: a.no_reply.then_some(false),
+            unstated: a.unstated,
         }
     }
 }

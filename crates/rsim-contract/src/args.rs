@@ -58,8 +58,34 @@ pub enum Form {
     Full,
 }
 
+/// How a path query treats a field that it does not state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Unstated {
+    /// An unstated field has all values.
+    #[default]
+    All,
+    /// An unstated field takes its default value where it has one: an
+    /// untagged frame, dscp 0, ecn 0 and an unfragmented packet. The MAC
+    /// addresses, the ports, the TCP flags and the ICMP fields have no
+    /// default. The answer names each default in its notes.
+    Defaults,
+}
+
+impl std::str::FromStr for Unstated {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "all" => Ok(Unstated::All),
+            "defaults" => Ok(Unstated::Defaults),
+            _ => Err(format!("unstated {s:?} is not all or defaults")),
+        }
+    }
+}
+
 /// The fields of a path query. A field that the query does not state is
-/// not known.
+/// not known, or takes its default value with `unstated` `defaults`.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PathQueryArgs {
@@ -116,6 +142,9 @@ pub struct PathQueryArgs {
     pub fragment: Option<FragmentName>,
     /// Run the reply. The default is true.
     pub reply: Option<bool>,
+    /// all (the default): an unstated field has all values. defaults: an
+    /// unstated field takes its default value where it has one.
+    pub unstated: Option<Unstated>,
     /// The form of the answer. The default is summary.
     pub form: Option<Form>,
 }
@@ -213,6 +242,9 @@ pub struct StepArgs {
     pub query: SetQueryArgs,
     /// The kind of the query: path (the default) or set.
     pub mode: Option<QueryMode>,
+    /// The treatment of the unstated fields of a path query: all (the
+    /// default) or defaults. A set query does not take it.
+    pub unstated: Option<Unstated>,
     /// The branch index.
     pub branch: u32,
     /// The step index in the branch.

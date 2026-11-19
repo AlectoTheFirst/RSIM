@@ -1173,6 +1173,8 @@ export interface components {
         PathAnswerOut: {
             answer: components["schemas"]["AnswerJson"];
             kind: string;
+            /** @description The notes of the query: the defaults that the unstated fields took. */
+            notes?: string[];
             query: components["schemas"]["QueryEcho"];
             /** Format: uint32 */
             rsim_json: number;
@@ -1187,6 +1189,8 @@ export interface components {
             answer: components["schemas"]["AnswerBriefJson"];
             form: components["schemas"]["Form"];
             kind: string;
+            /** @description The notes of the query: the defaults that the unstated fields took. */
+            notes?: string[];
             query: components["schemas"]["QueryEcho"];
             /** Format: uint32 */
             rsim_json: number;
@@ -1196,7 +1200,7 @@ export interface components {
         /**
          * PathQueryArgs
          * @description The fields of a path query. A field that the query does not state is
-         *     not known.
+         *     not known, or takes its default value with `unstated` `defaults`.
          */
         PathQueryArgs: {
             /** @description The destination IP address. */
@@ -1269,6 +1273,11 @@ export interface components {
              *     of the server.
              */
             topology: string;
+            /**
+             * @description all (the default): an unstated field has all values. defaults: an
+             *     unstated field takes its default value where it has one.
+             */
+            unstated?: components["schemas"]["Unstated"] | null;
         };
         /** @description A problem object of RFC 9457 with the rsim error code. */
         Problem: {
@@ -1321,6 +1330,8 @@ export interface components {
             "source.port"?: number | null;
             tcp_flags?: components["schemas"]["TcpFlag"][] | null;
             topology: string;
+            /** @description The treatment of the unstated fields, when the query gives it. */
+            unstated?: components["schemas"]["Unstated"] | null;
         };
         /** @description A query error: the code and a text for persons. */
         QueryError: {
@@ -1909,6 +1920,8 @@ export interface components {
             topology: string;
             twin: components["schemas"]["TwinJson"];
         };
+        /** @description How a path query treats a field that it does not state. */
+        Unstated: "all" | "defaults";
         VerdictJson: {
             destination?: components["schemas"]["DestinationJson"] | null;
             /**
