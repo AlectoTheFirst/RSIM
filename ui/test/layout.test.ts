@@ -11,6 +11,8 @@ import {
   lanesOf,
   mostSpecific,
   notStated,
+  answerNotes,
+  noteLabel,
   ribNotChecked,
   ribOfGroup,
   spanLabel,
@@ -241,5 +243,33 @@ describe("the query fields", () => {
     expect(n).not.toContain("source.ip");
     expect(n).not.toContain("network.transport");
     expect(n).toContain("dscp");
+  });
+
+  it("leaves out the fields that take a default value with unstated defaults", () => {
+    const q = golden("mini-enterprise").query as unknown as Record<string, unknown>;
+    const all = notStated({ ...q, unstated: "all" });
+    expect(all).toEqual(notStated(q));
+    const n = notStated({ ...q, unstated: "defaults" });
+    for (const k of ["dscp", "ecn", "network.vlan.id", "l2_priority", "fragment", "tcp_flags", "icmp_type", "icmp_code", "source.port", "unstated"]) {
+      expect(n, k).not.toContain(k);
+    }
+    expect(n).toContain("source.mac");
+    expect(notStated({ ...q, unstated: "defaults", "network.vlan.id": 10 })).toContain("l2_priority");
+  });
+});
+
+describe("answer notes", () => {
+  it("gives the notes of a path answer as they are, and none for a set answer or a path answer with no notes", () => {
+    const a = golden("mini-enterprise");
+    expect(answerNotes(a)).toEqual([]);
+    expect(answerNotes({ ...a, notes: ["defaults: dscp 0, ecn 0, no VLAN"] })).toEqual(["defaults: dscp 0, ecn 0, no VLAN"]);
+    expect(answerNotes({ kind: "set_answer", notes: ["x"] })).toEqual([]);
+  });
+});
+
+describe("note label", () => {
+  it("is the word before the colon, and the whole note goes in the title", () => {
+    expect(noteLabel("defaults: dscp 0, ecn 0, no VLAN, tcp syn, source.port 49152-65535")).toBe("defaults");
+    expect(noteLabel("no colon")).toBe("no colon");
   });
 });

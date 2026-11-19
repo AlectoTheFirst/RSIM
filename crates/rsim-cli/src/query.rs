@@ -6,12 +6,13 @@ use std::net::IpAddr;
 use std::str::FromStr;
 
 use rsim_core::{
-    DeviceId, FieldValue, Fragment, Header, InterfaceId, Mac, PROTO_ICMP, PROTO_ICMPV6, PROTO_TCP,
-    PROTO_UDP,
+    DefaultValue, DeviceId, FieldValue, Fragment, Header, HeaderField, InterfaceId, Mac,
+    PROTO_ICMP, PROTO_ICMPV6, PROTO_TCP, PROTO_UDP, PacketSet, UnstatedDefault,
 };
 use rsim_engine::{Query, Twin};
 use serde::Serialize;
 
+pub use rsim_contract::args::Unstated;
 pub use rsim_contract::query::{FragmentName, IngressRef, QueryEcho, TcpFlag};
 
 use crate::error::{ErrorCode, QueryError};
@@ -146,6 +147,7 @@ pub struct QueryInput {
     pub ecn: Option<u8>,
     pub fragment: Option<FragmentName>,
     pub reply: Option<bool>,
+    pub unstated: Option<Unstated>,
 }
 
 impl QueryInput {
@@ -184,6 +186,7 @@ impl QueryInput {
             ecn: self.ecn,
             fragment: self.fragment,
             reply: self.reply,
+            unstated: self.unstated,
         }
     }
 
@@ -262,6 +265,32 @@ impl QueryInput {
 
     /// The request header of the query.
     pub fn header(&self) -> Result<Header, QueryError> {
+        Ok(self.header_with_defaults()?.0)
+    }
+
+    /// The notes of the answer: one note that names each default that
+    /// applied, for example `defaults: dscp 0, ecn 0, no VLAN, tcp syn,
+    /// source.port 49152-65535`. A query that does not give its header has
+    /// no notes.
+    pub fn notes(&self) -> Vec<String> {
+        let Ok((_, applied)) = self.header_with_defaults() else {
+            return Vec::new();
+        };
+        if applied.is_empty() {
+            return Vec::new();
+        }
+        let untagged = applied.iter().any(|d| d.field == HeaderField::Vlan);
+        let parts: Vec<String> = applied
+            .iter()
+            .filter(|d| !(untagged && d.field == HeaderField::L2Priority))
+            .map(default_text)
+            .collect();
+        vec![format!("defaults: {}", parts.join(", "))]
+    }
+
+    /// The request header of the query, and the defaults that applied with
+    /// `unstated` `defaults`.
+    fn header_with_defaults(&self) -> Result<(Header, Vec<UnstatedDefault>), QueryError> {
         let p = self.validate()?;
         let mut h = Header::request(self.source_ip, self.destination_ip, p.0);
         if let Some(x) = self.source_port {
@@ -302,13 +331,23 @@ impl QueryInput {
             Some(FragmentName::First) => h.fragment = FieldValue::Known(Fragment::First),
             Some(FragmentName::Unfragmented) | None => {}
         }
-        Ok(h)
+        let defaults = match self.unstated.unwrap_or_default() {
+            Unstated::All => Vec::new(),
+            Unstated::Defaults => h.apply_defaults(),
+        };
+        Ok((h, defaults))
     }
 
     /// Validates the input and makes the engine query for one packet.
     pub fn to_query(&self, twin: &Twin) -> Result<Query, QueryError> {
-        let h = self.header()?;
+        let (h, applied) = self.header_with_defaults()?;
         let mut q = Query::path(twin, &h);
+        let ranges = UnstatedDefault::ranges(&applied);
+        if ranges != rsim_core::SetSpec::default() {
+            q.packets = q
+                .packets
+                .intersect(&PacketSet::from_spec(q.packets.arena(), &ranges));
+        }
         if let Some(i) = &self.ingress {
             let (d, f) = (DeviceId::new(&i.device), InterfaceId::new(&i.interface));
             if twin.ingress(&d, &f).is_none() {
@@ -324,6 +363,55 @@ impl QueryInput {
         }
         q.reply = self.reply.unwrap_or(true);
         Ok(q)
+    }
+}
+
+/// The short text of a default in the note of an answer.
+fn default_text(d: &UnstatedDefault) -> String {
+    let name = field_name(d.field);
+    match (d.field, d.value, d.protocol) {
+        (HeaderField::Vlan, DefaultValue::Absent, _) => "no VLAN".to_string(),
+        (_, DefaultValue::Absent, _) => format!("no {name}"),
+        (HeaderField::TcpFlags, DefaultValue::Number(n), _) => {
+            let flags = TcpFlag::ALL
+                .iter()
+                .filter(|f| n & f.bit() != 0)
+                .map(|f| f.name())
+                .collect::<Vec<_>>()
+                .join("+");
+            format!("tcp {flags}")
+        }
+        (HeaderField::IcmpType, DefaultValue::Number(8), Some(PROTO_ICMP))
+        | (HeaderField::IcmpType, DefaultValue::Number(128), Some(PROTO_ICMPV6)) => {
+            format!("{name} echo-request")
+        }
+        (_, DefaultValue::Number(n), _) => format!("{name} {n}"),
+        (_, DefaultValue::Fragment(Fragment::Unfragmented), _) => "unfragmented".to_string(),
+        (_, DefaultValue::Fragment(Fragment::First), _) => "first fragment".to_string(),
+        (_, DefaultValue::Fragment(Fragment::Later), _) => "later fragment".to_string(),
+        (_, DefaultValue::PortRange(lo, hi), _) => format!("{name} {lo}-{hi}"),
+    }
+}
+
+/// The name of the query field of a header field.
+fn field_name(f: HeaderField) -> &'static str {
+    match f {
+        HeaderField::SrcMac => "source.mac",
+        HeaderField::DstMac => "destination.mac",
+        HeaderField::Vlan => "network.vlan.id",
+        HeaderField::L2Priority => "l2_priority",
+        HeaderField::SrcIp => "source.ip",
+        HeaderField::DstIp => "destination.ip",
+        HeaderField::Protocol => "network.iana_number",
+        HeaderField::Dscp => "dscp",
+        HeaderField::Ecn => "ecn",
+        HeaderField::Fragment => "fragment",
+        HeaderField::SrcPort => "source.port",
+        HeaderField::DstPort => "destination.port",
+        HeaderField::TcpFlags => "tcp_flags",
+        HeaderField::IcmpType => "icmp_type",
+        HeaderField::IcmpCode => "icmp_code",
+        HeaderField::MplsTrafficClass => "mpls_tc",
     }
 }
 

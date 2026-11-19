@@ -360,6 +360,10 @@ select.twin {
   color: var(--ink);
 }
 
+button.mark {
+  padding-left: 0;
+}
+
 .hatch line {
   stroke: var(--ink-muted);
   stroke-width: var(--hatch-line);

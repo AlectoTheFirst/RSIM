@@ -1,13 +1,19 @@
 // The query of the query bar: its fields, its request body, and its forms
 // as an rsim command and as an MCP tool call.
-import { type Mode, QUERY_FIELDS, type QueryField, kindOf, listItems } from "./fields";
+import { type Mode, QUERY_FIELDS, type QueryField, UNSTATED_ALL, kindOf, listItems, takes } from "./fields";
 
 export { type Mode, QUERY_FIELDS, type QueryField } from "./fields";
 export type Fields = Partial<Record<QueryField, string>>;
 
-/** The stated fields, in the order of the query bar. */
-export function stated(f: Fields): [QueryField, string][] {
-  return QUERY_FIELDS.map((k) => [k, (f[k] ?? "").trim()] as [QueryField, string]).filter(([, v]) => v !== "");
+/**
+ * The stated fields of a mode, in the order of the query bar. A field
+ * that the mode does not take and `unstated` with the value `all` are
+ * not stated.
+ */
+export function stated(f: Fields, mode: Mode = "path"): [QueryField, string][] {
+  return QUERY_FIELDS.map((k) => [k, (f[k] ?? "").trim()] as [QueryField, string]).filter(
+    ([k, v]) => v !== "" && takes(mode, k) && !(k === "unstated" && v === UNSTATED_ALL),
+  );
 }
 
 /**
@@ -30,7 +36,7 @@ export function jsonValue(mode: Mode, k: QueryField, v: string): string | number
  * with no spaces.
  */
 function commandArgs(mode: Mode, f: Fields): string[] {
-  return stated(f).flatMap(([k, v]) => {
+  return stated(f, mode).flatMap(([k, v]) => {
     const kind = kindOf(k);
     if (kind === "boolean" && (v === "true" || v === "false")) return v === "false" ? [`--no-${k}`] : [];
     if (kind === "flags" && mode === "path") return [`--${k}`, shellWord(listItems(v).join(","))];
@@ -41,8 +47,54 @@ function commandArgs(mode: Mode, f: Fields): string[] {
 /** The body of `POST /v1/twins/{twin}/queries`. */
 export function requestBody(mode: Mode, f: Fields): Record<string, unknown> {
   const body: Record<string, unknown> = mode === "set" ? { mode: "set" } : {};
-  for (const [k, v] of stated(f)) body[k] = jsonValue(mode, k, v);
+  for (const [k, v] of stated(f, mode)) body[k] = jsonValue(mode, k, v);
   return body;
+}
+
+/** Whether the query of the bar has `unstated` `defaults`. */
+export function hasDefaults(f: Fields): boolean {
+  return (f.unstated ?? "").trim() === "defaults";
+}
+
+/** The label of the mark of the unstated fields: defaults, or the count of the fields that are not stated. */
+export function unstatedLabel(defaults: boolean, notStated: number): string {
+  return defaults ? "defaults" : `${notStated} not stated`;
+}
+
+/** The fields of the bar with `unstated` switched between all (no value) and defaults. */
+export function toggleDefaults(f: Fields): Fields {
+  return { ...f, unstated: hasDefaults(f) ? "" : "defaults" };
+}
+
+/**
+ * The defaults that a path query of the bar takes with `unstated`
+ * `defaults`, in the words and the order of the note of the answer. A
+ * default applies to an unstated field whose header the packet has.
+ */
+export function defaultsOf(f: Fields): string[] {
+  const v = (k: QueryField) => (f[k] ?? "").trim();
+  const t = v("network.transport").toLowerCase();
+  const n = v("network.iana_number");
+  const is = (name: string, num: string) => t === name || t === num || (t === "" && n === num);
+  const transport = v("fragment") !== "later";
+  const out: string[] = [];
+  if (!v("dscp")) out.push("dscp 0");
+  if (!v("ecn")) out.push("ecn 0");
+  if (!v("network.vlan.id")) out.push("no VLAN");
+  if (transport && is("tcp", "6") && !v("tcp_flags")) out.push("tcp syn");
+  if (transport && (is("icmp", "1") || is("icmpv6", "58"))) {
+    if (!v("icmp_type")) out.push("icmp_type echo-request");
+    if (!v("icmp_code")) out.push("icmp_code 0");
+  }
+  if (transport && (is("tcp", "6") || is("udp", "17")) && !v("source.port")) out.push("source.port 49152-65535");
+  return out;
+}
+
+/** The query echo of the fields of the bar: each field with its value or null, with no `unstated`. */
+export function echoOfFields(f: Fields): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of QUERY_FIELDS) if (k !== "unstated") out[k] = (f[k] ?? "").trim() || null;
+  return out;
 }
 
 /** The topology argument of the CLI and of the MCP tools for a twin. */
@@ -84,7 +136,7 @@ export function explainCommand(
 /** The query as an MCP tool call. */
 export function mcpCall(mode: Mode, twin: string, f: Fields): string {
   const args: Record<string, unknown> = { topology: topologyOf(twin) };
-  for (const [k, v] of stated(f)) args[k] = jsonValue(mode, k, v);
+  for (const [k, v] of stated(f, mode)) args[k] = jsonValue(mode, k, v);
   return JSON.stringify({ name: mode === "set" ? "set_query" : "path_query", arguments: args });
 }
 

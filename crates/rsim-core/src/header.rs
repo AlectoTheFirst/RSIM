@@ -50,6 +50,120 @@ pub enum Encap {
     },
 }
 
+/// How a path query treats a field that it does not state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Unstated {
+    /// An unstated field has all values.
+    #[default]
+    All,
+    /// An unstated field with an entry in [`UNSTATED_DEFAULTS`] takes its
+    /// default value; each other unstated field has all values.
+    Defaults,
+}
+
+/// The default value of a field of a path query with [`Unstated::Defaults`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DefaultValue {
+    /// The header of the field is absent.
+    Absent,
+    /// A number.
+    Number(u8),
+    /// A fragment state.
+    Fragment(Fragment),
+    /// A port range, inclusive. A header holds one value, so the field of
+    /// the header stays unstated and the packet set of the query holds the
+    /// range ([`crate::SetSpec`] of [`UnstatedDefault::ranges`]).
+    PortRange(u16, u16),
+}
+
+/// One default of [`UNSTATED_DEFAULTS`]: the field, the protocol for which
+/// it applies (`None` for each protocol) and the value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnstatedDefault {
+    pub field: HeaderField,
+    pub protocol: Option<u8>,
+    pub value: DefaultValue,
+}
+
+const fn default(field: HeaderField, protocol: Option<u8>, value: DefaultValue) -> UnstatedDefault {
+    UnstatedDefault {
+        field,
+        protocol,
+        value,
+    }
+}
+
+/// The first port of the ephemeral range of IANA.
+pub const EPHEMERAL_FIRST: u16 = 49152;
+
+/// The default value of each field that a path query with
+/// [`Unstated::Defaults`] does not state, in the order of application:
+/// DSCP 0, ECN 0, an untagged frame (no VLAN tag, so no layer 2 priority),
+/// an unfragmented packet, the TCP flags of the first packet of a
+/// connection (SYN), an echo request for ICMP (type 8, code 0) and ICMPv6
+/// (type 128, code 0), and a source port in the ephemeral range 49152 to
+/// 65535. The layer 2 priority is absent only when the VLAN tag is absent.
+/// A default applies only to a field whose header the packet has. The MAC
+/// addresses and the destination port have no default.
+pub const UNSTATED_DEFAULTS: [UnstatedDefault; 11] = [
+    default(HeaderField::Dscp, None, DefaultValue::Number(0)),
+    default(HeaderField::Ecn, None, DefaultValue::Number(0)),
+    default(HeaderField::Vlan, None, DefaultValue::Absent),
+    default(HeaderField::L2Priority, None, DefaultValue::Absent),
+    default(
+        HeaderField::Fragment,
+        None,
+        DefaultValue::Fragment(Fragment::Unfragmented),
+    ),
+    default(
+        HeaderField::TcpFlags,
+        Some(PROTO_TCP),
+        DefaultValue::Number(TCP_SYN),
+    ),
+    default(
+        HeaderField::IcmpType,
+        Some(PROTO_ICMP),
+        DefaultValue::Number(ICMP_ECHO_REQUEST),
+    ),
+    default(
+        HeaderField::IcmpCode,
+        Some(PROTO_ICMP),
+        DefaultValue::Number(0),
+    ),
+    default(
+        HeaderField::IcmpType,
+        Some(PROTO_ICMPV6),
+        DefaultValue::Number(ICMPV6_ECHO_REQUEST),
+    ),
+    default(
+        HeaderField::IcmpCode,
+        Some(PROTO_ICMPV6),
+        DefaultValue::Number(0),
+    ),
+    default(
+        HeaderField::SrcPort,
+        None,
+        DefaultValue::PortRange(EPHEMERAL_FIRST, u16::MAX),
+    ),
+];
+
+impl UnstatedDefault {
+    /// The constraints of the defaults that a header cannot hold: the port
+    /// ranges of `applied`. The other fields have no constraint.
+    pub fn ranges(applied: &[UnstatedDefault]) -> crate::SetSpec {
+        let mut spec = crate::SetSpec::default();
+        for d in applied {
+            if let (HeaderField::SrcPort, DefaultValue::PortRange(lo, hi)) = (d.field, d.value) {
+                spec.src_port = Some(vec![(lo, hi)]);
+            }
+            if let (HeaderField::DstPort, DefaultValue::PortRange(lo, hi)) = (d.field, d.value) {
+                spec.dst_port = Some(vec![(lo, hi)]);
+            }
+        }
+        spec
+    }
+}
+
 /// The names of the header fields. Functions declare which fields they read
 /// and which QoS fields they write.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -215,6 +329,63 @@ impl Header {
         assert!(self.tcp_flags.is_present(), "the protocol is not TCP");
         self.tcp_flags = FieldValue::Known(flags);
         self
+    }
+
+    /// Gives each unstated field of [`UNSTATED_DEFAULTS`] its default value,
+    /// and returns the defaults that applied, in the order of the table. A
+    /// stated field keeps its value, a field whose header is absent takes
+    /// no default, and a default for another protocol does not apply. A port
+    /// range applies to the packet set and not to the header: the port of
+    /// the header stays unstated, and [`UnstatedDefault::ranges`] gives its
+    /// constraint.
+    pub fn apply_defaults(&mut self) -> Vec<UnstatedDefault> {
+        fn fill<T: Copy>(slot: &mut FieldValue<T>, v: FieldValue<T>) -> bool {
+            if slot.is_unstated() {
+                *slot = v;
+                true
+            } else {
+                false
+            }
+        }
+        let mut out = Vec::new();
+        for d in UNSTATED_DEFAULTS {
+            if d.protocol.is_some() && self.protocol.known() != d.protocol {
+                continue;
+            }
+            let done = match (d.field, d.value) {
+                (HeaderField::Vlan, DefaultValue::Absent) => {
+                    fill(&mut self.vlan, FieldValue::Absent)
+                }
+                (HeaderField::L2Priority, DefaultValue::Absent) => {
+                    !self.vlan.is_present() && fill(&mut self.l2_priority, FieldValue::Absent)
+                }
+                (HeaderField::Dscp, DefaultValue::Number(n)) => {
+                    fill(&mut self.dscp, FieldValue::Known(n))
+                }
+                (HeaderField::Ecn, DefaultValue::Number(n)) => {
+                    fill(&mut self.ecn, FieldValue::Known(n))
+                }
+                (HeaderField::Fragment, DefaultValue::Fragment(x)) => {
+                    fill(&mut self.fragment, FieldValue::Known(x))
+                }
+                (HeaderField::TcpFlags, DefaultValue::Number(n)) => {
+                    fill(&mut self.tcp_flags, FieldValue::Known(n))
+                }
+                (HeaderField::IcmpType, DefaultValue::Number(n)) => {
+                    fill(&mut self.icmp_type, FieldValue::Known(n))
+                }
+                (HeaderField::IcmpCode, DefaultValue::Number(n)) => {
+                    fill(&mut self.icmp_code, FieldValue::Known(n))
+                }
+                (HeaderField::SrcPort, DefaultValue::PortRange(..)) => self.src_port.is_unstated(),
+                (HeaderField::DstPort, DefaultValue::PortRange(..)) => self.dst_port.is_unstated(),
+                _ => false,
+            };
+            if done {
+                out.push(d);
+            }
+        }
+        out
     }
 
     /// Makes the packet a later fragment. The transport fields become absent.
@@ -479,6 +650,89 @@ mod tests {
         assert_eq!(r.tcp_flags, FieldValue::Absent);
         assert_eq!(r.src_port, FieldValue::Absent);
         let udp = Header::request(ip("10.0.0.1"), ip("10.0.0.2"), PROTO_UDP).reply();
+        assert_eq!(udp.tcp_flags, FieldValue::Absent);
+        assert_eq!(udp.icmp_type, FieldValue::Absent);
+    }
+
+    fn fields(applied: &[UnstatedDefault]) -> Vec<HeaderField> {
+        applied.iter().map(|d| d.field).collect()
+    }
+
+    #[test]
+    fn each_default_applies_to_an_unstated_tcp_field_and_a_stated_field_keeps_its_value() {
+        let mut h = Header::request(ip("10.0.0.1"), ip("10.0.0.2"), PROTO_TCP).with_dst_port(22);
+        h.fragment = FieldValue::Unstated;
+        let applied = h.apply_defaults();
+        assert_eq!(
+            fields(&applied),
+            vec![
+                HeaderField::Dscp,
+                HeaderField::Ecn,
+                HeaderField::Vlan,
+                HeaderField::L2Priority,
+                HeaderField::Fragment,
+                HeaderField::TcpFlags,
+                HeaderField::SrcPort,
+            ]
+        );
+        assert_eq!(h.vlan, FieldValue::Absent);
+        assert_eq!(h.l2_priority, FieldValue::Absent);
+        assert_eq!(h.dscp, FieldValue::Known(0));
+        assert_eq!(h.ecn, FieldValue::Known(0));
+        assert_eq!(h.fragment, FieldValue::Known(Fragment::Unfragmented));
+        assert_eq!(h.tcp_flags, FieldValue::Known(TCP_SYN));
+        assert!(h.src_mac.is_unstated() && h.dst_mac.is_unstated());
+        assert_eq!(h.dst_port, FieldValue::Known(22));
+        // The header holds one value: the source port range is a constraint
+        // of the packet set.
+        assert!(h.src_port.is_unstated());
+        let spec = UnstatedDefault::ranges(&applied);
+        assert_eq!(spec.src_port, Some(vec![(49152, 65535)]));
+        assert_eq!(spec.dst_port, None);
+
+        let mut tagged = tcp().with_dscp(46).with_tcp_flags(TCP_ACK);
+        tagged.vlan = FieldValue::Known(10);
+        assert_eq!(fields(&tagged.apply_defaults()), vec![HeaderField::Ecn]);
+        assert_eq!(tagged.dscp, FieldValue::Known(46));
+        assert_eq!(tagged.tcp_flags, FieldValue::Known(TCP_ACK));
+        assert_eq!(tagged.src_port, FieldValue::Known(40000));
+        assert_eq!(tagged.l2_priority, FieldValue::Unstated);
+    }
+
+    #[test]
+    fn the_syn_of_the_default_gives_a_reply_with_syn_and_ack() {
+        let mut h = Header::request(ip("10.0.0.1"), ip("10.0.0.2"), PROTO_TCP)
+            .with_src_port(40000)
+            .with_dst_port(22);
+        h.apply_defaults();
+        assert_eq!(h.reply().tcp_flags, FieldValue::Known(TCP_SYN | TCP_ACK));
+    }
+
+    #[test]
+    fn icmp_and_icmpv6_take_an_echo_request_and_udp_takes_no_tcp_or_icmp_default() {
+        let mut v4 = Header::request(ip("10.0.0.1"), ip("10.0.0.2"), PROTO_ICMP);
+        let applied = v4.apply_defaults();
+        assert!(fields(&applied).contains(&HeaderField::IcmpType));
+        assert!(fields(&applied).contains(&HeaderField::IcmpCode));
+        assert!(!fields(&applied).contains(&HeaderField::SrcPort));
+        assert_eq!(v4.icmp_type, FieldValue::Known(ICMP_ECHO_REQUEST));
+        assert_eq!(v4.icmp_code, FieldValue::Known(0));
+        assert_eq!(UnstatedDefault::ranges(&applied), crate::SetSpec::default());
+
+        let mut v6 = Header::request(ip("2001:db8::1"), ip("2001:db8::2"), PROTO_ICMPV6);
+        v6.apply_defaults();
+        assert_eq!(v6.icmp_type, FieldValue::Known(ICMPV6_ECHO_REQUEST));
+        assert_eq!(v6.icmp_code, FieldValue::Known(0));
+
+        let mut stated = icmp(PROTO_ICMP, 0);
+        stated.apply_defaults();
+        assert_eq!(stated.icmp_type, FieldValue::Known(0));
+
+        let mut udp = Header::request(ip("10.0.0.1"), ip("10.0.0.2"), PROTO_UDP).with_dst_port(53);
+        let applied = udp.apply_defaults();
+        assert!(!fields(&applied).contains(&HeaderField::TcpFlags));
+        assert!(!fields(&applied).contains(&HeaderField::IcmpType));
+        assert!(fields(&applied).contains(&HeaderField::SrcPort));
         assert_eq!(udp.tcp_flags, FieldValue::Absent);
         assert_eq!(udp.icmp_type, FieldValue::Absent);
     }

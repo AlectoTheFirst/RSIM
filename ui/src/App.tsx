@@ -10,6 +10,7 @@ import {
   type DecidingStep,
   type Level,
   type StepRow,
+  answerNotes,
   autoStep,
   decidingStep,
   delayGaps,
@@ -17,6 +18,7 @@ import {
   ingressHint,
   ladder,
   noIngress,
+  noteLabel,
   notStated,
   partCounts,
   ribNotChecked,
@@ -27,7 +29,7 @@ import { HatchMark } from "./page/Hatch";
 import { keyForElement, keyPlace } from "./tables/model";
 import { KeyLine, LEVELS, QueryBar, ResultLine, TopBar } from "./page/Parts";
 import { viewOf, viewSearch, withTwin } from "./page/url";
-import { type Fields, type Mode, explainCommand, fieldsOf, mcpCall, requestBody, rsimCommand } from "./page/query";
+import { type Fields, type Mode, echoOfFields, explainCommand, fieldsOf, mcpCall, requestBody, rsimCommand, toggleDefaults } from "./page/query";
 import { QUERY_FIELDS, modeValue } from "./page/fields";
 import { TablesView } from "./tables/TablesView";
 import { type Prefs, applyTheme, loadPrefs, savePrefs } from "./theme";
@@ -53,7 +55,7 @@ const isSet = (out: PathAnswer | SetAnswer) => out.kind === "set_answer";
 /** Whether the query of an answer asks for the reply. */
 const asksReply = (out: PathAnswer | SetAnswer) => (out.query as { reply?: boolean | null }).reply !== false;
 
-function PathFacts(props: { a: Answer; onStep: (d: DecidingStep) => void }) {
+function PathFacts(props: { a: Answer; notes: readonly string[]; onStep: (d: DecidingStep) => void }) {
   const a = props.a;
   const s = a.summary;
   const multi = a.branches.length > 1;
@@ -118,6 +120,9 @@ function PathFacts(props: { a: Answer; onStep: (d: DecidingStep) => void }) {
         );
       })}
       {rib ? <HatchMark>{rib} route lookups, no RIB check</HatchMark> : null}
+      {props.notes.map((n) => (
+        <HatchMark title={n}>{noteLabel(n)}</HatchMark>
+      ))}
     </>
   );
 }
@@ -454,9 +459,10 @@ export function App() {
         fields={fields}
         found={answer && !busy ? ingressHint(answer) : null}
         askIngress={askIngress}
-        notStated={echo && !setMode_ ? notStated(echo) : null}
+        notStated={mode === "set" ? null : notStated(echo && !setMode_ ? { ...echo, unstated: null } : echoOfFields(fields))}
         onMode={changeMode}
         onField={(k, v) => setFields({ ...fields, [k]: v })}
+        onDefaults={() => setFields(toggleDefaults(fields))}
         onRun={() => void run()}
         onCopyCommand={() => copy(rsimCommand(mode, twin, fields), "rsim command")}
         onCopyMcp={() => copy(mcpCall(mode, twin, fields), "MCP call")}
@@ -469,7 +475,7 @@ export function App() {
           <span>{problem}</span>
         ) : answer ? (
           <>
-            {setMode_ ? <SetFacts a={answer} /> : <PathFacts a={answer} onStep={openStep} />}
+            {setMode_ ? <SetFacts a={answer} /> : <PathFacts a={answer} notes={result ? answerNotes(result.out) : []} onStep={openStep} />}
             {noIngress(answer) ? (
               <button type="button" onClick={() => setAskIngress((n) => n + 1)}>
                 Select entry point

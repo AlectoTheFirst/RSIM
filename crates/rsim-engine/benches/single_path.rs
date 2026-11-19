@@ -28,6 +28,16 @@ fn bench(c: &mut Criterion) {
     c.bench_function("mini-enterprise guest->dns forward+reply (42 steps)", |b| {
         b.iter(|| black_box(ex.run(&query(&mini, black_box(&h), true)).unwrap()))
     });
+    let mut stated = h.clone();
+    stated.apply_defaults();
+    c.bench_function(
+        "mini-enterprise guest->dns forward, unstated defaults (21 steps)",
+        |b| b.iter(|| black_box(ex.run(&query(&mini, black_box(&stated), false)).unwrap())),
+    );
+    c.bench_function(
+        "mini-enterprise guest->dns forward+reply, unstated defaults (42 steps)",
+        |b| b.iter(|| black_box(ex.run(&query(&mini, black_box(&stated), true)).unwrap())),
+    );
     let ex_checked = Executor::new(&mini);
     c.bench_function(
         "mini-enterprise guest->dns forward+reply, contract checks on",

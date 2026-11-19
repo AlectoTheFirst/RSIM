@@ -206,6 +206,7 @@ pub fn path(input: &QueryInput, twin: &Loaded) -> Result<PathAnswerOut, QueryErr
         topology: input.topology.clone(),
         twin: twin.identity.clone(),
         query: input.echo(),
+        notes: input.notes(),
         answer: AnswerJson::new(&answer),
     })
 }
@@ -225,6 +226,7 @@ pub fn path_brief(
         twin: twin.identity.clone(),
         form,
         query: input.echo(),
+        notes: input.notes(),
         answer: crate::json::brief_json(&answer, form),
     })
 }

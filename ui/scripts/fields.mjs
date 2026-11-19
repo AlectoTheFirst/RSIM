@@ -1,6 +1,7 @@
 // Writes src/api/fields.ts from crates/rsim-api/openapi.json: the fields
 // of a path query and of a set query, with their descriptions, their
-// number ranges and their names. With --check, it writes nothing and
+// number ranges and their names. A field of a path query only has the
+// set description null. With --check, it writes nothing and
 // fails if the file is not current.
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -57,8 +58,8 @@ const path = schemas.PathQueryArgs.properties;
 const set = schemas.SetQueryArgs.properties;
 const names = Object.keys(path).filter((k) => !LEFT_OUT.has(k));
 const setNames = Object.keys(set).filter((k) => !LEFT_OUT.has(k));
-if (names.join() !== setNames.join()) {
-  throw new Error(`the fields of PathQueryArgs and SetQueryArgs differ: ${names} / ${setNames}`);
+if (setNames.join() !== names.filter((k) => setNames.includes(k)).join()) {
+  throw new Error(`SetQueryArgs has a field that PathQueryArgs does not have, or another order: ${names} / ${setNames}`);
 }
 
 const fields = {};
@@ -67,7 +68,7 @@ for (const k of names) {
   if (f.type === null) throw new Error(`the field ${k} has no type`);
   fields[k] = {
     path: oneLine(path[k].description),
-    set: oneLine(set[k].description),
+    set: set[k] ? oneLine(set[k].description) : null,
     type: f.type,
     maximum: f.maximum,
     values: f.values,
@@ -89,8 +90,8 @@ export const MODE_TEXT = ${JSON.stringify(
 
 /**
  * Each field of a path query and of a set query: the description of each
- * mode, the JSON type of the path query value, its largest number, and
- * its names.
+ * mode, null for a mode that does not take the field, the JSON type of
+ * the path query value, its largest number, and its names.
  */
 export const FIELD_SCHEMA = ${JSON.stringify(fields, null, 2)} as const;
 

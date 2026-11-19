@@ -74,7 +74,7 @@ pub const OPERATIONS: &[Operation] = &[
     },
     Operation {
         id: "runPathQuery",
-        description: "The answer for one packet: the ingress, each branch with its verdict, its delay and its trace, and the reply of each delivered branch. A field that the query does not state is not known.",
+        description: "The answer for one packet: the ingress, each branch with its verdict, its delay and its trace, and the reply of each delivered branch. A field that the query does not state is not known, or takes its default value with unstated defaults; the notes of the answer name each default.",
         effect: Effect::Read,
         tool: Some("path_query"),
         command: Some("path"),
