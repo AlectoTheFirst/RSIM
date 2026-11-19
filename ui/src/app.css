@@ -317,7 +317,11 @@ select.twin {
   outline: none;
 }
 
-/* An empty field: its placeholder in the label style. */
+/* An empty field: an empty box, or its hint in the label style. */
+.autosize.empty {
+  min-width: var(--field-min);
+}
+
 .autosize.empty::after,
 .autosize input::placeholder {
   font-family: var(--label-family);

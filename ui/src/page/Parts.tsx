@@ -159,7 +159,7 @@ function QueryValue(props: {
   onRun: () => void;
   inputRef?: { current: HTMLInputElement | null };
 }) {
-  const shown = props.value || props.hint || "not stated";
+  const shown = props.value || props.hint || "";
   const picks = PICKED.has(props.name);
   const [edited, setEdited] = useState(false);
   const [state, setState] = useState<PickerState>(PICKER_CLOSED);
@@ -183,7 +183,7 @@ function QueryValue(props: {
           class="t-query"
           size={1}
           value={props.value}
-          placeholder={props.hint || "not stated"}
+          placeholder={props.hint ?? undefined}
           spellcheck={false}
           autocomplete="off"
           role={picks ? "combobox" : undefined}
