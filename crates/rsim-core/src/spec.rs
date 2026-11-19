@@ -190,6 +190,27 @@ fn product(
     absent(bits::ICMP_CODE, icmp, &mut zero);
     absent(bits::VLAN, tagged, &mut zero);
     absent(bits::L2_PRIORITY, tagged, &mut zero);
+    // With no tag constraint for them, the TPID is 0x8100 and the inner tag
+    // is absent.
+    if tagged {
+        lits.extend(crate::set::value_lits(
+            bits::VLAN_TPID,
+            c,
+            u128::from(bits::TPID_8021Q),
+        ));
+    } else {
+        zero.extend(bits::VLAN_TPID.value_bits());
+    }
+    for x in [
+        bits::P_INNER_VLAN,
+        bits::U_INNER_VLAN,
+        bits::U_INNER_L2_PRIORITY,
+    ] {
+        lits.push((bits::level(x, c), false));
+    }
+    for f in bits::INNER_TAG {
+        zero.extend(f.value_bits());
+    }
     zero.extend(bits::MPLS_TC.value_bits());
     for f in [
         bits::ENCAP_KIND,

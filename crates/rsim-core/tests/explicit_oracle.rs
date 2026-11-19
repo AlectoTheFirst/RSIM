@@ -41,6 +41,9 @@ prop_compose! {
         dscp in unknown_or(prop_oneof![Just(0u8), Just(46)]),
         later in prop::bool::weighted(0.1),
         mac in 0u8..3,
+        tags in prop_oneof![3 => Just(0usize), 2 => Just(1), 1 => Just(2)],
+        outer in tag(),
+        inner in tag(),
     ) -> Header {
         let (s, d) = if v6 {
             (ADDRS6[src % ADDRS6.len()], ADDRS6[dst % ADDRS6.len()])
@@ -63,13 +66,38 @@ prop_compose! {
         h.ecn = FieldValue::Known(0);
         h.src_mac = FieldValue::Known(Mac([0, 0, 0, 0, 0, mac]));
         h.dst_mac = FieldValue::Known(Mac([0, 0, 0, 0, 1, mac]));
-        h.vlan = FieldValue::Absent;
-        h.l2_priority = FieldValue::Absent;
+        h = with_tags(h.untagged(), tags, outer, inner);
         if later {
             h = h.as_later_fragment();
         }
         h
     }
+}
+
+/// A VLAN tag: the VLAN, the priority and the TPID.
+type Tag = (u16, u8, u16);
+
+fn tag() -> impl Strategy<Value = Tag> {
+    (
+        prop::sample::select(vec![10u16, 20]),
+        0u8..2,
+        prop::sample::select(vec![0x8100u16, 0x88a8]),
+    )
+}
+
+/// The header with its first `n` tags of `outer` and `inner`.
+fn with_tags(mut h: Header, n: usize, outer: Tag, inner: Tag) -> Header {
+    if n > 0 {
+        h.vlan = FieldValue::Known(outer.0);
+        h.l2_priority = FieldValue::Known(outer.1);
+        h.vlan_tpid = FieldValue::Known(outer.2);
+    }
+    if n > 1 {
+        h.inner_vlan = FieldValue::Known(inner.0);
+        h.inner_l2_priority = FieldValue::Known(inner.1);
+        h.inner_vlan_tpid = FieldValue::Known(inner.2);
+    }
+    h
 }
 
 fn headers() -> impl Strategy<Value = Vec<Header>> {
@@ -411,7 +439,7 @@ fn check_session(lookup: Explicit, rw: Rewrite, probe: Explicit) -> Result<(), T
             prop_assert_eq!(&r.ambiguous, &set(&ar, &ambiguous), "{:?}", dir);
             prop_assert!(r.uncertain.is_empty());
             for x in [&r.matched, &r.unmatched, &r.ambiguous] {
-                prop_assert!(x.has_free_levels());
+                prop_assert!(x.has_free_levels() && x.has_valid_tags());
             }
         }
     }
@@ -658,8 +686,7 @@ prop_compose! {
         h.ecn = FieldValue::Known(0);
         h.src_mac = FieldValue::Known(Mac([0, 0, 0, 0, 2, mac]));
         h.dst_mac = FieldValue::Known(Mac([0, 0, 0, 0, 3, mac]));
-        h.vlan = FieldValue::Absent;
-        h.l2_priority = FieldValue::Absent;
+        h = h.untagged();
         let e = match kind {
             0 => Encap::Vxlan { src: s, dst: d, vni },
             1 => Encap::Gre { src: s, dst: d },
@@ -755,6 +782,8 @@ proptest! {
         for x in [&sa, &po, &projected, &related] {
             prop_assert!(x.has_free_levels());
         }
+        // A projection leaves the tags of the other banks free.
+        prop_assert!(sa.has_valid_tags() && po.has_valid_tags());
         prop_assert!(sa.is_subset(&related));
         prop_assert_eq!(related.project_original(), po.clone());
         for p in &eb {
@@ -778,7 +807,7 @@ proptest! {
         let nested: Explicit = ea.iter().filter(|p| is_encapsulated(p)).cloned().collect();
         prop_assert_eq!(&r.done, &set(&ar, &done));
         prop_assert_eq!(&r.nested, &set(&ar, &nested));
-        prop_assert!(r.done.has_free_levels() && r.nested.has_free_levels());
+        prop_assert!((r.done.has_free_levels() && r.done.has_valid_tags()) && (r.nested.has_free_levels() && r.nested.has_valid_tags()));
         // The 2 parts partition the input.
         let back = r.done.decapsulate();
         prop_assert!(back.plain.is_empty());
@@ -801,7 +830,7 @@ proptest! {
         let plain: Explicit = ea.iter().filter(|p| !is_encapsulated(p)).cloned().collect();
         prop_assert_eq!(&r.done, &set(&ar, &done));
         prop_assert_eq!(&r.plain, &set(&ar, &plain));
-        prop_assert!(r.done.has_free_levels() && r.plain.has_free_levels());
+        prop_assert!((r.done.has_free_levels() && r.done.has_valid_tags()) && (r.plain.has_free_levels() && r.plain.has_valid_tags()));
         // The 2 parts partition the input.
         prop_assert!(r.plain.is_subset(&s));
         prop_assert!(s.difference(&r.plain).decapsulate().plain.is_empty());
@@ -826,7 +855,7 @@ proptest! {
         let s = set(&ar, &explicit(&a)).rewrite(&rw).union(&wide);
         let e = s.encapsulate(&o);
         prop_assert!(e.nested.is_empty());
-        prop_assert!(e.done.has_free_levels());
+        prop_assert!(e.done.has_free_levels() && e.done.has_valid_tags());
         let d = e.done.decapsulate();
         prop_assert!(d.plain.is_empty());
         prop_assert_eq!(d.done, s);
@@ -860,7 +889,7 @@ proptest! {
         }
         let r = set(&ar, &ea).rewrite(&rw);
         prop_assert_eq!(&r, &set(&ar, &want));
-        prop_assert!(r.has_free_levels());
+        prop_assert!(r.has_free_levels() && r.has_valid_tags());
     }
 
     #[test]
@@ -927,7 +956,7 @@ proptest! {
         }
         let r = s.reply();
         prop_assert_eq!(&r, &want);
-        prop_assert!(r.has_free_levels());
+        prop_assert!(r.has_free_levels() && r.has_valid_tags());
     }
 
     #[test]
@@ -975,8 +1004,7 @@ fn a_single_encapsulated_request_has_the_inner_header_as_its_original_request() 
     o.ecn = FieldValue::Known(0);
     o.src_mac = FieldValue::Known(Mac([0, 0, 0, 0, 2, 1]));
     o.dst_mac = FieldValue::Known(Mac([0, 0, 0, 0, 3, 1]));
-    o.vlan = FieldValue::Absent;
-    o.l2_priority = FieldValue::Absent;
+    o = o.untagged();
     o.encap = vec![Encap::Vxlan {
         src: ip("198.51.100.1"),
         dst: ip("198.51.100.2"),
@@ -991,7 +1019,7 @@ fn a_single_encapsulated_request_has_the_inner_header_as_its_original_request() 
         original: w.original.clone(),
         current: w.current.decapsulate().unwrap(),
     }));
-    assert!(s.has_free_levels());
+    assert!(s.has_free_levels() && s.has_valid_tags());
 }
 
 #[test]
@@ -1016,4 +1044,94 @@ fn a_header_with_an_encapsulation_and_no_inner_header_is_refused() {
         dst: ip("198.51.100.2"),
     }];
     let _ = PacketSet::single(&ar, &h);
+}
+
+/// The outer tag of `h` as the inner tag and no outer tag.
+fn outer_to_inner(h: &mut Header) {
+    h.inner_vlan = h.vlan;
+    h.inner_l2_priority = h.l2_priority;
+    h.inner_vlan_tpid = h.vlan_tpid;
+}
+
+/// The inner tag of `h` as the outer tag and no inner tag.
+fn inner_to_outer(h: &mut Header) {
+    h.vlan = h.inner_vlan;
+    h.l2_priority = h.inner_l2_priority;
+    h.vlan_tpid = h.inner_vlan_tpid;
+    h.inner_vlan = FieldValue::Absent;
+    h.inner_l2_priority = FieldValue::Absent;
+    h.inner_vlan_tpid = FieldValue::Absent;
+}
+
+/// The set of `e` with `f` applied to the current header of each pair.
+fn each_current(e: &Explicit, f: impl Fn(&mut Header)) -> Explicit {
+    sorted(
+        e.iter()
+            .map(|p| {
+                let mut c = p.current.clone();
+                f(&mut c);
+                PacketPair {
+                    original: p.original.clone(),
+                    current: c,
+                }
+            })
+            .collect(),
+    )
+}
+
+proptest! {
+    #[test]
+    fn the_tag_operations_agree_with_the_tags_of_each_header(
+        a in headers(),
+        v in prop::sample::select(vec![10u16, 30]),
+        tpid in prop::sample::select(vec![0x8100u16, 0x88a8]),
+    ) {
+        let ar = arena();
+        let ea = explicit(&a);
+        let s = set(&ar, &ea);
+        let two = |p: &PacketPair| p.current.inner_vlan.is_present();
+        let tagged = |h: &Header| h.vlan.is_present();
+
+        let pushed = s.push_vlan(v, tpid);
+        let full: Explicit = ea.iter().filter(|p| two(p)).cloned().collect();
+        let rest: Explicit = ea.iter().filter(|p| !two(p)).cloned().collect();
+        let done = each_current(&rest, |h| {
+            if tagged(h) {
+                outer_to_inner(h);
+            }
+            h.vlan = FieldValue::Known(v);
+            h.l2_priority = FieldValue::Unknown;
+            h.vlan_tpid = FieldValue::Known(tpid);
+        });
+        prop_assert_eq!(&pushed.full, &set(&ar, &full));
+        prop_assert_eq!(&pushed.done, &set(&ar, &done));
+
+        let popped = each_current(&ea, |h| {
+            if h.inner_vlan.is_present() {
+                inner_to_outer(h);
+            } else {
+                *h = h.clone().untagged();
+            }
+        });
+        prop_assert_eq!(&s.pop_vlan(), &set(&ar, &popped));
+        prop_assert_eq!(&pushed.done.pop_vlan(), &set(&ar, &rest));
+
+        let cleared = each_current(&ea, |h| *h = h.clone().untagged());
+        prop_assert_eq!(&s.set_vlan(None), &set(&ar, &cleared));
+        let retagged = each_current(&ea, |h| {
+            if !tagged(h) {
+                h.l2_priority = FieldValue::Unknown;
+            }
+            h.vlan = FieldValue::Known(v);
+            h.vlan_tpid = FieldValue::Known(0x8100);
+        });
+        prop_assert_eq!(&s.set_vlan(Some(v)), &set(&ar, &retagged));
+
+        let (inner, plain) = s.split_inner_vlan();
+        prop_assert_eq!(&inner, &set(&ar, &full));
+        prop_assert_eq!(&plain, &set(&ar, &rest));
+        for x in [&pushed.done, &pushed.full, &s.pop_vlan(), &s.set_vlan(None), &s.set_vlan(Some(v)), &inner, &plain] {
+            prop_assert!(x.has_free_levels() && x.has_valid_tags());
+        }
+    }
 }

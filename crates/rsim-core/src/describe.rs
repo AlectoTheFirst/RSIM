@@ -147,6 +147,12 @@ impl PacketSet {
 }
 
 fn describe_edge(ops: &mut Ops<'_>, s: Edge) -> Result<Vec<Member>, DdError> {
+    let tags: Vec<u32> = bits::tpid_and_inner_bits()
+        .into_iter()
+        .flat_map(|b| [Bank::Original, Bank::Current, Bank::Inner].map(|k| level(b, k)))
+        .collect();
+    let tags = ops.dd.cube(&tags)?;
+    let s = ops.dd.exists(s, tags)?;
     let flags = flag_bits();
     let mut plain_levels = Vec::new();
     for &b in &flags {
@@ -519,7 +525,7 @@ fn ranges(ops: &mut Ops<'_>, e: Edge, f: FieldBits, bank: Bank) -> Result<Values
                 "a field value set reads a level outside its field".to_string(),
             ));
         }
-        let l = level(f.start + depth, bank);
+        let l = level(f.bit(depth), bank);
         let (lo, hi) = match ops.dd.branch(e)? {
             Some((top, lo, hi)) if top == l => (lo, hi),
             Some((top, _, _)) if top > l => (e, e),
@@ -553,24 +559,24 @@ mod tests {
 
     /// An untagged TCP request.
     fn h() -> Header {
-        let mut h = Header::request(
+        tagged().untagged()
+    }
+
+    /// A TCP request that does not state its VLAN tags.
+    fn tagged() -> Header {
+        Header::request(
             "10.0.0.1".parse().unwrap(),
             "10.0.0.2".parse().unwrap(),
             PROTO_TCP,
         )
         .with_src_port(40000)
-        .with_dst_port(22);
-        h.vlan = FieldValue::Absent;
-        h.l2_priority = FieldValue::Absent;
-        h
+        .with_dst_port(22)
     }
 
     #[test]
     fn a_request_has_one_member_with_its_stated_values() {
         let a = SetArena::standalone();
-        let mut req = h();
-        req.vlan = FieldValue::Unstated;
-        req.l2_priority = FieldValue::Unstated;
+        let req = tagged();
         // A VLAN tag that the request does not state can be absent.
         let m = PacketSet::single(&a, &req).describe();
         assert_eq!(m.len(), 2);
@@ -631,8 +637,7 @@ mod tests {
         o.ecn = FieldValue::Known(0);
         o.src_mac = FieldValue::Unknown;
         o.dst_mac = FieldValue::Unknown;
-        o.vlan = FieldValue::Absent;
-        o.l2_priority = FieldValue::Absent;
+        o = o.untagged();
         o.encap = vec![Encap::Vxlan {
             src: vtep("198.51.100.1"),
             dst: vtep("198.51.100.2"),
@@ -683,8 +688,7 @@ mod tests {
         o.ecn = FieldValue::Known(0);
         o.src_mac = FieldValue::Unknown;
         o.dst_mac = FieldValue::Unknown;
-        o.vlan = FieldValue::Absent;
-        o.l2_priority = FieldValue::Absent;
+        o = o.untagged();
         o.encap = vec![Encap::Gre {
             src: vtep("198.51.100.1"),
             dst: vtep("198.51.100.2"),

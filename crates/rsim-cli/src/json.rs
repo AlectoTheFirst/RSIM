@@ -601,8 +601,7 @@ mod tests {
         o.ecn = FieldValue::Known(0);
         o.src_mac = FieldValue::Known(Mac([0, 0, 0, 0, 2, 1]));
         o.dst_mac = FieldValue::Known(Mac([0, 0, 0, 0, 3, 1]));
-        o.vlan = FieldValue::Absent;
-        o.l2_priority = FieldValue::Absent;
+        o = o.untagged();
         o.encap = vec![Encap::Vxlan {
             src: ip("198.51.100.1"),
             dst: ip("198.51.100.2"),

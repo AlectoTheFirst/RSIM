@@ -141,8 +141,7 @@ fn a_packet_that_is_encapsulated_already_is_unknown_at_the_tunnel_end() {
         }
         o.src_mac = FieldValue::Unknown;
         o.dst_mac = FieldValue::Unknown;
-        o.vlan = FieldValue::Absent;
-        o.l2_priority = FieldValue::Absent;
+        o = o.untagged();
         o.encap = vec![rsim_core::Encap::Gre {
             src: ip("198.51.100.1"),
             dst: ip("10.2.0.10"),

@@ -271,8 +271,8 @@ fn sat_count_and_pick_one_on_a_known_set() {
 /// A packet is a chain of 1 literal on each level. The operations recurse
 /// once for each level, on a thread with the default stack.
 #[test]
-fn a_chain_on_all_3056_levels_runs_on_a_default_thread() {
-    const LEVELS: u32 = 3056;
+fn a_chain_on_all_3256_levels_runs_on_a_default_thread() {
+    const LEVELS: u32 = 3256;
     let r = thread::spawn(|| {
         let mut dd = Dd::new(LEVELS);
         // The plain BDD of the shadow check recurses, so it is off here.

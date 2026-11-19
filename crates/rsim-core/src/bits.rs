@@ -13,7 +13,7 @@ use crate::field::FieldValue;
 use crate::header::{Encap, Fragment, Header, HeaderField};
 
 /// The number of bits of one header.
-pub const BITS: u32 = 764;
+pub const BITS: u32 = 814;
 /// The number of levels: 4 for each bit.
 pub const LEVELS: u32 = 4 * BITS;
 
@@ -54,12 +54,18 @@ pub const U_VLAN: u32 = 15;
 /// The address family: 0 for IPv4, 1 for IPv6.
 pub const AF: u32 = 16;
 
+/// The presence bit of the inner VLAN tag. An inner tag needs an outer tag.
+pub const P_INNER_VLAN: u32 = 17;
+pub const U_INNER_VLAN: u32 = 18;
+pub const U_INNER_L2_PRIORITY: u32 = 19;
+
 /// The bits of one field: its value bits, most significant bit first, its
-/// presence bit and its unknown bit.
+/// presence bit and its unknown bit. The value bits are `stride` bits apart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FieldBits {
     pub start: u32,
     pub width: u32,
+    pub stride: u32,
     pub presence: Option<u32>,
     pub unknown: Option<u32>,
 }
@@ -69,14 +75,32 @@ impl FieldBits {
         FieldBits {
             start,
             width,
+            stride: 1,
             presence,
             unknown,
         }
     }
 
+    /// A field whose value bits alternate with the value bits of the same
+    /// field of the other VLAN tag.
+    const fn tag(start: u32, width: u32, presence: u32, unknown: Option<u32>) -> Self {
+        FieldBits {
+            start,
+            width,
+            stride: 2,
+            presence: Some(presence),
+            unknown,
+        }
+    }
+
+    /// The value bit `i`, from the most significant bit.
+    pub fn bit(&self, i: u32) -> u32 {
+        self.start + i * self.stride
+    }
+
     /// The value bits.
-    pub fn value_bits(&self) -> std::ops::Range<u32> {
-        self.start..self.start + self.width
+    pub fn value_bits(&self) -> std::iter::StepBy<std::ops::Range<u32>> {
+        (self.start..self.start + self.width * self.stride).step_by(self.stride as usize)
     }
 
     /// The value bits, the presence bit and the unknown bit.
@@ -88,27 +112,66 @@ impl FieldBits {
     }
 }
 
-pub const PROTOCOL: FieldBits = FieldBits::new(17, 8, None, None);
-pub const DST_IP: FieldBits = FieldBits::new(25, 128, None, Some(U_DST_IP));
-pub const SRC_IP: FieldBits = FieldBits::new(153, 128, None, Some(U_SRC_IP));
-pub const DST_PORT: FieldBits = FieldBits::new(281, 16, Some(P_PORTS), Some(U_DST_PORT));
-pub const SRC_PORT: FieldBits = FieldBits::new(297, 16, Some(P_PORTS), Some(U_SRC_PORT));
-pub const TCP_FLAGS: FieldBits = FieldBits::new(313, 8, Some(P_TCP), None);
-pub const ICMP_TYPE: FieldBits = FieldBits::new(321, 8, Some(P_ICMP), None);
-pub const ICMP_CODE: FieldBits = FieldBits::new(329, 8, Some(P_ICMP), None);
-pub const DSCP: FieldBits = FieldBits::new(337, 6, None, Some(U_DSCP));
-pub const ECN: FieldBits = FieldBits::new(343, 2, None, Some(U_ECN));
-pub const FRAGMENT: FieldBits = FieldBits::new(345, 2, None, None);
-pub const VLAN: FieldBits = FieldBits::new(347, 12, Some(P_VLAN), Some(U_VLAN));
-pub const L2_PRIORITY: FieldBits = FieldBits::new(359, 3, Some(P_VLAN), Some(U_L2_PRIORITY));
-pub const DST_MAC: FieldBits = FieldBits::new(362, 48, None, Some(U_DST_MAC));
-pub const SRC_MAC: FieldBits = FieldBits::new(410, 48, None, Some(U_SRC_MAC));
-pub const MPLS_TC: FieldBits = FieldBits::new(458, 3, Some(P_MPLS), Some(U_MPLS_TC));
-pub const ENCAP_KIND: FieldBits = FieldBits::new(461, 3, None, None);
-pub const ENCAP_SRC: FieldBits = FieldBits::new(464, 128, None, None);
-pub const ENCAP_DST: FieldBits = FieldBits::new(592, 128, None, None);
-pub const ENCAP_VNI: FieldBits = FieldBits::new(720, 24, None, None);
-pub const ENCAP_LABEL: FieldBits = FieldBits::new(744, 20, None, None);
+pub const PROTOCOL: FieldBits = FieldBits::new(20, 8, None, None);
+pub const DST_IP: FieldBits = FieldBits::new(28, 128, None, Some(U_DST_IP));
+pub const SRC_IP: FieldBits = FieldBits::new(156, 128, None, Some(U_SRC_IP));
+pub const DST_PORT: FieldBits = FieldBits::new(284, 16, Some(P_PORTS), Some(U_DST_PORT));
+pub const SRC_PORT: FieldBits = FieldBits::new(300, 16, Some(P_PORTS), Some(U_SRC_PORT));
+pub const TCP_FLAGS: FieldBits = FieldBits::new(316, 8, Some(P_TCP), None);
+pub const ICMP_TYPE: FieldBits = FieldBits::new(324, 8, Some(P_ICMP), None);
+pub const ICMP_CODE: FieldBits = FieldBits::new(332, 8, Some(P_ICMP), None);
+pub const DSCP: FieldBits = FieldBits::new(340, 6, None, Some(U_DSCP));
+pub const ECN: FieldBits = FieldBits::new(346, 2, None, Some(U_ECN));
+pub const FRAGMENT: FieldBits = FieldBits::new(348, 2, None, None);
+// The fields of the outer tag and of the inner tag alternate bit by bit, so
+// a move of a tag to the other tag renames each bit to its neighbour.
+pub const VLAN: FieldBits = FieldBits::tag(350, 12, P_VLAN, Some(U_VLAN));
+pub const INNER_VLAN: FieldBits = FieldBits::tag(351, 12, P_INNER_VLAN, Some(U_INNER_VLAN));
+pub const L2_PRIORITY: FieldBits = FieldBits::tag(374, 3, P_VLAN, Some(U_L2_PRIORITY));
+pub const INNER_L2_PRIORITY: FieldBits =
+    FieldBits::tag(375, 3, P_INNER_VLAN, Some(U_INNER_L2_PRIORITY));
+/// The TPID of the outer tag. It shares the presence bit of the outer tag.
+pub const VLAN_TPID: FieldBits = FieldBits::tag(380, 16, P_VLAN, None);
+pub const INNER_VLAN_TPID: FieldBits = FieldBits::tag(381, 16, P_INNER_VLAN, None);
+pub const DST_MAC: FieldBits = FieldBits::new(412, 48, None, Some(U_DST_MAC));
+pub const SRC_MAC: FieldBits = FieldBits::new(460, 48, None, Some(U_SRC_MAC));
+pub const MPLS_TC: FieldBits = FieldBits::new(508, 3, Some(P_MPLS), Some(U_MPLS_TC));
+pub const ENCAP_KIND: FieldBits = FieldBits::new(511, 3, None, None);
+pub const ENCAP_SRC: FieldBits = FieldBits::new(514, 128, None, None);
+pub const ENCAP_DST: FieldBits = FieldBits::new(642, 128, None, None);
+pub const ENCAP_VNI: FieldBits = FieldBits::new(770, 24, None, None);
+pub const ENCAP_LABEL: FieldBits = FieldBits::new(794, 20, None, None);
+
+/// The TPID of an 802.1Q tag.
+pub const TPID_8021Q: u16 = 0x8100;
+/// The TPID of an 802.1ad service tag.
+pub const TPID_8021AD: u16 = 0x88a8;
+
+/// The fields of the outer tag and of the inner tag, in the same order: the
+/// VLAN, the priority and the TPID.
+pub const OUTER_TAG: [FieldBits; 3] = [VLAN, L2_PRIORITY, VLAN_TPID];
+pub const INNER_TAG: [FieldBits; 3] = [INNER_VLAN, INNER_L2_PRIORITY, INNER_VLAN_TPID];
+
+/// The bits of a tag: its value bits, its presence bit and its unknown
+/// bits. The bits of the outer tag and of the inner tag are in the same
+/// order, so the 2 lists pair the bits of the 2 tags.
+pub fn tag_bits(tag: &[FieldBits; 3]) -> Vec<u32> {
+    let mut v: Vec<u32> = tag.iter().flat_map(|f| f.value_bits()).collect();
+    v.extend(tag[0].presence);
+    v.extend(tag.iter().filter_map(|f| f.unknown));
+    v
+}
+
+/// The bits of the TPID of the outer tag and of the inner tag.
+pub fn tpid_and_inner_bits() -> Vec<u32> {
+    let mut v = vec![P_INNER_VLAN, U_INNER_VLAN, U_INNER_L2_PRIORITY];
+    v.extend(VLAN_TPID.value_bits());
+    for f in INNER_TAG {
+        v.extend(f.value_bits());
+    }
+    v.sort_unstable();
+    v
+}
 
 /// The encapsulation kinds in [`ENCAP_KIND`].
 pub const ENCAP_NONE: u128 = 0;
@@ -128,8 +191,9 @@ pub fn presence_group(p: u32) -> Vec<FieldBits> {
         P_PORTS => vec![SRC_PORT, DST_PORT],
         P_TCP => vec![TCP_FLAGS],
         P_ICMP => vec![ICMP_TYPE, ICMP_CODE],
-        P_VLAN => vec![VLAN, L2_PRIORITY],
+        P_VLAN => vec![VLAN, L2_PRIORITY, VLAN_TPID],
         P_MPLS => vec![MPLS_TC],
+        P_INNER_VLAN => vec![INNER_VLAN, INNER_L2_PRIORITY, INNER_VLAN_TPID],
         _ => Vec::new(),
     }
 }
@@ -220,18 +284,41 @@ pub(crate) fn encode(h: &Header) -> Vec<BitValue> {
     put(&mut bits, DSCP, h.dscp.map(u128::from));
     put(&mut bits, ECN, h.ecn.map(u128::from));
     put(&mut bits, FRAGMENT, h.fragment.map(fragment_code));
-    put(&mut bits, VLAN, h.vlan.map(u128::from));
-    put(&mut bits, L2_PRIORITY, h.l2_priority.map(u128::from));
-    // The tag is free only when the request states neither field of it.
-    let tag = match (h.vlan, h.l2_priority) {
-        (FieldValue::Unstated, FieldValue::Unstated) => None,
-        (FieldValue::Absent, _) | (_, FieldValue::Absent) => Some(false),
-        _ => Some(true),
+    let (outer, inner) = h.tag_presence();
+    // A TPID that the header does not state is 0x8100. With an outer tag
+    // that the header does not state, the set gives the TPID of a present
+    // tag.
+    let tpid = |v: FieldValue<u16>, present: Option<bool>| match (v, present) {
+        (FieldValue::Unstated, Some(true)) => FieldValue::Known(u128::from(TPID_8021Q)),
+        _ => v.map(u128::from),
     };
-    bits[P_VLAN as usize] = tag;
-    if tag == Some(false) {
-        for f in [VLAN, L2_PRIORITY] {
-            put(&mut bits, f, FieldValue::Absent);
+    let outer_values = [
+        h.vlan.map(u128::from),
+        h.l2_priority.map(u128::from),
+        tpid(h.vlan_tpid, outer),
+    ];
+    let inner_values = [
+        h.inner_vlan.map(u128::from),
+        h.inner_l2_priority.map(u128::from),
+        tpid(h.inner_vlan_tpid, inner),
+    ];
+    for (tag, values, present) in [
+        (OUTER_TAG, outer_values, outer),
+        (INNER_TAG, inner_values, inner),
+    ] {
+        for (f, v) in tag.into_iter().zip(values) {
+            put(
+                &mut bits,
+                f,
+                if present == Some(false) {
+                    FieldValue::Absent
+                } else {
+                    v
+                },
+            );
+        }
+        if let Some(p) = tag[0].presence {
+            bits[p as usize] = present;
         }
     }
     put(&mut bits, DST_MAC, h.dst_mac.map(mac_bits));
@@ -401,6 +488,10 @@ pub(crate) fn decode(bit: &dyn Fn(u32) -> bool) -> Header {
         dst_mac: state(DST_MAC, bit).map(bits_mac),
         vlan: n16(VLAN),
         l2_priority: n8(L2_PRIORITY),
+        vlan_tpid: n16(VLAN_TPID),
+        inner_vlan: n16(INNER_VLAN),
+        inner_l2_priority: n8(INNER_L2_PRIORITY),
+        inner_vlan_tpid: n16(INNER_VLAN_TPID),
         src_ip: state(SRC_IP, bit).map(|x| bits_ip(v6, x)),
         dst_ip: state(DST_IP, bit).map(|x| bits_ip(v6, x)),
         protocol: n8(PROTOCOL),
@@ -429,7 +520,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_table_has_764_bits_in_order() {
+    fn the_table_has_814_bits_each_used_once() {
         let fields = [
             PROTOCOL,
             DST_IP,
@@ -443,7 +534,11 @@ mod tests {
             ECN,
             FRAGMENT,
             VLAN,
+            INNER_VLAN,
             L2_PRIORITY,
+            INNER_L2_PRIORITY,
+            VLAN_TPID,
+            INNER_VLAN_TPID,
             DST_MAC,
             SRC_MAC,
             MPLS_TC,
@@ -453,12 +548,19 @@ mod tests {
             ENCAP_VNI,
             ENCAP_LABEL,
         ];
-        let mut next = AF + 1;
+        let mut used: Vec<u32> = (0..=U_INNER_L2_PRIORITY).collect();
         for f in fields {
-            assert_eq!(f.start, next);
-            next += f.width;
+            used.extend(f.value_bits());
         }
-        assert_eq!(next, BITS);
+        used.sort_unstable();
+        assert_eq!(used, (0..BITS).collect::<Vec<_>>());
+        // Each value bit of the outer tag has the bit of the inner tag next
+        // to it.
+        for (f, g) in OUTER_TAG.iter().zip(INNER_TAG) {
+            for (a, b) in f.value_bits().zip(g.value_bits()) {
+                assert_eq!(a + 1, b);
+            }
+        }
     }
 
     #[test]
@@ -473,11 +575,9 @@ mod tests {
         .with_tcp_flags(0x02)
         .with_dscp(46)
         .with_ecn(1);
-        let mut h = h;
+        let mut h = h.untagged();
         h.src_mac = FieldValue::Known(Mac([1, 2, 3, 4, 5, 6]));
         h.dst_mac = FieldValue::Known(Mac([0xa, 0xb, 0xc, 0xd, 0xe, 0xf]));
-        h.vlan = FieldValue::Absent;
-        h.l2_priority = FieldValue::Absent;
         let bits = encode(&h);
         assert!(bits.iter().all(Option::is_some));
         let back = decode(&|b| bits[b as usize] == Some(true));
