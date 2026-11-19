@@ -72,6 +72,8 @@ export const SIZE = {
   buttonPad: 8,
   input: 22,
   inputRadius: 2,
+  inputPad: 6,
+  fieldMin: 64,
   buttonGap: 4,
   factGap: 22,
   lane: 52,

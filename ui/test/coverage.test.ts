@@ -56,6 +56,11 @@ describe("views in the URL", () => {
     expect(viewSearch("Trace", "t1")).toBe("?twin=t1");
   });
 
+  it("keeps the query of the shown answer only for the Trace view", () => {
+    expect(viewSearch("Trace", "t1", "?view=tables&twin=t1", "qabc")).toBe("?twin=t1&q=qabc");
+    expect(viewSearch("Tables", "t1", "", "qabc")).toBe("?view=tables&twin=t1");
+  });
+
   it("drops the query, the page and the opened device for another twin", () => {
     expect(withTwin("?view=tables&twin=a&table=fib&f.device=r1&at=o200", "b")).toBe("?view=tables&twin=b&table=fib&f.device=r1");
     expect(withTwin("?view=coverage&twin=a&device=r1", "b")).toBe("?view=coverage&twin=b");

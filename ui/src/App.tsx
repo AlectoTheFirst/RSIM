@@ -405,7 +405,7 @@ export function App() {
           else navigate(withTwin(search, t));
         }}
         view={view}
-        onView={(v) => navigate(viewSearch(v, twin, search))}
+        onView={(v) => navigate(viewSearch(v, twin, search, result?.qid ?? null))}
         prefs={prefs}
         onPrefs={setPrefs}
       />
