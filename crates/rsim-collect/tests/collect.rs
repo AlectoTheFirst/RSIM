@@ -476,6 +476,20 @@ async fn a_change_of_each_class_is_reported_with_its_class() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_device_that_the_collector_does_not_reach_records_no_address() {
+    let mut e = env(vec![vyos("r1"), vyos("r2")], Limits::default());
+    e.t.clear("r1");
+    let r = e.c.run_cycle().await.unwrap();
+    assert_eq!(r.failed, vec!["r1".to_string()]);
+    let s = latest(&e);
+    assert_eq!(s.devices["r1"].management_address, None);
+    assert_eq!(
+        s.devices["r2"].management_address.as_deref(),
+        Some("192.0.2.1")
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_failed_device_keeps_its_data_and_backs_off() {
     let mut e = env(vec![vyos("r1"), vyos("r2")], Limits::default());
     e.c.run_cycle().await.unwrap();

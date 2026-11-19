@@ -530,13 +530,23 @@ fn store_stage(
                 (t.clone(), parts)
             })
             .collect();
+        // A device that the collector did not reach keeps the address of
+        // its previous manifest.
+        let management_address = if c.failed {
+            cycle
+                .base()
+                .and_then(|s| s.devices.get(&c.device.id))
+                .and_then(|m| m.management_address.clone())
+        } else {
+            Some(c.device.address.clone())
+        };
         cycle.add(DeviceUpdate {
             device: c.device.id.clone(),
             vendor: c.device.vendor.name().to_string(),
             collected_at: c.collected_at,
             sections: c.sections,
             tables,
-            management_address: Some(c.device.address.clone()),
+            management_address,
         })?;
         results.push(DeviceResult {
             device: c.device,

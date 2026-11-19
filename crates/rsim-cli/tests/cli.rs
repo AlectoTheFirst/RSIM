@@ -862,6 +862,8 @@ fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
     assert_eq!(*sw1["vendor"], "unifi");
     assert_eq!(*sw1["serial"], "FAKESW0001");
     assert_eq!(*sw1["management_address"], "198.51.100.11");
+    // The 4 facts of a UniFi record share the row span of the record.
+    assert_eq!(sw1["provenance"].as_array().unwrap().len(), 1, "{sw1:?}");
     assert_eq!(*by_device["ap1"]["serial"], Value::Null);
     assert_eq!(*by_device["ap1"]["serial_reason"], "not_read");
     assert_eq!(*by_device["gw1"]["platform_reason"], "not_read");

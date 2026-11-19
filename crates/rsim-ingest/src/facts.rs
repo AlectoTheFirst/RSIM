@@ -108,9 +108,10 @@ pub struct DeviceFacts {
 }
 
 impl DeviceFacts {
-    /// The spans of the known facts, in column order.
+    /// The spans of the known facts in column order, each span once.
     pub fn spans(&self) -> Vec<&SourceSpan> {
-        [
+        let mut out: Vec<&SourceSpan> = Vec::new();
+        for s in [
             &self.platform,
             &self.os_version,
             &self.serial,
@@ -118,7 +119,12 @@ impl DeviceFacts {
         ]
         .into_iter()
         .filter_map(Fact::span)
-        .collect()
+        {
+            if !out.contains(&s) {
+                out.push(s);
+            }
+        }
+        out
     }
 }
 
