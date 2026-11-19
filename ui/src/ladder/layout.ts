@@ -485,6 +485,12 @@ export function destinationOf(v: Verdict): string | null {
   return v.destination?.endpoint ?? v.destination?.device ?? null;
 }
 
+/** The short label of a note of an answer: its text before the first colon. */
+export function noteLabel(note: string): string {
+  const at = note.indexOf(":");
+  return at < 0 ? note : note.slice(0, at);
+}
+
 /** The notes of an answer: a path answer names the defaults that its unstated fields took. */
 export function answerNotes(out: { kind: string; notes?: string[] | null }): string[] {
   return out.kind === "set_answer" ? [] : (out.notes ?? []);

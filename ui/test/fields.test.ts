@@ -23,7 +23,19 @@ import {
   valueToken,
   valuesOf,
 } from "../src/page/fields";
-import { explainCommand, fieldsOf, mcpCall, requestBody, rsimCommand } from "../src/page/query";
+import {
+  defaultsOf,
+  echoOfFields,
+  explainCommand,
+  fieldsOf,
+  hasDefaults,
+  mcpCall,
+  requestBody,
+  rsimCommand,
+  toggleDefaults,
+  unstatedLabel,
+} from "../src/page/query";
+import { notStated } from "../src/ladder/layout";
 
 const openapi = JSON.parse(readFileSync(new URL("../../crates/rsim-api/openapi.json", import.meta.url), "utf8"));
 const schemas = openapi.components.schemas;
@@ -336,5 +348,46 @@ describe("unstated setting", () => {
 
   it("comes back from the echo of a path query", () => {
     expect(fieldsOf({ "source.ip": "172.31.10.20", unstated: "defaults" })).toEqual({ "source.ip": "172.31.10.20", unstated: "defaults" });
+  });
+});
+
+describe("unstated button", () => {
+  it("switches between all and defaults, and all leaves the request as it is", () => {
+    const base = { "source.ip": "172.31.10.20", "network.transport": "udp" };
+    const on = toggleDefaults(base);
+    expect(hasDefaults(base)).toBe(false);
+    expect(hasDefaults(on)).toBe(true);
+    expect(requestBody("path", on)).toEqual({ ...requestBody("path", base), unstated: "defaults" });
+    expect(rsimCommand("path", "builtin.mini-enterprise", on)).toBe(`${rsimCommand("path", "builtin.mini-enterprise", base)} --unstated defaults`);
+    const off = toggleDefaults(on);
+    expect(hasDefaults(off)).toBe(false);
+    expect(requestBody("path", off)).toEqual(requestBody("path", base));
+    expect(mcpCall("path", "builtin.mini-enterprise", off)).toBe(mcpCall("path", "builtin.mini-enterprise", base));
+  });
+
+  it("reads the count of the fields that are not stated with all, and defaults with defaults", () => {
+    expect(unstatedLabel(false, 10)).toBe("10 not stated");
+    expect(unstatedLabel(true, 10)).toBe("defaults");
+  });
+
+  it("names the defaults that apply, in the words of the note of the answer", () => {
+    const udp = { "source.ip": "172.31.10.20", "destination.ip": "10.20.0.53", "network.transport": "udp", "destination.port": "53" };
+    expect(defaultsOf(udp)).toEqual(["dscp 0", "ecn 0", "no VLAN", "source.port 49152-65535"]);
+    expect(defaultsOf({ ...udp, "source.port": "40000" })).toEqual(["dscp 0", "ecn 0", "no VLAN"]);
+    expect(defaultsOf({ ...udp, "network.transport": "tcp" })).toEqual(["dscp 0", "ecn 0", "no VLAN", "tcp syn", "source.port 49152-65535"]);
+    expect(defaultsOf({ ...udp, "network.transport": "tcp", tcp_flags: "ack", "source.port": "40000" })).toEqual(["dscp 0", "ecn 0", "no VLAN"]);
+    expect(defaultsOf({ "network.transport": "icmp" })).toEqual(["dscp 0", "ecn 0", "no VLAN", "icmp_type echo-request", "icmp_code 0"]);
+    expect(defaultsOf({ "network.iana_number": "58" })).toEqual(["dscp 0", "ecn 0", "no VLAN", "icmp_type echo-request", "icmp_code 0"]);
+    expect(defaultsOf({ "network.transport": "udp", dscp: "46", "network.vlan.id": "10", fragment: "later" })).toEqual(["ecn 0"]);
+  });
+
+  it("counts the fields of the bar that are not stated with no answer", () => {
+    const f = { "source.ip": "172.31.10.20", "network.transport": "udp", unstated: "defaults" };
+    const echo = echoOfFields(f);
+    expect(echo).not.toHaveProperty("unstated");
+    const n = notStated(echo);
+    expect(n).toContain("dscp");
+    expect(n).not.toContain("source.ip");
+    expect(n).not.toContain("network.transport");
   });
 });

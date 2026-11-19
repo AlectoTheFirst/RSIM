@@ -12,6 +12,7 @@ import {
   mostSpecific,
   notStated,
   answerNotes,
+  noteLabel,
   ribNotChecked,
   ribOfGroup,
   spanLabel,
@@ -263,5 +264,12 @@ describe("answer notes", () => {
     expect(answerNotes(a)).toEqual([]);
     expect(answerNotes({ ...a, notes: ["defaults: dscp 0, ecn 0, no VLAN"] })).toEqual(["defaults: dscp 0, ecn 0, no VLAN"]);
     expect(answerNotes({ kind: "set_answer", notes: ["x"] })).toEqual([]);
+  });
+});
+
+describe("note label", () => {
+  it("is the word before the colon, and the whole note goes in the title", () => {
+    expect(noteLabel("defaults: dscp 0, ecn 0, no VLAN, tcp syn, source.port 49152-65535")).toBe("defaults");
+    expect(noteLabel("no colon")).toBe("no colon");
   });
 });

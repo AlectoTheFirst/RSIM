@@ -18,6 +18,7 @@ import {
   ingressHint,
   ladder,
   noIngress,
+  noteLabel,
   notStated,
   partCounts,
   ribNotChecked,
@@ -28,7 +29,7 @@ import { HatchMark } from "./page/Hatch";
 import { keyForElement, keyPlace } from "./tables/model";
 import { KeyLine, LEVELS, QueryBar, ResultLine, TopBar } from "./page/Parts";
 import { viewOf, viewSearch, withTwin } from "./page/url";
-import { type Fields, type Mode, explainCommand, fieldsOf, mcpCall, requestBody, rsimCommand } from "./page/query";
+import { type Fields, type Mode, echoOfFields, explainCommand, fieldsOf, mcpCall, requestBody, rsimCommand, toggleDefaults } from "./page/query";
 import { QUERY_FIELDS, modeValue } from "./page/fields";
 import { TablesView } from "./tables/TablesView";
 import { type Prefs, applyTheme, loadPrefs, savePrefs } from "./theme";
@@ -120,7 +121,7 @@ function PathFacts(props: { a: Answer; notes: readonly string[]; onStep: (d: Dec
       })}
       {rib ? <HatchMark>{rib} route lookups, no RIB check</HatchMark> : null}
       {props.notes.map((n) => (
-        <HatchMark>{n}</HatchMark>
+        <HatchMark title={n}>{noteLabel(n)}</HatchMark>
       ))}
     </>
   );
@@ -458,9 +459,10 @@ export function App() {
         fields={fields}
         found={answer && !busy ? ingressHint(answer) : null}
         askIngress={askIngress}
-        notStated={echo && !setMode_ ? notStated(echo) : null}
+        notStated={mode === "set" ? null : notStated(echo && !setMode_ ? { ...echo, unstated: null } : echoOfFields(fields))}
         onMode={changeMode}
         onField={(k, v) => setFields({ ...fields, [k]: v })}
+        onDefaults={() => setFields(toggleDefaults(fields))}
         onRun={() => void run()}
         onCopyCommand={() => copy(rsimCommand(mode, twin, fields), "rsim command")}
         onCopyMcp={() => copy(mcpCall(mode, twin, fields), "MCP call")}

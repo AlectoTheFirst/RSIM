@@ -51,6 +51,52 @@ export function requestBody(mode: Mode, f: Fields): Record<string, unknown> {
   return body;
 }
 
+/** Whether the query of the bar has `unstated` `defaults`. */
+export function hasDefaults(f: Fields): boolean {
+  return (f.unstated ?? "").trim() === "defaults";
+}
+
+/** The label of the mark of the unstated fields: defaults, or the count of the fields that are not stated. */
+export function unstatedLabel(defaults: boolean, notStated: number): string {
+  return defaults ? "defaults" : `${notStated} not stated`;
+}
+
+/** The fields of the bar with `unstated` switched between all (no value) and defaults. */
+export function toggleDefaults(f: Fields): Fields {
+  return { ...f, unstated: hasDefaults(f) ? "" : "defaults" };
+}
+
+/**
+ * The defaults that a path query of the bar takes with `unstated`
+ * `defaults`, in the words and the order of the note of the answer. A
+ * default applies to an unstated field whose header the packet has.
+ */
+export function defaultsOf(f: Fields): string[] {
+  const v = (k: QueryField) => (f[k] ?? "").trim();
+  const t = v("network.transport").toLowerCase();
+  const n = v("network.iana_number");
+  const is = (name: string, num: string) => t === name || t === num || (t === "" && n === num);
+  const transport = v("fragment") !== "later";
+  const out: string[] = [];
+  if (!v("dscp")) out.push("dscp 0");
+  if (!v("ecn")) out.push("ecn 0");
+  if (!v("network.vlan.id")) out.push("no VLAN");
+  if (transport && is("tcp", "6") && !v("tcp_flags")) out.push("tcp syn");
+  if (transport && (is("icmp", "1") || is("icmpv6", "58"))) {
+    if (!v("icmp_type")) out.push("icmp_type echo-request");
+    if (!v("icmp_code")) out.push("icmp_code 0");
+  }
+  if (transport && (is("tcp", "6") || is("udp", "17")) && !v("source.port")) out.push("source.port 49152-65535");
+  return out;
+}
+
+/** The query echo of the fields of the bar: each field with its value or null, with no `unstated`. */
+export function echoOfFields(f: Fields): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of QUERY_FIELDS) if (k !== "unstated") out[k] = (f[k] ?? "").trim() || null;
+  return out;
+}
+
 /** The topology argument of the CLI and of the MCP tools for a twin. */
 export function topologyOf(twin: string): string {
   return twin.startsWith("builtin.") ? twin.slice("builtin.".length) : "store";
