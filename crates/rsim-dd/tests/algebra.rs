@@ -365,3 +365,37 @@ fn an_import_needs_the_same_number_of_levels() {
     let mut b = Dd::new(5);
     assert!(matches!(b.import(&a, e), Err(DdError::InvariantBroken(_))));
 }
+
+#[test]
+fn a_swap_of_2_far_blocks_makes_few_nodes() {
+    // 2 blocks of 128 bits with 4 levels each, 1024 levels apart. The swap
+    // moves level 0 of each bit of one block to level 1 of the same bit of
+    // the other block, and level 1 to level 0.
+    const BITS: u32 = 128;
+    let (a, b) = (100, 100 + 2 * 4 * BITS);
+    let lvl = |block: u32, i: u32, bank: u32| block + 4 * i + bank;
+    let value = |i: u32, bank: u32| (i * 7 + bank * 3) % 5 < 2;
+    let mut dd = Dd::new(b + 4 * BITS);
+    let mut lits = Vec::new();
+    let mut want = Vec::new();
+    let mut pairs = Vec::new();
+    for i in 0..BITS {
+        for bank in 0..2 {
+            let (x, y) = (lvl(a, i, bank), lvl(b, i, 1 - bank));
+            lits.push((x, value(i, bank)));
+            lits.push((y, !value(i + 1, bank)));
+            want.push((y, value(i, bank)));
+            want.push((x, !value(i + 1, bank)));
+            pairs.extend([(x, y), (y, x)]);
+        }
+    }
+    let f = dd.literals(&lits).unwrap();
+    let want = dd.literals(&want).unwrap();
+    let m = dd.map(&pairs).unwrap();
+    let before = dd.local_nodes();
+    let r = dd.rename(f, m).unwrap();
+    assert_eq!(r, want);
+    let made = dd.local_nodes() - before;
+    assert!(made <= 4 * 4 * BITS as usize, "the swap made {made} nodes");
+    dd.validate().unwrap();
+}
