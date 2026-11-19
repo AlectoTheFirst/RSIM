@@ -11,7 +11,6 @@ import {
   BASE_FIELDS,
   checkValue,
   fieldsOfMode,
-  exampleOf,
   filterValues,
   firstError,
   formOf,
@@ -157,7 +156,6 @@ const PICKED = new Set<QueryField>(["source.ip", "destination.ip"]);
 const inputId = (k: QueryField) => `q-${k.replace(/\./g, "-")}`;
 
 /** The id of the help line of the query bar. */
-const HELP_ID = "query-help";
 
 /** True for an element whose focus keeps the query bar in its edit state. */
 const edits = (el: EventTarget | null) => el instanceof HTMLElement && el.dataset["edit"] !== undefined;
@@ -177,9 +175,10 @@ function QueryValue(props: {
   value: string;
   found?: string | null;
   invalid: boolean;
+  /** The title of the field: the message of a wrong value, else its form. */
+  hint: string;
   onInput: (v: string) => void;
   onRun: () => void;
-  onFocus: () => void;
   onBlur: () => void;
   inputRef?: { current: HTMLInputElement | null };
 }) {
@@ -220,7 +219,7 @@ function QueryValue(props: {
   const stage = entry ? ingressStage(props.value) : null;
   const classes = ["autosize", "t-query", props.value ? "" : "empty", props.invalid ? "invalid" : ""].filter(Boolean).join(" ");
   return (
-    <label class="qfield">
+    <label class="qfield" title={props.hint}>
       <span class="muted">{props.name} </span>
       <span class={classes} data-value={props.value}>
         <input
@@ -233,7 +232,6 @@ function QueryValue(props: {
           spellcheck={false}
           autocomplete="off"
           aria-invalid={props.invalid || undefined}
-          aria-describedby={HELP_ID}
           role={picks ? "combobox" : undefined}
           aria-autocomplete={picks ? "list" : undefined}
           aria-expanded={picks ? open : undefined}
@@ -247,7 +245,6 @@ function QueryValue(props: {
             }
           }}
           onFocus={() => {
-            props.onFocus();
             if (names.length || entry) setState({ open: true, active: -1 });
           }}
           onClick={() => {
@@ -298,8 +295,6 @@ function AddField(props: {
   mode: Mode;
   fields: readonly QueryField[];
   onAdd: (k: QueryField) => void;
-  onFocus: () => void;
-  onBlur: () => void;
 }) {
   const [state, setState] = useState<PickerState>(PICKER_CLOSED);
   const open = state.open && props.fields.length > 0;
@@ -330,13 +325,8 @@ function AddField(props: {
         aria-expanded={open}
         aria-controls={open ? id : undefined}
         aria-activedescendant={open && state.active >= 0 ? `${id}-${state.active}` : undefined}
-        aria-describedby={HELP_ID}
         onClick={() => setState((s) => (s.open ? PICKER_CLOSED : { open: true, active: -1 }))}
-        onFocus={props.onFocus}
-        onBlur={() => {
-          setState(PICKER_CLOSED);
-          props.onBlur();
-        }}
+        onBlur={() => setState(PICKER_CLOSED)}
         onKeyDown={(e) => {
           const r = pickerKey(state, e.key, props.fields.length);
           if (!r.handled) return;
@@ -358,50 +348,6 @@ function AddField(props: {
         />
       ) : null}
     </span>
-  );
-}
-
-/** The separator of the parts of the help line. */
-const SEP = " · ";
-
-/**
- * The help line of the query bar, in short parts. For the field that has
- * the focus: its name, the message of a value with a wrong form, the form
- * of a value in the mode and an example. With no field in focus: the name
- * and the message of the first shown field whose value has a wrong form.
- */
-function HelpLine(props: { mode: Mode; focus: QueryField | "add" | null; error: { field: QueryField; message: string } | null }) {
-  const { mode, focus, error } = props;
-  if (focus === "add") {
-    return (
-      <div class="qhelp" id={HELP_ID}>
-        <span class="muted">Add field</span>
-        {SEP}
-        {notStatedNote(mode)}
-      </div>
-    );
-  }
-  const k = focus ?? error?.field ?? null;
-  if (!k) return <div class="qhelp" id={HELP_ID} hidden />;
-  const message = error && error.field === k ? error.message : null;
-  return (
-    <div class="qhelp" id={HELP_ID}>
-      <span class="muted">{k}</span>
-      {message ? (
-        <>
-          {SEP}
-          <span class="c-drop">{message}</span>
-        </>
-      ) : null}
-      {focus ? (
-        <>
-          {SEP}
-          {formOf(mode, k)}
-          {SEP}
-          <span class="t-query">{exampleOf(mode, k)}</span>
-        </>
-      ) : null}
-    </div>
   );
 }
 
@@ -448,7 +394,6 @@ export function QueryBar(props: {
 }) {
   const [editing, setEditing] = useState(false);
   const [added, setAdded] = useState<ReadonlySet<QueryField>>(new Set());
-  const [focus, setFocus] = useState<QueryField | "add" | null>(null);
   const [checked, setChecked] = useState<ReadonlySet<QueryField>>(new Set());
   const [focusNext, setFocusNext] = useState<QueryField | null>(null);
   useAsk(props.askIngress, () => {
@@ -471,18 +416,9 @@ export function QueryBar(props: {
   const shown = ofMode.filter((k) => value(k) !== "" || added.has(k) || (BASE_FIELDS.has(k) && (editing || none)));
   const hidden = ofMode.filter((k) => !shown.includes(k));
   const errorOf = (k: QueryField) => (checked.has(k) ? checkValue(props.mode, k, value(k)) : null);
-  const focused = focus && focus !== "add" ? focus : null;
-  let shownError: { field: QueryField; message: string } | null = null;
-  for (const k of focused ? [focused] : shown) {
-    const message = errorOf(k);
-    if (message) {
-      shownError = { field: k, message };
-      break;
-    }
-  }
   const mark = (k: QueryField) => setChecked((c) => (c.has(k) ? c : new Set(c).add(k)));
   // A value with a wrong form stops the run: its field gets the focus and
-  // the help line gives the message.
+  // its title gives the message.
   const run = () => {
     const bad = firstError(props.mode, props.fields);
     if (bad) {
@@ -505,7 +441,6 @@ export function QueryBar(props: {
         const next = e.relatedTarget as Node | null;
         if (!next || !e.currentTarget.contains(next) || !edits(next)) {
           setEditing(false);
-          setFocus(null);
         }
       }}
     >
@@ -519,9 +454,9 @@ export function QueryBar(props: {
           value={value(k)}
           found={k === "ingress" ? props.found : null}
           invalid={errorOf(k) !== null}
+          hint={errorOf(k) ?? `${k} · ${formOf(props.mode, k)}`}
           onInput={(v) => props.onField(k, v)}
           onRun={run}
-          onFocus={() => setFocus(k)}
           onBlur={() => {
             if (value(k).trim() !== "") mark(k);
           }}
@@ -536,8 +471,6 @@ export function QueryBar(props: {
             setAdded((a) => new Set(a).add(k));
             setFocusNext(k);
           }}
-          onFocus={() => setFocus("add")}
-          onBlur={() => setFocus((f) => (f === "add" ? null : f))}
         />
       ) : null}
       {props.mode === "set" ? (
@@ -554,7 +487,6 @@ export function QueryBar(props: {
           Copy as MCP call
         </button>
       </span>
-      <HelpLine mode={props.mode} focus={focus} error={shownError} />
     </form>
   );
 }
