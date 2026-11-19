@@ -381,6 +381,8 @@ export function QueryBar(props: {
   found: string | null;
   /** A count that shows the ingress field and opens its list each time it changes while the bar shows. */
   askIngress: number;
+  /** Whether an answer shows. */
+  answered: boolean;
   /** The fields that the query of the answer does not state, or null. */
   notStated: readonly string[] | null;
   onMode: (m: Mode) => void;
@@ -473,11 +475,12 @@ export function QueryBar(props: {
           }}
         />
       ) : null}
+      {/* The mark of the fields not stated shows beside an answer, or while defaults is set. */}
       {props.mode === "set" ? (
-        <span class="muted">{notStatedNote("set")}</span>
-      ) : (
+        props.answered ? <span class="muted">{notStatedNote("set")}</span> : null
+      ) : props.answered || hasDefaults(props.fields) ? (
         <UnstatedButton fields={props.fields} notStated={props.notStated ?? []} onToggle={props.onDefaults} />
-      )}
+      ) : null}
       <span class="grow" />
       <span class="group end">
         <button type="button" onClick={props.onCopyCommand}>

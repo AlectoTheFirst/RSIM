@@ -459,6 +459,7 @@ export function App() {
         fields={fields}
         found={answer && !busy ? ingressHint(answer) : null}
         askIngress={askIngress}
+        answered={result !== null}
         notStated={mode === "set" ? null : notStated(echo && !setMode_ ? { ...echo, unstated: null } : echoOfFields(fields))}
         onMode={changeMode}
         onField={(k, v) => setFields({ ...fields, [k]: v })}
