@@ -177,7 +177,7 @@ function QueryValue(props: {
   return (
     <label class="qfield" title={FIELD_TITLES[props.name]}>
       <span class="muted">{props.name} </span>
-      <span class="autosize t-query" data-value={shown}>
+      <span class={props.value ? "autosize t-query" : "autosize t-query empty"} data-value={shown}>
         <input
           ref={props.inputRef}
           class="t-query"

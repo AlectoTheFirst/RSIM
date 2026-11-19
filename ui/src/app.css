@@ -273,7 +273,19 @@ select.twin {
 
 .autosize {
   display: inline-grid;
-  vertical-align: baseline;
+  align-items: center;
+  vertical-align: middle;
+  height: var(--input);
+  padding: 0 var(--input-pad);
+  background: var(--ground);
+  border: var(--hairline) solid var(--control);
+  border-radius: var(--input-radius);
+  cursor: text;
+}
+
+.autosize:focus-within {
+  outline: var(--focus-ring) solid var(--forward);
+  outline-offset: var(--focus-offset);
 }
 
 .autosize::after,
@@ -299,6 +311,19 @@ select.twin {
   border-radius: 0;
   background: transparent;
   color: var(--ink);
+}
+
+.autosize input:focus-visible {
+  outline: none;
+}
+
+/* An empty field: its placeholder in the label style. */
+.autosize.empty::after,
+.autosize input::placeholder {
+  font-family: var(--label-family);
+  font-size: var(--label-size);
+  font-weight: var(--label-weight);
+  font-stretch: var(--label-stretch);
 }
 
 .autosize input::placeholder {
