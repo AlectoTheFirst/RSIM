@@ -519,3 +519,56 @@ fn a_device_manifest_records_the_management_address_and_an_older_manifest_has_no
             .contains("management_address")
     );
 }
+
+fn snapshot_file(dir: &Path, cycle: u64) -> std::path::PathBuf {
+    dir.join("snapshots").join(format!("{cycle:020}"))
+}
+
+#[test]
+fn a_snapshot_whose_parent_is_not_older_is_an_integrity_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    commit(&store, 0, vec![update(&store, "r1", "a", None)]);
+    commit(&store, 1, vec![update(&store, "r1", "a1", None)]).unwrap();
+    commit(&store, 2, vec![update(&store, "r1", "a2", None)]).unwrap();
+    let set_parent = |cycle: u64, parent: u64| {
+        let path = snapshot_file(dir.path(), cycle);
+        let mut m: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        m["parent"] = parent.into();
+        fs::write(&path, serde_json::to_vec(&m).unwrap()).unwrap();
+    };
+    // A manifest that names itself as its parent.
+    set_parent(1, 1);
+    assert!(matches!(store.snapshot(1), Err(StoreError::Integrity(_))));
+    // Two manifests that name each other.
+    set_parent(1, 2);
+    assert!(matches!(store.snapshot(2), Err(StoreError::Integrity(_))));
+    assert!(matches!(store.latest(), Err(StoreError::Integrity(_))));
+}
+
+#[test]
+fn a_table_range_that_overflows_is_an_integrity_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    let s0 = commit(
+        &store,
+        0,
+        vec![update(&store, "r1", "a", Some(&[("eth0", 1000)]))],
+    )
+    .unwrap();
+    // A device manifest whose row range does not fit in a u64.
+    let mut d: serde_json::Value = serde_json::to_value(&s0.devices["r1"]).unwrap();
+    d["tables"]["link_speeds"]["first_row"] = u64::MAX.into();
+    let bytes = serde_json::to_vec(&d).unwrap();
+    let name = keys().hash(&bytes);
+    fs::write(dir.path().join("devices").join(name.to_string()), &bytes).unwrap();
+    let path = snapshot_file(dir.path(), 0);
+    let mut m: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    m["devices"]["r1"] = name.to_string().into();
+    fs::write(&path, serde_json::to_vec(&m).unwrap()).unwrap();
+    let s = store.snapshot(0).unwrap();
+    assert!(matches!(
+        store.read_table(&s, &LINK_SPEEDS),
+        Err(StoreError::Integrity(_))
+    ));
+}
