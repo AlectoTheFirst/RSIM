@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { ApiProblem, getTable } from "../api/client";
 import type { Column, SummarizeOut, TableDef, TableOut, UniqueOut } from "../api/types";
 import { HatchMark } from "../page/Hatch";
+import { endpointAddresses } from "../page/pick";
 import { KeyLine, ResultLine } from "../page/Parts";
 import { cliTopology } from "../page/query";
 import type { RowHeight } from "../theme";
@@ -105,8 +106,13 @@ function Detail(props: {
   cell: (j: number) => CellText;
   onRefer: (table: string, column: string, value: string) => void;
   onCopy: () => void;
+  /** The addresses of an endpoint row, which the Trace view can take as its source or destination. */
+  addresses?: string[];
+  onUse?: (field: "source.ip" | "destination.ip", address: string) => void;
 }) {
   const { columns, defs, row } = props;
+  const addresses = props.addresses ?? [];
+  const one = addresses.length === 1;
   const spans = columns.flatMap((_, j) => (defs[j]?.semantic === SPAN_SEMANTIC && Array.isArray(row[j]) ? (row[j] as string[]) : []));
   const refers = columns
     .map((c, j) => ({ c, d: defs[j], v: row[j] }))
@@ -163,6 +169,16 @@ function Detail(props: {
               Show {x.v as string} in {x.d!.refers_to![0]}
             </button>
           ))}
+          {props.onUse
+            ? addresses.flatMap((a) => [
+                <button type="button" onClick={() => props.onUse!("source.ip", a)}>
+                  {one ? "Use as source" : `Use ${a} as source`}
+                </button>,
+                <button type="button" onClick={() => props.onUse!("destination.ip", a)}>
+                  {one ? "Use as destination" : `Use ${a} as destination`}
+                </button>,
+              ])
+            : null}
           <button type="button" onClick={props.onCopy}>
             Copy the row as JSON
           </button>
@@ -178,6 +194,8 @@ export function TablesView(props: {
   catalog: TableDef[] | null;
   search: string;
   navigate: (search: string) => void;
+  /** Opens the Trace view with an address of an endpoint as a field of the query. */
+  onUseAddress?: (field: "source.ip" | "destination.ip", address: string) => void;
 }) {
   const { twin, catalog, search, navigate } = props;
   const url = readState(search);
@@ -548,6 +566,8 @@ export function TablesView(props: {
                       defs={grid.defs}
                       row={grid.rows[i]!}
                       cell={(j) => cellOf(i, j)}
+                      addresses={st.table === "endpoints" ? endpointAddresses(grid.columns, grid.rows[i]!) : []}
+                      onUse={props.onUseAddress}
                       onRefer={(table, column, value) =>
                         go({ table, verb: "show", filters: [{ column, op: "=", value }], sort: [], by: [] })
                       }

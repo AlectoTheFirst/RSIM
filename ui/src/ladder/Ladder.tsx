@@ -8,8 +8,10 @@ import { SIZE } from "../theme";
 import { LaneNames, Lanes, laneX } from "./Lanes";
 import {
   type Cell,
+  type DecidingStep,
   delayShown,
   destinationOf,
+  functionLabel,
   type Ladder as LadderModel,
   type Rib,
   outcomeKnown,
@@ -64,9 +66,20 @@ function ShownValue(props: { s: Shown }) {
   return props.s.known ? v : <HatchMark>{v}</HatchMark>;
 }
 
-export function VerdictText(props: { v: Verdict; headline?: boolean }) {
-  const { v } = props;
+/**
+ * A verdict: its outcome word, its destination and its reason. With the
+ * deciding step, the reason follows the device and the function of that
+ * step, which a click selects and opens.
+ */
+export function VerdictText(props: {
+  v: Verdict;
+  headline?: boolean;
+  at?: DecidingStep | null;
+  onStep?: (d: DecidingStep) => void;
+}) {
+  const { v, at } = props;
   const dest = destinationOf(v);
+  const reason = at ? at.reason : v.reason?.detail;
   return (
     <>
       <OutcomeWord kind={v.kind} headline={props.headline} />
@@ -76,7 +89,16 @@ export function VerdictText(props: { v: Verdict; headline?: boolean }) {
           <span class="t-value">{dest}</span>
         </>
       ) : null}
-      {v.reason ? <span class="muted"> {v.reason.detail}</span> : null}
+      {at ? (
+        <>
+          {" at "}
+          <button type="button" class="link t-value" title="Select and open this step" onClick={() => props.onStep?.(at)}>
+            {at.step.device ? `${at.step.device} ${functionLabel(at.step)}` : at.step.function}
+          </button>
+          {reason ? ":" : ""}
+        </>
+      ) : null}
+      {reason ? <span class="muted"> {reason}</span> : null}
     </>
   );
 }
@@ -125,7 +147,7 @@ export function SectionLine(props: { row: SectionRow; lanes: number; h: number }
       <span class="lanes">
         <Lanes lanes={lanes} h={h} marks={null} />
       </span>
-      <span class={`title c-${row.dir}`}>
+      <span class={row.muted ? "title t-body muted" : `title c-${row.dir}`}>
         {row.text}
         {row.verdict ? (
           <span class="t-body">
