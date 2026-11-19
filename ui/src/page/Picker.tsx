@@ -1,11 +1,16 @@
 // The list of the endpoint picker under an address field of the query bar.
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { tableRows } from "../api/client";
 import {
   type EndpointRow,
+  type EntryOption,
   PICKER_MAX,
   type Suggestion,
+  deviceOptions,
   endpointRows,
+  ingressRequests,
+  ingressStage,
+  interfaceOptions,
   matchEndpoints,
   pickerQuery,
   placesByHost,
@@ -72,6 +77,50 @@ export function useEndpoints(twin: string, value: string, active: boolean): Sugg
   return list;
 }
 
+/**
+ * Calls `onAsk` each time `count` changes. The count at the mount is not a
+ * new request, so a view that mounts again with the same count calls nothing.
+ */
+export function useAsk(count: number, onAsk: () => void): void {
+  const asked = useRef(count);
+  useEffect(() => {
+    if (count === asked.current) return;
+    asked.current = count;
+    onAsk();
+  }, [count]);
+}
+
+/**
+ * The entry point list of the ingress field while `active`: the devices,
+ * or the entry interfaces of the device of the text, with `found` first in
+ * the device list. The rows of another twin or another stage do not show.
+ */
+export function useEntryPoints(twin: string, value: string, active: boolean, found: string | null): EntryOption[] {
+  const stage = ingressStage(value);
+  const key = `${twin} ${stage.stage === "device" ? "device" : `interface ${stage.device}`}`;
+  const [rows, setRows] = useState<{ key: string; records: Record<string, unknown>[] }>({ key: "", records: [] });
+  useEffect(() => {
+    if (!active || !twin) return;
+    let live = true;
+    const reqs = ingressRequests(ingressStage(value));
+    const timer = setTimeout(() => {
+      Promise.all(reqs.map((r) => tableRows(twin, r.table, r.params)))
+        .then((ts) => {
+          if (live) setRows({ key, records: ts.flatMap(recordsOf) });
+        })
+        .catch(() => {
+          if (live) setRows({ key, records: [] });
+        });
+    }, PICKER_WAIT_MS);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [twin, value, active]);
+  const records = rows.key === key ? rows.records : [];
+  return stage.stage === "device" ? deviceOptions(records, found, value) : interfaceOptions(records, value);
+}
+
 export function PickerList(props: {
   id: string;
   list: Suggestion[];
@@ -95,6 +144,38 @@ export function PickerList(props: {
           <span class="t-value">{s.name}</span>
           <span class="t-value">{s.address}</span>
           <span class="t-value muted">{s.places.join(", ")}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A list of names under a control of the query bar, in the look of the endpoint picker. */
+export function NameList(props: {
+  id: string;
+  label: string;
+  names: readonly string[];
+  /** The text after each name, or none. */
+  detail?: (name: string) => string;
+  active: number;
+  onChoose: (name: string) => void;
+}) {
+  return (
+    <div class={props.detail ? "picker two" : "picker one"} id={props.id} role="listbox" aria-label={props.label}>
+      {props.names.map((n, i) => (
+        <div
+          id={`${props.id}-${i}`}
+          class="option"
+          role="option"
+          aria-selected={i === props.active}
+          // A press keeps the focus where it is, so that the query bar stays open.
+          onMouseDown={(e) => {
+            e.preventDefault();
+            props.onChoose(n);
+          }}
+        >
+          <span class="t-value">{n}</span>
+          {props.detail ? <span class="muted">{props.detail(n)}</span> : null}
         </div>
       ))}
     </div>

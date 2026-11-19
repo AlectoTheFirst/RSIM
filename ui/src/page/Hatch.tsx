@@ -33,11 +33,11 @@ export function Hatch(props: { w: number; h: number; title?: string }) {
   );
 }
 
-/** A hatch mark in a line of text: a hatch square and its text. */
-export function HatchMark(props: { children: preact.ComponentChildren }) {
+/** A hatch mark in a line of text: a hatch square and its text, with an optional `title`. */
+export function HatchMark(props: { children: preact.ComponentChildren; title?: string }) {
   const s = SIZE.hatchMark - 2 * SIZE.hairline;
   return (
-    <span class="mark">
+    <span class="mark" title={props.title}>
       <Hatch w={s} h={s} />
       <span>{props.children}</span>
     </span>

@@ -69,7 +69,7 @@ describe("delay and rate", () => {
         { kind: "link", function: "r1/out" },
       ],
     });
-    expect(d).toEqual({ known: false, text: "at least 1200 ns: 1 functions and 1 links have no delay data" });
+    expect(d).toEqual({ known: false, text: "at least 1200 ns · no data: 1 functions, 1 links" });
   });
 
   it("shows a rate condition with no rate as not known", () => {
