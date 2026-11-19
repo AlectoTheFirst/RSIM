@@ -1,0 +1,225 @@
+/* The styles of the Inventory page: the device table with its group rows,
+   the opened device row, the band of the devices that the twin sees, and
+   the tables Credentials and Routes. Each colour, font and size is a custom
+   property of the theme. */
+
+.inv-page .t-value,
+.inv-page input.t-value {
+  font-stretch: var(--value-stretch);
+}
+
+.inv {
+  width: max-content;
+  min-width: 100%;
+  padding-bottom: var(--margin);
+}
+
+.inv-row {
+  display: grid;
+  grid-template-columns:
+    var(--inv-mark) var(--inv-device) var(--inv-address) var(--inv-vendor) var(--inv-site)
+    minmax(var(--inv-location), 1fr) var(--inv-credential) var(--inv-route) var(--inv-ssh)
+    var(--inv-trust) var(--inv-cycle) var(--inv-serial);
+  min-height: var(--row);
+  align-items: center;
+}
+
+.inv-row > * {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inv-head {
+  color: var(--ink-muted);
+  font-size: var(--label-size);
+  padding-bottom: var(--button-gap);
+}
+
+.inv-group {
+  border-top: var(--hairline) solid var(--rule);
+  background: var(--raise);
+  font-weight: var(--headline-weight);
+}
+
+.inv-group .muted {
+  font-weight: var(--body-weight);
+}
+
+.inv-group .span2 {
+  grid-column: 2 / 4;
+}
+
+.inv-device {
+  cursor: pointer;
+}
+
+.inv-device:hover,
+.inv-device.opened,
+.inv-detail {
+  background: var(--raise);
+}
+
+.inv-device.opened {
+  box-shadow: inset var(--selected-bar) 0 0 var(--forward);
+}
+
+.inv-device:focus-visible {
+  outline: var(--focus-ring) solid var(--forward);
+  outline-offset: calc(-1 * var(--focus-ring));
+}
+
+/* A setting that the device inherits from the group row above. */
+.inv .same {
+  position: relative;
+  overflow: visible;
+}
+
+.inv .same::before {
+  content: "";
+  position: absolute;
+  left: var(--button-gap);
+  top: calc(-1 * var(--cell-pad));
+  bottom: calc(-1 * var(--cell-pad));
+  width: var(--hairline);
+  background: var(--rule);
+}
+
+.inv .hc {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mark-gap);
+}
+
+.inv .hc > svg {
+  flex-shrink: 0;
+}
+
+.inv-detail {
+  display: grid;
+  grid-template-columns: var(--inv-mark) 1fr;
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.inv-detail > .cols {
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 4fr) minmax(0, 5fr);
+  gap: var(--inv-detail-gap);
+  padding: var(--button-pad) var(--margin) var(--inv-detail-bottom) 0;
+}
+
+.inv-detail .head {
+  color: var(--ink-muted);
+  margin-bottom: var(--button-gap);
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: var(--inv-kv-label) 1fr;
+  gap: var(--button-gap) var(--cell-pad);
+  align-items: center;
+}
+
+.inv input,
+.inv select,
+.inv-tables input,
+.inv-tables select {
+  height: var(--input);
+  padding: 0 var(--input-pad);
+  font: inherit;
+  max-width: 100%;
+}
+
+.inv input.param,
+.inv-tables input.param {
+  color: var(--parameter);
+}
+
+.inv input.site {
+  width: var(--inv-site-input);
+}
+
+.inv input.location {
+  width: var(--inv-location-input);
+}
+
+.inv .edit > input,
+.inv .edit > select,
+.inv-tables .edit > input,
+.inv-tables .edit > select {
+  width: calc(100% - var(--button-gap));
+}
+
+.inv .edit,
+.inv-tables .edit {
+  overflow: visible;
+}
+
+.inv-band-mark {
+  align-self: stretch;
+  position: relative;
+}
+
+.inv-band-mark > svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.inv-group .span-all {
+  grid-column: 2 / -1;
+}
+
+.inv-band .text {
+  grid-column: 5 / 11;
+}
+
+.inv-tables {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: var(--inv-columns-gap);
+}
+
+.inv-sec {
+  font-family: var(--section-family);
+  font-size: var(--section-size);
+  line-height: var(--section-line);
+  font-weight: var(--section-weight);
+  margin: var(--fact-gap) 0 var(--line-gap) 0;
+}
+
+.inv-sec .muted {
+  font-family: var(--body-family);
+  font-size: var(--body-size);
+  font-weight: var(--body-weight);
+}
+
+.inv-t {
+  display: grid;
+  min-height: var(--row);
+  align-items: center;
+}
+
+.inv-t > * {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: var(--result-pad);
+}
+
+.inv-t.inv-head {
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.inv-t.cred {
+  grid-template-columns: var(--cred-name) var(--cred-secret) 1fr;
+}
+
+.inv-t.route {
+  grid-template-columns: var(--route-name) 1fr var(--route-credential);
+}
+
+.inv-tables .group {
+  overflow: visible;
+}

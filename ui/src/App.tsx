@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { ApiProblem, type ServerTiming, type TwinRef, createQuery, getCatalog, getQuery, getSourceLines, getTwin, listTwins, stepUrl } from "./api/client";
 import type { Answer, PathAnswer, SetAnswer, Span, TableDef, Twin } from "./api/types";
 import { CoverageView } from "./coverage/CoverageView";
+import { InventoryView } from "./inventory/InventoryView";
 import { OutcomeWord, PathLadder, VerdictText } from "./ladder/Ladder";
 import { SetLadder } from "./ladder/SetLadder";
 import {
@@ -176,7 +177,7 @@ export function App() {
   const firstInput = useRef<HTMLInputElement | null>(null);
   // Whether the next ladder opens the deciding step of its answer.
   const autoOpen = useRef(false);
-  // The view of the URL: Trace with no view parameter, else Tables or Coverage.
+  // The view of the URL: Trace with no view parameter, else Tables, Coverage or Inventory.
   const [search, setSearch] = useState(window.location.search);
   const [catalog, setCatalog] = useState<TableDef[] | null>(null);
   const view = viewOf(search);
@@ -451,6 +452,8 @@ export function App() {
         <div class="grid-page">
           <CoverageView twin={twin} row={prefs.row} catalog={catalog} search={search} navigate={navigate} />
         </div>
+      ) : view === "Inventory" ? (
+        <InventoryView twin={twin} />
       ) : (
       <>
       <QueryBar

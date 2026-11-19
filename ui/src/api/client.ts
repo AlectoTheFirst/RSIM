@@ -1,4 +1,5 @@
 // The calls of the UI to the REST API of rsim-api, on the origin of the page.
+import type { Credential, Device, Group, Inventory, ResolvedDevice, Route, Vendors } from "../inventory/model";
 import type { PathAnswer, SetAnswer, SourceText, Span, TableOut, TablesOut, Twin } from "./types";
 
 /** A refused request: the problem object of RFC 9457. */
@@ -7,6 +8,8 @@ export class ApiProblem extends Error {
     readonly status: number,
     readonly code: string,
     readonly detail: string,
+    /** The title of the problem: a fixed text for each code. */
+    readonly title: string = detail,
   ) {
     super(detail);
   }
@@ -15,7 +18,8 @@ export class ApiProblem extends Error {
 async function problem(r: Response): Promise<ApiProblem> {
   try {
     const p = (await r.json()) as { code?: string; detail?: string; title?: string };
-    return new ApiProblem(r.status, p.code ?? "", p.detail ?? p.title ?? r.statusText);
+    const detail = p.detail ?? p.title ?? r.statusText;
+    return new ApiProblem(r.status, p.code ?? "", detail, p.title ?? detail);
   } catch {
     return new ApiProblem(r.status, "", r.statusText);
   }
@@ -149,4 +153,52 @@ export async function getUnhandled(twin: string, device: string, limit: number, 
 export async function tableRows(twin: string, table: string, params: Record<string, string>): Promise<TableOut> {
   const q = new URLSearchParams(params).toString();
   return getJson(`/v1/twins/${encodeURIComponent(twin)}/tables/${encodeURIComponent(table)}/rows?${q}`);
+}
+
+/** The whole inventory as stored. */
+export async function getInventory(): Promise<Inventory> {
+  return getJson("/v1/inventory");
+}
+
+/** The devices of the inventory with the settings of their groups resolved. */
+export async function getResolvedDevices(): Promise<ResolvedDevice[]> {
+  const body = await getJson<{ devices: ResolvedDevice[] }>("/v1/inventory/devices");
+  return body.devices;
+}
+
+/** The vendors that have a collector, with their transport. */
+export async function getVendors(): Promise<Vendors> {
+  return getJson("/v1/inventory/vendors");
+}
+
+/** Makes or replaces a record of the inventory; the answer is the inventory version. */
+async function put(path: string, body: unknown): Promise<number> {
+  const r = await fetch(path, {
+    method: "PUT",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw await problem(r);
+  return ((await r.json()) as { version: number }).version;
+}
+
+export const putDevice = (d: Device) => put(`/v1/inventory/devices/${encodeURIComponent(d.name)}`, d);
+export const putGroup = (g: Group) => put(`/v1/inventory/groups/${encodeURIComponent(g.name)}`, g);
+export const putCredential = (c: Credential) => put(`/v1/inventory/credentials/${encodeURIComponent(c.name)}`, c);
+export const putRoute = (r: Route) => put(`/v1/inventory/routes/${encodeURIComponent(r.name)}`, r);
+
+/** All rows of a table of a twin, page after page. */
+export async function allRows(twin: string, table: string): Promise<{ columns: string[]; rows: unknown[][] }> {
+  const rows: unknown[][] = [];
+  let columns: string[] = [];
+  let cursor: string | null = null;
+  do {
+    const params: Record<string, string> = { limit: "1000" };
+    if (cursor) params["cursor"] = cursor;
+    const page = await tableRows(twin, table, params);
+    columns = page.columns;
+    rows.push(...page.rows);
+    cursor = page.next_cursor ?? null;
+  } while (cursor);
+  return { columns, rows };
 }

@@ -22,9 +22,10 @@ pub use resolve::{
     ResolvedDevices, ResolvedSettings, resolve_device, resolve_settings,
 };
 pub use types::{
-    Action, AuditPage, AuditRecord, Bindings, CaptureBgp, Credential, CredentialSource, Device,
-    EdgeDeviceBinding, FabricPortBinding, Group, Ha, Inventory, JumpHost, NxosJson, Route,
-    Settings, SshAlgorithms, SshMode, TlsTrust, valid_device_name, valid_name,
+    Action, AuditPage, AuditRecord, Bindings, COLLECTOR_VENDORS, CaptureBgp, CollectorTransport,
+    Credential, CredentialSource, Device, EdgeDeviceBinding, FabricPortBinding, Group, Ha,
+    Inventory, JumpHost, NxosJson, Route, Settings, SshAlgorithms, SshMode, TlsTrust,
+    valid_device_name, valid_name,
 };
 
 /// The environment variable of the URL of the inventory database.

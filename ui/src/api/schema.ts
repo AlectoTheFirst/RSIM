@@ -319,6 +319,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/inventory/vendors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The vendors that have a collector, each with its transport. A group of another vendor is allowed; the collector skips its devices. */
+        get: operations["listVendors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/openapi.json": {
         parameters: {
             query?: never;
@@ -801,6 +818,11 @@ export interface components {
             /** Format: uint32 */
             rsim_json: number;
         };
+        /**
+         * @description The transport of a collector.
+         * @enum {string}
+         */
+        CollectorTransport: "ssh" | "https";
         /** @description One column of a table. */
         Column: {
             description: string;
@@ -1922,6 +1944,18 @@ export interface components {
         };
         /** @description How a path query treats a field that it does not state. */
         Unstated: "all" | "defaults";
+        /** @description A vendor that has a collector, with its transport. */
+        VendorOut: {
+            transport: components["schemas"]["CollectorTransport"];
+            vendor: string;
+        };
+        /**
+         * VendorsOut
+         * @description The vendors that have a collector, in name order.
+         */
+        VendorsOut: {
+            vendors: components["schemas"]["VendorOut"][];
+        };
         VerdictJson: {
             destination?: components["schemas"]["DestinationJson"] | null;
             /**
@@ -2791,6 +2825,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listVendors: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VendorsOut"];
                 };
             };
             /** @description A problem */

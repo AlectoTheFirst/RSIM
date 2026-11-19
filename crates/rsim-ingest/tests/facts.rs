@@ -27,6 +27,7 @@ fn one(name: &str, vendor: &str, address: Option<&str>, s: &Sections) -> DeviceF
     assert_eq!(n, name);
     assert_eq!(f.vendor, vendor);
     assert_eq!(f.collected_at, 1_700_000_000_000);
+    assert_eq!(f.store_device, name);
     f
 }
 
@@ -222,6 +223,7 @@ fn a_unifi_console_gives_the_facts_of_each_device_record_by_its_twin_device() {
     let sw = &all["sw1"];
     assert_eq!(sw.vendor, "unifi");
     assert_eq!(sw.collected_at, 7);
+    assert_eq!(sw.store_device, "site1");
     assert_eq!(sw.platform, known("USW-FAKE-8", row(1)));
     assert_eq!(sw.os_version, known("7.1.26.15869", row(1)));
     assert_eq!(sw.serial, known("FAKESW0001", row(1)));

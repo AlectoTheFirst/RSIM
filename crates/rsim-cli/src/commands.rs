@@ -32,6 +32,9 @@ pub struct Loaded {
     /// The facts of each device of a store twin, by twin device; empty for
     /// a built-in topology.
     pub facts: BTreeMap<String, rsim_ingest::facts::DeviceFacts>,
+    /// The LLDP and CDP records of a store twin that name a neighbour with
+    /// no device in the twin; empty for a built-in topology.
+    pub seen: Vec<rsim_ingest::links::SeenNeighbour>,
     /// The columns of the tables of the twin, built when a request first
     /// names a table.
     pub tables: crate::tables::TableCache,
@@ -71,6 +74,7 @@ pub fn load(topology: &str) -> Result<Loaded, QueryError> {
         coverage: BTreeMap::new(),
         bgp: BTreeMap::new(),
         facts: BTreeMap::new(),
+        seen: Vec::new(),
         tables: Default::default(),
         source: None,
     })
@@ -97,6 +101,7 @@ pub fn load_store(folder: &str) -> Result<Loaded, QueryError> {
     let coverage = estate.coverage.clone();
     let bgp = estate.bgp.clone();
     let facts = estate.facts.clone();
+    let seen = estate.seen.clone();
     let twin = estate.builder.build().map_err(|errors| {
         let text: Vec<String> = errors.iter().map(ToString::to_string).collect();
         err(format!("the twin does not build: {}", text.join("; ")))
@@ -107,6 +112,7 @@ pub fn load_store(folder: &str) -> Result<Loaded, QueryError> {
         coverage,
         bgp,
         facts,
+        seen,
         tables: Default::default(),
         source: Some(crate::sources::SourceStore::new(store, snap)),
     })

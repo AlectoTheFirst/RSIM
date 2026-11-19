@@ -33,6 +33,9 @@ pub struct Estate {
     /// The facts of each device of the snapshot, by twin device; empty for
     /// a twin of inputs with no snapshot.
     pub facts: BTreeMap<String, DeviceFacts>,
+    /// The LLDP and CDP records that name a neighbour with no device in the
+    /// twin.
+    pub seen: Vec<crate::links::SeenNeighbour>,
 }
 
 fn short(h: &Hash) -> String {
@@ -251,6 +254,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         notes: BTreeMap::new(),
         bgp: BTreeMap::new(),
         facts: BTreeMap::new(),
+        seen: Vec::new(),
     };
     let mut routers: BTreeMap<String, Router> = BTreeMap::new();
     #[allow(clippy::type_complexity)]
@@ -559,6 +563,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     // The BGP peers with their far ends; a peer outside the twin is a
     // router, not an endpoint.
     e.bgp = std::mem::take(&mut joined.bgp);
+    e.seen = std::mem::take(&mut joined.seen);
     next_hops.extend(joined.bgp_outside.iter().copied());
 
     let mut l2: BTreeMap<String, vyos::Layer2Links> = BTreeMap::new();

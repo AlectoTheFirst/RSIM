@@ -121,6 +121,24 @@ words! {
     }
 }
 
+words! {
+    /// The transport of a collector.
+    CollectorTransport {
+        Ssh = "ssh",
+        Https = "https",
+    }
+}
+
+/// The vendors that have a collector, each with its transport, in name
+/// order.
+pub const COLLECTOR_VENDORS: &[(&str, CollectorTransport)] = &[
+    ("iosxe", CollectorTransport::Ssh),
+    ("iosxr", CollectorTransport::Ssh),
+    ("nxos", CollectorTransport::Ssh),
+    ("unifi", CollectorTransport::Https),
+    ("vyos", CollectorTransport::Ssh),
+];
+
 /// A reference to a credential. The secret stays in its source.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

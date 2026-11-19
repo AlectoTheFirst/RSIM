@@ -30,7 +30,7 @@ export const VIEWS = ["Trace", "Tables", "Coverage", "Compare", "Inventory", "Ad
 export type View = (typeof VIEWS)[number];
 
 /** The views of this build. */
-export const BUILT: readonly View[] = ["Trace", "Tables", "Coverage"];
+export const BUILT: readonly View[] = ["Trace", "Tables", "Coverage", "Inventory"];
 
 /** The user of the page. The server has no sign-in on loopback. */
 const USER = { name: "Local user", initials: "LU", how: "no sign-in on a loopback address" };

@@ -436,7 +436,7 @@ fn page_parts(p: Page) -> (Vec<String>, Vec<Vec<Value>>, usize, Option<String>) 
 #[test]
 fn the_selection_on_columns_gives_the_answer_of_the_selection_on_json_rows() {
     let mut g = Gen(0x9e37_79b9_7f4a_7c15);
-    for name in ["fib", "bgp-sessions", "coverage", "devices"] {
+    for name in ["fib", "bgp-sessions", "coverage", "devices", "neighbours"] {
         let def = table::table(name).unwrap();
         for round in 0..62 {
             // The last rounds have tables of many chunks of a parallel scan.

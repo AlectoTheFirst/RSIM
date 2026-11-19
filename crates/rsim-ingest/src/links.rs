@@ -402,6 +402,38 @@ pub struct Joined {
     /// The peer addresses of the configured BGP neighbours whose peer is
     /// outside the twin.
     pub bgp_outside: BTreeSet<IpAddr>,
+    /// The LLDP and CDP records that name a neighbour that is no device of
+    /// the twin, by device and port.
+    pub seen: Vec<SeenNeighbour>,
+}
+
+/// An LLDP or CDP record of a port that names a neighbour with no device in
+/// the twin: no device has its name or its host name, and its MACs name no
+/// device.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SeenNeighbour {
+    /// The device of the record.
+    pub device: String,
+    /// The local port.
+    pub port: String,
+    /// The name of the neighbour.
+    pub name: String,
+    /// The port of the neighbour as it sends it.
+    pub remote_port: Option<String>,
+    /// `lldp` or `cdp`, the section of the record.
+    pub protocol: &'static str,
+    pub span: SourceSpan,
+}
+
+/// `lldp` or `cdp` for a span of a section of that name, `<device>/<section>@<blob>`.
+fn protocol(span: &SourceSpan) -> Option<&'static str> {
+    let (_, rest) = span.file.split_once('/')?;
+    let section = rest.split('@').next()?;
+    match section {
+        "lldp" => Some("lldp"),
+        "cdp" => Some("cdp"),
+        _ => None,
+    }
 }
 
 fn target(devices: &BTreeMap<String, Summary>, end: &End) -> Option<FunctionId> {
@@ -496,6 +528,9 @@ pub fn join(
                     .as_deref()
                     .and_then(|x| by_name.get(x))
                     .filter(|x| **x != d.as_str());
+                // True when a name, a port MAC or a chassis MAC names a
+                // device of the twin, with or without its port.
+                let mut identified = sw.is_some();
                 let end = match sw {
                     Some(other) => {
                         let o = &switches[*other];
@@ -527,11 +562,31 @@ pub fn join(
                             }
                         };
                         match by_port {
-                            Some((o, p)) => Some(End(o, p)),
-                            None => by_chassis().flatten(),
+                            Some((o, p)) => {
+                                identified = true;
+                                Some(End(o, p))
+                            }
+                            None => by_chassis().and_then(|e| {
+                                identified = true;
+                                e
+                            }),
                         }
                     }
                 };
+                if !identified
+                    && let (Some(name), Some(protocol)) = (n.name.as_deref(), protocol(&n.span))
+                    && !name_owners.contains_key(name)
+                    && !switches.contains_key(name)
+                {
+                    out.seen.push(SeenNeighbour {
+                        device: d.clone(),
+                        port: port.clone(),
+                        name: name.to_string(),
+                        remote_port: n.remote_port.clone(),
+                        protocol,
+                        span: n.span.clone(),
+                    });
+                }
                 far.insert(end);
             }
             out.notes.entry(d.clone()).or_default().extend(router_notes);

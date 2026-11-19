@@ -65,10 +65,41 @@ fn a_server_with_no_inventory_says_so() {
 }
 
 #[test]
+fn the_vendors_with_a_collector_need_no_database() {
+    let r = call(&state(), "GET", "/v1/inventory/vendors", None);
+    assert_eq!(r.status, 200);
+    let v = json(&r);
+    let words: Vec<(&str, &str)> = v["vendors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| {
+            (
+                x["vendor"].as_str().unwrap(),
+                x["transport"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        words,
+        [
+            ("iosxe", "ssh"),
+            ("iosxr", "ssh"),
+            ("nxos", "ssh"),
+            ("unifi", "https"),
+            ("vyos", "ssh"),
+        ]
+    );
+    let r = call(&state(), "PUT", "/v1/inventory/vendors", Some(json!({})));
+    assert_eq!(r.status, 405);
+}
+
+#[test]
 fn the_openapi_document_has_the_inventory_routes() {
     let doc = rsim_api::openapi::document();
     let paths = &doc["paths"];
     assert!(paths["/v1/inventory/devices"]["get"].is_object());
+    assert!(paths["/v1/inventory/vendors"]["get"].is_object());
     let put = &paths["/v1/inventory/devices/{device}"]["put"];
     assert_eq!(put["security"][0]["rsim"][0], "rsim.inventory.write");
     assert!(put["requestBody"].is_object());
