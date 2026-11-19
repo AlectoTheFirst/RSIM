@@ -1,6 +1,7 @@
 //! Each source span of each trace step lies inside the span index of its
 //! twin, so the source lines of a step are given: for the built-in
-//! topologies, and for the fixture store with each line served.
+//! topologies, and for the fixture store with each line served. A row span
+//! is not in the index and admits no line.
 
 use std::collections::BTreeSet;
 
@@ -101,14 +102,23 @@ fn each_step_span_of_the_fixture_store_is_served_whole() {
     assert!(files.iter().any(|f| f.starts_with("site1/")), "{files:?}");
     let index = SpanIndex::of(&twin.twin);
     let mut served = 0;
+    let mut rows = 0;
     for (file, a, b) in &spans {
+        if file.ends_with("#row") {
+            // A row span names the rows of a table and admits no line.
+            assert_eq!(index.covered(file, *a, *b), vec![], "{file}:{a}-{b}");
+            let e = sources::text(&twin, file, *a, *b).unwrap_err();
+            assert_eq!(e.code.as_str(), "no_source_text", "{file}:{a}-{b}");
+            rows += 1;
+            continue;
+        }
         assert_eq!(
             index.covered(file, *a, *b),
             vec![(*a, *b)],
             "{file}:{a}-{b}"
         );
         // The table sections of the fixture store hold no readable text.
-        if !file.contains("/config@") && !file.starts_with("site1/") {
+        if !file.contains("/config@") {
             continue;
         }
         let t = sources::text(&twin, file, *a, *b)
@@ -118,4 +128,47 @@ fn each_step_span_of_the_fixture_store_is_served_whole() {
         served += 1;
     }
     assert!(served > 0);
+    assert!(rows > 0);
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)]
+fn a_row_span_admits_no_line_of_its_section() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-cli-span-index-rows");
+    let _ = std::fs::remove_dir_all(&dir);
+    fixture_store::write(&dir);
+    let topology = format!("store:{}", dir.display());
+    let twin = commands::load(&topology).unwrap();
+    let index = SpanIndex::of(&twin.twin);
+    let mut rows: BTreeSet<(String, u32)> = BTreeSet::new();
+    for f in twin.functions() {
+        f.each_span(&mut |s| {
+            if s.is_row() {
+                rows.insert((s.file.to_string(), s.first_line));
+            }
+        });
+    }
+    assert!(
+        rows.iter().any(|(f, _)| f.starts_with("site1/devices@")),
+        "{rows:?}"
+    );
+    for (file, row) in &rows {
+        let section = file.strip_suffix("#row").unwrap();
+        assert_eq!(index.covered(file, *row, *row), vec![], "{file}:{row}");
+        assert_eq!(index.covered(section, *row, *row), vec![], "{file}:{row}");
+        // A table whose name is a section, such as the UniFi devices, is
+        // outside every span; another table is not a section.
+        let e = sources::text(&twin, section, *row, *row).unwrap_err();
+        let want = if file.starts_with("site1/") {
+            "not_a_source_span"
+        } else {
+            e.code.as_str()
+        };
+        assert!(
+            ["not_a_source_span", "no_source_text"].contains(&e.code.as_str()),
+            "{file}:{row}: {}",
+            e.detail
+        );
+        assert_eq!(e.code.as_str(), want, "{file}:{row}");
+    }
 }

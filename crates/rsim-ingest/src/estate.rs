@@ -612,7 +612,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                         ip: ip.clone(),
                         mac: Some(c.mac.clone()),
                         state: Some("CLIENT".into()),
-                        span: SourceSpan::line(
+                        span: SourceSpan::row(
                             &files.clients,
                             u32::try_from(c.index + 1).unwrap_or(u32::MAX),
                         ),

@@ -165,18 +165,12 @@ fn a_long_span_is_cut_with_a_note() {
 }
 
 #[test]
-fn a_span_beyond_the_section_or_out_of_order_is_refused() {
+fn a_span_out_of_order_is_refused() {
     let dir = fixture_dir("rsim-api-sources-range");
     let s = state(&dir);
     let id = twin(&s);
     let file = file_of(&dir, "r1", "config");
-    let n = fixture_lines("vyos/r1-config.json");
-    for lines in [
-        format!("{n}-{}", n + 1),
-        "0-3".into(),
-        "9-3".into(),
-        "a-b".into(),
-    ] {
+    for lines in ["0-3", "9-3", "a-b"] {
         let r = get(
             &s,
             &format!("/v1/twins/{id}/sources?file={file}&lines={lines}"),
@@ -192,6 +186,78 @@ fn a_span_beyond_the_section_or_out_of_order_is_refused() {
     );
     assert_eq!(r.status, 404);
     assert_eq!(json(&r)["code"], "no_source_text");
+}
+
+#[test]
+fn no_answer_gives_the_line_count_of_a_section() {
+    let dir = fixture_dir("rsim-api-sources-count");
+    let s = state(&dir);
+    let id = twin(&s);
+    let file = file_of(&dir, "r1", "config");
+    let n = fixture_lines("vyos/r1-config.json");
+    for (first, last) in [
+        (1, 999_999),
+        (2, 999_999),
+        (n + 1, n + 1000),
+        (n + 1, 999_999),
+    ] {
+        let r = get(
+            &s,
+            &format!("/v1/twins/{id}/sources?file={file}&lines={first}-{last}"),
+        );
+        let v = json(&r);
+        let text = v.to_string();
+        assert!(
+            !text.contains(&format!("{n} lines")),
+            "{first}-{last}: {text}"
+        );
+        assert!(!text.contains("beyond"), "{first}-{last}: {text}");
+        if first > n {
+            assert_eq!(r.status, 403, "{first}-{last}: {text}");
+            assert_eq!(v["code"], "not_a_source_span");
+            continue;
+        }
+        assert_eq!(r.status, 200, "{first}-{last}: {text}");
+        let lines = v["source"]["lines"].as_array().unwrap();
+        assert!(
+            lines
+                .iter()
+                .all(|l| l["number"].as_u64().unwrap() <= n as u64)
+        );
+        let left_out = v["source"]["left_out"].as_array().unwrap();
+        assert!(
+            left_out.last().unwrap()["last_line"] == last,
+            "{first}-{last}: {text}"
+        );
+    }
+}
+
+#[test]
+fn a_unifi_section_is_not_served_by_its_rows() {
+    let dir = fixture_dir("rsim-api-sources-rows");
+    let s = state(&dir);
+    let id = twin(&s);
+    for section in ["devices", "clients", "wlans"] {
+        let file = file_of(&dir, "site1", section);
+        for (first, last) in [(1, 1), (1, 40), (2, 2)] {
+            assert_eq!(
+                served(&s, &id, &file, first, last).unwrap_err(),
+                "not_a_source_span",
+                "{file}:{first}-{last}"
+            );
+        }
+        let r = get(
+            &s,
+            &format!("/v1/twins/{id}/sources?file={file}%23row&lines=1-1"),
+        );
+        assert_eq!(r.status, 404, "{file}");
+        let r = get(
+            &s,
+            &format!("/v1/twins/{id}/sources?file={file}#row&lines=1-1"),
+        );
+        assert_eq!(r.status, 404, "{file}");
+        assert_eq!(json(&r)["code"], "no_source_text", "{file}");
+    }
 }
 
 #[test]
@@ -316,7 +382,12 @@ fn a_section_of_a_vendor_with_no_mask_is_refused() {
     let r = get(&s, &format!("/v1/twins/{id}/sources?file={file}&lines=1-2"));
     assert_eq!(r.status, 403);
     let v = json(&r);
-    assert_eq!(v["code"], "not_masked");
+    // The device is not lowered, so no span names its config and the span
+    // gate refuses it before the mask is asked.
+    assert!(
+        ["not_masked", "not_a_source_span"].contains(&v["code"].as_str().unwrap()),
+        "{v}"
+    );
     assert!(!String::from_utf8_lossy(&r.body).contains("FAKEPASSWORD"));
 }
 
@@ -459,6 +530,7 @@ fn each_span_of_a_step_is_served_whole() {
     let answer = json(&get(&s, &format!("{q}?form=full")));
     let steps = answer["answer"]["branches"][0]["steps"].as_array().unwrap();
     let mut seen = 0;
+    let mut rows = 0;
     for i in 0..steps.len() {
         let v = json(&get(
             &s,
@@ -466,8 +538,15 @@ fn each_span_of_a_step_is_served_whole() {
         ));
         for src in v["source_lines"].as_array().unwrap() {
             let file = src["file"].as_str().unwrap();
+            if file.ends_with("#row") {
+                // A row span names the rows of a table: it stays a label.
+                assert_eq!(src["error"]["code"], "no_source_text", "step {i}: {src}");
+                assert!(src.get("lines").is_none(), "step {i}: {src}");
+                rows += 1;
+                continue;
+            }
             // The table sections of the fixture store hold no readable text.
-            if !file.contains("/config@") && !file.starts_with("site1/") {
+            if !file.contains("/config@") {
                 continue;
             }
             assert!(src.get("error").is_none(), "step {i}: {src}");
@@ -481,4 +560,5 @@ fn each_span_of_a_step_is_served_whole() {
         }
     }
     assert!(seen > 0);
+    assert!(rows > 0);
 }

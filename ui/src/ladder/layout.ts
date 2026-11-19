@@ -148,8 +148,14 @@ export function fileLabel(file: string, device: string | null | undefined): stri
   return device && f.startsWith(`${device}.`) && f.length > device.length + 1 ? f.slice(device.length + 1) : f;
 }
 
+/** Whether a span names the rows of a collected table, not lines of a text. */
+export function isRowSpan(s: Span): boolean {
+  return s.file.endsWith("#row");
+}
+
 export function spanLabel(s: Span, device: string | null | undefined): string {
   const f = fileLabel(s.file, device);
+  if (isRowSpan(s)) return s.first_line === s.last_line ? `${f} row ${s.first_line}` : `${f} rows ${s.first_line}-${s.last_line}`;
   return s.first_line === s.last_line ? `${f}:${s.first_line}` : `${f}:${s.first_line}-${s.last_line}`;
 }
 
@@ -547,7 +553,8 @@ export interface DetailSource {
 
 /**
  * The source spans of the steps of a row, each once: the most specific
- * span first, then the others in the order of the steps.
+ * span of text first, else the most specific row span, then the others in
+ * the order of the steps.
  */
 export function detailSources(steps: readonly TraceStep[]): DetailSource[] {
   const out: DetailSource[] = [];
@@ -557,7 +564,8 @@ export function detailSources(steps: readonly TraceStep[]): DetailSource[] {
       if (!out.some((e) => e.key === key)) out.push({ key, label: spanLabel(p, st.device), span: p });
     }
   }
-  const best = mostSpecific(out.map((e) => e.span));
+  const text = out.filter((e) => !isRowSpan(e.span));
+  const best = mostSpecific((text.length > 0 ? text : out).map((e) => e.span));
   const i = out.findIndex((e) => e.span === best);
   if (i > 0) out.unshift(...out.splice(i, 1));
   return out;

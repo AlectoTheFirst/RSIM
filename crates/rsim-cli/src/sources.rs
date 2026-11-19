@@ -3,7 +3,9 @@
 //! of the twin; its lines are the lines of the canonical form of the
 //! section, with the secrets masked by the mask of the vendor. A section
 //! with no mask for its vendor and format is not given. Only the lines that
-//! lie inside a source span of a function of the twin are given.
+//! lie inside a source span of a function of the twin are given. A row span
+//! names the rows of a collected table, not lines of a text, and gives no
+//! lines.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -12,6 +14,7 @@ use rsim_contract::json::{SpanJson, StepOut};
 use rsim_contract::source::{
     LineRangeJson, MAX_LINES, SourceLineJson, SourceLinesOut, SourceTextJson, StepSourceJson,
 };
+use rsim_core::provenance::is_row_file;
 use rsim_engine::Twin;
 use rsim_ingest::mask::{Refusal, section_lines};
 use rsim_store::{Snapshot, Store};
@@ -58,12 +61,15 @@ fn file_key(file: &str) -> String {
 pub struct SpanIndex(BTreeMap<String, Vec<(u32, u32)>>);
 
 impl SpanIndex {
-    /// The index of each span that a trace step of a function of the twin
-    /// can name.
+    /// The index of each span of text that a trace step of a function of
+    /// the twin can name. A row span is not in the index.
     pub fn of(twin: &Twin) -> Self {
         let mut by_file: BTreeMap<String, Vec<(u32, u32)>> = BTreeMap::new();
         for f in twin.functions() {
             f.each_span(&mut |s| {
+                if s.is_row() {
+                    return;
+                }
                 by_file
                     .entry(file_key(&s.file))
                     .or_default()
@@ -87,6 +93,9 @@ impl SpanIndex {
     /// The parts of the lines `first` to `last` of a file that lie inside a
     /// span, in order.
     pub fn covered(&self, file: &str, first: u32, last: u32) -> Vec<(u32, u32)> {
+        if is_row_file(file) {
+            return Vec::new();
+        }
         let Some(v) = self.0.get(&file_key(file)) else {
             return Vec::new();
         };
@@ -163,7 +172,9 @@ pub fn parse_range(text: &str) -> Result<(u32, u32), QueryError> {
 /// The masked lines of a span of a twin that lie inside a source span of a
 /// function of the twin: at most `MAX_LINES` lines from `first`, the ranges
 /// that are left out, and the number of the lines after the limit. A span
-/// with no line inside a source span of a function is refused.
+/// with no line inside a source span of a function is refused, whatever the
+/// length of the section; a line of a source span past the end of the
+/// section is not given. A row span is refused.
 pub fn text(
     twin: &Loaded,
     file: &str,
@@ -182,6 +193,11 @@ pub fn text(
             twin.identity.id
         )));
     };
+    if is_row_file(file) {
+        return Err(none(format!(
+            "{file} names the rows of a collected table, not lines of a text, so it has no source text"
+        )));
+    }
     let not_here = || {
         none(format!(
             "{file} is not a section of the snapshot of the twin {}",
@@ -197,6 +213,21 @@ pub fn text(
     if short.len() < 12 || !name.starts_with(short) {
         return Err(not_here());
     }
+    let key = format!("{device}/{section}@{}", &name[..12]);
+    let index = src.spans.get_or_init(|| SpanIndex::of(&twin.twin));
+    let covered = index.covered(&key, first, last);
+    let outside = || {
+        QueryError::new(
+            ErrorCode::NotASourceSpan,
+            format!(
+                "lines {first}-{last} of {file} are outside every source span of a function of the twin {}, so they are not given",
+                twin.identity.id
+            ),
+        )
+    };
+    if covered.is_empty() {
+        return Err(outside());
+    }
     let bytes = src
         .store
         .read_blob(&blob)
@@ -209,25 +240,16 @@ pub fn text(
         Refusal::Unreadable(_) => QueryError::new(ErrorCode::Store, format!("{file}: {r}")),
     })?;
     let count = u32::try_from(lines.len()).unwrap_or(u32::MAX);
-    if last > count {
-        return Err(invalid(format!(
-            "lines {first}-{last} are beyond the {count} lines of {file}"
-        )));
-    }
-    let key = format!("{device}/{section}@{}", &name[..12]);
-    let index = src.spans.get_or_init(|| SpanIndex::of(&twin.twin));
-    let covered = index.covered(&key, first, last);
-    if covered.is_empty() {
-        return Err(QueryError::new(
-            ErrorCode::NotASourceSpan,
-            format!(
-                "lines {first}-{last} of {file} are outside every source span of a function of the twin {}, so they are not given",
-                twin.identity.id
-            ),
-        ));
+    let present: Vec<(u32, u32)> = covered
+        .iter()
+        .filter(|r| r.0 <= count)
+        .map(|&(a, b)| (a, b.min(count)))
+        .collect();
+    if present.is_empty() {
+        return Err(outside());
     }
     let left_out = gaps(&covered, first, last);
-    let shown = last.min(first + MAX_LINES - 1);
+    let shown = last.min(first.saturating_add(MAX_LINES - 1));
     let cut = last - shown;
     let mut notes = Vec::new();
     if !left_out.is_empty() {
@@ -246,7 +268,7 @@ pub fn text(
         file: file.to_string(),
         first_line: first,
         last_line: last,
-        lines: covered
+        lines: present
             .iter()
             .flat_map(|&(a, b)| a..=b.min(shown))
             .map(|n| SourceLineJson {

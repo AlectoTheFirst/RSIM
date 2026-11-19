@@ -89,13 +89,13 @@ impl<'a> L<'a> {
         m
     }
     fn dev_span(&self, d: &Device) -> SourceSpan {
-        SourceSpan::line(
+        SourceSpan::row(
             &self.files.devices,
             u32::try_from(d.index + 1).unwrap_or(u32::MAX),
         )
     }
     fn client_span(&self, c: &Client) -> SourceSpan {
-        SourceSpan::line(
+        SourceSpan::row(
             &self.files.clients,
             u32::try_from(c.index + 1).unwrap_or(u32::MAX),
         )
@@ -609,7 +609,7 @@ pub fn lower(
                 continue;
             };
             let pid = PortId::new(&sp.port);
-            let span = SourceSpan::line(
+            let span = SourceSpan::row(
                 &l.files.wlans,
                 u32::try_from(w.index + 1).unwrap_or(u32::MAX),
             );
@@ -828,7 +828,7 @@ pub fn link_summary(site: &Site, files: &Files) -> BTreeMap<String, crate::links
         .iter()
         .filter(|d| d.uplink_peer.is_none() && d.kind != DeviceKind::Other)
     {
-        let span = SourceSpan::line(
+        let span = SourceSpan::row(
             &files.devices,
             u32::try_from(d.index + 1).unwrap_or(u32::MAX),
         );

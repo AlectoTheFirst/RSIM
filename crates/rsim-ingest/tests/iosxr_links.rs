@@ -841,7 +841,8 @@ fn the_links_carry_their_provenance() {
         .flat_map(|s| s.provenance.iter())
         .map(|s| s.file.to_string())
         .collect();
-    for f in ["core1/lldp", "pe1/lldp", "pe1/cdp", "pe1/interfaces"] {
+    // The LLDP rows of the NX-OS switch are rows of a JSON table.
+    for f in ["core1/lldp#row", "pe1/lldp", "pe1/cdp", "pe1/interfaces"] {
         assert!(files.contains(f), "{f} not in {files:?}");
     }
 }

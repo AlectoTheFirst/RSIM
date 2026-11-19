@@ -607,6 +607,16 @@ impl NetFunction for WireguardEncap {
             .chain([Dependency::RouteTable(dev.clone(), self.underlay.clone())])
             .collect()
     }
+    fn each_span(&self, f: &mut dyn FnMut(&SourceSpan)) {
+        for s in self
+            .meta
+            .provenance
+            .iter()
+            .chain(self.peers.iter().flat_map(|p| p.spans.iter()))
+        {
+            f(s);
+        }
+    }
     fn successors(&self) -> Vec<FunctionId> {
         vec![self.next.clone()]
     }

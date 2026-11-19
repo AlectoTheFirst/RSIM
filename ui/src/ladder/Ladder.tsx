@@ -14,6 +14,7 @@ import {
   destinationOf,
   detailSources,
   functionLabel,
+  isRowSpan,
   type Ladder as LadderModel,
   type Rib,
   outcomeKnown,
@@ -215,8 +216,8 @@ function CodeLines(props: { t: SourceText }) {
 /**
  * The source spans of the opened row by file: the lines of the open span,
  * first the most specific one, and the other spans as labels that open
- * their lines. A span whose lines the API refuses, or a twin with no
- * source text, shows the label only.
+ * their lines. A row span, a span whose lines the API refuses, or a twin
+ * with no source text, shows the label only.
  */
 function SourceLines(props: { steps: readonly TraceStep[]; load: DetailActions["sourceLines"] }) {
   const { load } = props;
@@ -227,7 +228,7 @@ function SourceLines(props: { steps: readonly TraceStep[]; load: DetailActions["
     if (f) f[1].push(e);
     else files.push([e.span.file, [e]]);
   }
-  const [open, setOpen] = useState<string | null>(sources[0]?.key ?? null);
+  const [open, setOpen] = useState<string | null>(sources.find((e) => !isRowSpan(e.span))?.key ?? null);
   const [text, setText] = useState<Record<string, SourceText | null>>({});
   const asked = useRef(new Set<string>());
   useEffect(() => {
@@ -249,7 +250,7 @@ function SourceLines(props: { steps: readonly TraceStep[]; load: DetailActions["
           {spans.map((e) => {
             const t = e.key === open ? text[e.key] : null;
             if (t) return <CodeLines t={t} />;
-            return load ? (
+            return load && !isRowSpan(e.span) ? (
               <button type="button" class="plain span-label t-value" onClick={() => setOpen(e.key)}>
                 {e.label}
               </button>

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { SetAnswer, TraceStep } from "../src/api/types";
 import { serverTiming, sourceUrl } from "../src/api/client";
-import { delayShown, detailSources, outcomeKnown, partCounts, qosShown, rateShown } from "../src/ladder/layout";
+import { delayShown, detailSources, isRowSpan, outcomeKnown, partCounts, qosShown, rateShown } from "../src/ladder/layout";
 
 describe("server timing", () => {
   it("reads the engine time and a cache hit of the Server-Timing header", () => {
@@ -89,6 +89,17 @@ describe("source spans of the opened row", () => {
   it("lists each span once, with the device prefix left out, the most specific span first", () => {
     const labels = detailSources([step([[100, 108], [12, 12]]), step([[100, 108]])]).map((e) => e.label);
     expect(labels).toEqual(["conf:12", "conf:100-108"]);
+  });
+
+  it("labels a row span by its rows and puts a span of text first", () => {
+    const rows = {
+      device: "site1",
+      provenance: [{ file: "site1/devices@b156ff45a077#row", first_line: 3, last_line: 3 }],
+    } as unknown as TraceStep;
+    const s = detailSources([rows, step([[100, 108]])]);
+    expect(s.map((e) => e.label)).toEqual(["conf:100-108", "devices row 3"]);
+    expect(isRowSpan(s[1]!.span)).toBe(true);
+    expect(isRowSpan(s[0]!.span)).toBe(false);
   });
 
   it("keeps the order of the steps after the most specific span", () => {

@@ -25,6 +25,7 @@ const SECRET_WORDS: &[&str] = &[
     "passphrase",
     "password",
     "pin",
+    "pmk",
     "pre-shared-key",
     "prepend-pkg-opts",
     "priv",

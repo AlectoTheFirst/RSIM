@@ -815,6 +815,26 @@ mod tests {
     }
 
     #[test]
+    fn the_cts_manual_pairwise_master_key_is_masked() {
+        let nxos = b"interface Ethernet1/1\n  ip address 192.0.2.1/30\n  cts manual\n    sap pmk FAKEPMK0123456789 modelist gcm-encrypt\n    sap pmk encrypted FAKEENCPMK modelist gcm-encrypt\n";
+        let got = check::masked(
+            "nxos",
+            Format::Text,
+            nxos,
+            &[],
+            &["ip address 192.0.2.1/30"],
+        );
+        assert_eq!(got[3], "    sap pmk <secret>");
+        assert_eq!(got[4], "    sap pmk <secret>");
+        let short =
+            b"interface TenGigE0/0/0/1\n cts manual\n  sap pmk FEDBAA mode-list gcm-encrypt\n";
+        for vendor in ["iosxr", "iosxe"] {
+            let got = check::masked(vendor, Format::Text, short, &["FEDBAA"], &["cts manual"]);
+            assert_eq!(got[2], "  sap pmk <secret>", "{vendor}");
+        }
+    }
+
+    #[test]
     fn a_vendor_and_format_with_no_mask_is_refused() {
         for (vendor, format) in [
             ("vyos", Format::Text),
