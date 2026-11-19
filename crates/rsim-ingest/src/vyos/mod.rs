@@ -3,6 +3,7 @@
 pub mod bgp;
 pub mod config;
 pub mod lower;
+pub mod mask;
 mod profile;
 mod table;
 

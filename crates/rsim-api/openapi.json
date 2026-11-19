@@ -859,6 +859,45 @@
         ],
         "type": "object"
       },
+      "ErrorCode": {
+        "description": "The code of a query error.",
+        "oneOf": [
+          {
+            "enum": [
+              "unknown_topology",
+              "unknown_ingress",
+              "invalid_query",
+              "no_such_step",
+              "start_requires_context",
+              "contract_violation",
+              "unknown_table",
+              "invalid_filter",
+              "internal"
+            ],
+            "type": "string"
+          },
+          {
+            "const": "store",
+            "description": "The store of a `store:` topology cannot be read.",
+            "type": "string"
+          },
+          {
+            "const": "no_source_text",
+            "description": "The twin has no text of the source: a built-in topology, or a file\nthat is not a section of the snapshot of the twin.",
+            "type": "string"
+          },
+          {
+            "const": "not_masked",
+            "description": "The section has no mask of its secrets for its vendor and format, so\nits lines are not given.",
+            "type": "string"
+          },
+          {
+            "const": "not_a_source_span",
+            "description": "The lines are outside every source span of a function of the twin,\nso they are not given.",
+            "type": "string"
+          }
+        ]
+      },
       "Evidence": {
         "description": "One evidence row.",
         "properties": {
@@ -1536,6 +1575,26 @@
         "title": "JumpHostsOut",
         "type": "object"
       },
+      "LineRangeJson": {
+        "description": "An inclusive range of line numbers.",
+        "properties": {
+          "first_line": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_line": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "first_line",
+          "last_line"
+        ],
+        "type": "object"
+      },
       "MemberJson": {
         "properties": {
           "current": {
@@ -2114,6 +2173,22 @@
           "topology",
           "source.ip",
           "destination.ip"
+        ],
+        "type": "object"
+      },
+      "QueryError": {
+        "description": "A query error: the code and a text for persons.",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode"
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail"
         ],
         "type": "object"
       },
@@ -3152,6 +3227,106 @@
         },
         "type": "object"
       },
+      "SourceLineJson": {
+        "description": "One source line with its number in the canonical form of its section.",
+        "properties": {
+          "number": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "text": {
+            "description": "The text of the line with each secret masked as `<secret>`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "text"
+        ],
+        "type": "object"
+      },
+      "SourceLinesOut": {
+        "description": "The masked lines of one source span of a twin.",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SourceTextJson"
+          },
+          "topology": {
+            "type": "string"
+          },
+          "twin": {
+            "$ref": "#/components/schemas/TwinJson"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "topology",
+          "twin",
+          "source"
+        ],
+        "title": "SourceLinesOut",
+        "type": "object"
+      },
+      "SourceTextJson": {
+        "description": "The masked lines of one source span: the lines from `first_line` to\n`last_line` that lie inside a source span of a function of the twin, at\nmost `MAX_LINES` lines from `first_line`. `left_out` lists the ranges of\nthe request that are outside every such span or past the end of the\nsection, so `lines` can be empty; `cut` is the number of\nlines after the limit that the answer leaves out. A note names both.",
+        "properties": {
+          "cut": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "file": {
+            "type": "string"
+          },
+          "first_line": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_line": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "left_out": {
+            "items": {
+              "$ref": "#/components/schemas/LineRangeJson"
+            },
+            "type": "array"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/SourceLineJson"
+            },
+            "type": "array"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "file",
+          "first_line",
+          "last_line",
+          "lines",
+          "left_out",
+          "cut"
+        ],
+        "type": "object"
+      },
       "SpanJson": {
         "properties": {
           "file": {
@@ -3270,6 +3445,16 @@
             "minimum": 0,
             "type": "integer"
           },
+          "source_lines": {
+            "description": "The masked source lines of each span of the step, when they are\nasked for.",
+            "items": {
+              "$ref": "#/components/schemas/StepSourceJson"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "step": {
             "format": "uint",
             "minimum": 0,
@@ -3297,6 +3482,41 @@
         ],
         "title": "StepOut",
         "type": "object"
+      },
+      "StepSourceJson": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/SourceTextJson"
+          },
+          {
+            "properties": {
+              "error": {
+                "$ref": "#/components/schemas/QueryError"
+              },
+              "file": {
+                "type": "string"
+              },
+              "first_line": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "last_line": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "file",
+              "first_line",
+              "last_line",
+              "error"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "The source lines of one span of a trace step: the masked lines, or the\nerror that refuses them."
       },
       "SummarizeOut": {
         "description": "The counts of a table and of each column.",
@@ -5712,6 +5932,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "true to add the source lines of each span of the step, with the secrets masked.",
+            "in": "query",
+            "name": "source_lines",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -5867,6 +6096,69 @@
           }
         ],
         "summary": "The drawing of the paths of a query: each hop with its branches, and for a tunnel the overlay edge and the underlay edges that name it."
+      }
+    },
+    "/v1/twins/{twin}/sources": {
+      "get": {
+        "operationId": "getSourceLines",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The file of a source span: <device>/<section>@<blob>.",
+            "in": "query",
+            "name": "file",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The line range a-b, or a for one line.",
+            "in": "query",
+            "name": "lines",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceLinesOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "rsim": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The source lines of a span of a twin with the secrets masked: only the lines inside a source span of a function of the twin, at most 200 lines, with the lines left out and the cut lines named in a note. A built-in topology has no source text, a section with no mask for its vendor is refused, and a range with no line inside a source span is refused."
       }
     },
     "/v1/twins/{twin}/tables/{table}/lpm": {

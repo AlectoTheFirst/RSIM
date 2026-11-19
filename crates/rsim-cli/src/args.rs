@@ -34,7 +34,7 @@ pub const QUERY_FIELDS: [&str; 19] = [
 ];
 
 /// The names of the arguments that select a trace step.
-pub const STEP_FIELDS: [&str; 3] = ["branch", "step", "reply_of"];
+pub const STEP_FIELDS: [&str; 4] = ["branch", "step", "reply_of", "source_lines"];
 
 fn invalid(detail: String) -> QueryError {
     QueryError::new(ErrorCode::InvalidQuery, detail)
@@ -262,6 +262,11 @@ pub fn set_query(args: &Map<String, Value>, extra: &[&str]) -> Result<SetInput, 
             .transpose()?,
         reply: opt(args, "reply", |v| boolean(v, "reply"))?,
     })
+}
+
+/// True if the arguments of `explain_step` ask for the source lines.
+pub fn source_lines(args: &Map<String, Value>) -> Result<bool, QueryError> {
+    Ok(opt(args, "source_lines", |v| boolean(v, "source_lines"))?.unwrap_or(false))
 }
 
 /// The mode of `explain_step`: `path` or `set`.

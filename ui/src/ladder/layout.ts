@@ -148,8 +148,14 @@ export function fileLabel(file: string, device: string | null | undefined): stri
   return device && f.startsWith(`${device}.`) && f.length > device.length + 1 ? f.slice(device.length + 1) : f;
 }
 
+/** Whether a span names the rows of a collected table, not lines of a text. */
+export function isRowSpan(s: Span): boolean {
+  return s.file.endsWith("#row");
+}
+
 export function spanLabel(s: Span, device: string | null | undefined): string {
   const f = fileLabel(s.file, device);
+  if (isRowSpan(s)) return s.first_line === s.last_line ? `${f} row ${s.first_line}` : `${f} rows ${s.first_line}-${s.last_line}`;
   return s.first_line === s.last_line ? `${f}:${s.first_line}` : `${f}:${s.first_line}-${s.last_line}`;
 }
 
@@ -538,15 +544,30 @@ export function rateShown(rc: NonNullable<TraceStep["rate_condition"]>): { actio
   };
 }
 
-/** The source spans of the steps of a row, each once, in the order of the steps. */
-export function detailSpans(steps: readonly TraceStep[]): string[] {
-  const out: string[] = [];
+/** A source span of the opened row with its label and a key. */
+export interface DetailSource {
+  key: string;
+  label: string;
+  span: Span;
+}
+
+/**
+ * The source spans of the steps of a row, each once: the most specific
+ * span of text first, else the most specific row span, then the others in
+ * the order of the steps.
+ */
+export function detailSources(steps: readonly TraceStep[]): DetailSource[] {
+  const out: DetailSource[] = [];
   for (const st of steps) {
     for (const p of st.provenance) {
-      const l = spanLabel(p, st.device);
-      if (!out.includes(l)) out.push(l);
+      const key = `${p.file}:${p.first_line}-${p.last_line}`;
+      if (!out.some((e) => e.key === key)) out.push({ key, label: spanLabel(p, st.device), span: p });
     }
   }
+  const text = out.filter((e) => !isRowSpan(e.span));
+  const best = mostSpecific((text.length > 0 ? text : out).map((e) => e.span));
+  const i = out.findIndex((e) => e.span === best);
+  if (i > 0) out.unshift(...out.splice(i, 1));
   return out;
 }
 

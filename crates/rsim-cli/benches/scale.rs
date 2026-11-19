@@ -285,6 +285,7 @@ fn main() {
             coverage: BTreeMap::new(),
             bgp: BTreeMap::new(),
             tables: Default::default(),
+            source: None,
         };
         let page = Selection {
             limit: Some(100),

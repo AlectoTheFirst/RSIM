@@ -219,7 +219,7 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
         Some((serde_json::from_slice(b).ok()?, f.as_str()))
     };
     let line =
-        |file: &str, i: usize| SourceSpan::line(file, u32::try_from(i + 1).unwrap_or(u32::MAX));
+        |file: &str, i: usize| SourceSpan::row(file, u32::try_from(i + 1).unwrap_or(u32::MAX));
     if let Some((v, file)) = json("interfaces") {
         for (i, r) in rows(&v, "interface").iter().enumerate() {
             let Some(name) = text(r, "interface") else {

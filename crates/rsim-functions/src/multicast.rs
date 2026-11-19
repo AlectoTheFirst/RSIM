@@ -91,6 +91,15 @@ impl McastRoute {
 impl NetFunction for MulticastLookup {
     meta_methods!(FunctionKind::MulticastLookup);
 
+    fn each_span(&self, f: &mut dyn FnMut(&rsim_core::SourceSpan)) {
+        for s in &self.meta.provenance {
+            f(s);
+        }
+        for s in self.routes.values().flatten().flat_map(|r| &r.spans) {
+            f(s);
+        }
+    }
+
     fn requires(&self) -> Vec<ContextAttr> {
         let mut v = vec![ContextAttr::Vrf];
         if self.rpf_interface.is_none() {

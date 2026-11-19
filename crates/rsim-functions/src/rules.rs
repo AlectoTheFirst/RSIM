@@ -215,6 +215,17 @@ pub fn describe_all<A>(rules: &[Rule<A>], what: &str, by: &[RuleRef]) -> String 
         .join(" or ")
 }
 
+/// Calls `f` with the provenance and with each span of the rules.
+pub fn each_rule_span<A>(
+    provenance: &[SourceSpan],
+    rules: &[Rule<A>],
+    f: &mut dyn FnMut(&SourceSpan),
+) {
+    for s in provenance.iter().chain(rules.iter().flat_map(|r| &r.spans)) {
+        f(s);
+    }
+}
+
 /// The spans of the rules that decided.
 pub fn spans_of<A>(rules: &[Rule<A>], by: &[RuleRef]) -> Vec<SourceSpan> {
     let mut v = Vec::new();

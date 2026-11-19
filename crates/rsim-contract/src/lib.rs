@@ -9,6 +9,7 @@ pub mod error;
 pub mod json;
 pub mod query;
 pub mod registry;
+pub mod source;
 pub mod table;
 pub mod topology;
 pub mod twin;

@@ -13,7 +13,8 @@ use crate::common::{Meta, push_nonempty};
 use crate::forwarding::meta_methods;
 use crate::profile::PortTranslation;
 use crate::rules::{
-    Decision, Rule, UnknownCause, describe_all, evaluate, explain, predicates_of, spans_of,
+    Decision, Rule, UnknownCause, describe_all, each_rule_span, evaluate, explain, predicates_of,
+    spans_of,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -187,6 +188,10 @@ impl SourceNat {
 impl NetFunction for SourceNat {
     meta_methods!(FunctionKind::SourceNat);
 
+    fn each_span(&self, f: &mut dyn FnMut(&rsim_core::SourceSpan)) {
+        each_rule_span(&self.meta.provenance, &self.rules, f);
+    }
+
     fn requires(&self) -> Vec<ContextAttr> {
         let mut v = vec![ContextAttr::Session, ContextAttr::EgressInterface];
         if self.scopes.iter().any(|s| s.ingress.is_some()) {
@@ -240,6 +245,10 @@ pub struct DestinationNat {
 
 impl NetFunction for DestinationNat {
     meta_methods!(FunctionKind::DestinationNat);
+
+    fn each_span(&self, f: &mut dyn FnMut(&rsim_core::SourceSpan)) {
+        each_rule_span(&self.meta.provenance, &self.rules, f);
+    }
 
     fn requires(&self) -> Vec<ContextAttr> {
         let mut v = vec![ContextAttr::Session];

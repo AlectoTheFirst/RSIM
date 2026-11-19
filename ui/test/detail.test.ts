@@ -3,8 +3,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { SetAnswer, TraceStep } from "../src/api/types";
-import { serverTiming } from "../src/api/client";
-import { delayShown, detailSpans, outcomeKnown, partCounts, qosShown, rateShown } from "../src/ladder/layout";
+import { serverTiming, sourceUrl } from "../src/api/client";
+import { delayShown, detailSources, isRowSpan, outcomeKnown, partCounts, qosShown, rateShown } from "../src/ladder/layout";
 
 describe("server timing", () => {
   it("reads the engine time and a cache hit of the Server-Timing header", () => {
@@ -80,12 +80,40 @@ describe("delay and rate", () => {
 });
 
 describe("source spans of the opened row", () => {
-  it("lists each span once, with the device prefix left out", () => {
-    const step = (spans: [number, number][]) =>
-      ({
-        device: "leaf1",
-        provenance: spans.map(([a, b]) => ({ file: "leaf1.conf", first_line: a, last_line: b })),
-      }) as unknown as TraceStep;
-    expect(detailSpans([step([[100, 108], [12, 12]]), step([[100, 108]])])).toEqual(["conf:100-108", "conf:12"]);
+  const step = (spans: [number, number][], file = "leaf1.conf") =>
+    ({
+      device: "leaf1",
+      provenance: spans.map(([a, b]) => ({ file, first_line: a, last_line: b })),
+    }) as unknown as TraceStep;
+
+  it("lists each span once, with the device prefix left out, the most specific span first", () => {
+    const labels = detailSources([step([[100, 108], [12, 12]]), step([[100, 108]])]).map((e) => e.label);
+    expect(labels).toEqual(["conf:12", "conf:100-108"]);
+  });
+
+  it("labels a row span by its rows and puts a span of text first", () => {
+    const rows = {
+      device: "site1",
+      provenance: [{ file: "site1/devices@b156ff45a077#row", first_line: 3, last_line: 3 }],
+    } as unknown as TraceStep;
+    const s = detailSources([rows, step([[100, 108]])]);
+    expect(s.map((e) => e.label)).toEqual(["conf:100-108", "devices row 3"]);
+    expect(isRowSpan(s[1]!.span)).toBe(true);
+    expect(isRowSpan(s[0]!.span)).toBe(false);
+  });
+
+  it("keeps the order of the steps after the most specific span", () => {
+    const s = detailSources([step([[1, 50], [60, 70], [5, 6], [80, 99]])]);
+    expect(s.map((e) => [e.span.first_line, e.span.last_line])).toEqual([
+      [5, 6],
+      [1, 50],
+      [60, 70],
+      [80, 99],
+    ]);
+  });
+
+  it("asks the API for the lines of a span with the file in percent encoding", () => {
+    const span = { file: "core 1/config@b156ff45a077", first_line: 397, last_line: 412 };
+    expect(sourceUrl("snap-7", span)).toBe("/v1/twins/snap-7/sources?file=core%201%2Fconfig%40b156ff45a077&lines=397-412");
   });
 });

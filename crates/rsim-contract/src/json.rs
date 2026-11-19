@@ -112,6 +112,10 @@ pub struct StepOut {
     pub branch: usize,
     pub step: usize,
     pub trace_step: TraceStepJson,
+    /// The masked source lines of each span of the step, when they are
+    /// asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_lines: Option<Vec<crate::source::StepSourceJson>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

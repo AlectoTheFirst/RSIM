@@ -1,8 +1,8 @@
 // The ladder of a path query: one row for each function, or for each
 // device at the level device, with the forward path and the replies.
 import type { JSX } from "preact";
-import type { Answer, Span, TraceStep, Verdict } from "../api/types";
-import { useLayoutEffect, useState } from "preact/hooks";
+import type { Answer, SourceText, Span, TraceStep, Verdict } from "../api/types";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Hatch, HatchMark } from "../page/Hatch";
 import { SIZE } from "../theme";
 import { LaneNames, Lanes, laneX } from "./Lanes";
@@ -10,8 +10,11 @@ import {
   type Cell,
   type DecidingStep,
   delayShown,
+  type DetailSource,
   destinationOf,
+  detailSources,
   functionLabel,
+  isRowSpan,
   type Ladder as LadderModel,
   type Rib,
   outcomeKnown,
@@ -191,54 +194,68 @@ function isElement(v: Shown | JSX.Element): v is JSX.Element {
 export interface DetailActions {
   copyExplain: (row: StepRow) => void;
   copyUrl: (row: StepRow) => void;
+  /** The masked lines of a span; absent for a twin with no source text. */
+  sourceLines?: (span: Span) => Promise<SourceText>;
 }
 
-/** The most lines of one span that the opened row lists. */
-const SPAN_LINES = 12;
+/** The numbered lines of a span, with the note of the cut lines. */
+function CodeLines(props: { t: SourceText }) {
+  return (
+    <div class="code t-value">
+      {props.t.lines.map((l) => (
+        <>
+          <span class="ln">{l.number}</span>
+          <span class="tx">{l.text}</span>
+        </>
+      ))}
+      {props.t.note ? <span class="note muted">{props.t.note}</span> : null}
+    </div>
+  );
+}
 
-/** The source spans of the steps of a row, each once, by file. */
-function spansByFile(steps: readonly TraceStep[]): [string, Span[]][] {
-  const out: [string, Span[]][] = [];
-  for (const st of steps) {
-    for (const p of st.provenance) {
-      let f = out.find(([file]) => file === p.file);
-      if (!f) {
-        f = [p.file, []];
-        out.push(f);
-      }
-      if (!f[1].some((s) => s.first_line === p.first_line && s.last_line === p.last_line)) f[1].push(p);
-    }
+/**
+ * The source spans of the opened row by file: the lines of the open span,
+ * first the most specific one, and the other spans as labels that open
+ * their lines. A row span, a span whose lines the API refuses, or a twin
+ * with no source text, shows the label only.
+ */
+function SourceLines(props: { steps: readonly TraceStep[]; load: DetailActions["sourceLines"] }) {
+  const { load } = props;
+  const sources = detailSources(props.steps);
+  const files: [string, DetailSource[]][] = [];
+  for (const e of sources) {
+    const f = files.find(([file]) => file === e.span.file);
+    if (f) f[1].push(e);
+    else files.push([e.span.file, [e]]);
   }
-  return out;
-}
-
-function SourceLines(props: { steps: readonly TraceStep[] }) {
+  const [open, setOpen] = useState<string | null>(sources.find((e) => !isRowSpan(e.span))?.key ?? null);
+  const [text, setText] = useState<Record<string, SourceText | null>>({});
+  const asked = useRef(new Set<string>());
+  useEffect(() => {
+    const s = sources.find((e) => e.key === open);
+    if (!load || !s || asked.current.has(s.key)) return;
+    asked.current.add(s.key);
+    load(s.span).then(
+      (t) => setText((m) => ({ ...m, [s.key]: t })),
+      () => setText((m) => ({ ...m, [s.key]: null })),
+    );
+  }, [open, load]);
   return (
     <div>
-      {spansByFile(props.steps).map(([file, spans]) => (
+      {files.map(([file, spans]) => (
         <>
           <div class="muted head">
             Source <span class="t-value">{file}</span>
           </div>
-          {spans.map((s) => {
-            const n = Math.min(SPAN_LINES, s.last_line - s.first_line + 1);
-            return (
-              <div class="code t-value">
-                {Array.from({ length: n }, (_, i) => (
-                  <>
-                    <span class="muted">{s.first_line + i}</span>
-                    <span class="muted">
-                      {i === 0 ? `[the API does not serve the text of lines ${s.first_line} to ${s.last_line}]` : ""}
-                    </span>
-                  </>
-                ))}
-                {s.last_line - s.first_line + 1 > n ? (
-                  <>
-                    <span class="muted">{s.last_line}</span>
-                    <span />
-                  </>
-                ) : null}
-              </div>
+          {spans.map((e) => {
+            const t = e.key === open ? text[e.key] : null;
+            if (t) return <CodeLines t={t} />;
+            return load && !isRowSpan(e.span) ? (
+              <button type="button" class="plain span-label t-value" onClick={() => setOpen(e.key)}>
+                {e.label}
+              </button>
+            ) : (
+              <span class="span-label t-value">{e.label}</span>
             );
           })}
         </>
@@ -273,7 +290,7 @@ function Detail(props: { row: StepRow; lanes: number; actions: DetailActions }) 
         </svg>
       </span>
       <div class="detail">
-        <SourceLines steps={row.steps} />
+        <SourceLines key={row.key} steps={row.steps} load={actions.sourceLines} />
         <div>
           <div class="muted head">
             Parameters of <span class="t-value">{last.function}</span>

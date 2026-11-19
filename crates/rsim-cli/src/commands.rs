@@ -32,6 +32,9 @@ pub struct Loaded {
     /// The columns of the tables of the twin, built when a request first
     /// names a table.
     pub tables: crate::tables::TableCache,
+    /// The store and the snapshot of a store twin, for the text of its
+    /// source lines; none for a built-in topology.
+    pub source: Option<crate::sources::SourceStore>,
 }
 
 impl std::ops::Deref for Loaded {
@@ -65,6 +68,7 @@ pub fn load(topology: &str) -> Result<Loaded, QueryError> {
         coverage: BTreeMap::new(),
         bgp: BTreeMap::new(),
         tables: Default::default(),
+        source: None,
     })
 }
 
@@ -98,6 +102,7 @@ pub fn load_store(folder: &str) -> Result<Loaded, QueryError> {
         coverage,
         bgp,
         tables: Default::default(),
+        source: Some(crate::sources::SourceStore::new(store, snap)),
     })
 }
 
@@ -332,5 +337,6 @@ fn step_of(
         branch: at.branch,
         step: at.step,
         trace_step: crate::json::trace_step_json(at.step, step),
+        source_lines: None,
     })
 }

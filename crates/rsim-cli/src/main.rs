@@ -101,6 +101,10 @@ enum Command {
         /// the step index are indexes in the reply.
         #[arg(long)]
         reply_of: Option<usize>,
+        /// Add the source lines of each span of the step, with the secrets
+        /// masked. A built-in topology has no source text.
+        #[arg(long)]
+        source_lines: bool,
     },
     /// One trace step of the answer.
     Explain {
@@ -116,6 +120,10 @@ enum Command {
         /// the step index are indexes in the reply.
         #[arg(long)]
         reply_of: Option<usize>,
+        /// Add the source lines of each span of the step, with the secrets
+        /// masked. A built-in topology has no source text.
+        #[arg(long)]
+        source_lines: bool,
     },
 }
 
@@ -369,6 +377,7 @@ fn main() -> ExitCode {
             branch,
             step,
             reply_of,
+            source_lines,
         } => {
             let input = query.input();
             let at = StepRef {
@@ -376,8 +385,13 @@ fn main() -> ExitCode {
                 branch: *branch,
                 step: *step,
             };
-            let r =
-                commands::load(&input.topology).and_then(|t| commands::explain_set(&input, at, &t));
+            let r = commands::load(&input.topology).and_then(|t| {
+                let mut o = commands::explain_set(&input, at, &t)?;
+                if *source_lines {
+                    rsim_cli::sources::attach(&mut o, &t);
+                }
+                Ok(o)
+            });
             emit(&cli, r, text::step)
         }
         Command::Explain {
@@ -385,6 +399,7 @@ fn main() -> ExitCode {
             branch,
             step,
             reply_of,
+            source_lines,
         } => {
             let input = query.clone_input();
             let at = StepRef {
@@ -392,7 +407,13 @@ fn main() -> ExitCode {
                 branch: *branch,
                 step: *step,
             };
-            let r = commands::load(&input.topology).and_then(|t| commands::explain(&input, at, &t));
+            let r = commands::load(&input.topology).and_then(|t| {
+                let mut o = commands::explain(&input, at, &t)?;
+                if *source_lines {
+                    rsim_cli::sources::attach(&mut o, &t);
+                }
+                Ok(o)
+            });
             emit(&cli, r, text::step)
         }
     }

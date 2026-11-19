@@ -1,5 +1,5 @@
 // The calls of the UI to the REST API of rsim-api, on the origin of the page.
-import type { PathAnswer, SetAnswer, TableOut, TablesOut, Twin } from "./types";
+import type { PathAnswer, SetAnswer, SourceText, Span, TableOut, TablesOut, Twin } from "./types";
 
 /** A refused request: the problem object of RFC 9457. */
 export class ApiProblem extends Error {
@@ -107,6 +107,18 @@ export function stepUrl(
 ): string {
   const base = `/v1/twins/${encodeURIComponent(twin)}/queries/${encodeURIComponent(qid)}/branches/${branch}/steps/${step}`;
   return replyOf === null ? base : `${base}?reply_of=${replyOf}`;
+}
+
+/** The URL of the masked source lines of a span of a twin. */
+export function sourceUrl(twin: string, span: Span): string {
+  const file = encodeURIComponent(span.file);
+  return `/v1/twins/${encodeURIComponent(twin)}/sources?file=${file}&lines=${span.first_line}-${span.last_line}`;
+}
+
+/** The masked source lines of a span of a twin. */
+export async function getSourceLines(twin: string, span: Span): Promise<SourceText> {
+  const body = await getJson<{ source: SourceText }>(sourceUrl(twin, span));
+  return body.source;
 }
 
 /** The catalog of the tables. */

@@ -220,6 +220,10 @@ pub struct StepArgs {
     /// Select the reply of this forward branch. Then the branch index and
     /// the step index are indexes in the reply.
     pub reply_of: Option<u32>,
+    /// True to add the source lines of each span of the step, with the
+    /// secrets masked; only the lines inside a source span of a function of
+    /// the twin are given. A built-in topology has no source text.
+    pub source_lines: Option<bool>,
 }
 
 /// A verb of a table.

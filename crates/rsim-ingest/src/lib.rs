@@ -10,6 +10,7 @@ pub mod estate;
 pub mod iosxe;
 pub mod iosxr;
 pub mod links;
+pub mod mask;
 pub mod nxos;
 pub mod resolve;
 pub mod route_tables;

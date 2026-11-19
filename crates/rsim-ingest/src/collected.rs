@@ -82,11 +82,11 @@ pub struct Collected {
     pub macs: Vec<MacRow>,
 }
 
-/// The source span of a row: the device, the table, the blob of its section
+/// The row span of a row: the device, the table, the blob of its section
 /// and its index in the section, from 1.
 pub fn row_span(device: &str, table: &str, blob: &str, index: u64) -> SourceSpan {
-    let line = u32::try_from(index + 1).unwrap_or(u32::MAX);
-    SourceSpan::line(format!("{device}/{table}@{blob}"), line)
+    let row = u32::try_from(index + 1).unwrap_or(u32::MAX);
+    SourceSpan::row(format!("{device}/{table}@{blob}"), row)
 }
 
 struct Cols<'a> {

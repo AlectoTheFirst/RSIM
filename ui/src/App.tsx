@@ -1,8 +1,8 @@
 // The Trace view: the query bar, the result line and the ladder of the
 // answer of a path query or a set query.
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { ApiProblem, type ServerTiming, type TwinRef, createQuery, getCatalog, getQuery, getTwin, listTwins, stepUrl } from "./api/client";
-import type { Answer, PathAnswer, SetAnswer, TableDef, Twin } from "./api/types";
+import { ApiProblem, type ServerTiming, type TwinRef, createQuery, getCatalog, getQuery, getSourceLines, getTwin, listTwins, stepUrl } from "./api/client";
+import type { Answer, PathAnswer, SetAnswer, Span, TableDef, Twin } from "./api/types";
 import { CoverageView } from "./coverage/CoverageView";
 import { OutcomeWord, PathLadder, VerdictText } from "./ladder/Ladder";
 import { SetLadder } from "./ladder/SetLadder";
@@ -285,7 +285,13 @@ export function App() {
       .catch(() => setNotice(`The browser did not copy the ${what}.`));
   }
 
+  const sourceTwin = result && !result.twin.startsWith("builtin.") ? result.twin : null;
+  const sourceLines = useMemo(
+    () => (sourceTwin ? (span: Span) => getSourceLines(sourceTwin, span) : undefined),
+    [sourceTwin],
+  );
   const actions = {
+    sourceLines,
     copyExplain: (row: StepRow) => {
       const st = row.steps[row.steps.length - 1]!;
       copy(explainCommand(mode, result?.twin ?? twin, fields, row.path.branch, st.index, row.path.replyOf), "rsim explain command");

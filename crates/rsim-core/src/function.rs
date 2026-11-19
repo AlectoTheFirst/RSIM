@@ -98,6 +98,14 @@ pub trait NetFunction: Debug + Send + Sync + std::any::Any {
     fn qos_reads(&self) -> Vec<HeaderField>;
     fn qos_writes(&self) -> Vec<HeaderField>;
     fn provenance(&self) -> &[SourceSpan];
+    /// Calls `f` with each source span that a trace step of the function
+    /// can name: the provenance and the spans of the parts of the function
+    /// that decide a branch, such as its rules, routes and table entries.
+    fn each_span(&self, f: &mut dyn FnMut(&SourceSpan)) {
+        for s in self.provenance() {
+            f(s);
+        }
+    }
     /// All functions that a `Forward` outcome of this function can name.
     fn successors(&self) -> Vec<FunctionId>;
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch>;

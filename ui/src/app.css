@@ -582,6 +582,32 @@ select.twin {
   text-align: right;
 }
 
+.code .ln {
+  color: var(--ink-muted);
+}
+
+.code .tx {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code .note {
+  grid-column: 1 / -1;
+  text-align: left;
+}
+
+.code + .code,
+.code + .span-label,
+.span-label + .code {
+  margin-top: var(--button-gap);
+}
+
+.span-label {
+  display: block;
+  height: auto;
+  padding: 0;
+}
+
 /* The set page */
 
 .part {

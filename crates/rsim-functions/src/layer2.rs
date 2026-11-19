@@ -159,6 +159,20 @@ impl HostResolution {
 impl NetFunction for HostResolution {
     meta_methods!(FunctionKind::Ingress);
 
+    fn each_span(&self, f: &mut dyn FnMut(&rsim_core::SourceSpan)) {
+        for s in &self.meta.provenance {
+            f(s);
+        }
+        for (_, h) in self.hosts.entries() {
+            for s in &h.spans {
+                f(s);
+            }
+        }
+        for s in self.gateway.iter().flat_map(|g| &g.spans) {
+            f(s);
+        }
+    }
+
     fn ingress_interface(&self) -> Option<&InterfaceId> {
         Some(&self.interface)
     }
@@ -454,6 +468,20 @@ pub struct MacLookup {
 impl NetFunction for MacLookup {
     meta_methods!(FunctionKind::MacLookup);
 
+    fn each_span(&self, f: &mut dyn FnMut(&rsim_core::SourceSpan)) {
+        for s in &self.meta.provenance {
+            f(s);
+        }
+        for s in self
+            .tables
+            .values()
+            .flat_map(|t| t.values())
+            .flat_map(|e| &e.spans)
+        {
+            f(s);
+        }
+    }
+
     fn requires(&self) -> Vec<ContextAttr> {
         vec![ContextAttr::BridgeDomain]
     }
@@ -678,6 +706,22 @@ pub struct PortEgress {
 
 impl NetFunction for PortEgress {
     meta_methods!(FunctionKind::PortEgress);
+
+    fn each_span(&self, f: &mut dyn FnMut(&rsim_core::SourceSpan)) {
+        for s in &self.meta.provenance {
+            f(s);
+        }
+        for l in self.peers.iter().filter_map(|p| p.link.as_ref()) {
+            for s in l
+                .local
+                .spans
+                .iter()
+                .chain(l.remote.iter().flat_map(|r| &r.spans))
+            {
+                f(s);
+            }
+        }
+    }
 
     fn requires(&self) -> Vec<ContextAttr> {
         vec![ContextAttr::BridgeDomain]
