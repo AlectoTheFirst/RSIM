@@ -19,6 +19,9 @@ import {
   columnWidths,
   deviceFunctions,
   filterCellText,
+  filterCells,
+  filterWords,
+  hiddenSelection,
   nextPage,
   nextSort,
   pageWords,
@@ -283,6 +286,45 @@ describe("shown columns", () => {
 
   it("keeps the source spans when no row opens", () => {
     expect(shownColumns(cols, defs, false)).toEqual([0, 1, 3, 4]);
+  });
+});
+
+describe("filter cells with hidden columns", () => {
+  const cols = ["device", "platform", "platform_reason", "management_address", "asn", "provenance"];
+  const defs = cols.map((n) =>
+    n === "management_address"
+      ? col(n, "address")
+      : n === "asn"
+        ? col(n, "integer")
+        : n === "provenance"
+          ? { ...col(n, "list"), semantic: "source_span" }
+          : col(n, "text"),
+  );
+  const shown = shownColumns(cols, defs, true);
+
+  it("gives each cell the definition of its own column after a hidden column", () => {
+    const cells = filterCells(cols, defs, shown);
+    expect(cells.map((c) => [c.name, c.col?.name, c.first])).toEqual([
+      ["device", "device", true],
+      ["platform", "platform", false],
+      ["management_address", "management_address", false],
+      ["asn", "asn", false],
+    ]);
+    expect(cells[2]!.col?.type).toBe("address");
+    expect(cells[3]!.col?.type).toBe("integer");
+  });
+
+  it("names the filters and the sort keys of the hidden columns", () => {
+    const filters = [
+      { column: "platform_reason", op: "=" as const, value: "not_read" },
+      { column: "device", op: "=" as const, value: "r1" },
+      { column: "provenance", op: "contains" as const, value: "r1/" },
+    ];
+    const h = hiddenSelection(cols, shown, filters, ["-platform_reason", "device"]);
+    expect(h.filters).toEqual([filters[0], filters[2]]);
+    expect(h.sort).toEqual(["-platform_reason"]);
+    expect(filterWords(h.filters)).toBe("platform_reason=not_read provenance.contains=r1/");
+    expect(hiddenSelection(cols, shown, [filters[1]!], ["device"])).toEqual({ filters: [], sort: [] });
   });
 });
 

@@ -26,6 +26,9 @@ import {
   defaultBy,
   deviceFunctions,
   filterCellText,
+  filterCells,
+  filterWords,
+  hiddenSelection,
   nextPage,
   nextSort,
   opsOf,
@@ -333,17 +336,19 @@ export function TablesView(props: {
 
   const filterable = grid && (st.verb === "show" || st.verb === "top" || st.verb === "lpm");
   const filters = filterable
-    ? shown.map((j) => grid.columns[j]!).map((name, j) => (
+    ? filterCells(grid.columns, grid.defs, shown).map(({ name, col, first }) => (
         <FilterCell
-          col={grid.defs[j]}
+          col={col}
           name={name}
           text={filterCellText(name, st.filters)}
-          first={j === 0}
+          first={first}
           inputRef={firstFilter}
           onApply={(t) => go({ filters: setColumnFilters(st.filters, name, t) })}
         />
       ))
     : null;
+
+  const hidden = grid ? hiddenSelection(grid.columns, shown, st.filters, st.sort) : { filters: [], sort: [] };
 
   const next = body?.verb === "show" ? (body.out.next_cursor ?? null) : null;
 
@@ -459,7 +464,29 @@ export function TablesView(props: {
       parts.push(
         <span>
           <span class="t-label">filters </span>
-          <span class="t-value">{st.filters.map((f) => `${f.op === "=" ? f.column : `${f.column}.${f.op}`}=${f.value}`).join(" ")}</span>
+          <span class="t-value">{filterWords(st.filters)}</span>
+        </span>,
+      );
+    }
+    if (filterable && hidden.filters.length) {
+      parts.push(
+        <span>
+          <span class="t-label">hidden filters </span>
+          <span class="t-value">{filterWords(hidden.filters)}</span>{" "}
+          <button type="button" class="plain" onClick={() => go({ filters: st.filters.filter((f) => !hidden.filters.includes(f)) })}>
+            Clear
+          </button>
+        </span>,
+      );
+    }
+    if (sortable && hidden.sort.length) {
+      parts.push(
+        <span>
+          <span class="t-label">hidden order </span>
+          <span class="t-value">{hidden.sort.join(",")}</span>{" "}
+          <button type="button" class="plain" onClick={() => go({ sort: st.sort.filter((x) => !hidden.sort.includes(x)) })}>
+            Clear
+          </button>
         </span>,
       );
     }

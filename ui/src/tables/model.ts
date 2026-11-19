@@ -426,6 +426,36 @@ export function shownColumns(
   return out;
 }
 
+/** The filter cells of the shown columns, each with the name and the definition of its own column. */
+export function filterCells(
+  columns: readonly string[],
+  defs: readonly (Column | undefined)[],
+  shown: readonly number[],
+): { name: string; col: Column | undefined; first: boolean }[] {
+  return shown.map((j, k) => ({ name: columns[j]!, col: defs[j], first: k === 0 }));
+}
+
+/**
+ * The filters and the sort keys of the columns that the grid does not show,
+ * which no filter cell and no column head gives.
+ */
+export function hiddenSelection(
+  columns: readonly string[],
+  shown: readonly number[],
+  filters: readonly Filter[],
+  sort: readonly string[],
+): { filters: Filter[]; sort: string[] } {
+  const names = new Set(shown.map((j) => columns[j]!));
+  return {
+    filters: filters.filter((f) => !names.has(f.column)),
+    sort: sort.filter((s) => !names.has(s.startsWith("-") ? s.slice(1) : s)),
+  };
+}
+
+/** The text of filters as the URL gives them. */
+export const filterWords = (filters: readonly Filter[]): string =>
+  filters.map((f) => `${f.op === "=" ? f.column : `${f.column}.${f.op}`}=${f.value}`).join(" ");
+
 /** True for a column whose values align right. */
 export const alignsRight = (c: Column | undefined): boolean => c?.type === "integer";
 
