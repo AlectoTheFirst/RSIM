@@ -585,6 +585,14 @@ export function qosShown(v: Qos[keyof Qos]): Shown {
   return { known: true, text: String(v.known) };
 }
 
+/** The text of the DSCP or the ECN of a step: the one value of the packets, else not available. */
+export function headerQosShown(v: Qos["dscp"]): Shown {
+  if (typeof v !== "string" && "value" in v && typeof v.value !== "string" && "known" in v.value) {
+    return { known: true, text: String(v.value.known) };
+  }
+  return { known: false, text: "not available" };
+}
+
 /** The delay of a step. A delay with no data for some functions or links is a lower bound and not known. */
 export function delayShown(d: Branch["delay"]): Shown {
   if (!d.lower_bound) return { known: true, text: `${d.known_ns} ns` };

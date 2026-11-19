@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { SetAnswer, TraceStep } from "../src/api/types";
 import { serverTiming, sourceUrl } from "../src/api/client";
-import { delayShown, detailSources, isRowSpan, outcomeKnown, partCounts, qosShown, rateShown } from "../src/ladder/layout";
+import { delayShown, detailSources, headerQosShown, isRowSpan, outcomeKnown, partCounts, qosShown, rateShown } from "../src/ladder/layout";
 
 describe("server timing", () => {
   it("reads the engine time and a cache hit of the Server-Timing header", () => {
@@ -55,6 +55,12 @@ describe("QoS values", () => {
     expect(qosShown({ value: "unknown" }).known).toBe(false);
     expect(qosShown({ value: "original" }).known).toBe(false);
     expect(qosShown({ value: { in: [[0, 63]] } })).toEqual({ known: false, text: "0-63" });
+  });
+  it("shows the one DSCP or ECN value, else not available", () => {
+    expect(headerQosShown({ value: { known: 46 } })).toEqual({ known: true, text: "46" });
+    expect(headerQosShown("varies")).toEqual({ known: false, text: "not available" });
+    expect(headerQosShown("none")).toEqual({ known: false, text: "not available" });
+    expect(headerQosShown({ value: "unknown" })).toEqual({ known: false, text: "not available" });
   });
 });
 

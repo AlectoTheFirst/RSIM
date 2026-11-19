@@ -5,8 +5,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { TwinRef } from "../api/client";
 import type { Twin } from "../api/types";
 import type { Level } from "../ladder/layout";
-import { type ColourPref, type Prefs, ROW_HEIGHTS, type RowHeight, SIZE, type ThemePref } from "../theme";
-import { Hatch } from "./Hatch";
+import { type ColourPref, type Prefs, ROW_HEIGHTS, type RowHeight, type ThemePref } from "../theme";
 import {
   BASE_FIELDS,
   FIELD_CHARS,
@@ -17,13 +16,12 @@ import {
   formOf,
   insertValue,
   labelOf,
-  notStatedNote,
   valueToken,
   valuesOf,
 } from "./fields";
 import { NameList, PickerList, useAsk, useEndpoints, useEntryPoints } from "./Picker";
 import { type EntryOption, PICKER_CLOSED, type PickerState, type Suggestion, ingressStage, pickerKey } from "./pick";
-import { type Fields, type Mode, type QueryField, defaultsOf, hasDefaults, unstatedLabel } from "./query";
+import { type Fields, type Mode, type QueryField } from "./query";
 import { twinOption } from "./url";
 
 export const VIEWS = ["Trace", "Tables", "Coverage", "Compare", "Inventory", "Admin"] as const;
@@ -127,9 +125,7 @@ export function TopBar(props: {
         ))}
       </select>
       {info ? (
-        <span class="muted">
-          {info.snapshot == null ? "no snapshot" : `snapshot ${info.snapshot}`}, {info.layers.length} what-if layers
-        </span>
+        <span class="muted">{info.layers.length} what-if layers</span>
       ) : null}
       <span class="grow" />
       <nav class="group" aria-label="Views">
@@ -352,28 +348,6 @@ function AddField(props: {
   );
 }
 
-/**
- * The mark of the fields that a path query does not state, as a button
- * that switches `unstated` between all and defaults. With all it gives the
- * count of the fields that are not stated, with defaults the word
- * defaults; its title names the fields or the defaults.
- */
-function UnstatedButton(props: { fields: Fields; notStated: readonly string[]; onToggle: () => void }) {
-  const on = hasDefaults(props.fields);
-  const s = SIZE.hatchMark - 2 * SIZE.hairline;
-  const title = on
-    ? `defaults: ${defaultsOf(props.fields).join(", ")}`
-    : props.notStated.length
-      ? `not stated: ${props.notStated.join(", ")}`
-      : "not stated: none";
-  return (
-    <button type="button" class="mark" aria-pressed={on} title={title} onClick={props.onToggle}>
-      <Hatch w={s} h={s} />
-      <span>{unstatedLabel(on, props.notStated.length)}</span>
-    </button>
-  );
-}
-
 export function QueryBar(props: {
   twin: string;
   mode: Mode;
@@ -384,12 +358,8 @@ export function QueryBar(props: {
   askIngress: number;
   /** Whether an answer shows. */
   answered: boolean;
-  /** The fields that the query of the answer does not state, or null. */
-  notStated: readonly string[] | null;
   onMode: (m: Mode) => void;
   onField: (k: QueryField, v: string) => void;
-  /** Switches `unstated` between all and defaults. */
-  onDefaults: () => void;
   onRun: () => void;
   firstInput: { current: HTMLInputElement | null };
 }) {
@@ -474,12 +444,6 @@ export function QueryBar(props: {
             setFocusNext(k);
           }}
         />
-      ) : null}
-      {/* The mark of the fields not stated shows beside an answer, or while defaults is set. */}
-      {props.mode === "set" ? (
-        props.answered ? <span class="muted">{notStatedNote("set")}</span> : null
-      ) : props.answered || hasDefaults(props.fields) ? (
-        <UnstatedButton fields={props.fields} notStated={props.notStated ?? []} onToggle={props.onDefaults} />
       ) : null}
     </form>
   );
