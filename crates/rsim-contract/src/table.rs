@@ -92,7 +92,7 @@ const BASE_VERBS: &[&str] = &["show", "summarize", "unique", "top"];
 pub const TABLES: &[TableDef] = &[
     TableDef {
         name: "devices",
-        description: "The devices of the twin with their facts: each device with a function and each device of the snapshot. A fact that is not known is null, and its column `<fact>_reason` gives not_collected (the snapshot has no section or record that gives it) or not_read (no reader gives it from the section, or the serial is a placeholder).",
+        description: "The devices of the twin with their facts: each device with a function and each device of the snapshot, where a UniFi console gives a row for each device record of its `devices` section and a row of its own only when that section gives no device. A fact that is not known is null, and its column `<fact>_reason` gives not_collected (the snapshot has no section or record that gives it) or not_read (no reader gives it from the section, or the serial is a placeholder).",
         key: &["device"],
         columns: &[
             col("device", ColumnType::Text, "device", "The device."),
