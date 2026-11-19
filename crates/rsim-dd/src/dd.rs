@@ -140,6 +140,14 @@ fn key(op: Op, a: Edge, b: Edge, c: u32) -> (Key, bool) {
     }
 }
 
+/// The distance in levels up to which [`Dd::rename`] moves a level above the
+/// image of a level above it without a cut.
+const NEAR: u32 = 16;
+/// The most cuts of one rename by cuts.
+const MAX_CUTS: usize = 64;
+/// The most leaves of the upper part of one cut.
+const MAX_LEAVES: usize = 64;
+
 /// The identifier of a level map for [`Dd::rename`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MapId(u32);
@@ -162,6 +170,9 @@ pub struct Dd {
     read_only: bool,
     shadow_on: bool,
     maps: Vec<Vec<u32>>,
+    /// For each level map, true if it moves a level more than [`NEAR`]
+    /// levels above the image of a level above it.
+    far: Vec<bool>,
     /// The local nodes that the validator has checked.
     checked: usize,
     /// The task stack and the value stack of the evaluator, kept for reuse.
@@ -192,6 +203,7 @@ impl Dd {
             read_only: ro,
             shadow_on: true,
             maps: Vec::new(),
+            far: Vec::new(),
             checked,
             tasks: Vec::new(),
             vals: Vec::new(),
@@ -240,9 +252,20 @@ impl Dd {
 
     /// Reserves room for `nodes` more nodes and their table entries.
     pub fn reserve(&mut self, nodes: usize) {
+        self.reserve_tables(nodes, nodes);
+    }
+
+    /// Reserves room for `nodes` more nodes with their entries of the unique
+    /// table, and for `cache` more entries of the operation caches.
+    pub fn reserve_tables(&mut self, nodes: usize, cache: usize) {
         self.nodes.reserve(nodes);
         self.unique.reserve(nodes);
-        self.cache.reserve(nodes);
+        self.cache.reserve(cache);
+    }
+
+    /// The number of entries of the operation caches.
+    pub fn cache_entries(&self) -> usize {
+        self.cache.len()
     }
 
     /// Turns the operation caches on or off.
@@ -618,6 +641,12 @@ impl Dd {
         if sorted.len() != m.len() {
             return Err(broken("the level map is not injective"));
         }
+        let mut high = 0;
+        let far = m.iter().any(|&t| {
+            high = high.max(t);
+            t + NEAR < high
+        });
+        self.far.push(far);
         self.maps.push(m);
         Ok(MapId(self.maps.len() as u32 - 1))
     }
@@ -628,13 +657,187 @@ impl Dd {
     }
 
     /// The function with each variable moved by the level map `map`.
+    ///
+    /// A map that moves a level far above the image of a level above it
+    /// renames by cuts.
     pub fn rename(&mut self, f: Edge, map: MapId) -> Result<Edge, DdError> {
         self.check_edges(&[f])?;
         if map.0 as usize >= self.maps.len() {
             return Err(broken("the level map is not registered"));
         }
-        let r = self.rename_rec(f, map)?;
+        let r = if self.far[map.0 as usize] {
+            self.rename_cut(f, map)?
+        } else {
+            self.rename_rec(f, map)?
+        };
         self.post(ShadowOp::Rename(f, map), r)
+    }
+
+    /// The rename of `f` by cuts. The cuts are the levels of the support of
+    /// `f` whose image lies more than [`NEAR`] levels above the highest
+    /// image of the levels above them since the last cut. With no cut, or
+    /// with more than [`MAX_CUTS`] cuts, it is the rename of
+    /// [`Dd::rename_rec`].
+    fn rename_cut(&mut self, f: Edge, map: MapId) -> Result<Edge, DdError> {
+        if f.is_constant() {
+            return Ok(f);
+        }
+        let support = self.support(f);
+        let m = &self.maps[map.0 as usize];
+        let mut cuts = Vec::new();
+        let mut high = None;
+        for l in support {
+            let t = m[l as usize];
+            match high {
+                Some(h) if t + NEAR < h => {
+                    cuts.push(l);
+                    high = Some(t);
+                }
+                Some(h) => high = Some(t.max(h)),
+                None => high = Some(t),
+            }
+        }
+        if cuts.is_empty() || cuts.len() > MAX_CUTS {
+            return self.rename_rec(f, map);
+        }
+        let mut memo = Map::default();
+        self.cut_rec(f, map, &cuts, &mut memo)
+    }
+
+    /// The rename of `f` with the cuts `cuts`. The part of `f` above the
+    /// first cut below its top level reaches the edges at or below the cut,
+    /// its leaves. `f` is the disjunction over the leaves of the indicator
+    /// of the paths of the upper part to the leaf and the leaf, and the
+    /// rename of `f` is the disjunction of their renames. The upper part
+    /// lies between 2 cuts, so the rename of an indicator is near the
+    /// order. The recursion goes one cut deeper for each leaf. With more
+    /// than [`MAX_LEAVES`] leaves, it is the rename of [`Dd::rename_rec`].
+    fn cut_rec(
+        &mut self,
+        f: Edge,
+        map: MapId,
+        cuts: &[u32],
+        memo: &mut Map<Edge, Edge>,
+    ) -> Result<Edge, DdError> {
+        if f.is_constant() {
+            return Ok(f);
+        }
+        let neg = f.is_complement();
+        let f = f.regular();
+        if let Some(&r) = memo.get(&f) {
+            return Ok(r.xor_complement(neg));
+        }
+        let (key, _) = key(Op::Rename, f, Edge::TRUE, map.0);
+        if let Some(r) = self.cached(&key, false) {
+            memo.insert(f, r);
+            return Ok(r.xor_complement(neg));
+        }
+        let top = self.level(f);
+        let i = cuts.partition_point(|&c| c <= top);
+        let r = match cuts.get(i) {
+            None => self.rename_rec(f, map)?,
+            Some(&cut) => {
+                let leaves = self.leaves(f, cut);
+                if leaves.len() > MAX_LEAVES {
+                    self.rename_rec(f, map)?
+                } else {
+                    let mut acc = Edge::FALSE;
+                    for g in leaves {
+                        if g == Edge::FALSE {
+                            continue;
+                        }
+                        let c = self.indicator(f, cut, g)?;
+                        let c = self.rename_rec(c, map)?;
+                        let g = self.cut_rec(g, map, &cuts[i + 1..], memo)?;
+                        let part = self.and_rec(c, g)?;
+                        acc = self.or_rec(acc, part)?;
+                    }
+                    acc
+                }
+            }
+        };
+        self.store(key, false, r);
+        memo.insert(f, r);
+        Ok(r.xor_complement(neg))
+    }
+
+    /// The levels of the support of `f`, in order.
+    fn support(&self, f: Edge) -> Vec<u32> {
+        let mut seen: Map<u32, ()> = Map::default();
+        let mut levels = vec![false; self.levels as usize];
+        let mut stack = vec![f.index()];
+        while let Some(i) = stack.pop() {
+            if i == 0 || seen.insert(i, ()).is_some() {
+                continue;
+            }
+            let n = self.node(i);
+            levels[n.level as usize] = true;
+            stack.push(n.lo.index());
+            stack.push(n.hi.index());
+        }
+        (0..self.levels).filter(|&l| levels[l as usize]).collect()
+    }
+
+    /// The edges at or below the level `cut` that the paths of `f` reach,
+    /// with their complement flags, in the order of a walk that takes the 0
+    /// child first.
+    fn leaves(&self, f: Edge, cut: u32) -> Vec<Edge> {
+        let mut seen: Map<Edge, ()> = Map::default();
+        let mut found: Map<Edge, ()> = Map::default();
+        let mut out = Vec::new();
+        let mut stack = vec![f];
+        while let Some(e) = stack.pop() {
+            let l = self.level(e);
+            if l >= cut {
+                if found.insert(e, ()).is_none() {
+                    out.push(e);
+                }
+                continue;
+            }
+            if seen.insert(e, ()).is_some() {
+                continue;
+            }
+            let (lo, hi) = self.cofactors(e, l);
+            stack.push(hi);
+            stack.push(lo);
+        }
+        out
+    }
+
+    /// The function of the levels above `cut` that is true where the path
+    /// of `f` reaches the edge `leaf` at or below `cut`.
+    fn indicator(&mut self, f: Edge, cut: u32, leaf: Edge) -> Result<Edge, DdError> {
+        let mut done: Map<Edge, Edge> = Map::default();
+        let mut stack = vec![f];
+        while let Some(&e) = stack.last() {
+            let l = self.level(e);
+            if l >= cut {
+                done.insert(e, if e == leaf { Edge::TRUE } else { Edge::FALSE });
+                stack.pop();
+                continue;
+            }
+            if done.contains_key(&e) {
+                stack.pop();
+                continue;
+            }
+            let (lo, hi) = self.cofactors(e, l);
+            match (done.get(&lo), done.get(&hi)) {
+                (Some(&a), Some(&b)) => {
+                    let r = self.mk(l, a, b)?;
+                    done.insert(e, r);
+                    stack.pop();
+                }
+                (a, b) => {
+                    if b.is_none() {
+                        stack.push(hi);
+                    }
+                    if a.is_none() {
+                        stack.push(lo);
+                    }
+                }
+            }
+        }
+        Ok(done[&f])
     }
 
     // ------------------------------------------------------------ evaluator

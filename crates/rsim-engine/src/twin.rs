@@ -490,6 +490,12 @@ impl Twin {
         SetArena::new(&self.base, budget)
     }
 
+    /// A new arena for one run of a query, with the table room of the
+    /// earlier runs on this twin.
+    pub fn run_arena(&self, budget: Option<usize>) -> Arc<SetArena> {
+        SetArena::for_run(&self.base, budget)
+    }
+
     /// The fault of the frozen base, if its validation fails.
     pub fn validate(&self) -> Result<(), DdError> {
         self.base.validate()

@@ -145,4 +145,59 @@ proptest! {
         prop_assert!(got == want, "the engine and OxiDD differ for {:?}", f);
         dd.validate().unwrap();
     }
+
+    #[test]
+    fn a_swap_of_the_2_fields_gives_the_same_sets_as_oxidd(f in formula_with(leaf(), pool(), 5)) {
+        same_as_oxidd(&F::Rename(Box::new(f), field_swap()));
+    }
+}
+
+/// The swaps of the reverse direction of a flow relation on the 2 fields:
+/// the first field of the original level with the second field of the
+/// current level, and the first field of the current level with the second
+/// field of the original level.
+fn field_swap() -> Vec<(u32, u32)> {
+    let [a, b] = FIELDS;
+    (0..32)
+        .flat_map(|i| {
+            [
+                ((a + i) * 4, (b + i) * 4 + 1),
+                ((a + i) * 4 + 1, (b + i) * 4),
+            ]
+        })
+        .collect()
+}
+
+fn same_as_oxidd(f: &F) {
+    let oxi = Oxi::new();
+    let mut dd = Dd::new(LEVELS);
+    let e = build(&mut dd, f).unwrap();
+    let got = oxi.translate(&dd, e, &mut HashMap::new());
+    assert!(got == oxi.build(f), "the engine and OxiDD differ for {f:?}");
+    dd.validate().unwrap();
+}
+
+/// The union of `n` pairs of a value of the first field and a value of the
+/// second field, each pair with its own value of the second field.
+fn pairs_of_values(n: u32) -> F {
+    let [a, b] = FIELDS;
+    (0..n).fold(F::Const(false), |acc, k| {
+        let pair = F::And(
+            Box::new(prefix(a, 8, k, 0)),
+            Box::new(F::And(
+                Box::new(prefix(a, 8, k ^ 0x5a, 1)),
+                Box::new(prefix(b, 8, (k * 37 + 11) % 256, 0)),
+            )),
+        );
+        F::Or(Box::new(acc), Box::new(pair))
+    })
+}
+
+#[test]
+fn a_swap_of_the_2_fields_with_few_and_with_many_paths_gives_the_same_sets_as_oxidd() {
+    for n in [1, 8, 100] {
+        let f = pairs_of_values(n);
+        same_as_oxidd(&F::Rename(Box::new(f.clone()), field_swap()));
+        same_as_oxidd(&F::Rename(Box::new(F::Not(Box::new(f))), field_swap()));
+    }
 }

@@ -250,7 +250,7 @@ impl<'t> Executor<'t> {
         *runs += 1;
         // Each run has a new arena, so a query that runs again gives the
         // same answer.
-        let s = input.copy_to(&self.twin.arena(self.opts.node_budget));
+        let s = input.copy_to(&self.twin.run_arena(self.opts.node_budget));
         let r = fault_of(&s).and_then(|()| self.try_run(&s, ingress, start, q, FlowState::new()));
         match r {
             Ok(out) => outs.push(out),
