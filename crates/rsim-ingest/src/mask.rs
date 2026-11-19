@@ -218,15 +218,30 @@ fn query_secrets(word: &str, host: usize, found: &mut Vec<(usize, usize)>) {
     }
 }
 
-/// The masked lines of the canonical form of a section of a vendor, from
-/// line 1. A vendor and format with no mask give `Refusal::NoMask`.
-pub fn section_lines(vendor: &str, format: Format, bytes: &[u8]) -> Result<Vec<String>, Refusal> {
+/// The masked lines of a section of a vendor, from line 1, numbered as the
+/// source spans of the section number them. A JSON section and a running
+/// config give the lines of their canonical form; a text section that the
+/// templates of `rsim-textfsm` read gives the lines of its bytes split by
+/// `rsim_textfsm::split_lines`. A vendor and format with no mask give
+/// `Refusal::NoMask`.
+pub fn section_lines(
+    vendor: &str,
+    section: &str,
+    format: Format,
+    bytes: &[u8],
+) -> Result<Vec<String>, Refusal> {
     match (vendor, format) {
         ("vyos", Format::Json) => json_lines(bytes, &vyos::mask::MASK),
         ("unifi", Format::Json) => json_lines(bytes, &unifi::mask::MASK),
         ("nxos", Format::Json) => json_lines(bytes, &nxos::JSON_MASK),
         ("nxos", Format::Text) => text_lines(bytes, nxos::mask),
+        ("iosxr", Format::Text) if iosxr::SECTIONS.contains(&section) => {
+            record_lines(bytes, iosxr::mask)
+        }
         ("iosxr", Format::Text) => text_lines(bytes, iosxr::mask),
+        ("iosxe", Format::Text) if iosxe::SECTIONS.contains(&section) => {
+            record_lines(bytes, iosxe::mask)
+        }
         ("iosxe", Format::Text) => text_lines(bytes, iosxe::mask),
         _ => Err(Refusal::NoMask {
             vendor: vendor.to_string(),
@@ -469,6 +484,16 @@ pub fn text_lines(bytes: &[u8], mask: fn(&str) -> String) -> Result<Vec<String>,
     Ok(text.lines().map(|l| masked_line(l, mask)).collect())
 }
 
+/// The masked lines of a text section that a template of `rsim-textfsm`
+/// reads: its bytes split by `rsim_textfsm::split_lines`, the split that
+/// numbers the lines of the records, with the line mask of its vendor.
+pub fn record_lines(bytes: &[u8], mask: fn(&str) -> String) -> Result<Vec<String>, Refusal> {
+    let text = String::from_utf8_lossy(bytes);
+    Ok(rsim_textfsm::split_lines(&text)
+        .map(|l| masked_line(l, mask))
+        .collect())
+}
+
 /// The number of words that stay in a Cisco config line whose secret
 /// follows words that are not secret words, or `None` for another line:
 /// 3 in a line that starts with `snmp-server host`, 2 in a line that starts
@@ -545,7 +570,7 @@ pub(crate) mod check {
         secrets: &[&str],
         kept: &[&str],
     ) -> Vec<String> {
-        let got = section_lines(vendor, format, bytes).unwrap();
+        let got = section_lines(vendor, "config", format, bytes).unwrap();
         let canon = rsim_store::canonical(format, bytes).unwrap();
         assert_eq!(got.len(), String::from_utf8_lossy(&canon).lines().count());
         let text = got.join("\n");
@@ -845,7 +870,7 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    section_lines(vendor, format, b"{}"),
+                    section_lines(vendor, "config", format, b"{}"),
                     Err(Refusal::NoMask { .. })
                 ),
                 "{vendor}"

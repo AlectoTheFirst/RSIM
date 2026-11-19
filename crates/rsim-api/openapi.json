@@ -3278,7 +3278,7 @@
         "type": "object"
       },
       "SourceTextJson": {
-        "description": "The masked lines of one source span: the lines from `first_line` to\n`last_line` that lie inside a source span of a function of the twin, at\nmost `MAX_LINES` lines from `first_line`. `left_out` lists the ranges of\nthe request that are outside every such span; `cut` is the number of\nlines after the limit that the answer leaves out. A note names both.",
+        "description": "The masked lines of one source span: the lines from `first_line` to\n`last_line` that lie inside a source span of a function of the twin, at\nmost `MAX_LINES` lines from `first_line`. `left_out` lists the ranges of\nthe request that are outside every such span or past the end of the\nsection, so `lines` can be empty; `cut` is the number of\nlines after the limit that the answer leaves out. A note names both.",
         "properties": {
           "cut": {
             "format": "uint32",

@@ -220,9 +220,13 @@ pub(crate) fn parse_on(
         .find(platform, command)
         .ok_or_else(|| format!("no template for {command}"))?;
     let text = String::from_utf8_lossy(bytes);
-    let first = text.lines().next().unwrap_or_default();
+    let mut lines = rsim_textfsm::split_lines(&text);
+    let first = lines.next().unwrap_or_default();
     let (body, offset) = if skip(first) {
-        (text.split_once('\n').map_or("", |x| x.1), 1)
+        let start = lines
+            .next()
+            .map_or(text.len(), |l| l.as_ptr() as usize - text.as_ptr() as usize);
+        (&text[start..], 1)
     } else {
         (&text[..], 0)
     };
@@ -543,6 +547,40 @@ mod tests {
         assert_eq!(speed("1000Mb/s"), Some(1000));
         assert_eq!(speed("10Gb/s"), Some(10_000));
         assert_eq!(speed("fast"), None);
+    }
+
+    #[test]
+    fn a_record_span_serves_its_own_lines_with_a_form_feed_and_a_lone_cr() {
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/iosxr/arp.txt"
+        ))
+        .unwrap();
+        let text = text
+            .replacen("UTC\n", "UTC\x0c", 1)
+            .replacen("\n0/0/CPU0\n", "\r0/0/CPU0\n", 1)
+            .replacen("\n\n", "\n\x0c", 1);
+        assert_eq!(text.matches('\x0c').count(), 2);
+        assert_eq!(text.matches('\r').count(), 1);
+        let p = parse(command("arp"), text.as_bytes(), "r1/arp@x").unwrap();
+        let served =
+            crate::mask::section_lines("iosxr", "arp", rsim_store::Format::Text, text.as_bytes())
+                .unwrap();
+        let records: Vec<_> = p.records().collect();
+        assert!(records.len() > 10);
+        for (r, span) in &records {
+            let (a, b) = (span.first_line as usize, span.last_line as usize);
+            assert!(b <= served.len(), "{a}-{b} past {}", served.len());
+            let got = &served[a - 1..b];
+            assert_eq!(got.len(), 1, "{a}-{b}");
+            assert!(
+                got[0].starts_with(&format!("{} ", p.text(r, "IP_ADDRESS"))),
+                "{a}: {got:?}"
+            );
+        }
+        let (r, span) = records.last().unwrap();
+        assert_eq!(p.text(r, "IP_ADDRESS"), "203.0.113.254");
+        assert_eq!(span.last_line as usize, served.len());
     }
 
     #[test]

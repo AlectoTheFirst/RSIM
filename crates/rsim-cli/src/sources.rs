@@ -172,9 +172,11 @@ pub fn parse_range(text: &str) -> Result<(u32, u32), QueryError> {
 /// The masked lines of a span of a twin that lie inside a source span of a
 /// function of the twin: at most `MAX_LINES` lines from `first`, the ranges
 /// that are left out, and the number of the lines after the limit. A span
-/// with no line inside a source span of a function is refused, whatever the
-/// length of the section; a line of a source span past the end of the
-/// section is not given. A row span is refused.
+/// with no line inside a source span of a function is refused before the
+/// section is read; a span with such a line is answered, and a covered line
+/// past the end of the section is not given and is in `left_out`, so the
+/// status and `left_out` do not depend on the length of the section beyond
+/// the lines that are given. A row span is refused.
 pub fn text(
     twin: &Loaded,
     file: &str,
@@ -232,29 +234,41 @@ pub fn text(
         .store
         .read_blob(&blob)
         .map_err(|e| QueryError::new(ErrorCode::Store, e.to_string()))?;
-    let lines = section_lines(&m.vendor, entry.format, &bytes).map_err(|r| match r {
+    let lines = section_lines(&m.vendor, section, entry.format, &bytes).map_err(|r| match r {
         Refusal::NoMask { .. } => QueryError::new(
             ErrorCode::NotMasked,
             format!("{file}: {r}, so its lines are not given"),
         ),
         Refusal::Unreadable(_) => QueryError::new(ErrorCode::Store, format!("{file}: {r}")),
     })?;
+    Ok(serve(file, first, last, &covered, &lines))
+}
+
+/// The answer of the lines `first` to `last` of a section with the masked
+/// lines `lines`, of which the ranges `covered` lie inside a source span.
+/// A covered line past the end of the section is in `left_out` with the
+/// lines outside every span, so each line of the request that is not given
+/// is in `left_out` or after the limit.
+fn serve(
+    file: &str,
+    first: u32,
+    last: u32,
+    covered: &[(u32, u32)],
+    lines: &[String],
+) -> SourceTextJson {
     let count = u32::try_from(lines.len()).unwrap_or(u32::MAX);
     let present: Vec<(u32, u32)> = covered
         .iter()
         .filter(|r| r.0 <= count)
         .map(|&(a, b)| (a, b.min(count)))
         .collect();
-    if present.is_empty() {
-        return Err(outside());
-    }
-    let left_out = gaps(&covered, first, last);
+    let left_out = gaps(&present, first, last);
     let shown = last.min(first.saturating_add(MAX_LINES - 1));
     let cut = last - shown;
     let mut notes = Vec::new();
     if !left_out.is_empty() {
         notes.push(format!(
-            "lines {} are outside every source span of a function of the twin and are left out",
+            "lines {} are outside every source span of a function of the twin or not in the section and are left out",
             ranges_text(&left_out)
         ));
     }
@@ -264,7 +278,7 @@ pub fn text(
             shown + 1
         ));
     }
-    Ok(SourceTextJson {
+    SourceTextJson {
         file: file.to_string(),
         first_line: first,
         last_line: last,
@@ -279,7 +293,7 @@ pub fn text(
         left_out,
         cut,
         note: (!notes.is_empty()).then(|| notes.join("; ")),
-    })
+    }
 }
 
 /// The output object of the masked lines of a span.
@@ -318,4 +332,60 @@ pub fn of_spans(twin: &Loaded, spans: &[SpanJson]) -> Vec<StepSourceJson> {
 /// Adds the masked lines of each span of the step to a step output.
 pub fn attach(out: &mut StepOut, twin: &Loaded) {
     out.source_lines = Some(of_spans(twin, &out.trace_step.provenance));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const COVERED: [(u32, u32); 2] = [(5, 10), (30, 35)];
+
+    /// The answer of the lines 1-40 of a section of `n` lines.
+    fn answer(n: usize) -> SourceTextJson {
+        let lines: Vec<String> = (1..=n).map(|i| format!("line {i}")).collect();
+        serve("d/s@x", 1, 40, &COVERED, &lines)
+    }
+
+    fn numbers(t: &SourceTextJson) -> Vec<u32> {
+        t.lines.iter().map(|l| l.number).collect()
+    }
+
+    fn left(t: &SourceTextJson) -> Vec<u32> {
+        t.left_out
+            .iter()
+            .flat_map(|r| r.first_line..=r.last_line)
+            .collect()
+    }
+
+    #[test]
+    fn sections_of_different_lengths_give_the_same_status_and_left_out() {
+        let (a, b) = (answer(3), answer(4));
+        assert!(a.lines.is_empty() && b.lines.is_empty());
+        assert_eq!(a.left_out, b.left_out);
+        assert_eq!(
+            a.left_out,
+            vec![LineRangeJson {
+                first_line: 1,
+                last_line: 40
+            }]
+        );
+        let (a, b) = (answer(40), answer(90));
+        assert_eq!(numbers(&a), numbers(&b));
+        assert_eq!(a.left_out, b.left_out);
+        let past = answer(7);
+        assert_eq!(numbers(&past), vec![5, 6, 7]);
+        assert_eq!(left(&past), (1..=4).chain(8..=40).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn each_line_of_a_request_is_given_or_left_out_for_each_section_length() {
+        for n in 0..=50 {
+            let t = answer(n);
+            assert!(numbers(&t).iter().all(|&k| k as usize <= n), "length {n}");
+            let mut all: Vec<u32> = numbers(&t).into_iter().chain(left(&t)).collect();
+            all.sort_unstable();
+            assert_eq!(all, (1..=40).collect::<Vec<_>>(), "length {n}");
+            assert_eq!(t.cut, 0);
+        }
+    }
 }

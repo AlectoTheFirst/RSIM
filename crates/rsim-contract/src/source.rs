@@ -26,7 +26,8 @@ pub struct LineRangeJson {
 /// The masked lines of one source span: the lines from `first_line` to
 /// `last_line` that lie inside a source span of a function of the twin, at
 /// most `MAX_LINES` lines from `first_line`. `left_out` lists the ranges of
-/// the request that are outside every such span; `cut` is the number of
+/// the request that are outside every such span or past the end of the
+/// section, so `lines` can be empty; `cut` is the number of
 /// lines after the limit that the answer leaves out. A note names both.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceTextJson {

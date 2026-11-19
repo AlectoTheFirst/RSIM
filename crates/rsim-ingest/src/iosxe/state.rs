@@ -273,7 +273,7 @@ fn vlans(p: &Parsed) -> Result<Vec<VlanRow>, String> {
 /// `VRF: <name> failed` gives a VRF whose command failed. A text before
 /// the first such line makes the section not read.
 fn arp_vrfs(text: &str, file: &str, names: &Names) -> Result<VrfArp, String> {
-    let lines: Vec<&str> = text.lines().collect();
+    let lines: Vec<&str> = rsim_textfsm::split_lines(text).collect();
     let starts: Vec<usize> = (0..lines.len())
         .filter(|&i| lines[i].starts_with(ARP_VRF_LINE))
         .collect();
