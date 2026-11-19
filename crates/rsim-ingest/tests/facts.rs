@@ -90,6 +90,31 @@ fn an_empty_or_placeholder_vyos_serial_is_not_read_and_the_next_line_is_not_take
 }
 
 #[test]
+fn a_placeholder_platform_or_os_version_is_not_read() {
+    for (model, version) in [
+        ("Default string", "VyOS 0"),
+        ("To Be Filled By O.E.M.", "VyOS Unknown"),
+        ("System Product Name", "VyOS N/A"),
+        ("Not Specified", "VyOS xxxx"),
+    ] {
+        let text = format!(
+            "Version:          {version}\nHardware model:   {model}\nHardware S/N:     FAKER10002\n"
+        );
+        let s = sections("r1", &[("version", text.into_bytes())]);
+        let f = one("r1", "vyos", None, &s);
+        assert_eq!(f.platform, NOT_READ, "{model}");
+        assert_eq!(f.os_version, NOT_READ, "{version}");
+        assert_eq!(f.serial, known("FAKER10002", line("r1/version@b1", 3, 3)));
+    }
+    let json = br#"{"chassis_id": "System Product Name", "nxos_ver_str": "System Version", "proc_board_id": "FAKELEAF02"}"#;
+    let s = sections("leaf1", &[("version", json.to_vec())]);
+    let f = one("leaf1", "nxos", None, &s);
+    assert_eq!(f.platform, NOT_READ);
+    assert_eq!(f.os_version, NOT_READ);
+    assert_eq!(f.serial.value(), Some("FAKELEAF02"));
+}
+
+#[test]
 fn an_nxos_switch_gives_its_chassis_version_and_board_serial() {
     let s = sections("leaf1", &[("version", fixture("nxos/version.json"))]);
     let f = one("leaf1", "nxos", Some("192.0.2.11"), &s);

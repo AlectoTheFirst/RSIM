@@ -19,7 +19,7 @@ pub enum Reason {
     NotCollected,
     /// The section is in the snapshot, but no reader gives the fact from
     /// it: the line or the key is not there, the template does not read
-    /// it, or the serial is a placeholder.
+    /// it, or the value is a placeholder.
     NotRead,
 }
 
@@ -84,6 +84,15 @@ impl Fact {
     fn serial(text: Option<&str>, span: SourceSpan) -> Fact {
         match text {
             Some(t) if placeholder_serial(t) => Fact::Unknown(Reason::NotRead),
+            _ => Fact::of(text, span),
+        }
+    }
+
+    /// A platform or an OS version with its span, or `not_read` for no
+    /// text or a placeholder.
+    fn named(text: Option<&str>, span: SourceSpan) -> Fact {
+        match text {
+            Some(t) if placeholder_text(t) => Fact::Unknown(Reason::NotRead),
             _ => Fact::of(text, span),
         }
     }
@@ -160,17 +169,51 @@ pub const PLACEHOLDER_SERIALS: &[&str] = &[
     "12345678",
 ];
 
+/// The platforms and OS versions that name no model and no version,
+/// compared as [`PLACEHOLDER_SERIALS`]: what the firmware of a board gives
+/// when the field is not set.
+pub const PLACEHOLDER_TEXTS: &[&str] = &[
+    "",
+    "default string",
+    "to be filled by o.e.m.",
+    "system product name",
+    "system version",
+    "not specified",
+    "none",
+    "n/a",
+    "0",
+    "unknown",
+];
+
+/// The text in lower case with each run of white space as one space, and
+/// the count of its characters other than white space with true if they
+/// are all one character.
+fn folded(text: &str) -> (String, usize, bool) {
+    let words: Vec<String> = text.split_whitespace().map(str::to_lowercase).collect();
+    let mut chars = words.iter().flat_map(|w| w.chars());
+    let first = chars.next();
+    let mut count = usize::from(first.is_some());
+    let mut one = true;
+    for c in chars {
+        count += 1;
+        one &= Some(c) == first;
+    }
+    (words.join(" "), count, one)
+}
+
 /// True if a serial is a placeholder: one of [`PLACEHOLDER_SERIALS`], or
 /// one character repeated, such as `0000` or `XXXXXXXX`.
 pub fn placeholder_serial(text: &str) -> bool {
-    let words: Vec<String> = text.split_whitespace().map(str::to_lowercase).collect();
-    let joined = words.join(" ");
-    if PLACEHOLDER_SERIALS.contains(&joined.as_str()) {
-        return true;
-    }
-    let mut chars = words.iter().flat_map(|w| w.chars());
-    let first = chars.next();
-    chars.all(|c| Some(c) == first)
+    let (joined, _, one) = folded(text);
+    one || PLACEHOLDER_SERIALS.contains(&joined.as_str())
+}
+
+/// True if a platform or an OS version is a placeholder: one of
+/// [`PLACEHOLDER_TEXTS`], or one character 2 or more times, such as `xx`
+/// or `....`.
+pub fn placeholder_text(text: &str) -> bool {
+    let (joined, count, one) = folded(text);
+    (one && count >= 2) || PLACEHOLDER_TEXTS.contains(&joined.as_str())
 }
 
 /// The sections of a device, each with its file name.
@@ -311,7 +354,7 @@ fn vyos_version(bytes: &[u8], file: &str) -> Identity {
     let text = String::from_utf8_lossy(bytes);
     let fact = |label: &str, serial: bool| match labelled(&text, file, label) {
         Some((rest, span)) if serial => Fact::serial(Some(rest), span),
-        Some((rest, span)) => Fact::of(Some(rest), span),
+        Some((rest, span)) => Fact::named(Some(rest), span),
         None => Fact::Unknown(Reason::NotRead),
     };
     let os_version = match labelled(&text, file, vyos::profile::VERSION_LINE) {
@@ -321,7 +364,7 @@ fn vyos_version(bytes: &[u8], file: &str) -> Identity {
                 Some(word) if word == vyos::profile::VERSION_NAME => w.next(),
                 _ => None,
             };
-            Fact::of(v, span)
+            Fact::named(v, span)
         }
         None => Fact::Unknown(Reason::NotRead),
     };
@@ -349,7 +392,7 @@ fn nxos_version(bytes: &[u8], file: &str) -> Identity {
     };
     let fact = |keys: &[&str], serial: bool| match keys.iter().find_map(|k| key(k)) {
         Some((t, span)) if serial => Fact::serial(Some(t), span),
-        Some((t, span)) => Fact::of(Some(t), span),
+        Some((t, span)) => Fact::named(Some(t), span),
         None => Fact::Unknown(Reason::NotRead),
     };
     Identity {
@@ -369,7 +412,7 @@ fn iosxr_version(version: Option<(&[u8], &str)>, inventory: Option<(&[u8], &str)
                 .records()
                 .find_map(|(r, span)| match p.text(r, "VERSION").trim() {
                     "" => None,
-                    v => Some(Fact::of(Some(v), span)),
+                    v => Some(Fact::named(Some(v), span)),
                 })
                 .unwrap_or(Fact::Unknown(Reason::NotRead)),
             Err(_) => Fact::Unknown(Reason::NotRead),
@@ -391,7 +434,7 @@ fn iosxr_version(version: Option<(&[u8], &str)>, inventory: Option<(&[u8], &str)
                     ),
                     |(r, span)| {
                         (
-                            Fact::of(Some(p.text(r, "PID")), span.clone()),
+                            Fact::named(Some(p.text(r, "PID")), span.clone()),
                             Fact::serial(Some(p.text(r, "SN")), span),
                         )
                     },
@@ -420,8 +463,8 @@ fn iosxe_version(bytes: &[u8], file: &str) -> Identity {
     };
     let first = |name: &str| p.list(r, name).into_iter().next();
     Identity {
-        platform: Fact::of(first("HARDWARE").as_deref(), span.clone()),
-        os_version: Fact::of(Some(p.text(r, "VERSION")), span.clone()),
+        platform: Fact::named(first("HARDWARE").as_deref(), span.clone()),
+        os_version: Fact::named(Some(p.text(r, "VERSION")), span.clone()),
         serial: Fact::serial(first("SERIAL").as_deref(), span),
     }
 }
@@ -442,8 +485,8 @@ fn unifi_devices(bytes: &[u8], file: &str) -> Vec<(String, Identity, Fact)> {
             Some((
                 unifi::lower::device_name(d),
                 Identity {
-                    platform: Fact::of(s("model"), span.clone()),
-                    os_version: Fact::of(s("version"), span.clone()),
+                    platform: Fact::named(s("model"), span.clone()),
+                    os_version: Fact::named(s("version"), span.clone()),
                     serial: Fact::serial(s("serial"), span.clone()),
                 },
                 Fact::of(s("ip"), span),
@@ -471,6 +514,31 @@ mod tests {
         }
         for s in ["FAKE0001", "AB", "0001"] {
             assert!(!placeholder_serial(s), "{s:?}");
+        }
+    }
+
+    #[test]
+    fn a_placeholder_platform_or_version_is_not_a_value() {
+        for s in [
+            "Default string",
+            "To be filled by O.E.M.",
+            "To Be Filled By O.E.M.",
+            "System Product Name",
+            "System Version",
+            "Not Specified",
+            "None",
+            "N/A",
+            "0",
+            "Unknown",
+            "",
+            "   ",
+            "xx",
+            "....",
+        ] {
+            assert!(placeholder_text(s), "{s:?}");
+        }
+        for s in ["Fake Router 1000", "1.4.0", "9", "X", "U6-FAKE"] {
+            assert!(!placeholder_text(s), "{s:?}");
         }
     }
 }
