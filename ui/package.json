@@ -6,8 +6,8 @@
   "description": "The browser UI of rsim, served by rsim-api.",
   "license": "MIT",
   "scripts": {
-    "api": "openapi-typescript ../crates/rsim-api/openapi.json --output src/api/schema.ts",
-    "api:check": "openapi-typescript ../crates/rsim-api/openapi.json --check --output src/api/schema.ts",
+    "api": "openapi-typescript ../crates/rsim-api/openapi.json --output src/api/schema.ts && node scripts/fields.mjs",
+    "api:check": "openapi-typescript ../crates/rsim-api/openapi.json --check --output src/api/schema.ts && node scripts/fields.mjs --check",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "dev": "vite",

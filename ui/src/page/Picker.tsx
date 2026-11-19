@@ -100,3 +100,35 @@ export function PickerList(props: {
     </div>
   );
 }
+
+/** A list of names under a control of the query bar, in the look of the endpoint picker. */
+export function NameList(props: {
+  id: string;
+  label: string;
+  names: readonly string[];
+  /** The text after each name, or none. */
+  detail?: (name: string) => string;
+  active: number;
+  onChoose: (name: string) => void;
+}) {
+  return (
+    <div class={props.detail ? "picker two" : "picker one"} id={props.id} role="listbox" aria-label={props.label}>
+      {props.names.map((n, i) => (
+        <div
+          id={`${props.id}-${i}`}
+          class="option"
+          role="option"
+          aria-selected={i === props.active}
+          // A press keeps the focus where it is, so that the query bar stays open.
+          onMouseDown={(e) => {
+            e.preventDefault();
+            props.onChoose(n);
+          }}
+        >
+          <span class="t-value">{n}</span>
+          {props.detail ? <span class="muted">{props.detail(n)}</span> : null}
+        </div>
+      ))}
+    </div>
+  );
+}

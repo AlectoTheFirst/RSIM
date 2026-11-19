@@ -756,3 +756,36 @@ button.link {
   border-left-color: var(--forward);
   background: var(--ground);
 }
+
+/* The list of the names of a field, and the list of the fields that a
+   query can add, with the first sentence of each description. */
+.picker.one {
+  grid-template-columns: max-content;
+}
+
+.picker.two {
+  grid-template-columns: max-content minmax(0, max-content);
+  max-width: calc(100vw - 2 * var(--margin));
+}
+
+.picker.two .option > span:last-child {
+  white-space: normal;
+}
+
+/* The button "Add field" at the end of the fields of the query bar. */
+.qadd {
+  position: relative;
+}
+
+/* A field whose value has a wrong form. */
+.autosize.invalid {
+  border-color: var(--drop);
+}
+
+/* The help line of the query bar: the field in focus, its description,
+   the form of its value and an example. It wraps on a narrow window. */
+.qhelp {
+  flex-basis: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
