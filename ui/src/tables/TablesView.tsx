@@ -85,7 +85,7 @@ function FilterCell(props: { col: Column | undefined; name: string; text: string
         ref={props.first ? props.inputRef : undefined}
         class="t-value"
         aria-label={`filter of ${props.name}`}
-        title={ops.length ? `Values separated by commas, or an op and a value: ${ops.join(", ")}. Parts are separated by ;` : "Values separated by commas"}
+        title={ops.length ? `values by commas, or op value: ${ops.join(", ")}; parts by ;` : "values by commas"}
         value={v}
         spellcheck={false}
         autocomplete="off"
@@ -140,11 +140,11 @@ function Detail(props: {
                     </HatchMark>
                   </span>
                 ) : Array.isArray(v) ? (
-                  <ul class="spans">
+                  <div>
                     {v.map((x) => (
-                      <li class="t-value">{typeof x === "string" ? x : JSON.stringify(x)}</li>
+                      <div class="t-value">{typeof x === "string" ? x : JSON.stringify(x)}</div>
                     ))}
-                  </ul>
+                  </div>
                 ) : (
                   <span class="t-value">{t.text}</span>
                 )}
@@ -157,15 +157,15 @@ function Detail(props: {
         <div class="t-label">source lines</div>
         {spans.length ? (
           <>
-            <ul class="spans">
+            <div>
               {spans.map((l) => (
-                <li class="t-value">{l}</li>
+                <div class="t-value">{l}</div>
               ))}
-            </ul>
-            <div class="muted">The API does not serve the text of the source lines.</div>
+            </div>
+            <div class="muted">no source text</div>
           </>
         ) : (
-          <div class="muted">The table has no source lines for its rows.</div>
+          <div class="muted">no source lines</div>
         )}
         <div class="group actions wrap">
           {props.onFunctions ? (
@@ -272,8 +272,8 @@ export function TablesView(props: {
   function copy(text: string, what: string) {
     navigator.clipboard
       .writeText(text)
-      .then(() => setNotice(`Copied the ${what}.`))
-      .catch(() => setNotice(`The browser did not copy the ${what}.`));
+      .then(() => setNotice(`${what} copied`))
+      .catch(() => setNotice(`${what} not copied`));
   }
 
   // The grid of the body: its columns, rows and cells.
@@ -320,7 +320,7 @@ export function TablesView(props: {
           <button
             type="button"
             class="plain head"
-            title={`${d?.description ?? ""} Click to sort; shift-click to add to the order.`}
+            title={`${d?.description ?? ""} Sort: click; add a key: shift-click`}
             onClick={(e) => go({ sort: nextSort(st.sort, name, e.shiftKey) })}
           >
             {name}
@@ -426,9 +426,11 @@ export function TablesView(props: {
   const verbs: Verb[] = def ? VERBS.filter((v) => v === "describe" || def.verbs.includes(v)) : [];
 
   let facts: JSX.Element;
-  if (!catalog) facts = <span class="muted">The catalog of the tables loads.</span>;
-  else if (!def) facts = <span>{st.table} is not a table of the catalog.</span>;
-  else if (busy) facts = <span class="muted">The request runs.</span>;
+  if (!catalog) facts = <span class="muted">catalog loading</span>;
+  else if (!def) facts = <span>
+      <span class="t-value">{st.table}</span> <span class="muted">not in the catalog</span>
+    </span>;
+  else if (busy) facts = <span class="muted">running</span>;
   else if (problem) facts = <span>{problem}</span>;
   else {
     const parts: JSX.Element[] = [<span class="t-headline">{def.name}</span>];
@@ -442,10 +444,10 @@ export function TablesView(props: {
       );
       parts.push(<span class="muted">needs {def.needs}</span>);
     } else if (st.verb === "lpm" && !st.address) {
-      parts.push(<span class="muted">State an address for the longest prefix match on {prefixColumn(def)}.</span>);
+      parts.push(<span class="muted">no address for lpm on {prefixColumn(def)}</span>);
     } else if (body?.verb === "show") {
       parts.push(<span>{pageWords(pages, body.out.rows.length, body.out.total)}</span>);
-      if (body.out.total === 0) parts.push(<span class="muted">The table needs {def.needs}.</span>);
+      if (body.out.total === 0) parts.push(<span class="muted">needs {def.needs}</span>);
     } else if (body?.verb === "summarize") {
       parts.push(<span>{body.out.total} rows</span>);
     } else if (body?.verb === "unique") {

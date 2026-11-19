@@ -1,6 +1,8 @@
 // The state and the layout of the Tables view: the URL, the parameters of
 // the API, the filters of a column, the pages, the hairlines and the
-// virtual rows.
+// virtual rows, the shown columns and the words of the view.
+/// <reference types="node" />
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Column, TableDef } from "../src/api/types";
 import {
@@ -371,5 +373,22 @@ describe("answer of a request", () => {
     expect(answerOf(a, a.key)).toBe(1);
     expect(answerOf(a, "/v1/twins/b/tables/fib/rows")).toBeNull();
     expect(answerOf(null, a.key)).toBeNull();
+  });
+});
+
+describe("words of the Tables view", () => {
+  const source = (f: string) => readFileSync(new URL(`../src/tables/${f}`, import.meta.url), "utf8");
+  const code = (f: string) =>
+    source(f)
+      .split("\n")
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+      .join("\n");
+
+  it("lists the source lines of the opened row as plain lines", () => {
+    expect(source("TablesView.tsx")).not.toMatch(/<(ul|li)[ >]/);
+  });
+
+  it("has labels and no sentences", () => {
+    for (const f of ["TablesView.tsx", "Grid.tsx", "model.ts"]) expect(code(f)).not.toMatch(/[a-z]{2,}\.(<\/|`|")/);
   });
 });
