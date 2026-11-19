@@ -42,6 +42,8 @@ pub struct DeviceUpdate {
     /// rows of that section. A table that is not in the map keeps the rows
     /// of the previous manifest of the device.
     pub tables: BTreeMap<String, Vec<(Hash, Vec<Row>)>>,
+    /// The host name or the address to which the collector connected.
+    pub management_address: Option<String>,
 }
 
 /// A cycle that collects device updates and writes them as one snapshot.
@@ -450,6 +452,7 @@ impl<'a> Cycle<'a> {
                     collected_at: u.collected_at,
                     sections: u.sections.clone(),
                     tables: prev(d).map(|m| m.tables.clone()).unwrap_or_default(),
+                    management_address: u.management_address.clone(),
                 },
             );
         }

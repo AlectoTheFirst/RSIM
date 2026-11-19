@@ -294,6 +294,7 @@ mod tests {
             collected_at: 1,
             sections: c.sections.clone(),
             tables: BTreeMap::new(),
+            management_address: None,
         }
     }
 

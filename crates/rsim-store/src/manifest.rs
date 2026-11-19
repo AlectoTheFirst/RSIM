@@ -76,6 +76,10 @@ pub struct DeviceManifest {
     pub sections: Vec<SectionEntry>,
     /// The rows of the device in each table, by table name.
     pub tables: BTreeMap<String, TableRef>,
+    /// The host name or the address to which the collector connected.
+    /// `None` when the manifest does not record it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub management_address: Option<String>,
 }
 
 impl DeviceManifest {
@@ -89,6 +93,7 @@ impl DeviceManifest {
             || self.vendor != other.vendor
             || self.sections != other.sections
             || self.tables != other.tables
+            || self.management_address != other.management_address
     }
 }
 

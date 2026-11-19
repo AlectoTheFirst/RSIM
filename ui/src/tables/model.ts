@@ -402,19 +402,33 @@ export function reasonColumns(columns: readonly string[]): number[] {
 /** True for a column whose values align right. */
 export const alignsRight = (c: Column | undefined): boolean => c?.type === "integer";
 
-/** The widths of the columns in characters of the value font. */
+/** The words of a cell whose value the twin does not know. */
+export const NOT_KNOWN = "not known";
+
+/** The width in characters of a cell that the twin does not know: the hatch square and the words. */
+export const NOT_KNOWN_WIDTH = NOT_KNOWN.length + 3;
+
+/**
+ * The widths of the columns in characters of the value font. `known`
+ * tells if the twin knows the value of a cell; a cell that it does not
+ * know has the width of the hatch square and the words.
+ */
 export function columnWidths(
   columns: readonly string[],
   rows: readonly (readonly unknown[])[],
   min = 4,
   max = 48,
+  known?: (row: number, col: number) => boolean,
 ): number[] {
   return columns.map((name, i) => {
     let w = name.length;
-    for (const r of rows) {
-      const v = r[i];
-      const t = v === null || v === undefined ? "" : Array.isArray(v) ? v.map(String).join(", ") : String(v);
-      if (t.length > w) w = t.length;
+    for (let k = 0; k < rows.length; k++) {
+      const v = rows[k]![i];
+      const n =
+        known && !known(k, i)
+          ? NOT_KNOWN_WIDTH
+          : (v === null || v === undefined ? "" : Array.isArray(v) ? v.map(String).join(", ") : String(v)).length;
+      if (n > w) w = n;
       if (w >= max) break;
     }
     return Math.max(min, Math.min(max, w));
@@ -471,4 +485,10 @@ export function scrollFor(i: number, top: number, height: number, h: number, ope
   if (y < top) return y;
   if (y + h > top + height) return y + h - height;
   return null;
+}
+
+/** The filter of the functions table for the device of a row of the devices table, or null for no device. */
+export function deviceFunctions(columns: readonly string[], row: readonly unknown[]): Filter[] | null {
+  const v = row[columns.indexOf("device")];
+  return typeof v === "string" && v !== "" ? [{ column: "device", op: "=", value: v }] : null;
 }

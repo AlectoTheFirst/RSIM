@@ -536,6 +536,7 @@ fn store_stage(
             collected_at: c.collected_at,
             sections: c.sections,
             tables,
+            management_address: Some(c.device.address.clone()),
         })?;
         results.push(DeviceResult {
             device: c.device,

@@ -85,6 +85,10 @@ pub const ARP_OWN: &str = "Interface";
 /// The platform name of IOS-XR in the template index.
 pub const PLATFORM: &str = "cisco_xr";
 
+/// The name of the chassis row of `show inventory`, whose PID is the
+/// platform and whose serial is the serial of the router.
+pub const CHASSIS_ENTRY: &str = "Rack 0";
+
 /// The HSRP state word of the active router in `show hsrp`, in lower case.
 pub const HSRP_ACTIVE: &str = "active";
 

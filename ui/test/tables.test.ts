@@ -15,6 +15,7 @@ import {
   apiUrl,
   cellText,
   columnWidths,
+  deviceFunctions,
   filterCellText,
   nextPage,
   nextSort,
@@ -253,6 +254,19 @@ describe("cells", () => {
   it("gives each column the width of its longest value within the bounds", () => {
     expect(columnWidths(["device", "x", "prefix"], [["r1", 12345, "2001:db8::/32"], ["router-01", 1, null]])).toEqual([9, 5, 13]);
     expect(columnWidths(["p"], [["x".repeat(100)]])).toEqual([48]);
+  });
+
+  it("gives a cell that the twin does not know the width of the hatch square and the words", () => {
+    const rows = [["r1", null, "not_collected"]];
+    const known = (_: number, j: number) => j !== 1;
+    expect(columnWidths(["device", "serial", "serial_reason"], rows, 4, 48, known)).toEqual([6, 12, 13]);
+  });
+});
+
+describe("device rows", () => {
+  it("opens the functions table filtered to the device of the row", () => {
+    expect(deviceFunctions(["device", "vendor"], ["leaf1", "nxos"])).toEqual([{ column: "device", op: "=", value: "leaf1" }]);
+    expect(deviceFunctions(["vendor"], ["nxos"])).toBeNull();
   });
 });
 

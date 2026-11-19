@@ -1,5 +1,5 @@
 {"data": [
-  {"mac": "00:00:5e:00:53:a1", "name": "sw1", "type": "usw", "gateway_mac": "00:00:5e:00:53:01",
+  {"mac": "00:00:5e:00:53:a1", "name": "sw1", "type": "usw", "model": "USW-FAKE-8", "version": "7.1.26.15869", "serial": "FAKESW0001", "ip": "198.51.100.11", "gateway_mac": "00:00:5e:00:53:01",
    "uplink": {"port_idx": 1, "type": "wire"},
    "lldp_table": [],
    "port_table": [
@@ -8,7 +8,7 @@
      {"port_idx": 3, "up": true, "enable": true, "forward": "customize", "native_networkconf_id": "n-default", "excluded_networkconf_ids": ["n-lan"], "stp_state": "forwarding", "speed": 1000, "full_duplex": true, "media": "GE"},
      {"port_idx": 4, "up": false, "enable": true, "forward": "native", "native_networkconf_id": "n-lan", "stp_state": "disabled"}
    ]},
-  {"mac": "00:00:5e:00:53:b1", "name": "ap1", "type": "uap",
+  {"mac": "00:00:5e:00:53:b1", "name": "ap1", "type": "uap", "model": "U6-FAKE", "version": "6.6.77.15402", "serial": "000000000000", "ip": "198.51.100.12",
    "uplink": {"port_idx": 1, "type": "wire", "uplink_mac": "00:00:5e:00:53:a1", "uplink_remote_port": 3, "speed": 100, "full_duplex": true, "media": "GE"},
    "vap_table": [
      {"essid": "guest", "wlanconf_id": "w-guest", "radio": "ng", "up": true},

@@ -24,6 +24,7 @@ import {
   cellText,
   columnWidths,
   defaultBy,
+  deviceFunctions,
   filterCellText,
   nextPage,
   nextSort,
@@ -109,6 +110,8 @@ function Detail(props: {
   /** The addresses of an endpoint row, which the Trace view can take as its source or destination. */
   addresses?: string[];
   onUse?: (field: "source.ip" | "destination.ip", address: string) => void;
+  /** Opens the functions table of the device of a device row. */
+  onFunctions?: () => void;
 }) {
   const { columns, defs, row } = props;
   const addresses = props.addresses ?? [];
@@ -164,6 +167,11 @@ function Detail(props: {
           <div class="muted">The table has no source lines for its rows.</div>
         )}
         <div class="group actions wrap">
+          {props.onFunctions ? (
+            <button type="button" onClick={props.onFunctions}>
+              View functions
+            </button>
+          ) : null}
           {refers.map((x) => (
             <button type="button" onClick={() => props.onRefer(x.d!.refers_to![0], x.d!.refers_to![1], x.v as string)}>
               Show {x.v as string} in {x.d!.refers_to![0]}
@@ -296,7 +304,7 @@ export function TablesView(props: {
     return n;
   }, [grid]);
 
-  const widths = useMemo(() => (grid ? columnWidths(grid.columns, grid.rows) : []), [grid]);
+  const widths = useMemo(() => (grid ? columnWidths(grid.columns, grid.rows, 4, 48, (i, j) => cellOf(i, j).known) : []), [grid]);
   const sortable = st.verb === "show";
   const gridColumns: GridColumn[] = grid
     ? grid.columns.map((name, j) => {
@@ -568,6 +576,10 @@ export function TablesView(props: {
                       cell={(j) => cellOf(i, j)}
                       addresses={st.table === "endpoints" ? endpointAddresses(grid.columns, grid.rows[i]!) : []}
                       onUse={props.onUseAddress}
+                      onFunctions={(() => {
+                        const f = st.table === "devices" ? deviceFunctions(grid.columns, grid.rows[i]!) : null;
+                        return f ? () => go({ table: "functions", verb: "show", filters: f, sort: [], by: [] }) : undefined;
+                      })()}
                       onRefer={(table, column, value) =>
                         go({ table, verb: "show", filters: [{ column, op: "=", value }], sort: [], by: [] })
                       }

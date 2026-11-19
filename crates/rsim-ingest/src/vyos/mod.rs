@@ -4,7 +4,7 @@ pub mod bgp;
 pub mod config;
 pub mod lower;
 pub mod mask;
-mod profile;
+pub(crate) mod profile;
 mod table;
 
 use std::collections::BTreeSet;

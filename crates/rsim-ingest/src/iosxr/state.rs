@@ -202,7 +202,7 @@ impl Parsed {
 
 /// Parses a section with the template of its command. The time line before
 /// the answer is removed first.
-fn parse(command: &str, bytes: &[u8], file: &str) -> Result<Parsed, String> {
+pub(crate) fn parse(command: &str, bytes: &[u8], file: &str) -> Result<Parsed, String> {
     parse_on(PLATFORM, command, bytes, file, is_time_line)
 }
 

@@ -86,6 +86,7 @@ fn update(
         collected_at: 1,
         sections,
         tables,
+        management_address: None,
     }
 }
 
@@ -483,4 +484,38 @@ fn a_snapshot_records_the_inventory_version_and_an_older_manifest_has_none() {
     let plain = r#"{"cycle":1,"time":1,"parent":0,"checkpoint":false,"schemas":{},"devices":{}}"#;
     let m: SnapshotManifest = serde_json::from_str(plain).unwrap();
     assert_eq!(m.inventory_version, None);
+}
+
+#[test]
+fn a_device_manifest_records_the_management_address_and_an_older_manifest_has_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    let with = |a: Option<&str>| {
+        let mut u = update(&store, "r1", "a", None);
+        u.management_address = a.map(str::to_string);
+        u
+    };
+    let s0 = commit(&store, 0, vec![with(None)]).unwrap();
+    assert_eq!(s0.devices["r1"].management_address, None);
+    // A change of only the address writes a new manifest.
+    let s1 = commit(&store, 1, vec![with(Some("192.0.2.1"))]).unwrap();
+    assert_eq!(
+        s1.devices["r1"].management_address.as_deref(),
+        Some("192.0.2.1")
+    );
+    assert_eq!(
+        store.snapshot(1).unwrap().devices["r1"].management_address,
+        s1.devices["r1"].management_address
+    );
+    // The same address again writes nothing.
+    assert!(commit(&store, 2, vec![with(Some("192.0.2.1"))]).is_none());
+    // A manifest with no field `management_address` has none.
+    let plain = r#"{"device":"r1","vendor":"vyos","collected_at":1,"sections":[],"tables":{}}"#;
+    let m: DeviceManifest = serde_json::from_str(plain).unwrap();
+    assert_eq!(m.management_address, None);
+    assert!(
+        !serde_json::to_string(&m)
+            .unwrap()
+            .contains("management_address")
+    );
 }

@@ -69,6 +69,7 @@ fn classify_bench(c: &mut Criterion) {
         collected_at: 1,
         sections: first.sections.clone(),
         tables: Default::default(),
+        management_address: None,
     };
     c.bench_function("classify_unchanged", |b| {
         b.iter(|| classify(&keys, &cap, Some(&prev), false, &none))

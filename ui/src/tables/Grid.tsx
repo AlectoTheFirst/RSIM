@@ -5,10 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Hatch } from "../page/Hatch";
 import { SIZE } from "../theme";
 import "./tables.css";
-import { type CellText, repeats, rowWindow, scrollFor } from "./model";
-
-/** The width of the hatch of a cell; the cell clips it to its own width. */
-const HATCH_WIDTH = 640;
+import { type CellText, NOT_KNOWN, repeats, rowWindow, scrollFor } from "./model";
 
 export interface GridColumn {
   name: string;
@@ -27,14 +24,19 @@ export function gridTemplate(cols: readonly GridColumn[]): string {
   return [...cols.map((c) => `calc(${c.width}ch + 2 * var(--button-pad))`), "1fr"].join(" ");
 }
 
-/** A cell of a value: the text, or the hatch when the twin does not know it. */
+/**
+ * A cell of a value: the text, or, when the twin does not know it, a hatch
+ * square and the words "not known" with the reason as the title.
+ */
 export function ValueCell(props: { c: CellText; right: boolean; same: boolean; h: number }) {
   const { c, right, same, h } = props;
   if (same) return <span class="cell same" role="cell" aria-label="same as above" />;
   if (!c.known) {
+    const s = h - 2 * SIZE.buttonGap;
     return (
-      <span class="cell hatched" role="cell">
-        <Hatch w={HATCH_WIDTH} h={h - 2 * SIZE.buttonGap} title={`not known: ${c.why ?? ""}`} />
+      <span class="cell hatched" role="cell" title={c.why} aria-label={`${NOT_KNOWN}: ${c.why ?? ""}`}>
+        <Hatch w={s} h={s} />
+        <span class="not-known">{NOT_KNOWN}</span>
       </span>
     );
   }

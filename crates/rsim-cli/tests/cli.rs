@@ -816,6 +816,55 @@ fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
             spans.iter().map(Value::to_string).collect();
         assert_eq!(unique.len(), spans.len(), "{r}");
     }
+    // The devices of a store twin with their facts: the router from its
+    // version section and its manifest, and each device record of the UniFi
+    // console, the gateway record too, which the site lowering does not
+    // lower.
+    let dev = rsim(&[topology.as_str(), "devices", "--format", "json"]);
+    assert_eq!(dev.status.code(), Some(0));
+    let dev: Value = serde_json::from_slice(&dev.stdout).unwrap();
+    let cols: Vec<&str> = dev["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap())
+        .collect();
+    let by_device: BTreeMap<&str, BTreeMap<&str, &Value>> = dev["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            let r: BTreeMap<&str, &Value> =
+                cols.iter().copied().zip(r.as_array().unwrap()).collect();
+            (r["device"].as_str().unwrap(), r)
+        })
+        .collect();
+    assert_eq!(
+        by_device.keys().copied().collect::<Vec<_>>(),
+        ["ap1", "gw1", "r1", "sw1"]
+    );
+    let r1 = &by_device["r1"];
+    assert_eq!(*r1["vendor"], "vyos");
+    assert_eq!(*r1["platform"], "Fake Router 1000");
+    assert_eq!(*r1["os_version"], "1.4.0");
+    assert_eq!(*r1["serial"], "FAKER10001");
+    assert_eq!(*r1["serial_reason"], Value::Null);
+    assert_eq!(*r1["management_address"], "192.0.2.254");
+    assert_eq!(*r1["collected_at"], "1970-01-01T00:00:00Z");
+    let spans = r1["provenance"].as_array().unwrap();
+    assert_eq!(spans.len(), 3, "{spans:?}");
+    assert!(
+        spans
+            .iter()
+            .all(|s| s.as_str().unwrap().starts_with("r1/version@"))
+    );
+    let sw1 = &by_device["sw1"];
+    assert_eq!(*sw1["vendor"], "unifi");
+    assert_eq!(*sw1["serial"], "FAKESW0001");
+    assert_eq!(*sw1["management_address"], "198.51.100.11");
+    assert_eq!(*by_device["ap1"]["serial"], Value::Null);
+    assert_eq!(*by_device["ap1"]["serial_reason"], "not_read");
+    assert_eq!(*by_device["gw1"]["platform_reason"], "not_read");
     // The BGP claims of a store twin: the peers of the one router are
     // outside the twin, except the dynamic peer of the listen range, and a
     // neighbour has shutdown. bgp-peers-up checks the peers outside the twin
@@ -953,6 +1002,34 @@ fn a_table_query_gives_rows_pages_and_the_bytes_of_the_library() {
     let t = stdout(&rsim(&["leaf-spine", "devices"]));
     assert!(t.starts_with("device"), "{t}");
     assert_eq!(t.lines().count(), 7, "{t}");
+    // A built-in topology has no collection, so each fact of a device is
+    // not collected.
+    let d = json_of(&rsim(&[
+        "leaf-spine",
+        "devices",
+        "--device",
+        "leaf1",
+        "--format",
+        "json",
+    ]));
+    let row: BTreeMap<&str, &Value> = d["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap())
+        .zip(d["rows"][0].as_array().unwrap())
+        .collect();
+    for fact in [
+        "vendor",
+        "platform",
+        "os_version",
+        "serial",
+        "management_address",
+        "collected_at",
+    ] {
+        assert_eq!(*row[fact], Value::Null, "{fact}");
+        assert_eq!(*row[format!("{fact}_reason").as_str()], "not_collected");
+    }
 
     // Errors.
     let o = rsim(&["leaf-spine", "colours", "--format", "json"]);

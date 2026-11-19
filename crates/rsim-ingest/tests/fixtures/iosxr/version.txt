@@ -1,0 +1,14 @@
+Tue Nov 17 10:00:00.000 UTC
+Cisco IOS XR Software, Version 7.11.2
+Copyright (c) 2013-2026 by Cisco Systems, Inc.
+
+Build Information:
+ Built By     : builder
+ Built On     : Mon Jan 01 00:00:00 UTC 2026
+ Build Host   : build-host
+ Workspace    : /fake/workspace
+ Version      : 7.11.2
+ Label        : 7.11.2
+
+cisco FAKE-XR (Fake processor) processor with 4194304K bytes of memory.
+HOST uptime is 3 weeks, 2 days, 4 hours, 1 minute

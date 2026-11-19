@@ -284,6 +284,7 @@ fn main() {
             identity: TwinJson::builtin("scale").unwrap(),
             coverage: BTreeMap::new(),
             bgp: BTreeMap::new(),
+            facts: BTreeMap::new(),
             tables: Default::default(),
             source: None,
         };

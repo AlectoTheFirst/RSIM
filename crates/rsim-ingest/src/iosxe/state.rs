@@ -114,6 +114,11 @@ fn no_line(_: &str) -> bool {
     false
 }
 
+/// Parses the answer of a command with the template of its command.
+pub(crate) fn parse_command(command: &str, bytes: &[u8], file: &str) -> Result<Parsed, String> {
+    parse_on(PLATFORM, command, bytes, file, no_line)
+}
+
 fn parse(section: &str, bytes: &[u8], file: &str) -> Result<Parsed, String> {
     let command = SECTIONS
         .iter()

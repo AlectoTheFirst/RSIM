@@ -257,6 +257,12 @@ async fn the_first_cycle_stores_all_devices_and_their_tables() {
     let zones = site.section("firewall_zones").unwrap();
     assert!(matches!(zones.status, SectionStatus::Absent { .. }));
     assert!(zones.blob.is_none());
+    // Each manifest records the address to which the collector connected.
+    assert_eq!(
+        s.devices["r1"].management_address.as_deref(),
+        Some("192.0.2.1")
+    );
+    assert_eq!(site.management_address.as_deref(), Some("192.0.2.5"));
     let cfg = s.devices["r1"].section("config").unwrap();
     let raw = e.c.store().read_blob(&cfg.blob.unwrap()).unwrap();
     assert!(

@@ -76,9 +76,14 @@ fn mac(s: &str) -> Option<Mac> {
     s.parse().ok()
 }
 
+/// The name of the twin device of a UniFi device.
+pub fn device_name(d: &Device) -> String {
+    d.name.clone()
+}
+
 impl<'a> L<'a> {
     fn dev_name(&self, d: &Device) -> String {
-        d.name.clone()
+        device_name(d)
     }
     fn id(&self, d: &Device, f: &str) -> FunctionId {
         FunctionId::new(format!("{}/{f}", self.dev_name(d)))
