@@ -390,8 +390,6 @@ export function QueryBar(props: {
   /** Switches `unstated` between all and defaults. */
   onDefaults: () => void;
   onRun: () => void;
-  onCopyCommand: () => void;
-  onCopyMcp: () => void;
   firstInput: { current: HTMLInputElement | null };
 }) {
   const [editing, setEditing] = useState(false);
@@ -481,15 +479,6 @@ export function QueryBar(props: {
       ) : props.answered || hasDefaults(props.fields) ? (
         <UnstatedButton fields={props.fields} notStated={props.notStated ?? []} onToggle={props.onDefaults} />
       ) : null}
-      <span class="grow" />
-      <span class="group end">
-        <button type="button" onClick={props.onCopyCommand}>
-          Copy as rsim command
-        </button>
-        <button type="button" onClick={props.onCopyMcp}>
-          Copy as MCP call
-        </button>
-      </span>
     </form>
   );
 }
