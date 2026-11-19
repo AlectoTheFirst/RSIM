@@ -379,7 +379,8 @@ export function QueryBar(props: {
   mode: Mode;
   fields: Fields;
   ingressHint: string | null;
-  notStated: number | null;
+  /** The fields that the query of the answer does not state, or null. */
+  notStated: readonly string[] | null;
   onMode: (m: Mode) => void;
   onField: (k: QueryField, v: string) => void;
   onRun: () => void;
@@ -481,16 +482,18 @@ export function QueryBar(props: {
       ) : null}
       {props.mode === "set" ? (
         <span class="muted">Fields not stated have all values.</span>
-      ) : props.notStated ? (
-        <HatchMark>{props.notStated} fields not stated, so not known</HatchMark>
+      ) : props.notStated?.length ? (
+        <HatchMark title={props.notStated.join(", ")}>{props.notStated.length} not stated</HatchMark>
       ) : null}
       <span class="grow" />
-      <button type="button" onClick={props.onCopyCommand}>
-        Copy as rsim command
-      </button>
-      <button type="button" onClick={props.onCopyMcp}>
-        Copy as MCP call
-      </button>
+      <span class="group end">
+        <button type="button" onClick={props.onCopyCommand}>
+          Copy as rsim command
+        </button>
+        <button type="button" onClick={props.onCopyMcp}>
+          Copy as MCP call
+        </button>
+      </span>
       <HelpLine mode={props.mode} focus={focus} error={shownError} />
     </form>
   );

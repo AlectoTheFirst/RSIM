@@ -451,7 +451,7 @@ export function App() {
         mode={mode}
         fields={fields}
         ingressHint={answer && !busy ? ingressHint(answer) : null}
-        notStated={echo && !setMode_ ? notStated(echo).length : null}
+        notStated={echo && !setMode_ ? notStated(echo) : null}
         onMode={changeMode}
         onField={(k, v) => setFields({ ...fields, [k]: v })}
         onRun={() => void run()}
