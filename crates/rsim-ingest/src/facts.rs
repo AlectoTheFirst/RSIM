@@ -209,11 +209,13 @@ pub fn placeholder_serial(text: &str) -> bool {
 }
 
 /// True if a platform or an OS version is a placeholder: one of
-/// [`PLACEHOLDER_TEXTS`], or one character 2 or more times, such as `xx`
-/// or `....`.
+/// [`PLACEHOLDER_TEXTS`], or one character that is not a digit 2 or more
+/// times, such as `xx` or `....`. A repeated digit, such as `11`, is a
+/// value.
 pub fn placeholder_text(text: &str) -> bool {
     let (joined, count, one) = folded(text);
-    (one && count >= 2) || PLACEHOLDER_TEXTS.contains(&joined.as_str())
+    let digit = joined.chars().next().is_some_and(char::is_numeric);
+    (one && count >= 2 && !digit) || PLACEHOLDER_TEXTS.contains(&joined.as_str())
 }
 
 /// The sections of a device, each with its file name.
@@ -534,10 +536,20 @@ mod tests {
             "   ",
             "xx",
             "....",
+            "--",
         ] {
             assert!(placeholder_text(s), "{s:?}");
         }
-        for s in ["Fake Router 1000", "1.4.0", "9", "X", "U6-FAKE"] {
+        for s in [
+            "Fake Router 1000",
+            "1.4.0",
+            "9",
+            "X",
+            "U6-FAKE",
+            "11",
+            "22",
+            "888",
+        ] {
             assert!(!placeholder_text(s), "{s:?}");
         }
     }
