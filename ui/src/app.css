@@ -664,3 +664,56 @@ select.twin {
 .facts .mark > span {
   align-self: center;
 }
+
+/* A line that says why a path has no reply. */
+.ladder-section .title.muted {
+  font-weight: var(--body-weight);
+}
+
+/* A button that reads as a word of a line: the step of a verdict. */
+button.link {
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--control);
+}
+
+/* The endpoint picker: a list under an address field of the query bar. */
+.qfield {
+  position: relative;
+}
+
+.picker {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  z-index: 1;
+  min-width: var(--menu);
+  margin-top: var(--button-gap);
+  background: var(--raise);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--button-radius);
+  padding: var(--button-gap) 0;
+  display: grid;
+  grid-template-columns: repeat(3, max-content);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.picker .option {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  column-gap: var(--cell-pad);
+  padding: 0 var(--cell-pad);
+  border-left: var(--selected-bar) solid transparent;
+  cursor: pointer;
+}
+
+.picker .option[aria-selected="true"] {
+  border-left-color: var(--forward);
+  background: var(--ground);
+}

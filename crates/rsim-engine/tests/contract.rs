@@ -109,6 +109,50 @@ fn two_owners_behind_one_link_are_two_owners() {
 }
 
 #[test]
+fn a_missing_neighbour_of_an_incomplete_table_names_the_address_the_device_and_the_table() {
+    let dev = Dev::new("r1", nxos());
+    let f = NextHopResolution {
+        meta: dev.meta("nexthop", 1, 1),
+        neighbours: TriePrefixTable::new(),
+        complete: false,
+        egress: BTreeMap::from([(InterfaceId::new("eth1"), fid("r1/out/eth1"))]),
+        point_to_point: BTreeMap::new(),
+    };
+    let ctx = |nh| Context {
+        egress_interface: Attr::Known(InterfaceId::new("eth1")),
+        next_hop: Attr::Known(nh),
+        ..Context::default()
+    };
+    let arena = SetArena::standalone();
+    let one = single(&arena, udp("192.0.2.1", 1, "198.51.100.7", 53));
+    let reason = |p: &PacketSet, nh| {
+        let out = f.apply(p, &ctx(nh), &FlowState::new());
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].outcome, Outcome::Unknown);
+        assert_eq!(out[0].reason.code, ReasonCode::IncompleteTable);
+        out[0].reason.detail.clone()
+    };
+    assert_eq!(
+        reason(&one, NextHop::Connected),
+        "198.51.100.7 is not in the ARP table of r1 on eth1; the collected table is incomplete"
+    );
+    assert_eq!(
+        reason(&one, NextHop::Gateway(ip("192.0.2.254"))),
+        "192.0.2.254 is not in the ARP table of r1 on eth1; the collected table is incomplete"
+    );
+    let v6 = single(&arena, udp("2001:db8::1", 1, "2001:db8::7", 53));
+    assert_eq!(
+        reason(&v6, NextHop::Connected),
+        "2001:db8::7 is not in the neighbour table of r1 on eth1; the collected table is incomplete"
+    );
+    let two = one.union(&single(&arena, udp("192.0.2.1", 1, "198.51.100.8", 53)));
+    assert_eq!(
+        reason(&two, NextHop::Connected),
+        "the destination is not in the ARP or neighbour table of r1 on eth1; the collected table is incomplete"
+    );
+}
+
+#[test]
 fn an_interface_in_no_zone_follows_the_profile() {
     let dev = Dev::new("fw", fortios());
     let mk = |unzoned| ZoneLookup {

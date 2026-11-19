@@ -7,17 +7,23 @@ import { CoverageView } from "./coverage/CoverageView";
 import { OutcomeWord, PathLadder, VerdictText } from "./ladder/Ladder";
 import { SetLadder } from "./ladder/SetLadder";
 import {
+  type DecidingStep,
   type Level,
   type StepRow,
+  autoStep,
+  decidingStep,
   delayGaps,
   devicesOnPath,
+  ingressHint,
   ladder,
   notStated,
   partCounts,
   ribNotChecked,
+  rowKeyOfStep,
   verdictWord,
 } from "./ladder/layout";
 import { HatchMark } from "./page/Hatch";
+import { keyForElement, keyPlace } from "./tables/model";
 import { KeyLine, LEVELS, QueryBar, ResultLine, TopBar } from "./page/Parts";
 import { viewOf, viewSearch, withTwin } from "./page/url";
 import { type Fields, type Mode, explainCommand, fieldsOf, mcpCall, requestBody, rsimCommand } from "./page/query";
@@ -42,7 +48,10 @@ export function timingText(ms: number, t: ServerTiming): string {
 
 const isSet = (out: PathAnswer | SetAnswer) => out.kind === "set_answer";
 
-function PathFacts(props: { a: Answer }) {
+/** Whether the query of an answer asks for the reply. */
+const asksReply = (out: PathAnswer | SetAnswer) => (out.query as { reply?: boolean | null }).reply !== false;
+
+function PathFacts(props: { a: Answer; onStep: (d: DecidingStep) => void }) {
   const a = props.a;
   const s = a.summary;
   const multi = a.branches.length > 1;
@@ -53,7 +62,7 @@ function PathFacts(props: { a: Answer }) {
     <>
       <span>
         {one ? (
-          <VerdictText v={one} headline />
+          <VerdictText v={one} headline at={b0 && !multi ? decidingStep(b0) : null} onStep={props.onStep} />
         ) : (
           <span class="t-headline">{s[0]?.result.kind ?? "no answer"}</span>
         )}
@@ -67,7 +76,7 @@ function PathFacts(props: { a: Answer }) {
         ? a.branches.map((b) => (
             <span>
               <span class="muted">branch {b.index} </span>
-              <VerdictText v={b.verdict} />
+              <VerdictText v={b.verdict} at={decidingStep(b)} onStep={props.onStep} />
             </span>
           ))
         : null}
@@ -152,6 +161,8 @@ export function App() {
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const firstInput = useRef<HTMLInputElement | null>(null);
+  // Whether the next ladder opens the deciding step of its answer.
+  const autoOpen = useRef(false);
   // The view of the URL: Trace with no view parameter, else Tables or Coverage.
   const [search, setSearch] = useState(window.location.search);
   const [catalog, setCatalog] = useState<TableDef[] | null>(null);
@@ -206,6 +217,7 @@ export function App() {
       setMode(isSet(out) ? "set" : "path");
       setSelected(null);
       setOpen(false);
+      autoOpen.current = true;
     } catch (e) {
       setResult(null);
       setProblem(e instanceof ApiProblem ? `The query is refused: ${e.detail}` : String(e));
@@ -246,7 +258,19 @@ export function App() {
 
   const answer = result?.out.answer ?? null;
   const setMode_ = result ? isSet(result.out) : false;
-  const model = useMemo(() => (answer && !setMode_ ? ladder(answer, level) : null), [answer, level, setMode_]);
+  const reply = result ? asksReply(result.out) : true;
+  const model = useMemo(() => (answer && !setMode_ ? ladder(answer, level, reply) : null), [answer, level, setMode_, reply]);
+  // A new answer that does not deliver opens the step that decides it, in
+  // the ladder of the current level.
+  useEffect(() => {
+    if (!autoOpen.current || !model || !answer) return;
+    autoOpen.current = false;
+    const d = autoStep(answer);
+    const key = d ? rowKeyOfStep(model.rows, d.path, d.step.index) : null;
+    if (!key) return;
+    setSelected(key);
+    setOpen(true);
+  }, [model]);
   const stepRows = useMemo(() => (model ? model.rows.filter((r): r is StepRow => r.type === "step") : []), [model]);
 
   function copy(text: string, what: string) {
@@ -274,6 +298,13 @@ export function App() {
     },
   };
 
+  function openStep(d: DecidingStep) {
+    const key = model ? rowKeyOfStep(model.rows, d.path, d.step.index) : null;
+    if (!key) return;
+    setSelected(key);
+    setOpen(true);
+  }
+
   function select(key: string) {
     if (key === selected) setOpen(!open);
     else {
@@ -290,9 +321,10 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if (view !== "Trace") return;
       const t = e.target as HTMLElement | null;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) {
-        if (e.key === "Escape") t.blur();
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      const place = keyPlace(t);
+      if (keyForElement(place, e.key)) {
+        if (place === "text" && e.key === "Escape") t?.blur();
         return;
       }
       const at = stepRows.findIndex((r) => r.key === selected);
@@ -374,7 +406,17 @@ export function App() {
       />
       {view === "Tables" ? (
         <div class="grid-page">
-          <TablesView twin={twin} row={prefs.row} catalog={catalog} search={search} navigate={navigate} />
+          <TablesView
+            twin={twin}
+            row={prefs.row}
+            catalog={catalog}
+            search={search}
+            navigate={navigate}
+            onUseAddress={(k, a) => {
+              setFields((f) => ({ ...f, [k]: a }));
+              navigate(viewSearch("Trace", twin));
+            }}
+          />
         </div>
       ) : view === "Coverage" ? (
         <div class="grid-page">
@@ -383,8 +425,10 @@ export function App() {
       ) : (
       <>
       <QueryBar
+        twin={twin}
         mode={mode}
         fields={fields}
+        ingressHint={answer && !busy ? ingressHint(answer) : null}
         notStated={echo && !setMode_ ? notStated(echo).length : null}
         onMode={setMode}
         onField={(k, v) => setFields({ ...fields, [k]: v })}
@@ -402,7 +446,7 @@ export function App() {
           setMode_ ? (
             <SetFacts a={answer} />
           ) : (
-            <PathFacts a={answer} />
+            <PathFacts a={answer} onStep={openStep} />
           )
         ) : (
           <span class="muted">State the fields of a query and run it.</span>

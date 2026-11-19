@@ -242,6 +242,8 @@ export interface SectionRow {
   text: string;
   verdict: Verdict | null;
   note: string | null;
+  /** A line that says why a path has no reply, in muted text. */
+  muted?: boolean;
 }
 
 export type Row = StepRow | SectionRow;
@@ -389,8 +391,12 @@ export function pathRows(
   });
 }
 
-/** The ladder of a path query answer: the forward branches, then the replies. */
-export function ladder(a: Answer, level: Level): Ladder {
+/**
+ * The ladder of a path query answer: the forward branches, then the
+ * replies. With `reply`, a forward branch that does not deliver has a muted
+ * line in the place of its reply.
+ */
+export function ladder(a: Answer, level: Level, reply = true): Ladder {
   const starts = sourceEndpoints(a);
   const seqs: LaneKey[][] = a.branches.map((b) => laneSeq(b, starts.get(b.index) ?? null));
   const fwdEnd = new Map(a.branches.map((b) => [b.index, endpointOf(b.verdict)]));
@@ -405,24 +411,38 @@ export function ladder(a: Answer, level: Level): Ladder {
     }
     rows.push(...pathRows(b, { replyOf: null, branch: b.index }, "forward", level, lanes, starts.get(b.index) ?? null));
   }
-  for (const r of a.replies) {
-    const fb = r.forward_branch;
-    if (!r.ran || !r.answer) {
-      rows.push({ type: "section", key: `r${fb}`, dir: "reply", text: `reply of branch ${fb}`, verdict: null, note: r.not_run_reason ?? null });
-      continue;
-    }
-    const rmulti = r.answer.branches.length > 1;
-    for (const b of r.answer.branches) {
+  for (const b of a.branches) {
+    const replies = a.replies.filter((r) => r.forward_branch === b.index);
+    if (replies.length === 0 && reply && b.verdict.kind !== "deliver") {
       rows.push({
         type: "section",
-        key: `r${fb}.${b.index}`,
+        key: `n${b.index}`,
         dir: "reply",
-        text: rmulti ? `reply of branch ${fb}, branch ${b.index}` : `reply of branch ${fb}`,
-        // The result line gives the verdict of a reply with one branch.
-        verdict: rmulti ? b.verdict : null,
+        text: multi ? `no reply of branch ${b.index}: the forward path does not deliver` : "no reply: the forward path does not deliver",
+        verdict: null,
         note: null,
+        muted: true,
       });
-      rows.push(...pathRows(b, { replyOf: fb, branch: b.index }, "reply", level, lanes, fwdEnd.get(fb) ?? null));
+    }
+    for (const r of replies) {
+      const fb = r.forward_branch;
+      if (!r.ran || !r.answer) {
+        rows.push({ type: "section", key: `r${fb}`, dir: "reply", text: `reply of branch ${fb}`, verdict: null, note: r.not_run_reason ?? null });
+        continue;
+      }
+      const rmulti = r.answer.branches.length > 1;
+      for (const rb of r.answer.branches) {
+        rows.push({
+          type: "section",
+          key: `r${fb}.${rb.index}`,
+          dir: "reply",
+          text: rmulti ? `reply of branch ${fb}, branch ${rb.index}` : `reply of branch ${fb}`,
+          // The result line gives the verdict of a reply with one branch.
+          verdict: rmulti ? rb.verdict : null,
+          note: null,
+        });
+        rows.push(...pathRows(rb, { replyOf: fb, branch: rb.index }, "reply", level, lanes, fwdEnd.get(fb) ?? null));
+      }
     }
   }
   return { lanes, rows };
@@ -542,3 +562,57 @@ export function detailSources(steps: readonly TraceStep[]): DetailSource[] {
   return out;
 }
 
+/** The step that decides the verdict of a path, with the reason of the verdict. */
+export interface DecidingStep {
+  path: PathRef;
+  step: TraceStep;
+  reason: string;
+}
+
+/**
+ * The step that decides a path that does not deliver: the last step whose
+ * outcome is not `forward`, else the last step, for a verdict that the
+ * executor gives, such as a loop. The reason is the reason of the verdict,
+ * else the reason of the step. A delivered path has no deciding step.
+ */
+export function decidingStep(b: Branch, path: PathRef = { replyOf: null, branch: b.index }): DecidingStep | null {
+  if (b.verdict.kind === "deliver" || b.steps.length === 0) return null;
+  let step = b.steps[b.steps.length - 1]!;
+  for (let i = b.steps.length - 1; i >= 0; i--) {
+    if (b.steps[i]!.outcome.kind !== "forward") {
+      step = b.steps[i]!;
+      break;
+    }
+  }
+  return { path, step, reason: b.verdict.reason?.detail ?? step.reason.detail };
+}
+
+/** The key of the row of a ladder that holds a step of a path. */
+export function rowKeyOfStep(rows: readonly Row[], path: PathRef, step: number): string | null {
+  for (const r of rows) {
+    if (r.type !== "step" || r.path.branch !== path.branch || r.path.replyOf !== path.replyOf) continue;
+    if (r.steps.some((s) => s.index === step)) return r.key;
+  }
+  return null;
+}
+
+/**
+ * The step that a new answer selects and opens: for an answer whose one
+ * verdict, or whose one verdict kind, is Unknown or Drop, the deciding step
+ * of its first forward branch of that kind.
+ */
+export function autoStep(a: Answer): DecidingStep | null {
+  const s = a.summary;
+  const kind = s.length === 1 ? (s[0]!.result.verdict?.kind ?? s[0]!.result.verdict_kind ?? null) : null;
+  if (kind !== "unknown" && kind !== "drop") return null;
+  const b = a.branches.find((x) => x.verdict.kind === kind);
+  return b ? decidingStep(b) : null;
+}
+
+/** The entry point of an answer as `<device>/<interface>`, if its runs found one and the same one. */
+export function ingressHint(a: Pick<Answer, "ingress">): string | null {
+  const found = [
+    ...new Set(a.ingress.filter((i) => i.found && i.device && i.interface).map((i) => `${i.device}/${i.interface}`)),
+  ];
+  return found.length === 1 ? found[0]! : null;
+}
