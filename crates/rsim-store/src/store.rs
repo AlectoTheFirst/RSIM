@@ -270,14 +270,25 @@ impl Store {
     /// The snapshot of a cycle. The reader walks the parents back to the
     /// newest checkpoint, and the newest manifest of each device wins. A
     /// device that a snapshot removes is not in it, and is not in the
-    /// snapshots after it until one of them lists the device again.
+    /// snapshots after it until one of them lists the device again. The
+    /// parent of a snapshot has a smaller cycle number, so the walk ends.
     pub fn snapshot(&self, cycle: u64) -> Result<Snapshot, StoreError> {
         let top = self.snapshot_manifest(cycle)?;
         let mut chain = vec![top.clone()];
-        while !chain.last().expect("the chain is not empty").checkpoint {
-            let parent = chain.last().and_then(|m| m.parent).ok_or_else(|| {
+        loop {
+            let last = chain.last().expect("the chain is not empty");
+            if last.checkpoint {
+                break;
+            }
+            let parent = last.parent.ok_or_else(|| {
                 StoreError::Integrity(format!("snapshot {cycle} has no checkpoint before it"))
             })?;
+            if parent >= last.cycle {
+                return Err(StoreError::Integrity(format!(
+                    "snapshot {} names the parent {parent}, which is not older",
+                    last.cycle
+                )));
+            }
             chain.push(self.snapshot_manifest(parent)?);
         }
         let mut names: BTreeMap<String, Hash> = BTreeMap::new();
@@ -346,11 +357,11 @@ impl Store {
                 v.insert(self.read_table_file(table, r.cycle)?);
             }
             let batch = &files[&r.cycle];
-            let end = r.first_row + r.rows;
-            if end > batch.num_rows() as u64 {
+            let end = r.first_row.checked_add(r.rows);
+            if end.is_none_or(|e| e > batch.num_rows() as u64) {
                 return Err(StoreError::Integrity(format!(
-                    "{} rows {}..{end} of cycle {} are outside the file",
-                    table.name, r.first_row, r.cycle
+                    "{} rows {} and {} after it of cycle {} are outside the file",
+                    table.name, r.first_row, r.rows, r.cycle
                 )));
             }
             out.push((
