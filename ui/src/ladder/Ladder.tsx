@@ -18,6 +18,7 @@ import {
   type Ladder as LadderModel,
   type Rib,
   outcomeKnown,
+  headerQosShown,
   qosShown,
   rateShown,
   type SectionRow,
@@ -317,8 +318,8 @@ function Detail(props: { row: StepRow; lanes: number; actions: DetailActions }) 
           <div class="muted head">QoS at this function</div>
           <Facts
             rows={[
-              ["dscp", qosShown(last.qos.dscp)],
-              ["ecn", qosShown(last.qos.ecn)],
+              ["dscp", headerQosShown(last.qos.dscp)],
+              ["ecn", headerQosShown(last.qos.ecn)],
               ["traffic class", qosShown(last.qos.traffic_class)],
               ["drop precedence", qosShown(last.qos.drop_precedence)],
               ["queue", qosShown(last.qos.queue)],

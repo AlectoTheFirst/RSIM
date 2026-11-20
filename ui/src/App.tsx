@@ -14,15 +14,12 @@ import {
   answerNotes,
   autoStep,
   decidingStep,
-  delayGaps,
   devicesOnPath,
   ingressHint,
   ladder,
   noIngress,
   noteLabel,
-  notStated,
   partCounts,
-  ribNotChecked,
   rowKeyOfStep,
   verdictWord,
 } from "./ladder/layout";
@@ -30,7 +27,7 @@ import { HatchMark } from "./page/Hatch";
 import { keyForElement, keyPlace } from "./tables/model";
 import { KeyLine, LEVELS, QueryBar, ResultLine, TopBar } from "./page/Parts";
 import { viewOf, viewSearch, withTwin } from "./page/url";
-import { type Fields, type Mode, echoOfFields, explainCommand, fieldsOf, requestBody, rsimCommand, toggleDefaults } from "./page/query";
+import { type Fields, type Mode, explainCommand, fieldsOf, requestBody, rsimCommand } from "./page/query";
 import { QUERY_FIELDS, modeValue } from "./page/fields";
 import { TablesView } from "./tables/TablesView";
 import { type Prefs, applyTheme, loadPrefs, savePrefs } from "./theme";
@@ -62,7 +59,6 @@ function PathFacts(props: { a: Answer; notes: readonly string[]; onStep: (d: Dec
   const multi = a.branches.length > 1;
   const one = s.length === 1 && s[0]!.result.verdict ? s[0]!.result.verdict : null;
   const b0 = a.branches[0];
-  const rib = ribNotChecked(a);
   return (
     <>
       <span>
@@ -73,7 +69,7 @@ function PathFacts(props: { a: Answer; notes: readonly string[]; onStep: (d: Dec
         )}
         {!multi && b0 && b0.steps.length ? (
           <span class="muted">
-            , {b0.steps.length} functions on {devicesOnPath(b0).length} devices
+            , {devicesOnPath(b0).length} devices in path
           </span>
         ) : null}
       </span>
@@ -111,16 +107,6 @@ function PathFacts(props: { a: Answer; notes: readonly string[]; onStep: (d: Dec
           </span>
         );
       })}
-      {a.branches.map((b) => {
-        if (!b.delay.lower_bound) return null;
-        const g = delayGaps(b);
-        return (
-          <HatchMark>
-            {multi ? `branch ${b.index}: ` : ""}delay at least {b.delay.known_ns} ns · no data: {g.functions} functions, {g.links} links
-          </HatchMark>
-        );
-      })}
-      {rib ? <HatchMark>{rib} route lookups, no RIB check</HatchMark> : null}
       {props.notes.map((n) => (
         <HatchMark title={n}>{noteLabel(n)}</HatchMark>
       ))}
@@ -401,7 +387,6 @@ export function App() {
     return () => document.removeEventListener("keydown", onKey);
   });
 
-  const echo = result ? (result.out.query as unknown as Record<string, unknown>) : null;
   const keys: [string, string][] = setMode_
     ? [
         ["[ ]", "level"],
@@ -463,10 +448,8 @@ export function App() {
         found={answer && !busy ? ingressHint(answer) : null}
         askIngress={askIngress}
         answered={result !== null}
-        notStated={mode === "set" ? null : notStated(echo && !setMode_ ? { ...echo, unstated: null } : echoOfFields(fields))}
         onMode={changeMode}
         onField={(k, v) => setFields({ ...fields, [k]: v })}
-        onDefaults={() => setFields(toggleDefaults(fields))}
         onRun={() => void run()}
         firstInput={firstInput}
       />
