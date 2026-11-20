@@ -140,6 +140,10 @@ pub struct QueryInput {
     pub destination_mac: Option<Mac>,
     pub vlan_id: Option<u16>,
     pub l2_priority: Option<u8>,
+    pub vlan_tpid: Option<u16>,
+    pub inner_vlan_id: Option<u16>,
+    pub inner_l2_priority: Option<u8>,
+    pub inner_vlan_tpid: Option<u16>,
     pub tcp_flags: Option<Vec<TcpFlag>>,
     pub icmp_type: Option<IcmpType>,
     pub icmp_code: Option<u8>,
@@ -171,6 +175,10 @@ impl QueryInput {
             destination_mac: self.destination_mac.map(|m| format!("{m:?}")),
             vlan_id: self.vlan_id,
             l2_priority: self.l2_priority,
+            vlan_tpid: self.vlan_tpid,
+            inner_vlan_id: self.inner_vlan_id,
+            inner_l2_priority: self.inner_l2_priority,
+            inner_vlan_tpid: self.inner_vlan_tpid,
             tcp_flags: self.tcp_flags.as_ref().map(|fs| {
                 let mut fs = fs.clone();
                 fs.sort();
@@ -260,6 +268,33 @@ impl QueryInput {
         if self.l2_priority.is_some() && self.vlan_id.is_none() {
             return invalid("l2_priority is given and network.vlan.id is not".to_string());
         }
+        if let Some(v) = self.inner_vlan_id
+            && v > 4095
+        {
+            return invalid(format!("network.inner.vlan.id {v} is not 0 to 4095"));
+        }
+        if let Some(l) = self.inner_l2_priority
+            && l > 7
+        {
+            return invalid(format!("inner_l2_priority {l} is not 0 to 7"));
+        }
+        let outer = [
+            ("network.vlan.tpid", self.vlan_tpid.is_some()),
+            ("network.inner.vlan.id", self.inner_vlan_id.is_some()),
+            ("inner_l2_priority", self.inner_l2_priority.is_some()),
+            ("network.inner.vlan.tpid", self.inner_vlan_tpid.is_some()),
+        ];
+        if let (Some((name, _)), None) = (outer.iter().find(|(_, g)| *g), self.vlan_id) {
+            return invalid(format!("{name} is given and network.vlan.id is not"));
+        }
+        for (name, given) in [
+            ("inner_l2_priority", self.inner_l2_priority.is_some()),
+            ("network.inner.vlan.tpid", self.inner_vlan_tpid.is_some()),
+        ] {
+            if given && self.inner_vlan_id.is_none() {
+                return invalid(format!("{name} is given and network.inner.vlan.id is not"));
+            }
+        }
         Ok(p)
     }
 
@@ -326,6 +361,18 @@ impl QueryInput {
         if let Some(l) = self.l2_priority {
             h.l2_priority = FieldValue::Known(l);
         }
+        if let Some(t) = self.vlan_tpid {
+            h.vlan_tpid = FieldValue::Known(t);
+        }
+        if let Some(v) = self.inner_vlan_id {
+            h.inner_vlan = FieldValue::Known(v);
+        }
+        if let Some(l) = self.inner_l2_priority {
+            h.inner_l2_priority = FieldValue::Known(l);
+        }
+        if let Some(t) = self.inner_vlan_tpid {
+            h.inner_vlan_tpid = FieldValue::Known(t);
+        }
         match self.fragment {
             Some(FragmentName::Later) => h = h.as_later_fragment(),
             Some(FragmentName::First) => h.fragment = FieldValue::Known(Fragment::First),
@@ -390,6 +437,7 @@ fn default_text(d: &UnstatedDefault) -> String {
         (_, DefaultValue::Fragment(Fragment::First), _) => "first fragment".to_string(),
         (_, DefaultValue::Fragment(Fragment::Later), _) => "later fragment".to_string(),
         (_, DefaultValue::PortRange(lo, hi), _) => format!("{name} {lo}-{hi}"),
+        (_, DefaultValue::Tpid(t), _) => format!("{name} {t:#06x}"),
     }
 }
 
@@ -400,6 +448,10 @@ fn field_name(f: HeaderField) -> &'static str {
         HeaderField::DstMac => "destination.mac",
         HeaderField::Vlan => "network.vlan.id",
         HeaderField::L2Priority => "l2_priority",
+        HeaderField::VlanTpid => "network.vlan.tpid",
+        HeaderField::InnerVlan => "network.inner.vlan.id",
+        HeaderField::InnerL2Priority => "inner_l2_priority",
+        HeaderField::InnerVlanTpid => "network.inner.vlan.tpid",
         HeaderField::SrcIp => "source.ip",
         HeaderField::DstIp => "destination.ip",
         HeaderField::Protocol => "network.iana_number",

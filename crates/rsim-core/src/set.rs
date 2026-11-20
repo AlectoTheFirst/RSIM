@@ -552,6 +552,16 @@ impl Builder<'_> {
             (DST_MAC, self.mac_cond(DST_MAC, &m.dst_mac)?),
             (VLAN, self.port_cond(VLAN, &m.vlan)?),
             (L2_PRIORITY, self.value_cond(L2_PRIORITY, &m.l2_priority)?),
+            (VLAN_TPID, self.port_cond(VLAN_TPID, &m.vlan_tpid)?),
+            (INNER_VLAN, self.port_cond(INNER_VLAN, &m.inner_vlan)?),
+            (
+                INNER_L2_PRIORITY,
+                self.value_cond(INNER_L2_PRIORITY, &m.inner_l2_priority)?,
+            ),
+            (
+                INNER_VLAN_TPID,
+                self.port_cond(INNER_VLAN_TPID, &m.inner_vlan_tpid)?,
+            ),
             (MPLS_TC, self.value_cond(MPLS_TC, &m.mpls_tc)?),
         ];
         for (f, c) in conds {

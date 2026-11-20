@@ -507,13 +507,30 @@ fn the_query_echo_is_normalized_and_lists_each_field() {
     assert_eq!(a.echo(), b.echo());
     let v = serde_json::to_value(a.echo()).unwrap();
     let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
-    // `unstated` is in the echo only when the query gives it.
+    // `unstated` and the fields of the TPIDs and of the inner tag are in the
+    // echo only when the query gives them.
+    let only_given = [
+        "unstated",
+        "network.vlan.tpid",
+        "network.inner.vlan.id",
+        "inner_l2_priority",
+        "network.inner.vlan.tpid",
+    ];
     let mut want: Vec<&str> = rsim_cli::args::QUERY_FIELDS
         .into_iter()
-        .filter(|k| *k != "unstated")
+        .filter(|k| !only_given.contains(k))
         .collect();
     want.sort();
     assert_eq!(keys, want);
+    let t = q(serde_json::json!({
+        "network.transport": "tcp", "network.vlan.id": 10, "network.vlan.tpid": 34984,
+        "network.inner.vlan.id": 20, "inner_l2_priority": 3, "network.inner.vlan.tpid": 33024
+    }));
+    let t = serde_json::to_value(t.echo()).unwrap();
+    assert_eq!(t["network.vlan.tpid"], 34984);
+    assert_eq!(t["network.inner.vlan.id"], 20);
+    assert_eq!(t["inner_l2_priority"], 3);
+    assert_eq!(t["network.inner.vlan.tpid"], 33024);
     let d = q(serde_json::json!({"network.transport": "tcp", "unstated": "defaults"}));
     assert_eq!(
         serde_json::to_value(d.echo()).unwrap()["unstated"],
@@ -1304,4 +1321,165 @@ fn unstated_defaults_give_an_icmp_echo_request() {
     h.icmp_type = rsim_core::FieldValue::Known(8);
     h.icmp_code = rsim_core::FieldValue::Known(0);
     assert_eq!(answer_with_stated_defaults(&twin, &h, None), out["answer"]);
+}
+
+/// Each header object of a JSON answer: an object with `network.vlan.id`.
+fn headers(v: &Value, out: &mut Vec<serde_json::Map<String, Value>>) {
+    match v {
+        Value::Object(o) => {
+            if o.contains_key("network.vlan.id") && o.contains_key("source.ip") {
+                out.push(o.clone());
+            }
+            o.values().for_each(|x| headers(x, out));
+        }
+        Value::Array(a) => a.iter().for_each(|x| headers(x, out)),
+        _ => {}
+    }
+}
+
+fn tag_headers(v: &Value) -> Vec<serde_json::Map<String, Value>> {
+    let mut out = Vec::new();
+    headers(&v["answer"], &mut out);
+    assert!(!out.is_empty());
+    out
+}
+
+#[test]
+fn a_query_with_2_tags_shows_the_inner_tag_and_a_tpid_that_is_not_802_1q() {
+    let mut a = path_args("mini-enterprise", QUERIES[0].1);
+    a.extend_from_slice(&[
+        "--network.vlan.id",
+        "10",
+        "--network.vlan.tpid",
+        "34984",
+        "--network.inner.vlan.id",
+        "20",
+        "--inner_l2_priority",
+        "3",
+    ]);
+    let v = json_of(&rsim(&a));
+    assert_eq!(v["query"]["network.vlan.tpid"], 34984);
+    assert_eq!(v["query"]["network.inner.vlan.id"], 20);
+    assert!(v["query"].get("network.inner.vlan.tpid").is_none());
+    let first = &v["answer"]["branches"][0]["steps"][0]["input"]["members"][0]["original"];
+    assert_eq!(
+        first["network.vlan.tpid"],
+        serde_json::json!({"known": 34984})
+    );
+    assert_eq!(
+        first["network.inner.vlan.id"],
+        serde_json::json!({"known": 20})
+    );
+    assert_eq!(first["inner_l2_priority"], serde_json::json!({"known": 3}));
+    // The inner TPID is 0x8100, so the answer does not show it.
+    for h in tag_headers(&v) {
+        assert!(!h.contains_key("network.inner.vlan.tpid"), "{h:?}");
+    }
+    // With one tag, no header shows a TPID or an inner tag.
+    let mut one = path_args("mini-enterprise", QUERIES[0].1);
+    one.extend_from_slice(&["--network.vlan.id", "10"]);
+    for h in tag_headers(&json_of(&rsim(&one))) {
+        for k in [
+            "network.vlan.tpid",
+            "network.inner.vlan.id",
+            "inner_l2_priority",
+            "network.inner.vlan.tpid",
+        ] {
+            assert!(!h.contains_key(k), "{k} in {h:?}");
+        }
+    }
+}
+
+#[test]
+fn a_tag_field_needs_the_tag_above_it() {
+    let base = path_args("mini-enterprise", QUERIES[0].1);
+    for (extra, detail) in [
+        (
+            &["--network.inner.vlan.id", "20"][..],
+            "network.inner.vlan.id is given and network.vlan.id is not",
+        ),
+        (
+            &["--network.vlan.tpid", "34984"][..],
+            "network.vlan.tpid is given and network.vlan.id is not",
+        ),
+        (
+            &["--network.vlan.id", "10", "--inner_l2_priority", "3"][..],
+            "inner_l2_priority is given and network.inner.vlan.id is not",
+        ),
+        (
+            &[
+                "--network.vlan.id",
+                "10",
+                "--network.inner.vlan.tpid",
+                "33024",
+            ][..],
+            "network.inner.vlan.tpid is given and network.inner.vlan.id is not",
+        ),
+    ] {
+        let mut a = base.clone();
+        a.extend_from_slice(extra);
+        let o = rsim(&a);
+        assert_eq!(o.status.code(), Some(1), "{extra:?}");
+        let v = json_of(&o);
+        assert_eq!(v["error"]["code"], "invalid_query", "{v}");
+        assert_eq!(v["error"]["detail"], detail);
+    }
+}
+
+#[test]
+fn unstated_defaults_give_a_stated_inner_tag_the_outer_tpid_of_802_1ad() {
+    let mut a = path_args("mini-enterprise", QUERIES[0].1);
+    a.extend_from_slice(&[
+        "--unstated",
+        "defaults",
+        "--network.vlan.id",
+        "10",
+        "--network.inner.vlan.id",
+        "20",
+    ]);
+    let v = json_of(&rsim(&a));
+    assert_eq!(
+        v["notes"][0],
+        "defaults: dscp 0, ecn 0, network.vlan.tpid 0x88a8"
+    );
+    let first = &v["answer"]["branches"][0]["steps"][0]["input"]["members"][0]["original"];
+    assert_eq!(
+        first["network.vlan.tpid"],
+        serde_json::json!({"known": 34984})
+    );
+    // A stated outer TPID keeps its value, and with `all` the TPID is 0x8100.
+    let mut stated = a.clone();
+    stated.extend_from_slice(&["--network.vlan.tpid", "37120"]);
+    let v = json_of(&rsim(&stated));
+    assert_eq!(v["notes"][0], "defaults: dscp 0, ecn 0");
+    let all: Vec<&str> = a
+        .iter()
+        .copied()
+        .filter(|s| *s != "--unstated" && *s != "defaults")
+        .collect();
+    for h in tag_headers(&json_of(&rsim(&all))) {
+        assert!(!h.contains_key("network.vlan.tpid"), "{h:?}");
+    }
+}
+
+#[test]
+fn a_set_query_with_an_inner_tag_holds_only_frames_with_2_tags() {
+    let v = json_of(&rsim(&set_args(&[
+        "--network.vlan.id",
+        "10",
+        "--network.inner.vlan.id",
+        "20-21",
+        "--format",
+        "json",
+    ])));
+    assert_eq!(v["query"]["network.inner.vlan.id"], "20-21");
+    assert!(v["query"].get("network.vlan.tpid").is_none());
+    let first = &v["answer"]["branches"][0]["steps"][0]["input"]["members"];
+    for m in first.as_array().unwrap() {
+        assert_eq!(
+            m["original"]["network.vlan.id"],
+            serde_json::json!({"known": 10})
+        );
+        assert!(m["original"].get("network.inner.vlan.id").is_some(), "{m}");
+    }
 }

@@ -400,6 +400,20 @@ pub struct HeaderJson {
     #[serde(rename = "network.vlan.id")]
     pub vlan_id: FieldJson<u16>,
     pub l2_priority: FieldJson<u8>,
+    /// The TPID of the outer tag, only when it is not 33024 (0x8100).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "network.vlan.tpid")]
+    pub vlan_tpid: Option<FieldJson<u16>>,
+    /// The inner tag, only when the frame has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "network.inner.vlan.id")]
+    pub inner_vlan_id: Option<FieldJson<u16>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inner_l2_priority: Option<FieldJson<u8>>,
+    /// The TPID of the inner tag, only when it is not 33024 (0x8100).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "network.inner.vlan.tpid")]
+    pub inner_vlan_tpid: Option<FieldJson<u16>>,
     #[serde(rename = "source.ip")]
     pub source_ip: FieldJson<String>,
     #[serde(rename = "destination.ip")]

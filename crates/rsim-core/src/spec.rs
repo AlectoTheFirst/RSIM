@@ -25,6 +25,13 @@ pub struct SetSpec {
     pub dst_mac: Option<Vec<Mac>>,
     pub vlan: Option<Vec<(u16, u16)>>,
     pub l2_priority: Option<Vec<(u8, u8)>>,
+    /// The TPID of the outer tag. Not given, it is `0x8100`.
+    pub vlan_tpid: Option<Vec<(u16, u16)>>,
+    /// The fields of the inner tag. With none of them given, the frames
+    /// have no inner tag. Not given, the inner TPID is `0x8100`.
+    pub inner_vlan: Option<Vec<(u16, u16)>>,
+    pub inner_l2_priority: Option<Vec<(u8, u8)>>,
+    pub inner_vlan_tpid: Option<Vec<(u16, u16)>>,
     pub tcp_flags: Option<Vec<(u8, u8)>>,
     pub icmp_type: Option<Vec<(u8, u8)>>,
     pub icmp_code: Option<Vec<(u8, u8)>>,
@@ -111,11 +118,15 @@ fn spec_edge(ops: &mut Ops<'_>, spec: &SetSpec) -> Result<Edge, DdError> {
         .fragment
         .clone()
         .unwrap_or_else(|| vec![Fragment::Unfragmented, Fragment::First, Fragment::Later]);
-    let vlans: Vec<bool> = if spec.vlan.is_some() || spec.l2_priority.is_some() {
-        vec![true]
-    } else {
-        vec![false, true]
-    };
+    let inner = spec.inner_vlan.is_some()
+        || spec.inner_l2_priority.is_some()
+        || spec.inner_vlan_tpid.is_some();
+    let vlans: Vec<bool> =
+        if inner || spec.vlan.is_some() || spec.l2_priority.is_some() || spec.vlan_tpid.is_some() {
+            vec![true]
+        } else {
+            vec![false, true]
+        };
     let mut acc = Edge::FALSE;
     for &v6 in &families {
         for class in [Class::Tcp, Class::Udp, Class::Icmp, Class::Other] {
@@ -137,7 +148,14 @@ fn spec_edge(ops: &mut Ops<'_>, spec: &SetSpec) -> Result<Edge, DdError> {
                     {
                         continue;
                     }
-                    let p = product(ops, spec, v6, &protos, frag, ports, tcp, icmp, tagged)?;
+                    let present = Present {
+                        ports,
+                        tcp,
+                        icmp,
+                        tagged,
+                        inner,
+                    };
+                    let p = product(ops, spec, v6, &protos, frag, present)?;
                     acc = ops.dd.or(acc, p)?;
                 }
             }
@@ -146,19 +164,32 @@ fn spec_edge(ops: &mut Ops<'_>, spec: &SetSpec) -> Result<Edge, DdError> {
     ops.dd.and(acc, ops.base.eq)
 }
 
+/// The headers that the packets of one product have.
+#[derive(Clone, Copy)]
+struct Present {
+    ports: bool,
+    tcp: bool,
+    icmp: bool,
+    tagged: bool,
+    inner: bool,
+}
+
 /// One product on the current bank.
-#[allow(clippy::too_many_arguments)]
 fn product(
     ops: &mut Ops<'_>,
     spec: &SetSpec,
     v6: bool,
     protos: &[(u8, u8)],
     frag: Fragment,
-    ports: bool,
-    tcp: bool,
-    icmp: bool,
-    tagged: bool,
+    present: Present,
 ) -> Result<Edge, DdError> {
+    let Present {
+        ports,
+        tcp,
+        icmp,
+        tagged,
+        inner,
+    } = present;
     let c = Bank::Current;
     let mut b: Builder<'_> = ops.builder();
     let mut lits: Vec<(u32, bool)> = Vec::new();
@@ -190,27 +221,38 @@ fn product(
     absent(bits::ICMP_CODE, icmp, &mut zero);
     absent(bits::VLAN, tagged, &mut zero);
     absent(bits::L2_PRIORITY, tagged, &mut zero);
-    // With no tag constraint for them, the TPID is 0x8100 and the inner tag
-    // is absent.
-    if tagged {
-        lits.extend(crate::set::value_lits(
-            bits::VLAN_TPID,
-            c,
-            u128::from(bits::TPID_8021Q),
-        ));
-    } else {
-        zero.extend(bits::VLAN_TPID.value_bits());
-    }
-    for x in [
-        bits::P_INNER_VLAN,
-        bits::U_INNER_VLAN,
-        bits::U_INNER_L2_PRIORITY,
-    ] {
+    // A TPID with no constraint is 0x8100.
+    let tpid = |lits: &mut Vec<(u32, bool)>,
+                zero: &mut Vec<u32>,
+                f: FieldBits,
+                rs: &Option<Vec<(u16, u16)>>,
+                there: bool| {
+        if !there {
+            zero.extend(f.value_bits());
+        } else if rs.is_none() {
+            lits.extend(crate::set::value_lits(f, c, u128::from(bits::TPID_8021Q)));
+        }
+    };
+    tpid(
+        &mut lits,
+        &mut zero,
+        bits::VLAN_TPID,
+        &spec.vlan_tpid,
+        tagged,
+    );
+    tpid(
+        &mut lits,
+        &mut zero,
+        bits::INNER_VLAN_TPID,
+        &spec.inner_vlan_tpid,
+        inner,
+    );
+    lits.push((bits::level(bits::P_INNER_VLAN, c), inner));
+    for x in [bits::U_INNER_VLAN, bits::U_INNER_L2_PRIORITY] {
         lits.push((bits::level(x, c), false));
     }
-    for f in bits::INNER_TAG {
-        zero.extend(f.value_bits());
-    }
+    absent(bits::INNER_VLAN, inner, &mut zero);
+    absent(bits::INNER_L2_PRIORITY, inner, &mut zero);
     zero.extend(bits::MPLS_TC.value_bits());
     for f in [
         bits::ENCAP_KIND,
@@ -280,6 +322,9 @@ fn product(
         (bits::SRC_PORT, &spec.src_port, ports),
         (bits::DST_PORT, &spec.dst_port, ports),
         (bits::VLAN, &spec.vlan, tagged),
+        (bits::VLAN_TPID, &spec.vlan_tpid, tagged),
+        (bits::INNER_VLAN, &spec.inner_vlan, inner),
+        (bits::INNER_VLAN_TPID, &spec.inner_vlan_tpid, inner),
     ];
     for (f, rs, present) in p16 {
         if let (Some(rs), true) = (rs, present) {
@@ -289,6 +334,7 @@ fn product(
     }
     let p8 = [
         (bits::L2_PRIORITY, &spec.l2_priority, tagged),
+        (bits::INNER_L2_PRIORITY, &spec.inner_l2_priority, inner),
         (bits::TCP_FLAGS, &spec.tcp_flags, tcp),
         (bits::ICMP_TYPE, &spec.icmp_type, icmp),
         (bits::ICMP_CODE, &spec.icmp_code, icmp),

@@ -144,6 +144,17 @@ pub struct QueryEcho {
     #[serde(rename = "network.vlan.id")]
     pub vlan_id: Option<u16>,
     pub l2_priority: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "network.vlan.tpid")]
+    pub vlan_tpid: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "network.inner.vlan.id")]
+    pub inner_vlan_id: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inner_l2_priority: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "network.inner.vlan.tpid")]
+    pub inner_vlan_tpid: Option<u16>,
     pub tcp_flags: Option<Vec<TcpFlag>>,
     pub icmp_type: Option<u8>,
     pub icmp_code: Option<u8>,
@@ -181,6 +192,17 @@ pub struct SetEcho {
     #[serde(rename = "network.vlan.id")]
     pub vlan_id: Option<String>,
     pub l2_priority: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "network.vlan.tpid")]
+    pub vlan_tpid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "network.inner.vlan.id")]
+    pub inner_vlan_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inner_l2_priority: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "network.inner.vlan.tpid")]
+    pub inner_vlan_tpid: Option<String>,
     pub tcp_flags: Option<String>,
     pub icmp_type: Option<String>,
     pub icmp_code: Option<String>,

@@ -404,8 +404,8 @@ impl FromEngine<PacketSet> for PacketSetJson {
                 .describe()
                 .iter()
                 .map(|m| MemberJson {
-                    original: header_json(&m.original, m.original.encap.as_ref()),
-                    current: header_json(&m.current, m.current.encap.as_ref()),
+                    original: header_json(&m.original, m.original.encap.as_ref(), None),
+                    current: header_json(&m.current, m.current.encap.as_ref(), Some(&m.original)),
                 })
                 .collect(),
         }
@@ -425,7 +425,36 @@ fn fragment_text(x: u128) -> &'static str {
     }
 }
 
-pub fn header_json(h: &HeaderDesc, encap: Option<&EncapDesc>) -> HeaderJson {
+/// True if a value of a tag field is hidden in the JSON: an absent field,
+/// and a TPID of 0x8100 when `tpid`.
+fn tag_hidden(v: &Values, tpid: bool) -> bool {
+    matches!(v, Values::Absent) || (tpid && v.single() == Some(u128::from(bits::TPID_8021Q)))
+}
+
+/// The JSON value of a tag field, or `None` when it is hidden. A value
+/// that equals the original request is shown when the original value is.
+fn tag_json<T>(
+    h: &HeaderDesc,
+    original: Option<&HeaderDesc>,
+    f: HeaderField,
+    tpid: bool,
+    conv: impl Fn(u128) -> T,
+) -> Option<FieldJson<T>> {
+    let v = h.get(f);
+    let hidden = match v {
+        Values::Original => original.is_none_or(|o| tag_hidden(o.get(f), tpid)),
+        v => tag_hidden(v, tpid),
+    };
+    (!hidden).then(|| field_json(f, v, conv))
+}
+
+/// The JSON form of a header. `original` is the original request of a
+/// current header or of its inner header.
+pub fn header_json(
+    h: &HeaderDesc,
+    encap: Option<&EncapDesc>,
+    original: Option<&HeaderDesc>,
+) -> HeaderJson {
     let v6 = match h.get(HeaderField::SrcIp) {
         Values::Prefixes(ps) => ps.first().is_some_and(|p| !p.is_ipv4()),
         _ => match h.get(HeaderField::DstIp) {
@@ -441,6 +470,12 @@ pub fn header_json(h: &HeaderDesc, encap: Option<&EncapDesc>) -> HeaderJson {
         destination_mac: field_json(HeaderField::DstMac, h.get(HeaderField::DstMac), mac_text),
         vlan_id: f16(HeaderField::Vlan),
         l2_priority: f8(HeaderField::L2Priority),
+        vlan_tpid: tag_json(h, original, HeaderField::VlanTpid, true, |x| x as u16),
+        inner_vlan_id: tag_json(h, original, HeaderField::InnerVlan, false, |x| x as u16),
+        inner_l2_priority: tag_json(h, original, HeaderField::InnerL2Priority, false, |x| {
+            x as u8
+        }),
+        inner_vlan_tpid: tag_json(h, original, HeaderField::InnerVlanTpid, true, |x| x as u16),
         source_ip: field_json(HeaderField::SrcIp, h.get(HeaderField::SrcIp), ip),
         destination_ip: field_json(HeaderField::DstIp, h.get(HeaderField::DstIp), ip),
         iana_number: f8(HeaderField::Protocol),
@@ -456,7 +491,10 @@ pub fn header_json(h: &HeaderDesc, encap: Option<&EncapDesc>) -> HeaderJson {
         icmp_code: f8(HeaderField::IcmpCode),
         mpls_tc: f8(HeaderField::MplsTrafficClass),
         encap: encap.map(EncapJson::new).into_iter().collect(),
-        inner: h.inner.as_deref().map(|i| Box::new(header_json(i, None))),
+        inner: h
+            .inner
+            .as_deref()
+            .map(|i| Box::new(header_json(i, None, original))),
     }
 }
 

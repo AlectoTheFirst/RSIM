@@ -76,11 +76,15 @@ pub struct Member {
 }
 
 /// The header fields in the order of the JSON form.
-pub const HEADER_FIELDS: [HeaderField; 16] = [
+pub const HEADER_FIELDS: [HeaderField; 20] = [
     HeaderField::SrcMac,
     HeaderField::DstMac,
     HeaderField::Vlan,
     HeaderField::L2Priority,
+    HeaderField::VlanTpid,
+    HeaderField::InnerVlan,
+    HeaderField::InnerL2Priority,
+    HeaderField::InnerVlanTpid,
     HeaderField::SrcIp,
     HeaderField::DstIp,
     HeaderField::Protocol,
@@ -96,7 +100,7 @@ pub const HEADER_FIELDS: [HeaderField; 16] = [
 ];
 
 /// The value fields in the order of the bit table.
-const VALUE_FIELDS: [FieldBits; 20] = [
+const VALUE_FIELDS: [FieldBits; 24] = [
     bits::PROTOCOL,
     bits::DST_IP,
     bits::SRC_IP,
@@ -109,7 +113,11 @@ const VALUE_FIELDS: [FieldBits; 20] = [
     bits::ECN,
     bits::FRAGMENT,
     bits::VLAN,
+    bits::INNER_VLAN,
     bits::L2_PRIORITY,
+    bits::INNER_L2_PRIORITY,
+    bits::VLAN_TPID,
+    bits::INNER_VLAN_TPID,
     bits::DST_MAC,
     bits::SRC_MAC,
     bits::MPLS_TC,
@@ -126,7 +134,7 @@ type Cell = (Values, Values, Option<Values>);
 /// The flag bits: the presence bits, the unknown bits, the address family
 /// and the encapsulation kind.
 fn flag_bits() -> Vec<u32> {
-    let mut v: Vec<u32> = (0..=bits::AF).collect();
+    let mut v: Vec<u32> = (0..=bits::LAST_FLAG).collect();
     v.extend(bits::ENCAP_KIND.value_bits());
     v
 }
@@ -147,12 +155,6 @@ impl PacketSet {
 }
 
 fn describe_edge(ops: &mut Ops<'_>, s: Edge) -> Result<Vec<Member>, DdError> {
-    let tags: Vec<u32> = bits::tpid_and_inner_bits()
-        .into_iter()
-        .flat_map(|b| [Bank::Original, Bank::Current, Bank::Inner].map(|k| level(b, k)))
-        .collect();
-    let tags = ops.dd.cube(&tags)?;
-    let s = ops.dd.exists(s, tags)?;
     let flags = flag_bits();
     let mut plain_levels = Vec::new();
     for &b in &flags {
@@ -161,7 +163,7 @@ fn describe_edge(ops: &mut Ops<'_>, s: Edge) -> Result<Vec<Member>, DdError> {
     }
     // An encapsulated member has the flags of its inner header too.
     let mut encap_levels = plain_levels.clone();
-    encap_levels.extend((0..=bits::AF).map(|b| level(b, Bank::Inner)));
+    encap_levels.extend((0..=bits::LAST_FLAG).map(|b| level(b, Bank::Inner)));
     let plain_cube = ops.dd.cube(&plain_levels)?;
     let encap_cube = ops.dd.cube(&encap_levels)?;
     let mut out = Vec::new();

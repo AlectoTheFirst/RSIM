@@ -58,6 +58,8 @@ pub const AF: u32 = 16;
 pub const P_INNER_VLAN: u32 = 17;
 pub const U_INNER_VLAN: u32 = 18;
 pub const U_INNER_L2_PRIORITY: u32 = 19;
+/// The last presence bit or unknown bit: the bits from 0 to it are flags.
+pub const LAST_FLAG: u32 = U_INNER_L2_PRIORITY;
 
 /// The bits of one field: its value bits, most significant bit first, its
 /// presence bit and its unknown bit. The value bits are `stride` bits apart.
@@ -162,17 +164,6 @@ pub fn tag_bits(tag: &[FieldBits; 3]) -> Vec<u32> {
     v
 }
 
-/// The bits of the TPID of the outer tag and of the inner tag.
-pub fn tpid_and_inner_bits() -> Vec<u32> {
-    let mut v = vec![P_INNER_VLAN, U_INNER_VLAN, U_INNER_L2_PRIORITY];
-    v.extend(VLAN_TPID.value_bits());
-    for f in INNER_TAG {
-        v.extend(f.value_bits());
-    }
-    v.sort_unstable();
-    v
-}
-
 /// The encapsulation kinds in [`ENCAP_KIND`].
 pub const ENCAP_NONE: u128 = 0;
 pub const ENCAP_GRE: u128 = 1;
@@ -205,6 +196,10 @@ pub fn field_bits(f: HeaderField) -> FieldBits {
         HeaderField::DstMac => DST_MAC,
         HeaderField::Vlan => VLAN,
         HeaderField::L2Priority => L2_PRIORITY,
+        HeaderField::VlanTpid => VLAN_TPID,
+        HeaderField::InnerVlan => INNER_VLAN,
+        HeaderField::InnerL2Priority => INNER_L2_PRIORITY,
+        HeaderField::InnerVlanTpid => INNER_VLAN_TPID,
         HeaderField::SrcIp => SRC_IP,
         HeaderField::DstIp => DST_IP,
         HeaderField::Protocol => PROTOCOL,

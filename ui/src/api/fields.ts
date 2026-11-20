@@ -86,6 +86,13 @@ export const FIELD_SCHEMA = {
     "maximum": null,
     "values": []
   },
+  "inner_l2_priority": {
+    "path": "The layer 2 priority of the inner tag. It needs network.inner.vlan.id.",
+    "set": "The layer 2 priorities of the inner tag.",
+    "type": "integer",
+    "maximum": 7,
+    "values": []
+  },
   "l2_priority": {
     "path": "The layer 2 priority. It needs network.vlan.id.",
     "set": "The layer 2 priorities.",
@@ -98,6 +105,20 @@ export const FIELD_SCHEMA = {
     "set": "The protocol numbers.",
     "type": "integer",
     "maximum": 255,
+    "values": []
+  },
+  "network.inner.vlan.id": {
+    "path": "The VLAN of the inner tag. It needs network.vlan.id. Not given, the frame has no inner tag.",
+    "set": "The VLANs of the inner tag. With no inner field given, the frames have no inner tag.",
+    "type": "integer",
+    "maximum": 4095,
+    "values": []
+  },
+  "network.inner.vlan.tpid": {
+    "path": "The TPID of the inner VLAN tag. It needs network.inner.vlan.id. Not given, it is 33024 (0x8100).",
+    "set": "The TPIDs of the inner VLAN tag. Not given, the TPID is 33024 (0x8100).",
+    "type": "integer",
+    "maximum": 65535,
     "values": []
   },
   "network.transport": {
@@ -117,6 +138,13 @@ export const FIELD_SCHEMA = {
     "set": "The VLAN tags.",
     "type": "integer",
     "maximum": 4095,
+    "values": []
+  },
+  "network.vlan.tpid": {
+    "path": "The TPID of the outer VLAN tag, a number such as 34984 (0x88a8). It needs network.vlan.id. Not given, it is 33024 (0x8100), or 34984 (0x88a8) with an inner tag and unstated defaults.",
+    "set": "The TPIDs of the outer VLAN tag. Not given, the TPID is 33024 (0x8100).",
+    "type": "integer",
+    "maximum": 65535,
     "values": []
   },
   "reply": {

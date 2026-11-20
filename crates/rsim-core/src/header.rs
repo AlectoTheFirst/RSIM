@@ -70,6 +70,8 @@ pub enum DefaultValue {
     Number(u8),
     /// A fragment state.
     Fragment(Fragment),
+    /// A TPID.
+    Tpid(u16),
     /// A port range, inclusive. A header holds one value, so the field of
     /// the header stays unstated and the packet set of the query holds the
     /// range ([`crate::SetSpec`] of [`UnstatedDefault::ranges`]).
@@ -103,13 +105,19 @@ pub const EPHEMERAL_FIRST: u16 = 49152;
 /// connection (SYN), an echo request for ICMP (type 8, code 0) and ICMPv6
 /// (type 128, code 0), and a source port in the ephemeral range 49152 to
 /// 65535. The layer 2 priority is absent only when the VLAN tag is absent.
-/// A default applies only to a field whose header the packet has. The MAC
+/// A frame with a stated inner tag has the outer TPID `0x88a8`; each other
+/// TPID that the query does not state is `0x8100`. A default applies only to a field whose header the packet has. The MAC
 /// addresses and the destination port have no default.
-pub const UNSTATED_DEFAULTS: [UnstatedDefault; 11] = [
+pub const UNSTATED_DEFAULTS: [UnstatedDefault; 12] = [
     default(HeaderField::Dscp, None, DefaultValue::Number(0)),
     default(HeaderField::Ecn, None, DefaultValue::Number(0)),
     default(HeaderField::Vlan, None, DefaultValue::Absent),
     default(HeaderField::L2Priority, None, DefaultValue::Absent),
+    default(
+        HeaderField::VlanTpid,
+        None,
+        DefaultValue::Tpid(crate::bits::TPID_8021AD),
+    ),
     default(
         HeaderField::Fragment,
         None,
@@ -172,6 +180,10 @@ pub enum HeaderField {
     DstMac,
     Vlan,
     L2Priority,
+    VlanTpid,
+    InnerVlan,
+    InnerL2Priority,
+    InnerVlanTpid,
     SrcIp,
     DstIp,
     Protocol,
@@ -194,6 +206,10 @@ impl HeaderField {
             HeaderField::DstMac => "destination MAC",
             HeaderField::Vlan => "VLAN",
             HeaderField::L2Priority => "layer 2 priority",
+            HeaderField::VlanTpid => "VLAN TPID",
+            HeaderField::InnerVlan => "inner VLAN",
+            HeaderField::InnerL2Priority => "inner layer 2 priority",
+            HeaderField::InnerVlanTpid => "inner VLAN TPID",
             HeaderField::SrcIp => "source IP",
             HeaderField::DstIp => "destination IP",
             HeaderField::Protocol => "protocol",
@@ -370,6 +386,10 @@ impl Header {
                 }
                 (HeaderField::L2Priority, DefaultValue::Absent) => {
                     !self.vlan.is_present() && fill(&mut self.l2_priority, FieldValue::Absent)
+                }
+                (HeaderField::VlanTpid, DefaultValue::Tpid(t)) => {
+                    let stated = !self.inner_vlan.is_unstated() && self.inner_vlan.is_present();
+                    stated && fill(&mut self.vlan_tpid, FieldValue::Known(t))
                 }
                 (HeaderField::Dscp, DefaultValue::Number(n)) => {
                     fill(&mut self.dscp, FieldValue::Known(n))

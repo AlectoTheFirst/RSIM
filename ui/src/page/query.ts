@@ -81,6 +81,7 @@ export function defaultsOf(f: Fields): string[] {
   if (!v("dscp")) out.push("dscp 0");
   if (!v("ecn")) out.push("ecn 0");
   if (!v("network.vlan.id")) out.push("no VLAN");
+  else if (v("network.inner.vlan.id") && !v("network.vlan.tpid")) out.push("network.vlan.tpid 0x88a8");
   if (transport && is("tcp", "6") && !v("tcp_flags")) out.push("tcp syn");
   if (transport && (is("icmp", "1") || is("icmpv6", "58"))) {
     if (!v("icmp_type")) out.push("icmp_type echo-request");
