@@ -3,7 +3,8 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { TwinRef } from "../api/client";
-import type { Twin } from "../api/types";
+import type { Me, Twin } from "../api/types";
+import { howText, initials } from "../auth/model";
 import type { Level } from "../ladder/layout";
 import { type ColourPref, type Prefs, ROW_HEIGHTS, type RowHeight, type ThemePref } from "../theme";
 import {
@@ -24,14 +25,17 @@ import { type EntryOption, PICKER_CLOSED, type PickerState, type Suggestion, ing
 import { type Fields, type Mode, type QueryField } from "./query";
 import { twinOption } from "./url";
 
-export const VIEWS = ["Trace", "Tables", "Coverage", "Compare", "Inventory", "Admin"] as const;
+export const VIEWS = ["Trace", "Tables", "Coverage", "Compare", "Inventory", "Admin", "Tokens"] as const;
 export type View = (typeof VIEWS)[number];
 
 /** The views of this build. */
-export const BUILT: readonly View[] = ["Trace", "Tables", "Coverage", "Inventory"];
+export const BUILT: readonly View[] = ["Trace", "Tables", "Coverage", "Inventory", "Tokens"];
 
-/** The user of the page. The server has no sign-in on loopback. */
-const USER = { name: "Local user", initials: "LU", how: "no sign-in on a loopback address" };
+/** The views that need a signed-in user. */
+export const SIGNED_IN_VIEWS: readonly View[] = ["Tokens"];
+
+/** The user of a page of a server with no sign-in. */
+const LOCAL_USER = { name: "Local user", initials: "LU", how: "no sign-in on a loopback address" };
 
 function Choice<T extends string | number>(props: {
   value: T;
@@ -50,7 +54,7 @@ function Choice<T extends string | number>(props: {
   );
 }
 
-function AccountMenu(props: { prefs: Prefs; onPrefs: (p: Prefs) => void }) {
+function AccountMenu(props: { prefs: Prefs; onPrefs: (p: Prefs) => void; user: Me | null; onTokens?: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -66,6 +70,8 @@ function AccountMenu(props: { prefs: Prefs; onPrefs: (p: Prefs) => void }) {
     };
   }, [open]);
   const p = props.prefs;
+  const u = props.user;
+  const USER = u ? { name: u.name, initials: initials(u.name), how: howText(u.role, u.via) } : LOCAL_USER;
   return (
     <span class="account" ref={ref}>
       <button
@@ -99,6 +105,24 @@ function AccountMenu(props: { prefs: Prefs; onPrefs: (p: Prefs) => void }) {
             <Choice<RowHeight> value={p.row} options={ROW_HEIGHTS} onChange={(row) => props.onPrefs({ ...p, row })} />
           </div>
           <div class="muted">blue and orange: colours of Deliver and Drop</div>
+          {u ? (
+            <>
+              <hr />
+              <span class="group">
+                {props.onTokens ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      props.onTokens?.();
+                    }}
+                  >
+                    My API tokens
+                  </button>
+                ) : null}
+              </span>
+            </>
+          ) : null}
         </div>
       ) : null}
     </span>
@@ -114,8 +138,12 @@ export function TopBar(props: {
   onView: (v: View) => void;
   prefs: Prefs;
   onPrefs: (p: Prefs) => void;
+  /** The signed-in user, or null on a server with no sign-in. */
+  user?: Me | null;
+  onSignOut?: () => void;
 }) {
   const info = props.info;
+  const user = props.user ?? null;
   return (
     <header class="bar top">
       <span class="t-wordmark">RSIM</span>
@@ -129,7 +157,7 @@ export function TopBar(props: {
       ) : null}
       <span class="grow" />
       <nav class="group" aria-label="Views">
-        {VIEWS.map((v) =>
+        {VIEWS.filter((v) => user || !SIGNED_IN_VIEWS.includes(v)).map((v) =>
           BUILT.includes(v) ? (
             <button type="button" aria-current={v === props.view ? "page" : undefined} onClick={() => props.onView(v)}>
               {v}
@@ -141,7 +169,17 @@ export function TopBar(props: {
           ),
         )}
       </nav>
-      <AccountMenu prefs={props.prefs} onPrefs={props.onPrefs} />
+      {user ? (
+        <span class="group">
+          <span class="t-value">{user.name}</span>
+          {props.onSignOut ? (
+            <button type="button" onClick={props.onSignOut}>
+              Sign out
+            </button>
+          ) : null}
+        </span>
+      ) : null}
+      <AccountMenu prefs={props.prefs} onPrefs={props.onPrefs} user={user} onTokens={user ? () => props.onView("Tokens") : undefined} />
     </header>
   );
 }

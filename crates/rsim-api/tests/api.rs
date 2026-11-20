@@ -19,6 +19,8 @@ fn state(store: Option<String>) -> State {
         store,
         allow_origins: vec!["http://localhost:3000".into()],
         max_body: 64 * 1024,
+        public_origins: Vec::new(),
+        trusted_proxies: Vec::new(),
     })
 }
 
@@ -37,6 +39,7 @@ fn req(method: &str, path: &str) -> Request {
             .collect(),
         headers: BTreeMap::from([("host".to_string(), format!("127.0.0.1:{PORT}"))]),
         body: Vec::new(),
+        peer: None,
     }
 }
 
@@ -543,6 +546,8 @@ fn a_real_server_answers_on_a_loopback_port() {
         store: None,
         allow_origins: Vec::new(),
         max_body: 1024,
+        public_origins: Vec::new(),
+        trusted_proxies: Vec::new(),
     }));
     rt.spawn(rsim_api::server::serve(listener, s));
     let ask = |text: String| -> String {

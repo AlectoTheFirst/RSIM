@@ -1,6 +1,6 @@
 // The calls of the UI to the REST API of rsim-api, on the origin of the page.
 import type { Credential, Device, Group, Inventory, ResolvedDevice, Route, Vendors } from "../inventory/model";
-import type { PathAnswer, SetAnswer, SourceText, Span, TableOut, TablesOut, Twin } from "./types";
+import type { Me, NewToken, PathAnswer, SetAnswer, SetupState, SourceText, Span, TableOut, TablesOut, TokenIn, TokenInfo, Twin } from "./types";
 
 /** A refused request: the problem object of RFC 9457. */
 export class ApiProblem extends Error {
@@ -10,25 +10,103 @@ export class ApiProblem extends Error {
     readonly detail: string,
     /** The title of the problem: a fixed text for each code. */
     readonly title: string = detail,
+    /** The seconds of the `Retry-After` header, or null with none. */
+    readonly retryAfter: number | null = null,
   ) {
     super(detail);
   }
 }
 
+/** The seconds of a `Retry-After` header, or null for no header or a date. */
+export function retryAfterSeconds(header: string | null): number | null {
+  if (header === null || !/^\s*\d+\s*$/.test(header)) return null;
+  return Number(header);
+}
+
 async function problem(r: Response): Promise<ApiProblem> {
+  const wait = retryAfterSeconds(r.headers.get("retry-after"));
   try {
     const p = (await r.json()) as { code?: string; detail?: string; title?: string };
     const detail = p.detail ?? p.title ?? r.statusText;
-    return new ApiProblem(r.status, p.code ?? "", detail, p.title ?? detail);
+    return new ApiProblem(r.status, p.code ?? "", detail, p.title ?? detail, wait);
   } catch {
-    return new ApiProblem(r.status, "", r.statusText);
+    return new ApiProblem(r.status, "", r.statusText, r.statusText, wait);
   }
 }
 
+/** The handler of a 401 answer: the page goes back to the sign-in. */
+let unauthorized: (() => void) | null = null;
+
+/** Sets the handler of a 401 answer of a request, or removes it with null. */
+export function onUnauthorized(handler: (() => void) | null): void {
+  unauthorized = handler;
+}
+
+/**
+ * Sends a request on the origin of the page with the session cookie. A
+ * refused request throws its problem; a 401 also calls the handler of
+ * `onUnauthorized`, except with `expect401`, where a 401 is an answer.
+ */
+async function send(path: string, init: RequestInit = {}, expect401 = false): Promise<Response> {
+  const r = await fetch(path, { credentials: "same-origin", ...init });
+  if (r.ok) return r;
+  if (r.status === 401 && !expect401) unauthorized?.();
+  throw await problem(r);
+}
+
+const JSON_HEADERS = { "content-type": "application/json", accept: "application/json" };
+
 async function getJson<T>(path: string): Promise<T> {
-  const r = await fetch(path, { headers: { accept: "application/json" } });
-  if (!r.ok) throw await problem(r);
+  const r = await send(path, { headers: { accept: "application/json" } });
   return (await r.json()) as T;
+}
+
+/** Sends a JSON body and reads the JSON answer. */
+async function sendJson<T>(method: string, path: string, body: unknown, expect401 = false): Promise<T> {
+  const r = await send(path, { method, headers: JSON_HEADERS, body: JSON.stringify(body) }, expect401);
+  return (await r.json()) as T;
+}
+
+/** Whether the server has sign-in, and whether its setup can make the first admin. */
+export async function getSetup(): Promise<SetupState> {
+  return getJson("/v1/auth/setup");
+}
+
+/** Makes the first admin and signs it in. */
+export async function setUp(name: string, password: string): Promise<Me> {
+  return sendJson("POST", "/v1/auth/setup", { name, password }, true);
+}
+
+/** Signs in and sets the session cookie. */
+export async function signIn(name: string, password: string): Promise<Me> {
+  return sendJson("POST", "/v1/auth/login", { name, password }, true);
+}
+
+/** Ends the session of the cookie. */
+export async function signOut(): Promise<void> {
+  await send("/v1/auth/logout", { method: "POST", headers: { accept: "application/json" } }, true);
+}
+
+/** The user of the session; a 401 throws its problem with no call of the handler. */
+export async function getMe(): Promise<Me> {
+  const r = await send("/v1/auth/me", { headers: { accept: "application/json" } }, true);
+  return (await r.json()) as Me;
+}
+
+/** The API tokens of the user of the session. */
+export async function listTokens(): Promise<TokenInfo[]> {
+  const body = await getJson<{ tokens: TokenInfo[] }>("/v1/auth/tokens");
+  return body.tokens;
+}
+
+/** Makes an API token; the answer holds its text one time only. */
+export async function createToken(body: TokenIn): Promise<NewToken> {
+  return sendJson("POST", "/v1/auth/tokens", body);
+}
+
+/** Revokes an API token of the user of the session. */
+export async function revokeToken(id: number): Promise<void> {
+  await send(`/v1/auth/tokens/${id}`, { method: "DELETE", headers: { accept: "application/json" } });
 }
 
 export interface TwinRef {
@@ -53,12 +131,11 @@ export async function createQuery(
   twin: string,
   body: Record<string, unknown>,
 ): Promise<{ twin: string; qid: string }> {
-  const r = await fetch(`/v1/twins/${encodeURIComponent(twin)}/queries`, {
+  const r = await send(`/v1/twins/${encodeURIComponent(twin)}/queries`, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
+    headers: JSON_HEADERS,
     body: JSON.stringify(body),
   });
-  if (!r.ok) throw await problem(r);
   const m = /^\/v1\/twins\/([^/]+)\/queries\/([^/]+)$/.exec(new URL(r.url).pathname);
   if (!m) throw new ApiProblem(r.status, "", `no query resource: ${r.url}`);
   return { twin: decodeURIComponent(m[1]!), qid: decodeURIComponent(m[2]!) };
@@ -93,10 +170,9 @@ export function serverTiming(header: string | null): ServerTiming {
 
 /** The full form of a query answer, with the server timing of the response. */
 export async function getQuery(twin: string, qid: string): Promise<{ out: PathAnswer | SetAnswer; timing: ServerTiming }> {
-  const r = await fetch(`/v1/twins/${encodeURIComponent(twin)}/queries/${encodeURIComponent(qid)}?form=full`, {
+  const r = await send(`/v1/twins/${encodeURIComponent(twin)}/queries/${encodeURIComponent(qid)}?form=full`, {
     headers: { accept: "application/json" },
   });
-  if (!r.ok) throw await problem(r);
   const out = (await r.json()) as PathAnswer | SetAnswer;
   return { out, timing: serverTiming(r.headers.get("server-timing")) };
 }
@@ -173,13 +249,7 @@ export async function getVendors(): Promise<Vendors> {
 
 /** Makes or replaces a record of the inventory; the answer is the inventory version. */
 async function put(path: string, body: unknown): Promise<number> {
-  const r = await fetch(path, {
-    method: "PUT",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!r.ok) throw await problem(r);
-  return ((await r.json()) as { version: number }).version;
+  return (await sendJson<{ version: number }>("PUT", path, body)).version;
 }
 
 export const putDevice = (d: Device) => put(`/v1/inventory/devices/${encodeURIComponent(d.name)}`, d);

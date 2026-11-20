@@ -329,11 +329,33 @@ fn one_of(list: &[fn() -> Value], components: &mut Map<String, Value>) -> Value 
     }
 }
 
+/// Each route of the API: the twin routes, the inventory routes and the
+/// sign-in and admin routes.
+pub fn all_routes() -> impl Iterator<Item = &'static Route> {
+    ROUTES
+        .iter()
+        .chain(crate::inventory::ROUTES)
+        .chain(crate::auth::ROUTES)
+}
+
+/// The security requirement of a gate: none for an open route, a session
+/// for a route of the browser session, else a session or a token with the
+/// scope.
+fn security(g: crate::auth::Gate) -> Value {
+    use crate::auth::Gate;
+    match g {
+        Gate::Open => json!([]),
+        Gate::Session => json!([{"session": []}]),
+        Gate::SignedIn => json!([{"session": []}, {"token": []}]),
+        Gate::Scope(s) => json!([{"session": [s]}, {"token": [s]}]),
+    }
+}
+
 /// The OpenAPI document.
 pub fn document() -> Value {
     let mut components = Map::new();
     let mut paths = Map::new();
-    for r in ROUTES.iter().chain(crate::inventory::ROUTES) {
+    for r in all_routes() {
         let mut params: Vec<Value> = r
             .path
             .split('/')
@@ -345,22 +367,26 @@ pub fn document() -> Value {
         params.extend(r.query.iter().map(|(name, d)| {
             json!({"name": name, "in": "query", "required": false, "description": d, "schema": {"type": "string"}})
         }));
-        let ok = one_of(r.ok.1, &mut components);
+        let success = if r.ok.1.is_empty() {
+            json!({"description": "Success"})
+        } else {
+            json!({
+                "description": "Success",
+                "content": {"application/json": {"schema": one_of(r.ok.1, &mut components)}}
+            })
+        };
         let mut op = json!({
             "operationId": r.id,
             "summary": r.summary,
             "parameters": params,
             "responses": {
-                r.ok.0.to_string(): {
-                    "description": "Success",
-                    "content": {"application/json": {"schema": ok}}
-                },
+                r.ok.0.to_string(): success,
                 "default": {
                     "description": "A problem",
                     "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}
                 }
             },
-            "security": [{"rsim": [if matches!(r.method, "put" | "delete") { "rsim.inventory.write" } else { "rsim.read" }]}]
+            "security": security(crate::auth::gate_of(r))
         });
         if !r.body.is_empty() {
             op["requestBody"] = json!({
@@ -400,19 +426,16 @@ pub fn document() -> Value {
         "components": {
             "schemas": components,
             "securitySchemes": {
-                "rsim": {
-                    "type": "oauth2",
-                    "description": "Not checked yet: the server listens only on a loopback address. The scope rsim.scenario.write is for the what-if scenarios.",
-                    "flows": {
-                        "clientCredentials": {
-                            "tokenUrl": "/oauth/token",
-                            "scopes": {
-                                "rsim.read": "Read the twins, the tables, the queries and the claims.",
-                                "rsim.scenario.write": "Make and change what-if scenarios.",
-                                "rsim.inventory.write": "Change the inventory."
-                            }
-                        }
-                    }
+                "session": {
+                    "type": "apiKey",
+                    "in": "cookie",
+                    "name": crate::auth::COOKIE_HTTPS,
+                    "description": "The session of POST /v1/auth/login. On plain HTTP to a loopback address the cookie is rsim_session. A request that changes data needs an Origin header. The scopes are those of the role of the user: viewer rsim.read; operator also rsim.scenario.write; admin also rsim.inventory.write and rsim.admin. With no inventory database the server has no sign-in and listens only on a loopback address."
+                },
+                "token": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "description": "An API token of POST /v1/auth/tokens, rsim_ and 64 hex digits. It has the scopes that it names and that the role of its user gives: rsim.read reads the twins, the tables, the queries and the claims; rsim.scenario.write makes and changes what-if scenarios; rsim.inventory.write changes the inventory; rsim.admin manages the users."
                 }
             }
         }
