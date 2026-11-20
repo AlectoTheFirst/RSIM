@@ -12,7 +12,7 @@ import {
   shareText,
   writeCoverage,
 } from "../src/coverage/model";
-import { twinOption, viewOf, viewSearch, withTwin } from "../src/page/url";
+import { newerRun, pinnedRun, reloadMark, twinOption, viewOf, viewSearch, withTwin } from "../src/page/url";
 import { answerOf, nextPage, pageWords, previousPage, syncPages } from "../src/tables/model";
 
 const COLUMNS = ["device", "handled", "irrelevant", "unhandled", "unhandled_paths", "unhandled_stanzas"];
@@ -40,6 +40,38 @@ describe("coverage report", () => {
     expect(readCoverage(search)).toEqual(s);
     expect(viewOf(search)).toBe("Coverage");
     expect(writeCoverage({ cursor: null, limit: 200, device: null })).toBe("");
+  });
+});
+
+describe("reload of the store", () => {
+  it("marks a newest snapshot that does not build, with the held snapshot", () => {
+    const base = { id: "store", href: "/v1/twins/store", held: "snap-4", newest_cycle: 5 };
+    expect(reloadMark([{ ...base, reload_error: null }])).toBeNull();
+    expect(reloadMark([{ id: "builtin.ecmp", href: "/v1/twins/builtin.ecmp" }])).toBeNull();
+    expect(reloadMark([{ ...base, reload_error: { snapshot: "snap-5", detail: "the twin does not build" } }])).toEqual({
+      text: "snap-5 does not build, snap-4 answers",
+      title: "the twin does not build",
+    });
+    expect(reloadMark([{ ...base, reload_error: { snapshot: null, detail: "HEAD: no such file" } }])).toEqual({
+      text: "store HEAD not read, snap-4 answers",
+      title: "HEAD: no such file",
+    });
+    expect(reloadMark([{ ...base, loading: "snap-5", reload_error: null }])).toBeNull();
+  });
+
+  it("pins the newest built run and offers a newer run", () => {
+    const twins = [
+      { id: "builtin.ecmp", href: "/v1/twins/builtin.ecmp" },
+      { id: "store", href: "/v1/twins/store", held: "snap-12", previous: "snap-11" },
+    ];
+    expect(pinnedRun(twins, "store")).toBe("snap-12");
+    expect(pinnedRun(twins, "snap-11")).toBe("snap-11");
+    expect(pinnedRun(twins, "builtin.ecmp")).toBe("builtin.ecmp");
+    expect(pinnedRun([{ id: "store", href: "/v1/twins/store", held: null }], "store")).toBe("store");
+    expect(newerRun(twins, "snap-11")).toBe("snap-12");
+    expect(newerRun(twins, "snap-12")).toBeNull();
+    expect(newerRun(twins, "builtin.ecmp")).toBeNull();
+    expect(newerRun(twins, "store")).toBeNull();
   });
 });
 

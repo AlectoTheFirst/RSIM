@@ -359,6 +359,175 @@ fn the_store_alias_redirects_to_its_snapshot() {
     );
 }
 
+/// Writes the snapshot `cycle` of the store in `dir` with the device
+/// `device` removed, and gives its cycle.
+fn remove_device(dir: &std::path::Path, device: &str, cycle: u64) -> u64 {
+    let keys = std::fs::read_to_string(dir.join("keys")).unwrap();
+    let store = rsim_store::Store::open(
+        dir.join("store"),
+        rsim_store::Keys::from_hex(&keys).unwrap(),
+    )
+    .unwrap();
+    let mut c = store.begin(cycle).unwrap();
+    c.remove(device);
+    c.prepare()
+        .unwrap()
+        .expect("the cycle removes the device")
+        .publish()
+        .unwrap()
+        .manifest
+        .cycle
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)]
+fn a_newer_snapshot_of_the_store_builds_in_the_background_and_keeps_the_previous_twin() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-api-reload");
+    let _ = std::fs::remove_dir_all(&dir);
+    fixture_store::write(&dir);
+    let s = state(Some(dir.display().to_string()));
+    let devices = |s: &State| -> (String, Vec<String>) {
+        let r = get(s, "/v1/twins/store/tables/devices/rows");
+        assert_eq!(r.status, 307);
+        let location = r.header("location").unwrap().to_string();
+        let rows = json(&get(s, &location));
+        let names = rows["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r[0].as_str().unwrap().to_string())
+            .collect();
+        (rows["twin"]["id"].as_str().unwrap().to_string(), names)
+    };
+    let (first, before) = devices(&s);
+    assert!(before.iter().any(|d| d != "r1"), "{before:?}");
+    let store_entry = |s: &State| -> Value {
+        let list = json(&get(s, "/v1/twins"));
+        list["twins"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["id"] == "store")
+            .unwrap()
+            .clone()
+    };
+    let entry = store_entry(&s);
+    assert_eq!(entry["held"], first.as_str());
+    assert_eq!(entry["previous"], Value::Null);
+    assert_eq!(entry["reload_error"], Value::Null);
+    let builtin = json(&get(&s, "/v1/twins/builtin.ecmp"));
+
+    // No new snapshot: the same twin.
+    let tools = rsim_mcp::tools::Tools::with_store(dir.display().to_string()).reload_store();
+    let a = tools.twin("store").unwrap();
+    assert!(std::sync::Arc::ptr_eq(&a, &tools.twin("store").unwrap()));
+
+    // A new snapshot: the current twin answers at once while the new twin
+    // builds in the background.
+    let cycle = remove_device(&dir, "site1", 2);
+    let held = format!("/v1/twins/{first}/tables/devices/rows");
+    assert_eq!(get(&s, &held).status, 200);
+    s.wait_store();
+    let entry = store_entry(&s);
+    let second = format!("snap-{cycle}");
+    assert_eq!(entry["held"], second.as_str());
+    assert_eq!(entry["previous"], first.as_str());
+    assert_eq!(entry["newest_cycle"], cycle);
+    assert_eq!(entry["loading"], Value::Null);
+    // A new query on the alias gets its resource on the new snapshot at once.
+    let mut post = req("POST", "/v1/twins/store/queries");
+    post.body = br#"{"source.ip": "192.0.2.10", "destination.ip": "192.0.2.70", "network.transport": "udp", "destination.port": 53}"#.to_vec();
+    let r = handle(&s, &post);
+    assert_eq!(r.status, 303, "{}", String::from_utf8_lossy(&r.body));
+    let location = r.header("location").unwrap();
+    assert!(
+        location.starts_with(&format!("/v1/twins/{second}/queries/")),
+        "{location}"
+    );
+    let (now, after) = devices(&s);
+    assert_eq!(now, second);
+    assert_eq!(after, vec!["r1".to_string()]);
+    // The previous snapshot still answers.
+    assert_eq!(get(&s, &held).status, 200);
+    assert_eq!(
+        get(
+            &s,
+            &format!("/v1/twins/snap-{}/tables/devices/rows", cycle + 1)
+        )
+        .status,
+        404
+    );
+    assert_eq!(json(&get(&s, "/v1/twins/builtin.ecmp")), builtin);
+    // Other tools give their current twin until their build ends.
+    assert_eq!(tools.twin("store").unwrap().identity.id, first);
+    tools.wait_store();
+    let b = tools.twin("store").unwrap();
+    assert_eq!(b.identity.id, second);
+    assert!(std::sync::Arc::ptr_eq(&b, &tools.twin("store").unwrap()));
+
+    // The MCP tools of the server name the new snapshot too.
+    let call = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
+        "_meta": meta(),
+        "name": "list_devices",
+        "arguments": {"topology": "store"}
+    }});
+    let r = mcp(
+        &s,
+        &call,
+        &[
+            ("mcp-protocol-version", "2026-07-28"),
+            ("mcp-method", "tools/call"),
+            ("mcp-name", "list_devices"),
+        ],
+    );
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
+    assert_eq!(
+        json(&r)["result"]["structuredContent"]["twin"]["id"],
+        second
+    );
+
+    // A third snapshot: the first one is replaced.
+    let third = remove_device(&dir, "r1", cycle + 1);
+    assert_eq!(get(&s, "/v1/twins/store").status, 307);
+    s.wait_store();
+    let entry = store_entry(&s);
+    assert_eq!(entry["held"], format!("snap-{third}"), "{entry}");
+    assert_eq!(entry["previous"], second.as_str());
+    let gone = get(&s, &held);
+    assert_eq!(gone.status, 410);
+    assert_eq!(json(&gone)["code"], "snapshot_replaced");
+    let (cycle, previous, second) = (third, second, format!("snap-{third}"));
+
+    // A newest snapshot that does not build leaves the current twin, and
+    // the twin list names it.
+    std::fs::write(dir.join("store/HEAD"), format!("{}\n", cycle + 7)).unwrap();
+    let r = get(&s, "/v1/twins/store");
+    assert_eq!(r.status, 307);
+    s.wait_store();
+    let r = get(&s, "/v1/twins/store");
+    assert_eq!(r.status, 307);
+    assert!(
+        r.header("location").unwrap().ends_with(&second),
+        "{:?}",
+        r.header("location")
+    );
+    let entry = store_entry(&s);
+    assert_eq!(entry["newest_cycle"], cycle + 7);
+    assert_eq!(entry["loading"], Value::Null);
+    assert_eq!(
+        entry["reload_error"]["snapshot"],
+        format!("snap-{}", cycle + 7)
+    );
+    assert!(!entry["reload_error"]["detail"].as_str().unwrap().is_empty());
+    assert_eq!(
+        get(&s, &format!("/v1/twins/{second}/tables/devices/rows")).status,
+        200
+    );
+    // The start of the build released the previous twin.
+    assert_eq!(entry["previous"], Value::Null);
+    assert_eq!(get(&s, &format!("/v1/twins/{previous}")).status, 410);
+}
+
 #[test]
 fn the_coverage_report_gives_the_lines_of_each_state_in_pages() {
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-api-coverage");

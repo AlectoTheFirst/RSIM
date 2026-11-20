@@ -20,6 +20,7 @@ pub struct Problem {
 pub fn title(code: &str) -> &'static str {
     match code {
         "unknown_twin" => "The twin is not known",
+        "snapshot_replaced" => "The snapshot is replaced by a newer snapshot",
         "unknown_topology" => "The topology is not known",
         "unknown_table" => "The table is not known",
         "no_such_step" => "The trace step is not in the answer",

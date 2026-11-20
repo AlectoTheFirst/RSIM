@@ -83,7 +83,7 @@ pub const ROUTES: &[Route] = &[
         method: "get",
         path: "/v1/twins",
         id: "listTopologies",
-        summary: "The twins of the server: the built-in topologies, and the alias store.",
+        summary: "The twins of the server: the built-in topologies, and the alias store with the newest built snapshot (held), the snapshot before it that the server keeps (previous), the cycle of the newest snapshot of the store (newest_cycle), the snapshot whose twin builds now in the background (loading), and the newest snapshot that does not build or the HEAD that cannot be read (reload_error, with its snapshot, null for HEAD, and detail), each null when not known. A snapshot older than the held snapshot that the server does not keep gives 410 with the code snapshot_replaced.",
         query: &[],
         body: &[],
         ok: (200, &[object]),
