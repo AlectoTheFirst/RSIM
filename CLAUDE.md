@@ -29,6 +29,15 @@ This repository holds only code, tests, usage how-tos and the information that t
 
 A comment or a docstring describes the code that it belongs to. Do not write design text, reasons for a decision, build step numbers or section numbers of the brief in the code. Design text goes in `../rsim-project/`.
 
+## Disk space
+
+- Build in the shared folder `target` of this repository. For a build of a worktree or another checkout, set `CARGO_TARGET_DIR` to that folder.
+- Do not make a separate target folder for a worktree, a branch, a benchmark or a check.
+- Do not copy the source tree to make a build. Use a worktree.
+- When the work of a worktree, a scratch folder or a source copy is done, delete it.
+- Before a full build, a benchmark or a release build, do a check of the free space with `df -h`. If less than 20 GB is free, stop and tell the owner.
+- If the folder `target/debug/incremental` is more than 20 GB, delete it.
+
 ## Commands
 
 | Task | Command |
