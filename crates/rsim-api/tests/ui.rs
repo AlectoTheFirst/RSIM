@@ -16,6 +16,8 @@ fn state() -> State {
         store: None,
         allow_origins: vec!["http://localhost:3000".into()],
         max_body: 64 * 1024,
+        public_origins: Vec::new(),
+        trusted_proxies: Vec::new(),
     })
 }
 
@@ -26,6 +28,7 @@ fn req(method: &str, path: &str) -> Request {
         query: Vec::new(),
         headers: BTreeMap::from([("host".to_string(), format!("127.0.0.1:{PORT}"))]),
         body: Vec::new(),
+        peer: None,
     }
 }
 

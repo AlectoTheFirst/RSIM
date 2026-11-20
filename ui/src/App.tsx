@@ -2,7 +2,8 @@
 // answer of a path query or a set query.
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { ApiProblem, type ServerTiming, type TwinRef, createQuery, getCatalog, getQuery, getSourceLines, getTwin, listTwins, stepUrl } from "./api/client";
-import type { Answer, PathAnswer, SetAnswer, Span, TableDef, Twin } from "./api/types";
+import type { Answer, Me, PathAnswer, SetAnswer, Span, TableDef, Twin } from "./api/types";
+import { TokensView } from "./auth/TokensView";
 import { CoverageView } from "./coverage/CoverageView";
 import { InventoryView } from "./inventory/InventoryView";
 import { OutcomeWord, PathLadder, VerdictText } from "./ladder/Ladder";
@@ -144,7 +145,12 @@ function readUrl(): { twin: string | null; q: string | null } {
   return { twin: u.get("twin"), q: u.get("q") };
 }
 
-export function App() {
+/**
+ * The views of the page. `user` is the signed-in user, or null on a server
+ * with no sign-in, which has no view Tokens.
+ */
+export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
+  const user = props.user ?? null;
   const [prefs, setPrefs] = useState<Prefs>(loadPrefs);
   const [twins, setTwins] = useState<TwinRef[]>([]);
   const [twin, setTwin] = useState<string>(readUrl().twin ?? "");
@@ -166,10 +172,11 @@ export function App() {
   // The view of the URL: Trace with no view parameter, else Tables, Coverage or Inventory.
   const [search, setSearch] = useState(window.location.search);
   const [catalog, setCatalog] = useState<TableDef[] | null>(null);
-  const view = viewOf(search);
+  const urlView = viewOf(search);
+  const view = urlView === "Tokens" && !user ? "Trace" : urlView;
 
   useEffect(() => {
-    if (view === "Trace" || catalog) return;
+    if (view === "Trace" || view === "Tokens" || catalog) return;
     getCatalog()
       .then((c) => setCatalog(c.tables))
       .catch((e: unknown) => setProblem(String(e instanceof Error ? e.message : e)));
@@ -418,8 +425,12 @@ export function App() {
         onView={(v) => navigate(viewSearch(v, twin, search, result?.qid ?? null))}
         prefs={prefs}
         onPrefs={setPrefs}
+        user={user}
+        onSignOut={props.onSignOut}
       />
-      {view === "Tables" ? (
+      {view === "Tokens" && user ? (
+        <TokensView user={user} />
+      ) : view === "Tables" ? (
         <div class="grid-page">
           <TablesView
             twin={twin}

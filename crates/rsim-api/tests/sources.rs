@@ -18,6 +18,8 @@ fn state(store: &Path) -> State {
         store: Some(store.display().to_string()),
         allow_origins: Vec::new(),
         max_body: 64 * 1024,
+        public_origins: Vec::new(),
+        trusted_proxies: Vec::new(),
     })
 }
 
@@ -36,6 +38,7 @@ fn req(method: &str, path: &str) -> Request {
             .collect(),
         headers: [("host".to_string(), format!("127.0.0.1:{PORT}"))].into(),
         body: Vec::new(),
+        peer: None,
     }
 }
 

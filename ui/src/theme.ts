@@ -141,6 +141,12 @@ export const SIZE = {
   credSecret: 200,
   routeName: 110,
   routeCredential: 110,
+  authInput: 220,
+  tokenName: 150,
+  tokenScopes: 230,
+  tokenTime: 120,
+  tokenState: 70,
+  tokenText: 420,
 } as const;
 
 /** The share of the direction colour in the band of a part of a set query. */

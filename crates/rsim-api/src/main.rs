@@ -1,4 +1,7 @@
-//! `rsim-api`: the REST API of rsim on a loopback address.
+//! `rsim-api`: the REST API of rsim. With no inventory database it has no
+//! sign-in and listens only on a loopback address. With the inventory
+//! database, each route except the open routes needs a session or an API
+//! token, and the server can listen on any address.
 
 use std::net::SocketAddr;
 use std::process::ExitCode;
@@ -7,7 +10,18 @@ use std::sync::Arc;
 use rsim_api::handler::{Settings, State};
 use rsim_api::inventory::InventoryHandle;
 
-const USAGE: &str = "usage: rsim-api [--listen <loopback address:port>] [--store <data folder>] [--allow-origin <origin>]... [--max-body <bytes>] [--inventory <postgres URL>] [--inventory-ca-file <PEM file>] | rsim-api --openapi";
+const USAGE: &str = "usage: rsim-api [--listen <address:port>] [--store <data folder>] [--allow-origin <origin>]... [--public-origin <origin>]... [--trusted-proxy <address[/length]>]... [--max-body <bytes>] [--inventory <postgres URL>] [--inventory-ca-file <PEM file>] | rsim-api --openapi";
+
+/// An origin `scheme://host[:port]` of HTTP or HTTPS with no path, in
+/// lower case.
+fn origin(v: &str) -> Option<String> {
+    let v = v.trim_end_matches('/').to_ascii_lowercase();
+    let (scheme, host) = v.split_once("://")?;
+    let ok = matches!(scheme, "http" | "https")
+        && !host.is_empty()
+        && !host.contains(['/', '?', '#', '@', ' ']);
+    ok.then_some(v)
+}
 
 fn main() -> ExitCode {
     let mut listen: SocketAddr = ([127, 0, 0, 1], 8787).into();
@@ -15,6 +29,8 @@ fn main() -> ExitCode {
     let mut inventory = std::env::var(rsim_inventory::URL_VAR).ok();
     let mut inventory_ca = std::env::var(rsim_inventory::CA_FILE_VAR).ok();
     let mut origins = Vec::new();
+    let mut public_origins = Vec::new();
+    let mut trusted_proxies = Vec::new();
     let mut max_body = 1 << 20;
     if std::env::args().nth(1).as_deref() == Some("--openapi") {
         let doc = rsim_api::openapi::document();
@@ -40,6 +56,20 @@ fn main() -> ExitCode {
                 origins.push(v);
                 true
             }
+            ("--public-origin", Some(v)) => match origin(&v) {
+                Some(o) => {
+                    public_origins.push(o);
+                    true
+                }
+                None => false,
+            },
+            ("--trusted-proxy", Some(v)) => match rsim_api::auth::Prefix::parse(&v) {
+                Some(p) => {
+                    trusted_proxies.push(p);
+                    true
+                }
+                None => false,
+            },
             ("--max-body", Some(v)) => v.parse().map(|x| max_body = x).is_ok(),
             ("--inventory", Some(v)) => {
                 inventory = Some(v);
@@ -56,9 +86,20 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     }
-    if !listen.ip().is_loopback() {
+    if public_origins.iter().any(|o| o.starts_with("https://")) && trusted_proxies.is_empty() {
         eprintln!(
-            "error: {listen} is not a loopback address; the API has no authentication yet, so it listens only on a loopback address"
+            "error: an https public origin needs --trusted-proxy with the address of the proxy that ends TLS; with no trusted proxy the session cookie is not Secure and each client has the address of the proxy"
+        );
+        return ExitCode::from(2);
+    }
+    if !listen.ip().is_loopback() && trusted_proxies.is_empty() {
+        eprintln!(
+            "warning: {listen} is not a loopback address and no --trusted-proxy is set: the session cookie is not Secure, so publish the port only on a loopback address of the host or put a proxy with TLS in front"
+        );
+    }
+    if !listen.ip().is_loopback() && inventory.is_none() {
+        eprintln!(
+            "error: {listen} is not a loopback address; with no inventory database the API has no sign-in, so it listens only on a loopback address"
         );
         return ExitCode::from(2);
     }
@@ -81,6 +122,8 @@ fn main() -> ExitCode {
             store,
             allow_origins: origins,
             max_body,
+            public_origins,
+            trusted_proxies,
         });
         if let Some(url) = &inventory {
             let ca = inventory_ca
@@ -94,7 +137,10 @@ fn main() -> ExitCode {
             for v in db.migrate().await.map_err(std::io::Error::other)? {
                 eprintln!("applied inventory migration {v}");
             }
-            eprintln!("rsim-api serves the inventory at /v1/inventory");
+            eprintln!("rsim-api serves the inventory at /v1/inventory, with sign-in");
+            if db.setup_open().await.map_err(std::io::Error::other)? {
+                eprintln!("no user exists: open the UI to make the first admin");
+            }
             state = state.with_inventory(InventoryHandle::new(
                 Arc::new(db),
                 tokio::runtime::Handle::current(),
