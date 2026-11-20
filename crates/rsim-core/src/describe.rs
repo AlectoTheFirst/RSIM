@@ -76,11 +76,15 @@ pub struct Member {
 }
 
 /// The header fields in the order of the JSON form.
-pub const HEADER_FIELDS: [HeaderField; 16] = [
+pub const HEADER_FIELDS: [HeaderField; 20] = [
     HeaderField::SrcMac,
     HeaderField::DstMac,
     HeaderField::Vlan,
     HeaderField::L2Priority,
+    HeaderField::VlanTpid,
+    HeaderField::InnerVlan,
+    HeaderField::InnerL2Priority,
+    HeaderField::InnerVlanTpid,
     HeaderField::SrcIp,
     HeaderField::DstIp,
     HeaderField::Protocol,
@@ -96,7 +100,7 @@ pub const HEADER_FIELDS: [HeaderField; 16] = [
 ];
 
 /// The value fields in the order of the bit table.
-const VALUE_FIELDS: [FieldBits; 20] = [
+const VALUE_FIELDS: [FieldBits; 24] = [
     bits::PROTOCOL,
     bits::DST_IP,
     bits::SRC_IP,
@@ -109,7 +113,11 @@ const VALUE_FIELDS: [FieldBits; 20] = [
     bits::ECN,
     bits::FRAGMENT,
     bits::VLAN,
+    bits::INNER_VLAN,
     bits::L2_PRIORITY,
+    bits::INNER_L2_PRIORITY,
+    bits::VLAN_TPID,
+    bits::INNER_VLAN_TPID,
     bits::DST_MAC,
     bits::SRC_MAC,
     bits::MPLS_TC,
@@ -126,7 +134,7 @@ type Cell = (Values, Values, Option<Values>);
 /// The flag bits: the presence bits, the unknown bits, the address family
 /// and the encapsulation kind.
 fn flag_bits() -> Vec<u32> {
-    let mut v: Vec<u32> = (0..=bits::AF).collect();
+    let mut v: Vec<u32> = (0..=bits::LAST_FLAG).collect();
     v.extend(bits::ENCAP_KIND.value_bits());
     v
 }
@@ -155,7 +163,7 @@ fn describe_edge(ops: &mut Ops<'_>, s: Edge) -> Result<Vec<Member>, DdError> {
     }
     // An encapsulated member has the flags of its inner header too.
     let mut encap_levels = plain_levels.clone();
-    encap_levels.extend((0..=bits::AF).map(|b| level(b, Bank::Inner)));
+    encap_levels.extend((0..=bits::LAST_FLAG).map(|b| level(b, Bank::Inner)));
     let plain_cube = ops.dd.cube(&plain_levels)?;
     let encap_cube = ops.dd.cube(&encap_levels)?;
     let mut out = Vec::new();
@@ -177,7 +185,19 @@ fn describe_edge(ops: &mut Ops<'_>, s: Edge) -> Result<Vec<Member>, DdError> {
         let part = ops.dd.and(rest, a)?;
         rest = ops.dd.diff(rest, part)?;
         let r = ops.dd.exists(part, flag_cube)?;
-        for row in decompose(ops, r, 0, inner)? {
+        // A field that is absent in each bank of the member has no values
+        // to read.
+        let absent: Vec<bool> = VALUE_FIELDS
+            .iter()
+            .map(|f| {
+                f.presence.is_some_and(|p| {
+                    !flag(p, Bank::Original)
+                        && !flag(p, Bank::Current)
+                        && !(inner && has_inner(*f) && flag(p, Bank::Inner))
+                })
+            })
+            .collect();
+        for row in decompose(ops, r, 0, inner, &absent)? {
             let mut current = header(&row, Bank::Current, &flag);
             if inner {
                 current.inner = Some(Box::new(header(&row, Bank::Inner, &flag)));
@@ -305,12 +325,32 @@ fn value_levels(f: FieldBits, inner: bool) -> Vec<u32> {
 /// The rows of the value fields from field `i` on: for each field, the
 /// values of the original request, of the current header and, if `inner`,
 /// of the inner header.
-fn decompose(ops: &mut Ops<'_>, r: Edge, i: usize, inner: bool) -> Result<Vec<Vec<Cell>>, DdError> {
+fn decompose(
+    ops: &mut Ops<'_>,
+    r: Edge,
+    i: usize,
+    inner: bool,
+    absent: &[bool],
+) -> Result<Vec<Vec<Cell>>, DdError> {
     if i == VALUE_FIELDS.len() {
         return Ok(vec![Vec::new()]);
     }
     let f = VALUE_FIELDS[i];
     let f_levels = value_levels(f, inner);
+    if absent[i] {
+        let cube_f = ops.dd.cube(&f_levels)?;
+        let residual = ops.dd.exists(r, cube_f)?;
+        let inner_cell = (inner && has_inner(f)).then_some(Values::Absent);
+        let cell: Cell = (Values::Absent, Values::Absent, inner_cell);
+        return Ok(decompose(ops, residual, i + 1, inner, absent)?
+            .into_iter()
+            .map(|t| {
+                let mut row = vec![cell.clone()];
+                row.extend(t);
+                row
+            })
+            .collect());
+    }
     let rest_levels: Vec<u32> = VALUE_FIELDS[i + 1..]
         .iter()
         .flat_map(|g| value_levels(*g, inner))
@@ -335,7 +375,7 @@ fn decompose(ops: &mut Ops<'_>, r: Edge, i: usize, inner: bool) -> Result<Vec<Ve
         let proj = ops.dd.exists(rem, cube_rest)?;
         let group = ops.dd.diff(proj, bad)?;
         rem = ops.dd.diff(rem, group)?;
-        let tails = decompose(ops, residual, i + 1, inner)?;
+        let tails = decompose(ops, residual, i + 1, inner, absent)?;
         for cell in field_values(ops, group, f, inner && has_inner(f))? {
             for t in &tails {
                 let mut row = vec![cell.clone()];
@@ -519,7 +559,7 @@ fn ranges(ops: &mut Ops<'_>, e: Edge, f: FieldBits, bank: Bank) -> Result<Values
                 "a field value set reads a level outside its field".to_string(),
             ));
         }
-        let l = level(f.start + depth, bank);
+        let l = level(f.bit(depth), bank);
         let (lo, hi) = match ops.dd.branch(e)? {
             Some((top, lo, hi)) if top == l => (lo, hi),
             Some((top, _, _)) if top > l => (e, e),
@@ -553,24 +593,24 @@ mod tests {
 
     /// An untagged TCP request.
     fn h() -> Header {
-        let mut h = Header::request(
+        tagged().untagged()
+    }
+
+    /// A TCP request that does not state its VLAN tags.
+    fn tagged() -> Header {
+        Header::request(
             "10.0.0.1".parse().unwrap(),
             "10.0.0.2".parse().unwrap(),
             PROTO_TCP,
         )
         .with_src_port(40000)
-        .with_dst_port(22);
-        h.vlan = FieldValue::Absent;
-        h.l2_priority = FieldValue::Absent;
-        h
+        .with_dst_port(22)
     }
 
     #[test]
     fn a_request_has_one_member_with_its_stated_values() {
         let a = SetArena::standalone();
-        let mut req = h();
-        req.vlan = FieldValue::Unstated;
-        req.l2_priority = FieldValue::Unstated;
+        let req = tagged();
         // A VLAN tag that the request does not state can be absent.
         let m = PacketSet::single(&a, &req).describe();
         assert_eq!(m.len(), 2);
@@ -631,8 +671,7 @@ mod tests {
         o.ecn = FieldValue::Known(0);
         o.src_mac = FieldValue::Unknown;
         o.dst_mac = FieldValue::Unknown;
-        o.vlan = FieldValue::Absent;
-        o.l2_priority = FieldValue::Absent;
+        o = o.untagged();
         o.encap = vec![Encap::Vxlan {
             src: vtep("198.51.100.1"),
             dst: vtep("198.51.100.2"),
@@ -683,8 +722,7 @@ mod tests {
         o.ecn = FieldValue::Known(0);
         o.src_mac = FieldValue::Unknown;
         o.dst_mac = FieldValue::Unknown;
-        o.vlan = FieldValue::Absent;
-        o.l2_priority = FieldValue::Absent;
+        o = o.untagged();
         o.encap = vec![Encap::Gre {
             src: vtep("198.51.100.1"),
             dst: vtep("198.51.100.2"),

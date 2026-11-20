@@ -164,6 +164,18 @@ struct QueryArgs {
     /// 0 to 7. It needs network.vlan.id.
     #[arg(long = "l2_priority", value_parser = clap::value_parser!(u8).range(0..=7))]
     l2_priority: Option<u8>,
+    /// The TPID of the outer tag, 0 to 65535. It needs network.vlan.id.
+    #[arg(long = "network.vlan.tpid")]
+    vlan_tpid: Option<u16>,
+    /// 0 to 4095. It needs network.vlan.id.
+    #[arg(long = "network.inner.vlan.id", value_parser = clap::value_parser!(u16).range(0..=4095))]
+    inner_vlan_id: Option<u16>,
+    /// 0 to 7. It needs network.inner.vlan.id.
+    #[arg(long = "inner_l2_priority", value_parser = clap::value_parser!(u8).range(0..=7))]
+    inner_l2_priority: Option<u8>,
+    /// The TPID of the inner tag, 0 to 65535. It needs network.inner.vlan.id.
+    #[arg(long = "network.inner.vlan.tpid")]
+    inner_vlan_tpid: Option<u16>,
     /// A comma-separated list of fin, syn, rst, psh, ack, urg, ece, cwr.
     #[arg(long = "tcp_flags", value_delimiter = ',')]
     tcp_flags: Option<Vec<TcpFlag>>,
@@ -224,6 +236,14 @@ struct SetArgs {
     vlan_id: Option<Ranges>,
     #[arg(long = "l2_priority", value_parser = |s: &str| Ranges::parse(s, "l2_priority", 7))]
     l2_priority: Option<Ranges>,
+    #[arg(long = "network.vlan.tpid", value_parser = |s: &str| Ranges::parse(s, "network.vlan.tpid", 65535))]
+    vlan_tpid: Option<Ranges>,
+    #[arg(long = "network.inner.vlan.id", value_parser = |s: &str| Ranges::parse(s, "network.inner.vlan.id", 4095))]
+    inner_vlan_id: Option<Ranges>,
+    #[arg(long = "inner_l2_priority", value_parser = |s: &str| Ranges::parse(s, "inner_l2_priority", 7))]
+    inner_l2_priority: Option<Ranges>,
+    #[arg(long = "network.inner.vlan.tpid", value_parser = |s: &str| Ranges::parse(s, "network.inner.vlan.tpid", 65535))]
+    inner_vlan_tpid: Option<Ranges>,
     /// Numbers, ranges, or flag names joined with +, for example syn+ack.
     #[arg(long = "tcp_flags", value_parser = parse_tcp_flags)]
     tcp_flags: Option<Ranges>,
@@ -259,6 +279,10 @@ impl SetArgs {
             destination_mac: a.destination_mac.map(|l| l.0),
             vlan_id: a.vlan_id,
             l2_priority: a.l2_priority,
+            vlan_tpid: a.vlan_tpid,
+            inner_vlan_id: a.inner_vlan_id,
+            inner_l2_priority: a.inner_l2_priority,
+            inner_vlan_tpid: a.inner_vlan_tpid,
             tcp_flags: a.tcp_flags,
             icmp_type: a.icmp_type,
             icmp_code: a.icmp_code,
@@ -300,6 +324,10 @@ impl QueryArgs {
             destination_mac: a.destination_mac,
             vlan_id: a.vlan_id,
             l2_priority: a.l2_priority,
+            vlan_tpid: a.vlan_tpid,
+            inner_vlan_id: a.inner_vlan_id,
+            inner_l2_priority: a.inner_l2_priority,
+            inner_vlan_tpid: a.inner_vlan_tpid,
             tcp_flags: a.tcp_flags,
             icmp_type: a.icmp_type,
             icmp_code: a.icmp_code,

@@ -84,8 +84,7 @@ fn view(a: &Answer) -> Vec<String> {
 fn a_run_over_the_node_budget_splits_its_input() {
     let twin = ecmp().build().unwrap();
     let untagged = |mut h: Header| {
-        h.vlan = FieldValue::Absent;
-        h.l2_priority = FieldValue::Absent;
+        h = h.untagged();
         h
     };
     let run = |budget, hs: &[Header]| {

@@ -149,6 +149,10 @@ pub struct SetInput {
     pub destination_mac: Option<Vec<Mac>>,
     pub vlan_id: Option<Ranges>,
     pub l2_priority: Option<Ranges>,
+    pub vlan_tpid: Option<Ranges>,
+    pub inner_vlan_id: Option<Ranges>,
+    pub inner_l2_priority: Option<Ranges>,
+    pub inner_vlan_tpid: Option<Ranges>,
     pub tcp_flags: Option<Ranges>,
     pub icmp_type: Option<Ranges>,
     pub icmp_code: Option<Ranges>,
@@ -178,6 +182,10 @@ impl SetInput {
             destination_mac: join(&self.destination_mac, |m| format!("{m:?}")),
             vlan_id: self.vlan_id.as_ref().map(Ranges::text),
             l2_priority: self.l2_priority.as_ref().map(Ranges::text),
+            vlan_tpid: self.vlan_tpid.as_ref().map(Ranges::text),
+            inner_vlan_id: self.inner_vlan_id.as_ref().map(Ranges::text),
+            inner_l2_priority: self.inner_l2_priority.as_ref().map(Ranges::text),
+            inner_vlan_tpid: self.inner_vlan_tpid.as_ref().map(Ranges::text),
             tcp_flags: self.tcp_flags.as_ref().map(Ranges::text),
             icmp_type: self.icmp_type.as_ref().map(Ranges::text),
             icmp_code: self.icmp_code.as_ref().map(Ranges::text),
@@ -242,6 +250,10 @@ impl SetInput {
             dst_mac: self.destination_mac.clone(),
             vlan: self.vlan_id.as_ref().map(Ranges::u16s),
             l2_priority: self.l2_priority.as_ref().map(Ranges::u8s),
+            vlan_tpid: self.vlan_tpid.as_ref().map(Ranges::u16s),
+            inner_vlan: self.inner_vlan_id.as_ref().map(Ranges::u16s),
+            inner_l2_priority: self.inner_l2_priority.as_ref().map(Ranges::u8s),
+            inner_vlan_tpid: self.inner_vlan_tpid.as_ref().map(Ranges::u16s),
             tcp_flags: self.tcp_flags.as_ref().map(Ranges::u8s),
             icmp_type: self.icmp_type.as_ref().map(Ranges::u8s),
             icmp_code: self.icmp_code.as_ref().map(Ranges::u8s),
@@ -259,8 +271,20 @@ impl SetInput {
         }
     }
 
-    /// Makes the engine query. A set with no packet is not valid.
+    /// Makes the engine query. A set with no packet is not valid, and a
+    /// field of the inner tag needs `network.vlan.id`.
     pub fn to_query(&self, twin: &Twin) -> Result<Query, QueryError> {
+        let inner = [
+            ("network.inner.vlan.id", self.inner_vlan_id.is_some()),
+            ("inner_l2_priority", self.inner_l2_priority.is_some()),
+            ("network.inner.vlan.tpid", self.inner_vlan_tpid.is_some()),
+        ];
+        if let (Some((name, _)), None) = (inner.iter().find(|(_, g)| *g), &self.vlan_id) {
+            return Err(QueryError::new(
+                ErrorCode::InvalidQuery,
+                format!("{name} is given and network.vlan.id is not"),
+            ));
+        }
         let arena = twin.arena(None);
         let packets = PacketSet::from_spec(&arena, &self.spec(twin));
         if packets.is_empty() {

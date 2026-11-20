@@ -50,6 +50,14 @@ pub struct Decapsulated {
     pub plain: PacketSet,
 }
 
+/// The result of a push of a VLAN tag: the frames with the new tag, and the
+/// frames that had 2 tags already.
+#[derive(Clone, Debug)]
+pub struct Pushed {
+    pub done: PacketSet,
+    pub full: PacketSet,
+}
+
 /// A set of packet pairs in the arena of one query. Two sets of one query
 /// with the same members have the same edge.
 ///
@@ -302,7 +310,9 @@ impl PacketSet {
 
     /// The set of one request: the original request is the header itself.
     /// A field that the header does not state has all values, with the
-    /// same value in the original request and the current header.
+    /// same value in the original request and the current header. The
+    /// exceptions are the VLAN tags: an inner tag that the header does not
+    /// state is absent, and a TPID that it does not state is `0x8100`.
     ///
     /// For an encapsulated header, the original request is the inner
     /// header, and the current header is the encapsulated header. The outer
@@ -352,6 +362,15 @@ impl PacketSet {
                         let z = b.absent_zero(p, Bank::Current)?;
                         acc = b.dd.and(acc, z)?;
                     }
+                }
+                // An outer tag that the request does not state has the
+                // TPID 0x8100 where it is present.
+                if enc[bits::P_VLAN as usize].is_none() {
+                    let p = b.var(bits::P_VLAN, Bank::Current)?;
+                    let tpid =
+                        b.value(bits::VLAN_TPID, Bank::Current, u128::from(bits::TPID_8021Q))?;
+                    let e = b.dd.or(p.not(), tpid)?;
+                    acc = b.dd.and(acc, e)?;
                 }
                 Ok(acc)
             })
@@ -876,15 +895,19 @@ impl PacketSet {
         })
     }
 
-    /// Sets the 802.1Q tag of the current header. `None` removes the tag:
-    /// the VLAN and the layer 2 priority become absent. `Some(v)` sets the
-    /// VLAN to `v` on each frame; a frame that had no tag gets an unknown
-    /// layer 2 priority.
+    /// Sets the outer VLAN tag of the current header. `None` removes both
+    /// tags: the VLAN, the layer 2 priority, the TPID and the inner tag
+    /// become absent. `Some(v)` sets the VLAN to `v` and the TPID to
+    /// `0x8100` on each frame and keeps the inner tag; a frame that had no
+    /// tag gets an unknown layer 2 priority.
     pub fn set_vlan(&self, tag: Option<u16>) -> PacketSet {
         self.op(&[], |ops| match tag {
             None => {
-                let s = force_field(ops, self.edge, bits::VLAN, FieldValue::Absent)?;
-                force_field(ops, s, bits::L2_PRIORITY, FieldValue::Absent)
+                let mut s = self.edge;
+                for f in bits::OUTER_TAG.into_iter().chain(bits::INNER_TAG) {
+                    s = force_field(ops, s, f, FieldValue::Absent)?;
+                }
+                Ok(s)
             }
             Some(v) => {
                 // The VLAN and the priority share one presence bit, so the
@@ -895,12 +918,125 @@ impl PacketSet {
                 let had = ops.dd.and(self.edge, pv)?;
                 let none = ops.dd.diff(self.edge, pv)?;
                 let tag = FieldValue::Known(u128::from(v));
+                let tpid = FieldValue::Known(u128::from(bits::TPID_8021Q));
                 let had = force_field(ops, had, bits::VLAN, tag)?;
+                let had = force_field(ops, had, bits::VLAN_TPID, tpid)?;
                 let none = force_field(ops, none, bits::VLAN, tag)?;
                 let none = force_field(ops, none, bits::L2_PRIORITY, FieldValue::Unknown)?;
+                let none = force_field(ops, none, bits::VLAN_TPID, tpid)?;
                 ops.dd.or(had, none)
             }
         })
+    }
+
+    /// Removes the inner VLAN tag of the current header. The outer tag
+    /// stays.
+    pub fn clear_inner_vlan(&self) -> PacketSet {
+        self.op(&[], |ops| {
+            let mut s = self.edge;
+            for f in bits::INNER_TAG {
+                s = force_field(ops, s, f, FieldValue::Absent)?;
+            }
+            Ok(s)
+        })
+    }
+
+    /// Pushes a new outer VLAN tag with the VLAN `vlan`, the TPID `tpid` and
+    /// an unknown layer 2 priority. The outer tag of a tagged frame becomes
+    /// its inner tag. A frame that has 2 tags already is in `full`.
+    pub fn push_vlan(&self, vlan: u16, tpid: u16) -> Pushed {
+        let r = self.run(&[], |ops| {
+            let c = Bank::Current;
+            let mut b = ops.builder();
+            let outer = b.var(bits::P_VLAN, c)?;
+            let inner = b.var(bits::P_INNER_VLAN, c)?;
+            let full = ops.dd.and(self.edge, inner)?;
+            let rest = ops.dd.diff(self.edge, inner)?;
+            let one = ops.dd.and(rest, outer)?;
+            let none = ops.dd.diff(rest, outer)?;
+            // The outer tag of a frame with 1 tag moves to the inner tag.
+            let inner_cube = ops.cube(&bits::tag_bits(&bits::INNER_TAG), c)?;
+            let one = ops.dd.exists(one, inner_cube)?;
+            let m = ops.map(MapKind::Tags)?;
+            let one = ops.dd.rename(one, m)?;
+            let outer_cube = ops.cube(&bits::tag_bits(&bits::OUTER_TAG), c)?;
+            let none = ops.dd.exists(none, outer_cube)?;
+            let moved = ops.dd.or(one, none)?;
+            let mut lits = crate::set::value_lits(bits::VLAN, c, u128::from(vlan));
+            lits.extend(crate::set::value_lits(bits::VLAN_TPID, c, u128::from(tpid)));
+            lits.extend(crate::set::value_lits(bits::L2_PRIORITY, c, 0));
+            lits.extend([
+                (level(bits::P_VLAN, c), true),
+                (level(bits::U_VLAN, c), false),
+                (level(bits::U_L2_PRIORITY, c), true),
+            ]);
+            let tag = ops.dd.literals(&lits)?;
+            let done = ops.dd.and(moved, tag)?;
+            Ok((done, full))
+        });
+        let (done, full) = r.unwrap_or((Edge::FALSE, Edge::FALSE));
+        Pushed {
+            done: self.with(done),
+            full: self.with(full),
+        }
+    }
+
+    /// Pops the outer VLAN tag of the current header. The inner tag of a
+    /// frame with 2 tags becomes its outer tag. An untagged frame stays as
+    /// it is.
+    pub fn pop_vlan(&self) -> PacketSet {
+        self.op(&[], |ops| {
+            let c = Bank::Current;
+            let inner = ops.builder().var(bits::P_INNER_VLAN, c)?;
+            let two = ops.dd.and(self.edge, inner)?;
+            let mut one = ops.dd.diff(self.edge, inner)?;
+            for f in bits::OUTER_TAG {
+                one = force_field(ops, one, f, FieldValue::Absent)?;
+            }
+            let outer_cube = ops.cube(&bits::tag_bits(&bits::OUTER_TAG), c)?;
+            let two = ops.dd.exists(two, outer_cube)?;
+            let m = ops.map(MapKind::Tags)?;
+            let two = ops.dd.rename(two, m)?;
+            let z = ops.builder().zeros(&bits::tag_bits(&bits::INNER_TAG), c)?;
+            let two = ops.dd.and(two, z)?;
+            ops.dd.or(one, two)
+        })
+    }
+
+    /// Splits the set into the frames with an inner VLAN tag and the rest.
+    pub fn split_inner_vlan(&self) -> (PacketSet, PacketSet) {
+        let r = self.run(&[], |ops| {
+            let pv = ops.builder().var(bits::P_INNER_VLAN, Bank::Current)?;
+            Ok((ops.dd.and(self.edge, pv)?, ops.dd.diff(self.edge, pv)?))
+        });
+        let (inner, rest) = r.unwrap_or((Edge::FALSE, Edge::FALSE));
+        (self.with(inner), self.with(rest))
+    }
+
+    /// True if each frame of the set with an inner VLAN tag has an outer
+    /// tag, in the original request, the current header and the inner
+    /// header. Each set operation keeps this property; the tests check it.
+    pub fn has_valid_tags(&self) -> bool {
+        self.run(&[], |ops| {
+            let mut b = ops.builder();
+            let none = b.value(bits::ENCAP_KIND, Bank::Current, bits::ENCAP_NONE)?;
+            let encapsulated = b.dd.diff(self.edge, none)?;
+            for (bank, s) in [
+                (Bank::Original, self.edge),
+                (Bank::Current, self.edge),
+                (Bank::Inner, encapsulated),
+            ] {
+                let inner = b.var(bits::P_INNER_VLAN, bank)?;
+                let outer = b.var(bits::P_VLAN, bank)?;
+                let bad = b.dd.and(s, inner)?;
+                let bad = b.dd.diff(bad, outer)?;
+                if bad != Edge::FALSE {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        })
+        .unwrap_or(false)
     }
 
     /// Rewrites fields of the current header. The original request stays.

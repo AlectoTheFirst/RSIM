@@ -123,6 +123,9 @@ pub(crate) enum MapKind {
     /// The current and the inner levels of the header bits below the
     /// encapsulation fields swap.
     CurrentInner,
+    /// The bits of the outer VLAN tag and of the inner VLAN tag of the
+    /// current bank swap.
+    Tags,
 }
 
 pub(crate) struct Inner {
@@ -348,6 +351,14 @@ impl Ops<'_> {
                 let header: Vec<u32> = bits::header_bits().collect();
                 swap(Bank::Current, Bank::Inner, &header)
             }
+            MapKind::Tags => bits::tag_bits(&bits::OUTER_TAG)
+                .into_iter()
+                .zip(bits::tag_bits(&bits::INNER_TAG))
+                .flat_map(|(a, b)| {
+                    let (a, b) = (level(a, Bank::Current), level(b, Bank::Current));
+                    [(a, b), (b, a)]
+                })
+                .collect(),
             MapKind::ReverseFlow => {
                 let pairs = bits::swap_pairs();
                 let sw = swapped(&pairs);
@@ -447,7 +458,7 @@ impl Builder<'_> {
         let mut le = Edge::TRUE;
         let mut ge = Edge::TRUE;
         for i in (0..f.width).rev() {
-            let x = self.dd.var(level(f.start + i, bank))?;
+            let x = self.dd.var(level(f.bit(i), bank))?;
             let shift = f.width - 1 - i;
             le = if hi >> shift & 1 == 1 {
                 self.dd.ite(x, le, Edge::TRUE)?
@@ -541,6 +552,16 @@ impl Builder<'_> {
             (DST_MAC, self.mac_cond(DST_MAC, &m.dst_mac)?),
             (VLAN, self.port_cond(VLAN, &m.vlan)?),
             (L2_PRIORITY, self.value_cond(L2_PRIORITY, &m.l2_priority)?),
+            (VLAN_TPID, self.port_cond(VLAN_TPID, &m.vlan_tpid)?),
+            (INNER_VLAN, self.port_cond(INNER_VLAN, &m.inner_vlan)?),
+            (
+                INNER_L2_PRIORITY,
+                self.value_cond(INNER_L2_PRIORITY, &m.inner_l2_priority)?,
+            ),
+            (
+                INNER_VLAN_TPID,
+                self.port_cond(INNER_VLAN_TPID, &m.inner_vlan_tpid)?,
+            ),
             (MPLS_TC, self.value_cond(MPLS_TC, &m.mpls_tc)?),
         ];
         for (f, c) in conds {
@@ -616,7 +637,7 @@ impl Builder<'_> {
                     .filter(|i| mask >> i & 1 == 1)
                     .map(|i| {
                         (
-                            level(f.start + f.width - 1 - i, Bank::Current),
+                            level(f.bit(f.width - 1 - i), Bank::Current),
                             value >> i & 1 == 1,
                         )
                     })

@@ -1249,10 +1249,17 @@ export interface components {
             icmp_type: components["schemas"]["Field_uint8"];
             /** @description The inner header of an encapsulated current header. */
             inner?: components["schemas"]["HeaderJson"] | null;
+            inner_l2_priority?: components["schemas"]["Field_uint8"] | null;
             l2_priority: components["schemas"]["Field_uint8"];
             mpls_tc: components["schemas"]["Field_uint8"];
             "network.iana_number": components["schemas"]["Field_uint8"];
+            /** @description The inner tag, only when the frame has one. */
+            "network.inner.vlan.id"?: components["schemas"]["Field_uint16"] | null;
+            /** @description The TPID of the inner tag, only when it is not 33024 (0x8100). */
+            "network.inner.vlan.tpid"?: components["schemas"]["Field_uint16"] | null;
             "network.vlan.id": components["schemas"]["Field_uint16"];
+            /** @description The TPID of the outer tag, only when it is not 33024 (0x8100). */
+            "network.vlan.tpid"?: components["schemas"]["Field_uint16"] | null;
             "source.ip": components["schemas"]["Field_string"];
             "source.mac": components["schemas"]["Field_string"];
             "source.port": components["schemas"]["Field_uint16"];
@@ -1457,6 +1464,11 @@ export interface components {
             ingress?: string | null;
             /**
              * Format: uint8
+             * @description The layer 2 priority of the inner tag. It needs network.inner.vlan.id.
+             */
+            inner_l2_priority?: number | null;
+            /**
+             * Format: uint8
              * @description The layer 2 priority. It needs network.vlan.id.
              */
             l2_priority?: number | null;
@@ -1465,6 +1477,18 @@ export interface components {
              * @description The protocol number.
              */
             "network.iana_number"?: number | null;
+            /**
+             * Format: uint16
+             * @description The VLAN of the inner tag. It needs network.vlan.id. Not given: no
+             *     inner tag.
+             */
+            "network.inner.vlan.id"?: number | null;
+            /**
+             * Format: uint16
+             * @description The TPID of the inner tag. It needs network.inner.vlan.id. Not
+             *     given: 33024 (0x8100).
+             */
+            "network.inner.vlan.tpid"?: number | null;
             /** @description The protocol name. Give network.iana_number or network.transport. */
             "network.transport"?: components["schemas"]["Transport"] | null;
             /**
@@ -1472,6 +1496,13 @@ export interface components {
              * @description The VLAN tag.
              */
             "network.vlan.id"?: number | null;
+            /**
+             * Format: uint16
+             * @description The TPID of the outer tag, for example 34984 (0x88a8). It needs
+             *     network.vlan.id. Not given: 33024 (0x8100), or 34984 with an inner
+             *     tag and unstated defaults.
+             */
+            "network.vlan.tpid"?: number | null;
             /** @description Run the reply. The default is true. */
             reply?: boolean | null;
             /** @description The source IP address. */
@@ -1534,12 +1565,20 @@ export interface components {
             icmp_type?: number | null;
             ingress?: components["schemas"]["IngressRef"] | null;
             /** Format: uint8 */
+            inner_l2_priority?: number | null;
+            /** Format: uint8 */
             l2_priority?: number | null;
             /** Format: uint8 */
             "network.iana_number"?: number | null;
+            /** Format: uint16 */
+            "network.inner.vlan.id"?: number | null;
+            /** Format: uint16 */
+            "network.inner.vlan.tpid"?: number | null;
             "network.transport"?: string | null;
             /** Format: uint16 */
             "network.vlan.id"?: number | null;
+            /** Format: uint16 */
+            "network.vlan.tpid"?: number | null;
             reply?: boolean | null;
             "source.ip": string;
             "source.mac"?: string | null;
@@ -1747,10 +1786,14 @@ export interface components {
             icmp_code?: string | null;
             icmp_type?: string | null;
             ingress?: components["schemas"]["IngressRef"] | null;
+            inner_l2_priority?: string | null;
             l2_priority?: string | null;
             "network.iana_number"?: string | null;
+            "network.inner.vlan.id"?: string | null;
+            "network.inner.vlan.tpid"?: string | null;
             "network.transport"?: string | null;
             "network.vlan.id"?: string | null;
+            "network.vlan.tpid"?: string | null;
             reply?: boolean | null;
             "source.ip"?: string | null;
             "source.mac"?: string | null;
@@ -1789,14 +1832,25 @@ export interface components {
              *     attachment records of the source addresses give the ingress.
              */
             ingress?: string | null;
+            /** @description The layer 2 priorities of the inner tag. */
+            inner_l2_priority?: components["schemas"]["SetArg"] | null;
             /** @description The layer 2 priorities. */
             l2_priority?: components["schemas"]["SetArg"] | null;
             /** @description The protocol numbers. */
             "network.iana_number"?: components["schemas"]["SetArg"] | null;
+            /**
+             * @description The VLANs of the inner tag. It needs network.vlan.id. With no inner
+             *     field: no inner tag.
+             */
+            "network.inner.vlan.id"?: components["schemas"]["SetArg"] | null;
+            /** @description The TPIDs of the inner tag. Not given: 33024 (0x8100). */
+            "network.inner.vlan.tpid"?: components["schemas"]["SetArg"] | null;
             /** @description The protocol names. */
             "network.transport"?: components["schemas"]["SetArg"] | null;
             /** @description The VLAN tags. */
             "network.vlan.id"?: components["schemas"]["SetArg"] | null;
+            /** @description The TPIDs of the outer tag. Not given: 33024 (0x8100). */
+            "network.vlan.tpid"?: components["schemas"]["SetArg"] | null;
             /** @description Run the replies. The default is true. */
             reply?: boolean | null;
             /** @description The source addresses. */

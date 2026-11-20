@@ -315,15 +315,15 @@ impl ExitMark {
     }
 }
 
-/// What an egress does with the 802.1Q tag.
+/// What an egress does with the VLAN tags.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tag {
-    /// The tag stays as it is.
+    /// The tags stay as they are.
     #[default]
     Keep,
     /// The frames leave without a tag.
     Untagged,
-    /// The frames leave with this VLAN.
+    /// The frames leave with this VLAN and no inner tag.
     Vlan(u16),
 }
 
@@ -350,7 +350,10 @@ impl Egress {
                     match self.tag {
                         Tag::Keep => input.rewrite(&self.rewrite),
                         Tag::Untagged => input.rewrite(&self.rewrite).set_vlan(None),
-                        Tag::Vlan(v) => input.rewrite(&self.rewrite).set_vlan(Some(v)),
+                        Tag::Vlan(v) => input
+                            .rewrite(&self.rewrite)
+                            .set_vlan(Some(v))
+                            .clear_inner_vlan(),
                     },
                     peer,
                     ReasonCode::LinkHandOff,
@@ -594,8 +597,7 @@ mod tests {
         outer.fragment = FieldValue::Known(Fragment::Unfragmented);
         outer.src_mac = FieldValue::Unknown;
         outer.dst_mac = FieldValue::Unknown;
-        outer.vlan = FieldValue::Absent;
-        outer.l2_priority = FieldValue::Absent;
+        outer = outer.untagged();
         outer.encap = vec![Encap::Wireguard { src, dst }];
         let plain = PacketSet::single(
             &arena,

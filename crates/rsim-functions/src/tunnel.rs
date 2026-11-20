@@ -88,8 +88,7 @@ impl OuterFields {
         h.fragment = FieldValue::Known(Fragment::Unfragmented);
         h.src_mac = FieldValue::Unknown;
         h.dst_mac = FieldValue::Unknown;
-        h.vlan = FieldValue::Absent;
-        h.l2_priority = FieldValue::Absent;
+        h = h.untagged();
         h.encap = vec![Encap::Vxlan { src, dst, vni }];
         h
     }
@@ -481,8 +480,7 @@ impl WireguardEncap {
         h.fragment = FieldValue::Known(Fragment::Unfragmented);
         h.src_mac = FieldValue::Unknown;
         h.dst_mac = FieldValue::Unknown;
-        h.vlan = FieldValue::Absent;
-        h.l2_priority = FieldValue::Absent;
+        h = h.untagged();
         h.encap = vec![Encap::Wireguard { src, dst }];
         h
     }

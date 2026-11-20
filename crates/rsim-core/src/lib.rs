@@ -39,7 +39,7 @@ pub use id::{
 pub use outcome::{Destination, ExitPoint, Outcome, Reason, ReasonCode, Verdict, VerdictKind};
 pub use packet_set::{
     AddrField, Decapsulated, Encapsulated, GroupPart, GroupPartition, PacketPair, PacketSet,
-    PrefixPartition, Rewrite, SessionDirection, SessionSplit, Split, Uniform,
+    PrefixPartition, Pushed, Rewrite, SessionDirection, SessionSplit, Split, Uniform,
 };
 pub use predicate::{
     AddrCond, FlagsCond, FragmentCond, MacCond, Match, MatchClass, OpenField, PortCond, RangeCond,
