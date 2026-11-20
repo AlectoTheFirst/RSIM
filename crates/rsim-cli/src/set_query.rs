@@ -271,8 +271,20 @@ impl SetInput {
         }
     }
 
-    /// Makes the engine query. A set with no packet is not valid.
+    /// Makes the engine query. A set with no packet is not valid, and a
+    /// field of the inner tag needs `network.vlan.id`.
     pub fn to_query(&self, twin: &Twin) -> Result<Query, QueryError> {
+        let inner = [
+            ("network.inner.vlan.id", self.inner_vlan_id.is_some()),
+            ("inner_l2_priority", self.inner_l2_priority.is_some()),
+            ("network.inner.vlan.tpid", self.inner_vlan_tpid.is_some()),
+        ];
+        if let (Some((name, _)), None) = (inner.iter().find(|(_, g)| *g), &self.vlan_id) {
+            return Err(QueryError::new(
+                ErrorCode::InvalidQuery,
+                format!("{name} is given and network.vlan.id is not"),
+            ));
+        }
         let arena = twin.arena(None);
         let packets = PacketSet::from_spec(&arena, &self.spec(twin));
         if packets.is_empty() {

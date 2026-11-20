@@ -108,15 +108,15 @@ export const FIELD_SCHEMA = {
     "values": []
   },
   "network.inner.vlan.id": {
-    "path": "The VLAN of the inner tag. It needs network.vlan.id. Not given, the frame has no inner tag.",
-    "set": "The VLANs of the inner tag. With no inner field given, the frames have no inner tag.",
+    "path": "The VLAN of the inner tag. It needs network.vlan.id. Not given: no inner tag.",
+    "set": "The VLANs of the inner tag. It needs network.vlan.id. With no inner field: no inner tag.",
     "type": "integer",
     "maximum": 4095,
     "values": []
   },
   "network.inner.vlan.tpid": {
-    "path": "The TPID of the inner VLAN tag. It needs network.inner.vlan.id. Not given, it is 33024 (0x8100).",
-    "set": "The TPIDs of the inner VLAN tag. Not given, the TPID is 33024 (0x8100).",
+    "path": "The TPID of the inner tag. It needs network.inner.vlan.id. Not given: 33024 (0x8100).",
+    "set": "The TPIDs of the inner tag. Not given: 33024 (0x8100).",
     "type": "integer",
     "maximum": 65535,
     "values": []
@@ -141,8 +141,8 @@ export const FIELD_SCHEMA = {
     "values": []
   },
   "network.vlan.tpid": {
-    "path": "The TPID of the outer VLAN tag, a number such as 34984 (0x88a8). It needs network.vlan.id. Not given, it is 33024 (0x8100), or 34984 (0x88a8) with an inner tag and unstated defaults.",
-    "set": "The TPIDs of the outer VLAN tag. Not given, the TPID is 33024 (0x8100).",
+    "path": "The TPID of the outer tag, for example 34984 (0x88a8). It needs network.vlan.id. Not given: 33024 (0x8100), or 34984 with an inner tag and unstated defaults.",
+    "set": "The TPIDs of the outer tag. Not given: 33024 (0x8100).",
     "type": "integer",
     "maximum": 65535,
     "values": []

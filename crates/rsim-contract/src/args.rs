@@ -127,21 +127,21 @@ pub struct PathQueryArgs {
     /// The layer 2 priority. It needs network.vlan.id.
     #[schemars(range(max = 7))]
     pub l2_priority: Option<u8>,
-    /// The TPID of the outer VLAN tag, a number such as 34984 (0x88a8). It
-    /// needs network.vlan.id. Not given, it is 33024 (0x8100), or 34984
-    /// (0x88a8) with an inner tag and unstated defaults.
+    /// The TPID of the outer tag, for example 34984 (0x88a8). It needs
+    /// network.vlan.id. Not given: 33024 (0x8100), or 34984 with an inner
+    /// tag and unstated defaults.
     #[serde(rename = "network.vlan.tpid")]
     pub vlan_tpid: Option<u16>,
-    /// The VLAN of the inner tag. It needs network.vlan.id. Not given, the
-    /// frame has no inner tag.
+    /// The VLAN of the inner tag. It needs network.vlan.id. Not given: no
+    /// inner tag.
     #[serde(rename = "network.inner.vlan.id")]
     #[schemars(range(max = 4095))]
     pub inner_vlan_id: Option<u16>,
     /// The layer 2 priority of the inner tag. It needs network.inner.vlan.id.
     #[schemars(range(max = 7))]
     pub inner_l2_priority: Option<u8>,
-    /// The TPID of the inner VLAN tag. It needs network.inner.vlan.id. Not
-    /// given, it is 33024 (0x8100).
+    /// The TPID of the inner tag. It needs network.inner.vlan.id. Not
+    /// given: 33024 (0x8100).
     #[serde(rename = "network.inner.vlan.tpid")]
     pub inner_vlan_tpid: Option<u16>,
     /// The TCP flags that are set.
@@ -225,18 +225,16 @@ pub struct SetQueryArgs {
     pub vlan_id: Option<SetArg>,
     /// The layer 2 priorities.
     pub l2_priority: Option<SetArg>,
-    /// The TPIDs of the outer VLAN tag. Not given, the TPID is 33024
-    /// (0x8100).
+    /// The TPIDs of the outer tag. Not given: 33024 (0x8100).
     #[serde(rename = "network.vlan.tpid")]
     pub vlan_tpid: Option<SetArg>,
-    /// The VLANs of the inner tag. With no inner field given, the frames
-    /// have no inner tag.
+    /// The VLANs of the inner tag. It needs network.vlan.id. With no inner
+    /// field: no inner tag.
     #[serde(rename = "network.inner.vlan.id")]
     pub inner_vlan_id: Option<SetArg>,
     /// The layer 2 priorities of the inner tag.
     pub inner_l2_priority: Option<SetArg>,
-    /// The TPIDs of the inner VLAN tag. Not given, the TPID is 33024
-    /// (0x8100).
+    /// The TPIDs of the inner tag. Not given: 33024 (0x8100).
     #[serde(rename = "network.inner.vlan.tpid")]
     pub inner_vlan_tpid: Option<SetArg>,
     /// The TCP flag values: numbers, ranges, or flag names joined with +.

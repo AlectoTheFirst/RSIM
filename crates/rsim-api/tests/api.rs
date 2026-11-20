@@ -122,6 +122,28 @@ fn each_stored_query_gives_the_stored_bytes_through_its_resource() {
 }
 
 #[test]
+fn a_query_with_an_inner_tag_has_its_own_resource() {
+    let s = state(None);
+    let text = golden()
+        .into_iter()
+        .find(|(n, _)| n == "mini-enterprise.json")
+        .map(|(_, t)| t)
+        .expect("the stored answer of mini-enterprise");
+    let mut stored: Value = serde_json::from_str(&text).unwrap();
+    stored["query"]["network.vlan.id"] = json!(10);
+    let one = make_query(&s, &stored);
+    stored["query"]["network.inner.vlan.id"] = json!(20);
+    let two = make_query(&s, &stored);
+    assert_ne!(one, two);
+    let r = get(&s, &format!("{two}?form=full"));
+    assert_eq!(r.status, 200);
+    let v = json(&r);
+    assert_eq!(v["query"]["network.inner.vlan.id"], 20);
+    let first = &v["answer"]["branches"][0]["steps"][0]["input"]["members"][0]["original"];
+    assert_eq!(first["network.inner.vlan.id"], json!({"known": 20}));
+}
+
+#[test]
 fn a_step_and_a_claim_have_urls_below_their_query() {
     let s = state(None);
     let stored: Value = serde_json::from_str(

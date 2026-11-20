@@ -1284,14 +1284,14 @@ export interface components {
             "network.iana_number"?: number | null;
             /**
              * Format: uint16
-             * @description The VLAN of the inner tag. It needs network.vlan.id. Not given, the
-             *     frame has no inner tag.
+             * @description The VLAN of the inner tag. It needs network.vlan.id. Not given: no
+             *     inner tag.
              */
             "network.inner.vlan.id"?: number | null;
             /**
              * Format: uint16
-             * @description The TPID of the inner VLAN tag. It needs network.inner.vlan.id. Not
-             *     given, it is 33024 (0x8100).
+             * @description The TPID of the inner tag. It needs network.inner.vlan.id. Not
+             *     given: 33024 (0x8100).
              */
             "network.inner.vlan.tpid"?: number | null;
             /** @description The protocol name. Give network.iana_number or network.transport. */
@@ -1303,9 +1303,9 @@ export interface components {
             "network.vlan.id"?: number | null;
             /**
              * Format: uint16
-             * @description The TPID of the outer VLAN tag, a number such as 34984 (0x88a8). It
-             *     needs network.vlan.id. Not given, it is 33024 (0x8100), or 34984
-             *     (0x88a8) with an inner tag and unstated defaults.
+             * @description The TPID of the outer tag, for example 34984 (0x88a8). It needs
+             *     network.vlan.id. Not given: 33024 (0x8100), or 34984 with an inner
+             *     tag and unstated defaults.
              */
             "network.vlan.tpid"?: number | null;
             /** @description Run the reply. The default is true. */
@@ -1642,23 +1642,17 @@ export interface components {
             /** @description The protocol numbers. */
             "network.iana_number"?: components["schemas"]["SetArg"] | null;
             /**
-             * @description The VLANs of the inner tag. With no inner field given, the frames
-             *     have no inner tag.
+             * @description The VLANs of the inner tag. It needs network.vlan.id. With no inner
+             *     field: no inner tag.
              */
             "network.inner.vlan.id"?: components["schemas"]["SetArg"] | null;
-            /**
-             * @description The TPIDs of the inner VLAN tag. Not given, the TPID is 33024
-             *     (0x8100).
-             */
+            /** @description The TPIDs of the inner tag. Not given: 33024 (0x8100). */
             "network.inner.vlan.tpid"?: components["schemas"]["SetArg"] | null;
             /** @description The protocol names. */
             "network.transport"?: components["schemas"]["SetArg"] | null;
             /** @description The VLAN tags. */
             "network.vlan.id"?: components["schemas"]["SetArg"] | null;
-            /**
-             * @description The TPIDs of the outer VLAN tag. Not given, the TPID is 33024
-             *     (0x8100).
-             */
+            /** @description The TPIDs of the outer tag. Not given: 33024 (0x8100). */
             "network.vlan.tpid"?: components["schemas"]["SetArg"] | null;
             /** @description Run the replies. The default is true. */
             reply?: boolean | null;

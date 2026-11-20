@@ -1473,6 +1473,17 @@ fn a_set_query_with_an_inner_tag_holds_only_frames_with_2_tags() {
         "json",
     ])));
     assert_eq!(v["query"]["network.inner.vlan.id"], "20-21");
+    let o = rsim(&set_args(&[
+        "--network.inner.vlan.id",
+        "20",
+        "--format",
+        "json",
+    ]));
+    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(
+        json_of(&o)["error"]["detail"],
+        "network.inner.vlan.id is given and network.vlan.id is not"
+    );
     assert!(v["query"].get("network.vlan.tpid").is_none());
     let first = &v["answer"]["branches"][0]["steps"][0]["input"]["members"];
     for m in first.as_array().unwrap() {

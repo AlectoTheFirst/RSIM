@@ -1967,7 +1967,7 @@
             ]
           },
           "network.inner.vlan.id": {
-            "description": "The VLAN of the inner tag. It needs network.vlan.id. Not given, the\nframe has no inner tag.",
+            "description": "The VLAN of the inner tag. It needs network.vlan.id. Not given: no\ninner tag.",
             "format": "uint16",
             "maximum": 4095,
             "minimum": 0,
@@ -1977,7 +1977,7 @@
             ]
           },
           "network.inner.vlan.tpid": {
-            "description": "The TPID of the inner VLAN tag. It needs network.inner.vlan.id. Not\ngiven, it is 33024 (0x8100).",
+            "description": "The TPID of the inner tag. It needs network.inner.vlan.id. Not\ngiven: 33024 (0x8100).",
             "format": "uint16",
             "maximum": 65535,
             "minimum": 0,
@@ -2008,7 +2008,7 @@
             ]
           },
           "network.vlan.tpid": {
-            "description": "The TPID of the outer VLAN tag, a number such as 34984 (0x88a8). It\nneeds network.vlan.id. Not given, it is 33024 (0x8100), or 34984\n(0x88a8) with an inner tag and unstated defaults.",
+            "description": "The TPID of the outer tag, for example 34984 (0x88a8). It needs\nnetwork.vlan.id. Not given: 33024 (0x8100), or 34984 with an inner\ntag and unstated defaults.",
             "format": "uint16",
             "maximum": 65535,
             "minimum": 0,
@@ -3208,7 +3208,7 @@
                 "type": "null"
               }
             ],
-            "description": "The VLANs of the inner tag. With no inner field given, the frames\nhave no inner tag."
+            "description": "The VLANs of the inner tag. It needs network.vlan.id. With no inner\nfield: no inner tag."
           },
           "network.inner.vlan.tpid": {
             "anyOf": [
@@ -3219,7 +3219,7 @@
                 "type": "null"
               }
             ],
-            "description": "The TPIDs of the inner VLAN tag. Not given, the TPID is 33024\n(0x8100)."
+            "description": "The TPIDs of the inner tag. Not given: 33024 (0x8100)."
           },
           "network.transport": {
             "anyOf": [
@@ -3252,7 +3252,7 @@
                 "type": "null"
               }
             ],
-            "description": "The TPIDs of the outer VLAN tag. Not given, the TPID is 33024\n(0x8100)."
+            "description": "The TPIDs of the outer tag. Not given: 33024 (0x8100)."
           },
           "reply": {
             "description": "Run the replies. The default is true.",

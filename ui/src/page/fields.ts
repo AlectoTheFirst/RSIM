@@ -118,7 +118,7 @@ export const FIELD_LABELS: Record<QueryField, string> = {
   l2_priority: "layer 2 priority",
   "network.vlan.tpid": "VLAN TPID",
   "network.inner.vlan.id": "inner VLAN tag",
-  inner_l2_priority: "inner L2 priority",
+  inner_l2_priority: "inner tag priority",
   "network.inner.vlan.tpid": "inner VLAN TPID",
   reply: "reply run",
   unstated: "unstated fields",

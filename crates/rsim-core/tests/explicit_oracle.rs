@@ -174,8 +174,21 @@ prop_compose! {
         dport in prop_oneof![Just(PortCond::Any), Just(PortCond::one(53)), Just(PortCond::In(vec![(20, 1024)]))],
         dscp in prop_oneof![Just(ValueCond::Any), Just(ValueCond::one(46))],
         icmp in prop_oneof![Just(ValueCond::Any), Just(ValueCond::one(8))],
+        tags in (
+            prop_oneof![Just(PortCond::Any), Just(PortCond::one(10)), Just(PortCond::In(vec![(10, 20)]))],
+            prop_oneof![Just(ValueCond::Any), Just(ValueCond::one(1))],
+            prop_oneof![Just(PortCond::Any), Just(PortCond::one(0x88a8))],
+            prop_oneof![Just(PortCond::Any), Just(PortCond::one(20)), Just(PortCond::In(vec![(0, 15)]))],
+            prop_oneof![Just(ValueCond::Any), Just(ValueCond::one(0))],
+            prop_oneof![Just(PortCond::Any), Just(PortCond::one(0x8100))],
+        ),
     ) -> Match {
-        Match { src_ip: src, dst_ip: dst, protocol: proto, src_port: sport, dst_port: dport, dscp, icmp_type: icmp, ..Match::any() }
+        let (vlan, l2_priority, vlan_tpid, inner_vlan, inner_l2_priority, inner_vlan_tpid) = tags;
+        Match {
+            src_ip: src, dst_ip: dst, protocol: proto, src_port: sport, dst_port: dport, dscp, icmp_type: icmp,
+            vlan, l2_priority, vlan_tpid, inner_vlan, inner_l2_priority, inner_vlan_tpid,
+            ..Match::any()
+        }
     }
 }
 
