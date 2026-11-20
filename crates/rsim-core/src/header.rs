@@ -70,6 +70,8 @@ pub enum DefaultValue {
     Number(u8),
     /// A fragment state.
     Fragment(Fragment),
+    /// A TPID.
+    Tpid(u16),
     /// A port range, inclusive. A header holds one value, so the field of
     /// the header stays unstated and the packet set of the query holds the
     /// range ([`crate::SetSpec`] of [`UnstatedDefault::ranges`]).
@@ -103,13 +105,19 @@ pub const EPHEMERAL_FIRST: u16 = 49152;
 /// connection (SYN), an echo request for ICMP (type 8, code 0) and ICMPv6
 /// (type 128, code 0), and a source port in the ephemeral range 49152 to
 /// 65535. The layer 2 priority is absent only when the VLAN tag is absent.
-/// A default applies only to a field whose header the packet has. The MAC
+/// A frame with a stated inner tag has the outer TPID `0x88a8`; each other
+/// TPID that the query does not state is `0x8100`. A default applies only to a field whose header the packet has. The MAC
 /// addresses and the destination port have no default.
-pub const UNSTATED_DEFAULTS: [UnstatedDefault; 11] = [
+pub const UNSTATED_DEFAULTS: [UnstatedDefault; 12] = [
     default(HeaderField::Dscp, None, DefaultValue::Number(0)),
     default(HeaderField::Ecn, None, DefaultValue::Number(0)),
     default(HeaderField::Vlan, None, DefaultValue::Absent),
     default(HeaderField::L2Priority, None, DefaultValue::Absent),
+    default(
+        HeaderField::VlanTpid,
+        None,
+        DefaultValue::Tpid(crate::bits::TPID_8021AD),
+    ),
     default(
         HeaderField::Fragment,
         None,
@@ -172,6 +180,10 @@ pub enum HeaderField {
     DstMac,
     Vlan,
     L2Priority,
+    VlanTpid,
+    InnerVlan,
+    InnerL2Priority,
+    InnerVlanTpid,
     SrcIp,
     DstIp,
     Protocol,
@@ -194,6 +206,10 @@ impl HeaderField {
             HeaderField::DstMac => "destination MAC",
             HeaderField::Vlan => "VLAN",
             HeaderField::L2Priority => "layer 2 priority",
+            HeaderField::VlanTpid => "VLAN TPID",
+            HeaderField::InnerVlan => "inner VLAN",
+            HeaderField::InnerL2Priority => "inner layer 2 priority",
+            HeaderField::InnerVlanTpid => "inner VLAN TPID",
             HeaderField::SrcIp => "source IP",
             HeaderField::DstIp => "destination IP",
             HeaderField::Protocol => "protocol",
@@ -232,6 +248,14 @@ pub struct Header {
     pub vlan: FieldValue<u16>,
     /// Absent for an untagged frame.
     pub l2_priority: FieldValue<u8>,
+    /// The TPID of the outer tag. Absent for an untagged frame.
+    pub vlan_tpid: FieldValue<u16>,
+    /// The VLAN of the inner tag. Absent for a frame with less than 2 tags.
+    pub inner_vlan: FieldValue<u16>,
+    /// The priority of the inner tag.
+    pub inner_l2_priority: FieldValue<u8>,
+    /// The TPID of the inner tag.
+    pub inner_vlan_tpid: FieldValue<u16>,
     // Layer 3.
     pub src_ip: FieldValue<IpAddr>,
     pub dst_ip: FieldValue<IpAddr>,
@@ -286,6 +310,10 @@ impl Header {
             dst_mac: FieldValue::Unstated,
             vlan: FieldValue::Unstated,
             l2_priority: FieldValue::Unstated,
+            vlan_tpid: FieldValue::Unstated,
+            inner_vlan: FieldValue::Unstated,
+            inner_l2_priority: FieldValue::Unstated,
+            inner_vlan_tpid: FieldValue::Unstated,
             src_ip: FieldValue::Known(src),
             dst_ip: FieldValue::Known(dst),
             protocol: FieldValue::Known(protocol),
@@ -359,6 +387,10 @@ impl Header {
                 (HeaderField::L2Priority, DefaultValue::Absent) => {
                     !self.vlan.is_present() && fill(&mut self.l2_priority, FieldValue::Absent)
                 }
+                (HeaderField::VlanTpid, DefaultValue::Tpid(t)) => {
+                    let stated = !self.inner_vlan.is_unstated() && self.inner_vlan.is_present();
+                    stated && fill(&mut self.vlan_tpid, FieldValue::Known(t))
+                }
                 (HeaderField::Dscp, DefaultValue::Number(n)) => {
                     fill(&mut self.dscp, FieldValue::Known(n))
                 }
@@ -386,6 +418,17 @@ impl Header {
             }
         }
         out
+    }
+
+    /// Makes the frame untagged: both VLAN tags are absent.
+    pub fn untagged(mut self) -> Self {
+        self.vlan = FieldValue::Absent;
+        self.l2_priority = FieldValue::Absent;
+        self.vlan_tpid = FieldValue::Absent;
+        self.inner_vlan = FieldValue::Absent;
+        self.inner_l2_priority = FieldValue::Absent;
+        self.inner_vlan_tpid = FieldValue::Absent;
+        self
     }
 
     /// Makes the packet a later fragment. The transport fields become absent.
@@ -477,14 +520,51 @@ impl Header {
         self.encap.len() == 1 && self.inner.is_none() && !self.has_unstated_field()
     }
 
+    /// The presence of the outer tag and of the inner tag: `Some(false)` for
+    /// an absent tag, `Some(true)` for a present tag and `None` for an outer
+    /// tag that the header does not state. A field of a tag that is absent
+    /// makes the tag absent, and an inner tag that the header does not state
+    /// is absent. A stated field of the inner tag makes the outer tag
+    /// present, and an absent outer tag makes the inner tag absent.
+    pub fn tag_presence(&self) -> (Option<bool>, Option<bool>) {
+        fn presence(fields: [FieldValue<()>; 3]) -> Option<bool> {
+            if fields.contains(&FieldValue::Absent) {
+                Some(false)
+            } else if fields.iter().all(FieldValue::is_unstated) {
+                None
+            } else {
+                Some(true)
+            }
+        }
+        let unit = |v: FieldValue<u16>| v.map(|_| ());
+        let outer = presence([
+            unit(self.vlan),
+            self.l2_priority.map(|_| ()),
+            unit(self.vlan_tpid),
+        ]);
+        let inner = presence([
+            unit(self.inner_vlan),
+            self.inner_l2_priority.map(|_| ()),
+            unit(self.inner_vlan_tpid),
+        ]);
+        match (outer, inner) {
+            (Some(false), _) | (_, None | Some(false)) => (outer, Some(false)),
+            (_, Some(true)) => (Some(true), Some(true)),
+        }
+    }
+
     /// True if a field of the header is unstated. The encapsulation and the
-    /// inner header are not fields of the header.
+    /// inner header are not fields of the header, the fields of an absent
+    /// tag are absent, and a TPID that the header does not state is
+    /// `0x8100`.
     pub fn has_unstated_field(&self) -> bool {
+        let (outer, inner) = self.tag_presence();
         [
             self.src_mac.is_unstated(),
             self.dst_mac.is_unstated(),
-            self.vlan.is_unstated(),
-            self.l2_priority.is_unstated(),
+            outer != Some(false) && (self.vlan.is_unstated() || self.l2_priority.is_unstated()),
+            inner == Some(true)
+                && (self.inner_vlan.is_unstated() || self.inner_l2_priority.is_unstated()),
             self.src_ip.is_unstated(),
             self.dst_ip.is_unstated(),
             self.protocol.is_unstated(),
@@ -546,8 +626,7 @@ mod tests {
         o.ecn = FieldValue::Known(0);
         o.src_mac = FieldValue::Unknown;
         o.dst_mac = FieldValue::Unknown;
-        o.vlan = FieldValue::Absent;
-        o.l2_priority = FieldValue::Absent;
+        o = o.untagged();
         o.encap = vec![Encap::Vxlan {
             src: ip("198.51.100.1"),
             dst: ip("198.51.100.2"),

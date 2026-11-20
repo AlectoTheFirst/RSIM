@@ -112,6 +112,34 @@ fn dst_mac_is(m: Mac) -> RulePredicate {
     })
 }
 
+/// The branches of a layer 2 function: the function runs on the frames
+/// with no inner VLAN tag, and a frame with an inner tag is unknown.
+fn with_inner_tag(
+    meta: &Meta,
+    input: &PacketSet,
+    ctx: &Context,
+    state: &FlowState,
+    f: impl FnOnce(&PacketSet) -> Vec<Branch>,
+) -> Vec<Branch> {
+    let (inner, rest) = input.split_inner_vlan();
+    if inner.is_empty() {
+        return f(input);
+    }
+    let mut out = if rest.is_empty() {
+        Vec::new()
+    } else {
+        f(&rest)
+    };
+    out.push(meta.unknown(
+        inner,
+        ReasonCode::UnknownAttribute,
+        "the frame has 2 VLAN tags, and the behaviour of the device for 2 tags is not known",
+        ctx,
+        state,
+    ));
+    out
+}
+
 /// A MAC with its provenance and the packets that it applies to.
 type Resolved = (Mac, Vec<SourceSpan>, PacketSet);
 
@@ -189,72 +217,74 @@ impl NetFunction for HostResolution {
         vec![self.next.clone()]
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
-        let mut c = ctx.clone();
-        c.device = Attr::Known(self.meta.device.clone());
-        c.ingress_interface = Attr::Known(self.interface.clone());
-        let mut out = Vec::new();
-        let unknown = |set: PacketSet, detail: String, out: &mut Vec<Branch>| {
-            push_nonempty(
-                out,
-                self.meta
-                    .unknown(set, ReasonCode::UnknownAttribute, detail, &c, state),
-            );
-        };
-        let (sources, src_none, src_unc) = self.by_address(AddrField::Src, input);
-        unknown(src_none, "no MAC of the source address".into(), &mut out);
-        unknown(src_unc, "the source address is not known".into(), &mut out);
-        for (src_mac, src_spans, set) in sources {
-            let local: TriePrefixTable<()> = {
-                let mut t = TriePrefixTable::new();
-                for p in &self.local {
-                    t.insert(*p, ());
-                }
-                t
+        with_inner_tag(&self.meta, input, ctx, state, |input| {
+            let mut c = ctx.clone();
+            c.device = Attr::Known(self.meta.device.clone());
+            c.ingress_interface = Attr::Known(self.interface.clone());
+            let mut out = Vec::new();
+            let unknown = |set: PacketSet, detail: String, out: &mut Vec<Branch>| {
+                push_nonempty(
+                    out,
+                    self.meta
+                        .unknown(set, ReasonCode::UnknownAttribute, detail, &c, state),
+                );
             };
-            let part = set.partition_by_prefix(AddrField::Dst, &local);
-            unknown(
-                part.uncertain,
-                "the destination address is not known".into(),
-                &mut out,
-            );
-            let mut targets: Vec<(Mac, Vec<SourceSpan>, PacketSet, String)> = Vec::new();
-            for (_, _, on_link) in part.matched {
-                let (dst, none, unc) = self.by_address(AddrField::Dst, &on_link);
-                unknown(none, "no MAC of the local destination".into(), &mut out);
-                unknown(unc, "the destination address is not known".into(), &mut out);
-                targets.extend(
-                    dst.into_iter()
-                        .map(|(m, s, p)| (m, s, p, "the host".to_string())),
-                );
-            }
-            match &self.gateway {
-                Some(g) => targets.push((
-                    g.mac,
-                    g.spans.clone(),
-                    part.unmatched,
-                    "the gateway".to_string(),
-                )),
-                None => unknown(part.unmatched, "no gateway".into(), &mut out),
-            }
-            for (dst_mac, dst_spans, set, what) in targets {
-                let rw = Rewrite {
-                    src_mac: Some(FieldValue::Known(src_mac)),
-                    dst_mac: Some(FieldValue::Known(dst_mac)),
-                    ..Rewrite::default()
+            let (sources, src_none, src_unc) = self.by_address(AddrField::Src, input);
+            unknown(src_none, "no MAC of the source address".into(), &mut out);
+            unknown(src_unc, "the source address is not known".into(), &mut out);
+            for (src_mac, src_spans, set) in sources {
+                let local: TriePrefixTable<()> = {
+                    let mut t = TriePrefixTable::new();
+                    for p in &self.local {
+                        t.insert(*p, ());
+                    }
+                    t
                 };
-                let mut b = self.meta.forward(
-                    set.rewrite(&rw).set_vlan(None),
-                    &self.next,
-                    ReasonCode::Resolved,
-                    format!("from {src_mac:?} to {what} {dst_mac:?}"),
-                    c.clone(),
-                    state,
+                let part = set.partition_by_prefix(AddrField::Dst, &local);
+                unknown(
+                    part.uncertain,
+                    "the destination address is not known".into(),
+                    &mut out,
                 );
-                b.spans = src_spans.iter().chain(&dst_spans).cloned().collect();
-                push_nonempty(&mut out, b);
+                let mut targets: Vec<(Mac, Vec<SourceSpan>, PacketSet, String)> = Vec::new();
+                for (_, _, on_link) in part.matched {
+                    let (dst, none, unc) = self.by_address(AddrField::Dst, &on_link);
+                    unknown(none, "no MAC of the local destination".into(), &mut out);
+                    unknown(unc, "the destination address is not known".into(), &mut out);
+                    targets.extend(
+                        dst.into_iter()
+                            .map(|(m, s, p)| (m, s, p, "the host".to_string())),
+                    );
+                }
+                match &self.gateway {
+                    Some(g) => targets.push((
+                        g.mac,
+                        g.spans.clone(),
+                        part.unmatched,
+                        "the gateway".to_string(),
+                    )),
+                    None => unknown(part.unmatched, "no gateway".into(), &mut out),
+                }
+                for (dst_mac, dst_spans, set, what) in targets {
+                    let rw = Rewrite {
+                        src_mac: Some(FieldValue::Known(src_mac)),
+                        dst_mac: Some(FieldValue::Known(dst_mac)),
+                        ..Rewrite::default()
+                    };
+                    let mut b = self.meta.forward(
+                        set.rewrite(&rw).set_vlan(None),
+                        &self.next,
+                        ReasonCode::Resolved,
+                        format!("from {src_mac:?} to {what} {dst_mac:?}"),
+                        c.clone(),
+                        state,
+                    );
+                    b.spans = src_spans.iter().chain(&dst_spans).cloned().collect();
+                    push_nonempty(&mut out, b);
+                }
             }
-        }
-        out
+            out
+        })
     }
 }
 
@@ -336,66 +366,68 @@ impl NetFunction for PortIngress {
         vec![self.next.clone()]
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
-        let mut out = Vec::new();
-        let mut c = ctx.clone();
-        c.device = Attr::Known(self.meta.device.clone());
-        c.ingress_port = Attr::Known(self.port.clone());
-        let to = |set: PacketSet, bd: &BridgeDomainId, tag: String, out: &mut Vec<Branch>| {
-            let mut c = c.clone();
-            c.bridge_domain = Attr::Known(bd.clone());
+        with_inner_tag(&self.meta, input, ctx, state, |input| {
+            let mut out = Vec::new();
+            let mut c = ctx.clone();
+            c.device = Attr::Known(self.meta.device.clone());
+            c.ingress_port = Attr::Known(self.port.clone());
+            let to = |set: PacketSet, bd: &BridgeDomainId, tag: String, out: &mut Vec<Branch>| {
+                let mut c = c.clone();
+                c.bridge_domain = Attr::Known(bd.clone());
+                push_nonempty(
+                    out,
+                    self.meta.forward(
+                        set,
+                        &self.next,
+                        ReasonCode::Classified,
+                        format!("port {} {tag} · bridge domain {bd}", self.port),
+                        c,
+                        state,
+                    ),
+                );
+            };
+            let mut rest = input.clone();
+            for (v, bd) in &self.tagged {
+                let s = rest.split(&vlan_is(*v));
+                to(s.matched, bd, format!("VLAN {v}"), &mut out);
+                rest = s.unmatched.union(&s.uncertain);
+            }
+            let s = rest.split(&any_tag());
             push_nonempty(
-                out,
-                self.meta.forward(
-                    set,
-                    &self.next,
-                    ReasonCode::Classified,
-                    format!("port {} {tag} · bridge domain {bd}", self.port),
-                    c,
-                    state,
-                ),
-            );
-        };
-        let mut rest = input.clone();
-        for (v, bd) in &self.tagged {
-            let s = rest.split(&vlan_is(*v));
-            to(s.matched, bd, format!("VLAN {v}"), &mut out);
-            rest = s.unmatched.union(&s.uncertain);
-        }
-        let s = rest.split(&any_tag());
-        push_nonempty(
-            &mut out,
-            self.meta.drop(
-                s.matched,
-                ReasonCode::Denied,
-                format!("the VLAN is not on port {}", self.port),
-                &c,
-                state,
-            ),
-        );
-        push_nonempty(
-            &mut out,
-            self.meta.unknown(
-                s.uncertain,
-                ReasonCode::UnknownAttribute,
-                "the tag of the frame is not known",
-                &c,
-                state,
-            ),
-        );
-        match &self.native {
-            Some(bd) => to(s.unmatched, bd, "untagged".into(), &mut out),
-            None => push_nonempty(
                 &mut out,
                 self.meta.drop(
-                    s.unmatched,
+                    s.matched,
                     ReasonCode::Denied,
-                    format!("port {} has no native VLAN", self.port),
+                    format!("the VLAN is not on port {}", self.port),
                     &c,
                     state,
                 ),
-            ),
-        }
-        out
+            );
+            push_nonempty(
+                &mut out,
+                self.meta.unknown(
+                    s.uncertain,
+                    ReasonCode::UnknownAttribute,
+                    "the tag of the frame is not known",
+                    &c,
+                    state,
+                ),
+            );
+            match &self.native {
+                Some(bd) => to(s.unmatched, bd, "untagged".into(), &mut out),
+                None => push_nonempty(
+                    &mut out,
+                    self.meta.drop(
+                        s.unmatched,
+                        ReasonCode::Denied,
+                        format!("port {} has no native VLAN", self.port),
+                        &c,
+                        state,
+                    ),
+                ),
+            }
+            out
+        })
     }
 }
 
@@ -425,18 +457,20 @@ impl NetFunction for WirelessAttachment {
         vec![self.next.clone()]
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
-        let mut c = ctx.clone();
-        c.device = Attr::Known(self.meta.device.clone());
-        c.ingress_port = Attr::Known(self.port.clone());
-        c.bridge_domain = Attr::Known(self.bridge_domain.clone());
-        vec![self.meta.forward(
-            input.clone(),
-            &self.next,
-            ReasonCode::Classified,
-            format!("{} · bridge domain {}", self.port, self.bridge_domain),
-            c,
-            state,
-        )]
+        with_inner_tag(&self.meta, input, ctx, state, |input| {
+            let mut c = ctx.clone();
+            c.device = Attr::Known(self.meta.device.clone());
+            c.ingress_port = Attr::Known(self.port.clone());
+            c.bridge_domain = Attr::Known(self.bridge_domain.clone());
+            vec![self.meta.forward(
+                input.clone(),
+                &self.next,
+                ReasonCode::Classified,
+                format!("{} · bridge domain {}", self.port, self.bridge_domain),
+                c,
+                state,
+            )]
+        })
     }
 }
 
@@ -499,95 +533,97 @@ impl NetFunction for MacLookup {
         v
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
-        let Some(bd) = ctx.bridge_domain.known() else {
-            return vec![self.meta.unknown(
-                input.clone(),
-                ReasonCode::UnknownAttribute,
-                "the bridge domain is not known",
-                ctx,
-                state,
-            )];
-        };
-        let mut out = Vec::new();
-        let mut rest = input.clone();
-        let mut unclear = input.empty();
-        if let Some(table) = self.tables.get(bd) {
-            for (mac, e) in table {
-                if rest.is_empty() {
-                    break;
+        with_inner_tag(&self.meta, input, ctx, state, |input| {
+            let Some(bd) = ctx.bridge_domain.known() else {
+                return vec![self.meta.unknown(
+                    input.clone(),
+                    ReasonCode::UnknownAttribute,
+                    "the bridge domain is not known",
+                    ctx,
+                    state,
+                )];
+            };
+            let mut out = Vec::new();
+            let mut rest = input.clone();
+            let mut unclear = input.empty();
+            if let Some(table) = self.tables.get(bd) {
+                for (mac, e) in table {
+                    if rest.is_empty() {
+                        break;
+                    }
+                    let s = rest.split(&dst_mac_is(*mac));
+                    rest = s.unmatched;
+                    unclear = unclear.union(&s.uncertain);
+                    if s.matched.is_empty() {
+                        continue;
+                    }
+                    let inport = ctx.ingress_port.known();
+                    let isolated = inport
+                        .and_then(|p| self.blocked.get(p))
+                        .is_some_and(|m| m.contains(mac));
+                    let b = if isolated {
+                        self.meta.drop(
+                            s.matched,
+                            ReasonCode::Denied,
+                            format!(
+                                "{mac:?} is isolated from port {}",
+                                inport.expect("an isolated port is known")
+                            ),
+                            ctx,
+                            state,
+                        )
+                    } else if inport == Some(&e.port) && !self.hairpin.contains(&e.port) {
+                        self.meta.drop(
+                            s.matched,
+                            ReasonCode::Denied,
+                            format!("{mac:?} is on the ingress port {}", e.port),
+                            ctx,
+                            state,
+                        )
+                    } else if let Some(next) = self.egress.get(&e.port) {
+                        self.meta.forward(
+                            s.matched,
+                            next,
+                            ReasonCode::Resolved,
+                            format!("{mac:?} is on port {} · bridge domain {bd}", e.port),
+                            ctx.clone(),
+                            state,
+                        )
+                    } else {
+                        self.meta.unknown(
+                            s.matched,
+                            ReasonCode::IncompleteTable,
+                            format!("no egress function · port {}", e.port),
+                            ctx,
+                            state,
+                        )
+                    };
+                    push_nonempty(&mut out, b.with_spans(e.spans.clone()));
                 }
-                let s = rest.split(&dst_mac_is(*mac));
-                rest = s.unmatched;
-                unclear = unclear.union(&s.uncertain);
-                if s.matched.is_empty() {
-                    continue;
-                }
-                let inport = ctx.ingress_port.known();
-                let isolated = inport
-                    .and_then(|p| self.blocked.get(p))
-                    .is_some_and(|m| m.contains(mac));
-                let b = if isolated {
-                    self.meta.drop(
-                        s.matched,
-                        ReasonCode::Denied,
-                        format!(
-                            "{mac:?} is isolated from port {}",
-                            inport.expect("an isolated port is known")
-                        ),
-                        ctx,
-                        state,
-                    )
-                } else if inport == Some(&e.port) && !self.hairpin.contains(&e.port) {
-                    self.meta.drop(
-                        s.matched,
-                        ReasonCode::Denied,
-                        format!("{mac:?} is on the ingress port {}", e.port),
-                        ctx,
-                        state,
-                    )
-                } else if let Some(next) = self.egress.get(&e.port) {
-                    self.meta.forward(
-                        s.matched,
-                        next,
-                        ReasonCode::Resolved,
-                        format!("{mac:?} is on port {} · bridge domain {bd}", e.port),
-                        ctx.clone(),
-                        state,
-                    )
-                } else {
-                    self.meta.unknown(
-                        s.matched,
-                        ReasonCode::IncompleteTable,
-                        format!("no egress function · port {}", e.port),
-                        ctx,
-                        state,
-                    )
-                };
-                push_nonempty(&mut out, b.with_spans(e.spans.clone()));
             }
-        }
-        push_nonempty(
-            &mut out,
-            self.meta.forward(
-                rest,
-                &self.flood,
-                ReasonCode::Classified,
-                format!("broadcast or unknown MAC · bridge domain {bd}"),
-                ctx.clone(),
-                state,
-            ),
-        );
-        push_nonempty(
-            &mut out,
-            self.meta.unknown(
-                unclear,
-                ReasonCode::UnknownAttribute,
-                "the destination MAC is not known",
-                ctx,
-                state,
-            ),
-        );
-        out
+            push_nonempty(
+                &mut out,
+                self.meta.forward(
+                    rest,
+                    &self.flood,
+                    ReasonCode::Classified,
+                    format!("broadcast or unknown MAC · bridge domain {bd}"),
+                    ctx.clone(),
+                    state,
+                ),
+            );
+            push_nonempty(
+                &mut out,
+                self.meta.unknown(
+                    unclear,
+                    ReasonCode::UnknownAttribute,
+                    "the destination MAC is not known",
+                    ctx,
+                    state,
+                ),
+            );
+            out
+        })
     }
 }
 
@@ -624,56 +660,58 @@ impl NetFunction for Flood {
         v
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
-        let Some(bd) = ctx.bridge_domain.known() else {
-            return vec![self.meta.unknown(
-                input.clone(),
-                ReasonCode::UnknownAttribute,
-                "the bridge domain is not known",
-                ctx,
-                state,
-            )];
-        };
-        let ports: Vec<&(PortId, FunctionId)> = self
-            .ports
-            .get(bd)
-            .map(|v| {
-                v.iter()
-                    .filter(|(p, _)| ctx.ingress_port.known() != Some(p))
-                    .collect()
-            })
-            .unwrap_or_default();
-        if ports.is_empty() {
-            return vec![self.meta.drop(
-                input.clone(),
-                ReasonCode::Denied,
-                format!("no other forwarding port · bridge domain {bd}"),
-                ctx,
-                state,
-            )];
-        }
-        let count = u32::try_from(ports.len()).expect("too many ports");
-        ports
-            .iter()
-            .enumerate()
-            .map(|(i, (port, next))| {
-                let mut b = self.meta.forward(
+        with_inner_tag(&self.meta, input, ctx, state, |input| {
+            let Some(bd) = ctx.bridge_domain.known() else {
+                return vec![self.meta.unknown(
                     input.clone(),
-                    next,
-                    ReasonCode::Classified,
-                    format!("flood copy to port {port} · bridge domain {bd}"),
-                    ctx.clone(),
+                    ReasonCode::UnknownAttribute,
+                    "the bridge domain is not known",
+                    ctx,
                     state,
-                );
-                b.flood_copy = Some(FloodCopy {
-                    flood: self.meta.id.clone(),
-                    key: String::new(),
-                    port: port.clone(),
-                    index: u32::try_from(i).expect("too many ports"),
-                    count,
-                });
-                b
-            })
-            .collect()
+                )];
+            };
+            let ports: Vec<&(PortId, FunctionId)> = self
+                .ports
+                .get(bd)
+                .map(|v| {
+                    v.iter()
+                        .filter(|(p, _)| ctx.ingress_port.known() != Some(p))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if ports.is_empty() {
+                return vec![self.meta.drop(
+                    input.clone(),
+                    ReasonCode::Denied,
+                    format!("no other forwarding port · bridge domain {bd}"),
+                    ctx,
+                    state,
+                )];
+            }
+            let count = u32::try_from(ports.len()).expect("too many ports");
+            ports
+                .iter()
+                .enumerate()
+                .map(|(i, (port, next))| {
+                    let mut b = self.meta.forward(
+                        input.clone(),
+                        next,
+                        ReasonCode::Classified,
+                        format!("flood copy to port {port} · bridge domain {bd}"),
+                        ctx.clone(),
+                        state,
+                    );
+                    b.flood_copy = Some(FloodCopy {
+                        flood: self.meta.id.clone(),
+                        key: String::new(),
+                        port: port.clone(),
+                        index: u32::try_from(i).expect("too many ports"),
+                        count,
+                    });
+                    b
+                })
+                .collect()
+        })
     }
 }
 
@@ -736,101 +774,103 @@ impl NetFunction for PortEgress {
         self.peers.iter().map(|p| p.target.clone()).collect()
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
-        let Some(bd) = ctx.bridge_domain.known() else {
-            return vec![self.meta.unknown(
-                input.clone(),
-                ReasonCode::UnknownAttribute,
-                "the bridge domain is not known",
-                ctx,
-                state,
-            )];
-        };
-        let tag = if self.native.as_ref() == Some(bd) {
-            None
-        } else if let Some(v) = self.tagged.get(bd) {
-            Some(*v)
-        } else {
-            return vec![self.meta.drop(
-                input.clone(),
-                ReasonCode::Denied,
-                format!("bridge domain {bd} is not on port {}", self.port),
-                ctx,
-                state,
-            )];
-        };
-        let set = input.set_vlan(tag);
-        let shown = match tag {
-            Some(v) => format!("VLAN {v}"),
-            None => "untagged".to_string(),
-        };
-        if !self.peers.is_empty() {
-            let mut peers: Vec<&PortPeer> = self.peers.iter().collect();
-            peers.sort_by(|a, b| a.target.cmp(&b.target));
-            let count = u32::try_from(peers.len()).expect("too many peers");
-            let mut out = Vec::new();
-            for (i, p) in peers.into_iter().enumerate() {
-                let facts = p
-                    .link
-                    .as_ref()
-                    .map_or(String::new(), |l| format!(" · {}", l.text()));
-                let mut b = self.meta.forward(
-                    set.clone(),
-                    &p.target,
-                    ReasonCode::LinkHandOff,
-                    format!("leave port {} {shown} to {}{facts}", self.port, p.target),
-                    ctx.clone(),
+        with_inner_tag(&self.meta, input, ctx, state, |input| {
+            let Some(bd) = ctx.bridge_domain.known() else {
+                return vec![self.meta.unknown(
+                    input.clone(),
+                    ReasonCode::UnknownAttribute,
+                    "the bridge domain is not known",
+                    ctx,
                     state,
-                );
-                let spans = p.link.as_ref().map(LinkFacts::spans).unwrap_or_default();
-                b = b.with_spans(spans);
-                if count > 1 {
-                    b = b.with_alternative(Alternative {
-                        choice: self.meta.id.clone(),
-                        key: self.port.to_string(),
-                        index: u32::try_from(i).expect("too many peers"),
-                        count,
-                        label: p.target.to_string(),
-                    });
+                )];
+            };
+            let tag = if self.native.as_ref() == Some(bd) {
+                None
+            } else if let Some(v) = self.tagged.get(bd) {
+                Some(*v)
+            } else {
+                return vec![self.meta.drop(
+                    input.clone(),
+                    ReasonCode::Denied,
+                    format!("bridge domain {bd} is not on port {}", self.port),
+                    ctx,
+                    state,
+                )];
+            };
+            let set = input.set_vlan(tag);
+            let shown = match tag {
+                Some(v) => format!("VLAN {v}"),
+                None => "untagged".to_string(),
+            };
+            if !self.peers.is_empty() {
+                let mut peers: Vec<&PortPeer> = self.peers.iter().collect();
+                peers.sort_by(|a, b| a.target.cmp(&b.target));
+                let count = u32::try_from(peers.len()).expect("too many peers");
+                let mut out = Vec::new();
+                for (i, p) in peers.into_iter().enumerate() {
+                    let facts = p
+                        .link
+                        .as_ref()
+                        .map_or(String::new(), |l| format!(" · {}", l.text()));
+                    let mut b = self.meta.forward(
+                        set.clone(),
+                        &p.target,
+                        ReasonCode::LinkHandOff,
+                        format!("leave port {} {shown} to {}{facts}", self.port, p.target),
+                        ctx.clone(),
+                        state,
+                    );
+                    let spans = p.link.as_ref().map(LinkFacts::spans).unwrap_or_default();
+                    b = b.with_spans(spans);
+                    if count > 1 {
+                        b = b.with_alternative(Alternative {
+                            choice: self.meta.id.clone(),
+                            key: self.port.to_string(),
+                            index: u32::try_from(i).expect("too many peers"),
+                            count,
+                            label: p.target.to_string(),
+                        });
+                    }
+                    out.push(b);
                 }
-                out.push(b);
+                return out;
             }
-            return out;
-        }
-        // The reply of a host starts on the port, which is also the
-        // interface of the attachment point of the host.
-        let mut delivered = ctx.clone();
-        delivered.device = Attr::Known(self.meta.device.clone());
-        delivered.egress_interface = Attr::Known(InterfaceId::new(self.port.to_string()));
-        let mut out = Vec::new();
-        let mut rest = set;
-        for (mac, e) in &self.hosts {
-            let s = rest.split(&dst_mac_is(*mac));
-            rest = s.unmatched.union(&s.uncertain);
+            // The reply of a host starts on the port, which is also the
+            // interface of the attachment point of the host.
+            let mut delivered = ctx.clone();
+            delivered.device = Attr::Known(self.meta.device.clone());
+            delivered.egress_interface = Attr::Known(InterfaceId::new(self.port.to_string()));
+            let mut out = Vec::new();
+            let mut rest = set;
+            for (mac, e) in &self.hosts {
+                let s = rest.split(&dst_mac_is(*mac));
+                rest = s.unmatched.union(&s.uncertain);
+                push_nonempty(
+                    &mut out,
+                    self.meta.branch(
+                        s.matched,
+                        Outcome::Deliver(Destination::Endpoint(e.clone())),
+                        Reason::new(
+                            ReasonCode::Delivered,
+                            format!("deliver to {e} on port {} {shown}", self.port),
+                        ),
+                        delivered.clone(),
+                        state,
+                    ),
+                );
+            }
             push_nonempty(
                 &mut out,
-                self.meta.branch(
-                    s.matched,
-                    Outcome::Deliver(Destination::Endpoint(e.clone())),
-                    Reason::new(
-                        ReasonCode::Delivered,
-                        format!("deliver to {e} on port {} {shown}", self.port),
-                    ),
-                    delivered.clone(),
+                self.meta.unknown(
+                    rest,
+                    ReasonCode::NoLink,
+                    format!("no known host or link · port {}", self.port),
+                    ctx,
                     state,
                 ),
             );
-        }
-        push_nonempty(
-            &mut out,
-            self.meta.unknown(
-                rest,
-                ReasonCode::NoLink,
-                format!("no known host or link · port {}", self.port),
-                ctx,
-                state,
-            ),
-        );
-        out
+            out
+        })
     }
 }
 
@@ -867,94 +907,96 @@ impl NetFunction for Layer3HandOff {
         v
     }
     fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
-        let mine = exact(Match {
-            dst_mac: MacCond::In(self.macs.clone()),
-            ..Match::any()
-        });
-        let s = input.split(&mine);
-        let mut out = Vec::new();
-        push_nonempty(
-            &mut out,
-            self.meta.drop(
-                s.unmatched,
-                ReasonCode::Denied,
-                "the destination MAC is not a MAC of the router",
-                ctx,
-                state,
-            ),
-        );
-        push_nonempty(
-            &mut out,
-            self.meta.unknown(
-                s.uncertain,
-                ReasonCode::UnknownAttribute,
-                "the destination MAC is not known",
-                ctx,
-                state,
-            ),
-        );
-        let mut rest = s.matched;
-        let fresh = ctx.cross_device();
-        for (v, next) in &self.tagged {
-            let t = rest.split(&vlan_is(*v));
-            rest = t.unmatched.union(&t.uncertain);
+        with_inner_tag(&self.meta, input, ctx, state, |input| {
+            let mine = exact(Match {
+                dst_mac: MacCond::In(self.macs.clone()),
+                ..Match::any()
+            });
+            let s = input.split(&mine);
+            let mut out = Vec::new();
             push_nonempty(
                 &mut out,
-                self.meta.forward(
-                    t.matched.set_vlan(None),
-                    next,
-                    ReasonCode::LinkHandOff,
-                    format!("VLAN {v} to {next}"),
-                    fresh.clone(),
-                    state,
-                ),
-            );
-        }
-        let t = rest.split(&any_tag());
-        push_nonempty(
-            &mut out,
-            self.meta.drop(
-                t.matched,
-                ReasonCode::Denied,
-                "the router has no interface for the VLAN",
-                ctx,
-                state,
-            ),
-        );
-        push_nonempty(
-            &mut out,
-            self.meta.unknown(
-                t.uncertain,
-                ReasonCode::UnknownAttribute,
-                "the tag of the frame is not known",
-                ctx,
-                state,
-            ),
-        );
-        match &self.untagged {
-            Some(next) => push_nonempty(
-                &mut out,
-                self.meta.forward(
-                    t.unmatched,
-                    next,
-                    ReasonCode::LinkHandOff,
-                    format!("untagged to {next}"),
-                    fresh,
-                    state,
-                ),
-            ),
-            None => push_nonempty(
-                &mut out,
                 self.meta.drop(
-                    t.unmatched,
+                    s.unmatched,
                     ReasonCode::Denied,
-                    "the router has no interface for untagged frames",
+                    "the destination MAC is not a MAC of the router",
                     ctx,
                     state,
                 ),
-            ),
-        }
-        out
+            );
+            push_nonempty(
+                &mut out,
+                self.meta.unknown(
+                    s.uncertain,
+                    ReasonCode::UnknownAttribute,
+                    "the destination MAC is not known",
+                    ctx,
+                    state,
+                ),
+            );
+            let mut rest = s.matched;
+            let fresh = ctx.cross_device();
+            for (v, next) in &self.tagged {
+                let t = rest.split(&vlan_is(*v));
+                rest = t.unmatched.union(&t.uncertain);
+                push_nonempty(
+                    &mut out,
+                    self.meta.forward(
+                        t.matched.set_vlan(None),
+                        next,
+                        ReasonCode::LinkHandOff,
+                        format!("VLAN {v} to {next}"),
+                        fresh.clone(),
+                        state,
+                    ),
+                );
+            }
+            let t = rest.split(&any_tag());
+            push_nonempty(
+                &mut out,
+                self.meta.drop(
+                    t.matched,
+                    ReasonCode::Denied,
+                    "the router has no interface for the VLAN",
+                    ctx,
+                    state,
+                ),
+            );
+            push_nonempty(
+                &mut out,
+                self.meta.unknown(
+                    t.uncertain,
+                    ReasonCode::UnknownAttribute,
+                    "the tag of the frame is not known",
+                    ctx,
+                    state,
+                ),
+            );
+            match &self.untagged {
+                Some(next) => push_nonempty(
+                    &mut out,
+                    self.meta.forward(
+                        t.unmatched,
+                        next,
+                        ReasonCode::LinkHandOff,
+                        format!("untagged to {next}"),
+                        fresh,
+                        state,
+                    ),
+                ),
+                None => push_nonempty(
+                    &mut out,
+                    self.meta.drop(
+                        t.unmatched,
+                        ReasonCode::Denied,
+                        "the router has no interface for untagged frames",
+                        ctx,
+                        state,
+                    ),
+                ),
+            }
+            out
+        })
     }
 }
 

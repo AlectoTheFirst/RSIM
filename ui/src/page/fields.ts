@@ -25,6 +25,10 @@ export const QUERY_FIELDS = [
   "destination.mac",
   "network.vlan.id",
   "l2_priority",
+  "network.vlan.tpid",
+  "network.inner.vlan.id",
+  "inner_l2_priority",
+  "network.inner.vlan.tpid",
   "reply",
   "unstated",
 ] as const satisfies readonly FieldName[];
@@ -89,6 +93,8 @@ export const FIELD_CHARS: Partial<Record<QueryField, number>> = {
   "source.mac": 17,
   "destination.mac": 17,
   tcp_flags: 7,
+  "network.vlan.tpid": 5,
+  "network.inner.vlan.tpid": 5,
 };
 
 /** The label of each field in the UI: a short noun phrase. */
@@ -110,6 +116,10 @@ export const FIELD_LABELS: Record<QueryField, string> = {
   "destination.mac": "destination MAC",
   "network.vlan.id": "VLAN tag",
   l2_priority: "layer 2 priority",
+  "network.vlan.tpid": "VLAN TPID",
+  "network.inner.vlan.id": "inner VLAN tag",
+  inner_l2_priority: "inner tag priority",
+  "network.inner.vlan.tpid": "inner VLAN TPID",
   reply: "reply run",
   unstated: "unstated fields",
 };

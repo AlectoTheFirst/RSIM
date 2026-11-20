@@ -540,9 +540,12 @@ export function answerNotes(out: { kind: string; notes?: string[] | null }): str
  */
 const DEFAULTED = ["dscp", "ecn", "network.vlan.id", "fragment", "tcp_flags", "icmp_type", "icmp_code", "source.port"];
 
+/** The fields of the TPIDs and of the inner tag: not stated, they have a value in each setting of `unstated`. */
+const TAG_FIELDS = ["network.vlan.tpid", "network.inner.vlan.id", "inner_l2_priority", "network.inner.vlan.tpid"];
+
 /** The query fields that the query does not state and that have no default value. */
 export function notStated(echo: Record<string, unknown>): string[] {
-  const skip = new Set(["topology", "ingress", "reply", "unstated", "network.iana_number", "network.transport"]);
+  const skip = new Set(["topology", "ingress", "reply", "unstated", "network.iana_number", "network.transport", ...TAG_FIELDS]);
   if (echo["unstated"] === "defaults") {
     for (const k of DEFAULTED) skip.add(k);
     if (echo["network.vlan.id"] == null) skip.add("l2_priority");

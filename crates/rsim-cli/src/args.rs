@@ -11,7 +11,7 @@ use crate::set_query::{
 };
 
 /// The names of the path query arguments, in the order of the query input.
-pub const QUERY_FIELDS: [&str; 20] = [
+pub const QUERY_FIELDS: [&str; 24] = [
     "topology",
     "ingress",
     "source.ip",
@@ -24,6 +24,10 @@ pub const QUERY_FIELDS: [&str; 20] = [
     "destination.mac",
     "network.vlan.id",
     "l2_priority",
+    "network.vlan.tpid",
+    "network.inner.vlan.id",
+    "inner_l2_priority",
+    "network.inner.vlan.tpid",
     "tcp_flags",
     "icmp_type",
     "icmp_code",
@@ -155,6 +159,10 @@ pub fn query(args: &Map<String, Value>, extra: &[&str]) -> Result<QueryInput, Qu
         destination_mac: mac("destination.mac")?,
         vlan_id: n16("network.vlan.id", 4095)?,
         l2_priority: n8("l2_priority", 7)?,
+        vlan_tpid: n16("network.vlan.tpid", 65535)?,
+        inner_vlan_id: n16("network.inner.vlan.id", 4095)?,
+        inner_l2_priority: n8("inner_l2_priority", 7)?,
+        inner_vlan_tpid: n16("network.inner.vlan.tpid", 65535)?,
         tcp_flags: opt(args, "tcp_flags", |v| {
             let list = v
                 .as_array()
@@ -196,7 +204,7 @@ pub fn step(args: &Map<String, Value>) -> Result<(QueryInput, StepRef), QueryErr
 
 /// The names of the set query arguments: the path query names without
 /// `unstated`.
-pub const SET_FIELDS: [&str; 19] = [
+pub const SET_FIELDS: [&str; 23] = [
     "topology",
     "ingress",
     "source.ip",
@@ -209,6 +217,10 @@ pub const SET_FIELDS: [&str; 19] = [
     "destination.mac",
     "network.vlan.id",
     "l2_priority",
+    "network.vlan.tpid",
+    "network.inner.vlan.id",
+    "inner_l2_priority",
+    "network.inner.vlan.tpid",
     "tcp_flags",
     "icmp_type",
     "icmp_code",
@@ -274,6 +286,10 @@ pub fn set_query(args: &Map<String, Value>, extra: &[&str]) -> Result<SetInput, 
             .transpose()?,
         vlan_id: ranges("network.vlan.id", 4095)?,
         l2_priority: ranges("l2_priority", 7)?,
+        vlan_tpid: ranges("network.vlan.tpid", 65535)?,
+        inner_vlan_id: ranges("network.inner.vlan.id", 4095)?,
+        inner_l2_priority: ranges("inner_l2_priority", 7)?,
+        inner_vlan_tpid: ranges("network.inner.vlan.tpid", 65535)?,
         tcp_flags: text("tcp_flags")?
             .map(|t| parse_tcp_flags(&t).map_err(invalid))
             .transpose()?,

@@ -140,6 +140,10 @@ pub struct Match {
     pub dst_mac: MacCond,
     pub vlan: RangeCond,
     pub l2_priority: ValueCond,
+    pub vlan_tpid: RangeCond,
+    pub inner_vlan: RangeCond,
+    pub inner_l2_priority: ValueCond,
+    pub inner_vlan_tpid: RangeCond,
     pub mpls_tc: ValueCond,
 }
 
@@ -167,6 +171,10 @@ impl Match {
             dst_mac: MacCond::Any,
             vlan: RangeCond::Any,
             l2_priority: ValueCond::Any,
+            vlan_tpid: RangeCond::Any,
+            inner_vlan: RangeCond::Any,
+            inner_l2_priority: ValueCond::Any,
+            inner_vlan_tpid: RangeCond::Any,
             mpls_tc: ValueCond::Any,
         }
     }
@@ -189,6 +197,10 @@ impl Match {
             .and(self.dst_mac.eval(h.dst_mac))
             .and(self.vlan.eval(h.vlan))
             .and(self.l2_priority.eval(h.l2_priority))
+            .and(self.vlan_tpid.eval(h.vlan_tpid))
+            .and(self.inner_vlan.eval(h.inner_vlan))
+            .and(self.inner_l2_priority.eval(h.inner_l2_priority))
+            .and(self.inner_vlan_tpid.eval(h.inner_vlan_tpid))
             .and(self.mpls_tc.eval(h.mpls_tc))
     }
 
@@ -255,6 +267,28 @@ impl Match {
                 open(self.l2_priority.eval(h.l2_priority), h.l2_priority),
             ),
             (
+                HeaderField::VlanTpid,
+                open(self.vlan_tpid.eval(h.vlan_tpid), h.vlan_tpid),
+            ),
+            (
+                HeaderField::InnerVlan,
+                open(self.inner_vlan.eval(h.inner_vlan), h.inner_vlan),
+            ),
+            (
+                HeaderField::InnerL2Priority,
+                open(
+                    self.inner_l2_priority.eval(h.inner_l2_priority),
+                    h.inner_l2_priority,
+                ),
+            ),
+            (
+                HeaderField::InnerVlanTpid,
+                open(
+                    self.inner_vlan_tpid.eval(h.inner_vlan_tpid),
+                    h.inner_vlan_tpid,
+                ),
+            ),
+            (
                 HeaderField::MplsTrafficClass,
                 open(self.mpls_tc.eval(h.mpls_tc), h.mpls_tc),
             ),
@@ -312,6 +346,18 @@ impl Match {
         }
         if self.l2_priority != ValueCond::Any {
             r.push(HeaderField::L2Priority);
+        }
+        if self.vlan_tpid != RangeCond::Any {
+            r.push(HeaderField::VlanTpid);
+        }
+        if self.inner_vlan != RangeCond::Any {
+            r.push(HeaderField::InnerVlan);
+        }
+        if self.inner_l2_priority != ValueCond::Any {
+            r.push(HeaderField::InnerL2Priority);
+        }
+        if self.inner_vlan_tpid != RangeCond::Any {
+            r.push(HeaderField::InnerVlanTpid);
         }
         if self.mpls_tc != ValueCond::Any {
             r.push(HeaderField::MplsTrafficClass);

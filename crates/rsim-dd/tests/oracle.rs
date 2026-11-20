@@ -13,7 +13,7 @@ use proptest::prelude::*;
 use rsim_dd::{Dd, Edge};
 
 /// The header bits of the bit table.
-const BITS: u32 = 764;
+const BITS: u32 = 814;
 /// Each bit has 4 levels: the original request, the current header, the
 /// work level and the inner level.
 const LEVELS: u32 = BITS * 4;
@@ -37,7 +37,7 @@ fn prefix(start: u32, len: u32, value: u32, bank: u32) -> F {
 /// The first header bits of the 2 fields that the formulas use: the
 /// destination address near the top of the order and the encapsulation
 /// near the end.
-const FIELDS: [u32; 2] = [25, BITS - 64];
+const FIELDS: [u32; 2] = [28, BITS - 64];
 
 /// The levels of the 2 fields: 32 bits each, with their 4 levels.
 fn pool() -> Vec<u32> {

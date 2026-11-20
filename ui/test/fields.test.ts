@@ -379,6 +379,9 @@ describe("unstated button", () => {
     expect(defaultsOf({ "network.transport": "icmp" })).toEqual(["dscp 0", "ecn 0", "no VLAN", "icmp_type echo-request", "icmp_code 0"]);
     expect(defaultsOf({ "network.iana_number": "58" })).toEqual(["dscp 0", "ecn 0", "no VLAN", "icmp_type echo-request", "icmp_code 0"]);
     expect(defaultsOf({ "network.transport": "udp", dscp: "46", "network.vlan.id": "10", fragment: "later" })).toEqual(["ecn 0"]);
+    const two = { "network.transport": "udp", dscp: "46", fragment: "later", "network.vlan.id": "10", "network.inner.vlan.id": "20" };
+    expect(defaultsOf(two)).toEqual(["ecn 0", "network.vlan.tpid 0x88a8"]);
+    expect(defaultsOf({ ...two, "network.vlan.tpid": "37120" })).toEqual(["ecn 0"]);
   });
 
   it("counts the fields of the bar that are not stated with no answer", () => {
@@ -389,5 +392,9 @@ describe("unstated button", () => {
     expect(n).toContain("dscp");
     expect(n).not.toContain("source.ip");
     expect(n).not.toContain("network.transport");
+    for (const k of ["network.vlan.tpid", "network.inner.vlan.id", "inner_l2_priority", "network.inner.vlan.tpid"]) {
+      expect(echo).toHaveProperty(k, null);
+      expect(n).not.toContain(k);
+    }
   });
 });

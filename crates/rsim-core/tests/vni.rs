@@ -19,8 +19,7 @@ fn outer(vni: u32) -> Header {
     o.ecn = FieldValue::Unknown;
     o.src_mac = FieldValue::Unknown;
     o.dst_mac = FieldValue::Unknown;
-    o.vlan = FieldValue::Absent;
-    o.l2_priority = FieldValue::Absent;
+    o = o.untagged();
     o.encap = vec![Encap::Vxlan {
         src: ip("192.0.2.1"),
         dst: ip("192.0.2.2"),
@@ -41,6 +40,7 @@ fn a_vni_selects_only_the_packets_of_its_segment() {
     assert!(both.vxlan_vni(30).is_empty());
     assert!(plain.vxlan_vni(0).is_empty());
     assert!(both.vxlan_vni(10).has_free_levels());
+    assert!(both.vxlan_vni(10).has_valid_tags());
 }
 
 #[test]

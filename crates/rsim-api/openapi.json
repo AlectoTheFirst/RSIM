@@ -1292,6 +1292,16 @@
             ],
             "description": "The inner header of an encapsulated current header."
           },
+          "inner_l2_priority": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Field_uint8"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "l2_priority": {
             "$ref": "#/components/schemas/Field_uint8"
           },
@@ -1301,8 +1311,41 @@
           "network.iana_number": {
             "$ref": "#/components/schemas/Field_uint8"
           },
+          "network.inner.vlan.id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Field_uint16"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The inner tag, only when the frame has one."
+          },
+          "network.inner.vlan.tpid": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Field_uint16"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The TPID of the inner tag, only when it is not 33024 (0x8100)."
+          },
           "network.vlan.id": {
             "$ref": "#/components/schemas/Field_uint16"
+          },
+          "network.vlan.tpid": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Field_uint16"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The TPID of the outer tag, only when it is not 33024 (0x8100)."
           },
           "source.ip": {
             "$ref": "#/components/schemas/Field_string"
@@ -1893,6 +1936,16 @@
               "null"
             ]
           },
+          "inner_l2_priority": {
+            "description": "The layer 2 priority of the inner tag. It needs network.inner.vlan.id.",
+            "format": "uint8",
+            "maximum": 7,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "l2_priority": {
             "description": "The layer 2 priority. It needs network.vlan.id.",
             "format": "uint8",
@@ -1907,6 +1960,26 @@
             "description": "The protocol number.",
             "format": "uint8",
             "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "network.inner.vlan.id": {
+            "description": "The VLAN of the inner tag. It needs network.vlan.id. Not given: no\ninner tag.",
+            "format": "uint16",
+            "maximum": 4095,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "network.inner.vlan.tpid": {
+            "description": "The TPID of the inner tag. It needs network.inner.vlan.id. Not\ngiven: 33024 (0x8100).",
+            "format": "uint16",
+            "maximum": 65535,
             "minimum": 0,
             "type": [
               "integer",
@@ -1928,6 +2001,16 @@
             "description": "The VLAN tag.",
             "format": "uint16",
             "maximum": 4095,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "network.vlan.tpid": {
+            "description": "The TPID of the outer tag, for example 34984 (0x88a8). It needs\nnetwork.vlan.id. Not given: 33024 (0x8100), or 34984 with an inner\ntag and unstated defaults.",
+            "format": "uint16",
+            "maximum": 65535,
             "minimum": 0,
             "type": [
               "integer",
@@ -2132,6 +2215,15 @@
               }
             ]
           },
+          "inner_l2_priority": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "l2_priority": {
             "format": "uint8",
             "maximum": 255,
@@ -2150,6 +2242,24 @@
               "null"
             ]
           },
+          "network.inner.vlan.id": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "network.inner.vlan.tpid": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "network.transport": {
             "type": [
               "string",
@@ -2157,6 +2267,15 @@
             ]
           },
           "network.vlan.id": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "network.vlan.tpid": {
             "format": "uint16",
             "maximum": 65535,
             "minimum": 0,
@@ -2837,6 +2956,12 @@
               }
             ]
           },
+          "inner_l2_priority": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "l2_priority": {
             "type": [
               "string",
@@ -2849,6 +2974,18 @@
               "null"
             ]
           },
+          "network.inner.vlan.id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "network.inner.vlan.tpid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "network.transport": {
             "type": [
               "string",
@@ -2856,6 +2993,12 @@
             ]
           },
           "network.vlan.id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "network.vlan.tpid": {
             "type": [
               "string",
               "null"
@@ -3023,6 +3166,17 @@
               "null"
             ]
           },
+          "inner_l2_priority": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The layer 2 priorities of the inner tag."
+          },
           "l2_priority": {
             "anyOf": [
               {
@@ -3045,6 +3199,28 @@
             ],
             "description": "The protocol numbers."
           },
+          "network.inner.vlan.id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The VLANs of the inner tag. It needs network.vlan.id. With no inner\nfield: no inner tag."
+          },
+          "network.inner.vlan.tpid": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The TPIDs of the inner tag. Not given: 33024 (0x8100)."
+          },
           "network.transport": {
             "anyOf": [
               {
@@ -3066,6 +3242,17 @@
               }
             ],
             "description": "The VLAN tags."
+          },
+          "network.vlan.tpid": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetArg"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The TPIDs of the outer tag. Not given: 33024 (0x8100)."
           },
           "reply": {
             "description": "Run the replies. The default is true.",
