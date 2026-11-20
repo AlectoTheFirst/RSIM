@@ -13,6 +13,9 @@ use tokio_postgres::types::ToSql;
 use tokio_postgres::{Client, Config, GenericClient, IsolationLevel, Row};
 use tokio_postgres_rustls::MakeRustlsConnect;
 
+mod auth;
+pub use auth::*;
+
 use crate::types::{
     Action, AuditPage, AuditRecord, Bindings, CaptureBgp, Credential, CredentialSource, Device,
     EdgeDeviceBinding, FabricPortBinding, Group, Ha, Inventory, JumpHost, NxosJson, Route,
@@ -21,11 +24,14 @@ use crate::types::{
 
 /// The migrations: the version, the name and the SQL, in order. A version
 /// that a database has is never changed.
-pub const MIGRATIONS: &[(u32, &str, &str)] = &[(
-    1,
-    "inventory",
-    include_str!("../migrations/0001_inventory.sql"),
-)];
+pub const MIGRATIONS: &[(u32, &str, &str)] = &[
+    (
+        1,
+        "inventory",
+        include_str!("../migrations/0001_inventory.sql"),
+    ),
+    (2, "auth", include_str!("../migrations/0002_auth.sql")),
+];
 
 /// The schema version of this build: the last migration.
 pub fn schema_version() -> u32 {
@@ -157,6 +163,15 @@ impl Db {
             tls: tls(ca_pem)?,
             client: Mutex::new(None),
         })
+    }
+
+    /// The same database on a connection of its own.
+    pub fn reopen(&self) -> Db {
+        Db {
+            config: self.config.clone(),
+            tls: self.tls.clone(),
+            client: Mutex::new(None),
+        }
     }
 
     async fn client<'a>(

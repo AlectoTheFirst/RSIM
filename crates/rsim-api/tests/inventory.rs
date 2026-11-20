@@ -11,18 +11,26 @@ use serde_json::{Value, json};
 
 const PORT: u16 = 8787;
 
+thread_local! {
+    /// The API token of the admin of the database of the test on this
+    /// thread, which `call` sends.
+    static TOKEN: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
 fn state() -> State {
     State::new(Settings {
         listen: ([127, 0, 0, 1], PORT).into(),
         store: None,
         allow_origins: vec![],
         max_body: 64 * 1024,
+        public_origins: Vec::new(),
+        trusted_proxies: Vec::new(),
     })
 }
 
 fn call(s: &State, method: &str, path: &str, body: Option<Value>) -> Response {
     let (path, q) = path.split_once('?').unwrap_or((path, ""));
-    let r = Request {
+    let mut r = Request {
         method: method.into(),
         path: path.into(),
         query: q
@@ -35,7 +43,12 @@ fn call(s: &State, method: &str, path: &str, body: Option<Value>) -> Response {
             .collect(),
         headers: BTreeMap::from([("host".to_string(), format!("127.0.0.1:{PORT}"))]),
         body: body.map(|b| b.to_string().into_bytes()).unwrap_or_default(),
+        peer: None,
     };
+    if let Some(t) = TOKEN.with(|t| t.borrow().clone()) {
+        r.headers
+            .insert("authorization".into(), format!("Bearer {t}"));
+    }
     handle(s, &r)
 }
 
@@ -53,6 +66,20 @@ fn with_db(name: &str) -> Option<(State, tokio::runtime::Runtime)> {
         .build()
         .unwrap();
     let db = rt.block_on(rsim_inventory::test_database(name))?;
+    let token = rt.block_on(async {
+        let hash = rsim_inventory::hash_password("a long test password").unwrap();
+        let (_, session) = rsim_inventory::new_secret("").unwrap();
+        let admin = db
+            .setup("admin", &hash, &session, "127.0.0.1")
+            .await
+            .unwrap();
+        let (text, th) = rsim_inventory::new_secret(rsim_inventory::TOKEN_PREFIX).unwrap();
+        db.create_token(&admin, "test", &admin.scopes, None, &th)
+            .await
+            .unwrap();
+        text
+    });
+    TOKEN.with(|t| *t.borrow_mut() = Some(token));
     let s = state().with_inventory(InventoryHandle::new(Arc::new(db), rt.handle().clone()));
     Some((s, rt))
 }
@@ -101,7 +128,8 @@ fn the_openapi_document_has_the_inventory_routes() {
     assert!(paths["/v1/inventory/devices"]["get"].is_object());
     assert!(paths["/v1/inventory/vendors"]["get"].is_object());
     let put = &paths["/v1/inventory/devices/{device}"]["put"];
-    assert_eq!(put["security"][0]["rsim"][0], "rsim.inventory.write");
+    assert_eq!(put["security"][0]["session"][0], "rsim.inventory.write");
+    assert_eq!(put["security"][1]["token"][0], "rsim.inventory.write");
     assert!(put["requestBody"].is_object());
     assert!(paths["/v1/inventory/audit"]["get"].is_object());
     assert!(
@@ -173,7 +201,7 @@ fn the_inventory_routes_write_with_an_audit_and_resolve_the_devices() {
     let audit = ok(call(&s, "GET", "/v1/inventory/audit?limit=2", None));
     let records = audit["records"].as_array().unwrap();
     assert_eq!(records.len(), 2);
-    assert_eq!(records[0]["actor"], "rsim-api");
+    assert_eq!(records[0]["actor"], "admin");
     assert_eq!(records[0]["kind"], "device");
     assert_eq!(records[0]["action"], "create");
     assert_eq!(records[0]["new"]["address"], "192.0.2.1");

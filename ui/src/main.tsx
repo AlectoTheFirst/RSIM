@@ -1,7 +1,7 @@
 import { render } from "preact";
-import { App } from "./App";
+import { Root } from "./auth/Gate";
 import "./app.css";
 import { applyTheme, loadPrefs } from "./theme";
 
 applyTheme(loadPrefs());
-render(<App />, document.getElementById("app")!);
+render(<Root />, document.getElementById("app")!);

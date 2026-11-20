@@ -20,7 +20,7 @@ use crate::handler::{Request, Response, State};
 use crate::openapi::Route as ApiRoute;
 use crate::problem::{Problem, problem};
 
-/// The actor of the audit records of the API.
+/// The actor of the audit records of a server with no sign-in.
 pub const ACTOR: &str = "rsim-api";
 
 /// The inventory database of a server and the runtime of its connection.
@@ -36,8 +36,13 @@ impl InventoryHandle {
         InventoryHandle { db, rt }
     }
 
-    fn run<F: Future>(&self, f: F) -> F::Output {
+    pub(crate) fn run<F: Future>(&self, f: F) -> F::Output {
         self.rt.block_on(f)
+    }
+
+    /// The inventory database.
+    pub(crate) fn db(&self) -> &Db {
+        &self.db
     }
 }
 
@@ -347,16 +352,24 @@ pub const ROUTES: &[ApiRoute] = &[
     },
 ];
 
-fn from_error(e: Error) -> Problem {
+pub(crate) fn from_error(e: Error) -> Problem {
     match e {
         Error::NotFound(d) => problem(404, "not_found", d),
         Error::Conflict(d) => problem(409, "conflict", d),
         Error::Invalid(d) => problem(422, "invalid_record", d),
-        Error::Schema(d) | Error::Database(d) => problem(503, "inventory_unavailable", d),
+        Error::Schema(d) | Error::Database(d) => {
+            eprintln!("inventory database: {d}");
+            problem(
+                503,
+                "inventory_unavailable",
+                "the inventory database cannot be used; the log of the server has the reason"
+                    .into(),
+            )
+        }
     }
 }
 
-fn json_out<T: Serialize>(v: &T) -> Response {
+pub(crate) fn json_out<T: Serialize>(v: &T) -> Response {
     Response {
         status: 200,
         headers: vec![
@@ -368,7 +381,7 @@ fn json_out<T: Serialize>(v: &T) -> Response {
 }
 
 /// A path segment with its percent encoding decoded.
-fn decode(seg: &str) -> Result<String, Problem> {
+pub(crate) fn decode(seg: &str) -> Result<String, Problem> {
     let b = seg.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
@@ -401,7 +414,7 @@ fn decode(seg: &str) -> Result<String, Problem> {
 
 /// The body of a PUT, with the name of the path. A name in the body must be
 /// the name of the path.
-fn body<T: DeserializeOwned>(req: &Request) -> Result<T, Problem> {
+pub(crate) fn body<T: DeserializeOwned>(req: &Request) -> Result<T, Problem> {
     serde_json::from_slice(&req.body).map_err(|e| {
         problem(
             422,
@@ -426,7 +439,7 @@ fn named(field: &mut String, path: &str, what: &str) -> Result<(), Problem> {
     }
 }
 
-fn allow(req: &Request, methods: &[&str]) -> Result<(), Problem> {
+pub(crate) fn allow(req: &Request, methods: &[&str]) -> Result<(), Problem> {
     if methods.contains(&req.method.as_str()) {
         Ok(())
     } else {
@@ -443,7 +456,15 @@ fn allow(req: &Request, methods: &[&str]) -> Result<(), Problem> {
 }
 
 /// Handles a request below `/v1/inventory`; `rest` is the path after it.
-pub fn route(state: &State, req: &Request, rest: &[&str]) -> Result<Response, Problem> {
+/// A write records the name of the user of the request as its actor, or
+/// `rsim-api` for a server with no sign-in.
+pub fn route(
+    state: &State,
+    req: &Request,
+    rest: &[&str],
+    user: Option<&rsim_inventory::Principal>,
+) -> Result<Response, Problem> {
+    let actor = user.map_or(ACTOR, |u| u.name.as_str());
     if rest == ["vendors"] {
         allow(req, &["GET"])?;
         return Ok(json_out(&vendors()));
@@ -459,7 +480,7 @@ pub fn route(state: &State, req: &Request, rest: &[&str]) -> Result<Response, Pr
     let segs: Vec<&str> = segs.iter().map(String::as_str).collect();
     let load = || h.run(h.db.load()).map_err(from_error);
     let write = |changes: Vec<Change>| -> Result<Response, Problem> {
-        let version = h.run(h.db.apply(ACTOR, &changes)).map_err(from_error)?;
+        let version = h.run(h.db.apply(actor, &changes)).map_err(from_error)?;
         Ok(json_out(&WrittenOut { version }))
     };
     let not_found =

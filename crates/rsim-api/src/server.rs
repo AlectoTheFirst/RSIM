@@ -92,6 +92,7 @@ fn query_pairs(q: Option<&str>) -> Vec<(String, String)> {
 async fn serve_one(
     state: Arc<State>,
     limit: Arc<Semaphore>,
+    peer: std::net::IpAddr,
     req: hyper::Request<Incoming>,
 ) -> Result<hyper::Response<Full<Bytes>>, Infallible> {
     let (parts, body) = req.into_parts();
@@ -109,6 +110,18 @@ async fn serve_one(
             ));
         }
     };
+    if parts.method == hyper::Method::GET && matches!(parts.uri.path(), "/healthz" | "/readyz") {
+        let request = Request {
+            method: "GET".into(),
+            path: parts.uri.path().to_string(),
+            peer: Some(peer),
+            ..Request::default()
+        };
+        let r = tokio::task::spawn_blocking(move || handler::handle(&state, &request))
+            .await
+            .unwrap_or_else(|_| problem(500, "internal", "the handler failed".into()).response());
+        return Ok(to_hyper(r));
+    }
     let Ok(permit) = Arc::clone(&limit).try_acquire_owned() else {
         return Ok(to_hyper(
             problem(503, "too_many_queries", "too many queries run now".into()).response(),
@@ -130,6 +143,7 @@ async fn serve_one(
         query: query_pairs(parts.uri.query()),
         headers,
         body,
+        peer: Some(peer),
     };
     let r = tokio::task::spawn_blocking(move || {
         let start = Instant::now();
@@ -147,12 +161,14 @@ async fn serve_one(
 pub async fn serve(listener: TcpListener, state: Arc<State>) -> std::io::Result<()> {
     let limit = Arc::new(Semaphore::new(MAX_PARALLEL));
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, addr) = listener.accept().await?;
+        let peer = addr.ip();
         let io = TokioIo::new(stream);
         let state = Arc::clone(&state);
         let limit = Arc::clone(&limit);
         tokio::spawn(async move {
-            let svc = service_fn(move |req| serve_one(Arc::clone(&state), Arc::clone(&limit), req));
+            let svc =
+                service_fn(move |req| serve_one(Arc::clone(&state), Arc::clone(&limit), peer, req));
             let _ = http1::Builder::new().serve_connection(io, svc).await;
         });
     }

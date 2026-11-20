@@ -38,6 +38,162 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The sign-in events, the newest first: the sign-ins, the failures, the setup, the token and user changes and the refused requests. */
+        get: operations["listAuthEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The users. */
+        get: operations["listUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Makes a user or changes its role, its state or its password. A new password or a disabled user ends the sessions of the user. The last enabled admin stays an admin. */
+        put: operations["putUser"];
+        post?: never;
+        /** Removes a user with the sessions and the tokens of the user. */
+        delete: operations["deleteUser"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Signs in with a user name and a password, and sets the session cookie. After 5 failures in 15 minutes for one user name or one client address, the answer is 429. */
+        post: operations["signIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ends the session of the cookie. */
+        post: operations["signOut"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The user of the request, the role and the scopes. */
+        get: operations["getMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** True while the server has no user, so that the one-time setup can make the first admin. */
+        get: operations["getSetup"];
+        put?: never;
+        /** Makes the first user, an admin, and signs it in. 409 when a user exists. */
+        post: operations["setUp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The API tokens of the user of the session. */
+        get: operations["listTokens"];
+        put?: never;
+        /** Makes an API token with scopes of the role of the user. The answer gives the token text one time only. */
+        post: operations["createToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revokes an API token of the user of the session. */
+        delete: operations["revokeToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/claims": {
         parameters: {
             query?: never;
@@ -738,6 +894,26 @@ export interface components {
              */
             version: number;
         };
+        /** @description One sign-in event. */
+        AuthEvent: {
+            actor?: string | null;
+            at: string;
+            client?: string | null;
+            detail?: string | null;
+            event: string;
+            /** Format: int64 */
+            id: number;
+            subject?: string | null;
+        };
+        /**
+         * AuthEventPage
+         * @description A page of the sign-in events, the newest first.
+         */
+        AuthEventPage: {
+            events: components["schemas"]["AuthEvent"][];
+            /** Format: int64 */
+            next_before?: number | null;
+        };
         /** @description The bindings of the inventory. */
         Bindings: {
             edge_devices: components["schemas"]["EdgeDeviceBinding"][];
@@ -1166,9 +1342,28 @@ export interface components {
             /** Format: uint32 */
             last_line: number;
         };
+        /**
+         * MeOut
+         * @description The user of a request as the UI shows it.
+         */
+        MeOut: {
+            name: string;
+            role: components["schemas"]["Role"];
+            scopes: string[];
+            /** @description `session` or `token`. */
+            via: string;
+        };
         MemberJson: {
             current: components["schemas"]["HeaderJson"];
             original: components["schemas"]["HeaderJson"];
+        };
+        /**
+         * NewTokenOut
+         * @description A new API token: its text, given only in this answer, and its record.
+         */
+        NewTokenOut: {
+            info: components["schemas"]["TokenInfo"];
+            token: string;
         };
         /** @description The JSON form of the NX-OS answers. */
         NxosJson: "plain" | "native";
@@ -1476,6 +1671,8 @@ export interface components {
             tls_ca_file: components["schemas"]["Resolved"];
             tls_trust: components["schemas"]["Resolved6"];
         };
+        /** @description The role of a user. */
+        Role: "viewer" | "operator" | "admin";
         /**
          * Route
          * @description The network path to a device: an optional proxy for the first TCP
@@ -1666,6 +1863,27 @@ export interface components {
             tls_ca_file?: string | null;
             tls_trust?: components["schemas"]["TlsTrust"] | null;
         };
+        /**
+         * SetupOut
+         * @description The state of the one-time setup.
+         */
+        SetupOut: {
+            /**
+             * @description True while the server has no user: the setup can make the first
+             *     admin.
+             */
+            open: boolean;
+            /** @description True if the server has sign-in. */
+            sign_in: boolean;
+        };
+        /**
+         * SignInIn
+         * @description The body of a sign-in and of the setup.
+         */
+        SignInIn: {
+            name: string;
+            password: string;
+        };
         /** @description One source line with its number in the canonical form of its section. */
         SourceLineJson: {
             /** Format: uint32 */
@@ -1830,6 +2048,42 @@ export interface components {
         TcpFlag: "fin" | "syn" | "rst" | "psh" | "ack" | "urg" | "ece" | "cwr";
         /** @description The check of the TLS certificate of an HTTPS device. */
         TlsTrust: "pin" | "ca" | "none";
+        /**
+         * TokenIn
+         * @description The body of a new API token.
+         */
+        TokenIn: {
+            /**
+             * Format: uint32
+             * @description The days until the token expires. With no value the token does not
+             *     expire.
+             * @default null
+             */
+            expires_days: number | null;
+            name: string;
+            scopes: string[];
+        };
+        /**
+         * @description An API token as its user sees it. The token text is given only once,
+         *     when the token is made.
+         */
+        TokenInfo: {
+            created_at: string;
+            expires_at?: string | null;
+            /** Format: int64 */
+            id: number;
+            last_used_at?: string | null;
+            name: string;
+            revoked: boolean;
+            scopes: string[];
+        };
+        /**
+         * TokensOut
+         * @description The API tokens of the user.
+         */
+        TokensOut: {
+            tokens: components["schemas"]["TokenInfo"][];
+        };
         /** @description One edge. */
         TopoEdge: {
             /** @description In a path drawing: the branches that cross the edge. */
@@ -1944,6 +2198,37 @@ export interface components {
         };
         /** @description How a path query treats a field that it does not state. */
         Unstated: "all" | "defaults";
+        /**
+         * User
+         * @description A user as an admin sees it. The password hash is not part of it.
+         */
+        User: {
+            created_at: string;
+            disabled: boolean;
+            name: string;
+            role: components["schemas"]["Role"];
+        };
+        /**
+         * UserIn
+         * @description The body of a user that an admin makes or changes.
+         */
+        UserIn: {
+            /** @default false */
+            disabled: boolean;
+            /**
+             * @description A new password. A new user needs one.
+             * @default null
+             */
+            password: string | null;
+            role: components["schemas"]["Role"];
+        };
+        /**
+         * UsersOut
+         * @description The users.
+         */
+        UsersOut: {
+            users: components["schemas"]["User"][];
+        };
         /** @description A vendor that has a collector, with its transport. */
         VendorOut: {
             transport: components["schemas"]["CollectorTransport"];
@@ -2032,6 +2317,375 @@ export interface operations {
                 content: {
                     "application/json": Record<string, never>;
                 };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listAuthEvents: {
+        parameters: {
+            query?: {
+                /** @description The number of events of a page, at most 1000. */
+                limit?: string;
+                /** @description The id of the last event of the previous page. */
+                before?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthEventPage"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listUsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsersOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    putUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserIn"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    signIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignInIn"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    signOut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getSetup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    setUp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignInIn"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listTokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokensOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    createToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TokenIn"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewTokenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    revokeToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description A problem */
             default: {

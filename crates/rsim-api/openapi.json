@@ -218,6 +218,74 @@
         ],
         "type": "object"
       },
+      "AuthEvent": {
+        "description": "One sign-in event.",
+        "properties": {
+          "actor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "at": {
+            "type": "string"
+          },
+          "client": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "event"
+        ],
+        "type": "object"
+      },
+      "AuthEventPage": {
+        "description": "A page of the sign-in events, the newest first.",
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/AuthEvent"
+            },
+            "type": "array"
+          },
+          "next_before": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "title": "AuthEventPage",
+        "type": "object"
+      },
       "Bindings": {
         "description": "The bindings of the inventory.",
         "properties": {
@@ -1603,6 +1671,35 @@
         ],
         "type": "object"
       },
+      "MeOut": {
+        "description": "The user of a request as the UI shows it.",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "via": {
+            "description": "`session` or `token`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "role",
+          "scopes",
+          "via"
+        ],
+        "title": "MeOut",
+        "type": "object"
+      },
       "MemberJson": {
         "properties": {
           "current": {
@@ -1616,6 +1713,23 @@
           "original",
           "current"
         ],
+        "type": "object"
+      },
+      "NewTokenOut": {
+        "description": "A new API token: its text, given only in this answer, and its record.",
+        "properties": {
+          "info": {
+            "$ref": "#/components/schemas/TokenInfo"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "info"
+        ],
+        "title": "NewTokenOut",
         "type": "object"
       },
       "NxosJson": {
@@ -2628,6 +2742,26 @@
         ],
         "type": "object"
       },
+      "Role": {
+        "description": "The role of a user.",
+        "oneOf": [
+          {
+            "const": "viewer",
+            "description": "Reads the twins.",
+            "type": "string"
+          },
+          {
+            "const": "operator",
+            "description": "Reads the twins and writes what-if scenarios.",
+            "type": "string"
+          },
+          {
+            "const": "admin",
+            "description": "Each scope, the inventory and the users included.",
+            "type": "string"
+          }
+        ]
+      },
       "Route": {
         "additionalProperties": false,
         "description": "The network path to a device: an optional proxy for the first TCP\nconnection, then the jump hosts in order. A route with no proxy and no\njump host is a direct connection.",
@@ -3271,6 +3405,42 @@
         },
         "type": "object"
       },
+      "SetupOut": {
+        "description": "The state of the one-time setup.",
+        "properties": {
+          "open": {
+            "description": "True while the server has no user: the setup can make the first\nadmin.",
+            "type": "boolean"
+          },
+          "sign_in": {
+            "description": "True if the server has sign-in.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "open",
+          "sign_in"
+        ],
+        "title": "SetupOut",
+        "type": "object"
+      },
+      "SignInIn": {
+        "description": "The body of a sign-in and of the setup.",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "password"
+        ],
+        "title": "SignInIn",
+        "type": "object"
+      },
       "SourceLineJson": {
         "description": "One source line with its number in the canonical form of its section.",
         "properties": {
@@ -3798,6 +3968,96 @@
           }
         ]
       },
+      "TokenIn": {
+        "description": "The body of a new API token.",
+        "properties": {
+          "expires_days": {
+            "default": null,
+            "description": "The days until the token expires. With no value the token does not\nexpire.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "scopes"
+        ],
+        "title": "TokenIn",
+        "type": "object"
+      },
+      "TokenInfo": {
+        "description": "An API token as its user sees it. The token text is given only once,\nwhen the token is made.",
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "revoked": {
+            "type": "boolean"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "scopes",
+          "created_at",
+          "revoked"
+        ],
+        "type": "object"
+      },
+      "TokensOut": {
+        "description": "The API tokens of the user.",
+        "properties": {
+          "tokens": {
+            "items": {
+              "$ref": "#/components/schemas/TokenInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tokens"
+        ],
+        "title": "TokensOut",
+        "type": "object"
+      },
       "TopoEdge": {
         "description": "One edge.",
         "properties": {
@@ -4171,6 +4431,72 @@
           }
         ]
       },
+      "User": {
+        "description": "A user as an admin sees it. The password hash is not part of it.",
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          }
+        },
+        "required": [
+          "name",
+          "role",
+          "disabled",
+          "created_at"
+        ],
+        "title": "User",
+        "type": "object"
+      },
+      "UserIn": {
+        "description": "The body of a user that an admin makes or changes.",
+        "properties": {
+          "disabled": {
+            "default": false,
+            "type": "boolean"
+          },
+          "password": {
+            "default": null,
+            "description": "A new password. A new user needs one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "UserIn",
+        "type": "object"
+      },
+      "UsersOut": {
+        "description": "The users.",
+        "properties": {
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/User"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "users"
+        ],
+        "title": "UsersOut",
+        "type": "object"
+      },
       "VendorOut": {
         "description": "A vendor that has a collector, with its transport.",
         "properties": {
@@ -4252,19 +4578,16 @@
       }
     },
     "securitySchemes": {
-      "rsim": {
-        "description": "Not checked yet: the server listens only on a loopback address. The scope rsim.scenario.write is for the what-if scenarios.",
-        "flows": {
-          "clientCredentials": {
-            "scopes": {
-              "rsim.inventory.write": "Change the inventory.",
-              "rsim.read": "Read the twins, the tables, the queries and the claims.",
-              "rsim.scenario.write": "Make and change what-if scenarios."
-            },
-            "tokenUrl": "/oauth/token"
-          }
-        },
-        "type": "oauth2"
+      "session": {
+        "description": "The session of POST /v1/auth/login. On plain HTTP to a loopback address the cookie is rsim_session. A request that changes data needs an Origin header. The scopes are those of the role of the user: viewer rsim.read; operator also rsim.scenario.write; admin also rsim.inventory.write and rsim.admin. With no inventory database the server has no sign-in and listens only on a loopback address.",
+        "in": "cookie",
+        "name": "__Host-rsim_session",
+        "type": "apiKey"
+      },
+      "token": {
+        "description": "An API token of POST /v1/auth/tokens, rsim_ and 64 hex digits. It has the scopes that it names and that the role of its user gives: rsim.read reads the twins, the tables, the queries and the claims; rsim.scenario.write makes and changes what-if scenarios; rsim.inventory.write changes the inventory; rsim.admin manages the users.",
+        "scheme": "bearer",
+        "type": "http"
       }
     }
   },
@@ -4318,7 +4641,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -4354,12 +4682,506 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
         ],
         "summary": "The entry point: the links, the contract version and the limits."
+      }
+    },
+    "/v1/admin/events": {
+      "get": {
+        "operationId": "listAuthEvents",
+        "parameters": [
+          {
+            "description": "The number of events of a page, at most 1000.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The id of the last event of the previous page.",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthEventPage"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "rsim.admin"
+            ]
+          },
+          {
+            "token": [
+              "rsim.admin"
+            ]
+          }
+        ],
+        "summary": "The sign-in events, the newest first: the sign-ins, the failures, the setup, the token and user changes and the refused requests."
+      }
+    },
+    "/v1/admin/users": {
+      "get": {
+        "operationId": "listUsers",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsersOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "rsim.admin"
+            ]
+          },
+          {
+            "token": [
+              "rsim.admin"
+            ]
+          }
+        ],
+        "summary": "The users."
+      }
+    },
+    "/v1/admin/users/{name}": {
+      "delete": {
+        "operationId": "deleteUser",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "rsim.admin"
+            ]
+          },
+          {
+            "token": [
+              "rsim.admin"
+            ]
+          }
+        ],
+        "summary": "Removes a user with the sessions and the tokens of the user."
+      },
+      "put": {
+        "operationId": "putUser",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "rsim.admin"
+            ]
+          },
+          {
+            "token": [
+              "rsim.admin"
+            ]
+          }
+        ],
+        "summary": "Makes a user or changes its role, its state or its password. A new password or a disabled user ends the sessions of the user. The last enabled admin stays an admin."
+      }
+    },
+    "/v1/auth/login": {
+      "post": {
+        "operationId": "signIn",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [],
+        "summary": "Signs in with a user name and a password, and sets the session cookie. After 5 failures in 15 minutes for one user name or one client address, the answer is 429."
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "operationId": "signOut",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "token": []
+          }
+        ],
+        "summary": "Ends the session of the cookie."
+      }
+    },
+    "/v1/auth/me": {
+      "get": {
+        "operationId": "getMe",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "token": []
+          }
+        ],
+        "summary": "The user of the request, the role and the scopes."
+      }
+    },
+    "/v1/auth/setup": {
+      "get": {
+        "operationId": "getSetup",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [],
+        "summary": "True while the server has no user, so that the one-time setup can make the first admin."
+      },
+      "post": {
+        "operationId": "setUp",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [],
+        "summary": "Makes the first user, an admin, and signs it in. 409 when a user exists."
+      }
+    },
+    "/v1/auth/tokens": {
+      "get": {
+        "operationId": "listTokens",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokensOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "The API tokens of the user of the session."
+      },
+      "post": {
+        "operationId": "createToken",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewTokenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Makes an API token with scopes of the role of the user. The answer gives the token text one time only."
+      }
+    },
+    "/v1/auth/tokens/{id}": {
+      "delete": {
+        "operationId": "revokeToken",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Revokes an API token of the user of the session."
       }
     },
     "/v1/claims": {
@@ -4390,7 +5212,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -4426,7 +5253,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -4481,7 +5313,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -4517,7 +5354,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -4570,7 +5412,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
               "rsim.inventory.write"
             ]
           }
@@ -4631,7 +5478,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
               "rsim.inventory.write"
             ]
           }
@@ -4684,7 +5536,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
               "rsim.inventory.write"
             ]
           }
@@ -4745,7 +5602,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
               "rsim.inventory.write"
             ]
           }
@@ -4781,7 +5643,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -4826,7 +5693,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
               "rsim.inventory.write"
             ]
           }
@@ -4879,7 +5751,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
               "rsim.inventory.write"
             ]
           }
@@ -4915,7 +5792,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -4960,7 +5842,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
               "rsim.inventory.write"
             ]
           }
@@ -5003,7 +5890,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -5056,7 +5948,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
               "rsim.inventory.write"
             ]
           }
@@ -5092,7 +5989,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -5137,7 +6039,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
               "rsim.inventory.write"
             ]
           }
@@ -5180,7 +6087,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -5233,7 +6145,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
               "rsim.inventory.write"
             ]
           }
@@ -5269,7 +6186,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -5314,7 +6236,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
               "rsim.inventory.write"
             ]
           }
@@ -5367,7 +6294,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
               "rsim.inventory.write"
             ]
           }
@@ -5403,7 +6335,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -5448,7 +6385,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
               "rsim.inventory.write"
             ]
           }
@@ -5501,7 +6443,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
               "rsim.inventory.write"
             ]
           }
@@ -5537,7 +6484,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -5573,7 +6525,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -5609,7 +6566,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -5645,7 +6607,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -5690,7 +6657,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -5745,7 +6717,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -5807,7 +6784,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -5870,7 +6852,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -5932,7 +6919,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -6007,7 +6999,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -6094,7 +7091,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -6155,7 +7157,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -6217,7 +7224,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -6280,7 +7292,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -6351,7 +7368,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -6440,7 +7462,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -6493,7 +7520,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -6573,7 +7605,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -6635,7 +7672,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
@@ -6743,7 +7785,12 @@
         },
         "security": [
           {
-            "rsim": [
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
               "rsim.read"
             ]
           }
