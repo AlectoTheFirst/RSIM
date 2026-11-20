@@ -9,15 +9,37 @@ use rsim_store::{
     Cell, Class, DeviceUpdate, Entropy, Format, Hash, Keys, Row, SectionEntry, SectionStatus, Store,
 };
 
-struct Counter(u8);
+/// `N` random bytes from the operating system.
+pub fn random<const N: usize>() -> [u8; N] {
+    let mut bytes = [0u8; N];
+    getrandom::fill(&mut bytes).unwrap();
+    bytes
+}
 
-impl Entropy for Counter {
-    fn fill(&mut self, buf: &mut [u8]) {
-        for b in buf {
-            self.0 = self.0.wrapping_add(1);
-            *b = self.0;
-        }
+/// Random keys and nonces from the operating system.
+pub struct Os;
+
+impl Entropy for Os {
+    fn key(&mut self) -> [u8; 32] {
+        random()
     }
+    fn nonce(&mut self) -> [u8; 24] {
+        random()
+    }
+}
+
+/// The keys of the data folder: those of its file `keys`, else new keys
+/// with a random wrap key, which the file then holds.
+#[allow(clippy::disallowed_methods)]
+fn keys(dir: &Path) -> Keys {
+    let path = dir.join("keys");
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        return Keys::from_hex(&text).unwrap();
+    }
+    let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+    let text = format!("{}\n{}\n", hex(&[1u8; 32]), hex(&random::<32>()));
+    std::fs::write(&path, &text).unwrap();
+    Keys::from_hex(&text).unwrap()
 }
 
 fn fixture(rel: &str) -> Vec<u8> {
@@ -48,17 +70,9 @@ fn s(v: &str) -> Cell {
 /// `keys` and the store in `store`, with one snapshot.
 #[allow(clippy::disallowed_methods)]
 pub fn write(dir: &Path) {
-    let hash = [1u8; 32];
-    let wrap = [2u8; 32];
-    let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
     std::fs::create_dir_all(dir).unwrap();
-    std::fs::write(
-        dir.join("keys"),
-        format!("{}\n{}\n", hex(&hash), hex(&wrap)),
-    )
-    .unwrap();
-    let store = Store::open(dir.join("store"), Keys::new(hash, wrap)).unwrap();
-    let mut e = Counter(0);
+    let store = Store::open(dir.join("store"), keys(dir)).unwrap();
+    let mut e = Os;
     let mut put = |b: &[u8]| store.put_blob(b, &mut e).unwrap();
 
     let config = put(&fixture("vyos/r1-config.json"));

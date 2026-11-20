@@ -24,6 +24,7 @@ serde_json = "1.0.154"
 
 [dev-dependencies]
 boon = "=0.6.1"
+getrandom = "0.3.4"
 rsim-contract.workspace = true
 rsim-store.workspace = true
 

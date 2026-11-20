@@ -2759,6 +2759,7 @@ version = "0.1.0"
 dependencies = [
  "boon",
  "bytes",
+ "getrandom 0.3.4",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -2782,6 +2783,7 @@ dependencies = [
  "arrow-ord",
  "boon",
  "clap",
+ "getrandom 0.3.4",
  "rayon",
  "rsim-contract",
  "rsim-core",
@@ -2897,6 +2899,7 @@ name = "rsim-mcp"
 version = "0.1.0"
 dependencies = [
  "boon",
+ "getrandom 0.3.4",
  "rsim-cli",
  "rsim-contract",
  "rsim-store",
@@ -2913,6 +2916,7 @@ dependencies = [
  "arrow-select",
  "blake3",
  "chacha20poly1305",
+ "getrandom 0.3.4",
  "parquet",
  "serde",
  "serde_json",

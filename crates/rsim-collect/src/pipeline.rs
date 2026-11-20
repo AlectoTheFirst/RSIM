@@ -59,9 +59,19 @@ impl Clock for TokioClock {
 pub struct OsEntropy;
 
 impl Entropy for OsEntropy {
-    fn fill(&mut self, buf: &mut [u8]) {
-        getrandom::fill(buf).expect("the operating system gives random bytes");
+    fn key(&mut self) -> [u8; 32] {
+        os_random()
     }
+    fn nonce(&mut self) -> [u8; 24] {
+        os_random()
+    }
+}
+
+/// `N` random bytes from the operating system.
+fn os_random<const N: usize>() -> [u8; N] {
+    let mut bytes = [0u8; N];
+    getrandom::fill(&mut bytes).expect("the operating system gives random bytes");
+    bytes
 }
 
 /// Receives the devices that changed in a published snapshot.

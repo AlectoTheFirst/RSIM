@@ -5,23 +5,55 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use arrow_array::{Array, StringArray};
 use rsim_store::*;
 
-struct Counter(u8);
+/// `N` random bytes from the operating system.
+fn random<const N: usize>() -> [u8; N] {
+    let mut bytes = [0u8; N];
+    getrandom::fill(&mut bytes).unwrap();
+    bytes
+}
 
-impl Entropy for Counter {
-    fn fill(&mut self, buf: &mut [u8]) {
-        for b in buf {
-            self.0 = self.0.wrapping_add(1);
-            *b = self.0;
-        }
+/// The random bytes of the test process, the same for each source.
+fn block() -> &'static [u8; 256] {
+    static BLOCK: OnceLock<[u8; 256]> = OnceLock::new();
+    BLOCK.get_or_init(random)
+}
+
+/// A source that gives the bytes of the block from a start position, so 2
+/// sources with the same start give the same keys and nonces.
+struct Replay(usize);
+
+impl Replay {
+    fn bytes<const N: usize>(&mut self) -> [u8; N] {
+        std::array::from_fn(|_| {
+            let byte = block()[self.0 % 256];
+            self.0 += 1;
+            byte
+        })
     }
 }
 
+impl Entropy for Replay {
+    fn key(&mut self) -> [u8; 32] {
+        self.bytes()
+    }
+    fn nonce(&mut self) -> [u8; 24] {
+        self.bytes()
+    }
+}
+
+/// The wrap key of the tests, made one time in each test process.
+fn wrap_key() -> [u8; 32] {
+    static KEY: OnceLock<[u8; 32]> = OnceLock::new();
+    *KEY.get_or_init(random)
+}
+
 fn keys() -> Keys {
-    Keys::new([7; 32], [9; 32])
+    Keys::new([7; 32], wrap_key())
 }
 
 fn files(dir: &Path) -> Vec<String> {
@@ -69,7 +101,7 @@ fn update(
     config: &str,
     speeds: Option<&[(&str, u64)]>,
 ) -> DeviceUpdate {
-    let mut e = Counter(0);
+    let mut e = Replay(0);
     let cfg = store.put_blob(config.as_bytes(), &mut e).unwrap();
     let mut sections = vec![section("config", cfg, Class::Configuration)];
     let mut tables = BTreeMap::new();
@@ -128,8 +160,8 @@ fn speeds(store: &Store, s: &Snapshot) -> Vec<(String, Vec<String>)> {
 fn equal_bytes_are_stored_once() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path(), keys()).unwrap();
-    let a = store.put_blob(b"same", &mut Counter(0)).unwrap();
-    let b = store.put_blob(b"same", &mut Counter(50)).unwrap();
+    let a = store.put_blob(b"same", &mut Replay(0)).unwrap();
+    let b = store.put_blob(b"same", &mut Replay(50)).unwrap();
     assert_eq!(a, b);
     assert_eq!(files(&dir.path().join("blobs")).len(), 1);
     assert_eq!(store.read_blob(&a).unwrap(), b"same");
@@ -273,12 +305,12 @@ fn other_keys_do_not_read_the_store() {
     let blob = s.devices["r1"].sections[0].blob.unwrap();
     let raw = fs::read(dir.path().join("blobs").join(blob.to_string())).unwrap();
     assert!(!raw.windows(6).any(|w| w == b"secret"));
-    let other_wrap = Store::open(dir.path(), Keys::new([7; 32], [8; 32])).unwrap();
+    let other_wrap = Store::open(dir.path(), Keys::new([7; 32], random())).unwrap();
     assert!(matches!(
         other_wrap.read_blob(&blob),
         Err(StoreError::Integrity(_))
     ));
-    let other_hash = Store::open(dir.path(), Keys::new([6; 32], [9; 32])).unwrap();
+    let other_hash = Store::open(dir.path(), Keys::new([6; 32], wrap_key())).unwrap();
     assert!(matches!(other_hash.latest(), Err(StoreError::Integrity(_))));
 }
 
