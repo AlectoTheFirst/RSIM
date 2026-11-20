@@ -303,8 +303,8 @@ async fn an_env_import_round_trips() {
     devices.sort_by(|a, b| a.name.cmp(&b.name));
     assert_eq!(inv.devices, devices);
     let dump = serde_json::to_string(&inv).unwrap();
-    for secret in ["secret-pass", "p:q", "\"k\""] {
-        assert!(!dump.contains(secret), "{secret} is in the inventory");
+    for (i, secret) in ["secret-pass", "p:q", "\"k\""].into_iter().enumerate() {
+        assert!(!dump.contains(secret), "secret {i} is in the inventory");
     }
     let audit = serde_json::to_string(&db.audit(1000, None).await.unwrap()).unwrap();
     assert!(!audit.contains("secret-pass") && !audit.contains("p:q"));

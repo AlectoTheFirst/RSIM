@@ -19,9 +19,12 @@ const NONCE: usize = 24;
 const WRAPPED: usize = 32 + 16;
 const HEADER: usize = MAGIC.len() + NONCE + WRAPPED + NONCE;
 
-/// A source of random bytes for data keys and nonces.
+/// A source of random data keys and nonces.
 pub trait Entropy: Send {
-    fn fill(&mut self, buf: &mut [u8]);
+    /// A random data key.
+    fn key(&mut self) -> [u8; 32];
+    /// A random nonce.
+    fn nonce(&mut self) -> [u8; NONCE];
 }
 
 fn cipher(key: &[u8; 32]) -> XChaCha20Poly1305 {
@@ -47,12 +50,9 @@ pub(crate) fn encrypt(
     plain: &[u8],
     entropy: &mut dyn Entropy,
 ) -> Vec<u8> {
-    let mut data_key = [0u8; 32];
-    let mut wrap_nonce = [0u8; NONCE];
-    let mut data_nonce = [0u8; NONCE];
-    entropy.fill(&mut data_key);
-    entropy.fill(&mut wrap_nonce);
-    entropy.fill(&mut data_nonce);
+    let data_key = entropy.key();
+    let wrap_nonce = entropy.nonce();
+    let data_nonce = entropy.nonce();
     let aad = &name.0;
     let wrapped = seal(keys.wrap_key(), &wrap_nonce, aad, &data_key);
     let body = seal(&data_key, &data_nonce, aad, plain);
@@ -89,26 +89,34 @@ pub(crate) fn decrypt(keys: &Keys, name: &Hash, bytes: &[u8]) -> Result<Vec<u8>,
 mod tests {
     use super::*;
 
-    struct Counter(u8);
-    impl Entropy for Counter {
-        fn fill(&mut self, buf: &mut [u8]) {
-            for b in buf {
-                self.0 = self.0.wrapping_add(1);
-                *b = self.0;
-            }
+    /// `N` random bytes from the operating system.
+    fn random<const N: usize>() -> [u8; N] {
+        let mut bytes = [0u8; N];
+        getrandom::fill(&mut bytes).unwrap();
+        bytes
+    }
+
+    /// Random keys and nonces from the operating system.
+    struct Os;
+    impl Entropy for Os {
+        fn key(&mut self) -> [u8; 32] {
+            random()
+        }
+        fn nonce(&mut self) -> [u8; NONCE] {
+            random()
         }
     }
 
     #[test]
     fn a_blob_decrypts_only_with_its_keys_and_its_name() {
-        let keys = Keys::new([1; 32], [2; 32]);
+        let keys = Keys::new([1; 32], random());
         let plain = b"interfaces { ethernet eth0 }";
         let name = keys.hash(plain);
-        let blob = encrypt(&keys, &name, plain, &mut Counter(0));
+        let blob = encrypt(&keys, &name, plain, &mut Os);
         assert!(!blob.windows(plain.len()).any(|w| w == plain));
         assert_eq!(decrypt(&keys, &name, &blob).unwrap(), plain);
 
-        let wrong_wrap = Keys::new([1; 32], [3; 32]);
+        let wrong_wrap = Keys::new([1; 32], random());
         assert!(decrypt(&wrong_wrap, &name, &blob).is_err());
         let other = keys.hash(b"other");
         assert!(decrypt(&keys, &other, &blob).is_err());

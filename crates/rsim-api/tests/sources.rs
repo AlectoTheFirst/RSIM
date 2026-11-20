@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use rsim_api::handler::{Request, Response, Settings, State, handle};
-use rsim_store::{Class, DeviceUpdate, Entropy, Format, Keys, SectionEntry, SectionStatus, Store};
+use rsim_store::{Class, DeviceUpdate, Format, Keys, SectionEntry, SectionStatus, Store};
 use serde_json::{Value, json};
 
 #[path = "../../rsim-cli/tests/support/fixture_store.rs"]
@@ -118,8 +118,9 @@ fn the_lines_of_a_vyos_config_have_no_secret_and_the_same_bytes_each_time() {
         let r = get(&s, &path);
         assert_eq!(get(&s, &path).body, r.body);
         let text = String::from_utf8(r.body.clone()).unwrap();
-        for secret in ["FAKEVYOSPASSWORD", "FAKEPEERGROUPPASSWORD", "BBBB"] {
-            assert!(!text.contains(secret), "{secret} in lines {first}-{last}");
+        let secrets = ["FAKEVYOSPASSWORD", "FAKEPEERGROUPPASSWORD", "BBBB"];
+        for (i, secret) in secrets.into_iter().enumerate() {
+            assert!(!text.contains(secret), "secret {i} in lines {first}-{last}");
         }
         if r.status == 403 {
             assert_eq!(json(&r)["code"], "not_a_source_span");
@@ -334,24 +335,13 @@ fn a_step_gives_the_masked_lines_of_its_spans_on_request() {
     );
 }
 
-struct Counter(u8);
-
-impl Entropy for Counter {
-    fn fill(&mut self, buf: &mut [u8]) {
-        for b in buf {
-            self.0 = self.0.wrapping_add(1);
-            *b = self.0;
-        }
-    }
-}
-
 /// A data folder with one device of a vendor with no mask.
 #[allow(clippy::disallowed_methods)]
 fn no_mask_store(dir: &Path) {
     let _ = std::fs::remove_dir_all(dir);
     std::fs::create_dir_all(dir).unwrap();
     let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
-    let (hash, wrap) = ([3u8; 32], [4u8; 32]);
+    let (hash, wrap) = ([3u8; 32], fixture_store::random());
     std::fs::write(
         dir.join("keys"),
         format!("{}\n{}\n", hex(&hash), hex(&wrap)),
@@ -361,7 +351,7 @@ fn no_mask_store(dir: &Path) {
     let blob = store
         .put_blob(
             b"config system admin\n  set password FAKEPASSWORD\nend\n",
-            &mut Counter(0),
+            &mut fixture_store::Os,
         )
         .unwrap();
     let mut c = store.begin(1).unwrap();
@@ -409,7 +399,7 @@ fn container_store(dir: &Path) -> Vec<String> {
     let _ = std::fs::remove_dir_all(dir);
     std::fs::create_dir_all(dir).unwrap();
     let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
-    let (hash, wrap) = ([5u8; 32], [6u8; 32]);
+    let (hash, wrap) = ([5u8; 32], fixture_store::random());
     std::fs::write(
         dir.join("keys"),
         format!("{}\n{}\n", hex(&hash), hex(&wrap)),
@@ -425,7 +415,7 @@ fn container_store(dir: &Path) -> Vec<String> {
     }}});
     let bytes = config.to_string().into_bytes();
     let store = Store::open(dir.join("store"), Keys::new(hash, wrap)).unwrap();
-    let blob = store.put_blob(&bytes, &mut Counter(0)).unwrap();
+    let blob = store.put_blob(&bytes, &mut fixture_store::Os).unwrap();
     let mut c = store.begin(1).unwrap();
     c.add(DeviceUpdate {
         device: "r1".into(),

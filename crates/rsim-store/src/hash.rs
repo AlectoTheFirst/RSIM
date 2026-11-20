@@ -51,15 +51,15 @@ fn hex<const N: usize>(s: &str) -> Result<[u8; N], StoreError> {
     if s.len() != 2 * N {
         return Err(bad());
     }
-    let mut out = [0u8; N];
-    for (i, o) in out.iter_mut().enumerate() {
+    let mut out = Vec::with_capacity(N);
+    for i in 0..N {
         let pair = s.get(2 * i..2 * i + 2).ok_or_else(bad)?;
         if pair.bytes().any(|c| c.is_ascii_uppercase()) {
             return Err(bad());
         }
-        *o = u8::from_str_radix(pair, 16).map_err(|_| bad())?;
+        out.push(u8::from_str_radix(pair, 16).map_err(|_| bad())?);
     }
-    Ok(out)
+    out.try_into().map_err(|_| bad())
 }
 
 /// The 2 keys of a store. Both are outside the store. The hash key makes
