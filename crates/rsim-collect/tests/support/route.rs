@@ -129,6 +129,16 @@ impl russh::server::Handler for Bastion {
     }
 }
 
+/// The password of the test jump hosts, made one time in each test process.
+pub fn hop_pass() -> &'static str {
+    static PASS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PASS.get_or_init(|| {
+        let mut bytes = [0u8; 16];
+        getrandom::fill(&mut bytes).unwrap();
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    })
+}
+
 /// Starts a jump host that accepts only `user` with `password`.
 pub async fn bastion(user: &str, password: &str) -> BastionFixture {
     let host = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();

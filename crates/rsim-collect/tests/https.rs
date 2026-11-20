@@ -402,7 +402,7 @@ fn jump_credentials() -> Arc<MemoryCredentials> {
         "hop",
         Credential {
             user: "hop".into(),
-            secret: Secret::Password("hop-pass".into()),
+            secret: Secret::Password(route::hop_pass().into()),
         },
     );
     Arc::new(c)
@@ -430,7 +430,7 @@ async fn a_proxy_carries_the_connections_to_a_console() {
 #[tokio::test]
 async fn one_jump_host_login_serves_the_connections_of_a_console() {
     let f = serve(rustls::DEFAULT_VERSIONS).await;
-    let b = route::bastion("hop", "hop-pass").await;
+    let b = route::bastion("hop", route::hop_pass()).await;
     let trust = TrustStore::memory(PinPolicy::Strict);
     trust.pin(PinKind::Ssh, b.address(), &b.host_key);
     trust.pin(
@@ -452,7 +452,7 @@ async fn one_jump_host_login_serves_the_connections_of_a_console() {
     let paths: Vec<String> = (0..9).map(|i| format!("/p{i}")).collect();
     let outs = join_all(paths.iter().map(|p| t.get(&d, p))).await;
     assert!(outs.iter().all(Result::is_ok), "{outs:?}");
-    assert_eq!(b.log(), ["password hop hop-pass"]);
+    assert_eq!(b.log(), [format!("password hop {}", route::hop_pass())]);
     let n = f.state.connections.load(Ordering::SeqCst);
     assert!((1..=3).contains(&n), "{n} connections");
     assert_eq!(b.forwarder.forwards(), n);

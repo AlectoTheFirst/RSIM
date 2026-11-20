@@ -575,8 +575,8 @@ pub(crate) mod check {
         assert_eq!(got.len(), String::from_utf8_lossy(&canon).lines().count());
         let text = got.join("\n");
         assert!(!text.contains("FAKE"), "{text}");
-        for s in secrets {
-            assert!(!text.contains(s), "{s}: {text}");
+        for (i, s) in secrets.iter().enumerate() {
+            assert!(!text.contains(s), "secret {i}: {text}");
         }
         for k in kept {
             assert!(text.contains(k), "{k}: {text}");

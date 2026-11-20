@@ -301,7 +301,7 @@ fn route_credentials() -> Arc<MemoryCredentials> {
         "hop",
         Credential {
             user: "hop".into(),
-            secret: Secret::Password("hop-pass".into()),
+            secret: Secret::Password(route::hop_pass().into()),
         },
     );
     Arc::new(c)
@@ -595,7 +595,7 @@ async fn the_connection_mode_logs_in_for_each_command() {
 #[tokio::test]
 async fn a_jump_host_never_gets_the_device_credential() {
     let f = serve(password_server(), Preferred::default()).await;
-    let b = route::bastion("hop", "hop-pass").await;
+    let b = route::bastion("hop", route::hop_pass()).await;
     let trust = TrustStore::memory(PinPolicy::Strict);
     trust.pin(PinKind::Ssh, b.address(), &b.host_key);
     trust.pin(
@@ -613,7 +613,7 @@ async fn a_jump_host_never_gets_the_device_credential() {
     assert_eq!(t.run(&d, "two").await.unwrap(), b"two");
     assert_eq!(b.forwarder.forwards(), 1);
     let log = b.log();
-    assert_eq!(log, ["password hop hop-pass"]);
+    assert_eq!(log, [format!("password hop {}", route::hop_pass())]);
     assert!(
         log.iter()
             .all(|l| !l.contains("collector") && !l.contains("s3cret"))
@@ -623,8 +623,8 @@ async fn a_jump_host_never_gets_the_device_credential() {
 #[tokio::test]
 async fn a_chain_of_2_jump_hosts_reaches_the_device() {
     let f = serve(password_server(), Preferred::default()).await;
-    let b1 = route::bastion("hop", "hop-pass").await;
-    let b2 = route::bastion("hop", "hop-pass").await;
+    let b1 = route::bastion("hop", route::hop_pass()).await;
+    let b2 = route::bastion("hop", route::hop_pass()).await;
     let trust = TrustStore::memory(PinPolicy::AcceptNew);
     let trust = Arc::new(trust);
     let t = SshTransport::new(route_credentials(), trust.clone(), SshLimits::default());
@@ -654,7 +654,7 @@ async fn a_chain_of_2_jump_hosts_reaches_the_device() {
 #[tokio::test]
 async fn an_error_names_the_hop_that_failed() {
     let f = serve(password_server(), Preferred::default()).await;
-    let b = route::bastion("hop", "hop-pass").await;
+    let b = route::bastion("hop", route::hop_pass()).await;
     let trust = TrustStore::memory(PinPolicy::Strict);
     trust.pin(PinKind::Ssh, b.address(), &f.host_key);
     let t = SshTransport::new(route_credentials(), Arc::new(trust), SshLimits::default());
@@ -678,7 +678,7 @@ async fn an_error_names_the_hop_that_failed() {
         "hop",
         Credential {
             user: "hop".into(),
-            secret: Secret::Password("hop-pass".into()),
+            secret: Secret::Password(route::hop_pass().into()),
         },
     );
     let t = SshTransport::new(Arc::new(creds), Arc::new(trust), SshLimits::default());
@@ -728,7 +728,7 @@ async fn a_proxy_carries_the_first_connection() {
 #[tokio::test]
 async fn a_jump_host_behind_a_proxy() {
     let f = serve(password_server(), Preferred::default()).await;
-    let b = route::bastion("hop", "hop-pass").await;
+    let b = route::bastion("hop", route::hop_pass()).await;
     let socks = route::socks5_proxy().await;
     let t = SshTransport::new(
         route_credentials(),

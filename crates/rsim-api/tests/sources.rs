@@ -115,8 +115,9 @@ fn the_lines_of_a_vyos_config_have_no_secret_and_the_same_bytes_each_time() {
         let r = get(&s, &path);
         assert_eq!(get(&s, &path).body, r.body);
         let text = String::from_utf8(r.body.clone()).unwrap();
-        for secret in ["FAKEVYOSPASSWORD", "FAKEPEERGROUPPASSWORD", "BBBB"] {
-            assert!(!text.contains(secret), "{secret} in lines {first}-{last}");
+        let secrets = ["FAKEVYOSPASSWORD", "FAKEPEERGROUPPASSWORD", "BBBB"];
+        for (i, secret) in secrets.into_iter().enumerate() {
+            assert!(!text.contains(secret), "secret {i} in lines {first}-{last}");
         }
         if r.status == 403 {
             assert_eq!(json(&r)["code"], "not_a_source_span");
