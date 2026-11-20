@@ -2,13 +2,14 @@
 // Trace view, so a link of a query stays as it is.
 import type { View } from "./Parts";
 
-const PARAM: Partial<Record<View, string>> = { Tables: "tables", Coverage: "coverage", Inventory: "inventory" };
+const PARAM: Partial<Record<View, string>> = { Tables: "tables", Coverage: "coverage", Inventory: "inventory", Tokens: "tokens" };
 
 export function viewOf(search: string): View {
   const v = new URLSearchParams(search).get("view");
   if (v === "tables") return "Tables";
   if (v === "coverage") return "Coverage";
   if (v === "inventory") return "Inventory";
+  if (v === "tokens") return "Tokens";
   return "Trace";
 }
 

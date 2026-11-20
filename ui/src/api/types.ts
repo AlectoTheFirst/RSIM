@@ -36,3 +36,8 @@ export type FieldValue =
   | "unknown"
   | "absent"
   | "original";
+export type Me = S["MeOut"];
+export type SetupState = S["SetupOut"];
+export type TokenInfo = S["TokenInfo"];
+export type TokenIn = S["TokenIn"];
+export type NewToken = S["NewTokenOut"];

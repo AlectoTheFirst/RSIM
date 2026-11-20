@@ -52,6 +52,8 @@ fn main() {
         store: None,
         allow_origins: Vec::new(),
         max_body: 1 << 20,
+        public_origins: Vec::new(),
+        trusted_proxies: Vec::new(),
     }));
     rt.spawn(rsim_api::server::serve(listener, state));
     let query = r#"{"source.ip":"10.1.0.10","destination.ip":"10.2.0.10","network.transport":"tcp","source.port":40000,"destination.port":22}"#;

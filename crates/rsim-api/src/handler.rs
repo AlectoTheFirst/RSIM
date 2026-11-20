@@ -34,6 +34,8 @@ pub struct Request {
     pub query: Vec<(String, String)>,
     pub headers: BTreeMap<String, String>,
     pub body: Vec<u8>,
+    /// The address of the connection, if known.
+    pub peer: Option<std::net::IpAddr>,
 }
 
 /// One response.
@@ -64,6 +66,13 @@ pub struct Settings {
     pub allow_origins: Vec<String>,
     /// The largest request body in bytes.
     pub max_body: usize,
+    /// The origins of the server behind a proxy, for example
+    /// `https://rsim.example.net`: their hosts are hosts of the server, and
+    /// the origins are origins of the UI.
+    pub public_origins: Vec<String>,
+    /// The proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` the
+    /// server reads.
+    pub trusted_proxies: Vec<crate::auth::Prefix>,
 }
 
 /// The state of a server: the settings, the tools of the MCP transport
@@ -75,6 +84,7 @@ pub struct State {
     mcp: rsim_mcp::tools::Tools,
     long_queries: Mutex<BTreeMap<String, String>>,
     pub(crate) inventory: Option<crate::inventory::InventoryHandle>,
+    pub(crate) rate: crate::auth::Rate,
 }
 
 impl State {
@@ -88,11 +98,13 @@ impl State {
             mcp,
             long_queries: Mutex::new(BTreeMap::new()),
             inventory: None,
+            rate: crate::auth::Rate::default(),
         }
     }
 
     /// The server with the inventory database of the routes
-    /// `/v1/inventory`.
+    /// `/v1/inventory`, which also holds the users: with it, each route
+    /// except the open routes needs a session or an API token.
     pub fn with_inventory(mut self, inventory: crate::inventory::InventoryHandle) -> Self {
         self.inventory = Some(inventory);
         self
@@ -310,7 +322,16 @@ pub fn handle(state: &State, req: &Request) -> Response {
         )
         .response();
     }
-    let mut res = if req.method == "OPTIONS" {
+    let segs: Vec<&str> = req.path.trim_end_matches('/').split('/').skip(1).collect();
+    let user = if req.method == "OPTIONS" {
+        None
+    } else {
+        match crate::auth::check(state, req, &segs) {
+            Ok(u) => u,
+            Err(r) => return with_cors(state, req, origin, r),
+        }
+    };
+    let res = if req.method == "OPTIONS" {
         Response {
             status: 204,
             headers: vec![
@@ -320,18 +341,29 @@ pub fn handle(state: &State, req: &Request) -> Response {
                 ),
                 (
                     "access-control-allow-headers".into(),
-                    "content-type, if-none-match, mcp-protocol-version, mcp-method, mcp-name"
+                    "authorization, content-type, if-none-match, mcp-protocol-version, mcp-method, mcp-name"
                         .into(),
                 ),
             ],
             body: Vec::new(),
         }
     } else {
-        match route(state, req) {
+        match route(state, req, user.as_ref()) {
             Ok(r) => r,
             Err(p) => p.response(),
         }
     };
+    with_cors(state, req, origin, res)
+}
+
+/// Adds the CORS headers of an allowed origin, and HSTS on HTTPS.
+fn with_cors(state: &State, req: &Request, origin: Option<String>, mut res: Response) -> Response {
+    if crate::auth::https(state, req) {
+        res.headers.push((
+            "strict-transport-security".into(),
+            "max-age=31536000".into(),
+        ));
+    }
     if let Some(o) = origin {
         res.headers.push(("access-control-allow-origin".into(), o));
         res.headers.push((
@@ -346,9 +378,9 @@ pub fn handle(state: &State, req: &Request) -> Response {
 }
 
 /// The `Host` values of the listen address.
-fn own_hosts(state: &State) -> [String; 4] {
+fn listen_hosts(state: &State) -> Vec<String> {
     let port = state.settings.listen.port();
-    [
+    vec![
         format!("{}:{port}", state.settings.listen.ip()),
         format!("localhost:{port}"),
         format!("127.0.0.1:{port}"),
@@ -356,14 +388,41 @@ fn own_hosts(state: &State) -> [String; 4] {
     ]
 }
 
-/// True for the origin of the server itself: the origin of its UI pages.
-fn own_origin(state: &State, origin: &str) -> bool {
-    origin
-        .strip_prefix("http://")
-        .is_some_and(|h| own_hosts(state).iter().any(|a| a.eq_ignore_ascii_case(h)))
+/// The `Host` values of the server: those of the listen address and the
+/// hosts of the public origins.
+fn own_hosts(state: &State) -> Vec<String> {
+    let mut v = listen_hosts(state);
+    v.extend(
+        state
+            .settings
+            .public_origins
+            .iter()
+            .filter_map(|o| o.split_once("://").map(|(_, h)| h.to_string())),
+    );
+    v
 }
 
+/// True for the origin of the server itself: the origin of its UI pages on
+/// the listen address or a public origin.
+fn own_origin(state: &State, origin: &str) -> bool {
+    state
+        .settings
+        .public_origins
+        .iter()
+        .any(|o| o.eq_ignore_ascii_case(origin))
+        || origin.strip_prefix("http://").is_some_and(|h| {
+            listen_hosts(state)
+                .iter()
+                .any(|a| a.eq_ignore_ascii_case(h))
+        })
+}
+
+/// The probes, which give no data, accept each host: a container platform
+/// calls them on the address of the pod.
 fn check_host(state: &State, req: &Request) -> Option<Problem> {
+    if req.method == "GET" && matches!(req.path.as_str(), "/healthz" | "/readyz") {
+        return None;
+    }
     let host = req.headers.get("host")?;
     let allowed = own_hosts(state);
     (!allowed.iter().any(|a| a.eq_ignore_ascii_case(host))).then(|| {
@@ -417,7 +476,11 @@ fn percent_encode(s: &str) -> String {
     out
 }
 
-fn route(state: &State, req: &Request) -> Result<Response, Problem> {
+fn route(
+    state: &State,
+    req: &Request,
+    user: Option<&rsim_inventory::Principal>,
+) -> Result<Response, Problem> {
     let parts: Vec<&str> = req.path.trim_end_matches('/').split('/').skip(1).collect();
     let contract = contract_version();
     let not_found = || problem(404, "not_found", format!("{} is not a resource", req.path));
@@ -448,7 +511,8 @@ fn route(state: &State, req: &Request) -> Result<Response, Problem> {
                     "openapi": "/v1/openapi.json",
                     "tables": "/v1/tables",
                     "claims": "/v1/claims",
-                    "twins": "/v1/twins"
+                    "twins": "/v1/twins",
+                    "me": "/v1/auth/me"
                 },
                 "limits": {"max_body": state.settings.max_body}
             });
@@ -479,8 +543,12 @@ fn route(state: &State, req: &Request) -> Result<Response, Problem> {
             let body = json!({"rsim_json": VERSION, "kind": "twins", "twins": list});
             Ok(json_response(&body))
         }
+        ["healthz"] => crate::auth::probe(state, req, false),
+        ["readyz"] => crate::auth::probe(state, req, true),
+        ["v1", "auth", rest @ ..] => crate::auth::route_auth(state, req, rest, user),
+        ["v1", "admin", rest @ ..] => crate::auth::route_admin(state, req, rest, user),
         ["mcp"] => mcp(state, req),
-        ["v1", "inventory", rest @ ..] => crate::inventory::route(state, req, rest),
+        ["v1", "inventory", rest @ ..] => crate::inventory::route(state, req, rest, user),
         ["v1", "twins", twin, rest @ ..] => {
             let t = match state.twin(twin)? {
                 Resolved::Twin(t) => t,

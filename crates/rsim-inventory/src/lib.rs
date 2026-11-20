@@ -1,6 +1,7 @@
 //! The inventory of rsim in PostgreSQL: the device groups, the devices, the
 //! credential references, the routes, the Equinix bindings, the inventory
-//! version and the audit log.
+//! version, the audit log, and the users of `rsim-api` with their sessions
+//! and API tokens.
 //!
 //! `rsim-api` writes the inventory and `rsim-collect` reads it at the start
 //! of each cycle. The engine does not read it. A credential is a reference
@@ -15,7 +16,13 @@ pub mod env;
 mod resolve;
 mod types;
 
-pub use db::{Change, Db, Error, MIGRATIONS, import_changes, schema_version};
+pub use db::{
+    Account, Attempt, AuthEvent, AuthEventPage, Change, Db, Error, MAX_PASSWORD, MIGRATIONS,
+    Principal, Role, SCOPE_ADMIN, SCOPE_INVENTORY_WRITE, SCOPE_READ, SCOPE_SCENARIO_WRITE, SCOPES,
+    SESSION_MAX_SECONDS, TOKEN_PREFIX, TokenInfo, User, Via, check_password, hash_password,
+    import_changes, new_secret, schema_version, secret_hash, valid_user_name, verify_nothing,
+    verify_password,
+};
 pub use resolve::{
     DEFAULT_PAGED_SECTION_TIMEOUT_SECONDS, DEFAULT_REQUEST_TIMEOUT_SECONDS,
     DEFAULT_SECTION_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS, Origin, Resolved, ResolvedDevice,
