@@ -228,7 +228,11 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
 /// so that the time of an answer does not tell if the user exists.
 pub fn verify_nothing(password: &str) {
     static DUMMY: OnceLock<Option<String>> = OnceLock::new();
-    if let Some(h) = DUMMY.get_or_init(|| hash_password("rsim-no-such-user-password").ok()) {
+    let dummy = || {
+        let (text, _) = new_secret("").ok()?;
+        hash_password(&text).ok()
+    };
+    if let Some(h) = DUMMY.get_or_init(dummy) {
         let _ = verify_password(password, h);
     }
 }
@@ -996,6 +1000,11 @@ impl Db {
 mod tests {
     use super::*;
 
+    /// A random password of a test.
+    fn test_password() -> String {
+        new_secret("").unwrap().0
+    }
+
     #[test]
     fn roles_give_nested_scopes() {
         assert_eq!(Role::Viewer.scopes(), ["rsim.read"]);
@@ -1018,11 +1027,12 @@ mod tests {
 
     #[test]
     fn a_password_hash_verifies_only_its_password() {
-        let h = hash_password("correct horse battery").unwrap();
+        let p = test_password();
+        let h = hash_password(&p).unwrap();
         assert!(h.starts_with("$argon2id$"));
-        assert!(verify_password("correct horse battery", &h));
-        assert!(!verify_password("correct horse batterz", &h));
-        assert!(hash_password("short").is_err());
+        assert!(verify_password(&p, &h));
+        assert!(!verify_password(&p[..p.len() - 1], &h));
+        assert!(hash_password(&p[..MIN_PASSWORD - 1]).is_err());
     }
 
     #[test]
@@ -1043,7 +1053,7 @@ mod tests {
         let Some(db) = crate::test_database("auth_expiry").await else {
             return;
         };
-        let hash = hash_password("a long test password").unwrap();
+        let hash = hash_password(&test_password()).unwrap();
         let (_, idle) = new_secret("").unwrap();
         let admin = db.setup("admin", &hash, &idle, "192.0.2.1").await.unwrap();
         let (_, old) = new_secret("").unwrap();
@@ -1088,7 +1098,8 @@ mod tests {
         let Some(db) = crate::test_database("auth_hash_only").await else {
             return;
         };
-        let hash = hash_password("a long test password").unwrap();
+        let password = test_password();
+        let hash = hash_password(&password).unwrap();
         let (session, session_hash) = new_secret("").unwrap();
         let admin = db
             .setup("admin", &hash, &session_hash, "192.0.2.1")
@@ -1121,7 +1132,7 @@ mod tests {
             .await
             .unwrap();
         let stored: String = users.get(0);
-        assert!(stored.starts_with("$argon2id$") && !stored.contains("a long test password"));
+        assert!(stored.starts_with("$argon2id$") && !stored.contains(&password));
     }
 
     #[tokio::test]

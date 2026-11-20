@@ -7,19 +7,18 @@ use rsim_inventory::{
     test_database,
 };
 
-const PASSWORD: &str = "a long test password";
+/// The Argon2id hash of a random password.
+fn password_hash() -> String {
+    let (password, _) = new_secret("").unwrap();
+    hash_password(&password).unwrap()
+}
 
 async fn with_admin(name: &str) -> Option<(Db, Principal, Vec<u8>)> {
     let db = test_database(name).await?;
     assert!(db.setup_open().await.unwrap());
     let (_, session) = new_secret("").unwrap();
     let admin = db
-        .setup(
-            "admin",
-            &hash_password(PASSWORD).unwrap(),
-            &session,
-            "192.0.2.1",
-        )
+        .setup("admin", &password_hash(), &session, "192.0.2.1")
         .await
         .unwrap();
     Some((db, admin, session))
@@ -34,12 +33,7 @@ async fn the_setup_makes_one_admin_only() {
     assert!(!db.setup_open().await.unwrap());
     let (_, other) = new_secret("").unwrap();
     let again = db
-        .setup(
-            "other",
-            &hash_password(PASSWORD).unwrap(),
-            &other,
-            "192.0.2.2",
-        )
+        .setup("other", &password_hash(), &other, "192.0.2.2")
         .await;
     assert!(matches!(again, Err(Error::Conflict(_))), "{again:?}");
     let p = db.session(&session).await.unwrap().unwrap();
@@ -53,7 +47,7 @@ async fn parallel_setups_make_one_admin() {
     let Some(db) = test_database("auth_setup_race").await else {
         return;
     };
-    let hash = hash_password(PASSWORD).unwrap();
+    let hash = password_hash();
     let mut tasks = Vec::new();
     for i in 0..4 {
         // Each task has a connection of its own, so the setups meet in the
@@ -88,7 +82,7 @@ async fn a_session_ends_at_sign_out_and_for_a_disabled_user() {
         "viewer1",
         Role::Viewer,
         false,
-        Some(&hash_password(PASSWORD).unwrap()),
+        Some(&password_hash()),
     )
     .await
     .unwrap();
@@ -131,7 +125,7 @@ async fn a_token_works_until_it_is_revoked_and_keeps_only_role_scopes() {
         "second",
         Role::Admin,
         false,
-        Some(&hash_password(PASSWORD).unwrap()),
+        Some(&password_hash()),
     )
     .await
     .unwrap();
@@ -153,15 +147,9 @@ async fn a_token_cannot_name_a_scope_outside_its_role() {
     let Some((db, _, _)) = with_admin("auth_token_scope").await else {
         return;
     };
-    db.put_user(
-        "admin",
-        "v",
-        Role::Viewer,
-        false,
-        Some(&hash_password(PASSWORD).unwrap()),
-    )
-    .await
-    .unwrap();
+    db.put_user("admin", "v", Role::Viewer, false, Some(&password_hash()))
+        .await
+        .unwrap();
     let acc = db.account("v").await.unwrap().unwrap();
     let v = Principal {
         user_id: acc.user_id,

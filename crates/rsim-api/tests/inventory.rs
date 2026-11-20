@@ -67,7 +67,8 @@ fn with_db(name: &str) -> Option<(State, tokio::runtime::Runtime)> {
         .unwrap();
     let db = rt.block_on(rsim_inventory::test_database(name))?;
     let token = rt.block_on(async {
-        let hash = rsim_inventory::hash_password("a long test password").unwrap();
+        let (password, _) = rsim_inventory::new_secret("").unwrap();
+        let hash = rsim_inventory::hash_password(&password).unwrap();
         let (_, session) = rsim_inventory::new_secret("").unwrap();
         let admin = db
             .setup("admin", &hash, &session, "127.0.0.1")
