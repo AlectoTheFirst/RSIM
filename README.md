@@ -20,7 +20,104 @@ flowchart TD
 
 Sessions and NAT translations are in a `FlowState` value that the query carries. Each function keeps the file and the line range from which it came. A result that the engine cannot decide is `Unknown` with a reason.
 
+### Modules
+
+```mermaid
+flowchart TD
+  D["Devices"]
+  Q["Query"]
+  subgraph C["rsim-collect"]
+    T["ssh.rs, https.rs, tunnel.rs, path.rs<br/>transports and routes"]
+    SRC["vyos.rs, unifi.rs, nxos.rs, iosxr.rs, iosxe.rs<br/>SectionSpec lists"]
+    CL["classify.rs<br/>change hash, extracts"]
+    T --> SRC --> CL
+  end
+  subgraph S["rsim-store"]
+    ST["Store<br/>append-only snapshots"]
+    TBL["table.rs<br/>routes, neighbours, mac_table, links,<br/>addresses, link_speeds, clients"]
+    ST --- TBL
+  end
+  subgraph I["rsim-ingest"]
+    SZ["stanza.rs<br/>JSON or indented text to a stanza tree"]
+    CV["coverage.rs<br/>handled, known-irrelevant, unhandled"]
+    CF["vyos/config.rs, nxos/config.rs, iosxr/config.rs,<br/>iosxe/config.rs, unifi/site.rs<br/>handlers"]
+    SS["nxos/state.rs, iosxr/state.rs, iosxe/state.rs<br/>collected sections"]
+    CO["collected.rs<br/>table rows"]
+    PR["profile.rs of vyos, nxos, iosxr and iosxe<br/>VendorProfile"]
+    LW["lower.rs of vyos, unifi, nxos, iosxr and iosxe<br/>lower"]
+    LK["links.rs<br/>join"]
+    ES["estate.rs<br/>build, assemble"]
+    SZ --> CV --> CF --> LW
+    SS --> LW
+    CO --> LW
+    PR --> LW
+    LW -->|"summaries"| LK
+    LK -->|"links"| ES
+    LW -->|"functions"| ES
+  end
+  subgraph TF["rsim-textfsm"]
+    TX["templates of IOS-XR and IOS-XE"]
+  end
+  subgraph F["rsim-functions"]
+    FN["function types"]
+  end
+  subgraph E["rsim-engine"]
+    TW["twin.rs<br/>TwinBuilder::build"]
+    EX["exec.rs<br/>Executor::run"]
+    AN["answer.rs<br/>Answer with trace"]
+    TW --> EX --> AN
+  end
+  D --> T
+  CL --> ST
+  ST --> SZ
+  ST --> SS
+  TBL --> CO
+  TX -.->|"used by"| SS
+  FN -.->|"types used by"| LW
+  ES -->|"TwinBuilder"| TW
+  Q --> EX
+  AN --> OUT["rsim-cli, rsim-mcp, rsim-api"]
+```
+
 ### Router functions
+
+The function chain of a VyOS router behind a switch port. Each box is one function instance with its id.
+
+```mermaid
+flowchart TD
+  subgraph SW["Switch, layer 2"]
+    PI["PortIngress<br/>port/1/in"] --> ML["MacLookup<br/>mac"]
+    ML -->|"known MAC"| PE["PortEgress<br/>port/2/out"]
+    ML -->|"broadcast or unknown MAC"| FL["Flood<br/>flood"]
+    FL -->|"each copy"| PE
+  end
+  subgraph R["VyOS router, layer 3"]
+    HO["Layer3HandOff<br/>handoff/eth1"] --> IN["Ingress<br/>in/eth1"]
+    IN --> VRF["VrfSelection<br/>vrf"]
+    VRF --> ZS["ZoneLookup<br/>zone-src"]
+    ZS --> SL["SessionLookup<br/>session-lookup"]
+    SL --> DN["DestinationNat<br/>dnat"]
+    DN -->|"with a policy route"| PBR["PolicyRoute<br/>pbr"]
+    PBR --> RLK["RouteLookup<br/>route"]
+    DN -->|"with no policy route"| RLK
+    RLK -->|"to the router"| LI["LocalInput<br/>local"]
+    LI -->|"with a local zone"| PL["FirewallPolicy<br/>policy-local"]
+    PL --> DD["DeviceDelivery<br/>deliver"]
+    LI -->|"with no local zone"| DD
+    RLK -->|"each next hop"| ZD["ZoneLookup<br/>zone-dst"]
+    ZD --> FP["FirewallPolicy<br/>policy"]
+    FP --> SN["SourceNat<br/>snat"]
+    SN --> SC["SessionCommit<br/>session-commit"]
+    SC --> NH["NextHopResolution<br/>nexthop"]
+    NH -->|"with egress QoS"| QS["QosNotEvaluated<br/>qos/eth2"]
+    QS --> EG["Egress<br/>out/eth2"]
+    NH -->|"with no egress QoS"| EG
+  end
+  PE -->|"link"| HO
+  EG -->|"link"| NX["PortIngress or Layer3HandOff<br/>of the next device"]
+  EG -->|"edge interface with no link"| EXIT["Exit"]
+  EG -->|"other interface with no link"| UNK["Unknown"]
+```
 
 | Function | Action on the packet set |
 |---|---|
@@ -36,7 +133,10 @@ Sessions and NAT translations are in a `FlowState` value that the query carries.
 | `SourceNat` | Rewrites the source address and port. |
 | `SessionCommit` | Adds the session to the flow state. |
 | `NextHopResolution` | Finds the egress interface and the MAC of the next hop. |
+| `QosNotEvaluated` | Forwards the packets of a QoS stanza that is not evaluated. Makes the DSCP, the ECN, the traffic class and the queue unknown. |
 | `Egress` | Sends the set on the link to the next device. |
+| `LocalInput` | Sets the local zone as the destination zone of the packets to the router. |
+| `DeviceDelivery` | Delivers the packets to the router. An encapsulated packet is `Unknown`. |
 
 A switch uses `PortIngress`, `MacLookup`, and `PortEgress` or `Flood`. `Layer3HandOff` gives the packets from a switch port to a router.
 
@@ -57,7 +157,7 @@ A VXLAN tunnel end uses `VxlanEncap` and `VxlanDecap`. `VxlanEncap` puts the pac
 | `rsim-topologies` | The hand-built topologies |
 | `rsim-contract` | The contract types and the registry of operations, with their JSON Schema; no engine dependency |
 | `rsim-cli` | The command `rsim` |
-| `rsim-api` | The REST API with its OpenAPI 3.1 contract, on a loopback address |
+| `rsim-api` | The REST API with its OpenAPI 3.1 contract, the browser UI and the sign-in |
 | `rsim-mcp` | A Model Context Protocol server on stdio |
 | `rsim-inventory` | The inventory in PostgreSQL: device groups, devices, credential references, routes, Equinix bindings and the audit log |
 
@@ -122,7 +222,7 @@ The JSON of a tool result is the same as the output of `rsim` with `--format jso
 
 ## REST API
 
-`rsim-api` serves the twins, tables, queries and claims as REST resources on a loopback address. The contract is the OpenAPI 3.1 document in `crates/rsim-api/openapi.json`.
+`rsim-api` serves the twins, tables, queries and claims as REST resources. The contract is the OpenAPI 3.1 document in `crates/rsim-api/openapi.json`.
 
 ```
 cargo run -p rsim-api -- --listen 127.0.0.1:8787
@@ -137,7 +237,9 @@ cargo run -p rsim-api -- --listen 127.0.0.1:8787
 | The answer | `GET` the query resource, with `?form=summary`, `steps` or `full` |
 | A claim on the paths of the query | `GET <query resource>/claims/no-unknown` |
 
-The same server gives the MCP tools at `POST /mcp`, the Streamable HTTP transport of MCP, so many agents can share one server and its twins. Add `--store <data folder>` for the twin `store`, which redirects to its snapshot `snap-<cycle>`. A page of another origin needs `--allow-origin <origin>`. The server has no authentication yet, so it accepts only a loopback listen address.
+The same server gives the MCP tools at `POST /mcp`, the Streamable HTTP transport of MCP, so many agents can share one server and its twins. Add `--store <data folder>` for the twin `store`, which redirects to its snapshot `snap-<cycle>`. A page of another origin needs `--allow-origin <origin>`.
+
+With no inventory database, the server has no sign-in and accepts only a loopback listen address. With `--inventory <postgres URL>`, the server has sign-in and accepts each listen address. While no user exists, the UI shows the one-time setup page of the first admin. A request proves its user by the session cookie or by `Authorization: Bearer <API token>`. `--public-origin https://<host>` gives the host behind a proxy, and `--trusted-proxy <address/length>` gives the proxy.
 
 ## Browser UI
 
