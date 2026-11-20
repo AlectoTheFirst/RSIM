@@ -185,7 +185,19 @@ fn describe_edge(ops: &mut Ops<'_>, s: Edge) -> Result<Vec<Member>, DdError> {
         let part = ops.dd.and(rest, a)?;
         rest = ops.dd.diff(rest, part)?;
         let r = ops.dd.exists(part, flag_cube)?;
-        for row in decompose(ops, r, 0, inner)? {
+        // A field that is absent in each bank of the member has no values
+        // to read.
+        let absent: Vec<bool> = VALUE_FIELDS
+            .iter()
+            .map(|f| {
+                f.presence.is_some_and(|p| {
+                    !flag(p, Bank::Original)
+                        && !flag(p, Bank::Current)
+                        && !(inner && has_inner(*f) && flag(p, Bank::Inner))
+                })
+            })
+            .collect();
+        for row in decompose(ops, r, 0, inner, &absent)? {
             let mut current = header(&row, Bank::Current, &flag);
             if inner {
                 current.inner = Some(Box::new(header(&row, Bank::Inner, &flag)));
@@ -313,12 +325,32 @@ fn value_levels(f: FieldBits, inner: bool) -> Vec<u32> {
 /// The rows of the value fields from field `i` on: for each field, the
 /// values of the original request, of the current header and, if `inner`,
 /// of the inner header.
-fn decompose(ops: &mut Ops<'_>, r: Edge, i: usize, inner: bool) -> Result<Vec<Vec<Cell>>, DdError> {
+fn decompose(
+    ops: &mut Ops<'_>,
+    r: Edge,
+    i: usize,
+    inner: bool,
+    absent: &[bool],
+) -> Result<Vec<Vec<Cell>>, DdError> {
     if i == VALUE_FIELDS.len() {
         return Ok(vec![Vec::new()]);
     }
     let f = VALUE_FIELDS[i];
     let f_levels = value_levels(f, inner);
+    if absent[i] {
+        let cube_f = ops.dd.cube(&f_levels)?;
+        let residual = ops.dd.exists(r, cube_f)?;
+        let inner_cell = (inner && has_inner(f)).then_some(Values::Absent);
+        let cell: Cell = (Values::Absent, Values::Absent, inner_cell);
+        return Ok(decompose(ops, residual, i + 1, inner, absent)?
+            .into_iter()
+            .map(|t| {
+                let mut row = vec![cell.clone()];
+                row.extend(t);
+                row
+            })
+            .collect());
+    }
     let rest_levels: Vec<u32> = VALUE_FIELDS[i + 1..]
         .iter()
         .flat_map(|g| value_levels(*g, inner))
@@ -343,7 +375,7 @@ fn decompose(ops: &mut Ops<'_>, r: Edge, i: usize, inner: bool) -> Result<Vec<Ve
         let proj = ops.dd.exists(rem, cube_rest)?;
         let group = ops.dd.diff(proj, bad)?;
         rem = ops.dd.diff(rem, group)?;
-        let tails = decompose(ops, residual, i + 1, inner)?;
+        let tails = decompose(ops, residual, i + 1, inner, absent)?;
         for cell in field_values(ops, group, f, inner && has_inner(f))? {
             for t in &tails {
                 let mut row = vec![cell.clone()];
