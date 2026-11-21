@@ -1346,7 +1346,7 @@ mod tests {
             let (kind, user, value) = match plain.secret {
                 Secret::Password(p) => (CredentialKind::Password, Some(plain.user), p),
                 Secret::ApiKey(k) => (CredentialKind::ApiKey, None, k),
-                other => panic!("{other:?}"),
+                _ => panic!("{}: not a password and not an API key", c.name),
             };
             *c = rsim_inventory::Credential {
                 name: c.name.clone(),
