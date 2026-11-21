@@ -137,7 +137,7 @@ export function Routes(props: { inv: Inventory; adding: boolean; onAdding: () =>
   return (
     <div>
       <div class="inv-sec">
-        Routes <span class="muted">A jump host never gets the device credential.</span>
+        Routes
       </div>
       <div class="inv-t route inv-head" role="row">
         <span>name</span>
@@ -260,7 +260,7 @@ export function JumpHosts(props: { inv: Inventory; adding: boolean; onAdding: ()
   return (
     <div>
       <div class="inv-sec">
-        Jump hosts <span class="muted">Each jump host logs in with its own credential.</span>
+        Jump hosts
       </div>
       <div class="inv-t jump inv-head" role="row">
         <span>name</span>

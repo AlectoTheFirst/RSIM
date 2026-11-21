@@ -108,7 +108,7 @@ export function DeviceDetail(props: {
     <div class="inv-detail" role="row">
       <div class="cols">
         <div>
-          <div class="head">Asset facts that the collector reads</div>
+          <div class="head">Asset facts</div>
           <div class="kv">
             <span class="muted">serial</span>
             <Fact value={props.facts?.serial} reason={props.facts?.serialReason} />
@@ -154,7 +154,7 @@ function DeviceEdit(props: { d: ResolvedDevice; stored: Device; inv: Inventory; 
       </div>
       <div>
         <div class="head">
-          Settings <span class="muted">empty: from {stored.group}, else the default</span>
+          Settings <span class="muted" title={`from ${stored.group}, else the default`}>empty inherits from {stored.group}</span>
         </div>
         <SettingsEditor id={id} inv={inv} draft={draft} group={group?.settings ?? null} vendor={props.d.vendor} vendors={props.vendors} h={h} />
       </div>
@@ -192,7 +192,7 @@ export function GroupDetail(props: { g: Group; inv: Inventory; vendors: Vendors 
         </div>
         <div class="span2">
           <div class="head">
-            Settings <span class="muted">empty: the default</span>
+            Settings <span class="muted">empty: default</span>
           </div>
           <SettingsEditor id={id} inv={inv} draft={draft} group={null} vendor={g.vendor} vendors={props.vendors} h={h} />
         </div>
@@ -264,7 +264,7 @@ export function AddDevice(props: {
           </div>
           <div>
             <div class="head">
-              Settings <span class="muted">empty: from {f.group}, else the default</span>
+              Settings <span class="muted" title="from the group, else the default">empty inherits from {f.group}</span>
             </div>
             <SettingsEditor id="new-device" inv={props.inv} draft={draft} group={group?.settings ?? null} vendor={group?.vendor ?? ""} vendors={props.vendors} h={h} />
           </div>
@@ -342,7 +342,7 @@ export function AddGroup(props: {
           </div>
           <div class="span2">
             <div class="head">
-              Settings <span class="muted">empty: the default</span>
+              Settings <span class="muted">empty: default</span>
             </div>
             <SettingsEditor id="new-group" inv={props.inv} draft={draft} group={null} vendor={f.vendor.trim()} vendors={props.vendors} omit={["credential", "route"]} h={h} />
           </div>

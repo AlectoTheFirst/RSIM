@@ -37,7 +37,7 @@ function CredentialEdit(props: {
 }) {
   const { f, stored } = props;
   const keeps = stored?.source === "managed" && stored.kind === f.kind;
-  const secretHint = keeps ? "empty: the stored secret" : KIND_WORDS[f.kind];
+  const secretHint = keeps ? "unchanged" : KIND_WORDS[f.kind];
   return (
     <span class="cred-edit edit">
       <select aria-label="source" value={f.source} autoFocus={props.autoFocus} onChange={(e) => props.onChange({ source: e.currentTarget.value as Credential["source"] })} onKeyDown={props.keys}>
@@ -180,7 +180,7 @@ export function Credentials(props: { inv: Inventory; adding: boolean; onAdding: 
       <div class="inv-sec">
         Credentials{" "}
         {keyPresent ? (
-          <span class="muted">A managed secret is written once and never shown. Secret key {key?.id}.</span>
+          <span class="muted">secret key <span class="t-value">{key?.id}</span></span>
         ) : (
           <HatchCell title="rsim-api has no --secret-key-file">no secret key: env file only</HatchCell>
         )}
