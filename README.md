@@ -274,6 +274,24 @@ A build of `rsim-api` with no built UI serves a page that says how to build it. 
 
 The volume `rsim-data` holds the store, the store keys and the pins, and `rsim-api` mounts it read only. The volume `rsim-db` holds the database. A new instance has no snapshot, so the twin `store` gives an error until the collector writes one; the built-in twins work at once.
 
+## Kubernetes
+
+The Helm chart `deploy/helm/rsim` installs one instance: one pod with `rsim-api` and, with `collector.enabled`, the collector, on one volume with the data folder `/data/rsim`, and a PostgreSQL StatefulSet for the inventory and the sign-in. `rsim-api` applies the migrations at the start, so the chart has no migration job.
+
+```
+helm install rsim deploy/helm/rsim -n rsim --create-namespace -f <values file>
+```
+
+| Value | Content |
+|---|---|
+| `image`, `collector.image` | The images `rsim` and `rsim-collect`, by `digest` or `tag` |
+| `secrets.existingSecret` | A Secret with the key `postgres-password`. Use hex digits only, because the password goes into the database URL. |
+| `collector.enabled`, `collector.envSecret` | The collector, and a Secret with the env file of its secrets under the key `collect.env` |
+| `ingress.host`, `ingress.tls.secretName`, `api.trustedProxies` | The host behind the ingress. An HTTPS host needs the address of the proxy in `api.trustedProxies`. |
+| `networkPolicy.apiFrom` | The peers that can reach the API port, by default the namespace `traefik` |
+
+`deploy/helm/rsim/ci/` has the value sets of the 3 instances `rsim`, `rsim-dev` and `rsim-demo` with example names. The volume of the data folder stays after an uninstall.
+
 ## Collection
 
 `rsim-collect` reads the devices into a snapshot store:

@@ -1,0 +1,17 @@
+# The shape of the instance rsim-demo: no collector, with TLS at the ingress.
+# The real values are in argo-setup.
+image:
+  repository: ghcr.io/example/rsim
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+api:
+  trustedProxies: ["10.244.0.0/16"]
+ingress:
+  enabled: true
+  className: traefik
+  host: rsim-demo.example.invalid
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-cloudflare
+  tls:
+    secretName: rsim-demo-tls
+secrets:
+  existingSecret: rsim-demo-db

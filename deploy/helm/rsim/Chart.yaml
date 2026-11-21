@@ -1,0 +1,10 @@
+apiVersion: v2
+name: rsim
+description: The rsim network digital twin with its REST API, its sign-in, its inventory database and the collector.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/AlectoTheFirst/RSIM
+sources:
+  - https://github.com/AlectoTheFirst/RSIM
