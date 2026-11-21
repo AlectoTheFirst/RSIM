@@ -1,7 +1,7 @@
 // The Trace view: the query bar, the result line and the ladder of the
 // answer of a path query or a set query.
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { ApiProblem, type ServerTiming, type TwinRef, createQuery, getCatalog, getQuery, getSourceLines, getTwin, listTwins, stepUrl } from "./api/client";
+import { ApiProblem, type ServerTiming, type TwinRef, createQuery, getCatalog, getQuery, getSourceLines, getTwin, listTwins, onReplaced, stepUrl } from "./api/client";
 import type { Answer, Me, PathAnswer, SetAnswer, Span, TableDef, Twin } from "./api/types";
 import { TokensView } from "./auth/TokensView";
 import { CoverageView } from "./coverage/CoverageView";
@@ -27,7 +27,7 @@ import {
 import { HatchMark } from "./page/Hatch";
 import { keyForElement, keyPlace } from "./tables/model";
 import { KeyLine, LEVELS, QueryBar, ResultLine, TopBar } from "./page/Parts";
-import { viewOf, viewSearch, withTwin } from "./page/url";
+import { newerRun, pinnedRun, viewOf, viewSearch, withTwin } from "./page/url";
 import { type Fields, type Mode, explainCommand, fieldsOf, requestBody, rsimCommand } from "./page/query";
 import { QUERY_FIELDS, modeValue } from "./page/fields";
 import { TablesView } from "./tables/TablesView";
@@ -40,6 +40,21 @@ interface Result {
   /** The round trip of the query in ms, and the timing that the server gives. */
   ms: number;
   timing: ServerTiming;
+}
+
+/** The time between 2 reads of the twin list, for a newer run of the store. */
+const TWINS_POLL_MS = 60_000;
+
+/** Sets the twin of the URL of the page and keeps its other parameters. */
+function replaceUrlTwin(id: string) {
+  const u = new URLSearchParams(window.location.search);
+  u.set("twin", id);
+  window.history.replaceState(null, "", `?${u.toString()}`);
+}
+
+/** True for the problem of a snapshot that a newer snapshot replaced. */
+function replaced(e: unknown): boolean {
+  return e instanceof ApiProblem && e.code === "snapshot_replaced";
 }
 
 /** The time of a query: the round trip, then the engine time or a cache hit. */
@@ -168,6 +183,7 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
   const [askIngress, setAskIngress] = useState(0);
   const firstInput = useRef<HTMLInputElement | null>(null);
   // Whether the next ladder opens the deciding step of its answer.
+  const rerunning = useRef(false);
   const autoOpen = useRef(false);
   // The view of the URL: Trace with no view parameter, else Tables, Coverage or Inventory.
   const [search, setSearch] = useState(window.location.search);
@@ -219,17 +235,88 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
     setProblem(null);
     try {
       const { out, timing } = await getQuery(t, qid);
-      setResult({ twin: t, qid, out, ms: performance.now() - since, timing });
+      // The answer names its snapshot, so the steps and the source lines
+      // of the answer stay on it after a newer snapshot comes.
+      setResult({ twin: out.twin.id, qid, out, ms: performance.now() - since, timing });
+      // A query on the store pins the page to the run of its answer.
+      if (out.twin.id !== t && !t.startsWith("builtin.")) {
+        setTwin(out.twin.id);
+        replaceUrlTwin(out.twin.id);
+      }
       setFields(fieldsOf(out.query as unknown as Record<string, unknown>));
       setMode(isSet(out) ? "set" : "path");
       setSelected(null);
       setOpen(false);
       autoOpen.current = true;
     } catch (e) {
+      if (replaced(e) && t !== "store") {
+        await rerun(t, qid, since);
+        return;
+      }
       setResult(null);
       setProblem(e instanceof ApiProblem ? `query refused: ${e.detail}` : String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** Reads the twin list again, for the mark of the twin selector. */
+  function refreshTwins() {
+    listTwins()
+      .then(setTwins)
+      .catch(() => undefined);
+  }
+
+  /** Runs the query again on the newest snapshot after its snapshot is replaced. */
+  async function rerun(old: string, qid: string, since: number = performance.now()) {
+    if (rerunning.current) return;
+    rerunning.current = true;
+    setNotice(`${old} replaced: query ran on the newest snapshot`);
+    refreshTwins();
+    try {
+      await load("store", qid, since);
+    } finally {
+      rerunning.current = false;
+    }
+  }
+
+  useEffect(() => {
+    // A page whose run is replaced moves to the newest built run.
+    onReplaced(() => {
+      setNotice("run replaced: page on the newest run");
+      listTwins()
+        .then((list) => {
+          setTwins(list);
+          setTwin((t) => (/^snap-\d+$/.test(t) ? pinnedRun(list, "store") : t));
+        })
+        .catch(() => undefined);
+    });
+    const poll = window.setInterval(refreshTwins, TWINS_POLL_MS);
+    return () => {
+      onReplaced(null);
+      window.clearInterval(poll);
+    };
+  }, []);
+
+  useEffect(() => {
+    // The alias `store` pins the page to the newest built run.
+    const run = pinnedRun(twins, twin);
+    if (run === twin) return;
+    setTwin(run);
+    replaceUrlTwin(run);
+  }, [twin, twins]);
+
+  /** Moves the page to the newest built run, with the query of its answer. */
+  function loadLatest(run: string) {
+    setTwin(run);
+    setNotice(null);
+    if (result && view === "Trace") {
+      window.history.pushState(null, "", `?twin=${encodeURIComponent(run)}&q=${encodeURIComponent(result.qid)}`);
+      void load(run, result.qid);
+    } else if (view === "Trace") {
+      window.history.pushState(null, "", `?twin=${encodeURIComponent(run)}`);
+    } else {
+      navigate(withTwin(search, run));
     }
   }
 
@@ -269,7 +356,10 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
     const since = performance.now();
     try {
       const made = await createQuery(twin, requestBody(mode, fields));
-      const search = `?twin=${encodeURIComponent(twin)}&q=${encodeURIComponent(made.qid)}`;
+      // The answer of a query on the store pins the page to its run.
+      if (made.twin !== twin) setTwin(made.twin);
+      refreshTwins();
+      const search = `?twin=${encodeURIComponent(made.twin)}&q=${encodeURIComponent(made.qid)}`;
       window.history.pushState(null, "", search);
       await load(made.twin, made.qid, since);
     } catch (e) {
@@ -305,8 +395,15 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
 
   const sourceTwin = result && !result.twin.startsWith("builtin.") ? result.twin : null;
   const sourceLines = useMemo(
-    () => (sourceTwin ? (span: Span) => getSourceLines(sourceTwin, span) : undefined),
-    [sourceTwin],
+    () =>
+      sourceTwin && result
+        ? (span: Span) =>
+            getSourceLines(sourceTwin, span).catch((e: unknown) => {
+              if (replaced(e)) void rerun(sourceTwin, result.qid);
+              throw e;
+            })
+        : undefined,
+    [sourceTwin, result?.qid],
   );
   const actions = {
     sourceLines,
@@ -415,6 +512,8 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
         twins={twins}
         twin={twin}
         info={info}
+        latest={newerRun(twins, twin)}
+        onLatest={loadLatest}
         onTwin={(t) => {
           setTwin(t);
           setResult(null);

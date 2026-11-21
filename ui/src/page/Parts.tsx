@@ -23,7 +23,8 @@ import {
 import { NameList, PickerList, useAsk, useEndpoints, useEntryPoints } from "./Picker";
 import { type EntryOption, PICKER_CLOSED, type PickerState, type Suggestion, ingressStage, pickerKey } from "./pick";
 import { type Fields, type Mode, type QueryField } from "./query";
-import { twinOption } from "./url";
+import { HatchMark } from "./Hatch";
+import { reloadMark, twinOption } from "./url";
 
 export const VIEWS = ["Trace", "Tables", "Coverage", "Compare", "Inventory", "Admin", "Tokens"] as const;
 export type View = (typeof VIEWS)[number];
@@ -133,6 +134,9 @@ export function TopBar(props: {
   twins: TwinRef[];
   twin: string;
   info: Twin | null;
+  /** The newest built run of the store when the page shows an older run, or null. */
+  latest: string | null;
+  onLatest: (run: string) => void;
   onTwin: (id: string) => void;
   view: View;
   onView: (v: View) => void;
@@ -144,6 +148,7 @@ export function TopBar(props: {
 }) {
   const info = props.info;
   const user = props.user ?? null;
+  const reload = reloadMark(props.twins);
   return (
     <header class="bar top">
       <span class="t-wordmark">RSIM</span>
@@ -152,9 +157,16 @@ export function TopBar(props: {
           <option value={t.id}>{t.id}</option>
         ))}
       </select>
+      {/^snap-\d+$/.test(props.twin) ? <span class="t-value">{props.twin}</span> : null}
+      {props.latest ? (
+        <button type="button" title={`newest built run: ${props.latest}`} onClick={() => props.onLatest(props.latest!)}>
+          Load latest run
+        </button>
+      ) : null}
       {info ? (
         <span class="muted">{info.layers.length} what-if layers</span>
       ) : null}
+      {reload ? <HatchMark title={reload.title}>{reload.text}</HatchMark> : null}
       <span class="grow" />
       <nav class="group" aria-label="Views">
         {VIEWS.filter((v) => user || !SIGNED_IN_VIEWS.includes(v)).map((v) =>

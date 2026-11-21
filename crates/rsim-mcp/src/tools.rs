@@ -1,7 +1,7 @@
 //! The tools of the server: their definitions and their calls.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use rsim_cli::commands::Loaded;
 use rsim_cli::json::{self, ErrorOut};
@@ -63,12 +63,228 @@ impl<T> Cache<T> {
 
 /// Runs tools. It keeps the twin of each topology that a call named, and no
 /// answer. With a store, the topology `store` is the newest snapshot of the
-/// store when the first call names it. The clones of one `Tools` share its
-/// cache of twins.
+/// store when the first call names it; with `reload_store`, it is the newest
+/// built snapshot, and a newer snapshot builds in the background. The
+/// clones of one `Tools` share its cache of twins.
 #[derive(Clone, Default)]
 pub struct Tools {
     twins: Arc<Cache<Loaded>>,
     store: Option<String>,
+    reload: Option<Arc<Reload<Loaded>>>,
+}
+
+/// The build of the value of a version, with the text of its error.
+type Load<T> = Arc<dyn Fn(u64) -> Result<T, String> + Send + Sync>;
+
+/// A value that follows the newest version of its source. The current value
+/// is the value of the newest version that is built, and it answers each
+/// call with no wait. A newer version builds on its own thread; when it is
+/// built, it becomes the current value and the older current value becomes
+/// the previous value. Before a build starts, the previous value is
+/// released, so at most 2 values are held. A version that does not build
+/// is not built again, and the current value stays.
+struct Reload<T> {
+    held: Mutex<Held<T>>,
+    /// Signals the end of a build.
+    idle: Condvar,
+    load: Load<T>,
+    version: fn(&T) -> Option<u64>,
+}
+
+struct Held<T> {
+    current: Option<Arc<T>>,
+    previous: Option<Arc<T>>,
+    /// The version that builds now.
+    building: Option<u64>,
+    /// The newest version that did not build, with the text of its error.
+    failed: Option<(u64, String)>,
+    /// The error of the last read of the newest version.
+    head_error: Option<String>,
+}
+
+impl<T: Send + Sync + 'static> Reload<T> {
+    fn new(load: Load<T>, version: fn(&T) -> Option<u64>) -> Self {
+        Reload {
+            held: Mutex::new(Held {
+                current: None,
+                previous: None,
+                building: None,
+                failed: None,
+                head_error: None,
+            }),
+            idle: Condvar::new(),
+            load,
+            version,
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Held<T>> {
+        self.held.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// The lock of the state after the first build, if one runs.
+    fn lock_built(&self) -> MutexGuard<'_, Held<T>> {
+        let mut h = self.lock();
+        while h.current.is_none() && h.building.is_some() {
+            h = self.idle.wait(h).unwrap_or_else(|p| p.into_inner());
+        }
+        h
+    }
+
+    /// A copy of the state.
+    fn status(&self) -> Held<T> {
+        let h = self.lock();
+        Held {
+            current: h.current.clone(),
+            previous: h.previous.clone(),
+            building: h.building,
+            failed: h.failed.clone(),
+            head_error: h.head_error.clone(),
+        }
+    }
+
+    /// The current value or the previous value of a version, with no read
+    /// of the newest version.
+    fn find(&self, version: u64) -> Option<Arc<T>> {
+        let h = self.lock();
+        [&h.current, &h.previous]
+            .into_iter()
+            .flatten()
+            .find(|v| (self.version)(v) == Some(version))
+            .cloned()
+    }
+
+    /// Waits until no build runs.
+    fn wait(&self) {
+        let mut h = self.lock();
+        while h.building.is_some() {
+            h = self.idle.wait(h).unwrap_or_else(|p| p.into_inner());
+        }
+    }
+
+    /// The build of a version, with a panic as an error.
+    fn build(&self, version: u64) -> Result<T, String> {
+        let load = Arc::clone(&self.load);
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load(version)))
+            .unwrap_or_else(|_| Err("the build stopped with a panic".to_string()))
+    }
+
+    /// The current value. `head` reads the newest version, through the
+    /// current value when there is one.
+    ///
+    /// With no current value, the call builds the value of the newest
+    /// version and waits for it, and the other calls wait for that build; a
+    /// version that did not build gives its error until a newer version
+    /// comes, and no newest version gives an error. With a current value,
+    /// the call gets it at once, and if the newest version is newer and is
+    /// not the version that did not build, the call starts its build on its
+    /// own thread when no build runs. A head that cannot be read keeps the
+    /// current value and is recorded.
+    fn newest(
+        self: &Arc<Self>,
+        head: impl FnOnce(Option<&T>) -> Result<Option<u64>, String>,
+    ) -> Result<Arc<T>, String> {
+        let current = self.lock_built().current.clone();
+        let head = head(current.as_deref());
+        let mut h = self.lock_built();
+        let current = h.current.clone();
+        let head = match head {
+            Ok(head) => {
+                h.head_error = None;
+                head
+            }
+            Err(text) => {
+                h.head_error = Some(text.clone());
+                return current.ok_or(text);
+            }
+        };
+        let failed = |h: &Held<T>, head: u64| h.failed.as_ref().is_some_and(|f| f.0 >= head);
+        if let Some(v) = current {
+            let newer = head.filter(|&head| {
+                h.building.is_none()
+                    && !(self.version)(&v).is_some_and(|c| c >= head)
+                    && !failed(&h, head)
+            });
+            if let Some(head) = newer {
+                h.previous = None;
+                h.building = Some(head);
+                drop(h);
+                let r = Arc::clone(self);
+                let spawned = std::thread::Builder::new()
+                    .name("rsim-reload".into())
+                    .spawn(move || r.background(head));
+                if let Err(e) = spawned {
+                    let mut h = self.lock();
+                    h.building = None;
+                    h.failed = Some((head, format!("the build thread does not start: {e}")));
+                }
+            }
+            return Ok(v);
+        }
+        let Some(head) = head else {
+            return Err("the store has no snapshot".to_string());
+        };
+        if let Some((_, text)) = h.failed.as_ref().filter(|_| failed(&h, head)) {
+            return Err(text.clone());
+        }
+        h.building = Some(head);
+        drop(h);
+        let out = self.build(head);
+        let mut h = self.lock();
+        h.building = None;
+        let out = match out {
+            Ok(v) => {
+                let v = Arc::new(v);
+                h.current = Some(Arc::clone(&v));
+                h.failed = None;
+                Ok(v)
+            }
+            Err(text) => {
+                h.failed = Some((head, text.clone()));
+                Err(text)
+            }
+        };
+        drop(h);
+        self.idle.notify_all();
+        out
+    }
+
+    /// The build of the version `head` on the build thread.
+    fn background(&self, head: u64) {
+        let out = self.build(head);
+        let mut h = self.lock();
+        match out {
+            Ok(v) => {
+                h.previous = h.current.take();
+                h.current = Some(Arc::new(v));
+                h.failed = None;
+            }
+            Err(text) => h.failed = Some((head, text)),
+        }
+        h.building = None;
+        drop(h);
+        self.idle.notify_all();
+    }
+}
+
+/// The state of the store of the tools: the identifiers of the current twin
+/// and of the previous twin, the cycle of the newest snapshot of the store,
+/// the cycle whose twin builds now, the cycle and the error of the newest
+/// snapshot that did not build, and the error of the last read of the
+/// newest cycle.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoreStatus {
+    pub held: Option<String>,
+    pub previous: Option<String>,
+    pub newest_cycle: Option<u64>,
+    pub loading: Option<u64>,
+    pub failed: Option<(u64, String)>,
+    pub head_error: Option<String>,
+}
+
+/// The cycle of the snapshot of a store twin.
+fn cycle_of(t: &Loaded) -> Option<u64> {
+    t.source.as_ref().map(|s| s.snapshot.manifest.cycle)
 }
 
 impl Tools {
@@ -77,7 +293,52 @@ impl Tools {
         Tools {
             twins: Arc::default(),
             store: Some(folder),
+            reload: None,
         }
+    }
+
+    /// The same tools with the topology `store` as the newest built
+    /// snapshot of the store. A call for the store reads the number of the
+    /// newest snapshot; if it is newer than the current twin, the twin of
+    /// the newest snapshot builds on its own thread while the current twin
+    /// answers, and then becomes the current twin. The tools keep the
+    /// previous twin until the next build starts. The first call builds the
+    /// twin and waits for it. If a snapshot does not build, its error goes
+    /// to stderr and to the state of the store, and it is not built again.
+    pub fn reload_store(mut self) -> Tools {
+        if let Some(folder) = self.store.clone() {
+            let load: Load<Loaded> = Arc::new(move |cycle| {
+                commands::load_store_at(&folder, Some(cycle)).map_err(|e| {
+                    eprintln!(
+                        "rsim: snapshot {cycle} of the store does not build: {}",
+                        e.detail
+                    );
+                    e.detail
+                })
+            });
+            self.reload = Some(Arc::new(Reload::new(load, cycle_of)));
+        }
+        self
+    }
+
+    /// Waits until no build of the twin `store` runs.
+    pub fn wait_store(&self) {
+        if let Some(r) = &self.reload {
+            r.wait();
+        }
+    }
+
+    /// The cycle of the newest snapshot of the store, read through the store
+    /// of `held` when there is one.
+    fn store_head(&self, held: Option<&Loaded>) -> Result<Option<u64>, String> {
+        if let Some(s) = held.and_then(|t| t.source.as_ref()) {
+            return s.store.head().map_err(|e| e.to_string());
+        }
+        let Some(folder) = &self.store else {
+            return Ok(None);
+        };
+        let store = commands::open_store(folder).map_err(|e| e.detail)?;
+        store.head().map_err(|e| e.to_string())
     }
 
     /// The topology names: the built-in topologies, then `store` if the
@@ -106,7 +367,47 @@ impl Tools {
         if !self.names().contains(&topology) {
             return commands::load(&source).map(Arc::new);
         }
+        if let (STORE, Some(r)) = (topology, &self.reload) {
+            return r
+                .newest(|held| self.store_head(held))
+                .map_err(|text| QueryError::new(rsim_cli::ErrorCode::Store, text));
+        }
         self.twins.get_or_load(topology, || commands::load(&source))
+    }
+
+    /// The state of the store of the tools that follow its newest snapshot,
+    /// after a call for the store when a twin is held, so a newer snapshot
+    /// starts its build. `None` with no such store.
+    pub fn store_status(&self) -> Option<StoreStatus> {
+        let r = self.reload.as_ref()?;
+        if r.lock().current.is_some() {
+            let _ = self.twin(STORE);
+        }
+        let st = r.status();
+        let id = |t: Option<Arc<Loaded>>| t.map(|t| t.identity.id.clone());
+        Some(StoreStatus {
+            newest_cycle: self.store_head(st.current.as_deref()).ok().flatten(),
+            held: id(st.current),
+            previous: id(st.previous),
+            loading: st.building,
+            failed: st.failed,
+            head_error: st.head_error,
+        })
+    }
+
+    /// The twin of the snapshot `cycle` of the store, if the tools hold it
+    /// as the current or the previous twin, and the current twin. The call
+    /// is a call for the store, so a newer snapshot starts its build.
+    pub fn store_snapshot(
+        &self,
+        cycle: u64,
+    ) -> Result<(Option<Arc<Loaded>>, Arc<Loaded>), QueryError> {
+        let current = self.twin(STORE)?;
+        let found = match &self.reload {
+            Some(r) => r.find(cycle),
+            None => (cycle_of(&current) == Some(cycle)).then(|| Arc::clone(&current)),
+        };
+        Ok((found, current))
     }
 
     /// Calls the tool `name`. `None` is a name that is not a tool.
@@ -250,9 +551,11 @@ pub fn definitions(names: &[&str]) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::Cache;
-    use std::sync::Arc;
+    use super::{Cache, Load, Reload};
+    use std::sync::atomic::Ordering::SeqCst;
+    use std::sync::atomic::{AtomicU64, AtomicUsize};
     use std::sync::mpsc::channel;
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     #[test]
@@ -287,6 +590,194 @@ mod tests {
         assert_eq!(got, Ok(Ok(1)), "the cached key waited for the build");
         fast.join().unwrap();
         assert_eq!(slow.join().unwrap(), Ok(2));
+    }
+
+    /// A source for the tests: a head that a test sets, the versions that
+    /// do not build, a gate that holds each build, and a count of the
+    /// builds. The version 99 panics.
+    #[derive(Default)]
+    struct Source {
+        head: AtomicU64,
+        builds: AtomicUsize,
+        bad: Mutex<Vec<u64>>,
+        gate: Mutex<()>,
+    }
+
+    impl Source {
+        fn set(&self, head: u64) {
+            self.head.store(head, SeqCst);
+        }
+        fn builds(&self) -> usize {
+            self.builds.load(SeqCst)
+        }
+        fn bad(&self, v: &[u64]) {
+            *self.bad.lock().unwrap() = v.to_vec();
+        }
+    }
+
+    fn reload(s: &Arc<Source>) -> Arc<Reload<u64>> {
+        let src = Arc::clone(s);
+        let load: Load<u64> = Arc::new(move |v| {
+            src.builds.fetch_add(1, SeqCst);
+            let _gate = src.gate.lock().unwrap_or_else(|p| p.into_inner());
+            assert_ne!(v, 99, "the version 99 panics");
+            if src.bad.lock().unwrap().contains(&v) {
+                Err(format!("{v} does not build"))
+            } else {
+                Ok(v)
+            }
+        });
+        Arc::new(Reload::new(load, |v| Some(*v)))
+    }
+
+    fn newest(r: &Arc<Reload<u64>>, s: &Source) -> Result<u64, String> {
+        r.newest(|_| Ok(Some(s.head.load(SeqCst)))).map(|v| *v)
+    }
+
+    fn held(r: &Reload<u64>) -> (Option<u64>, Option<u64>) {
+        let st = r.status();
+        (st.current.map(|v| *v), st.previous.map(|v| *v))
+    }
+
+    #[test]
+    fn a_newer_version_builds_on_a_thread_while_the_current_value_answers() {
+        let s = Arc::new(Source::default());
+        let r = reload(&s);
+        s.set(1);
+        assert_eq!(newest(&r, &s), Ok(1));
+        assert_eq!(newest(&r, &s), Ok(1));
+        assert_eq!(s.builds(), 1);
+        s.set(2);
+        let gate = s.gate.lock().unwrap();
+        assert_eq!(
+            newest(&r, &s),
+            Ok(1),
+            "the call does not wait for the build"
+        );
+        assert_eq!(r.status().building, Some(2));
+        assert_eq!(newest(&r, &s), Ok(1));
+        drop(gate);
+        r.wait();
+        assert_eq!(s.builds(), 2, "one build of 2");
+        assert_eq!(newest(&r, &s), Ok(2));
+        assert_eq!(held(&r), (Some(2), Some(1)));
+        assert_eq!(r.find(1).map(|v| *v), Some(1));
+        assert_eq!(r.find(2).map(|v| *v), Some(2));
+        assert_eq!(r.find(3), None);
+    }
+
+    #[test]
+    fn a_build_releases_the_previous_value_so_at_most_2_values_are_held() {
+        let s = Arc::new(Source::default());
+        let r = reload(&s);
+        s.set(1);
+        assert_eq!(newest(&r, &s), Ok(1));
+        s.set(2);
+        assert_eq!(newest(&r, &s), Ok(1));
+        r.wait();
+        let one = Arc::downgrade(&r.find(1).unwrap());
+        s.set(3);
+        let gate = s.gate.lock().unwrap();
+        assert_eq!(newest(&r, &s), Ok(2));
+        assert_eq!(held(&r), (Some(2), None));
+        assert!(one.upgrade().is_none(), "the previous value is freed");
+        drop(gate);
+        r.wait();
+        assert_eq!(held(&r), (Some(3), Some(2)));
+        assert_eq!(r.find(1), None);
+    }
+
+    #[test]
+    fn a_version_that_does_not_build_keeps_the_current_value_and_is_not_built_again() {
+        let s = Arc::new(Source::default());
+        let r = reload(&s);
+        s.set(1);
+        assert_eq!(newest(&r, &s), Ok(1));
+        s.set(2);
+        s.bad(&[2]);
+        assert_eq!(newest(&r, &s), Ok(1));
+        r.wait();
+        for _ in 0..3 {
+            assert_eq!(newest(&r, &s), Ok(1));
+        }
+        assert_eq!(s.builds(), 2);
+        assert_eq!(r.status().failed, Some((2, "2 does not build".to_string())));
+        s.set(3);
+        assert_eq!(newest(&r, &s), Ok(1));
+        r.wait();
+        assert_eq!(newest(&r, &s), Ok(3));
+        assert_eq!(r.status().failed, None);
+    }
+
+    #[test]
+    fn a_failed_first_build_is_not_built_again_until_the_head_changes() {
+        let s = Arc::new(Source::default());
+        let r = reload(&s);
+        s.set(1);
+        s.bad(&[1]);
+        assert_eq!(newest(&r, &s), Err("1 does not build".to_string()));
+        assert_eq!(newest(&r, &s), Err("1 does not build".to_string()));
+        assert_eq!(s.builds(), 1);
+        s.set(2);
+        assert_eq!(newest(&r, &s), Ok(2));
+    }
+
+    #[test]
+    fn the_calls_during_the_first_build_wait_for_it() {
+        let s = Arc::new(Source::default());
+        let r = reload(&s);
+        s.set(1);
+        let gate = s.gate.lock().unwrap();
+        let calls: Vec<_> = (0..3)
+            .map(|_| {
+                let (r, s) = (Arc::clone(&r), Arc::clone(&s));
+                std::thread::spawn(move || newest(&r, &s))
+            })
+            .collect();
+        while s.builds() == 0 {
+            std::thread::yield_now();
+        }
+        drop(gate);
+        for c in calls {
+            assert_eq!(c.join().unwrap(), Ok(1));
+        }
+        assert_eq!(s.builds(), 1);
+    }
+
+    #[test]
+    fn a_build_that_panics_is_a_failed_build() {
+        let s = Arc::new(Source::default());
+        let r = reload(&s);
+        s.set(1);
+        assert_eq!(newest(&r, &s), Ok(1));
+        s.set(99);
+        assert_eq!(newest(&r, &s), Ok(1));
+        r.wait();
+        assert_eq!(newest(&r, &s), Ok(1));
+        assert_eq!(r.status().failed.map(|f| f.0), Some(99));
+    }
+
+    #[test]
+    fn a_head_that_cannot_be_read_keeps_the_value_and_is_recorded() {
+        let s = Arc::new(Source::default());
+        let r = reload(&s);
+        s.set(1);
+        assert_eq!(newest(&r, &s), Ok(1));
+        assert_eq!(r.newest(|_| Err("no HEAD".to_string())).map(|v| *v), Ok(1));
+        assert_eq!(r.status().head_error, Some("no HEAD".to_string()));
+        assert_eq!(newest(&r, &s), Ok(1));
+        assert_eq!(r.status().head_error, None);
+    }
+
+    #[test]
+    fn a_store_with_no_snapshot_gives_an_error_and_no_build() {
+        let s = Arc::new(Source::default());
+        let r = reload(&s);
+        assert_eq!(
+            r.newest(|_| Ok(None)).map(|v| *v),
+            Err("the store has no snapshot".to_string())
+        );
+        assert_eq!(s.builds(), 0);
     }
 
     #[test]

@@ -77,7 +77,9 @@ pub struct Settings {
 
 /// The state of a server: the settings, the tools of the MCP transport
 /// with the twins that a request named, and the query texts above the
-/// inline limit. The REST routes and the MCP tools share the twins. It
+/// inline limit. The REST routes and the MCP tools share the twins, and the
+/// twin `store` is the newest built snapshot of the store, with the twin of
+/// a newer snapshot built in the background. It
 /// keeps no answer.
 pub struct State {
     pub settings: Settings,
@@ -88,9 +90,14 @@ pub struct State {
 }
 
 impl State {
+    /// Waits until no build of the twin `store` runs.
+    pub fn wait_store(&self) {
+        self.mcp.wait_store();
+    }
+
     pub fn new(settings: Settings) -> Self {
         let mcp = match &settings.store {
-            Some(folder) => rsim_mcp::tools::Tools::with_store(folder.clone()),
+            Some(folder) => rsim_mcp::tools::Tools::with_store(folder.clone()).reload_store(),
             None => rsim_mcp::tools::Tools::default(),
         };
         State {
@@ -120,8 +127,8 @@ struct TwinRef {
 
 enum Resolved {
     Twin(TwinRef),
-    /// The alias `store`: the identifier of its snapshot.
-    Redirect(String),
+    /// The alias `store`: the twin of its snapshot.
+    Redirect(Arc<Loaded>),
 }
 
 fn json_response<T: Serialize>(v: &T) -> Response {
@@ -166,7 +173,7 @@ impl State {
         };
         if segment == "store" {
             let t = store(self)?;
-            return Ok(Resolved::Redirect(t.identity.id.clone()));
+            return Ok(Resolved::Redirect(t));
         }
         let id = TwinJson::parse(segment).map_err(unknown)?;
         match id.snapshot {
@@ -181,18 +188,33 @@ impl State {
                     loaded,
                 }))
             }
-            Some(_) => {
-                let t = store(self)?;
-                if t.identity.id != id.id {
-                    return Err(unknown(format!(
-                        "{segment} is not held by the server; the newest snapshot is {}",
-                        t.identity.id
-                    )));
+            Some(cycle) => {
+                // The current twin and the previous twin of the store answer
+                // for their own snapshots.
+                if self.settings.store.is_none() {
+                    return Err(unknown("the server has no store".into()));
                 }
-                Ok(Resolved::Twin(TwinRef {
-                    topology: "store".into(),
-                    loaded: t,
-                }))
+                let (found, current) = self.mcp.store_snapshot(cycle).map_err(from_query_error)?;
+                if let Some(loaded) = found {
+                    return Ok(Resolved::Twin(TwinRef {
+                        topology: "store".into(),
+                        loaded,
+                    }));
+                }
+                if current.identity.snapshot.is_some_and(|c| cycle < c) {
+                    return Err(problem(
+                        410,
+                        "snapshot_replaced",
+                        format!(
+                            "{segment} is replaced by {}; ask for the twin store again",
+                            current.identity.id
+                        ),
+                    ));
+                }
+                Err(unknown(format!(
+                    "{segment} is not built by the server; the newest built snapshot is {}",
+                    current.identity.id
+                )))
             }
         }
     }
@@ -538,7 +560,28 @@ fn route(
                 .map(|n| json!({"id": format!("builtin.{n}"), "href": format!("/v1/twins/builtin.{n}")}))
                 .collect();
             if state.settings.store.is_some() {
-                list.push(json!({"id": "store", "href": "/v1/twins/store"}));
+                let status = state.mcp.store_status();
+                let snap = |c: Option<u64>| c.map(|c| format!("snap-{c}"));
+                let held = status.as_ref().and_then(|s| s.held.clone());
+                let previous = status.as_ref().and_then(|s| s.previous.clone());
+                let newest = status.as_ref().and_then(|s| s.newest_cycle);
+                let loading = snap(status.as_ref().and_then(|s| s.loading));
+                let failed = status.and_then(|s| match (s.failed, s.head_error) {
+                    (_, Some(detail)) => Some(json!({"snapshot": null, "detail": detail})),
+                    (Some((cycle, detail)), None) => {
+                        Some(json!({"snapshot": format!("snap-{cycle}"), "detail": detail}))
+                    }
+                    (None, None) => None,
+                });
+                list.push(json!({
+                    "id": "store",
+                    "href": "/v1/twins/store",
+                    "held": held,
+                    "previous": previous,
+                    "newest_cycle": newest,
+                    "loading": loading,
+                    "reload_error": failed
+                }));
             }
             let body = json!({"rsim_json": VERSION, "kind": "twins", "twins": list});
             Ok(json_response(&body))
@@ -552,7 +595,16 @@ fn route(
         ["v1", "twins", twin, rest @ ..] => {
             let t = match state.twin(twin)? {
                 Resolved::Twin(t) => t,
-                Resolved::Redirect(id) => {
+                // A new query on the alias gets its resource on the snapshot
+                // at once, with no redirect before the 303.
+                Resolved::Redirect(loaded) if req.method == "POST" && rest == ["queries"] => {
+                    TwinRef {
+                        topology: "store".into(),
+                        loaded,
+                    }
+                }
+                Resolved::Redirect(loaded) => {
+                    let id = &loaded.identity.id;
                     let mut location = format!("/v1/twins/{id}");
                     for r in rest {
                         location.push('/');

@@ -42,16 +42,47 @@ export function onUnauthorized(handler: (() => void) | null): void {
   unauthorized = handler;
 }
 
+/** The handler of a snapshot that a newer snapshot replaced. */
+let replacedRun: (() => void) | null = null;
+
+/**
+ * Sets the handler of a request whose snapshot a newer snapshot replaced
+ * (`snapshot_replaced`), or removes it with null.
+ */
+export function onReplaced(handler: (() => void) | null): void {
+  replacedRun = handler;
+}
+
+/**
+ * The path of a request on the alias `store` in place of a replaced
+ * snapshot, or null for a path that must stay on its snapshot: a trace step
+ * and source lines belong to the answer of that snapshot.
+ */
+export function onNewestRun(path: string): string | null {
+  const m = /^\/v1\/twins\/snap-\d+(\/.*)?$/.exec(path);
+  if (!m) return null;
+  const rest = m[1] ?? "";
+  if (/\/(steps|sources)(\/|\?|$)/.test(rest)) return null;
+  return `/v1/twins/store${rest}`;
+}
+
 /**
  * Sends a request on the origin of the page with the session cookie. A
  * refused request throws its problem; a 401 also calls the handler of
- * `onUnauthorized`, except with `expect401`, where a 401 is an answer.
+ * `onUnauthorized`, except with `expect401`, where a 401 is an answer. A
+ * replaced snapshot calls the handler of `onReplaced`, and the request is
+ * sent again on the newest run when `onNewestRun` gives a path.
  */
 async function send(path: string, init: RequestInit = {}, expect401 = false): Promise<Response> {
   const r = await fetch(path, { credentials: "same-origin", ...init });
   if (r.ok) return r;
   if (r.status === 401 && !expect401) unauthorized?.();
-  throw await problem(r);
+  const p = await problem(r);
+  if (p.code !== "snapshot_replaced") throw p;
+  replacedRun?.();
+  const again = onNewestRun(path);
+  if (again === null) throw p;
+  return send(again, init, expect401);
 }
 
 const JSON_HEADERS = { "content-type": "application/json", accept: "application/json" };
@@ -112,6 +143,19 @@ export async function revokeToken(id: number): Promise<void> {
 export interface TwinRef {
   id: string;
   href: string;
+  /** For the alias `store`: the newest built snapshot, or null before the first build. */
+  held?: string | null;
+  /** For the alias `store`: the cycle of the newest snapshot of the store, or null when not known. */
+  newest_cycle?: number | null;
+  /** For the alias `store`: the snapshot before the held snapshot that the server keeps, or null. */
+  previous?: string | null;
+  /** For the alias `store`: the snapshot whose twin builds now in the background, or null. */
+  loading?: string | null;
+  /**
+   * For the alias `store`: the newest snapshot that does not build, or the
+   * HEAD of the store that cannot be read with the snapshot null; else null.
+   */
+  reload_error?: { snapshot: string | null; detail: string } | null;
 }
 
 export async function listTwins(): Promise<TwinRef[]> {
