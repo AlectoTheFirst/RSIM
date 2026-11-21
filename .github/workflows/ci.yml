@@ -66,6 +66,16 @@ jobs:
       - name: Tests
         run: cargo test --workspace --locked
 
+  image:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build the images with no push
+        run: |
+          for target in rsim rsim-collect; do
+            docker buildx build --target "$target" --platform linux/amd64 .
+          done
+
   audit:
     runs-on: ubuntu-24.04
     steps:
