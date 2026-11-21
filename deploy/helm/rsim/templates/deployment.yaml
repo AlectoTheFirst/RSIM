@@ -35,7 +35,7 @@ spec:
           command:
             - sh
             - -c
-            - until pg_isready -q -h {{ include "rsim.postgresHost" . }} -p 5432; do sleep 2; done
+            - until pg_isready -q -h {{ include "rsim.postgresHost" . }} -p 5432 -U {{ .Values.postgres.username }} -d {{ .Values.postgres.database }}; do sleep 2; done
           securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
             requests: { cpu: 10m, memory: 16Mi }
