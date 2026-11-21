@@ -73,11 +73,10 @@ export function cellState(text: string | null, origin: Origin, underGroup: boole
   return text === null ? { kind: "none" } : { kind: "value", text };
 }
 
-const ALGORITHMS: Record<string, string> = { modern: "Modern", legacy: "Legacy" };
 
-/** The SSH words of a group or a device: "Modern, exec". */
+/** The SSH words of a group or a device: "modern, exec". */
 export function sshText(algorithms: string, mode: string): string {
-  return `${ALGORITHMS[algorithms] ?? algorithms}, ${mode}`;
+  return `${algorithms}, ${mode}`;
 }
 
 /** The transport of the collector of a vendor, or null for a vendor with no collector. */
@@ -105,7 +104,7 @@ export function groupSsh(vendors: Vendors | null, g: Group): string | null {
   return sshText(g.settings.ssh_algorithms ?? "modern", g.settings.ssh_mode ?? "exec");
 }
 
-const TLS_TRUST: Record<string, string> = { pin: "Pin", ca: "CA", none: "None" };
+const TLS_TRUST: Record<string, string> = { pin: "pin", ca: "CA", none: "none" };
 
 /**
  * The trust policy of a group: the TLS trust of a vendor collected over
@@ -441,6 +440,8 @@ export type SettingKey = keyof Settings & string;
 /** How a setting is edited and checked, its default, its transport and whether the collector reads it. */
 export interface SettingField {
   key: SettingKey;
+  /** The name of the setting in the UI. */
+  label: string;
   kind: "credential" | "route" | "choice" | "number" | "text";
   /** The values of a choice. */
   choices?: readonly string[];
@@ -462,21 +463,21 @@ const I32_MAX = 2147483647;
 
 /** The settings of a group or a device, in the order of the settings. */
 export const SETTING_FIELDS: readonly SettingField[] = [
-  { key: "credential", kind: "credential", fallback: "none", transport: null },
-  { key: "route", kind: "route", fallback: "direct", transport: null },
-  { key: "ssh_algorithms", kind: "choice", choices: ["modern", "legacy"], fallback: "modern", transport: "ssh" },
-  { key: "ssh_mode", kind: "choice", choices: ["exec", "shell", "connection"], fallback: "exec", transport: "ssh" },
-  { key: "ssh_channels", kind: "number", min: 1, max: I32_MAX, fallback: "1", transport: "ssh", vendors: ["nxos", "iosxr", "iosxe"] },
-  { key: "nxos_json", kind: "choice", choices: ["plain", "native"], fallback: "plain", transport: "ssh", vendors: ["nxos"] },
-  { key: "tls_trust", kind: "choice", choices: ["pin", "ca", "none"], fallback: "pin", transport: "https" },
-  { key: "tls_ca_file", kind: "text", fallback: "none", transport: "https" },
-  { key: "capture_bgp", kind: "choice", choices: ["off", "sessions", "all"], fallback: "sessions", transport: null },
-  { key: "timeout_seconds", kind: "number", min: 1, max: 86400, fallback: "45", transport: null },
-  { key: "section_timeout_seconds", kind: "number", min: 1, max: 86400, fallback: "20", transport: null },
-  { key: "request_timeout_seconds", kind: "number", min: 1, max: 86400, fallback: "60", transport: "https", unread: true },
-  { key: "paged_section_timeout_seconds", kind: "number", min: 1, max: 86400, fallback: "300", transport: "https", unread: true },
-  { key: "retries", kind: "number", min: 0, max: 10, fallback: "0", transport: null, unread: true },
-  { key: "ha", kind: "choice", choices: ["none", "all", "one"], fallback: "none", transport: null, unread: true },
+  { key: "credential", label: "credential", kind: "credential", fallback: "none", transport: null },
+  { key: "route", label: "route", kind: "route", fallback: "direct", transport: null },
+  { key: "ssh_algorithms", label: "SSH algorithms", kind: "choice", choices: ["modern", "legacy"], fallback: "modern", transport: "ssh" },
+  { key: "ssh_mode", label: "SSH mode", kind: "choice", choices: ["exec", "shell", "connection"], fallback: "exec", transport: "ssh" },
+  { key: "ssh_channels", label: "SSH channels", kind: "number", min: 1, max: I32_MAX, fallback: "1", transport: "ssh", vendors: ["nxos", "iosxr", "iosxe"] },
+  { key: "nxos_json", label: "NX-OS JSON", kind: "choice", choices: ["plain", "native"], fallback: "plain", transport: "ssh", vendors: ["nxos"] },
+  { key: "tls_trust", label: "TLS trust", kind: "choice", choices: ["pin", "ca", "none"], fallback: "pin", transport: "https" },
+  { key: "tls_ca_file", label: "TLS CA file", kind: "text", fallback: "none", transport: "https" },
+  { key: "capture_bgp", label: "BGP sections", kind: "choice", choices: ["off", "sessions", "all"], fallback: "sessions", transport: null },
+  { key: "timeout_seconds", label: "device time limit, s", kind: "number", min: 1, max: 86400, fallback: "45", transport: null },
+  { key: "section_timeout_seconds", label: "section time limit, s", kind: "number", min: 1, max: 86400, fallback: "20", transport: null },
+  { key: "request_timeout_seconds", label: "request time limit, s", kind: "number", min: 1, max: 86400, fallback: "60", transport: "https", unread: true },
+  { key: "paged_section_timeout_seconds", label: "paged section time limit, s", kind: "number", min: 1, max: 86400, fallback: "300", transport: "https", unread: true },
+  { key: "retries", label: "retries", kind: "number", min: 0, max: 10, fallback: "0", transport: null, unread: true },
+  { key: "ha", label: "HA", kind: "choice", choices: ["none", "all", "one"], fallback: "none", transport: null, unread: true },
 ];
 
 /** The text of a stored value in an input: empty for none. */

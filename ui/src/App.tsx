@@ -533,15 +533,14 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
         onPrefs={setPrefs}
         user={user}
         onSignOut={props.onSignOut}
+        state={stateText}
       />
       {view === "Tokens" && user ? (
         <TokensView user={user} />
       ) : view === "Inventory" ? (
         <InventoryView twin={usable} />
       ) : stateText ? (
-        <main class="body">
-          <span class="muted" title={stateText.title}>{stateText.text}</span>
-        </main>
+        <main class="body" />
       ) : view === "Tables" ? (
         <div class="grid-page">
           <TablesView

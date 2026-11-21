@@ -171,23 +171,23 @@ describe("cells of the settings", () => {
   });
 
   it("gives the SSH words, an override when the device sets one of them", () => {
-    expect(deviceSsh(VENDORS, R2, true)).toEqual({ kind: "override", text: "Legacy, shell" });
+    expect(deviceSsh(VENDORS, R2, true)).toEqual({ kind: "override", text: "legacy, shell" });
     expect(deviceSsh(VENDORS, R1, true)).toEqual({ kind: "inherit" });
-    expect(deviceSsh(VENDORS, R1, false)).toEqual({ kind: "value", text: "Modern, exec" });
+    expect(deviceSsh(VENDORS, R1, false)).toEqual({ kind: "value", text: "modern, exec" });
   });
 
   it("leaves the SSH cell empty for a vendor with no SSH collector", () => {
     expect(deviceSsh(VENDORS, X1, true)).toBeNull();
     expect(deviceSsh(VENDORS, resolved("u1", "g-u", "unifi", {}), true)).toBeNull();
     expect(groupSsh(VENDORS, INV.groups[1]!)).toBeNull();
-    expect(groupSsh(VENDORS, INV.groups[0]!)).toBe("Modern, exec");
-    expect(groupSsh(VENDORS, INV.groups[2]!)).toBe("Legacy, exec");
+    expect(groupSsh(VENDORS, INV.groups[0]!)).toBe("modern, exec");
+    expect(groupSsh(VENDORS, INV.groups[2]!)).toBe("legacy, exec");
   });
 });
 
 describe("trust of a group", () => {
   it("gives the TLS trust over HTTPS, not known over SSH and none with no collector", () => {
-    expect(groupTrust(VENDORS, { name: "u", vendor: "unifi", settings: {} })).toEqual({ kind: "value", text: "Pin" });
+    expect(groupTrust(VENDORS, { name: "u", vendor: "unifi", settings: {} })).toEqual({ kind: "value", text: "pin" });
     expect(groupTrust(VENDORS, { name: "u", vendor: "unifi", settings: { tls_trust: "ca" } })).toEqual({ kind: "value", text: "CA" });
     expect(groupTrust(VENDORS, INV.groups[0]!)).toEqual({ kind: "not known" });
     expect(groupTrust(VENDORS, INV.groups[1]!)).toBeNull();

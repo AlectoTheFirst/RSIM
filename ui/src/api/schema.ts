@@ -482,7 +482,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The secret key of the server: present or not, and its id. */
+        /** Whether the server has a secret key. */
         get: operations["getSecretKey"];
         put?: never;
         post?: never;
@@ -1838,11 +1838,6 @@ export interface components {
          * @description The secret key of the server.
          */
         SecretKeyOut: {
-            /**
-             * @description The id of the key: the first 8 bytes of its SHA-256 in hex. The
-             *     collector needs the key of the same id.
-             */
-            id?: string | null;
             /**
              * @description True if the server has a secret key, so that it can write the secret
              *     of a managed credential.

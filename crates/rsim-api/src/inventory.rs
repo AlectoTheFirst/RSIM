@@ -116,10 +116,6 @@ pub struct SecretKeyOut {
     /// True if the server has a secret key, so that it can write the secret
     /// of a managed credential.
     pub present: bool,
-    /// The id of the key: the first 8 bytes of its SHA-256 in hex. The
-    /// collector needs the key of the same id.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
 }
 
 /// The device groups at one version.
@@ -307,7 +303,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/inventory/secret-key",
         id: "getSecretKey",
-        summary: "The secret key of the server: present or not, and its id.",
+        summary: "Whether the server has a secret key.",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<SecretKeyOut>]),
@@ -680,7 +676,6 @@ pub fn route(
             allow(req, &["GET"])?;
             Ok(json_out(&SecretKeyOut {
                 present: h.key.is_some(),
-                id: h.key.as_ref().map(|k| k.id().to_string()),
             }))
         }
         ["routes"] => {

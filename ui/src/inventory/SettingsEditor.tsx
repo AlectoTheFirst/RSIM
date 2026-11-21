@@ -23,6 +23,7 @@ export function TextRow(props: {
   placeholder?: string;
   list?: string;
   note?: string | null;
+  autoFocus?: boolean;
 }) {
   const { id, k, h } = props;
   const value = props.draft[k] ?? "";
@@ -38,6 +39,7 @@ export function TextRow(props: {
         placeholder={props.placeholder}
         list={props.list}
         spellcheck={false}
+        autoFocus={props.autoFocus}
         onInput={(e) => h.onInput(k, e.currentTarget.value)}
         onKeyDown={h.keys(k)}
         onBlur={() => h.onBlur?.(k)}
@@ -64,7 +66,7 @@ export function PickRow(props: {
       <label class={value ? "c-parameter" : "muted"} for={`${id}-${k}`}>
         {props.label}
       </label>
-      <select id={`${id}-${k}`} class="t-value param" value={value} onChange={(e) => h.onPick(k, e.currentTarget.value)} onKeyDown={h.keys(k)}>
+      <select id={`${id}-${k}`} class={value ? "t-value param" : "t-value muted"} value={value} onChange={(e) => h.onPick(k, e.currentTarget.value)} onKeyDown={h.keys(k)}>
         {props.options.map((o) => (
           <option value={o.value}>{o.text}</option>
         ))}
@@ -103,7 +105,7 @@ export function SettingsEditor(props: {
         const i = inherited(f, props.group);
         const inherit = `${i.from}: ${i.text}`;
         const note = notUsed(f, props.vendors, props.vendor);
-        const common = { id: props.id, k: f.key, label: f.key, draft: props.draft, h: props.h, note };
+        const common = { id: props.id, k: f.key, label: f.label, draft: props.draft, h: props.h, note };
         return f.kind === "number" || f.kind === "text" ? (
           <TextRow {...common} placeholder={inherit} />
         ) : (

@@ -178,19 +178,20 @@ export function Credentials(props: { inv: Inventory; adding: boolean; onAdding: 
   return (
     <div>
       <div class="inv-sec">
-        Credentials{" "}
-        {keyPresent ? (
-          <span class="muted">secret key <span class="t-value">{key?.id}</span></span>
-        ) : (
-          <HatchCell title="rsim-api has no RSIM_SECRET_KEY">no secret key</HatchCell>
-        )}
+        Credentials {key && !keyPresent ? <HatchCell title="rsim-api has no RSIM_SECRET_KEY">no secret key</HatchCell> : null}
       </div>
-      <div class="inv-t cred inv-head" role="row">
-        <span>name</span>
-        <span>source</span>
-        <span>device groups</span>
-        <span />
-      </div>
+      {inv.credentials.length || props.adding ? (
+        <div class="inv-t cred inv-head" role="row">
+          <span>name</span>
+          <span>source</span>
+          <span>device groups</span>
+          <span />
+        </div>
+      ) : (
+        <div class="inv-empty" role="row">
+          <HatchCell>no credential</HatchCell>
+        </div>
+      )}
       {inv.credentials.map((c) => (
         <CredentialRow key={c.name} inv={inv} c={c} keyPresent={keyPresent} editing={editing === c.name} onEdit={(on) => setEditing(on ? c.name : null)} write={props.write} refuse={props.refuse} />
       ))}
