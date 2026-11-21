@@ -13,7 +13,7 @@ use tokio::time::Instant;
 
 use crate::cli::{SHELL_HEIGHT, SHELL_WIDTH, at_prompt, echo_line, output_of, prompt_of, sanitize};
 pub use crate::path::Algorithms;
-use crate::trust::{Credentials, TrustStore, host_port};
+use crate::trust::{Credentials, TrustStore, host_port, plain_address};
 use crate::tunnel::{Client, Hop, HopLimits, Tunnel, login, stream};
 use crate::{BoxFuture, Device, Ssh, TransportError};
 
@@ -309,7 +309,9 @@ impl SshTransport {
             .credentials
             .get(&device.credential)
             .map_err(|e| connect(format!("device {}: {e}", device.address)))?;
-        let (host, port) = host_port(&device.address, 22)
+        let address = plain_address(&device.address, "ssh")
+            .map_err(|e| connect(format!("device {}: {e}", device.address)))?;
+        let (host, port) = host_port(address, 22)
             .map_err(|e| connect(format!("device {}: {e}", device.address)))?;
         let tunnel = if route.jumps.is_empty() {
             None
@@ -322,8 +324,8 @@ impl SshTransport {
         };
         let hop = Hop {
             role: "device",
-            address: &device.address,
-            pin: route.pin_name(route.jumps.len(), &device.address),
+            address,
+            pin: route.pin_name(route.jumps.len(), address),
             credential,
             algorithms: profile.algorithms,
             last: true,
