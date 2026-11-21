@@ -29,6 +29,30 @@ This repository holds only code, tests, usage how-tos and the information that t
 
 A comment or a docstring describes the code that it belongs to. Do not write design text, reasons for a decision, build step numbers or section numbers of the brief in the code. Design text goes in `../rsim-project/`.
 
+## UI text: no AI prose
+
+This rule has no exception. It applies to each text that a person reads in the product: a label, a button, a column head, a section head, a placeholder, a hint, a note, a `title`, an `aria-label`, an option of a select, a problem title and detail of the UI or of the API, and the reason text of the engine. Section 7.1 "Forbidden prose" of `../rsim-project/design/ui-design-language.md` is the full rule.
+
+- A label names a thing or a state in a few words: "not known", "no reply", "secret key", "empty inherits from core". A button names its action: "Add credential", "Delete core-01".
+- A label, a hint or a note is not a sentence. No full stop at the end of a label, and no explanation that a person did not ask for. A description goes only in the `title` of an element, in one short phrase.
+- A section head has no note that explains the section, its rules or its security.
+- Sentence case, present tense.
+
+| Forbidden pattern | Examples |
+|---|---|
+| Sentences and explanations | "A jump host never gets the device credential.", "RSIM keeps the reference. The secret stays in its source.", "A managed secret is written once and never shown." |
+| Conjectures and hedges | might, may, likely, probably, seems, appears to, it looks like, should work |
+| Comparisons | instead of, rather than, unlike, better than, more than before, no longer, now as a comparison |
+| Filler and intensifiers | simply, just, easily, actually, really, basically, quickly, fully, truly |
+| Hype words and Claudisms | seamless, powerful, robust, comprehensive, intuitive, effortless, leverage, unlock, empower, elevate, streamline, delve, dive into, explore, journey, landscape, realm, crucial, key (as an adjective), ensure, game-changer, cutting-edge, next-level |
+| Talk to the user | you, your, you can, feel free to, let's, we, please, don't worry, great, oops, sorry |
+| Narration | Here is, Below you will find, This view shows, Note that, Keep in mind, It is worth noting |
+| Summaries | In short, Overall, In summary, All in all |
+| Rhetorical forms | a question in a label, "Not only ... but also", "It's not X, it's Y", groups of 3 adjectives |
+| Decoration | emoji, glyphs such as `·`, `→`, `✓` and `•`, an em dash, an ellipsis as style, an exclamation mark, quotation marks for emphasis |
+
+Before a UI change is done, read each new or changed text of the change against this table.
+
 ## Disk space
 
 - Build in the shared folder `target` of this repository. For a build of a worktree or another checkout, set `CARGO_TARGET_DIR` to that folder.
