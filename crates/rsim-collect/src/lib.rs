@@ -10,6 +10,8 @@
 pub mod bgp;
 mod classify;
 pub mod cli;
+#[cfg(all(feature = "nxos", feature = "iosxe", feature = "iosxr"))]
+pub mod demo;
 mod device;
 pub mod fake;
 #[cfg(feature = "https")]

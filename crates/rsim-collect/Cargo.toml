@@ -53,3 +53,7 @@ harness = false
 
 [lints]
 workspace = true
+
+[[example]]
+name = "demo_enterprise"
+required-features = ["nxos", "iosxe", "iosxr"]
