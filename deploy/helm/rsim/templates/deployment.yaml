@@ -78,8 +78,10 @@ spec:
           image: {{ include "rsim.image" (dict "repository" .Values.collector.image.repository "tag" .Values.collector.image.tag "digest" .Values.collector.image.digest "appVersion" .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
+            {{- if .Values.collector.envSecret }}
             - --env
             - /run/rsim/collect.env
+            {{- end }}
             - --data
             - /data/rsim
             - run
@@ -93,15 +95,17 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            {{- if .Values.collector.envSecret }}
             - name: collect-env
               mountPath: /run/rsim
               readOnly: true
+            {{- end }}
         {{- end }}
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: {{ include "rsim.fullname" . }}-data
-        {{- if .Values.collector.enabled }}
+        {{- if and .Values.collector.enabled .Values.collector.envSecret }}
         - name: collect-env
           secret:
             secretName: {{ .Values.collector.envSecret }}
