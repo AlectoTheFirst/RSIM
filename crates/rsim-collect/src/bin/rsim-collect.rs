@@ -129,12 +129,15 @@ enum Command {
     Show { device: String, section: String },
     /// Writes the cycles of a demo folder into a new store through the fake
     /// transport, with no network. A data folder whose store has a snapshot
-    /// is an error.
+    /// is an error, or with `--if-empty` writes nothing.
     Seed {
         /// The demo folder, such as `demo/` of the repository or
         /// `/usr/share/rsim/demo` of the image.
         #[arg(long)]
         demo: PathBuf,
+        /// Writes nothing and succeeds when the store has a snapshot.
+        #[arg(long)]
+        if_empty: bool,
     },
 }
 
@@ -145,8 +148,12 @@ fn data(cli: &Cli) -> Result<&Path, String> {
 
 /// Seeds a new store from a demo folder and prints the report of each
 /// cycle.
-async fn seed(data: &Path, demo: &Path) -> Result<(), String> {
+async fn seed(data: &Path, demo: &Path, if_empty: bool) -> Result<(), String> {
     let store = open_store(data)?;
+    if if_empty && store.latest().map_err(|e| e.to_string())?.is_some() {
+        println!("the store has a snapshot; the seed writes nothing");
+        return Ok(());
+    }
     let reports = rsim_collect::demo::seed(store, demo).await?;
     for r in &reports {
         println!(
@@ -1245,12 +1252,12 @@ fn main() -> ExitCode {
         Command::Show { device, section } => data(&cli)
             .and_then(open_store)
             .and_then(|s| show(&s, device, section)),
-        Command::Seed { demo } => data(&cli).and_then(|d| {
+        Command::Seed { demo, if_empty } => data(&cli).and_then(|d| {
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .map_err(|e| e.to_string())
-                .and_then(|rt| rt.block_on(seed(d, demo)))
+                .and_then(|rt| rt.block_on(seed(d, demo, *if_empty)))
         }),
     };
     match result {

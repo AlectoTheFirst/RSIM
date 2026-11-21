@@ -316,7 +316,7 @@ With `RSIM_INVENTORY_URL` set, `rsim-collect` reads the inventory at the start o
 
 ### Demo estate
 
-The demo estate is a synthetic Cisco enterprise of 40 devices in 2 sites, Frankfurt and Paris. Each site has an NX-OS data centre fabric with EVPN, VXLAN and vPC, an IOS-XE campus, 2 IOS-XR WAN routers and an IOS-XE internet edge. `demo/` holds the command replies of each device in 3 cycles. The seed writes them into a new store through the fake transport of the collector, with no network, and refuses a store that has a snapshot:
+The demo estate is a synthetic Cisco enterprise of 40 devices in 2 sites, Frankfurt and Paris. Each site has an NX-OS data centre fabric with EVPN, VXLAN and vPC, an IOS-XE campus, 2 IOS-XR WAN routers and an IOS-XE internet edge. `demo/` holds the command replies of each device in 3 cycles. The seed writes them into a new store through the fake transport of the collector, with no network, and refuses a store that has a snapshot; with `--if-empty` it writes nothing and succeeds:
 
 ```sh
 rsim-collect --data <data folder> seed --demo demo

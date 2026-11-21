@@ -71,6 +71,10 @@ async fn the_seed_refuses_a_store_with_a_snapshot() {
         .await
         .unwrap();
     assert_eq!(reports.len(), demo_enterprise::CYCLES);
+    for r in &reports {
+        assert!(r.snapshot.is_some(), "{r:?}");
+        assert!(!r.changed.is_empty(), "{r:?}");
+    }
     let e = rsim_collect::demo::seed(new_store(tmp.path()), &committed())
         .await
         .unwrap_err();
