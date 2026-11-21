@@ -105,7 +105,7 @@ fn config(dev: &Dev) -> String {
 
 fn version(dev: &Dev) -> String {
     format!(
-        "{TIME}Cisco IOS XR Software, Version {v}\nCopyright (c) 2013-2026 by Cisco Systems, Inc.\n\nBuild Information:\n Built By     : demo\n Built On     : Thu Jan 15 10:00:00 UTC 2026\n Build Host   : demo-build\n Workspace    : /demo/workspace\n Version      : {v}\n Label        : {v}\n\ncisco {m} (Intel 8 core CPU) processor with 32GB of memory\n{n} uptime is 5 weeks, 6 days, 3 hours, 12 minutes\n{m} Chassis\n",
+        "{TIME}Cisco IOS XR Software, Version {v}\nCopyright (c) 2013-2026 by Cisco Systems, Inc.\n\nBuild Information:\n Built By     : demo\n Built On     : Thu Jan 15 10:00:00 UTC 2026\n Build Host   : demo-build\n Workspace    : /demo/workspace\n Version      : {v}\n Label        : {v}\n\ncisco {m} (Intel 8 core CPU) processor with 32GB of memory\n{n} uptime is 5 weeks, 6 days, 3 hours, 12 minutes\n",
         v = dev.version,
         m = dev.model,
         n = dev.name

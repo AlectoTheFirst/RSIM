@@ -5,7 +5,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::Ipv4Addr;
 
-use super::build::TENANT;
 use super::model::*;
 
 /// The kind of a route.
@@ -81,7 +80,6 @@ fn kind(p: Proto) -> Kind {
     match p {
         Proto::Ospf => Kind::Ospf,
         Proto::Ebgp => Kind::Ebgp,
-        Proto::Ibgp => Kind::Ibgp,
     }
 }
 
@@ -567,7 +565,6 @@ fn arp(e: &Estate) -> Vec<Vec<Arp>> {
 }
 
 pub fn tables(e: &Estate) -> Tables {
-    let _ = TENANT;
     Tables {
         ribs: ribs(e),
         arp: arp(e),

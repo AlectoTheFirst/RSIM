@@ -1,0 +1,55 @@
+{
+  "TABLE_tree": {
+    "ROW_tree": [
+      {
+        "TABLE_port": {
+          "ROW_port": [
+            {
+              "if_index": "Po1",
+              "port_role": "designated",
+              "port_state": "forwarding"
+            }
+          ]
+        },
+        "tree_id": "3001",
+        "tree_tree_type": "rstp"
+      },
+      {
+        "TABLE_port": {
+          "ROW_port": [
+            {
+              "if_index": "Po1",
+              "port_role": "designated",
+              "port_state": "forwarding"
+            },
+            {
+              "if_index": "Eth1/1",
+              "port_role": "designated",
+              "port_state": "forwarding"
+            }
+          ]
+        },
+        "tree_id": "10",
+        "tree_tree_type": "rstp"
+      },
+      {
+        "TABLE_port": {
+          "ROW_port": [
+            {
+              "if_index": "Po1",
+              "port_role": "designated",
+              "port_state": "forwarding"
+            },
+            {
+              "if_index": "Eth1/2",
+              "port_role": "designated",
+              "port_state": "forwarding"
+            }
+          ]
+        },
+        "tree_id": "40",
+        "tree_tree_type": "rstp"
+      }
+    ]
+  }
+}

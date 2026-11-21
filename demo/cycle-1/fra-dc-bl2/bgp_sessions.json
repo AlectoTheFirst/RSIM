@@ -1,0 +1,83 @@
+{
+  "TABLE_vrf": {
+    "ROW_vrf": [
+      {
+        "TABLE_neighbor": {
+          "ROW_neighbor": [
+            {
+              "connectionsdropped": "0",
+              "lastflap": "P41DT3H",
+              "lastread": "PT14S",
+              "lastwrite": "PT21S",
+              "localport": "179",
+              "neighbor-id": "10.19.0.2",
+              "notificationsreceived": "0",
+              "notificationssent": "0",
+              "remoteas": "65010",
+              "remoteport": "41022",
+              "state": "Established"
+            },
+            {
+              "connectionsdropped": "0",
+              "lastflap": "P41DT3H",
+              "lastread": "PT14S",
+              "lastwrite": "PT21S",
+              "localport": "179",
+              "neighbor-id": "10.99.0.3",
+              "notificationsreceived": "0",
+              "notificationssent": "0",
+              "remoteas": "65120",
+              "remoteport": "41022",
+              "state": "Established"
+            }
+          ]
+        },
+        "local-as": "65110",
+        "router-id": "10.10.0.22",
+        "vrf-name-out": "PROD",
+        "vrfestablishedpeers": "2",
+        "vrfpeers": "2"
+      },
+      {
+        "TABLE_neighbor": {
+          "ROW_neighbor": [
+            {
+              "connectionsdropped": "0",
+              "lastflap": "P41DT3H",
+              "lastread": "PT14S",
+              "lastwrite": "PT21S",
+              "localport": "179",
+              "neighbor-id": "10.10.0.1",
+              "notificationsreceived": "0",
+              "notificationssent": "0",
+              "remoteas": "65110",
+              "remoteport": "41022",
+              "state": "Established"
+            },
+            {
+              "connectionsdropped": "0",
+              "lastflap": "P41DT3H",
+              "lastread": "PT14S",
+              "lastwrite": "PT21S",
+              "localport": "179",
+              "neighbor-id": "10.10.0.2",
+              "notificationsreceived": "0",
+              "notificationssent": "0",
+              "remoteas": "65110",
+              "remoteport": "41022",
+              "state": "Established"
+            }
+          ]
+        },
+        "local-as": "65110",
+        "router-id": "10.10.0.22",
+        "vrf-name-out": "default",
+        "vrfestablishedpeers": "2",
+        "vrfpeers": "2"
+      }
+    ]
+  },
+  "localas": "65110",
+  "totalestablishedpeers": "4",
+  "totalpeers": "4"
+}

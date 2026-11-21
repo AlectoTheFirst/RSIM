@@ -1,0 +1,66 @@
+{
+  "TABLE_nbor_detail": {
+    "ROW_nbor_detail": [
+      {
+        "chassis_id": "025e.001a.0000",
+        "l_port_id": "Eth1/49",
+        "mgmt_addr": "10.255.2.12",
+        "port_desc": "par-dc-bl1",
+        "port_id": "Ethernet1/5",
+        "sys_desc": "Cisco Nexus Operating System (NX-OS) Software 10.3(4a)",
+        "sys_name": "par-dc-spine1",
+        "ttl": 120
+      },
+      {
+        "chassis_id": "025e.001b.0000",
+        "l_port_id": "Eth1/50",
+        "mgmt_addr": "10.255.2.13",
+        "port_desc": "par-dc-bl1",
+        "port_id": "Ethernet1/5",
+        "sys_desc": "Cisco Nexus Operating System (NX-OS) Software 10.3(4a)",
+        "sys_name": "par-dc-spine2",
+        "ttl": 120
+      },
+      {
+        "chassis_id": "025e.0021.0000",
+        "l_port_id": "Eth1/53",
+        "mgmt_addr": "10.255.2.19",
+        "port_desc": "vpc peer-link",
+        "port_id": "Ethernet1/53",
+        "sys_desc": "Cisco Nexus Operating System (NX-OS) Software 10.3(4a)",
+        "sys_name": "par-dc-bl2",
+        "ttl": 120
+      },
+      {
+        "chassis_id": "025e.0021.0000",
+        "l_port_id": "Eth1/54",
+        "mgmt_addr": "10.255.2.19",
+        "port_desc": "vpc peer-link",
+        "port_id": "Ethernet1/54",
+        "sys_desc": "Cisco Nexus Operating System (NX-OS) Software 10.3(4a)",
+        "sys_name": "par-dc-bl2",
+        "ttl": 120
+      },
+      {
+        "chassis_id": "025e.0018.0000",
+        "l_port_id": "Eth1/1",
+        "mgmt_addr": "10.255.2.10",
+        "port_desc": "par-dc-bl1",
+        "port_id": "TenGigE0/0/0/3",
+        "sys_desc": "Cisco IOS XR Software, Version 7.11.2",
+        "sys_name": "par-wan1",
+        "ttl": 120
+      },
+      {
+        "chassis_id": "025e.000b.0000",
+        "l_port_id": "Eth1/2",
+        "mgmt_addr": "10.255.1.20",
+        "port_desc": "par-dc-bl1",
+        "port_id": "Ethernet1/2",
+        "sys_desc": "Cisco Nexus Operating System (NX-OS) Software 10.3(4a)",
+        "sys_name": "fra-dc-bl1",
+        "ttl": 120
+      }
+    ]
+  }
+}

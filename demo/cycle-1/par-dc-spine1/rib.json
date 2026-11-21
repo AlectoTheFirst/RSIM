@@ -1,0 +1,828 @@
+{
+  "TABLE_vrf": {
+    "ROW_vrf": [
+      {
+        "TABLE_addrf": {
+          "ROW_addrf": [
+            {
+              "TABLE_prefix": {
+                "ROW_prefix": [
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "local",
+                          "ifname": "loopback0",
+                          "ipnexthop": "10.20.0.1",
+                          "metric": 0,
+                          "pref": 0,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": true,
+                    "ipprefix": "10.20.0.1/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/1",
+                          "ipnexthop": "10.20.100.1",
+                          "metric": 20,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        },
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/2",
+                          "ipnexthop": "10.20.100.5",
+                          "metric": 20,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        },
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/3",
+                          "ipnexthop": "10.20.100.9",
+                          "metric": 20,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        },
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/4",
+                          "ipnexthop": "10.20.100.13",
+                          "metric": 20,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        },
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/5",
+                          "ipnexthop": "10.20.100.17",
+                          "metric": 20,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        },
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/6",
+                          "ipnexthop": "10.20.100.21",
+                          "metric": 20,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.0.2/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 6
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/1",
+                          "ipnexthop": "10.20.100.1",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.0.11/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/2",
+                          "ipnexthop": "10.20.100.5",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.0.12/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/3",
+                          "ipnexthop": "10.20.100.9",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.0.13/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/4",
+                          "ipnexthop": "10.20.100.13",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.0.14/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/5",
+                          "ipnexthop": "10.20.100.17",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.0.21/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/6",
+                          "ipnexthop": "10.20.100.21",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.0.22/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/1",
+                          "ipnexthop": "10.20.100.1",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.1.11/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/2",
+                          "ipnexthop": "10.20.100.5",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.1.12/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/3",
+                          "ipnexthop": "10.20.100.9",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.1.13/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/4",
+                          "ipnexthop": "10.20.100.13",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.1.14/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/5",
+                          "ipnexthop": "10.20.100.17",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.1.21/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/6",
+                          "ipnexthop": "10.20.100.21",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.1.22/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/1",
+                          "ipnexthop": "10.20.100.1",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        },
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/2",
+                          "ipnexthop": "10.20.100.5",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.2.1/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 2
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/3",
+                          "ipnexthop": "10.20.100.9",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        },
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/4",
+                          "ipnexthop": "10.20.100.13",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.2.2/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 2
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/5",
+                          "ipnexthop": "10.20.100.17",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        },
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/6",
+                          "ipnexthop": "10.20.100.21",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.2.9/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 2
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "direct",
+                          "ifname": "Ethernet1/1",
+                          "ipnexthop": "10.20.100.0",
+                          "metric": 0,
+                          "pref": 0,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": true,
+                    "ipprefix": "10.20.100.0/31",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "local",
+                          "ifname": "Ethernet1/1",
+                          "ipnexthop": "10.20.100.0",
+                          "metric": 0,
+                          "pref": 0,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": true,
+                    "ipprefix": "10.20.100.0/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/1",
+                          "ipnexthop": "10.20.100.1",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.100.2/31",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "direct",
+                          "ifname": "Ethernet1/2",
+                          "ipnexthop": "10.20.100.4",
+                          "metric": 0,
+                          "pref": 0,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": true,
+                    "ipprefix": "10.20.100.4/31",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "local",
+                          "ifname": "Ethernet1/2",
+                          "ipnexthop": "10.20.100.4",
+                          "metric": 0,
+                          "pref": 0,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": true,
+                    "ipprefix": "10.20.100.4/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/2",
+                          "ipnexthop": "10.20.100.5",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.100.6/31",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "direct",
+                          "ifname": "Ethernet1/3",
+                          "ipnexthop": "10.20.100.8",
+                          "metric": 0,
+                          "pref": 0,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": true,
+                    "ipprefix": "10.20.100.8/31",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "local",
+                          "ifname": "Ethernet1/3",
+                          "ipnexthop": "10.20.100.8",
+                          "metric": 0,
+                          "pref": 0,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": true,
+                    "ipprefix": "10.20.100.8/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/3",
+                          "ipnexthop": "10.20.100.9",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.100.10/31",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "direct",
+                          "ifname": "Ethernet1/4",
+                          "ipnexthop": "10.20.100.12",
+                          "metric": 0,
+                          "pref": 0,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": true,
+                    "ipprefix": "10.20.100.12/31",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "local",
+                          "ifname": "Ethernet1/4",
+                          "ipnexthop": "10.20.100.12",
+                          "metric": 0,
+                          "pref": 0,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": true,
+                    "ipprefix": "10.20.100.12/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/4",
+                          "ipnexthop": "10.20.100.13",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.100.14/31",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "direct",
+                          "ifname": "Ethernet1/5",
+                          "ipnexthop": "10.20.100.16",
+                          "metric": 0,
+                          "pref": 0,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": true,
+                    "ipprefix": "10.20.100.16/31",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "local",
+                          "ifname": "Ethernet1/5",
+                          "ipnexthop": "10.20.100.16",
+                          "metric": 0,
+                          "pref": 0,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": true,
+                    "ipprefix": "10.20.100.16/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/5",
+                          "ipnexthop": "10.20.100.17",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.100.18/31",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "direct",
+                          "ifname": "Ethernet1/6",
+                          "ipnexthop": "10.20.100.20",
+                          "metric": 0,
+                          "pref": 0,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": true,
+                    "ipprefix": "10.20.100.20/31",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "local",
+                          "ifname": "Ethernet1/6",
+                          "ipnexthop": "10.20.100.20",
+                          "metric": 0,
+                          "pref": 0,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": true,
+                    "ipprefix": "10.20.100.20/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "ospf-UNDERLAY",
+                          "ifname": "Ethernet1/6",
+                          "ipnexthop": "10.20.100.21",
+                          "metric": 10,
+                          "pref": 110,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "10.20.100.22/31",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  }
+                ]
+              },
+              "addrf": "ipv4"
+            }
+          ]
+        },
+        "vrf-name-out": "default"
+      },
+      {
+        "TABLE_addrf": {
+          "ROW_addrf": [
+            {
+              "TABLE_prefix": {
+                "ROW_prefix": [
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "static",
+                          "ifname": "mgmt0",
+                          "ipnexthop": "10.255.2.1",
+                          "metric": 0,
+                          "pref": 1,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": false,
+                    "ipprefix": "0.0.0.0/0",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "direct",
+                          "ifname": "mgmt0",
+                          "ipnexthop": "10.255.2.12",
+                          "metric": 0,
+                          "pref": 0,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": true,
+                    "ipprefix": "10.255.2.0/24",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  },
+                  {
+                    "TABLE_path": {
+                      "ROW_path": [
+                        {
+                          "clientname": "local",
+                          "ifname": "mgmt0",
+                          "ipnexthop": "10.255.2.12",
+                          "metric": 0,
+                          "pref": 0,
+                          "ubest": "true",
+                          "uptime": "P41DT3H12M"
+                        }
+                      ]
+                    },
+                    "attached": true,
+                    "ipprefix": "10.255.2.12/32",
+                    "mcast-nhops": 0,
+                    "ucast-nhops": 1
+                  }
+                ]
+              },
+              "addrf": "ipv4"
+            }
+          ]
+        },
+        "vrf-name-out": "management"
+      }
+    ]
+  }
+}

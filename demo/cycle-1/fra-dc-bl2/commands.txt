@@ -1,0 +1,24 @@
+config.txt	show running-config
+version.json	show version | json
+interfaces.json	show interface | json
+lldp.json	show lldp neighbors detail | json
+cdp.json	show cdp neighbors | json
+vlans.json	show vlan | json
+vrfs.json	show vrf | json
+rib.json	show ip route vrf all | json
+mac_table.json	show mac address-table | json
+arp.json	show ip arp vrf all | json
+vrf_interfaces.json	show vrf interface | json
+acl.json	show ip access-lists | json
+trunks.json	show interface trunk | json
+hsrp.json	show hsrp all | json
+vrrp.json	show vrrp detail | json
+vpc.json	show vpc | json
+stp.json	show spanning-tree | json
+nve_peers.json	show nve peers | json
+nve_vnis.json	show nve vni | json
+evpn_macs.json	show l2route evpn mac all | json
+evpn_mac_ips.json	show l2route evpn mac-ip all | json
+mroutes.json	show ip mroute vrf all | json
+pim_neighbors.json	show ip pim neighbor vrf all | json
+bgp_sessions.json	show bgp sessions vrf all | json

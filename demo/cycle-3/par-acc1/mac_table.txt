@@ -1,0 +1,37 @@
+          Mac Address Table
+-------------------------------------------
+
+Vlan    Mac Address       Type        Ports
+----    -----------       --------    -----
+ All    0100.0ccc.cccc    STATIC      CPU
+ All    0100.0ccc.cccd    STATIC      CPU
+  99    0000.0c07.ac63    DYNAMIC     Te1/1/1
+  99    025e.0022.0006    DYNAMIC     Te1/1/1
+  99    025e.0023.0006    DYNAMIC     Te1/1/1
+  99    025e.0025.0003    DYNAMIC     Te1/1/1
+  99    025e.0026.0003    DYNAMIC     Te1/1/1
+  99    025e.0027.0003    DYNAMIC     Te1/1/1
+ 110    0000.0c07.ac6e    DYNAMIC     Te1/1/1
+ 110    025e.0022.0007    DYNAMIC     Te1/1/1
+ 110    025e.0023.0007    DYNAMIC     Te1/1/1
+ 110    025e.0a16.6e14    DYNAMIC     Gi1/0/1
+ 110    025e.0a16.6e15    DYNAMIC     Gi1/0/2
+ 110    025e.0a16.6e16    DYNAMIC     Gi1/0/3
+ 110    025e.0a16.6e18    DYNAMIC     Te1/1/1
+ 110    025e.0a16.6e19    DYNAMIC     Te1/1/1
+ 110    025e.0a16.6e1a    DYNAMIC     Te1/1/1
+ 110    025e.0a16.6e1b    DYNAMIC     Te1/1/1
+ 110    025e.0a16.6e1c    DYNAMIC     Te1/1/1
+ 110    025e.0a16.6e1d    DYNAMIC     Te1/1/1
+ 110    025e.0a16.6e1e    DYNAMIC     Te1/1/1
+ 110    025e.0a16.6e20    DYNAMIC     Te1/1/1
+ 110    025e.0a16.6e21    DYNAMIC     Te1/1/1
+ 110    025e.0a16.6e22    DYNAMIC     Te1/1/1
+ 120    0000.0c07.ac78    DYNAMIC     Te1/1/1
+ 120    025e.0022.0008    DYNAMIC     Te1/1/1
+ 120    025e.0023.0008    DYNAMIC     Te1/1/1
+ 120    025e.0a16.7814    DYNAMIC     Gi1/0/40
+ 120    025e.0a16.7815    DYNAMIC     Te1/1/1
+ 120    025e.0a16.7816    DYNAMIC     Te1/1/1
+ 120    025e.0a16.7817    DYNAMIC     Te1/1/1
+Total Mac Addresses for this criterion: 31

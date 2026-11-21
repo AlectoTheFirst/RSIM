@@ -1,0 +1,116 @@
+Building configuration...
+
+Current configuration : 2260 bytes
+!
+! Last configuration change at 07:30:00 UTC Mon Nov 2 2026 by admin
+!
+version 17.9
+service timestamps debug datetime msec
+service timestamps log datetime msec
+service password-encryption
+no platform punt-keepalive disable-kernel-core
+!
+hostname fra-inet1
+!
+vrf definition Mgmt-intf
+ !
+ address-family ipv4
+ exit-address-family
+ !
+ address-family ipv6
+ exit-address-family
+!
+no logging console
+enable secret 9 $9$DEMOSALT$FAKEHASHFAKEHASH
+!
+no aaa new-model
+!
+ip routing
+!
+no ip domain lookup
+ip domain name demo.example
+login on-success log
+!
+redundancy
+ mode none
+!
+interface Loopback0
+ ip address 10.16.255.1 255.255.255.255
+ ip ospf 1 area 0
+!
+interface TenGigabitEthernet0/1/0
+ description fra-wan1
+ ip address 10.16.0.1 255.255.255.254
+ ip ospf network point-to-point
+ ip ospf 1 area 0
+ negotiation auto
+!
+interface TenGigabitEthernet0/1/1
+ description fra-wan2
+ ip address 10.16.0.3 255.255.255.254
+ ip ospf network point-to-point
+ ip ospf 1 area 0
+ negotiation auto
+!
+interface GigabitEthernet0/0/0
+ description internet uplink
+ ip address 203.0.113.0 255.255.255.254
+ negotiation auto
+!
+interface GigabitEthernet0
+ vrf forwarding Mgmt-intf
+ ip address 10.255.1.32 255.255.255.0
+ negotiation auto
+!
+router ospf 1
+ router-id 10.16.255.1
+ default-information originate
+ passive-interface default
+ no passive-interface TenGigabitEthernet0/1/0
+ no passive-interface TenGigabitEthernet0/1/1
+!
+router bgp 64500
+ bgp router-id 10.16.255.1
+ bgp log-neighbor-changes
+ neighbor 203.0.113.1 remote-as 64496
+ neighbor 203.0.113.1 description isp-edge1
+ !
+ address-family ipv4
+  neighbor 203.0.113.1 activate
+  neighbor 203.0.113.1 route-map ISP-IN in
+  neighbor 203.0.113.1 route-map ISP-OUT out
+ exit-address-family
+!
+ip forward-protocol nd
+no ip http server
+no ip http secure-server
+ip route 0.0.0.0 0.0.0.0 203.0.113.1
+ip route vrf Mgmt-intf 0.0.0.0 0.0.0.0 10.255.1.1
+ip ssh version 2
+!
+ip prefix-list DEFAULT-ONLY seq 5 permit 0.0.0.0/0
+!
+route-map ISP-IN permit 10
+ match ip address prefix-list DEFAULT-ONLY
+!
+route-map ISP-OUT deny 10
+!
+snmp-server community FAKECOMMUNITY RO
+!
+control-plane
+ service-policy input system-cpp-policy
+!
+banner login ^C
+Demo estate. Authorized access only.
+^C
+!
+line con 0
+ stopbits 1
+line vty 0 4
+ password 7 FAKEVTYPASSWORD
+ login
+ transport input ssh
+!
+ntp server vrf Mgmt-intf 10.255.1.5
+!
+end

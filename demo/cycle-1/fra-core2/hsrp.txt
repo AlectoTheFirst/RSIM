@@ -1,0 +1,6 @@
+                     P indicates configured to preempt.
+                     |
+Interface   Grp  Pri P State   Active          Standby         Virtual IP
+Vl99        99   100 P Standby 10.12.99.2      local           10.12.99.1
+Vl110       110  100 P Standby 10.12.110.2     local           10.12.110.1
+Vl120       120  100 P Standby 10.12.120.2     local           10.12.120.1

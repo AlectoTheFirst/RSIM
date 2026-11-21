@@ -68,7 +68,6 @@ pub fn hsrp_mac(g: u16) -> Mac {
 pub enum Proto {
     Ospf,
     Ebgp,
-    Ibgp,
 }
 
 /// The layer 2 or layer 3 mode of an interface.
@@ -91,8 +90,6 @@ pub enum Mode {
     Nve,
     /// The management port.
     Mgmt,
-    /// A port with no config but its description, shut down.
-    Unused,
 }
 
 /// An HSRP group of an SVI.
@@ -259,8 +256,6 @@ pub struct Host {
     pub name: String,
     pub mac: Mac,
     pub ip: Ipv4Addr,
-    pub plen: u8,
-    pub gateway: Ipv4Addr,
     pub dev: usize,
     pub port: String,
     pub vlan: u16,
@@ -293,13 +288,6 @@ pub struct Estate {
 }
 
 impl Estate {
-    pub fn index(&self, name: &str) -> usize {
-        self.devs
-            .iter()
-            .position(|d| d.name == name)
-            .unwrap_or_else(|| panic!("no device {name}"))
-    }
-
     /// The far end of a port with a cable.
     pub fn far(&self, dev: usize, port: &str) -> Option<(usize, String)> {
         self.links.iter().find_map(|l| {
@@ -370,11 +358,6 @@ pub fn network(a: Ipv4Addr, len: u8) -> Ipv4Addr {
 /// The dotted mask of a length.
 pub fn mask(len: u8) -> Ipv4Addr {
     Ipv4Addr::from(if len == 0 { 0 } else { u32::MAX << (32 - len) })
-}
-
-/// The wildcard of a length.
-pub fn wildcard(len: u8) -> Ipv4Addr {
-    Ipv4Addr::from(!u32::from(mask(len)))
 }
 
 pub fn ip(a: u8, b: u8, c: u8, d: u8) -> Ipv4Addr {

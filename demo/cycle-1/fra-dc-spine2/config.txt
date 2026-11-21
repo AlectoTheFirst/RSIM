@@ -1,0 +1,179 @@
+!Command: show running-config
+!Running configuration last done at: Mon Nov  2 07:30:00 2026
+!Time: Mon Nov  2 08:00:00 2026
+
+version 10.3(4a) Bios:version 05.47
+hostname fra-dc-spine2
+vdc fra-dc-spine2 id 1
+  limit-resource vlan minimum 16 maximum 4094
+  limit-resource vrf minimum 2 maximum 4096
+
+feature bgp
+feature lldp
+feature ospf
+
+username admin password 5 $5$DEMOSALT$FAKEHASHFAKEHASHFAKEHASH  role network-admin
+ip domain-lookup
+ip domain-name demo.example
+copp profile strict
+snmp-server community FAKECOMMUNITY group network-operator
+ntp server 10.255.1.5 use-vrf management
+
+vrf context management
+  ip route 0.0.0.0/0 10.255.1.1
+
+interface loopback0
+  ip address 10.10.0.2/32
+  ip router ospf UNDERLAY area 0.0.0.0
+
+interface mgmt0
+  description oob management
+  vrf member management
+  ip address 10.255.1.13/24
+
+interface Ethernet1/1
+  description fra-dc-leaf1
+  no switchport
+  mtu 9216
+  ip address 10.10.100.2/31
+  ip ospf network point-to-point
+  ip router ospf UNDERLAY area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/2
+  description fra-dc-leaf2
+  no switchport
+  mtu 9216
+  ip address 10.10.100.6/31
+  ip ospf network point-to-point
+  ip router ospf UNDERLAY area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/3
+  description fra-dc-leaf3
+  no switchport
+  mtu 9216
+  ip address 10.10.100.10/31
+  ip ospf network point-to-point
+  ip router ospf UNDERLAY area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/4
+  description fra-dc-leaf4
+  no switchport
+  mtu 9216
+  ip address 10.10.100.14/31
+  ip ospf network point-to-point
+  ip router ospf UNDERLAY area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/5
+  description fra-dc-leaf5
+  no switchport
+  mtu 9216
+  ip address 10.10.100.18/31
+  ip ospf network point-to-point
+  ip router ospf UNDERLAY area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/6
+  description fra-dc-leaf6
+  no switchport
+  mtu 9216
+  ip address 10.10.100.22/31
+  ip ospf network point-to-point
+  ip router ospf UNDERLAY area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/7
+  description fra-dc-bl1
+  no switchport
+  mtu 9216
+  ip address 10.10.100.26/31
+  ip ospf network point-to-point
+  ip router ospf UNDERLAY area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/8
+  description fra-dc-bl2
+  no switchport
+  mtu 9216
+  ip address 10.10.100.30/31
+  ip ospf network point-to-point
+  ip router ospf UNDERLAY area 0.0.0.0
+  no shutdown
+
+line console
+line vty
+boot nxos bootflash:/nxos64-cs.10.3.4a.M.bin
+router ospf UNDERLAY
+  router-id 10.10.0.2
+router bgp 65110
+  router-id 10.10.0.2
+  log-neighbor-changes
+  address-family l2vpn evpn
+    retain route-target all
+  neighbor 10.10.0.11
+    remote-as 65110
+    description fra-dc-leaf1
+    update-source loopback0
+    address-family l2vpn evpn
+      send-community
+      send-community extended
+      route-reflector-client
+  neighbor 10.10.0.12
+    remote-as 65110
+    description fra-dc-leaf2
+    update-source loopback0
+    address-family l2vpn evpn
+      send-community
+      send-community extended
+      route-reflector-client
+  neighbor 10.10.0.13
+    remote-as 65110
+    description fra-dc-leaf3
+    update-source loopback0
+    address-family l2vpn evpn
+      send-community
+      send-community extended
+      route-reflector-client
+  neighbor 10.10.0.14
+    remote-as 65110
+    description fra-dc-leaf4
+    update-source loopback0
+    address-family l2vpn evpn
+      send-community
+      send-community extended
+      route-reflector-client
+  neighbor 10.10.0.15
+    remote-as 65110
+    description fra-dc-leaf5
+    update-source loopback0
+    address-family l2vpn evpn
+      send-community
+      send-community extended
+      route-reflector-client
+  neighbor 10.10.0.16
+    remote-as 65110
+    description fra-dc-leaf6
+    update-source loopback0
+    address-family l2vpn evpn
+      send-community
+      send-community extended
+      route-reflector-client
+  neighbor 10.10.0.21
+    remote-as 65110
+    description fra-dc-bl1
+    update-source loopback0
+    address-family l2vpn evpn
+      send-community
+      send-community extended
+      route-reflector-client
+  neighbor 10.10.0.22
+    remote-as 65110
+    description fra-dc-bl2
+    update-source loopback0
+    address-family l2vpn evpn
+      send-community
+      send-community extended
+      route-reflector-client

@@ -1,0 +1,61 @@
+------------------------------------------------
+Local Intf: Te0/1/0
+Chassis id: 025e.0018.0000
+Port id: TenGigE0/0/0/4
+Port Description: par-inet1
+System Name: par-wan1
+
+System Description:
+Cisco IOS XR Software, Version 7.11.2
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.255.2.10
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Te0/1/1
+Chassis id: 025e.0019.0000
+Port id: TenGigE0/0/0/4
+Port Description: par-inet1
+System Name: par-wan2
+
+System Description:
+Cisco IOS XR Software, Version 7.11.2
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.255.2.11
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Gi0/0/0
+Chassis id: 025e.ff00.0002
+Port id: TenGigE0/0/0/7
+Port Description: customer demo enterprise
+System Name: isp-edge2
+
+System Description:
+Provider edge router
+
+Time remaining: 98 seconds
+System Capabilities: R
+Enabled Capabilities: R
+Management Addresses - not advertised
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+
+Total entries displayed: 3

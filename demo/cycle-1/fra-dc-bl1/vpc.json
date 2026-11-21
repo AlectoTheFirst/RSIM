@@ -1,0 +1,19 @@
+{
+  "TABLE_peerlink": {
+    "ROW_peerlink": [
+      {
+        "peer-link-id": "1",
+        "peer-link-port-state": "1",
+        "peer-up-vlan-bitset": "90,3001",
+        "peerlink-ifindex": "Po1"
+      }
+    ]
+  },
+  "num-of-vpcs": "0",
+  "vpc-domain-id": "109",
+  "vpc-peer-consistency": "consistent",
+  "vpc-peer-keepalive-status": "peer-alive",
+  "vpc-peer-status": "peer-ok",
+  "vpc-peer-status-reason": "SUCCESS",
+  "vpc-role": "primary"
+}

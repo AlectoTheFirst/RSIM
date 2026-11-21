@@ -1,0 +1,8 @@
+Protocol  Address          Age (min)  Hardware Addr   Type   Interface
+Internet  10.22.99.1             3   0000.0c07.ac63  ARPA   Vlan99
+Internet  10.22.99.2             3   025e.0022.0006  ARPA   Vlan99
+Internet  10.22.99.3             3   025e.0023.0006  ARPA   Vlan99
+Internet  10.22.99.10            3   025e.0024.0003  ARPA   Vlan99
+Internet  10.22.99.11            3   025e.0025.0003  ARPA   Vlan99
+Internet  10.22.99.12            -   025e.0026.0003  ARPA   Vlan99
+Internet  10.22.99.13            3   025e.0027.0003  ARPA   Vlan99

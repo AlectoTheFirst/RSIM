@@ -1,0 +1,42 @@
+------------------------------------------------
+Local Intf: Te1/1/1
+Chassis id: 025e.000d.0000
+Port id: Te1/0/11
+Port Description: fra-acc2
+System Name: fra-core1
+
+System Description:
+Cisco IOS Software [Cupertino], C9500-48Y4C Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.255.1.22
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Te1/1/2
+Chassis id: 025e.000e.0000
+Port id: Te1/0/11
+Port Description: fra-acc2
+System Name: fra-core2
+
+System Description:
+Cisco IOS Software [Cupertino], C9500-48Y4C Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.255.1.23
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+
+Total entries displayed: 2

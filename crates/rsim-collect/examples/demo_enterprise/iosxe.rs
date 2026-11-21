@@ -148,7 +148,7 @@ fn config_body(dev: &Dev) -> String {
                     s.push_str(" negotiation auto\n");
                 }
             }
-            Mode::Nve | Mode::Unused => s.push_str(" shutdown\n"),
+            Mode::Nve => s.push_str(" shutdown\n"),
         }
         s.push_str("!\n");
     }

@@ -1,0 +1,178 @@
+{
+  "TABLE_interface": {
+    "ROW_interface": [
+      {
+        "admin_state": "up",
+        "eth_ip_addr": "10.10.0.14",
+        "eth_ip_mask": 32,
+        "interface": "loopback0",
+        "state": "up"
+      },
+      {
+        "admin_state": "up",
+        "eth_ip_addr": "10.10.1.14",
+        "eth_ip_mask": 32,
+        "interface": "loopback1",
+        "state": "up"
+      },
+      {
+        "admin_state": "up",
+        "desc": "fra-dc-spine1",
+        "eth_bw": 10000000,
+        "eth_duplex": "full",
+        "eth_hw_addr": "025e.0008.0003",
+        "eth_inpkts": 184220113,
+        "eth_ip_addr": "10.10.100.13",
+        "eth_ip_mask": 31,
+        "eth_link_flapped": "5week(s) 6day(s)",
+        "eth_mode": "routed",
+        "eth_mtu": "9216",
+        "eth_outpkts": 176904552,
+        "eth_speed": "10 Gb/s",
+        "interface": "Ethernet1/49",
+        "state": "up"
+      },
+      {
+        "admin_state": "up",
+        "desc": "fra-dc-spine2",
+        "eth_bw": 10000000,
+        "eth_duplex": "full",
+        "eth_hw_addr": "025e.0008.0004",
+        "eth_inpkts": 184220113,
+        "eth_ip_addr": "10.10.100.15",
+        "eth_ip_mask": 31,
+        "eth_link_flapped": "5week(s) 6day(s)",
+        "eth_mode": "routed",
+        "eth_mtu": "9216",
+        "eth_outpkts": 176904552,
+        "eth_speed": "10 Gb/s",
+        "interface": "Ethernet1/50",
+        "state": "up"
+      },
+      {
+        "interface": "Vlan30",
+        "svi_admin_state": "up",
+        "svi_desc": "SHOP-DB",
+        "svi_ip_addr": "10.11.30.1",
+        "svi_ip_mask": 24,
+        "svi_line_proto": "up",
+        "svi_mac": "025e.0008.0005",
+        "svi_mtu": 1500
+      },
+      {
+        "interface": "Vlan40",
+        "svi_admin_state": "up",
+        "svi_desc": "INFRA",
+        "svi_ip_addr": "10.11.40.1",
+        "svi_ip_mask": 24,
+        "svi_line_proto": "up",
+        "svi_mac": "025e.0008.0006",
+        "svi_mtu": 1500
+      },
+      {
+        "interface": "Vlan3001",
+        "svi_admin_state": "up",
+        "svi_desc": "PROD-L3VNI",
+        "svi_line_proto": "up",
+        "svi_mac": "025e.0008.0007",
+        "svi_mtu": 9216
+      },
+      {
+        "admin_state": "up",
+        "desc": "vpc peer-link",
+        "eth_bw": 10000000,
+        "eth_duplex": "full",
+        "eth_hw_addr": "025e.0008.0008",
+        "eth_inpkts": 184220113,
+        "eth_link_flapped": "5week(s) 6day(s)",
+        "eth_mode": "trunk",
+        "eth_mtu": "9216",
+        "eth_outpkts": 176904552,
+        "eth_speed": "10 Gb/s",
+        "interface": "Ethernet1/53",
+        "state": "up"
+      },
+      {
+        "admin_state": "up",
+        "desc": "vpc peer-link",
+        "eth_bw": 10000000,
+        "eth_duplex": "full",
+        "eth_hw_addr": "025e.0008.0009",
+        "eth_inpkts": 184220113,
+        "eth_link_flapped": "5week(s) 6day(s)",
+        "eth_mode": "trunk",
+        "eth_mtu": "9216",
+        "eth_outpkts": 176904552,
+        "eth_speed": "10 Gb/s",
+        "interface": "Ethernet1/54",
+        "state": "up"
+      },
+      {
+        "admin_state": "up",
+        "desc": "vpc peer-link",
+        "eth_bw": 20000000,
+        "eth_duplex": "full",
+        "eth_hw_addr": "025e.0008.0008",
+        "eth_inpkts": 184220113,
+        "eth_link_flapped": "5week(s) 6day(s)",
+        "eth_mode": "trunk",
+        "eth_mtu": "9216",
+        "eth_outpkts": 176904552,
+        "eth_speed": "20 Gb/s",
+        "interface": "port-channel1",
+        "state": "up"
+      },
+      {
+        "admin_state": "up",
+        "interface": "nve1",
+        "state": "up"
+      },
+      {
+        "admin_state": "up",
+        "desc": "oob management",
+        "eth_bw": 1000000,
+        "eth_duplex": "full",
+        "eth_hw_addr": "025e.0008.000c",
+        "eth_inpkts": 184220113,
+        "eth_ip_addr": "10.255.1.17",
+        "eth_ip_mask": 24,
+        "eth_link_flapped": "5week(s) 6day(s)",
+        "eth_mtu": "1500",
+        "eth_outpkts": 176904552,
+        "eth_speed": "1 Gb/s",
+        "interface": "mgmt0",
+        "state": "up"
+      },
+      {
+        "admin_state": "up",
+        "desc": "fra-db02",
+        "eth_bw": 25000000,
+        "eth_duplex": "full",
+        "eth_hw_addr": "025e.0008.000d",
+        "eth_inpkts": 184220113,
+        "eth_link_flapped": "5week(s) 6day(s)",
+        "eth_mode": "access",
+        "eth_mtu": "9216",
+        "eth_outpkts": 176904552,
+        "eth_speed": "25 Gb/s",
+        "interface": "Ethernet1/1",
+        "state": "up"
+      },
+      {
+        "admin_state": "up",
+        "desc": "fra-ntp01",
+        "eth_bw": 25000000,
+        "eth_duplex": "full",
+        "eth_hw_addr": "025e.0008.000e",
+        "eth_inpkts": 184220113,
+        "eth_link_flapped": "5week(s) 6day(s)",
+        "eth_mode": "access",
+        "eth_mtu": "9216",
+        "eth_outpkts": 176904552,
+        "eth_speed": "25 Gb/s",
+        "interface": "Ethernet1/2",
+        "state": "up"
+      }
+    ]
+  }
+}

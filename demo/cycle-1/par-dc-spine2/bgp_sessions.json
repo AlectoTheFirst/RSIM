@@ -1,0 +1,98 @@
+{
+  "TABLE_vrf": {
+    "ROW_vrf": [
+      {
+        "TABLE_neighbor": {
+          "ROW_neighbor": [
+            {
+              "connectionsdropped": "0",
+              "lastflap": "P41DT3H",
+              "lastread": "PT14S",
+              "lastwrite": "PT21S",
+              "localport": "179",
+              "neighbor-id": "10.20.0.11",
+              "notificationsreceived": "0",
+              "notificationssent": "0",
+              "remoteas": "65120",
+              "remoteport": "41022",
+              "state": "Established"
+            },
+            {
+              "connectionsdropped": "0",
+              "lastflap": "P41DT3H",
+              "lastread": "PT14S",
+              "lastwrite": "PT21S",
+              "localport": "179",
+              "neighbor-id": "10.20.0.12",
+              "notificationsreceived": "0",
+              "notificationssent": "0",
+              "remoteas": "65120",
+              "remoteport": "41022",
+              "state": "Established"
+            },
+            {
+              "connectionsdropped": "0",
+              "lastflap": "P41DT3H",
+              "lastread": "PT14S",
+              "lastwrite": "PT21S",
+              "localport": "179",
+              "neighbor-id": "10.20.0.13",
+              "notificationsreceived": "0",
+              "notificationssent": "0",
+              "remoteas": "65120",
+              "remoteport": "41022",
+              "state": "Established"
+            },
+            {
+              "connectionsdropped": "0",
+              "lastflap": "P41DT3H",
+              "lastread": "PT14S",
+              "lastwrite": "PT21S",
+              "localport": "179",
+              "neighbor-id": "10.20.0.14",
+              "notificationsreceived": "0",
+              "notificationssent": "0",
+              "remoteas": "65120",
+              "remoteport": "41022",
+              "state": "Established"
+            },
+            {
+              "connectionsdropped": "0",
+              "lastflap": "P41DT3H",
+              "lastread": "PT14S",
+              "lastwrite": "PT21S",
+              "localport": "179",
+              "neighbor-id": "10.20.0.21",
+              "notificationsreceived": "0",
+              "notificationssent": "0",
+              "remoteas": "65120",
+              "remoteport": "41022",
+              "state": "Established"
+            },
+            {
+              "connectionsdropped": "0",
+              "lastflap": "P41DT3H",
+              "lastread": "PT14S",
+              "lastwrite": "PT21S",
+              "localport": "179",
+              "neighbor-id": "10.20.0.22",
+              "notificationsreceived": "0",
+              "notificationssent": "0",
+              "remoteas": "65120",
+              "remoteport": "41022",
+              "state": "Established"
+            }
+          ]
+        },
+        "local-as": "65120",
+        "router-id": "10.20.0.2",
+        "vrf-name-out": "default",
+        "vrfestablishedpeers": "6",
+        "vrfpeers": "6"
+      }
+    ]
+  },
+  "localas": "65120",
+  "totalestablishedpeers": "6",
+  "totalpeers": "6"
+}

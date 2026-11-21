@@ -1,0 +1,76 @@
+{
+  "TABLE_vrf": {
+    "ROW_vrf": [
+      {
+        "TABLE_adj": {
+          "ROW_adj": [
+            {
+              "intf-out": "Ethernet1/1",
+              "ip-addr-out": "10.10.100.1",
+              "mac": "025e.0005.0003",
+              "time-stamp": "00:04:12"
+            },
+            {
+              "intf-out": "Ethernet1/2",
+              "ip-addr-out": "10.10.100.5",
+              "mac": "025e.0006.0003",
+              "time-stamp": "00:04:12"
+            },
+            {
+              "intf-out": "Ethernet1/3",
+              "ip-addr-out": "10.10.100.9",
+              "mac": "025e.0007.0003",
+              "time-stamp": "00:04:12"
+            },
+            {
+              "intf-out": "Ethernet1/4",
+              "ip-addr-out": "10.10.100.13",
+              "mac": "025e.0008.0003",
+              "time-stamp": "00:04:12"
+            },
+            {
+              "intf-out": "Ethernet1/5",
+              "ip-addr-out": "10.10.100.17",
+              "mac": "025e.0009.0003",
+              "time-stamp": "00:04:12"
+            },
+            {
+              "intf-out": "Ethernet1/6",
+              "ip-addr-out": "10.10.100.21",
+              "mac": "025e.000a.0003",
+              "time-stamp": "00:04:12"
+            },
+            {
+              "intf-out": "Ethernet1/7",
+              "ip-addr-out": "10.10.100.25",
+              "mac": "025e.000b.0003",
+              "time-stamp": "00:04:12"
+            },
+            {
+              "intf-out": "Ethernet1/8",
+              "ip-addr-out": "10.10.100.29",
+              "mac": "025e.000c.0003",
+              "time-stamp": "00:04:12"
+            }
+          ]
+        },
+        "cnt-total": 8,
+        "vrf-name-out": "default"
+      },
+      {
+        "TABLE_adj": {
+          "ROW_adj": [
+            {
+              "intf-out": "mgmt0",
+              "ip-addr-out": "10.255.1.1",
+              "mac": "025e.fe00.0000",
+              "time-stamp": "00:04:12"
+            }
+          ]
+        },
+        "cnt-total": 1,
+        "vrf-name-out": "management"
+      }
+    ]
+  }
+}

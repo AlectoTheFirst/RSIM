@@ -1,0 +1,91 @@
+Mon Nov  2 08:00:00.000 UTC
+
+VRF: MGMT
+
+Codes: C - connected, S - static, R - RIP, B - BGP, (>) - Diversion path
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2, E - EGP
+       i - ISIS, L1 - IS-IS level-1, L2 - IS-IS level-2
+       ia - IS-IS inter area, su - IS-IS summary null, * - candidate default
+       U - per-user static route, o - ODR, L - local, G  - DAGR, l - LISP
+       A - access/subscriber, a - Application route
+       M - mobile route, r - RPL, t - Traffic Engineering, (!) - FRR Backup path
+
+Gateway of last resort is 10.255.1.1 to network 0.0.0.0
+
+S*   0.0.0.0/0 [1/0] via 10.255.1.1, 5w6d
+C    10.255.1.0/24 is directly connected, 5w6d, MgmtEth0/RP0/CPU0/0
+L    10.255.1.11/32 is directly connected, 5w6d, MgmtEth0/RP0/CPU0/0
+
+VRF: default
+
+Codes: C - connected, S - static, R - RIP, B - BGP, (>) - Diversion path
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2, E - EGP
+       i - ISIS, L1 - IS-IS level-1, L2 - IS-IS level-2
+       ia - IS-IS inter area, su - IS-IS summary null, * - candidate default
+       U - per-user static route, o - ODR, L - local, G  - DAGR, l - LISP
+       A - access/subscriber, a - Application route
+       M - mobile route, r - RPL, t - Traffic Engineering, (!) - FRR Backup path
+
+Gateway of last resort is 10.16.0.3 to network 0.0.0.0
+
+O*E2 0.0.0.0/0 [110/11] via 10.16.0.3, 5w6d, TenGigE0/0/0/4
+B    10.11.10.0/24 [20/0] via 10.19.0.3, 5w6d
+B    10.11.20.0/24 [20/0] via 10.19.0.3, 5w6d
+B    10.11.30.0/24 [20/0] via 10.19.0.3, 5w6d
+B    10.11.40.0/24 [20/0] via 10.19.0.3, 5w6d
+B    10.11.50.0/24 [20/0] via 10.19.0.3, 5w6d
+B    10.11.90.0/24 [20/0] via 10.19.0.3, 5w6d
+O    10.12.99.0/24 [110/11] via 10.18.0.3, 5w6d, TenGigE0/0/0/2
+O    10.12.110.0/24 [110/11] via 10.18.0.3, 5w6d, TenGigE0/0/0/2
+O    10.12.120.0/24 [110/11] via 10.18.0.3, 5w6d, TenGigE0/0/0/2
+O    10.12.250.0/29 [110/11] via 10.18.0.3, 5w6d, TenGigE0/0/0/2
+O    10.16.0.0/31 [110/11] via 10.16.0.3, 5w6d, TenGigE0/0/0/4
+                  [110/11] via 10.17.1.0, 5w6d, TenGigE0/0/0/1
+C    10.16.0.2/31 is directly connected, 5w6d, TenGigE0/0/0/4
+L    10.16.0.2/32 is directly connected, 5w6d, TenGigE0/0/0/4
+O    10.16.255.1/32 [110/11] via 10.16.0.3, 5w6d, TenGigE0/0/0/4
+O    10.17.0.1/32 [110/11] via 10.17.1.0, 5w6d, TenGigE0/0/0/1
+L    10.17.0.2/32 is directly connected, 5w6d, Loopback0
+C    10.17.1.0/31 is directly connected, 5w6d, TenGigE0/0/0/1
+L    10.17.1.1/32 is directly connected, 5w6d, TenGigE0/0/0/1
+O    10.18.0.0/31 [110/11] via 10.17.1.0, 5w6d, TenGigE0/0/0/1
+C    10.18.0.2/31 is directly connected, 5w6d, TenGigE0/0/0/2
+L    10.18.0.2/32 is directly connected, 5w6d, TenGigE0/0/0/2
+O    10.18.255.1/32 [110/21] via 10.17.1.0, 5w6d, TenGigE0/0/0/1
+                    [110/21] via 10.18.0.3, 5w6d, TenGigE0/0/0/2
+O    10.18.255.2/32 [110/11] via 10.18.0.3, 5w6d, TenGigE0/0/0/2
+O    10.19.0.0/31 [110/11] via 10.17.1.0, 5w6d, TenGigE0/0/0/1
+C    10.19.0.2/31 is directly connected, 5w6d, TenGigE0/0/0/3
+L    10.19.0.2/32 is directly connected, 5w6d, TenGigE0/0/0/3
+B    10.21.10.0/24 [20/0] via 10.250.0.3, 5w6d
+B    10.21.30.0/24 [20/0] via 10.250.0.3, 5w6d
+B    10.21.40.0/24 [20/0] via 10.250.0.3, 5w6d
+B    10.21.60.0/24 [20/0] via 10.250.0.3, 5w6d
+B    10.21.90.0/24 [20/0] via 10.250.0.3, 5w6d
+B    10.22.99.0/24 [20/0] via 10.250.0.3, 5w6d
+B    10.22.110.0/24 [20/0] via 10.250.0.3, 5w6d
+B    10.22.120.0/24 [20/0] via 10.250.0.3, 5w6d
+B    10.22.250.0/29 [20/0] via 10.250.0.3, 5w6d
+O    10.26.0.0/31 [110/111] via 10.17.1.0, 5w6d, TenGigE0/0/0/1
+B    10.26.0.2/31 [20/0] via 10.250.0.3, 5w6d
+B    10.26.255.1/32 [20/0] via 10.250.0.3, 5w6d
+O    10.27.0.1/32 [110/111] via 10.17.1.0, 5w6d, TenGigE0/0/0/1
+B    10.27.0.2/32 [20/0] via 10.250.0.3, 5w6d
+B    10.27.1.0/31 [20/0] via 10.250.0.3, 5w6d
+O    10.28.0.0/31 [110/111] via 10.17.1.0, 5w6d, TenGigE0/0/0/1
+B    10.28.0.2/31 [20/0] via 10.250.0.3, 5w6d
+O    10.28.255.1/32 [110/121] via 10.17.1.0, 5w6d, TenGigE0/0/0/1
+B    10.28.255.2/32 [20/0] via 10.250.0.3, 5w6d
+O    10.29.0.0/31 [110/111] via 10.17.1.0, 5w6d, TenGigE0/0/0/1
+B    10.29.0.2/31 [20/0] via 10.250.0.3, 5w6d
+O    10.99.0.0/31 [110/41] via 10.17.1.0, 5w6d, TenGigE0/0/0/1
+B    10.99.0.2/31 [20/0] via 10.19.0.3, 5w6d
+O    10.250.0.0/31 [110/11] via 10.17.1.0, 5w6d, TenGigE0/0/0/1
+C    10.250.0.2/31 is directly connected, 5w6d, TenGigE0/0/0/0
+L    10.250.0.2/32 is directly connected, 5w6d, TenGigE0/0/0/0
+B    198.51.100.0/31 [20/0] via 10.250.0.3, 5w6d
+O    203.0.113.0/31 [110/11] via 10.16.0.3, 5w6d, TenGigE0/0/0/4

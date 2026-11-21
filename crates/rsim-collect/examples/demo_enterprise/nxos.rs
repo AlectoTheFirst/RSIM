@@ -217,7 +217,7 @@ fn config(e: &Estate, d: usize) -> String {
                     let _ = writeln!(s, "  vrf member {}\n  ip address {a}/{l}", i.vrf);
                 }
             }
-            Mode::Trunk(_) | Mode::Unused => {}
+            Mode::Trunk(_) => {}
         }
         s.push('\n');
     }

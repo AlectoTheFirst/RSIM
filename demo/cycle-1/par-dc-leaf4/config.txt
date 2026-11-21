@@ -1,0 +1,186 @@
+!Command: show running-config
+!Running configuration last done at: Mon Nov  2 07:30:00 2026
+!Time: Mon Nov  2 08:00:00 2026
+
+version 10.3(4a) Bios:version 05.47
+hostname par-dc-leaf4
+vdc par-dc-leaf4 id 1
+  limit-resource vlan minimum 16 maximum 4094
+  limit-resource vrf minimum 2 maximum 4096
+
+nv overlay evpn
+feature bgp
+feature fabric forwarding
+feature interface-vlan
+feature lacp
+feature lldp
+feature nv overlay
+feature ospf
+feature vn-segment-vlan-based
+feature vpc
+
+username admin password 5 $5$DEMOSALT$FAKEHASHFAKEHASHFAKEHASH  role network-admin
+ip domain-lookup
+ip domain-name demo.example
+copp profile strict
+snmp-server community FAKECOMMUNITY group network-operator
+ntp server 10.255.2.5 use-vrf management
+
+fabric forwarding anycast-gateway-mac 0000.5e00.5300
+vlan 1,3001,30,60
+vlan 3001
+  name PROD-L3VNI
+  vn-segment 50001
+vlan 30
+  name SHOP-DB
+  vn-segment 10030
+vlan 60
+  name FILES
+  vn-segment 10060
+
+vrf context PROD
+  vni 50001
+  rd auto
+  address-family ipv4 unicast
+    route-target both auto
+    route-target both auto evpn
+vrf context management
+  ip route 0.0.0.0/0 10.255.2.1
+vpc domain 202
+  peer-switch
+  role priority 200
+  peer-keepalive destination 10.255.2.16 source 10.255.2.17
+  delay restore 150
+  peer-gateway
+  auto-recovery
+  ip arp synchronize
+
+interface loopback0
+  ip address 10.20.0.14/32
+  ip router ospf UNDERLAY area 0.0.0.0
+
+interface loopback1
+  ip address 10.20.1.14/32
+  ip address 10.20.2.2/32 secondary
+  ip router ospf UNDERLAY area 0.0.0.0
+
+interface Ethernet1/49
+  description par-dc-spine1
+  no switchport
+  mtu 9216
+  ip address 10.20.100.13/31
+  ip ospf network point-to-point
+  ip router ospf UNDERLAY area 0.0.0.0
+  no shutdown
+
+interface Ethernet1/50
+  description par-dc-spine2
+  no switchport
+  mtu 9216
+  ip address 10.20.100.15/31
+  ip ospf network point-to-point
+  ip router ospf UNDERLAY area 0.0.0.0
+  no shutdown
+
+interface Vlan30
+  description SHOP-DB
+  no shutdown
+  vrf member PROD
+  ip address 10.21.30.1/24
+  fabric forwarding mode anycast-gateway
+
+interface Vlan60
+  description FILES
+  no shutdown
+  vrf member PROD
+  ip address 10.21.60.1/24
+  fabric forwarding mode anycast-gateway
+
+interface Vlan3001
+  description PROD-L3VNI
+  no shutdown
+  mtu 9216
+  vrf member PROD
+  ip forward
+
+interface Ethernet1/53
+  description vpc peer-link
+  switchport
+  switchport mode trunk
+  switchport trunk allowed vlan 30,60,3001
+  channel-group 1 mode active
+  no shutdown
+
+interface Ethernet1/54
+  description vpc peer-link
+  switchport
+  switchport mode trunk
+  switchport trunk allowed vlan 30,60,3001
+  channel-group 1 mode active
+  no shutdown
+
+interface port-channel1
+  description vpc peer-link
+  switchport
+  switchport mode trunk
+  switchport trunk allowed vlan 30,60,3001
+  spanning-tree port type network
+  vpc peer-link
+
+interface nve1
+  no shutdown
+  host-reachability protocol bgp
+  source-interface loopback1
+  member vni 50001 associate-vrf
+  member vni 10030
+    ingress-replication protocol bgp
+  member vni 10060
+    ingress-replication protocol bgp
+
+interface mgmt0
+  description oob management
+  vrf member management
+  ip address 10.255.2.17/24
+
+interface Ethernet1/1
+  description par-files02
+  switchport
+  switchport access vlan 60
+  spanning-tree port type edge
+  no shutdown
+
+line console
+line vty
+boot nxos bootflash:/nxos64-cs.10.3.4a.M.bin
+router ospf UNDERLAY
+  router-id 10.20.0.14
+router bgp 65120
+  router-id 10.20.0.14
+  log-neighbor-changes
+  address-family l2vpn evpn
+  neighbor 10.20.0.1
+    remote-as 65120
+    description par-dc-spine1
+    update-source loopback0
+    address-family l2vpn evpn
+      send-community
+      send-community extended
+  neighbor 10.20.0.2
+    remote-as 65120
+    description par-dc-spine2
+    update-source loopback0
+    address-family l2vpn evpn
+      send-community
+      send-community extended
+  vrf PROD
+    address-family ipv4 unicast
+      advertise l2vpn evpn
+evpn
+  vni 10030 l2
+    rd auto
+    route-target import auto
+    route-target export auto
+  vni 10060 l2
+    rd auto
+    route-target import auto
+    route-target export auto

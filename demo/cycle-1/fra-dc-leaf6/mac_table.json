@@ -1,0 +1,36 @@
+{
+  "TABLE_mac_address": {
+    "ROW_mac_address": [
+      {
+        "disp_age": "0",
+        "disp_is_ntfy": "disabled",
+        "disp_is_secure": "disabled",
+        "disp_is_static": "disabled",
+        "disp_mac_addr": "025e.0a0b.320b",
+        "disp_port": "Po1",
+        "disp_type": "dynamic",
+        "disp_vlan": "50"
+      },
+      {
+        "disp_age": "0",
+        "disp_is_ntfy": "disabled",
+        "disp_is_secure": "disabled",
+        "disp_is_static": "disabled",
+        "disp_mac_addr": "025e.0a0b.320c",
+        "disp_port": "Eth1/1",
+        "disp_type": "dynamic",
+        "disp_vlan": "50"
+      },
+      {
+        "disp_age": "0",
+        "disp_is_ntfy": "disabled",
+        "disp_is_secure": "disabled",
+        "disp_is_static": "disabled",
+        "disp_mac_addr": "025e.0a0b.3215",
+        "disp_port": "Po1",
+        "disp_type": "dynamic",
+        "disp_vlan": "50"
+      }
+    ]
+  }
+}

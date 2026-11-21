@@ -1,0 +1,42 @@
+------------------------------------------------
+Local Intf: Te1/1/1
+Chassis id: 025e.0022.0000
+Port id: Te1/0/10
+Port Description: par-acc1
+System Name: par-core1
+
+System Description:
+Cisco IOS Software [Cupertino], C9500-48Y4C Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.255.2.20
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Te1/1/2
+Chassis id: 025e.0023.0000
+Port id: Te1/0/10
+Port Description: par-acc1
+System Name: par-core2
+
+System Description:
+Cisco IOS Software [Cupertino], C9500-48Y4C Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.255.2.21
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+
+Total entries displayed: 2

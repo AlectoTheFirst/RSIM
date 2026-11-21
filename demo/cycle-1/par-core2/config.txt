@@ -1,0 +1,165 @@
+Building configuration...
+
+Current configuration : 3179 bytes
+!
+! Last configuration change at 07:30:00 UTC Mon Nov 2 2026 by admin
+!
+version 17.9
+service timestamps debug datetime msec
+service timestamps log datetime msec
+service password-encryption
+no platform punt-keepalive disable-kernel-core
+!
+hostname par-core2
+!
+vrf definition Mgmt-vrf
+ !
+ address-family ipv4
+ exit-address-family
+ !
+ address-family ipv6
+ exit-address-family
+!
+no logging console
+enable secret 9 $9$DEMOSALT$FAKEHASHFAKEHASH
+!
+no aaa new-model
+switch 1 provision c9500-48y4c
+!
+ip routing
+!
+no ip domain lookup
+ip domain name demo.example
+login on-success log
+vtp domain DEMO
+vtp mode transparent
+!
+spanning-tree mode rapid-pvst
+spanning-tree extend system-id
+spanning-tree vlan 99,110,120,900 priority 8192
+!
+redundancy
+ mode sso
+!
+vlan 99
+ name MGMT
+!
+vlan 110
+ name USERS
+!
+vlan 120
+ name PRINTERS
+!
+vlan 900
+ name CORE-TRANSIT
+!
+interface Loopback0
+ ip address 10.28.255.2 255.255.255.255
+ ip ospf 1 area 0
+!
+interface TenGigabitEthernet1/0/1
+ description par-wan2
+ no switchport
+ ip address 10.28.0.3 255.255.255.254
+ ip ospf network point-to-point
+ ip ospf 1 area 0
+!
+interface TenGigabitEthernet1/0/47
+ description par-core1
+ switchport trunk allowed vlan 99,110,120,900
+ switchport mode trunk
+ channel-group 1 mode active
+!
+interface TenGigabitEthernet1/0/48
+ description par-core1
+ switchport trunk allowed vlan 99,110,120,900
+ switchport mode trunk
+ channel-group 1 mode active
+!
+interface Port-channel1
+ description par-core1
+ switchport trunk allowed vlan 99,110,120,900
+ switchport mode trunk
+!
+interface Vlan99
+ description MGMT
+ ip address 10.22.99.3 255.255.255.0
+ standby 99 ip 10.22.99.1
+ standby 99 priority 100
+ standby 99 preempt
+!
+interface Vlan110
+ description USERS
+ ip address 10.22.110.3 255.255.255.0
+ standby 110 ip 10.22.110.1
+ standby 110 priority 100
+ standby 110 preempt
+!
+interface Vlan120
+ description PRINTERS
+ ip address 10.22.120.3 255.255.255.0
+ standby 120 ip 10.22.120.1
+ standby 120 priority 100
+ standby 120 preempt
+!
+interface Vlan900
+ description CORE-TRANSIT
+ ip address 10.22.250.2 255.255.255.248
+ ip ospf 1 area 0
+!
+interface TenGigabitEthernet1/0/10
+ description par-acc1
+ switchport trunk allowed vlan 99,110,120
+ switchport mode trunk
+!
+interface TenGigabitEthernet1/0/11
+ description par-acc2
+ switchport trunk allowed vlan 99,110,120
+ switchport mode trunk
+!
+interface TenGigabitEthernet1/0/12
+ description par-acc3
+ switchport trunk allowed vlan 99,110,120
+ switchport mode trunk
+!
+interface TenGigabitEthernet1/0/13
+ description par-acc4
+ switchport trunk allowed vlan 99,110,120
+ switchport mode trunk
+!
+interface GigabitEthernet0/0
+ vrf forwarding Mgmt-vrf
+ ip address 10.255.2.21 255.255.255.0
+ negotiation auto
+!
+router ospf 1
+ router-id 10.28.255.2
+ passive-interface default
+ no passive-interface TenGigabitEthernet1/0/1
+ no passive-interface Vlan900
+!
+ip forward-protocol nd
+no ip http server
+no ip http secure-server
+ip route vrf Mgmt-vrf 0.0.0.0 0.0.0.0 10.255.2.1
+ip ssh version 2
+!
+snmp-server community FAKECOMMUNITY RO
+!
+control-plane
+ service-policy input system-cpp-policy
+!
+banner login ^C
+Demo estate. Authorized access only.
+^C
+!
+line con 0
+ stopbits 1
+line vty 0 4
+ password 7 FAKEVTYPASSWORD
+ login
+ transport input ssh
+!
+ntp server vrf Mgmt-vrf 10.255.2.5
+!
+end

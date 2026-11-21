@@ -1,0 +1,89 @@
+Mon Nov  2 08:00:00.000 UTC
+Loopback0 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is Loopback interface(s)
+  Internet address is 10.27.0.1/32
+  MTU 1500 bytes, BW 0 Kbit
+     reliability Unknown, txload Unknown, rxload Unknown
+  Encapsulation Loopback,  loopback not set,
+
+MgmtEth0/RP0/CPU0/0 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is Management Ethernet, address is 025e.0018.0002 (bia 025e.0018.0002)
+  Description: oob management
+  Internet address is 10.255.2.10/24
+  MTU 1514 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+     reliability 255/255, txload 0/255, rxload 0/255
+  Encapsulation ARPA,
+  Full-duplex, 1000Mb/s, 1000BASE-T, link type is autonegotiation
+
+TenGigE0/0/0/1 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is TenGigE, address is 025e.0018.0003 (bia 025e.0018.0003)
+  Description: par-wan2
+  Internet address is 10.27.1.0/31
+  MTU 9216 bytes, BW 10000000 Kbit (Max: 10000000 Kbit)
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA,
+  Full-duplex, 10000Mb/s, 10GBASE-LR, link type is force-up
+  Last link flapped 5w6d
+  Last input 00:00:00, output 00:00:00
+  5 minute input rate 2412000 bits/sec, 512 packets/sec
+  5 minute output rate 2298000 bits/sec, 498 packets/sec
+
+TenGigE0/0/0/3 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is TenGigE, address is 025e.0018.0004 (bia 025e.0018.0004)
+  Description: par-dc-bl1
+  Internet address is 10.29.0.0/31
+  MTU 9216 bytes, BW 10000000 Kbit (Max: 10000000 Kbit)
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA,
+  Full-duplex, 10000Mb/s, 10GBASE-LR, link type is force-up
+  Last link flapped 5w6d
+  Last input 00:00:00, output 00:00:00
+  5 minute input rate 2412000 bits/sec, 512 packets/sec
+  5 minute output rate 2298000 bits/sec, 498 packets/sec
+
+TenGigE0/0/0/2 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is TenGigE, address is 025e.0018.0005 (bia 025e.0018.0005)
+  Description: par-core1
+  Internet address is 10.28.0.0/31
+  MTU 9216 bytes, BW 10000000 Kbit (Max: 10000000 Kbit)
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA,
+  Full-duplex, 10000Mb/s, 10GBASE-LR, link type is force-up
+  Last link flapped 5w6d
+  Last input 00:00:00, output 00:00:00
+  5 minute input rate 2412000 bits/sec, 512 packets/sec
+  5 minute output rate 2298000 bits/sec, 498 packets/sec
+
+TenGigE0/0/0/4 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is TenGigE, address is 025e.0018.0006 (bia 025e.0018.0006)
+  Description: par-inet1
+  Internet address is 10.26.0.0/31
+  MTU 9216 bytes, BW 10000000 Kbit (Max: 10000000 Kbit)
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA,
+  Full-duplex, 10000Mb/s, 10GBASE-LR, link type is force-up
+  Last link flapped 5w6d
+  Last input 00:00:00, output 00:00:00
+  5 minute input rate 2412000 bits/sec, 512 packets/sec
+  5 minute output rate 2298000 bits/sec, 498 packets/sec
+
+TenGigE0/0/0/0 is up, line protocol is up
+  Interface state transitions: 1
+  Hardware is TenGigE, address is 025e.0018.0007 (bia 025e.0018.0007)
+  Description: fra-wan1
+  Internet address is 10.250.0.1/31
+  MTU 9216 bytes, BW 10000000 Kbit (Max: 10000000 Kbit)
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA,
+  Full-duplex, 10000Mb/s, 10GBASE-LR, link type is force-up
+  Last link flapped 5w6d
+  Last input 00:00:00, output 00:00:00
+  5 minute input rate 2412000 bits/sec, 512 packets/sec
+  5 minute output rate 2298000 bits/sec, 498 packets/sec
+

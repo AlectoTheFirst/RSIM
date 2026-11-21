@@ -1,0 +1,58 @@
+
+VLAN0099
+  Spanning tree enabled protocol rstp
+  Root ID    Priority    4195
+             Address     025e.000d.0000
+             Cost        2
+             Port        1 (TenGigabitEthernet1/1/1)
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    32867  (priority 32768 sys-id-ext 99)
+             Address     025e.0016.0000
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Te1/1/1             Root FWD 2         128.1    P2p
+Te1/1/2             Altn BLK 2         128.2    P2p
+
+VLAN0110
+  Spanning tree enabled protocol rstp
+  Root ID    Priority    4206
+             Address     025e.000d.0000
+             Cost        2
+             Port        1 (TenGigabitEthernet1/1/1)
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    32878  (priority 32768 sys-id-ext 110)
+             Address     025e.0016.0000
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Te1/1/1             Root FWD 2         128.1    P2p
+Te1/1/2             Altn BLK 2         128.2    P2p
+Gi1/0/1             Desg FWD 4         128.3    P2p Edge
+Gi1/0/2             Desg FWD 4         128.4    P2p Edge
+Gi1/0/3             Desg FWD 4         128.5    P2p Edge
+
+VLAN0120
+  Spanning tree enabled protocol rstp
+  Root ID    Priority    4216
+             Address     025e.000d.0000
+             Cost        2
+             Port        1 (TenGigabitEthernet1/1/1)
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    32888  (priority 32768 sys-id-ext 120)
+             Address     025e.0016.0000
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Te1/1/1             Root FWD 2         128.1    P2p
+Te1/1/2             Altn BLK 2         128.2    P2p
+Gi1/0/40            Desg FWD 4         128.3    P2p Edge

@@ -1,0 +1,26 @@
+{
+  "TABLE_vlanbrief": {
+    "ROW_vlanbrief": [
+      {
+        "vlanshowbr-shutstate": "noshutdown",
+        "vlanshowbr-vlanid": "1",
+        "vlanshowbr-vlanname": "default",
+        "vlanshowbr-vlanstate": "active"
+      },
+      {
+        "vlanshowbr-shutstate": "noshutdown",
+        "vlanshowbr-vlanid": "3001",
+        "vlanshowbr-vlanname": "PROD-L3VNI",
+        "vlanshowbr-vlanstate": "active",
+        "vlanshowplist-ifidx": "port-channel1"
+      },
+      {
+        "vlanshowbr-shutstate": "noshutdown",
+        "vlanshowbr-vlanid": "50",
+        "vlanshowbr-vlanname": "ERP",
+        "vlanshowbr-vlanstate": "active",
+        "vlanshowplist-ifidx": "port-channel1,Ethernet1/1,Ethernet1/2"
+      }
+    ]
+  }
+}

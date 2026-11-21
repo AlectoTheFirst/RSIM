@@ -1,0 +1,66 @@
+{
+  "TABLE_if": {
+    "ROW_if": [
+      {
+        "if_name": "loopback0",
+        "soo": "--",
+        "vrf_id": 1,
+        "vrf_name": "default"
+      },
+      {
+        "if_name": "mgmt0",
+        "soo": "--",
+        "vrf_id": 2,
+        "vrf_name": "management"
+      },
+      {
+        "if_name": "Ethernet1/1",
+        "soo": "--",
+        "vrf_id": 1,
+        "vrf_name": "default"
+      },
+      {
+        "if_name": "Ethernet1/2",
+        "soo": "--",
+        "vrf_id": 1,
+        "vrf_name": "default"
+      },
+      {
+        "if_name": "Ethernet1/3",
+        "soo": "--",
+        "vrf_id": 1,
+        "vrf_name": "default"
+      },
+      {
+        "if_name": "Ethernet1/4",
+        "soo": "--",
+        "vrf_id": 1,
+        "vrf_name": "default"
+      },
+      {
+        "if_name": "Ethernet1/5",
+        "soo": "--",
+        "vrf_id": 1,
+        "vrf_name": "default"
+      },
+      {
+        "if_name": "Ethernet1/6",
+        "soo": "--",
+        "vrf_id": 1,
+        "vrf_name": "default"
+      },
+      {
+        "if_name": "Ethernet1/7",
+        "soo": "--",
+        "vrf_id": 1,
+        "vrf_name": "default"
+      },
+      {
+        "if_name": "Ethernet1/8",
+        "soo": "--",
+        "vrf_id": 1,
+        "vrf_name": "default"
+      }
+    ]
+  }
+}

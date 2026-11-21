@@ -1,0 +1,18 @@
+Cisco IOS XE Software, Version 17.09.04a
+Cisco IOS Software [Cupertino], ASR1000 Software (X86_64_LINUX_IOSD-UNIVERSALK9-M), Version 17.9.4a, RELEASE SOFTWARE (fc3)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2026 by Cisco Systems, Inc.
+
+ROM: IOS-XE ROMMON
+fra-inet1 uptime is 5 weeks, 6 days, 3 hours, 12 minutes
+Uptime for this control processor is 5 weeks, 6 days, 3 hours, 14 minutes
+System returned to ROM by Reload Command
+System image file is "bootflash:packages.conf"
+Last reload reason: Reload Command
+
+cisco ASR1001-X (1RU) processor with 1863083K/6147K bytes of memory.
+Processor board ID DEMO010023
+2 Virtual Ethernet interfaces
+48 Ten Gigabit Ethernet interfaces
+
+Configuration register is 0x102

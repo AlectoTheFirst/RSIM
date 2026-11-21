@@ -70,7 +70,6 @@ struct Builder {
     e: Estate,
     /// The next free /31 of each p2p range, by range.
     p2p: std::collections::BTreeMap<[u8; 3], u8>,
-    hosts: u64,
 }
 
 fn sc(site: usize) -> u8 {
@@ -117,7 +116,7 @@ impl Builder {
         let d = &mut self.e.devs[dev];
         let has_mac = !matches!(
             i.mode,
-            Mode::Loopback | Mode::Nve | Mode::PortChannel(_) | Mode::Unused
+            Mode::Loopback | Mode::Nve | Mode::PortChannel(_)
         );
         if has_mac && i.mac.is_none() {
             let n = u64::try_from(d.ifaces.len() + 1).expect("few interfaces");
@@ -169,14 +168,11 @@ impl Builder {
         (x, y)
     }
 
-    fn host(&mut self, name: &str, ip: Ipv4Addr, plen: u8, gateway: Ipv4Addr, dev: usize, port: &str, vlan: u16) {
-        self.hosts += 1;
+    fn host(&mut self, name: &str, ip: Ipv4Addr, dev: usize, port: &str, vlan: u16) {
         self.e.hosts.push(Host {
             name: name.to_string(),
             mac: 0x025e_0000_0000 | u64::from(u32::from(ip)),
             ip,
-            plen,
-            gateway,
             dev,
             port: port.to_string(),
             vlan,
@@ -253,11 +249,9 @@ pub fn estate(cycle: usize) -> Estate {
     let mut b = Builder {
         e: Estate::default(),
         p2p: Default::default(),
-        hosts: 0,
     };
     let mut wans = [[0usize; 2]; 2];
     let mut borders = [[0usize; 2]; 2];
-    let mut inets = [0usize; 2];
     let mut cores = [[0usize; 2]; 2];
     for site in 0..2 {
         let s = sc(site);
@@ -283,7 +277,7 @@ pub fn estate(cycle: usize) -> Estate {
             true,
         );
         for (a, z) in [(0usize, 1usize), (1, 0)] {
-            let (me, other) = (wans[site][a], wans[site][z]);
+            let me = wans[site][a];
             let mut x = nbr(
                 "default",
                 ip(10, s * 10 + 7, 0, u8::try_from(z + 1).expect("2")),
@@ -291,7 +285,6 @@ pub fn estate(cycle: usize) -> Estate {
                 &format!("{n}-wan{}", z + 1),
             );
             x.update_source = Some("Loopback0".into());
-            let _ = other;
             b.neighbor(me, x);
         }
 
@@ -441,8 +434,6 @@ pub fn estate(cycle: usize) -> Estate {
                     b.host(
                         &format!("{n}-{hname}"),
                         ip(10, s * 10 + 1, u8::try_from(v).expect("small"), last),
-                        24,
-                        ip(10, s * 10 + 1, u8::try_from(v).expect("small"), 1),
                         l,
                         &pname,
                         v,
@@ -604,8 +595,6 @@ pub fn estate(cycle: usize) -> Estate {
                 b.host(
                     &format!("{an}-pc{}", u + 1),
                     hip,
-                    24,
-                    ip(10, s * 10 + 2, 110, 1),
                     acc,
                     &port,
                     USERS,
@@ -616,8 +605,6 @@ pub fn estate(cycle: usize) -> Estate {
             b.host(
                 &format!("{an}-printer"),
                 ip(10, s * 10 + 2, 120, 20 + a8),
-                24,
-                ip(10, s * 10 + 2, 120, 1),
                 acc,
                 port,
                 PRINTERS,
@@ -629,7 +616,6 @@ pub fn estate(cycle: usize) -> Estate {
 
         // The internet edge.
         let inet = b.dev(&format!("{n}-inet1"), Os::Iosxe, Role::Inet, site, "ASR1001-X");
-        inets[site] = inet;
         b.loopback(inet, "Loopback0", ip(10, s * 10 + 6, 255, 1), true);
         for k in 0..2 {
             let w = wans[site][k];
@@ -700,7 +686,6 @@ pub fn estate(cycle: usize) -> Estate {
         b.neighbor(f, nbr(TENANT, pa, FABRIC_AS[1], &pname));
         b.neighbor(p, nbr(TENANT, fa, FABRIC_AS[0], &fname));
     }
-    let _ = inets;
     b.e.check();
     b.e
 }

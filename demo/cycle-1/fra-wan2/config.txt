@@ -1,0 +1,123 @@
+Mon Nov  2 08:00:00.000 UTC
+Building configuration...
+!! IOS XR Configuration 7.11.2
+!! Last configuration change at Mon Nov  2 07:30:00 2026 by admin
+!
+hostname fra-wan2
+clock timezone UTC 0
+logging console disabled
+logging buffered 1000000
+domain name demo.example
+username admin
+ group root-lr
+ group cisco-support
+ secret 10 $6$DEMOSALT$FAKEHASHFAKEHASH
+!
+vrf MGMT
+ address-family ipv4 unicast
+ !
+!
+line default
+ transport input ssh
+!
+snmp-server community FAKECOMMUNITY RO
+ntp
+ server vrf MGMT 10.255.1.5
+!
+interface Loopback0
+ ipv4 address 10.17.0.2 255.255.255.255
+!
+interface MgmtEth0/RP0/CPU0/0
+ vrf MGMT
+ ipv4 address 10.255.1.11 255.255.255.0
+!
+interface TenGigE0/0/0/1
+ description fra-wan1
+ mtu 9216
+ ipv4 address 10.17.1.1 255.255.255.254
+ load-interval 30
+!
+interface TenGigE0/0/0/3
+ description fra-dc-bl2
+ mtu 9216
+ ipv4 address 10.19.0.2 255.255.255.254
+ load-interval 30
+!
+interface TenGigE0/0/0/2
+ description fra-core2
+ mtu 9216
+ ipv4 address 10.18.0.2 255.255.255.254
+ load-interval 30
+!
+interface TenGigE0/0/0/4
+ description fra-inet1
+ mtu 9216
+ ipv4 address 10.16.0.2 255.255.255.254
+ load-interval 30
+!
+interface TenGigE0/0/0/0
+ description par-wan2
+ mtu 9216
+ ipv4 address 10.250.0.2 255.255.255.254
+ load-interval 30
+!
+route-policy PASS
+  pass
+end-policy
+!
+router static
+ vrf MGMT
+  address-family ipv4 unicast
+   0.0.0.0/0 10.255.1.1
+  !
+ !
+!
+router ospf CORE
+ router-id 10.17.0.2
+ area 0
+  interface Loopback0
+   passive enable
+  !
+  interface TenGigE0/0/0/1
+   network point-to-point
+  !
+  interface TenGigE0/0/0/2
+   network point-to-point
+  !
+  interface TenGigE0/0/0/4
+   network point-to-point
+  !
+ !
+!
+router bgp 65010
+ bgp router-id 10.17.0.2
+ address-family ipv4 unicast
+ !
+ neighbor 10.17.0.1
+  remote-as 65010
+  description fra-wan1
+  update-source Loopback0
+  address-family ipv4 unicast
+   next-hop-self
+  !
+ !
+ neighbor 10.19.0.3
+  remote-as 65110
+  description fra-dc-bl2
+  address-family ipv4 unicast
+   route-policy PASS in
+   route-policy PASS out
+  !
+ !
+ neighbor 10.250.0.3
+  remote-as 65020
+  description par-wan2
+  address-family ipv4 unicast
+   route-policy PASS in
+   route-policy PASS out
+  !
+ !
+!
+ssh server v2
+ssh server vrf MGMT
+end

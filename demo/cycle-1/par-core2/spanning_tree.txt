@@ -1,0 +1,80 @@
+
+VLAN0099
+  Spanning tree enabled protocol rstp
+  Root ID    Priority    4195
+             Address     025e.0022.0000
+             Cost        2
+             Port        1 (Port-channel1)
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    8291  (priority 8192 sys-id-ext 99)
+             Address     025e.0023.0000
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Po1                 Root FWD 2         128.1    P2p
+Te1/0/10            Desg FWD 2         128.2    P2p
+Te1/0/11            Desg FWD 2         128.3    P2p
+Te1/0/12            Desg FWD 2         128.4    P2p
+Te1/0/13            Desg FWD 2         128.5    P2p
+
+VLAN0110
+  Spanning tree enabled protocol rstp
+  Root ID    Priority    4206
+             Address     025e.0022.0000
+             Cost        2
+             Port        1 (Port-channel1)
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    8302  (priority 8192 sys-id-ext 110)
+             Address     025e.0023.0000
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Po1                 Root FWD 2         128.1    P2p
+Te1/0/10            Desg FWD 2         128.2    P2p
+Te1/0/11            Desg FWD 2         128.3    P2p
+Te1/0/12            Desg FWD 2         128.4    P2p
+Te1/0/13            Desg FWD 2         128.5    P2p
+
+VLAN0120
+  Spanning tree enabled protocol rstp
+  Root ID    Priority    4216
+             Address     025e.0022.0000
+             Cost        2
+             Port        1 (Port-channel1)
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    8312  (priority 8192 sys-id-ext 120)
+             Address     025e.0023.0000
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Po1                 Root FWD 2         128.1    P2p
+Te1/0/10            Desg FWD 2         128.2    P2p
+Te1/0/11            Desg FWD 2         128.3    P2p
+Te1/0/12            Desg FWD 2         128.4    P2p
+Te1/0/13            Desg FWD 2         128.5    P2p
+
+VLAN0900
+  Spanning tree enabled protocol rstp
+  Root ID    Priority    4996
+             Address     025e.0022.0000
+             Cost        2
+             Port        1 (Port-channel1)
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    9092  (priority 8192 sys-id-ext 900)
+             Address     025e.0023.0000
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Po1                 Root FWD 2         128.1    P2p

@@ -1,0 +1,52 @@
+          Mac Address Table
+-------------------------------------------
+
+Vlan    Mac Address       Type        Ports
+----    -----------       --------    -----
+ All    0100.0ccc.cccc    STATIC      CPU
+ All    0100.0ccc.cccd    STATIC      CPU
+  99    025e.000e.0006    DYNAMIC     Po1
+  99    025e.000f.0003    DYNAMIC     Te1/0/10
+  99    025e.0010.0003    DYNAMIC     Te1/0/11
+  99    025e.0011.0003    DYNAMIC     Te1/0/12
+  99    025e.0012.0003    DYNAMIC     Te1/0/13
+  99    025e.0013.0003    DYNAMIC     Te1/0/14
+  99    025e.0014.0003    DYNAMIC     Te1/0/15
+  99    025e.0015.0003    DYNAMIC     Te1/0/16
+  99    025e.0016.0003    DYNAMIC     Te1/0/17
+ 110    025e.000e.0007    DYNAMIC     Po1
+ 110    025e.0a0c.6e14    DYNAMIC     Te1/0/10
+ 110    025e.0a0c.6e15    DYNAMIC     Te1/0/10
+ 110    025e.0a0c.6e16    DYNAMIC     Te1/0/10
+ 110    025e.0a0c.6e18    DYNAMIC     Te1/0/11
+ 110    025e.0a0c.6e19    DYNAMIC     Te1/0/11
+ 110    025e.0a0c.6e1a    DYNAMIC     Te1/0/11
+ 110    025e.0a0c.6e1c    DYNAMIC     Te1/0/12
+ 110    025e.0a0c.6e1d    DYNAMIC     Te1/0/12
+ 110    025e.0a0c.6e1e    DYNAMIC     Te1/0/12
+ 110    025e.0a0c.6e20    DYNAMIC     Te1/0/13
+ 110    025e.0a0c.6e21    DYNAMIC     Te1/0/13
+ 110    025e.0a0c.6e22    DYNAMIC     Te1/0/13
+ 110    025e.0a0c.6e24    DYNAMIC     Te1/0/14
+ 110    025e.0a0c.6e25    DYNAMIC     Te1/0/14
+ 110    025e.0a0c.6e26    DYNAMIC     Te1/0/14
+ 110    025e.0a0c.6e28    DYNAMIC     Te1/0/15
+ 110    025e.0a0c.6e29    DYNAMIC     Te1/0/15
+ 110    025e.0a0c.6e2a    DYNAMIC     Te1/0/15
+ 110    025e.0a0c.6e2c    DYNAMIC     Te1/0/16
+ 110    025e.0a0c.6e2d    DYNAMIC     Te1/0/16
+ 110    025e.0a0c.6e2e    DYNAMIC     Te1/0/16
+ 110    025e.0a0c.6e30    DYNAMIC     Te1/0/17
+ 110    025e.0a0c.6e31    DYNAMIC     Te1/0/17
+ 110    025e.0a0c.6e32    DYNAMIC     Te1/0/17
+ 120    025e.000e.0008    DYNAMIC     Po1
+ 120    025e.0a0c.7814    DYNAMIC     Te1/0/10
+ 120    025e.0a0c.7815    DYNAMIC     Te1/0/11
+ 120    025e.0a0c.7816    DYNAMIC     Te1/0/12
+ 120    025e.0a0c.7817    DYNAMIC     Te1/0/13
+ 120    025e.0a0c.7818    DYNAMIC     Te1/0/14
+ 120    025e.0a0c.7819    DYNAMIC     Te1/0/15
+ 120    025e.0a0c.781a    DYNAMIC     Te1/0/16
+ 120    025e.0a0c.781b    DYNAMIC     Te1/0/17
+ 900    025e.000e.0009    DYNAMIC     Po1
+Total Mac Addresses for this criterion: 46

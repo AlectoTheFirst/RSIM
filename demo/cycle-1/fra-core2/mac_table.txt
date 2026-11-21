@@ -1,0 +1,55 @@
+          Mac Address Table
+-------------------------------------------
+
+Vlan    Mac Address       Type        Ports
+----    -----------       --------    -----
+ All    0100.0ccc.cccc    STATIC      CPU
+ All    0100.0ccc.cccd    STATIC      CPU
+  99    0000.0c07.ac63    DYNAMIC     Po1
+  99    025e.000d.0006    DYNAMIC     Po1
+  99    025e.000f.0003    DYNAMIC     Po1
+  99    025e.0010.0003    DYNAMIC     Po1
+  99    025e.0011.0003    DYNAMIC     Po1
+  99    025e.0012.0003    DYNAMIC     Po1
+  99    025e.0013.0003    DYNAMIC     Po1
+  99    025e.0014.0003    DYNAMIC     Po1
+  99    025e.0015.0003    DYNAMIC     Po1
+  99    025e.0016.0003    DYNAMIC     Po1
+ 110    0000.0c07.ac6e    DYNAMIC     Po1
+ 110    025e.000d.0007    DYNAMIC     Po1
+ 110    025e.0a0c.6e14    DYNAMIC     Po1
+ 110    025e.0a0c.6e15    DYNAMIC     Po1
+ 110    025e.0a0c.6e16    DYNAMIC     Po1
+ 110    025e.0a0c.6e18    DYNAMIC     Po1
+ 110    025e.0a0c.6e19    DYNAMIC     Po1
+ 110    025e.0a0c.6e1a    DYNAMIC     Po1
+ 110    025e.0a0c.6e1c    DYNAMIC     Po1
+ 110    025e.0a0c.6e1d    DYNAMIC     Po1
+ 110    025e.0a0c.6e1e    DYNAMIC     Po1
+ 110    025e.0a0c.6e20    DYNAMIC     Po1
+ 110    025e.0a0c.6e21    DYNAMIC     Po1
+ 110    025e.0a0c.6e22    DYNAMIC     Po1
+ 110    025e.0a0c.6e24    DYNAMIC     Po1
+ 110    025e.0a0c.6e25    DYNAMIC     Po1
+ 110    025e.0a0c.6e26    DYNAMIC     Po1
+ 110    025e.0a0c.6e28    DYNAMIC     Po1
+ 110    025e.0a0c.6e29    DYNAMIC     Po1
+ 110    025e.0a0c.6e2a    DYNAMIC     Po1
+ 110    025e.0a0c.6e2c    DYNAMIC     Po1
+ 110    025e.0a0c.6e2d    DYNAMIC     Po1
+ 110    025e.0a0c.6e2e    DYNAMIC     Po1
+ 110    025e.0a0c.6e30    DYNAMIC     Po1
+ 110    025e.0a0c.6e31    DYNAMIC     Po1
+ 110    025e.0a0c.6e32    DYNAMIC     Po1
+ 120    0000.0c07.ac78    DYNAMIC     Po1
+ 120    025e.000d.0008    DYNAMIC     Po1
+ 120    025e.0a0c.7814    DYNAMIC     Po1
+ 120    025e.0a0c.7815    DYNAMIC     Po1
+ 120    025e.0a0c.7816    DYNAMIC     Po1
+ 120    025e.0a0c.7817    DYNAMIC     Po1
+ 120    025e.0a0c.7818    DYNAMIC     Po1
+ 120    025e.0a0c.7819    DYNAMIC     Po1
+ 120    025e.0a0c.781a    DYNAMIC     Po1
+ 120    025e.0a0c.781b    DYNAMIC     Po1
+ 900    025e.000d.0009    DYNAMIC     Po1
+Total Mac Addresses for this criterion: 49

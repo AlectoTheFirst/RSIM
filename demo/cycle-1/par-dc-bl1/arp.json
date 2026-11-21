@@ -1,0 +1,72 @@
+{
+  "TABLE_vrf": {
+    "ROW_vrf": [
+      {
+        "TABLE_adj": {
+          "ROW_adj": [
+            {
+              "intf-out": "Ethernet1/1",
+              "ip-addr-out": "10.29.0.0",
+              "mac": "025e.0018.0004",
+              "time-stamp": "00:04:12"
+            },
+            {
+              "intf-out": "Ethernet1/2",
+              "ip-addr-out": "10.99.0.0",
+              "mac": "025e.000b.000e",
+              "time-stamp": "00:04:12"
+            },
+            {
+              "intf-out": "Vlan90",
+              "ip-addr-out": "10.21.90.11",
+              "mac": "025e.0a15.5a0b",
+              "time-stamp": "00:04:12"
+            },
+            {
+              "intf-out": "Vlan90",
+              "ip-addr-out": "10.21.90.12",
+              "mac": "025e.0a15.5a0c",
+              "time-stamp": "00:04:12"
+            }
+          ]
+        },
+        "cnt-total": 4,
+        "vrf-name-out": "PROD"
+      },
+      {
+        "TABLE_adj": {
+          "ROW_adj": [
+            {
+              "intf-out": "Ethernet1/49",
+              "ip-addr-out": "10.20.100.16",
+              "mac": "025e.001a.0007",
+              "time-stamp": "00:04:12"
+            },
+            {
+              "intf-out": "Ethernet1/50",
+              "ip-addr-out": "10.20.100.18",
+              "mac": "025e.001b.0007",
+              "time-stamp": "00:04:12"
+            }
+          ]
+        },
+        "cnt-total": 2,
+        "vrf-name-out": "default"
+      },
+      {
+        "TABLE_adj": {
+          "ROW_adj": [
+            {
+              "intf-out": "mgmt0",
+              "ip-addr-out": "10.255.2.1",
+              "mac": "025e.fe00.0001",
+              "time-stamp": "00:04:12"
+            }
+          ]
+        },
+        "cnt-total": 1,
+        "vrf-name-out": "management"
+      }
+    ]
+  }
+}

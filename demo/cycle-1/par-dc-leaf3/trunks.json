@@ -1,0 +1,12 @@
+{
+  "TABLE_interface": {
+    "ROW_interface": [
+      {
+        "allowedvlans": "30,60,3001",
+        "interface": "port-channel1",
+        "native": "1",
+        "status": "trunking"
+      }
+    ]
+  }
+}

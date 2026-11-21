@@ -1,0 +1,12 @@
+{
+  "bios_ver_str": "05.47",
+  "chassis_id": "Nexus9000 C9332C chassis",
+  "header_str": "Cisco Nexus Operating System (NX-OS) Software",
+  "host_name": "par-dc-spine1",
+  "kern_uptm_days": 41,
+  "kern_uptm_hrs": 3,
+  "kern_uptm_mins": 12,
+  "kern_uptm_secs": 7,
+  "nxos_ver_str": "10.3(4a)",
+  "proc_board_id": "DEMO020026"
+}
