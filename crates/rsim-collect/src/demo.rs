@@ -59,14 +59,16 @@ fn read(path: &Path) -> Result<Vec<u8>, String> {
 /// The devices of a demo folder.
 pub fn devices(folder: &Path) -> Result<Vec<Device>, String> {
     let path = folder.join(DEVICES);
-    let text = String::from_utf8(read(&path)?)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let text = String::from_utf8(read(&path)?).map_err(|e| format!("{}: {e}", path.display()))?;
     text.lines()
         .filter(|l| !l.trim().is_empty())
         .map(|l| {
             let w: Vec<&str> = l.split_whitespace().collect();
             let [id, vendor, address] = w.as_slice() else {
-                return Err(format!("{}: the line {l:?} is not <id> <vendor> <address>", path.display()));
+                return Err(format!(
+                    "{}: the line {l:?} is not <id> <vendor> <address>",
+                    path.display()
+                ));
             };
             let vendor = Vendor::ALL
                 .into_iter()
@@ -107,7 +109,8 @@ fn overlay(cycle: &Path, files: &mut BTreeMap<(String, String), Vec<u8>>) -> Res
             continue;
         }
         let device = d.file_name().to_string_lossy().into_owned();
-        let inner = std::fs::read_dir(d.path()).map_err(|e| format!("{}: {e}", d.path().display()))?;
+        let inner =
+            std::fs::read_dir(d.path()).map_err(|e| format!("{}: {e}", d.path().display()))?;
         for f in inner {
             let f = f.map_err(|e| format!("{}: {e}", d.path().display()))?;
             let name = f.file_name().to_string_lossy().into_owned();
@@ -176,9 +179,7 @@ pub async fn seed(store: Store, folder: &Path) -> Result<Vec<CycleReport>, Strin
             load(&fake, &d.id, &files)?;
         }
         let step = u64::try_from(i).unwrap_or(u64::MAX);
-        clock
-            .0
-            .store(START_MS + step * CYCLE_MS, Ordering::SeqCst);
+        clock.0.store(START_MS + step * CYCLE_MS, Ordering::SeqCst);
         let r = collector.run_cycle().await.map_err(|e| e.to_string())?;
         let name = cycle_dir(i + 1);
         if !r.failed.is_empty() {

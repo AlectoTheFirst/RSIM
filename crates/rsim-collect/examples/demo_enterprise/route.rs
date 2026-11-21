@@ -298,7 +298,9 @@ fn l2_port(dev: &Dev, port: &str) -> Option<String> {
         Mode::Member(n, _) => Some(
             dev.ifaces
                 .iter()
-                .find(|x| matches!(x.mode, Mode::PortChannel(_)) && x.name.ends_with(&format!("{n}")))
+                .find(|x| {
+                    matches!(x.mode, Mode::PortChannel(_)) && x.name.ends_with(&format!("{n}"))
+                })
                 .map(|x| x.name.clone())
                 .unwrap_or_else(|| panic!("{}: no port channel {n}", dev.name)),
         ),
@@ -338,7 +340,11 @@ fn l2_links(e: &Estate, v: u16) -> BTreeMap<usize, BTreeMap<String, usize>> {
 }
 
 /// The port of switch `from` that leads to switch `to` in a VLAN, if any.
-fn toward(links: &BTreeMap<usize, BTreeMap<String, usize>>, from: usize, to: usize) -> Option<String> {
+fn toward(
+    links: &BTreeMap<usize, BTreeMap<String, usize>>,
+    from: usize,
+    to: usize,
+) -> Option<String> {
     let mut seen = BTreeSet::from([from]);
     let mut queue: VecDeque<(usize, String)> = VecDeque::new();
     for (p, n) in links.get(&from).into_iter().flatten() {
@@ -377,10 +383,10 @@ fn owners(e: &Estate, v: u16) -> Vec<(Mac, usize, Option<String>)> {
             if let Some(m) = i.mac {
                 out.push((m, d, None));
             }
-            if let Some(h) = &i.hsrp {
-                if h.active {
-                    out.push((hsrp_mac(h.group), d, None));
-                }
+            if let Some(h) = &i.hsrp
+                && h.active
+            {
+                out.push((hsrp_mac(h.group), d, None));
             }
         }
     }
@@ -486,10 +492,10 @@ fn segment(e: &Estate, s: usize, v: u16) -> Vec<(Ipv4Addr, Mac, usize)> {
             if let (Some((a, _)), Some(m)) = (i.addr, i.mac) {
                 out.push((a, m, d));
             }
-            if let Some(h) = &i.hsrp {
-                if h.active {
-                    out.push((h.vip, hsrp_mac(h.group), d));
-                }
+            if let Some(h) = &i.hsrp
+                && h.active
+            {
+                out.push((h.vip, hsrp_mac(h.group), d));
             }
         }
     }
@@ -513,19 +519,43 @@ fn arp(e: &Estate) -> Vec<Vec<Arp>> {
             let own_mac = i.mac.unwrap_or(0);
             match &i.mode {
                 Mode::Routed => {
-                    rows.push(Arp { iface: i.name.clone(), ip: a, mac: own_mac, own: true });
+                    rows.push(Arp {
+                        iface: i.name.clone(),
+                        ip: a,
+                        mac: own_mac,
+                        own: true,
+                    });
                     if let Some((f, port)) = e.far(d, &i.name) {
                         let fi = e.devs[f].iface(&port);
                         if let (Some((fa, _)), Some(fm)) = (fi.addr, fi.mac) {
-                            rows.push(Arp { iface: i.name.clone(), ip: fa, mac: fm, own: false });
+                            rows.push(Arp {
+                                iface: i.name.clone(),
+                                ip: fa,
+                                mac: fm,
+                                own: false,
+                            });
                         }
                     }
-                    for x in e.externals.iter().filter(|x| x.dev == d && x.port == i.name) {
-                        rows.push(Arp { iface: i.name.clone(), ip: x.ip, mac: x.mac, own: false });
+                    for x in e
+                        .externals
+                        .iter()
+                        .filter(|x| x.dev == d && x.port == i.name)
+                    {
+                        rows.push(Arp {
+                            iface: i.name.clone(),
+                            ip: x.ip,
+                            mac: x.mac,
+                            own: false,
+                        });
                     }
                 }
                 Mode::Mgmt => {
-                    rows.push(Arp { iface: i.name.clone(), ip: a, mac: own_mac, own: true });
+                    rows.push(Arp {
+                        iface: i.name.clone(),
+                        ip: a,
+                        mac: own_mac,
+                        own: true,
+                    });
                     rows.push(Arp {
                         iface: i.name.clone(),
                         ip: ip(10, 255, u8::try_from(dev.site + 1).expect("2"), 1),
@@ -535,23 +565,33 @@ fn arp(e: &Estate) -> Vec<Vec<Arp>> {
                 }
                 Mode::Svi(v) => {
                     if !i.anycast {
-                        rows.push(Arp { iface: i.name.clone(), ip: a, mac: own_mac, own: true });
+                        rows.push(Arp {
+                            iface: i.name.clone(),
+                            ip: a,
+                            mac: own_mac,
+                            own: true,
+                        });
                     }
-                    if let Some(h) = &i.hsrp {
-                        if h.active {
-                            rows.push(Arp {
-                                iface: i.name.clone(),
-                                ip: h.vip,
-                                mac: hsrp_mac(h.group),
-                                own: true,
-                            });
-                        }
+                    if let Some(h) = &i.hsrp
+                        && h.active
+                    {
+                        rows.push(Arp {
+                            iface: i.name.clone(),
+                            ip: h.vip,
+                            mac: hsrp_mac(h.group),
+                            own: true,
+                        });
                     }
                     for (ip, mac, at) in segment(e, d, *v) {
                         if at == d {
                             continue;
                         }
-                        rows.push(Arp { iface: i.name.clone(), ip, mac, own: false });
+                        rows.push(Arp {
+                            iface: i.name.clone(),
+                            ip,
+                            mac,
+                            own: false,
+                        });
                     }
                 }
                 _ => {}

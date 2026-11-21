@@ -78,7 +78,11 @@ fn config(e: &Estate, d: usize) -> String {
         dev.site + 1
     );
     if leaf {
-        let _ = writeln!(s, "fabric forwarding anycast-gateway-mac {}", dotted(ANYCAST_MAC));
+        let _ = writeln!(
+            s,
+            "fabric forwarding anycast-gateway-mac {}",
+            dotted(ANYCAST_MAC)
+        );
     }
     for acl in &dev.acls {
         let _ = writeln!(s, "ip access-list {}", acl.name);
@@ -107,7 +111,11 @@ fn config(e: &Estate, d: usize) -> String {
     }
     let _ = writeln!(s, "vrf context management");
     for st in dev.statics.iter().filter(|x| x.vrf == "management") {
-        let _ = writeln!(s, "  ip route {}/{} {}", st.prefix.0, st.prefix.1, st.next_hop);
+        let _ = writeln!(
+            s,
+            "  ip route {}/{} {}",
+            st.prefix.0, st.prefix.1, st.next_hop
+        );
     }
     if let (Some(domain), Some(peer)) = (dev.vpc_domain, dev.vpc_peer) {
         let _ = writeln!(
@@ -271,13 +279,13 @@ fn config(e: &Estate, d: usize) -> String {
     if leaf {
         s.push_str("evpn\n");
         for v in &dev.vlans {
-            if let Some(vni) = v.vni {
-                if Some(vni) != dev.l3vni.as_ref().map(|x| x.1) {
-                    let _ = writeln!(
-                        s,
-                        "  vni {vni} l2\n    rd auto\n    route-target import auto\n    route-target export auto"
-                    );
-                }
+            if let Some(vni) = v.vni
+                && Some(vni) != dev.l3vni.as_ref().map(|x| x.1)
+            {
+                let _ = writeln!(
+                    s,
+                    "  vni {vni} l2\n    rd auto\n    route-target import auto\n    route-target export auto"
+                );
             }
         }
     }
@@ -326,7 +334,10 @@ fn interfaces(dev: &Dev) -> String {
                         r.insert("svi_ip_mask".into(), json!(l));
                     }
                     r.insert("svi_desc".into(), json!(i.desc));
-                    r.insert("svi_mtu".into(), json!(if i.ip_forward { 9216 } else { 1500 }));
+                    r.insert(
+                        "svi_mtu".into(),
+                        json!(if i.ip_forward { 9216 } else { 1500 }),
+                    );
                 }
                 _ => {
                     r.insert("state".into(), json!(if i.up { "up" } else { "down" }));
@@ -355,7 +366,10 @@ fn interfaces(dev: &Dev) -> String {
                         } else {
                             i.speed
                         };
-                        r.insert("eth_mtu".into(), json!(if i.mode == Mode::Mgmt { "1500" } else { "9216" }));
+                        r.insert(
+                            "eth_mtu".into(),
+                            json!(if i.mode == Mode::Mgmt { "1500" } else { "9216" }),
+                        );
                         r.insert("eth_speed".into(), json!(speed(mbps)));
                         r.insert("eth_duplex".into(), json!("full"));
                         r.insert("eth_bw".into(), json!(mbps * 1000));
@@ -455,7 +469,9 @@ fn vrfs(dev: &Dev) -> String {
     let rows: Vec<Value> = names
         .iter()
         .enumerate()
-        .map(|(i, n)| json!({"vrf_name": n, "vrf_id": i + 1, "vrf_state": "Up", "vrf_reason": "--"}))
+        .map(
+            |(i, n)| json!({"vrf_name": n, "vrf_id": i + 1, "vrf_state": "Up", "vrf_reason": "--"}),
+        )
         .collect();
     pretty(&json!({"TABLE_vrf": {"ROW_vrf": rows}}))
 }

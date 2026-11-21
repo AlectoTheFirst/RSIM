@@ -94,7 +94,12 @@ impl Builder {
             model,
             serial: format!("DEMO{:02}{:04}", site + 1, idx + 1),
             version,
-            mgmt: ip(10, 255, sc(site), 10 + u8::try_from(in_site).expect("few devices")),
+            mgmt: ip(
+                10,
+                255,
+                sc(site),
+                10 + u8::try_from(in_site).expect("few devices"),
+            ),
             ifaces: Vec::new(),
             vlans: Vec::new(),
             l3vni: None,
@@ -114,10 +119,7 @@ impl Builder {
     /// Adds an interface with the next MAC of the device.
     fn add(&mut self, dev: usize, mut i: Iface) -> &mut Iface {
         let d = &mut self.e.devs[dev];
-        let has_mac = !matches!(
-            i.mode,
-            Mode::Loopback | Mode::Nve | Mode::PortChannel(_)
-        );
+        let has_mac = !matches!(i.mode, Mode::Loopback | Mode::Nve | Mode::PortChannel(_));
         if has_mac && i.mac.is_none() {
             let n = u64::try_from(d.ifaces.len() + 1).expect("few interfaces");
             i.mac = Some(d.base_mac + n);
@@ -228,10 +230,7 @@ fn nbr(vrf: &str, addr: Ipv4Addr, remote_as: u32, desc: &str) -> Neighbor {
 fn dc_in(site: usize, cycle: usize) -> Acl {
     let s = sc(site);
     let mut entries = vec![
-        (
-            10,
-            format!("deny tcp any 10.{s}1.30.0/24 eq 1433"),
-        ),
+        (10, format!("deny tcp any 10.{s}1.30.0/24 eq 1433")),
         (20, format!("deny tcp any 10.{s}1.30.0/24 eq 5432")),
         (100, "permit ip any any".to_string()),
     ];
@@ -257,10 +256,21 @@ pub fn estate(cycle: usize) -> Estate {
         let s = sc(site);
         let n = SITES[site];
         // The WAN routers.
-        for k in 0..2 {
-            let w = b.dev(&format!("{n}-wan{}", k + 1), Os::Iosxr, Role::Wan, site, "ASR-9901");
-            wans[site][k] = w;
-            b.loopback(w, "Loopback0", ip(10, s * 10 + 7, 0, u8::try_from(k + 1).expect("2")), true);
+        for (k, slot) in wans[site].iter_mut().enumerate() {
+            let w = b.dev(
+                &format!("{n}-wan{}", k + 1),
+                Os::Iosxr,
+                Role::Wan,
+                site,
+                "ASR-9901",
+            );
+            *slot = w;
+            b.loopback(
+                w,
+                "Loopback0",
+                ip(10, s * 10 + 7, 0, u8::try_from(k + 1).expect("2")),
+                true,
+            );
             b.e.devs[w].bgp = Some(Bgp {
                 asn: WAN_AS[site],
                 router_id: ip(10, s * 10 + 7, 0, u8::try_from(k + 1).expect("2")),
@@ -271,7 +281,7 @@ pub fn estate(cycle: usize) -> Estate {
         let (w1, w2) = (wans[site][0], wans[site][1]);
         b.routed(
             [10, s * 10 + 7, 1],
-            (w1, "TenGigE0/0/0/1", "default", &format!("{n}-wan2"), ),
+            (w1, "TenGigE0/0/0/1", "default", &format!("{n}-wan2")),
             (w2, "TenGigE0/0/0/1", "default", &format!("{n}-wan1")),
             (10, Proto::Ospf, Proto::Ospf),
             true,
@@ -291,7 +301,7 @@ pub fn estate(cycle: usize) -> Estate {
         // The data centre fabric.
         let pairs: &[Pair] = if site == 0 { &FRA_PAIRS } else { &PAR_PAIRS };
         let mut spines = [0usize; 2];
-        for k in 0..2 {
+        for (k, slot) in spines.iter_mut().enumerate() {
             let sp = b.dev(
                 &format!("{n}-dc-spine{}", k + 1),
                 Os::Nxos,
@@ -299,7 +309,7 @@ pub fn estate(cycle: usize) -> Estate {
                 site,
                 "N9K-C9332C",
             );
-            spines[k] = sp;
+            *slot = sp;
             let id = ip(10, s * 10, 0, u8::try_from(k + 1).expect("2"));
             b.loopback(sp, "loopback0", id, true);
             b.e.devs[sp].bgp = Some(Bgp {
@@ -382,11 +392,11 @@ pub fn estate(cycle: usize) -> Estate {
                 b.neighbor(l, y);
             }
             // The VLANs and the SVIs of the pair.
-            let vlans: Vec<(u16, &str, &[(&str, u8)])> = match pair {
-                Some(p) => pairs[p].to_vec(),
-                None => BORDER[site].to_vec(),
+            let vlans: Pair = match pair {
+                Some(p) => pairs[p],
+                None => BORDER[site],
             };
-            for &(v, name, _) in &vlans {
+            for &(v, name, _) in vlans {
                 b.e.devs[l].vlans.push(Vlan {
                     id: v,
                     name: name.to_string(),
@@ -399,17 +409,27 @@ pub fn estate(cycle: usize) -> Estate {
             }
             let i = b.add(
                 l,
-                Iface::new(&format!("Vlan{L3VNI_VLAN}"), "PROD-L3VNI", Mode::Svi(L3VNI_VLAN)),
+                Iface::new(
+                    &format!("Vlan{L3VNI_VLAN}"),
+                    "PROD-L3VNI",
+                    Mode::Svi(L3VNI_VLAN),
+                ),
             );
             i.vrf = TENANT.into();
             i.ip_forward = true;
             // The peer link.
             let trunk: Vec<u16> = vlans.iter().map(|v| v.0).chain([L3VNI_VLAN]).collect();
             for port in ["Ethernet1/53", "Ethernet1/54"] {
-                b.add(l, Iface::new(port, "vpc peer-link", Mode::Member(1, trunk.clone())));
+                b.add(
+                    l,
+                    Iface::new(port, "vpc peer-link", Mode::Member(1, trunk.clone())),
+                );
             }
             let mac = b.e.devs[l].iface("Ethernet1/53").mac;
-            let po = b.add(l, Iface::new("port-channel1", "vpc peer-link", Mode::PortChannel(trunk)));
+            let po = b.add(
+                l,
+                Iface::new("port-channel1", "vpc peer-link", Mode::PortChannel(trunk)),
+            );
             po.peer_link = true;
             po.mac = mac;
             if m == 1 {
@@ -422,15 +442,18 @@ pub fn estate(cycle: usize) -> Estate {
             // The servers on orphan ports, alternating between the 2
             // switches of the pair.
             let mut port = [if border { 10 } else { 0 }; 2];
-            for &(v, _, hosts) in &vlans {
+            for &(v, _, hosts) in vlans {
                 for (h, &(hname, last)) in hosts.iter().enumerate() {
                     if h % 2 != m {
                         continue;
                     }
                     port[m] += 1;
                     let pname = format!("Ethernet1/{}", port[m]);
-                    b.add(l, Iface::new(&pname, &format!("{n}-{hname}"), Mode::Access(v)))
-                        .speed = 25_000;
+                    b.add(
+                        l,
+                        Iface::new(&pname, &format!("{n}-{hname}"), Mode::Access(v)),
+                    )
+                    .speed = 25_000;
                     b.host(
                         &format!("{n}-{hname}"),
                         ip(10, s * 10 + 1, u8::try_from(v).expect("small"), last),
@@ -487,10 +510,21 @@ pub fn estate(cycle: usize) -> Estate {
 
         // The campus: the core pair and the access switches.
         for k in 0..2 {
-            let c = b.dev(&format!("{n}-core{}", k + 1), Os::Iosxe, Role::Core, site, "C9500-48Y4C");
+            let c = b.dev(
+                &format!("{n}-core{}", k + 1),
+                Os::Iosxe,
+                Role::Core,
+                site,
+                "C9500-48Y4C",
+            );
             cores[site][k] = c;
             b.e.devs[c].stp_priority = if k == 0 { 4096 } else { 8192 };
-            b.loopback(c, "Loopback0", ip(10, s * 10 + 8, 255, u8::try_from(k + 1).expect("2")), true);
+            b.loopback(
+                c,
+                "Loopback0",
+                ip(10, s * 10 + 8, 255, u8::try_from(k + 1).expect("2")),
+                true,
+            );
             for (v, name) in [
                 (MGMT_VLAN, "MGMT"),
                 (USERS, "USERS"),
@@ -520,10 +554,16 @@ pub fn estate(cycle: usize) -> Estate {
             let other = if c == c1 { c2 } else { c1 };
             let on = b.e.devs[other].name.clone();
             for port in ["TenGigabitEthernet1/0/47", "TenGigabitEthernet1/0/48"] {
-                b.add(c, Iface::new(port, &on, Mode::Member(1, core_trunk.clone())));
+                b.add(
+                    c,
+                    Iface::new(port, &on, Mode::Member(1, core_trunk.clone())),
+                );
             }
             let mac = b.e.devs[c].iface("TenGigabitEthernet1/0/47").mac;
-            let po = b.add(c, Iface::new("Port-channel1", &on, Mode::PortChannel(core_trunk.clone())));
+            let po = b.add(
+                c,
+                Iface::new("Port-channel1", &on, Mode::PortChannel(core_trunk.clone())),
+            );
             po.mac = mac;
         }
         for port in ["TenGigabitEthernet1/0/47", "TenGigabitEthernet1/0/48"] {
@@ -551,7 +591,14 @@ pub fn estate(cycle: usize) -> Estate {
             }
         }
         for (k, &c) in [c1, c2].iter().enumerate() {
-            let i = b.add(c, Iface::new(&format!("Vlan{TRANSIT}"), "CORE-TRANSIT", Mode::Svi(TRANSIT)));
+            let i = b.add(
+                c,
+                Iface::new(
+                    &format!("Vlan{TRANSIT}"),
+                    "CORE-TRANSIT",
+                    Mode::Svi(TRANSIT),
+                ),
+            );
             i.addr = Some((ip(10, s * 10 + 2, 250, 1 + u8::try_from(k).expect("2")), 29));
             i.routing = Some((10, Proto::Ospf));
             i.ospf = true;
@@ -560,7 +607,11 @@ pub fn estate(cycle: usize) -> Estate {
         for a in 0..ACCESS[site] {
             let an = format!("{n}-acc{}", a + 1);
             let acc = b.dev(&an, Os::Iosxe, Role::Access, site, "C9300-48P");
-            for (v, name) in [(MGMT_VLAN, "MGMT"), (USERS, "USERS"), (PRINTERS, "PRINTERS")] {
+            for (v, name) in [
+                (MGMT_VLAN, "MGMT"),
+                (USERS, "USERS"),
+                (PRINTERS, "PRINTERS"),
+            ] {
                 b.e.devs[acc].vlans.push(Vlan {
                     id: v,
                     name: name.into(),
@@ -574,9 +625,15 @@ pub fn estate(cycle: usize) -> Estate {
                 let up = format!("TenGigabitEthernet1/1/{}", k + 1);
                 let down = format!("TenGigabitEthernet1/0/{}", 10 + a);
                 let cn = b.e.devs[c].name.clone();
-                let i = b.add(acc, Iface::new(&up, &cn, Mode::Trunk(campus_vlans.to_vec())));
+                let i = b.add(
+                    acc,
+                    Iface::new(&up, &cn, Mode::Trunk(campus_vlans.to_vec())),
+                );
                 i.blocked = k == 1;
-                b.add(c, Iface::new(&down, &an, Mode::Trunk(campus_vlans.to_vec())));
+                b.add(
+                    c,
+                    Iface::new(&down, &an, Mode::Trunk(campus_vlans.to_vec())),
+                );
                 b.link(acc, &up, c, &down);
             }
             let i = b.add(acc, Iface::new("Vlan99", "MGMT", Mode::Svi(MGMT_VLAN)));
@@ -587,21 +644,26 @@ pub fn estate(cycle: usize) -> Estate {
                 next_hop: ip(10, s * 10 + 2, 99, 1),
             });
             // 3 users and a printer.
-            let users = if site == 1 && a == 1 && cycle >= 3 { 4 } else { 3 };
+            let users = if site == 1 && a == 1 && cycle >= 3 {
+                4
+            } else {
+                3
+            };
             for u in 0..users {
                 let port = format!("GigabitEthernet1/0/{}", u + 1);
-                b.add(acc, Iface::new(&port, "user", Mode::Access(USERS))).speed = 1000;
-                let hip = ip(10, s * 10 + 2, 110, 20 + 4 * a8 + u8::try_from(u).expect("few"));
-                b.host(
-                    &format!("{an}-pc{}", u + 1),
-                    hip,
-                    acc,
-                    &port,
-                    USERS,
+                b.add(acc, Iface::new(&port, "user", Mode::Access(USERS)))
+                    .speed = 1000;
+                let hip = ip(
+                    10,
+                    s * 10 + 2,
+                    110,
+                    20 + 4 * a8 + u8::try_from(u).expect("few"),
                 );
+                b.host(&format!("{an}-pc{}", u + 1), hip, acc, &port, USERS);
             }
             let port = "GigabitEthernet1/0/40";
-            b.add(acc, Iface::new(port, "printer", Mode::Access(PRINTERS))).speed = 1000;
+            b.add(acc, Iface::new(port, "printer", Mode::Access(PRINTERS)))
+                .speed = 1000;
             b.host(
                 &format!("{an}-printer"),
                 ip(10, s * 10 + 2, 120, 20 + a8),
@@ -615,10 +677,15 @@ pub fn estate(cycle: usize) -> Estate {
         }
 
         // The internet edge.
-        let inet = b.dev(&format!("{n}-inet1"), Os::Iosxe, Role::Inet, site, "ASR1001-X");
+        let inet = b.dev(
+            &format!("{n}-inet1"),
+            Os::Iosxe,
+            Role::Inet,
+            site,
+            "ASR1001-X",
+        );
         b.loopback(inet, "Loopback0", ip(10, s * 10 + 6, 255, 1), true);
-        for k in 0..2 {
-            let w = wans[site][k];
+        for (k, &w) in wans[site].iter().enumerate() {
             let wn = b.e.devs[w].name.clone();
             let inn = b.e.devs[inet].name.clone();
             b.routed(
@@ -634,7 +701,10 @@ pub fn estate(cycle: usize) -> Estate {
         } else {
             (ip(198, 51, 100, 0), ip(198, 51, 100, 1))
         };
-        let i = b.add(inet, Iface::new("GigabitEthernet0/0/0", "internet uplink", Mode::Routed));
+        let i = b.add(
+            inet,
+            Iface::new("GigabitEthernet0/0/0", "internet uplink", Mode::Routed),
+        );
         i.addr = Some((net, 31));
         i.speed = 1000;
         b.e.devs[inet].statics.push(Static {
@@ -647,7 +717,12 @@ pub fn estate(cycle: usize) -> Estate {
             router_id: ip(10, s * 10 + 6, 255, 1),
             neighbors: Vec::new(),
         });
-        let mut x = nbr("default", isp, ISP_AS[site], &format!("isp-edge{}", site + 1));
+        let mut x = nbr(
+            "default",
+            isp,
+            ISP_AS[site],
+            &format!("isp-edge{}", site + 1),
+        );
         x.up = !(site == 0 && cycle >= 3);
         b.neighbor(inet, x);
         b.e.externals.push(External {

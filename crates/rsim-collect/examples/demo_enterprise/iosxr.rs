@@ -127,7 +127,12 @@ fn interfaces(dev: &Dev) -> String {
         };
         match i.mac {
             Some(m) => {
-                let _ = writeln!(s, "  Hardware is {hw}, address is {} (bia {})", dotted(m), dotted(m));
+                let _ = writeln!(
+                    s,
+                    "  Hardware is {hw}, address is {} (bia {})",
+                    dotted(m),
+                    dotted(m)
+                );
             }
             None => {
                 let _ = writeln!(s, "  Hardware is {hw}");
@@ -173,7 +178,11 @@ fn lldp(e: &Estate, d: usize) -> String {
             "------------------------------------------------\nLocal Interface: {}\nChassis id: {}\nPort id: {port_id}\nPort Description: {}\nSystem Name: {}\n\nSystem Description: \n{}\n\nTime remaining: 101 seconds\nHold Time: 120 seconds\nSystem Capabilities: B,R\nEnabled Capabilities: R\nManagement Addresses:\n  IPv4 address: {}\nPeer MAC Address: {}\n\n",
             i.name,
             dotted(fd.base_mac),
-            if fi.desc.is_empty() { "-" } else { fi.desc.as_str() },
+            if fi.desc.is_empty() {
+                "-"
+            } else {
+                fi.desc.as_str()
+            },
             fd.name,
             system_description(fd),
             fd.mgmt,
@@ -268,7 +277,9 @@ fn rib(routes: &[Route]) -> String {
                 let _ = writeln!(
                     s,
                     "Gateway of last resort is {} to network 0.0.0.0\n",
-                    r.paths[0].next_hop.map_or("0.0.0.0".into(), |a| a.to_string())
+                    r.paths[0]
+                        .next_hop
+                        .map_or("0.0.0.0".into(), |a| a.to_string())
                 );
             }
             None => s.push_str("Gateway of last resort is not set\n\n"),
@@ -296,7 +307,11 @@ fn arp(dev: &Dev, t: &Tables, d: usize) -> String {
             } else {
                 ("00:04:12", "Dynamic")
             };
-            let name = if mgmt { a.iface.clone() } else { short(&a.iface) };
+            let name = if mgmt {
+                a.iface.clone()
+            } else {
+                short(&a.iface)
+            };
             let _ = writeln!(
                 s,
                 "{:<15} {:<10} {}  {:<10} ARPA  {name}",
@@ -350,7 +365,7 @@ pub fn render(e: &Estate, t: &Tables, d: usize) -> BTreeMap<&'static str, String
     out.insert("rib", rib(&t.ribs[d]));
     out.insert("arp", arp(dev, t, d));
     out.insert("inventory", inventory(dev));
-    out.insert("hsrp", format!("{TIME}"));
+    out.insert("hsrp", TIME.to_string());
     out.insert("bgp_sessions", bgp_summary(dev));
     out
 }

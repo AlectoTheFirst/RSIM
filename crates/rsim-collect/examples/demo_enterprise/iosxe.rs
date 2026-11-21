@@ -68,7 +68,9 @@ fn config_body(dev: &Dev) -> String {
             mgmt_vrf(dev)
         );
     }
-    s.push_str("no logging console\nenable secret 9 $9$DEMOSALT$FAKEHASHFAKEHASH\n!\nno aaa new-model\n");
+    s.push_str(
+        "no logging console\nenable secret 9 $9$DEMOSALT$FAKEHASHFAKEHASH\n!\nno aaa new-model\n",
+    );
     if sw {
         let _ = writeln!(s, "switch 1 provision {}", dev.model.to_ascii_lowercase());
     }
@@ -78,7 +80,12 @@ fn config_body(dev: &Dev) -> String {
         let ids: Vec<u16> = dev.vlans.iter().map(|v| v.id).collect();
         s.push_str("spanning-tree mode rapid-pvst\nspanning-tree extend system-id\n");
         if dev.stp_priority < 32768 {
-            let _ = writeln!(s, "spanning-tree vlan {} priority {}", vlan_list(&ids), dev.stp_priority);
+            let _ = writeln!(
+                s,
+                "spanning-tree vlan {} priority {}",
+                vlan_list(&ids),
+                dev.stp_priority
+            );
         }
         s.push_str("!\nredundancy\n mode sso\n!\n");
         for v in &dev.vlans {
@@ -163,7 +170,11 @@ fn config_body(dev: &Dev) -> String {
             s.push_str(" default-information originate\n");
         }
         s.push_str(" passive-interface default\n");
-        for i in dev.ifaces.iter().filter(|i| i.ospf && i.mode != Mode::Loopback) {
+        for i in dev
+            .ifaces
+            .iter()
+            .filter(|i| i.ospf && i.mode != Mode::Loopback)
+        {
             let _ = writeln!(s, " no passive-interface {}", i.name);
         }
         s.push_str("!\n");
@@ -252,7 +263,10 @@ fn hardware(i: &Iface, dev: &Dev) -> &'static str {
 fn interfaces(dev: &Dev) -> String {
     let mut s = String::new();
     for i in &dev.ifaces {
-        let tail = if matches!(i.mode, Mode::Access(_) | Mode::Trunk(_) | Mode::Member(..) | Mode::PortChannel(_)) {
+        let tail = if matches!(
+            i.mode,
+            Mode::Access(_) | Mode::Trunk(_) | Mode::Member(..) | Mode::PortChannel(_)
+        ) {
             " (connected)"
         } else {
             ""
@@ -289,7 +303,11 @@ fn interfaces(dev: &Dev) -> String {
             bw * 1000
         );
         if !matches!(i.mode, Mode::Loopback | Mode::Svi(_)) {
-            let speed = if bw >= 1000 { format!("{}Gb/s", bw / 1000) } else { format!("{bw}Mb/s") };
+            let speed = if bw >= 1000 {
+                format!("{}Gb/s", bw / 1000)
+            } else {
+                format!("{bw}Mb/s")
+            };
             let _ = writeln!(s, "  Full-duplex, {speed}, media type is SFP");
             s.push_str("  5 minute input rate 112000 bits/sec, 41 packets/sec\n  5 minute output rate 98000 bits/sec, 37 packets/sec\n     18422011 packets input, 2210643120 bytes, 0 no buffer\n     17690455 packets output, 2005548221 bytes, 0 underruns\n");
         }
@@ -309,7 +327,11 @@ pub fn lldp_entry(e: &Estate, port: &str, f: usize, fport: &str) -> String {
         "------------------------------------------------\nLocal Intf: {}\nChassis id: {}\nPort id: {port_id}\nPort Description: {}\nSystem Name: {}\n\nSystem Description:\n{}\n\nTime remaining: 101 seconds\nSystem Capabilities: B,R\nEnabled Capabilities: R\nManagement Addresses:\n    IP: {}\nAuto Negotiation - not supported\nPhysical media capabilities - not advertised\nMedia Attachment Unit type - not advertised\nVlan ID: - not advertised\n\n",
         short(port),
         dotted(fd.base_mac),
-        if fi.desc.is_empty() { "-" } else { fi.desc.as_str() },
+        if fi.desc.is_empty() {
+            "-"
+        } else {
+            fi.desc.as_str()
+        },
         fd.name,
         system_description(fd),
         fd.mgmt
@@ -325,7 +347,11 @@ fn lldp(e: &Estate, d: usize) -> String {
             s.push_str(&lldp_entry(e, &i.name, f, &fport));
             n += 1;
         }
-        for x in e.externals.iter().filter(|x| x.dev == d && x.port == i.name) {
+        for x in e
+            .externals
+            .iter()
+            .filter(|x| x.dev == d && x.port == i.name)
+        {
             let _ = write!(
                 s,
                 "------------------------------------------------\nLocal Intf: {}\nChassis id: {}\nPort id: {}\nPort Description: customer demo enterprise\nSystem Name: {}\n\nSystem Description:\nProvider edge router\n\nTime remaining: 98 seconds\nSystem Capabilities: R\nEnabled Capabilities: R\nManagement Addresses - not advertised\nAuto Negotiation - not supported\nPhysical media capabilities - not advertised\nMedia Attachment Unit type - not advertised\nVlan ID: - not advertised\n\n",
@@ -387,7 +413,9 @@ fn table(routes: &[&Route]) -> String {
             let _ = writeln!(
                 s,
                 "Gateway of last resort is {} to network 0.0.0.0\n",
-                r.paths[0].next_hop.map_or("0.0.0.0".into(), |a| a.to_string())
+                r.paths[0]
+                    .next_hop
+                    .map_or("0.0.0.0".into(), |a| a.to_string())
             );
         }
         None => s.push_str("Gateway of last resort is not set\n\n"),
@@ -472,19 +500,29 @@ fn rib(dev: &Dev, routes: &[Route], all: bool) -> String {
     if all {
         let m: Vec<&Route> = routes.iter().filter(|r| r.vrf != "default").collect();
         if !m.is_empty() {
-            let _ = write!(s, "\nRouting Table: {}\n{CODES}\n{}", mgmt_vrf(dev), table(&m));
+            let _ = write!(
+                s,
+                "\nRouting Table: {}\n{CODES}\n{}",
+                mgmt_vrf(dev),
+                table(&m)
+            );
         }
     }
     s
 }
 
 fn arp_rows(dev: &Dev, t: &Tables, d: usize, vrf: &str) -> String {
-    let mut s = String::from("Protocol  Address          Age (min)  Hardware Addr   Type   Interface\n");
+    let mut s =
+        String::from("Protocol  Address          Age (min)  Hardware Addr   Type   Interface\n");
     for a in &t.arp[d] {
         if dev.iface(&a.iface).vrf != vrf {
             continue;
         }
-        let age = if a.own { "-".to_string() } else { "3".to_string() };
+        let age = if a.own {
+            "-".to_string()
+        } else {
+            "3".to_string()
+        };
         let _ = writeln!(
             s,
             "Internet  {:<15} {:>8}   {}  ARPA   {}",
@@ -587,7 +625,11 @@ fn mac_table(t: &Tables, d: usize) -> String {
             short(&m.port)
         );
     }
-    let _ = writeln!(s, "Total Mac Addresses for this criterion: {}", t.macs[d].len() + 2);
+    let _ = writeln!(
+        s,
+        "Total Mac Addresses for this criterion: {}",
+        t.macs[d].len() + 2
+    );
     s
 }
 
@@ -658,7 +700,13 @@ fn vlans(dev: &Dev) -> String {
             .filter(|i| i.mode == Mode::Access(v.id))
             .map(|i| short(&i.name))
             .collect();
-        let _ = writeln!(s, "{:<4} {:<32} active    {}", v.id, v.name, ports.join(", "));
+        let _ = writeln!(
+            s,
+            "{:<4} {:<32} active    {}",
+            v.id,
+            v.name,
+            ports.join(", ")
+        );
     }
     s.push_str("1002 fddi-default                     act/unsup \n1003 token-ring-default               act/unsup \n1004 fddinet-default                  act/unsup \n1005 trnet-default                    act/unsup \n");
     s
@@ -694,7 +742,11 @@ fn bgp_summary(dev: &Dev) -> String {
 
 /// The reply of each section of a device, by section name, and the reply
 /// of the ARP table of each VRF, by VRF.
-pub fn render(e: &Estate, t: &Tables, d: usize) -> (BTreeMap<&'static str, String>, BTreeMap<String, String>) {
+pub fn render(
+    e: &Estate,
+    t: &Tables,
+    d: usize,
+) -> (BTreeMap<&'static str, String>, BTreeMap<String, String>) {
     let dev = &e.devs[d];
     let sw = switch(dev);
     let l2 = |f: String| if sw { f } else { INVALID.to_string() };

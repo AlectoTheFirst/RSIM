@@ -28,11 +28,17 @@ type Files = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
 /// sections, and for the sessions of the global table of NX-OS, which the
 /// source sends only when the switch refuses the sessions of all VRFs.
 fn derived(s: &SectionSpec) -> bool {
-    s.command.contains('<') || s.command.contains('[') || s.name == rsim_collect::nxos::BGP_SESSIONS_DEFAULT
+    s.command.contains('<')
+        || s.command.contains('[')
+        || s.name == rsim_collect::nxos::BGP_SESSIONS_DEFAULT
 }
 
 fn file_name(s: &SectionSpec) -> String {
-    let ext = if s.format == Format::Json { "json" } else { "txt" };
+    let ext = if s.format == Format::Json {
+        "json"
+    } else {
+        "txt"
+    };
     format!("{}.{ext}", s.name)
 }
 
@@ -48,7 +54,11 @@ fn device_files(e: &Estate, t: &route::Tables, d: usize) -> BTreeMap<String, Vec
         ),
         Os::Iosxe => {
             let (r, v) = iosxe::render(e, t, d);
-            (rsim_collect::iosxe::sections_with(CaptureBgp::Sessions), r, v)
+            (
+                rsim_collect::iosxe::sections_with(CaptureBgp::Sessions),
+                r,
+                v,
+            )
         }
         Os::Iosxr => (
             rsim_collect::iosxr::sections_with(CaptureBgp::Sessions),
@@ -68,7 +78,10 @@ fn device_files(e: &Estate, t: &route::Tables, d: usize) -> BTreeMap<String, Vec
     }
     for (vrf, text) in vrfs {
         let f = format!("{}.{vrf}.txt", rsim_collect::iosxe::ARP_VRFS);
-        commands.push_str(&format!("{f}\t{}\n", rsim_collect::iosxe::arp_vrf_command(&vrf)));
+        commands.push_str(&format!(
+            "{f}\t{}\n",
+            rsim_collect::iosxe::arp_vrf_command(&vrf)
+        ));
         files.insert(f, text.into_bytes());
     }
     assert!(
