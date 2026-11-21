@@ -329,7 +329,7 @@ impl Tools {
     }
 
     /// The cycle of the newest snapshot of the store, read through the store
-    /// of `held` when there is one.
+    /// of `held` when there is one; none for a new data folder.
     fn store_head(&self, held: Option<&Loaded>) -> Result<Option<u64>, String> {
         if let Some(s) = held.and_then(|t| t.source.as_ref()) {
             return s.store.head().map_err(|e| e.to_string());
@@ -337,11 +337,14 @@ impl Tools {
         let Some(folder) = &self.store else {
             return Ok(None);
         };
+        if commands::new_data_folder(folder) {
+            return Ok(None);
+        }
         let store = commands::open_store(folder).map_err(|e| e.detail)?;
         store.head().map_err(|e| e.to_string())
     }
 
-    /// The topology names: the built-in topologies, then `store` if the
+    /// The topology names: the hand-built topologies of the tests, then `store` if the
     /// server has a store.
     pub fn names(&self) -> Vec<&'static str> {
         let mut v = commands::topology_names();
@@ -351,8 +354,9 @@ impl Tools {
         v
     }
 
-    /// The twin of a topology name: a built-in topology, or `store` for the
-    /// store of the server. Only the names of `names` go into the cache.
+    /// The twin of a topology name: `store` for the store of the server, or
+    /// a hand-built topology of the tests. Only the names of `names` go into
+    /// the cache.
     pub fn twin(&self, topology: &str) -> Result<Arc<Loaded>, QueryError> {
         let source = match (&self.store, topology) {
             (Some(folder), STORE) => format!("{}{folder}", commands::STORE_PREFIX),
@@ -385,13 +389,14 @@ impl Tools {
         }
         let st = r.status();
         let id = |t: Option<Arc<Loaded>>| t.map(|t| t.identity.id.clone());
+        let head = self.store_head(st.current.as_deref());
         Some(StoreStatus {
-            newest_cycle: self.store_head(st.current.as_deref()).ok().flatten(),
+            head_error: st.head_error.or_else(|| head.as_ref().err().cloned()),
+            newest_cycle: head.ok().flatten(),
             held: id(st.current),
             previous: id(st.previous),
             loading: st.building,
             failed: st.failed,
-            head_error: st.head_error,
         })
     }
 

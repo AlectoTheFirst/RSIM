@@ -83,7 +83,7 @@ pub const ROUTES: &[Route] = &[
         method: "get",
         path: "/v1/twins",
         id: "listTopologies",
-        summary: "The twins of the server: the built-in topologies, and the alias store with the newest built snapshot (held), the snapshot before it that the server keeps (previous), the cycle of the newest snapshot of the store (newest_cycle), the snapshot whose twin builds now in the background (loading), and the newest snapshot that does not build or the HEAD that cannot be read (reload_error, with its snapshot, null for HEAD, and detail), each null when not known. A snapshot older than the held snapshot that the server does not keep gives 410 with the code snapshot_replaced.",
+        summary: "The twins of the server: the alias store with the newest built snapshot (held), the snapshot before it that the server keeps (previous), the cycle of the newest snapshot of the store (newest_cycle), the snapshot whose twin builds now in the background (loading), and the newest snapshot that does not build or the HEAD that cannot be read (reload_error, with its snapshot, null for HEAD, and detail), each null when not known. A snapshot older than the held snapshot that the server does not keep gives 410 with the code snapshot_replaced.",
         query: &[],
         body: &[],
         ok: (200, &[object]),
@@ -153,7 +153,7 @@ pub const ROUTES: &[Route] = &[
         method: "get",
         path: "/v1/twins/{twin}/coverage",
         id: "getCoverage",
-        summary: "The coverage report of a twin: for each device in name order, the config lines that the ingestion handles, that have no effect on the twin and that it does not handle, with the number of unhandled paths and stanzas. A built-in topology has no report. The table coverage gives the unhandled paths.",
+        summary: "The coverage report of a twin: for each device in name order, the config lines that the ingestion handles, that have no effect on the twin and that it does not handle, with the number of unhandled paths and stanzas. The table coverage gives the unhandled paths.",
         query: &[
             ("limit", "The number of rows of a page."),
             ("cursor", "The cursor of the next page."),
@@ -206,7 +206,7 @@ pub const ROUTES: &[Route] = &[
         method: "get",
         path: "/v1/twins/{twin}/sources",
         id: "getSourceLines",
-        summary: "The source lines of a span of a twin with the secrets masked: only the lines inside a source span of a function of the twin, at most 200 lines, with the lines left out and the cut lines named in a note. A built-in topology has no source text, a section with no mask for its vendor is refused, and a range with no line inside a source span is refused.",
+        summary: "The source lines of a span of a twin with the secrets masked: only the lines inside a source span of a function of the twin, at most 200 lines, with the lines left out and the cut lines named in a note. A section with no mask for its vendor is refused, and a range with no line inside a source span is refused.",
         query: &[
             (
                 "file",

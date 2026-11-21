@@ -1,6 +1,6 @@
 //! `rsim-mcp`: a Model Context Protocol server on stdio for path queries on
-//! the built-in topologies, and with `--store <data folder>` on the newest
-//! snapshot of a store as the topology `store`. It writes only protocol
+//! the newest snapshot of the store of `--store <data folder>`, the topology
+//! `store`. It writes only protocol
 //! messages to stdout and its log to stderr.
 
 #![deny(clippy::disallowed_methods, clippy::disallowed_types)]

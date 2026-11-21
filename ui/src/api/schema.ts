@@ -533,7 +533,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The twins of the server: the built-in topologies, and the alias store with the newest built snapshot (held), the snapshot before it that the server keeps (previous), the cycle of the newest snapshot of the store (newest_cycle), the snapshot whose twin builds now in the background (loading), and the newest snapshot that does not build or the HEAD that cannot be read (reload_error, with its snapshot, null for HEAD, and detail), each null when not known. A snapshot older than the held snapshot that the server does not keep gives 410 with the code snapshot_replaced. */
+        /** The twins of the server: the alias store with the newest built snapshot (held), the snapshot before it that the server keeps (previous), the cycle of the newest snapshot of the store (newest_cycle), the snapshot whose twin builds now in the background (loading), and the newest snapshot that does not build or the HEAD that cannot be read (reload_error, with its snapshot, null for HEAD, and detail), each null when not known. A snapshot older than the held snapshot that the server does not keep gives 410 with the code snapshot_replaced. */
         get: operations["listTopologies"];
         put?: never;
         post?: never;
@@ -601,7 +601,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The coverage report of a twin: for each device in name order, the config lines that the ingestion handles, that have no effect on the twin and that it does not handle, with the number of unhandled paths and stanzas. A built-in topology has no report. The table coverage gives the unhandled paths. */
+        /** The coverage report of a twin: for each device in name order, the config lines that the ingestion handles, that have no effect on the twin and that it does not handle, with the number of unhandled paths and stanzas. The table coverage gives the unhandled paths. */
         get: operations["getCoverage"];
         put?: never;
         post?: never;
@@ -703,7 +703,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The source lines of a span of a twin with the secrets masked: only the lines inside a source span of a function of the twin, at most 200 lines, with the lines left out and the cut lines named in a note. A built-in topology has no source text, a section with no mask for its vendor is refused, and a range with no line inside a source span is refused. */
+        /** The source lines of a span of a twin with the secrets masked: only the lines inside a source span of a function of the twin, at most 200 lines, with the lines left out and the cut lines named in a note. A section with no mask for its vendor is refused, and a range with no line inside a source span is refused. */
         get: operations["getSourceLines"];
         put?: never;
         post?: never;
@@ -1517,7 +1517,7 @@ export interface components {
             /** @description The TCP flags that are set. */
             tcp_flags?: components["schemas"]["TcpFlag"][] | null;
             /**
-             * @description A built-in topology, or `store` for the newest snapshot of the store
+             * @description `store` for the newest snapshot of the store
              *     of the server.
              */
             topology: string;
@@ -1862,7 +1862,7 @@ export interface components {
             /** @description The TCP flag values: numbers, ranges, or flag names joined with +. */
             tcp_flags?: components["schemas"]["SetArg"] | null;
             /**
-             * @description A built-in topology, or `store` for the newest snapshot of the store
+             * @description `store` for the newest snapshot of the store
              *     of the server.
              */
             topology: string;
@@ -2219,7 +2219,7 @@ export interface components {
         Transport: "tcp" | "udp" | "icmp" | "icmpv6";
         /** @description The twin that gave an answer. */
         TwinJson: {
-            /** @description The identifier of the base: a built-in topology or a snapshot. */
+            /** @description The identifier of the base: a snapshot, or a hand-built topology of the tests. */
             base: string;
             /** @description The twin identifier. */
             id: string;
@@ -2227,7 +2227,7 @@ export interface components {
             layers: string[];
             /**
              * Format: uint64
-             * @description The snapshot cycle of the base, or `null` for a built-in topology.
+             * @description The snapshot cycle of the base, or `null` for a hand-built topology of the tests.
              */
             snapshot?: number | null;
         };

@@ -959,7 +959,7 @@
           },
           {
             "const": "no_source_text",
-            "description": "The twin has no text of the source: a built-in topology, or a file\nthat is not a section of the snapshot of the twin.",
+            "description": "The twin has no text of the source: a hand-built twin of the tests, or a file\nthat is not a section of the snapshot of the twin.",
             "type": "string"
           },
           {
@@ -2170,7 +2170,7 @@
             ]
           },
           "topology": {
-            "description": "A built-in topology, or `store` for the newest snapshot of the store\nof the server.",
+            "description": "`store` for the newest snapshot of the store\nof the server.",
             "type": "string"
           },
           "unstated": {
@@ -3440,7 +3440,7 @@
             "description": "The TCP flag values: numbers, ranges, or flag names joined with +."
           },
           "topology": {
-            "description": "A built-in topology, or `store` for the newest snapshot of the store\nof the server.",
+            "description": "`store` for the newest snapshot of the store\nof the server.",
             "type": "string"
           }
         },
@@ -4502,7 +4502,7 @@
         "description": "The twin that gave an answer.",
         "properties": {
           "base": {
-            "description": "The identifier of the base: a built-in topology or a snapshot.",
+            "description": "The identifier of the base: a snapshot, or a hand-built topology of the tests.",
             "type": "string"
           },
           "id": {
@@ -4517,7 +4517,7 @@
             "type": "array"
           },
           "snapshot": {
-            "description": "The snapshot cycle of the base, or `null` for a built-in topology.",
+            "description": "The snapshot cycle of the base, or `null` for a hand-built topology of the tests.",
             "format": "uint64",
             "minimum": 0,
             "type": [
@@ -6804,7 +6804,7 @@
             ]
           }
         ],
-        "summary": "The twins of the server: the built-in topologies, and the alias store with the newest built snapshot (held), the snapshot before it that the server keeps (previous), the cycle of the newest snapshot of the store (newest_cycle), the snapshot whose twin builds now in the background (loading), and the newest snapshot that does not build or the HEAD that cannot be read (reload_error, with its snapshot, null for HEAD, and detail), each null when not known. A snapshot older than the held snapshot that the server does not keep gives 410 with the code snapshot_replaced."
+        "summary": "The twins of the server: the alias store with the newest built snapshot (held), the snapshot before it that the server keeps (previous), the cycle of the newest snapshot of the store (newest_cycle), the snapshot whose twin builds now in the background (loading), and the newest snapshot that does not build or the HEAD that cannot be read (reload_error, with its snapshot, null for HEAD, and detail), each null when not known. A snapshot older than the held snapshot that the server does not keep gives 410 with the code snapshot_replaced."
       }
     },
     "/v1/twins/{twin}": {
@@ -7049,7 +7049,7 @@
             ]
           }
         ],
-        "summary": "The coverage report of a twin: for each device in name order, the config lines that the ingestion handles, that have no effect on the twin and that it does not handle, with the number of unhandled paths and stanzas. A built-in topology has no report. The table coverage gives the unhandled paths."
+        "summary": "The coverage report of a twin: for each device in name order, the config lines that the ingestion handles, that have no effect on the twin and that it does not handle, with the number of unhandled paths and stanzas. The table coverage gives the unhandled paths."
       }
     },
     "/v1/twins/{twin}/queries": {
@@ -7489,7 +7489,7 @@
             ]
           }
         ],
-        "summary": "The source lines of a span of a twin with the secrets masked: only the lines inside a source span of a function of the twin, at most 200 lines, with the lines left out and the cut lines named in a note. A built-in topology has no source text, a section with no mask for its vendor is refused, and a range with no line inside a source span is refused."
+        "summary": "The source lines of a span of a twin with the secrets masked: only the lines inside a source span of a function of the twin, at most 200 lines, with the lines left out and the cut lines named in a note. A section with no mask for its vendor is refused, and a range with no line inside a source span is refused."
       }
     },
     "/v1/twins/{twin}/tables/{table}/lpm": {

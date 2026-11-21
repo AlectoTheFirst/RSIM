@@ -339,7 +339,7 @@ pub const TABLES: &[TableDef] = &[
             ),
         ],
         verbs: BASE_VERBS,
-        needs: "a twin of a store snapshot; a built-in topology has no coverage report",
+        needs: "a twin of a store snapshot",
     },
     TableDef {
         name: "neighbours",
@@ -529,7 +529,7 @@ pub const TABLES: &[TableDef] = &[
             ),
         ],
         verbs: BASE_VERBS,
-        needs: "a twin of a store snapshot with a BGP config or a BGP session section; a built-in topology has no BGP peers",
+        needs: "a twin of a store snapshot with a BGP config or a BGP session section",
     },
 ];
 

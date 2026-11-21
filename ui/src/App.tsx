@@ -27,7 +27,7 @@ import {
 import { HatchMark } from "./page/Hatch";
 import { keyForElement, keyPlace } from "./tables/model";
 import { KeyLine, LEVELS, QueryBar, ResultLine, TopBar } from "./page/Parts";
-import { newerRun, pinnedRun, viewOf, viewSearch, withTwin } from "./page/url";
+import { newerRun, pinnedRun, twinState, twinStateText, viewOf, viewSearch, withTwin } from "./page/url";
 import { type Fields, type Mode, explainCommand, fieldsOf, requestBody, rsimCommand } from "./page/query";
 import { QUERY_FIELDS, modeValue } from "./page/fields";
 import { TablesView } from "./tables/TablesView";
@@ -168,6 +168,8 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
   const user = props.user ?? null;
   const [prefs, setPrefs] = useState<Prefs>(loadPrefs);
   const [twins, setTwins] = useState<TwinRef[]>([]);
+  // Whether the first list of the twins came.
+  const [listed, setListed] = useState(false);
   const [twin, setTwin] = useState<string>(readUrl().twin ?? "");
   const [info, setInfo] = useState<Twin | null>(null);
   const [mode, setMode] = useState<Mode>("path");
@@ -190,6 +192,10 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
   const [catalog, setCatalog] = useState<TableDef[] | null>(null);
   const urlView = viewOf(search);
   const view = urlView === "Tokens" && !user ? "Trace" : urlView;
+  // The twin when it can answer, else empty, and the text of a twin that cannot.
+  const state = twinState(listed ? twins : null, twin);
+  const usable = state === "ready" ? twin : "";
+  const stateText = twinStateText(state);
 
   useEffect(() => {
     if (view === "Trace" || view === "Tokens" || catalog) return;
@@ -218,17 +224,18 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
     listTwins()
       .then((list) => {
         setTwins(list);
+        setListed(true);
         setTwin((t) => t || list[0]?.id || "");
       })
       .catch((e: unknown) => setProblem(String(e instanceof Error ? e.message : e)));
   }, []);
 
   useEffect(() => {
-    if (!twin) return;
-    getTwin(twin)
+    if (!usable) return;
+    getTwin(usable)
       .then((t) => setInfo(t.twin))
       .catch(() => setInfo(null));
-  }, [twin]);
+  }, [usable]);
 
   async function load(t: string, qid: string, since: number = performance.now()) {
     setBusy(true);
@@ -239,7 +246,7 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
       // of the answer stay on it after a newer snapshot comes.
       setResult({ twin: out.twin.id, qid, out, ms: performance.now() - since, timing });
       // A query on the store pins the page to the run of its answer.
-      if (out.twin.id !== t && !t.startsWith("builtin.")) {
+      if (out.twin.id !== t) {
         setTwin(out.twin.id);
         replaceUrlTwin(out.twin.id);
       }
@@ -393,7 +400,7 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
       .catch(() => setNotice(`${what} not copied`));
   }
 
-  const sourceTwin = result && !result.twin.startsWith("builtin.") ? result.twin : null;
+  const sourceTwin = result ? result.twin : null;
   const sourceLines = useMemo(
     () =>
       sourceTwin && result
@@ -529,6 +536,12 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
       />
       {view === "Tokens" && user ? (
         <TokensView user={user} />
+      ) : view === "Inventory" ? (
+        <InventoryView twin={usable} />
+      ) : stateText ? (
+        <main class="body">
+          <span class="muted">{stateText}</span>
+        </main>
       ) : view === "Tables" ? (
         <div class="grid-page">
           <TablesView
@@ -547,8 +560,6 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
         <div class="grid-page">
           <CoverageView twin={twin} row={prefs.row} catalog={catalog} search={search} navigate={navigate} />
         </div>
-      ) : view === "Inventory" ? (
-        <InventoryView twin={twin} />
       ) : (
       <>
       <QueryBar

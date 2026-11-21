@@ -2787,6 +2787,7 @@ dependencies = [
  "clap",
  "getrandom 0.3.4",
  "rayon",
+ "rsim-cli",
  "rsim-contract",
  "rsim-core",
  "rsim-engine",

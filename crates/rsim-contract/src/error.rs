@@ -17,7 +17,7 @@ pub enum ErrorCode {
     Store,
     UnknownTable,
     InvalidFilter,
-    /// The twin has no text of the source: a built-in topology, or a file
+    /// The twin has no text of the source: a hand-built twin of the tests, or a file
     /// that is not a section of the snapshot of the twin.
     NoSourceText,
     /// The section has no mask of its secrets for its vendor and format, so

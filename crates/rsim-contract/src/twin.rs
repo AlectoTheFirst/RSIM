@@ -1,6 +1,6 @@
 //! The identity of a twin: a base and an ordered list of what-if layers.
 //!
-//! The identifier grammar: `builtin.<topology>` for a built-in topology,
+//! The identifier grammar: `builtin.<topology>` for a hand-built topology of the tests,
 //! `snap-<cycle>` for a snapshot of the store, and
 //! `snap-<cycle>~<scenario>~<hash>` for a scenario on a snapshot. A name is
 //! lower-case letters, digits and `-`, so `.` and `~` only separate the
@@ -14,9 +14,9 @@ use serde::{Deserialize, Serialize};
 pub struct TwinJson {
     /// The twin identifier.
     pub id: String,
-    /// The identifier of the base: a built-in topology or a snapshot.
+    /// The identifier of the base: a snapshot, or a hand-built topology of the tests.
     pub base: String,
-    /// The snapshot cycle of the base, or `null` for a built-in topology.
+    /// The snapshot cycle of the base, or `null` for a hand-built topology of the tests.
     pub snapshot: Option<u64>,
     /// The what-if layers on the base, in order. Empty with no scenario.
     pub layers: Vec<String>,
@@ -32,7 +32,7 @@ pub fn is_name(name: &str) -> bool {
 }
 
 impl TwinJson {
-    /// The twin of a built-in topology, or an error for a name that is not
+    /// The twin of a hand-built topology of the tests, or an error for a name that is not
     /// a name of the grammar.
     pub fn builtin(topology: &str) -> Result<TwinJson, String> {
         if !is_name(topology) {

@@ -58,6 +58,25 @@ export function reloadMark(twins: readonly TwinRef[]): { text: string; title: st
   return { text: `${what}${held}`, title: e.detail };
 }
 
+/**
+ * Whether a twin can answer: `none` while the server has no twin, `empty`
+ * for the alias `store` of a store with no snapshot, else `ready`.
+ */
+export function twinState(twins: readonly TwinRef[] | null, twin: string): "loading" | "none" | "empty" | "ready" {
+  if (twins === null) return "loading";
+  if (twins.length === 0) return "none";
+  if (twin !== "store") return "ready";
+  const store = twins.find((t) => t.id === "store");
+  return store && store.held == null && store.newest_cycle == null ? "empty" : "ready";
+}
+
+/** The text of a twin that cannot answer, or null. */
+export function twinStateText(state: ReturnType<typeof twinState>): string | null {
+  if (state === "none") return "no store: rsim-api runs with no --store";
+  if (state === "empty") return "no snapshot yet: the collector writes the first snapshot of the store";
+  return null;
+}
+
 /** The cycle of a snapshot identifier `snap-<cycle>`, or null. */
 function cycleOf(id: string | null | undefined): number | null {
   const m = id ? /^snap-(\d+)$/.exec(id) : null;

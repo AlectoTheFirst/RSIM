@@ -1307,3 +1307,38 @@ fn a_server_on_port_0_accepts_the_host_of_its_port() {
     c.read_to_string(&mut out).unwrap();
     assert!(out.starts_with("HTTP/1.1 200"), "{out}");
 }
+
+#[test]
+#[allow(clippy::disallowed_methods)]
+fn a_new_data_folder_has_no_snapshot_and_a_folder_with_no_keys_has_a_reload_error() {
+    let store_of = |s: &State| {
+        let list = json(&get(s, "/v1/twins"));
+        list["twins"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["id"] == "store")
+            .unwrap()
+            .clone()
+    };
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-api-new-folder");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let s = state(Some(dir.display().to_string()));
+    let store = store_of(&s);
+    assert_eq!(store["id"], "store");
+    assert_eq!(store["held"], Value::Null);
+    assert_eq!(store["newest_cycle"], Value::Null);
+    assert_eq!(store["reload_error"], Value::Null);
+
+    std::fs::create_dir_all(dir.join("store")).unwrap();
+    let store = store_of(&state(Some(dir.display().to_string())));
+    assert_eq!(store["reload_error"]["snapshot"], Value::Null);
+    assert!(
+        store["reload_error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("keys"),
+        "{store}"
+    );
+}

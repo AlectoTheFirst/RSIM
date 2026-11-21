@@ -7,17 +7,8 @@ use rsim_contract::source::StepSourceJson;
 use crate::error::QueryError;
 use crate::json::{
     AnswerJson, BranchJson, DelayJson, DevicesOut, FieldJson, HeaderJson, PacketSetJson,
-    PathAnswerOut, QueryJson, SetAnswerOut, StepOut, SummaryResultJson, TopologiesOut,
-    TraceStepJson, VerdictJson,
+    PathAnswerOut, QueryJson, SetAnswerOut, StepOut, SummaryResultJson, TraceStepJson, VerdictJson,
 };
-
-pub fn topologies(t: &TopologiesOut) -> String {
-    let mut s = String::new();
-    for n in &t.topologies {
-        let _ = writeln!(s, "{n}");
-    }
-    s
-}
 
 pub fn devices(d: &DevicesOut) -> String {
     let mut s = String::new();

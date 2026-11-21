@@ -99,8 +99,8 @@ export function echoOfFields(f: Fields): Record<string, unknown> {
 }
 
 /** The topology argument of the CLI and of the MCP tools for a twin. */
-export function topologyOf(twin: string): string {
-  return twin.startsWith("builtin.") ? twin.slice("builtin.".length) : "store";
+export function topologyOf(_twin: string): string {
+  return "store";
 }
 
 /** A shell word, quoted when it has a character that the shell reads. */
@@ -109,8 +109,8 @@ export function shellWord(s: string): string {
 }
 
 /** The topology argument of an rsim command for a twin. */
-export function cliTopology(twin: string): string {
-  return twin.startsWith("builtin.") ? topologyOf(twin) : "store:<data folder>";
+export function cliTopology(_twin: string): string {
+  return "store:<data folder>";
 }
 
 /** The query as an rsim command. */
