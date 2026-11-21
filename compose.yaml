@@ -1,0 +1,64 @@
+# A local instance of rsim with sign-in: PostgreSQL, rsim-api on
+# http://localhost:8787 and, with the profile `collect`, the collector.
+#
+#   echo "RSIM_DB_PASSWORD=$(openssl rand -hex 16)" > .env
+#   podman compose up --build
+#   RSIM_ENV_FILE=<env file> podman compose --profile collect up --build
+#
+# The store, the store keys and the pins are in the volume rsim-data. The
+# env file of the collector is a mount and stays outside the repository.
+
+name: rsim
+
+services:
+  postgres:
+    image: docker.io/library/postgres:17.6-trixie@sha256:00bc86618629af00d2937fdc5a5d63db3ff8450acf52f0636ec813c7f4902929
+    environment:
+      POSTGRES_USER: rsim
+      POSTGRES_DB: rsim
+      POSTGRES_PASSWORD: ${RSIM_DB_PASSWORD:?set RSIM_DB_PASSWORD in .env}
+    volumes:
+      - rsim-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "rsim", "-d", "rsim"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      dockerfile: Containerfile
+      target: rsim
+    image: localhost/rsim:dev
+    environment:
+      RSIM_INVENTORY_URL: postgres://rsim:${RSIM_DB_PASSWORD}@postgres:5432/rsim
+    volumes:
+      - rsim-data:/data:ro
+    ports:
+      - "127.0.0.1:8787:8787"
+    read_only: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  collector:
+    profiles: ["collect"]
+    build:
+      context: .
+      dockerfile: Containerfile
+      target: rsim-collect
+    image: localhost/rsim-collect:dev
+    environment:
+      RSIM_INVENTORY_URL: postgres://rsim:${RSIM_DB_PASSWORD}@postgres:5432/rsim
+    volumes:
+      - rsim-data:/data
+      - ${RSIM_ENV_FILE:-/dev/null}:/run/rsim/collect.env:ro
+    read_only: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  rsim-db:
+  rsim-data:

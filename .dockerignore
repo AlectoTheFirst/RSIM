@@ -1,0 +1,9 @@
+/target
+/.git
+/.github
+/.claude
+/.code-review-graph
+/ui/node_modules
+/ui/dist
+/.env
+**/.DS_Store
