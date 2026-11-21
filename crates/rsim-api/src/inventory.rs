@@ -663,8 +663,7 @@ pub fn route(
                                 problem(
                                     409,
                                     "no_secret_key",
-                                    "the server has no secret key; start it with --secret-key-file"
-                                        .into(),
+                                    "rsim-api has no RSIM_SECRET_KEY".into(),
                                 )
                             })?;
                             Some(key.seal(&c.name, kind, &secret).map_err(|e| {

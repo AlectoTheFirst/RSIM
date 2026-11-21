@@ -15,4 +15,3 @@ ingress:
     secretName: rsim-demo-tls
 secrets:
   existingSecret: rsim-demo-db
-  secretKeySecret: rsim-demo-secret-key

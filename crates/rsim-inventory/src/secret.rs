@@ -3,8 +3,8 @@
 //! and kind as the associated data, so that a sealed secret does not open
 //! under another name or kind.
 
+use std::collections::BTreeMap;
 use std::fmt;
-use std::path::Path;
 
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
 use ring::digest::{SHA256, digest};
@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::CredentialKind;
 
-/// The environment variable of the file of the secret key.
-pub const KEY_FILE_VAR: &str = "RSIM_SECRET_KEY_FILE";
+/// The env key of the secret key: in the environment or in the env file.
+pub const KEY_VAR: &str = "RSIM_SECRET_KEY";
 
 /// The first byte of a sealed secret: the format version.
 const FORMAT: u8 = 1;
@@ -134,10 +134,14 @@ impl SecretKey {
         })
     }
 
-    /// The key of a file.
-    pub fn read(path: &Path) -> Result<SecretKey, String> {
-        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        SecretKey::parse(&text).map_err(|e| format!("{}: {e}", path.display()))
+    /// The key of the env key `RSIM_SECRET_KEY` of the environment, else of
+    /// the env file, or none when neither has it.
+    pub fn from_env(env_file: &BTreeMap<String, String>) -> Result<Option<SecretKey>, String> {
+        let text = std::env::var(KEY_VAR)
+            .ok()
+            .or_else(|| env_file.get(KEY_VAR).cloned());
+        text.map(|t| SecretKey::parse(&t).map_err(|e| format!("{KEY_VAR}: {e}")))
+            .transpose()
     }
 
     /// The text of a new random key.
@@ -282,6 +286,21 @@ mod tests {
         assert_eq!(k.id().len(), 16);
         assert!(!format!("{k:?}").contains("abab"));
         assert_eq!(format!("{:?}", password("hunter2")), "SecretInput(..)");
+    }
+
+    #[test]
+    fn the_key_of_the_env_file_is_the_line_rsim_secret_key() {
+        if std::env::var(KEY_VAR).is_ok() {
+            return;
+        }
+        let text = "ab".repeat(32);
+        let env = BTreeMap::from([(KEY_VAR.to_string(), text.clone())]);
+        let k = SecretKey::from_env(&env).unwrap().unwrap();
+        assert_eq!(k.id(), SecretKey::parse(&text).unwrap().id());
+        assert!(SecretKey::from_env(&BTreeMap::new()).unwrap().is_none());
+        let bad = BTreeMap::from([(KEY_VAR.to_string(), "hunter2".to_string())]);
+        let e = SecretKey::from_env(&bad).unwrap_err();
+        assert!(e.starts_with(KEY_VAR) && !e.contains("hunter2"), "{e}");
     }
 
     #[test]

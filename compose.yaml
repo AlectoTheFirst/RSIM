@@ -2,16 +2,17 @@
 # http://localhost:8787 and, with the profile `collect`, the collector.
 #
 #   echo "RSIM_DB_PASSWORD=$(openssl rand -hex 16)" > .env
-#   openssl rand -hex 32 > <key file outside the repository>
-#   echo "RSIM_SECRET_KEY_PATH=<key file>" >> .env
+#   echo "RSIM_ENV_FILE=<env file outside the repository>" >> .env
+#   echo "RSIM_SECRET_KEY=$(openssl rand -hex 32)" >> <env file>
 #   podman compose up --build
 #   podman compose --profile collect up --build
 #
-# The store, the store keys and the pins are in the volume rsim-data. The
-# secret key seals the secrets of the managed credentials; rsim-api and the
-# collector mount it. RSIM_ENV_FILE=<env file> mounts an env file for the
-# credentials with the source env or env-url. The key file and the env file
-# stay outside the repository.
+# The store, the store keys and the pins are in the volume rsim-data.
+# RSIM_ENV_FILE=<env file> mounts an env file in rsim-api and the collector:
+# the secrets of the credentials with the source env or env-url, and
+# RSIM_SECRET_KEY, the key of the secrets of the managed credentials, which
+# is the only line that rsim-api reads. The env file stays outside the
+# repository.
 
 name: rsim
 
@@ -38,10 +39,10 @@ services:
     image: localhost/rsim:dev
     environment:
       RSIM_INVENTORY_URL: postgres://rsim:${RSIM_DB_PASSWORD}@postgres:5432/rsim
-      RSIM_SECRET_KEY_FILE: /run/rsim-key/secret-key
+    command: ["--listen", "0.0.0.0:8787", "--store", "/data", "--env", "/run/rsim/collect.env"]
     volumes:
       - rsim-data:/data:ro
-      - ${RSIM_SECRET_KEY_PATH:?set RSIM_SECRET_KEY_PATH in .env}:/run/rsim-key/secret-key:ro
+      - ${RSIM_ENV_FILE:-/dev/null}:/run/rsim/collect.env:ro
     ports:
       - "127.0.0.1:8787:8787"
     read_only: true
@@ -58,11 +59,9 @@ services:
     image: localhost/rsim-collect:dev
     environment:
       RSIM_INVENTORY_URL: postgres://rsim:${RSIM_DB_PASSWORD}@postgres:5432/rsim
-      RSIM_SECRET_KEY_FILE: /run/rsim-key/secret-key
     volumes:
       - rsim-data:/data
       - ${RSIM_ENV_FILE:-/dev/null}:/run/rsim/collect.env:ro
-      - ${RSIM_SECRET_KEY_PATH:?set RSIM_SECRET_KEY_PATH in .env}:/run/rsim-key/secret-key:ro
     read_only: true
     depends_on:
       postgres:

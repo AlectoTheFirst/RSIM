@@ -182,7 +182,7 @@ export function Credentials(props: { inv: Inventory; adding: boolean; onAdding: 
         {keyPresent ? (
           <span class="muted">secret key <span class="t-value">{key?.id}</span></span>
         ) : (
-          <HatchCell title="rsim-api has no --secret-key-file">no secret key: env file only</HatchCell>
+          <HatchCell title="rsim-api has no RSIM_SECRET_KEY">no secret key</HatchCell>
         )}
       </div>
       <div class="inv-t cred inv-head" role="row">
