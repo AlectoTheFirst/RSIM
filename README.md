@@ -286,7 +286,7 @@ helm install rsim deploy/helm/rsim -n rsim --create-namespace -f <values file>
 |---|---|
 | `image`, `collector.image` | The images `rsim` and `rsim-collect`, by `digest` or `tag` |
 | `secrets.existingSecret` | A Secret with the key `postgres-password`, and the optional key `secret-key`. Use hex digits only for the password, because the password goes into the database URL. `secret-key` is 64 hex digits from `openssl rand -hex 32`, the key of the managed credentials, which `rsim-api` and the collector get as `RSIM_SECRET_KEY`. With no key, the API refuses a managed secret. Keep the key across upgrades. |
-| `collector.enabled`, `collector.envSecret` | The collector, and the Secret with its env file under the key `collect.env`: the secrets of the credentials of the source `env` or `env-url`. |
+| `collector.enabled`, `collector.envSecret` | The collector, and the optional Secret with its env file under the key `collect.env`: the secrets of the credentials of the source `env` or `env-url`. With no env file, the collector uses only the managed credentials. |
 | `ingress.host`, `ingress.tls.secretName`, `api.trustedProxies` | The host behind the ingress. An HTTPS host needs the address of the proxy in `api.trustedProxies`. |
 | `networkPolicy.apiFrom` | The peers that can reach the API port, by default the namespace `traefik` |
 
