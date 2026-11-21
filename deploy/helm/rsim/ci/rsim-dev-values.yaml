@@ -21,3 +21,4 @@ ingress:
     secretName: rsim-dev-tls
 secrets:
   existingSecret: rsim-dev-db
+  secretKeySecret: rsim-dev-secret-key

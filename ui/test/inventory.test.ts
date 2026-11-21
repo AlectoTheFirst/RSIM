@@ -10,6 +10,8 @@ import {
   cellState,
   counts,
   credentialGroups,
+  credentialBody,
+  credentialFields,
   deviceCount,
   deviceSsh,
   devicesHave,
@@ -18,17 +20,31 @@ import {
   groupTrust,
   hops,
   lastCycle,
-  moveBody,
   nameTaken,
   newDeviceBody,
   newRouteBody,
-  overrides,
   routeCredentials,
   secretFrom,
   seenRows,
-  siteBody,
   storedDevice,
   usedByRoutes,
+  SETTING_FIELDS,
+  deviceBody,
+  deviceDraft,
+  groupBody,
+  groupDraft,
+  inherited,
+  jumpHostBody,
+  jumpHostRoutes,
+  newDeviceChecked,
+  newGroupChecked,
+  newJumpHostBody,
+  notUsed,
+  parseSetting,
+  rebase,
+  routeBody,
+  routeFields,
+  sameRecord,
 } from "../src/inventory/model";
 import { viewOf, viewSearch } from "../src/page/url";
 
@@ -167,11 +183,6 @@ describe("cells of the settings", () => {
     expect(groupSsh(VENDORS, INV.groups[0]!)).toBe("Modern, exec");
     expect(groupSsh(VENDORS, INV.groups[2]!)).toBe("Legacy, exec");
   });
-
-  it("names the settings that a device overrides", () => {
-    expect(overrides(R2)).toEqual(["ssh_algorithms", "ssh_mode"]);
-    expect(overrides(R1)).toEqual([]);
-  });
 });
 
 describe("trust of a group", () => {
@@ -283,15 +294,6 @@ describe("credentials and routes", () => {
 });
 
 describe("writes", () => {
-  it("keeps the stored settings of a device and adds no inherited value", () => {
-    const r2 = storedDevice(INV, "r2")!;
-    expect(siteBody(r2, " s9 ", "")).toEqual({ ...r2, site: "s9", location: null });
-    expect(moveBody(r2, "g-empty")).toEqual({ ...r2, group: "g-empty" });
-    expect(moveBody(r2, "g-empty").settings).toEqual({ ssh_algorithms: "legacy", ssh_mode: "shell" });
-    const r1 = storedDevice(INV, "r1")!;
-    expect(moveBody(r1, "g-empty").settings).toEqual({});
-  });
-
   it("makes the bodies of a new device and a new route", () => {
     expect(newDeviceBody({ name: "n1", address: "192.0.2.50", group: "g-vyos", site: "", location: "" })).toEqual({
       name: "n1",
@@ -311,6 +313,129 @@ describe("writes", () => {
   });
 });
 
+describe("edits of the settings", () => {
+  const field = (k: string) => SETTING_FIELDS.find((f) => f.key === k)!;
+
+  it("checks a number against the range of the database, an empty text inheriting", () => {
+    const retries = field("retries");
+    const timeout = field("timeout_seconds");
+    expect(parseSetting(retries, "0")).toEqual({ ok: true, value: 0 });
+    expect(parseSetting(retries, "10")).toEqual({ ok: true, value: 10 });
+    expect(parseSetting(retries, "11").ok).toBe(false);
+    expect(parseSetting(timeout, "0").ok).toBe(false);
+    expect(parseSetting(timeout, "1")).toEqual({ ok: true, value: 1 });
+    expect(parseSetting(timeout, "86400")).toEqual({ ok: true, value: 86400 });
+    expect(parseSetting(timeout, "86401")).toEqual({ ok: false, problem: { title: "timeout_seconds out of range", detail: "timeout_seconds from 1 to 86400" } });
+    expect(parseSetting(timeout, "")).toEqual({ ok: true, value: null });
+    expect(parseSetting(timeout, " ")).toEqual({ ok: true, value: null });
+    expect(parseSetting(timeout, "1.5")).toEqual({ ok: false, problem: { title: "timeout_seconds not a whole number", detail: "timeout_seconds from 1 to 86400" } });
+    expect(parseSetting(timeout, "-1").ok).toBe(false);
+    expect(parseSetting(field("ssh_channels"), "0").ok).toBe(false);
+    expect(parseSetting(field("ssh_channels"), "2147483648").ok).toBe(false);
+    expect(parseSetting(field("ssh_mode"), "telnet").ok).toBe(false);
+  });
+
+  it("names the settings that the collector of the vendor does not read, and none with no collector", () => {
+    expect(notUsed(field("tls_trust"), VENDORS, "vyos")).toBe("not used over SSH");
+    expect(notUsed(field("ssh_mode"), VENDORS, "unifi")).toBe("not used over HTTPS");
+    expect(notUsed(field("nxos_json"), VENDORS, "vyos")).toBe("not used by vyos");
+    expect(notUsed(field("nxos_json"), VENDORS, "nxos")).toBeNull();
+    expect(notUsed(field("timeout_seconds"), VENDORS, "unifi")).toBeNull();
+    expect(notUsed(field("retries"), VENDORS, "vyos")).toBe("not read by the collector");
+    expect(notUsed(field("request_timeout_seconds"), VENDORS, "unifi")).toBe("not read by the collector");
+    expect(notUsed(field("request_timeout_seconds"), VENDORS, "vyos")).toBe("not used over SSH");
+    expect(notUsed(field("tls_trust"), VENDORS, "othervendor")).toBeNull();
+    expect(notUsed(field("tls_trust"), null, "vyos")).toBeNull();
+  });
+
+  it("gives the inherited value of an empty setting: the group, else the default", () => {
+    expect(inherited(field("ssh_algorithms"), INV.groups[2]!.settings)).toEqual({ from: "group", text: "legacy" });
+    expect(inherited(field("timeout_seconds"), INV.groups[2]!.settings)).toEqual({ from: "default", text: "45" });
+    expect(inherited(field("route"), null)).toEqual({ from: "default", text: "direct" });
+  });
+
+  it("clears a setting of a device to inherit, with no other field changed", () => {
+    const r2 = storedDevice(INV, "r2")!;
+    const b = deviceBody(r2, { ...deviceDraft(r2), ssh_mode: "" });
+    expect(b).toEqual({ ok: true, body: { ...r2, settings: { ssh_algorithms: "legacy" } } });
+  });
+
+  it("writes 2 edited fields of one stored record and keeps the others", () => {
+    const r1 = storedDevice(INV, "r1")!;
+    const b = deviceBody(r1, { ...deviceDraft(r1), location: "", timeout_seconds: "30", address: " 192.0.2.101 " });
+    expect(b).toEqual({ ok: true, body: { name: "r1", group: "g-vyos", address: "192.0.2.101", site: "s1", settings: { timeout_seconds: 30 } } });
+    expect(deviceBody(r1, deviceDraft(r1))).toEqual({ ok: true, body: r1 });
+    expect(sameRecord(r1, { ...r1, console_site: null })).toBe(true);
+  });
+
+  it("refuses a body with a number out of range or an empty address", () => {
+    const r1 = storedDevice(INV, "r1")!;
+    expect(deviceBody(r1, { ...deviceDraft(r1), retries: "11" }).ok).toBe(false);
+    expect(deviceBody(r1, { ...deviceDraft(r1), address: " " }).ok).toBe(false);
+  });
+
+  it("edits the vendor, the description and the settings of a group", () => {
+    const g = INV.groups[0]!;
+    const b = groupBody(g, { ...groupDraft(g), description: "Lab routers", credential: "", capture_bgp: "all" });
+    expect(b).toEqual({ ok: true, body: { name: "g-vyos", vendor: "vyos", description: "Lab routers", settings: { route: "via-hop", capture_bgp: "all" } } });
+    expect(groupBody(g, { ...groupDraft(g), vendor: "" }).ok).toBe(false);
+  });
+
+  it("keeps an edit that is not written when the stored record changes", () => {
+    const before = { address: "192.0.2.1", site: "s1" };
+    const next = { address: "192.0.2.9", site: "s1" };
+    expect(rebase({ address: "192.0.2.1", site: "s7" }, before, next)).toEqual({ address: "192.0.2.9", site: "s7" });
+  });
+
+  it("makes the bodies of a new device and a new group with the settings of the panel", () => {
+    expect(newDeviceChecked({ name: "n1", address: "192.0.2.50", group: "g-vyos", site: "", location: "" }, { console_site: "default", retries: "2", ha: "" })).toEqual({
+      ok: true,
+      body: { name: "n1", group: "g-vyos", address: "192.0.2.50", site: null, location: null, console_site: "default", settings: { retries: 2 } },
+    });
+    expect(newDeviceChecked({ name: "n1", address: "192.0.2.50", group: "g-vyos", site: "", location: "" }, { retries: "x" }).ok).toBe(false);
+    expect(newGroupChecked({ name: "g", vendor: "nxos", credential: "cred-a", route: "" }, { nxos_json: "native", description: "" })).toEqual({
+      ok: true,
+      body: { name: "g", vendor: "nxos", settings: { credential: "cred-a", nxos_json: "native" } },
+    });
+  });
+});
+
+describe("edits of routes and jump hosts", () => {
+  it("clears the proxy and its login together", () => {
+    const r = INV.routes[2]!;
+    expect(routeBody(r, { ...routeFields(r), proxy: " " })).toEqual({ name: "via-proxy", jumps: ["hop-2", "hop-1"] });
+  });
+
+  it("changes the order of the jump hosts and keeps the proxy", () => {
+    const r = INV.routes[2]!;
+    expect(routeBody(r, { ...routeFields(r), jumps: ["hop-1"] })).toEqual({ ...r, jumps: ["hop-1"] });
+    expect(routeBody(r, routeFields(r))).toEqual(r);
+  });
+
+  it("adds a proxy login only with a proxy", () => {
+    const r = INV.routes[1]!;
+    expect(routeBody(r, { proxy: "http://198.51.100.30:3128", proxyCredential: "cred-proxy", jumps: [] })).toEqual({
+      name: "via-hop",
+      jumps: [],
+      proxy: "http://198.51.100.30:3128",
+      proxy_credential: "cred-proxy",
+    });
+  });
+
+  it("makes the bodies of a jump host and names the routes that use it", () => {
+    expect(newJumpHostBody({ name: " hop-3 ", address: " 198.51.100.12:22 ", credential: "cred-hop", ssh_algorithms: "legacy" })).toEqual({
+      name: "hop-3",
+      address: "198.51.100.12:22",
+      credential: "cred-hop",
+      ssh_algorithms: "legacy",
+    });
+    const j = INV.jump_hosts[0]!;
+    expect(jumpHostBody(j, { address: "198.51.100.13", credential: "cred-a", ssh_algorithms: "modern" })).toEqual({ ...j, address: "198.51.100.13", credential: "cred-a" });
+    expect(jumpHostRoutes(INV, "hop-1")).toEqual(["via-hop", "via-proxy"]);
+    expect(jumpHostRoutes(INV, "hop-9")).toEqual([]);
+  });
+});
+
 describe("names of new records", () => {
   it("finds a name in use after the trim", () => {
     expect(nameTaken(INV.groups, " g-vyos ")).toBe(true);
@@ -324,5 +449,43 @@ describe("view in the URL", () => {
   it("reads and writes the Inventory view", () => {
     expect(viewOf("?view=inventory&twin=store")).toBe("Inventory");
     expect(viewSearch("Inventory", "store")).toBe("?view=inventory&twin=store");
+  });
+});
+
+describe("the credential form", () => {
+  const managed = { name: "lab", source: "managed" as const, kind: "password" as const, user: "ro", description: "lab routers", secret_revision: 2 };
+  const PEM = "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----\n";
+
+  it("names a managed source by its kind", () => {
+    expect(secretFrom(managed)).toBe("managed password");
+    expect(secretFrom({ ...managed, kind: "api-key", user: null })).toBe("managed API key");
+  });
+
+  it("needs the secret of a new managed credential and keeps a stored one", () => {
+    const f = { ...credentialFields(), user: "ro" };
+    const fresh = credentialBody(undefined, " lab ", f);
+    expect(fresh.ok).toBe(false);
+    if (!fresh.ok) expect(fresh.problem.title).toBe("secret empty");
+    const set = credentialBody(undefined, "lab", { ...f, secret: "p" });
+    expect(set).toEqual({
+      ok: true,
+      body: { name: "lab", source: "managed", key: null, kind: "password", user: "ro", description: null, secret_revision: null, secret: { value: "p", passphrase: null } },
+    });
+    const kept = credentialBody(managed, "lab", { ...credentialFields(managed), user: "admin" });
+    expect(kept.ok && kept.body).toMatchObject({ user: "admin", description: "lab routers", secret: null });
+    expect(credentialBody(managed, "lab", { ...credentialFields(managed), kind: "api-key" }).ok).toBe(false);
+  });
+
+  it("checks the user, the private key and the env key", () => {
+    expect(credentialBody(undefined, "k", { ...credentialFields(), user: "", secret: "p" }).ok).toBe(false);
+    const key = { ...credentialFields(), kind: "ssh-key" as const, user: "ro", passphrase: "pp" };
+    expect(credentialBody(undefined, "k", { ...key, secret: "not a key" }).ok).toBe(false);
+    const ok = credentialBody(undefined, "k", { ...key, secret: PEM });
+    expect(ok.ok && ok.body.secret).toEqual({ value: PEM, passphrase: "pp" });
+    const api = credentialBody(undefined, "k", { ...credentialFields(), kind: "api-key", user: "ignored", secret: "abc" });
+    expect(api.ok && api.body).toMatchObject({ kind: "api-key", user: null, secret: { value: "abc", passphrase: null } });
+    expect(credentialBody(undefined, "e", { ...credentialFields(), source: "env", key: "lower" }).ok).toBe(false);
+    const env = credentialBody(managed, "lab", { ...credentialFields(managed), source: "env", key: "LAB" });
+    expect(env.ok && env.body).toMatchObject({ source: "env", key: "LAB", kind: null, user: null, secret: null });
   });
 });

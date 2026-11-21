@@ -60,6 +60,12 @@ fn json(r: &Response) -> Value {
 /// A server with the inventory database of a test, and the runtime of its
 /// connection.
 fn with_db(name: &str) -> Option<(State, tokio::runtime::Runtime)> {
+    with_db_key(name, None)
+}
+
+/// A server with the inventory database of a test and, if given, the
+/// secret key of the managed credentials.
+fn with_db_key(name: &str, key: Option<&str>) -> Option<(State, tokio::runtime::Runtime)> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
         .enable_all()
@@ -81,7 +87,11 @@ fn with_db(name: &str) -> Option<(State, tokio::runtime::Runtime)> {
         text
     });
     TOKEN.with(|t| *t.borrow_mut() = Some(token));
-    let s = state().with_inventory(InventoryHandle::new(Arc::new(db), rt.handle().clone()));
+    let mut h = InventoryHandle::new(Arc::new(db), rt.handle().clone());
+    if let Some(k) = key {
+        h = h.with_secret_key(rsim_inventory::SecretKey::parse(k).unwrap());
+    }
+    let s = state().with_inventory(h);
     Some((s, rt))
 }
 
@@ -320,4 +330,118 @@ fn the_bindings_routes_take_their_keys_from_the_path() {
         .status,
         404
     );
+}
+
+#[test]
+fn a_managed_secret_goes_in_and_no_answer_gives_it_back() {
+    let key = rsim_inventory::SecretKey::generate().unwrap();
+    let Some((s, _rt)) = with_db_key("a_managed_secret_goes_in", Some(&key)) else {
+        return;
+    };
+    let r = call(&s, "GET", "/v1/inventory/secret-key", None);
+    assert_eq!(r.status, 200);
+    let k = json(&r);
+    assert_eq!(k["present"], true);
+    assert_eq!(k["id"].as_str().unwrap().len(), 16);
+    assert!(!String::from_utf8_lossy(&r.body).contains(&key));
+
+    let plain = "s3cret-value-8841";
+    let r = call(
+        &s,
+        "PUT",
+        "/v1/inventory/credentials/lab",
+        Some(
+            json!({"source": "managed", "kind": "password", "user": "ro",
+                    "secret": {"value": plain}}),
+        ),
+    );
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
+
+    let stored =
+        json(&call(&s, "GET", "/v1/inventory/credentials", None))["credentials"][0].clone();
+    assert_eq!(
+        stored,
+        json!({"name": "lab", "source": "managed", "kind": "password", "user": "ro",
+               "secret_revision": 1})
+    );
+
+    // The stored record with one edited field keeps the secret.
+    let mut edited = stored.clone();
+    edited["description"] = json!("lab routers");
+    let r = call(&s, "PUT", "/v1/inventory/credentials/lab", Some(edited));
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
+    let c = json(&call(&s, "GET", "/v1/inventory/credentials", None))["credentials"][0].clone();
+    assert_eq!(c["secret_revision"], 1);
+    assert_eq!(c["description"], "lab routers");
+
+    // A new secret increases the revision.
+    let mut next = c.clone();
+    next["secret"] = json!({"value": "second-secret"});
+    let r = call(&s, "PUT", "/v1/inventory/credentials/lab", Some(next));
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
+    let c = json(&call(&s, "GET", "/v1/inventory/credentials", None))["credentials"][0].clone();
+    assert_eq!(c["secret_revision"], 2);
+
+    for path in [
+        "/v1/inventory",
+        "/v1/inventory/credentials",
+        "/v1/inventory/audit",
+        "/v1/inventory/devices",
+    ] {
+        let r = call(&s, "GET", path, None);
+        assert_eq!(r.status, 200, "{path}");
+        let text = String::from_utf8_lossy(&r.body);
+        assert!(
+            !text.contains(plain) && !text.contains("second-secret"),
+            "{path}: {text}"
+        );
+    }
+
+    // A secret of an env credential, a private key that is not one, and a
+    // passphrase of a password are refused.
+    for body in [
+        json!({"source": "env", "key": "LAB", "secret": {"value": "p"}}),
+        json!({"source": "managed", "kind": "ssh-key", "user": "ro", "secret": {"value": "p"}}),
+        json!({"source": "managed", "kind": "password", "user": "ro",
+               "secret": {"value": "p", "passphrase": "q"}}),
+        json!({"source": "managed", "kind": "api-key", "user": "ro", "secret": {"value": "p"}}),
+        json!({"source": "managed", "kind": "api-key"}),
+    ] {
+        let r = call(
+            &s,
+            "PUT",
+            "/v1/inventory/credentials/other",
+            Some(body.clone()),
+        );
+        assert_eq!(
+            r.status,
+            422,
+            "{body}: {}",
+            String::from_utf8_lossy(&r.body)
+        );
+    }
+}
+
+#[test]
+fn a_server_with_no_secret_key_refuses_a_secret() {
+    let Some((s, _rt)) = with_db("a_server_with_no_secret_key") else {
+        return;
+    };
+    let r = call(&s, "GET", "/v1/inventory/secret-key", None);
+    assert_eq!(json(&r), json!({"present": false}));
+    let r = call(
+        &s,
+        "PUT",
+        "/v1/inventory/credentials/lab",
+        Some(json!({"source": "managed", "kind": "api-key", "secret": {"value": "k"}})),
+    );
+    assert_eq!(r.status, 409);
+    assert_eq!(json(&r)["code"], "no_secret_key");
+    let r = call(
+        &s,
+        "PUT",
+        "/v1/inventory/credentials/lab",
+        Some(json!({"source": "env", "key": "LAB"})),
+    );
+    assert_eq!(r.status, 200);
 }

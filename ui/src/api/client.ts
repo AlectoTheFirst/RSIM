@@ -1,5 +1,5 @@
 // The calls of the UI to the REST API of rsim-api, on the origin of the page.
-import type { Credential, Device, Group, Inventory, ResolvedDevice, Route, Vendors } from "../inventory/model";
+import type { Credential, CredentialPut, Device, Group, Inventory, JumpHost, ResolvedDevice, Route, SecretKeyOut, Vendors } from "../inventory/model";
 import type { Me, NewToken, PathAnswer, SetAnswer, SetupState, SourceText, Span, TableOut, TablesOut, TokenIn, TokenInfo, Twin } from "./types";
 
 /** A refused request: the problem object of RFC 9457. */
@@ -286,6 +286,11 @@ export async function getResolvedDevices(): Promise<ResolvedDevice[]> {
   return body.devices;
 }
 
+/** Whether the server has the secret key of the managed credentials, and its id. */
+export async function getSecretKey(): Promise<SecretKeyOut> {
+  return getJson("/v1/inventory/secret-key");
+}
+
 /** The vendors that have a collector, with their transport. */
 export async function getVendors(): Promise<Vendors> {
   return getJson("/v1/inventory/vendors");
@@ -298,8 +303,21 @@ async function put(path: string, body: unknown): Promise<number> {
 
 export const putDevice = (d: Device) => put(`/v1/inventory/devices/${encodeURIComponent(d.name)}`, d);
 export const putGroup = (g: Group) => put(`/v1/inventory/groups/${encodeURIComponent(g.name)}`, g);
-export const putCredential = (c: Credential) => put(`/v1/inventory/credentials/${encodeURIComponent(c.name)}`, c);
+export const putCredential = (c: Credential | CredentialPut) => put(`/v1/inventory/credentials/${encodeURIComponent(c.name)}`, c);
 export const putRoute = (r: Route) => put(`/v1/inventory/routes/${encodeURIComponent(r.name)}`, r);
+export const putJumpHost = (j: JumpHost) => put(`/v1/inventory/jump-hosts/${encodeURIComponent(j.name)}`, j);
+
+/** Removes a record of the inventory; the answer is the inventory version. */
+async function del(path: string): Promise<number> {
+  const r = await send(path, { method: "DELETE", headers: { accept: "application/json" } });
+  return ((await r.json()) as { version: number }).version;
+}
+
+export const deleteDevice = (name: string) => del(`/v1/inventory/devices/${encodeURIComponent(name)}`);
+export const deleteGroup = (name: string) => del(`/v1/inventory/groups/${encodeURIComponent(name)}`);
+export const deleteCredential = (name: string) => del(`/v1/inventory/credentials/${encodeURIComponent(name)}`);
+export const deleteRoute = (name: string) => del(`/v1/inventory/routes/${encodeURIComponent(name)}`);
+export const deleteJumpHost = (name: string) => del(`/v1/inventory/jump-hosts/${encodeURIComponent(name)}`);
 
 /** All rows of a table of a twin, page after page. */
 export async function allRows(twin: string, table: string): Promise<{ columns: string[]; rows: unknown[][] }> {

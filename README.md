@@ -159,7 +159,7 @@ A VXLAN tunnel end uses `VxlanEncap` and `VxlanDecap`. `VxlanEncap` puts the pac
 | `rsim-cli` | The command `rsim` |
 | `rsim-api` | The REST API with its OpenAPI 3.1 contract, the browser UI and the sign-in |
 | `rsim-mcp` | A Model Context Protocol server on stdio |
-| `rsim-inventory` | The inventory in PostgreSQL: device groups, devices, credential references, routes, Equinix bindings and the audit log |
+| `rsim-inventory` | The inventory in PostgreSQL: device groups, devices, credentials with their sealed secrets, routes, Equinix bindings and the audit log |
 
 ## Build
 
@@ -267,9 +267,10 @@ A build of `rsim-api` with no built UI serves a page that says how to build it. 
 `Containerfile` builds 2 images: `rsim` with `rsim-api`, `rsim-inventory` and `rsim`, and `rsim-collect` with the collector. `compose.yaml` starts a local instance with sign-in: PostgreSQL, `rsim-api` on `http://localhost:8787` and, with the profile `collect`, the collector. It works with `podman compose` and with Docker Compose.
 
 1. Write the database password in the file `.env`, which Git ignores: `echo "RSIM_DB_PASSWORD=$(openssl rand -hex 16)" > .env`.
-2. Start the instance: `podman compose up --build`.
-3. Open `http://localhost:8787/` and make the first admin on the setup page.
-4. To collect, start the collector with the env file of its secrets: `RSIM_ENV_FILE=<env file> podman compose --profile collect up --build`. The collector reads the devices from the inventory of the instance.
+2. Make the secret key of the managed credentials in a file outside the repository, and write its path in `.env`: `openssl rand -hex 32 > <key file>` and `echo "RSIM_SECRET_KEY_PATH=<key file>" >> .env`. Keep the key: another key does not open the stored secrets.
+3. Start the instance: `podman compose up --build`.
+4. Open `http://localhost:8787/` and make the first admin on the setup page.
+5. To collect, start the collector: `podman compose --profile collect up --build`. The collector reads the devices and the managed credentials from the inventory of the instance. For credentials of the source `env` or `env-url`, add `RSIM_ENV_FILE=<env file>`.
 
 The volume `rsim-data` holds the store, the store keys and the pins, and `rsim-api` mounts it read only. The volume `rsim-db` holds the database. A new instance has no snapshot: the views Trace, Tables and Coverage show "no snapshot yet" until the collector writes the first snapshot, and the view Inventory works at once.
 
@@ -285,7 +286,8 @@ helm install rsim deploy/helm/rsim -n rsim --create-namespace -f <values file>
 |---|---|
 | `image`, `collector.image` | The images `rsim` and `rsim-collect`, by `digest` or `tag` |
 | `secrets.existingSecret` | A Secret with the key `postgres-password`. Use hex digits only, because the password goes into the database URL. |
-| `collector.enabled`, `collector.envSecret` | The collector, and a Secret with the env file of its secrets under the key `collect.env` |
+| `secrets.secretKeySecret` | A Secret with the key `secret-key`: 64 hex digits from `openssl rand -hex 32`. It seals the secrets of the managed credentials; `rsim-api` and the collector mount it. With no Secret, the API refuses a managed secret. Keep the Secret across upgrades. |
+| `collector.enabled`, `collector.envSecret` | The collector, and an optional Secret with an env file under the key `collect.env` for the credentials of the source `env` or `env-url` |
 | `ingress.host`, `ingress.tls.secretName`, `api.trustedProxies` | The host behind the ingress. An HTTPS host needs the address of the proxy in `api.trustedProxies`. |
 | `networkPolicy.apiFrom` | The peers that can reach the API port, by default the namespace `traefik` |
 
@@ -301,17 +303,17 @@ rsim-collect --env <env file> --data <data folder> run --repeat
 
 The env file has one `KEY=VALUE` on each line. For an SSH vendor `<P>` (`VYOS`, `NXOS`, `IOSXR` or `IOSXE`), `<P>_<NAME>_IP` adds a device, `<P>_USER` with `<P>_PASS`, `<P>_KEY_FILE` or `<P>_AGENT` is the credential of the vendor, and `<P>_VIA` and `<P>_PROXY` give the jump hosts and the proxy. `UNIFI_CONTROLLER` and `UNIFI_SITES` add the UniFi consoles and sites. The doc comment of `crates/rsim-collect/src/bin/rsim-collect.rs` lists each key. Keep the env file and the data folder outside the repository.
 
-The inventory can also be in PostgreSQL. Device groups hold the credential reference, the route, the SSH settings, the TLS trust and the collector settings, and a device inherits each setting from its group unless it sets its own. A credential is a reference to its source, for example `env:VYOS` for the `VYOS_USER` and `VYOS_PASS` keys of the env file; the database holds no secret. Each change increases the inventory version and writes an audit record, and each snapshot records the inventory version that its cycle read.
+The inventory can also be in PostgreSQL. Device groups hold the credential, the route, the SSH settings, the TLS trust and the collector settings, and a device inherits each setting from its group unless it sets its own. A credential has one of 3 sources: `env` names a prefix of the env file, for example `VYOS` for the `VYOS_USER` and `VYOS_PASS` keys; `env-url` names a key whose URL holds a login; `managed` holds the kind (`password`, `ssh-key` or `api-key`), the user and the secret in the database, sealed with the key of `--secret-key-file`. The Inventory page and `PUT /v1/inventory/credentials/<name>` write a managed secret, and no answer gives it back. Each change increases the inventory version and writes an audit record, and each snapshot records the inventory version that its cycle read.
 
 ```sh
 export RSIM_INVENTORY_URL=postgres://rsim:<password>@127.0.0.1:5432/rsim
 rsim-inventory migrate
 rsim-inventory import-env <env file>     # the groups, devices and routes of the env file
-rsim-collect --env <env file> --data <data folder> run --repeat
-rsim-api --inventory "$RSIM_INVENTORY_URL"   # GET and PUT /v1/inventory/...
+rsim-collect --secret-key-file <key file> --env <env file> --data <data folder> run --repeat
+rsim-api --inventory "$RSIM_INVENTORY_URL" --secret-key-file <key file>   # GET and PUT /v1/inventory/...
 ```
 
-With `RSIM_INVENTORY_URL` set, `rsim-collect` reads the inventory at the start of each cycle, and the env file gives only the secrets.
+With `RSIM_INVENTORY_URL` set, `rsim-collect` reads the inventory at the start of each cycle. The env file is then optional and gives only the secrets of the `env` and `env-url` credentials.
 
 ## License
 

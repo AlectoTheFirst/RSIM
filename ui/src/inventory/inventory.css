@@ -1,6 +1,7 @@
 /* The styles of the Inventory page: the device table with its group rows,
-   the opened device row, the band of the devices that the twin sees, and
-   the tables Credentials and Routes. Each colour, font and size is a custom
+   the opened device and group rows with their fields, the band of the
+   devices that the twin sees, and the tables Credentials, Jump hosts and
+   Routes. Each colour, font and size is a custom
    property of the theme. */
 
 .inv-page .t-value,
@@ -50,7 +51,8 @@
   grid-column: 2 / 4;
 }
 
-.inv-device {
+.inv-device,
+.inv-open {
   cursor: pointer;
 }
 
@@ -60,11 +62,13 @@
   background: var(--raise);
 }
 
-.inv-device.opened {
+.inv-device.opened,
+.inv-open.opened {
   box-shadow: inset var(--selected-bar) 0 0 var(--forward);
 }
 
-.inv-device:focus-visible {
+.inv-device:focus-visible,
+.inv-open:focus-visible {
   outline: var(--focus-ring) solid var(--forward);
   outline-offset: calc(-1 * var(--focus-ring));
 }
@@ -104,7 +108,7 @@
 .inv-detail > .cols {
   grid-column: 2;
   display: grid;
-  grid-template-columns: minmax(0, 4fr) minmax(0, 4fr) minmax(0, 5fr);
+  grid-template-columns: minmax(0, 3fr) minmax(0, 4fr) minmax(0, 6fr);
   gap: var(--inv-detail-gap);
   padding: var(--button-pad) var(--margin) var(--inv-detail-bottom) 0;
 }
@@ -112,6 +116,31 @@
 .inv-detail .head {
   color: var(--ink-muted);
   margin-bottom: var(--button-gap);
+}
+
+.inv-detail .span2 {
+  grid-column: span 2;
+}
+
+/* The fields of an edit: the name, the value or the inherited value, and the collectors that do not read it. */
+.inv-settings {
+  display: grid;
+  grid-template-columns: var(--inv-setting-label) var(--inv-setting-input) auto;
+  gap: var(--button-gap) var(--cell-pad);
+  align-items: center;
+}
+
+.inv-settings > input,
+.inv-settings > select {
+  width: 100%;
+}
+
+.inv-settings > span {
+  white-space: nowrap;
+}
+
+.inv-page input::placeholder {
+  color: var(--ink-muted);
 }
 
 .kv {
@@ -213,11 +242,28 @@
 }
 
 .inv-t.cred {
-  grid-template-columns: var(--cred-name) var(--cred-secret) 1fr;
+  grid-template-columns: var(--cred-name) var(--cred-secret) 1fr var(--inv-actions);
+}
+
+.inv-t.cred .cred-edit {
+  grid-column: span 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--button-gap) var(--cell-pad);
+  align-items: flex-start;
+}
+
+.inv-t.cred .cred-key {
+  flex-basis: 100%;
+  font: inherit;
 }
 
 .inv-t.route {
-  grid-template-columns: var(--route-name) 1fr var(--route-credential);
+  grid-template-columns: var(--route-name) 1fr var(--route-credential) var(--inv-actions);
+}
+
+.inv-t.jump {
+  grid-template-columns: var(--jump-name) var(--jump-address) var(--jump-credential) var(--jump-ssh) 1fr var(--inv-actions);
 }
 
 .inv-tables .group {

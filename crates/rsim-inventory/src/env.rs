@@ -209,12 +209,9 @@ struct Builder<'a> {
 impl Builder<'_> {
     fn credential(&mut self, name: &str, source: CredentialSource, key: &str) {
         if self.out.credentials.iter().all(|c| c.name != name) {
-            self.out.credentials.push(Credential {
-                name: name.to_string(),
-                source,
-                key: key.to_string(),
-                description: None,
-            });
+            self.out
+                .credentials
+                .push(Credential::env(name, source, key));
         }
     }
 
@@ -526,18 +523,8 @@ mod tests {
         assert_eq!(
             r.credentials,
             [
-                Credential {
-                    name: "vyos".into(),
-                    source: CredentialSource::Env,
-                    key: "VYOS".into(),
-                    description: None
-                },
-                Credential {
-                    name: "unifi".into(),
-                    source: CredentialSource::Env,
-                    key: "UNIFI".into(),
-                    description: None
-                },
+                Credential::env("vyos", CredentialSource::Env, "VYOS"),
+                Credential::env("unifi", CredentialSource::Env, "UNIFI"),
             ]
         );
         let text = format!("{r:?}");
@@ -591,7 +578,7 @@ mod tests {
             .find(|c| c.name == "vyos-proxy")
             .unwrap();
         assert_eq!(
-            (proxy.source, proxy.key.as_str()),
+            (proxy.source, proxy.key.as_deref().unwrap_or("")),
             (CredentialSource::EnvUrl, "VYOS_PROXY")
         );
         let inner = r.jump_hosts.iter().find(|j| j.name == "inner").unwrap();

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use rsim_api::handler::{Settings, State};
 use rsim_api::inventory::InventoryHandle;
 
-const USAGE: &str = "usage: rsim-api [--listen <address:port>] [--store <data folder>] [--allow-origin <origin>]... [--public-origin <origin>]... [--trusted-proxy <address[/length]>]... [--max-body <bytes>] [--inventory <postgres URL>] [--inventory-ca-file <PEM file>] | rsim-api --openapi";
+const USAGE: &str = "usage: rsim-api [--listen <address:port>] [--store <data folder>] [--allow-origin <origin>]... [--public-origin <origin>]... [--trusted-proxy <address[/length]>]... [--max-body <bytes>] [--inventory <postgres URL>] [--inventory-ca-file <PEM file>] [--secret-key-file <file>] | rsim-api --openapi";
 
 /// An origin `scheme://host[:port]` of HTTP or HTTPS with no path, in
 /// lower case.
@@ -42,6 +42,7 @@ fn main() -> ExitCode {
     let mut store = None;
     let mut inventory = std::env::var(rsim_inventory::URL_VAR).ok();
     let mut inventory_ca = std::env::var(rsim_inventory::CA_FILE_VAR).ok();
+    let mut secret_key_file = std::env::var(rsim_inventory::KEY_FILE_VAR).ok();
     let mut origins = Vec::new();
     let mut public_origins = Vec::new();
     let mut trusted_proxies = Vec::new();
@@ -91,6 +92,10 @@ fn main() -> ExitCode {
             }
             ("--inventory-ca-file", Some(v)) => {
                 inventory_ca = Some(v);
+                true
+            }
+            ("--secret-key-file", Some(v)) => {
+                secret_key_file = Some(v);
                 true
             }
             _ => false,
@@ -155,10 +160,19 @@ fn main() -> ExitCode {
             if db.setup_open().await.map_err(std::io::Error::other)? {
                 eprintln!("no user exists: open the UI to make the first admin");
             }
-            state = state.with_inventory(InventoryHandle::new(
-                Arc::new(db),
-                tokio::runtime::Handle::current(),
-            ));
+            let mut handle = InventoryHandle::new(Arc::new(db), tokio::runtime::Handle::current());
+            match &secret_key_file {
+                Some(p) => {
+                    let key = rsim_inventory::SecretKey::read(std::path::Path::new(p))
+                        .map_err(std::io::Error::other)?;
+                    eprintln!("the managed credentials use the secret key {}", key.id());
+                    handle = handle.with_secret_key(key);
+                }
+                None => eprintln!(
+                    "no secret key: a write of the secret of a managed credential is refused; give --secret-key-file"
+                ),
+            }
+            state = state.with_inventory(handle);
         }
         tokio::select! {
             r = rsim_api::server::serve(listener, Arc::new(state)) => r,

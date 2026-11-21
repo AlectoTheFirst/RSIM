@@ -4,9 +4,10 @@
 //! and API tokens.
 //!
 //! `rsim-api` writes the inventory and `rsim-collect` reads it at the start
-//! of each cycle. The engine does not read it. A credential is a reference
-//! to its source, for example a key of the env file of the collector; no
-//! secret is in the database.
+//! of each cycle. The engine does not read it. A credential names a key of
+//! the env file of the collector, or it is managed: the database holds its
+//! kind, its user and its secret, sealed by the secret key of [`SecretKey`],
+//! and no reader of the inventory gives the secret back.
 //!
 //! The schema is in `migrations/`, applied in order by [`Db::migrate`],
 //! which records each version in the table `schema_migrations`.
@@ -14,6 +15,7 @@
 mod db;
 pub mod env;
 mod resolve;
+mod secret;
 mod types;
 
 pub use db::{
@@ -28,10 +30,11 @@ pub use resolve::{
     DEFAULT_SECTION_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS, Origin, Resolved, ResolvedDevice,
     ResolvedDevices, ResolvedSettings, resolve_device, resolve_settings,
 };
+pub use secret::{KEY_FILE_VAR, MAX_SECRET, Sealed, SecretInput, SecretKey};
 pub use types::{
     Action, AuditPage, AuditRecord, Bindings, COLLECTOR_VENDORS, CaptureBgp, CollectorTransport,
-    Credential, CredentialSource, Device, EdgeDeviceBinding, FabricPortBinding, Group, Ha,
-    Inventory, JumpHost, NxosJson, Route, Settings, SshAlgorithms, SshMode, TlsTrust,
+    Credential, CredentialKind, CredentialSource, Device, EdgeDeviceBinding, FabricPortBinding,
+    Group, Ha, Inventory, JumpHost, NxosJson, Route, Settings, SshAlgorithms, SshMode, TlsTrust,
     valid_device_name, valid_name,
 };
 
