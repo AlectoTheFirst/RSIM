@@ -76,6 +76,19 @@ jobs:
             docker buildx build --target "$target" --platform linux/amd64 .
           done
 
+  chart:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Lint and render the chart with the Helm of the runner
+        run: |
+          helm version
+          chart=deploy/helm/rsim
+          for instance in rsim rsim-dev rsim-demo; do
+            helm lint --strict "$chart" -f "$chart/ci/$instance-values.yaml"
+            helm template "$instance" "$chart" -f "$chart/ci/$instance-values.yaml" > /dev/null
+          done
+
   audit:
     runs-on: ubuntu-24.04
     steps:
