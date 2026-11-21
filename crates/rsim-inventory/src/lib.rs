@@ -30,7 +30,7 @@ pub use resolve::{
     DEFAULT_SECTION_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS, Origin, Resolved, ResolvedDevice,
     ResolvedDevices, ResolvedSettings, resolve_device, resolve_settings,
 };
-pub use secret::{KEY_FILE_VAR, MAX_SECRET, Sealed, SecretInput, SecretKey};
+pub use secret::{KEY_VAR, MAX_SECRET, Sealed, SecretInput, SecretKey};
 pub use types::{
     Action, AuditPage, AuditRecord, Bindings, COLLECTOR_VENDORS, CaptureBgp, CollectorTransport,
     Credential, CredentialKind, CredentialSource, Device, EdgeDeviceBinding, FabricPortBinding,

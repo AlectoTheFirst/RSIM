@@ -57,9 +57,9 @@ spec:
             - --trusted-proxy
             - {{ . | quote }}
             {{- end }}
-            {{- if .Values.secrets.secretKeySecret }}
-            - --secret-key-file
-            - /run/rsim-key/secret-key
+            {{- if .Values.collector.envSecret }}
+            - --env
+            - /run/rsim/collect.env
             {{- end }}
           env: {{- include "rsim.databaseEnv" . | nindent 12 }}
           ports:
@@ -77,9 +77,9 @@ spec:
             - name: data
               mountPath: /data
               readOnly: true
-            {{- if .Values.secrets.secretKeySecret }}
-            - name: secret-key
-              mountPath: /run/rsim-key
+            {{- if .Values.collector.envSecret }}
+            - name: collect-env
+              mountPath: /run/rsim
               readOnly: true
             {{- end }}
         {{- if .Values.collector.enabled }}
@@ -90,10 +90,6 @@ spec:
             {{- if .Values.collector.envSecret }}
             - --env
             - /run/rsim/collect.env
-            {{- end }}
-            {{- if .Values.secrets.secretKeySecret }}
-            - --secret-key-file
-            - /run/rsim-key/secret-key
             {{- end }}
             - --data
             - /data/rsim
@@ -113,31 +109,18 @@ spec:
               mountPath: /run/rsim
               readOnly: true
             {{- end }}
-            {{- if .Values.secrets.secretKeySecret }}
-            - name: secret-key
-              mountPath: /run/rsim-key
-              readOnly: true
-            {{- end }}
         {{- end }}
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: {{ include "rsim.fullname" . }}-data
-        {{- if and .Values.collector.enabled .Values.collector.envSecret }}
+        {{- if .Values.collector.envSecret }}
         - name: collect-env
           secret:
             secretName: {{ .Values.collector.envSecret }}
             items:
               - key: collect.env
                 path: collect.env
-        {{- end }}
-        {{- if .Values.secrets.secretKeySecret }}
-        - name: secret-key
-          secret:
-            secretName: {{ .Values.secrets.secretKeySecret }}
-            items:
-              - key: secret-key
-                path: secret-key
         {{- end }}
       {{- with .Values.api.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}

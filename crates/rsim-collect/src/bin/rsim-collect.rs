@@ -51,9 +51,8 @@
 //! with `<P>_PASS`, `<P>_KEY_FILE` and `<P>_KEY_PASS`, or `<P>_AGENT`, and for
 //! an HTTPS device `<P>_API_KEY` or `<P>_USER` with `<P>_PASS`; `env-url:<KEY>`
 //! reads the login in the URL of `<KEY>`. A managed credential has its
-//! sealed secret in the database, which the secret key of
-//! `--secret-key-file`, `RSIM_SECRET_KEY_FILE` or the env key of the same
-//! name opens: a password for SSH, an HTTPS login and a proxy login, a
+//! sealed secret in the database, which the secret key of the env key
+//! `RSIM_SECRET_KEY`, in the environment or in the env file, opens: a password for SSH, an HTTPS login and a proxy login, a
 //! private key for SSH, and an API key for HTTPS. The client certificate of
 //! the UniFi consoles stays in `UNIFI_CLIENT_CERT` and `UNIFI_CLIENT_KEY`.
 //! `--inventory-ca-file`, `RSIM_INVENTORY_CA_FILE` or the env key of the same
@@ -106,10 +105,6 @@ struct Cli {
     /// The PEM file of the CA bundle of the inventory database server.
     #[arg(long, env = rsim_inventory::CA_FILE_VAR)]
     inventory_ca_file: Option<PathBuf>,
-    /// The file of the secret key that opens the secrets of the managed
-    /// credentials of the inventory database: 64 hex digits.
-    #[arg(long, env = rsim_inventory::KEY_FILE_VAR)]
-    secret_key_file: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -538,9 +533,9 @@ fn managed_credential(
     https: bool,
 ) -> Result<Credential, String> {
     let kind = c.kind.ok_or("the managed credential has no kind")?;
-    let key = secrets.key.ok_or(
-        "the credential is managed and the collector has no secret key; give --secret-key-file",
-    )?;
+    let key = secrets
+        .key
+        .ok_or("the credential is managed and the collector has no RSIM_SECRET_KEY")?;
     let sealed = secrets
         .sealed
         .get(&c.name)
@@ -1108,12 +1103,7 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
             "give --env, or an inventory database with --inventory or RSIM_INVENTORY_URL".into(),
         );
     }
-    let key = cli
-        .secret_key_file
-        .clone()
-        .or_else(|| env.get(rsim_inventory::KEY_FILE_VAR).map(PathBuf::from))
-        .map(|p| SecretKey::read(&p))
-        .transpose()?;
+    let key = SecretKey::from_env(&env)?;
     let store = open_store(&cli.data)?;
     let policy = if strict {
         PinPolicy::Strict
@@ -1396,7 +1386,7 @@ mod tests {
             ..managed
         };
         let e = setup_from_inventory(&inv, &no_key).err().unwrap();
-        assert!(e.contains("no secret key"), "{e}");
+        assert!(e.contains("no RSIM_SECRET_KEY"), "{e}");
         let other = SecretKey::parse(&SecretKey::generate().unwrap()).unwrap();
         let wrong = Secrets {
             key: Some(&other),

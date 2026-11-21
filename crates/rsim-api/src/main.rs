@@ -10,7 +10,7 @@ use std::sync::Arc;
 use rsim_api::handler::{Settings, State};
 use rsim_api::inventory::InventoryHandle;
 
-const USAGE: &str = "usage: rsim-api [--listen <address:port>] [--store <data folder>] [--allow-origin <origin>]... [--public-origin <origin>]... [--trusted-proxy <address[/length]>]... [--max-body <bytes>] [--inventory <postgres URL>] [--inventory-ca-file <PEM file>] [--secret-key-file <file>] | rsim-api --openapi";
+const USAGE: &str = "usage: rsim-api [--listen <address:port>] [--store <data folder>] [--allow-origin <origin>]... [--public-origin <origin>]... [--trusted-proxy <address[/length]>]... [--max-body <bytes>] [--inventory <postgres URL>] [--inventory-ca-file <PEM file>] [--env <env file>] | rsim-api --openapi";
 
 /// An origin `scheme://host[:port]` of HTTP or HTTPS with no path, in
 /// lower case.
@@ -42,7 +42,7 @@ fn main() -> ExitCode {
     let mut store = None;
     let mut inventory = std::env::var(rsim_inventory::URL_VAR).ok();
     let mut inventory_ca = std::env::var(rsim_inventory::CA_FILE_VAR).ok();
-    let mut secret_key_file = std::env::var(rsim_inventory::KEY_FILE_VAR).ok();
+    let mut env_file = None;
     let mut origins = Vec::new();
     let mut public_origins = Vec::new();
     let mut trusted_proxies = Vec::new();
@@ -94,8 +94,8 @@ fn main() -> ExitCode {
                 inventory_ca = Some(v);
                 true
             }
-            ("--secret-key-file", Some(v)) => {
-                secret_key_file = Some(v);
+            ("--env", Some(v)) => {
+                env_file = Some(v);
                 true
             }
             _ => false,
@@ -161,15 +161,20 @@ fn main() -> ExitCode {
                 eprintln!("no user exists: open the UI to make the first admin");
             }
             let mut handle = InventoryHandle::new(Arc::new(db), tokio::runtime::Handle::current());
-            match &secret_key_file {
-                Some(p) => {
-                    let key = rsim_inventory::SecretKey::read(std::path::Path::new(p))
-                        .map_err(std::io::Error::other)?;
+            let env = match &env_file {
+                Some(p) => rsim_inventory::env::parse_env(
+                    &std::fs::read_to_string(p)
+                        .map_err(|e| std::io::Error::other(format!("{p}: {e}")))?,
+                ),
+                None => Default::default(),
+            };
+            match rsim_inventory::SecretKey::from_env(&env).map_err(std::io::Error::other)? {
+                Some(key) => {
                     eprintln!("the managed credentials use the secret key {}", key.id());
                     handle = handle.with_secret_key(key);
                 }
                 None => eprintln!(
-                    "no secret key: a write of the secret of a managed credential is refused; give --secret-key-file"
+                    "no RSIM_SECRET_KEY: a write of the secret of a managed credential is refused"
                 ),
             }
             state = state.with_inventory(handle);
