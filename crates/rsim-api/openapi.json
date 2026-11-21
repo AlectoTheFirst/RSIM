@@ -3092,13 +3092,6 @@
       "SecretKeyOut": {
         "description": "The secret key of the server.",
         "properties": {
-          "id": {
-            "description": "The id of the key: the first 8 bytes of its SHA-256 in hex. The\ncollector needs the key of the same id.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "present": {
             "description": "True if the server has a secret key, so that it can write the secret\nof a managed credential.",
             "type": "boolean"
@@ -6854,7 +6847,7 @@
             ]
           }
         ],
-        "summary": "The secret key of the server: present or not, and its id."
+        "summary": "Whether the server has a secret key."
       }
     },
     "/v1/inventory/vendors": {

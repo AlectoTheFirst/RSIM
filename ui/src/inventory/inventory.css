@@ -19,8 +19,8 @@
   display: grid;
   grid-template-columns:
     var(--inv-mark) var(--inv-device) var(--inv-address) var(--inv-vendor) var(--inv-site)
-    minmax(var(--inv-location), 1fr) var(--inv-credential) var(--inv-route) var(--inv-ssh)
-    var(--inv-trust) var(--inv-cycle) var(--inv-serial);
+    var(--inv-location) var(--inv-credential) var(--inv-route) var(--inv-ssh)
+    var(--inv-trust) var(--inv-cycle) minmax(var(--inv-serial), 1fr);
   min-height: var(--row);
   align-items: center;
 }
@@ -89,13 +89,13 @@
   background: var(--rule);
 }
 
-.inv .hc {
+.inv-page .hc {
   display: inline-flex;
   align-items: center;
   gap: var(--mark-gap);
 }
 
-.inv .hc > svg {
+.inv-page .hc > svg {
   flex-shrink: 0;
 }
 
@@ -108,7 +108,7 @@
 .inv-detail > .cols {
   grid-column: 2;
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 4fr) minmax(0, 6fr);
+  grid-template-columns: repeat(3, max-content);
   gap: var(--inv-detail-gap);
   padding: var(--button-pad) var(--margin) var(--inv-detail-bottom) 0;
 }
@@ -204,10 +204,18 @@
   grid-column: 5 / 11;
 }
 
-.inv-tables {
-  display: grid;
-  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-  gap: var(--inv-columns-gap);
+/* The row of a table with no record: a hatch and the words. */
+.inv-empty {
+  display: flex;
+  align-items: center;
+  min-height: var(--row);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+/* The panel of a new device or a new group, over its buttons. */
+.inv-form {
+  border-top: var(--hairline) solid var(--rule);
+  margin-top: var(--line-gap);
 }
 
 .inv-sec {
@@ -259,7 +267,7 @@
 }
 
 .inv-t.route {
-  grid-template-columns: var(--route-name) 1fr var(--route-credential) var(--inv-actions);
+  grid-template-columns: var(--route-name) var(--route-hops) var(--route-credential) minmax(var(--inv-actions), 1fr);
 }
 
 .inv-t.jump {
@@ -268,4 +276,5 @@
 
 .inv-tables .group {
   overflow: visible;
+  justify-self: end;
 }

@@ -138,7 +138,7 @@ function DeviceEdit(props: { d: ResolvedDevice; stored: Device; inv: Inventory; 
           <PickRow id={id} k="group" label="group" draft={draft} h={h} options={inv.groups.map((g) => ({ value: g.name, text: g.name }))} />
           <TextRow id={id} k="site" label="site" draft={draft} h={h} />
           <TextRow id={id} k="location" label="location" draft={draft} h={h} mono={false} />
-          <TextRow id={id} k="console_site" label="console_site" draft={draft} h={h} />
+          <TextRow id={id} k="console_site" label="console site" draft={draft} h={h} />
         </div>
         <div class="group actions">
           <DeleteButton
@@ -154,7 +154,7 @@ function DeviceEdit(props: { d: ResolvedDevice; stored: Device; inv: Inventory; 
       </div>
       <div>
         <div class="head">
-          Settings <span class="muted" title={`from ${stored.group}, else the default`}>empty inherits from {stored.group}</span>
+          <span title={`empty: from ${stored.group}, else the default`}>Settings</span>
         </div>
         <SettingsEditor id={id} inv={inv} draft={draft} group={group?.settings ?? null} vendor={props.d.vendor} vendors={props.vendors} h={h} />
       </div>
@@ -191,8 +191,8 @@ export function GroupDetail(props: { g: Group; inv: Inventory; vendors: Vendors 
           </div>
         </div>
         <div class="span2">
-          <div class="head">
-            Settings <span class="muted">empty: default</span>
+          <div class="head" title="empty: the default">
+            Settings
           </div>
           <SettingsEditor id={id} inv={inv} draft={draft} group={null} vendor={g.vendor} vendors={props.vendors} h={h} />
         </div>
@@ -214,6 +214,12 @@ export function GroupSelect(props: { inv: Inventory; value: string; onChange: (g
 export type DeviceFields = Parameters<typeof newDeviceBody>[0];
 export type GroupFields = Parameters<typeof newGroupBody>[0];
 
+/** The handlers of the fields of an add panel that are not settings: each field changes the record, Enter adds, Escape cancels. */
+function recordHandlers<T extends Draft>(set: (f: (x: T) => T) => void, keys: (e: KeyboardEvent) => void): FieldHandlers {
+  const put = (k: string, v: string) => set((x) => ({ ...x, [k]: v }));
+  return { onInput: put, onPick: put, keys: () => keys };
+}
+
 export function AddDevice(props: {
   inv: Inventory;
   vendors: Vendors | null;
@@ -227,50 +233,30 @@ export function AddDevice(props: {
   useSubmit(props.submit, add);
   const keys = addKeys(add, props.onClose);
   const h = draftHandlers(setDraft, add, props.onClose);
+  const r = recordHandlers(setF, keys);
   const group = props.inv.groups.find((g) => g.name === f.group) ?? null;
-  const field = (k: "name" | "address" | "site" | "location", label: string, mono = true) => (
-    <span class="edit">
-      <input
-        class={mono ? "t-value" : ""}
-        aria-label={label}
-        value={f[k]}
-        spellcheck={false}
-        autoFocus={k === "name"}
-        onInput={(e) => setF({ ...f, [k]: e.currentTarget.value })}
-        onKeyDown={keys}
-      />
-    </span>
-  );
   return (
-    <>
-      <div class="inv-row" role="row" aria-label="New device">
-        <span />
-        {field("name", "device")}
-        {field("address", "address")}
-        <span class="edit">
-          <GroupSelect inv={props.inv} value={f.group} onChange={(group) => setF({ ...f, group })} onKeyDown={keys} />
-        </span>
-        {field("site", "site")}
-        {field("location", "location", false)}
-      </div>
-      <div class="inv-detail" role="row" aria-label="Settings of the new device">
-        <div class="cols">
-          <div />
-          <div>
-            <div class="head">Device</div>
-            <div class="inv-settings">
-              <TextRow id="new-device" k="console_site" label="console_site" draft={draft} h={h} />
-            </div>
-          </div>
-          <div>
-            <div class="head">
-              Settings <span class="muted" title="from the group, else the default">empty inherits from {f.group}</span>
-            </div>
-            <SettingsEditor id="new-device" inv={props.inv} draft={draft} group={group?.settings ?? null} vendor={group?.vendor ?? ""} vendors={props.vendors} h={h} />
+    <div class="inv-detail inv-form" role="group" aria-label="New device">
+      <div class="cols">
+        <div>
+          <div class="head">New device</div>
+          <div class="inv-settings">
+            <TextRow id="new-device" k="name" label="name" draft={f} h={r} autoFocus />
+            <TextRow id="new-device" k="address" label="address" draft={f} h={r} />
+            <PickRow id="new-device" k="group" label="device group" draft={f} h={r} options={props.inv.groups.map((g) => ({ value: g.name, text: g.name }))} />
+            <TextRow id="new-device" k="site" label="site" draft={f} h={r} />
+            <TextRow id="new-device" k="location" label="location" draft={f} h={r} mono={false} />
+            <TextRow id="new-device" k="console_site" label="console site" draft={draft} h={h} />
           </div>
         </div>
+        <div class="span2">
+          <div class="head" title={`empty: from ${f.group}, else the default`}>
+            Settings
+          </div>
+          <SettingsEditor id="new-device" inv={props.inv} draft={draft} group={group?.settings ?? null} vendor={group?.vendor ?? ""} vendors={props.vendors} h={h} />
+        </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -287,67 +273,27 @@ export function AddGroup(props: {
   useSubmit(props.submit, add);
   const keys = addKeys(add, props.onClose);
   const h = draftHandlers(setDraft, add, props.onClose);
+  const r = recordHandlers(setF, keys);
   return (
-    <>
-      <div class="inv-row inv-group" role="row" aria-label="New group">
-        <span />
-        <span class="span2 edit">
-          <input
-            class="t-value"
-            aria-label="group"
-            value={f.name}
-            spellcheck={false}
-            autoFocus
-            onInput={(e) => setF({ ...f, name: e.currentTarget.value })}
-            onKeyDown={keys}
-          />
-        </span>
-        <span class="edit">
-          <input
-            class="t-value"
-            aria-label="vendor"
-            list={VENDOR_LIST}
-            value={f.vendor}
-            spellcheck={false}
-            onInput={(e) => setF({ ...f, vendor: e.currentTarget.value })}
-            onKeyDown={keys}
-          />
-        </span>
-        <span />
-        <span />
-        <span class="edit">
-          <select class="t-value" aria-label="credential" value={f.credential} onChange={(e) => setF({ ...f, credential: e.currentTarget.value })} onKeyDown={keys}>
-            <option value="">none</option>
-            {props.inv.credentials.map((c) => (
-              <option value={c.name}>{c.name}</option>
-            ))}
-          </select>
-        </span>
-        <span class="edit">
-          <select class="t-value" aria-label="route" value={f.route} onChange={(e) => setF({ ...f, route: e.currentTarget.value })} onKeyDown={keys}>
-            <option value="">direct</option>
-            {props.inv.routes.map((r) => (
-              <option value={r.name}>{r.name}</option>
-            ))}
-          </select>
-        </span>
-      </div>
-      <div class="inv-detail" role="row" aria-label="Settings of the new group">
-        <div class="cols">
-          <div>
-            <div class="head">Device group</div>
-            <div class="inv-settings">
-              <TextRow id="new-group" k="description" label="description" draft={draft} h={h} mono={false} />
-            </div>
-          </div>
-          <div class="span2">
-            <div class="head">
-              Settings <span class="muted">empty: default</span>
-            </div>
-            <SettingsEditor id="new-group" inv={props.inv} draft={draft} group={null} vendor={f.vendor.trim()} vendors={props.vendors} omit={["credential", "route"]} h={h} />
+    <div class="inv-detail inv-form" role="group" aria-label="New group">
+      <div class="cols">
+        <div>
+          <div class="head">New device group</div>
+          <div class="inv-settings">
+            <TextRow id="new-group" k="name" label="name" draft={f} h={r} autoFocus />
+            <TextRow id="new-group" k="vendor" label="vendor" draft={f} h={r} list={VENDOR_LIST} />
+            <PickRow id="new-group" k="credential" label="credential" draft={f} h={r} options={[{ value: "", text: "none" }, ...props.inv.credentials.map((c) => ({ value: c.name, text: c.name }))]} />
+            <PickRow id="new-group" k="route" label="route" draft={f} h={r} options={[{ value: "", text: "direct" }, ...props.inv.routes.map((x) => ({ value: x.name, text: x.name }))]} />
+            <TextRow id="new-group" k="description" label="description" draft={draft} h={h} mono={false} />
           </div>
         </div>
+        <div class="span2">
+          <div class="head" title="empty: the default">
+            Settings
+          </div>
+          <SettingsEditor id="new-group" inv={props.inv} draft={draft} group={null} vendor={f.vendor.trim()} vendors={props.vendors} omit={["credential", "route"]} h={h} />
+        </div>
       </div>
-    </>
+    </div>
   );
 }

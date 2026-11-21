@@ -175,16 +175,19 @@ export function TokensView(props: { user: Me }) {
           />
         ) : null}
         <div class="tok" role="table" aria-label="API tokens">
-          <div class="tok-t tok-head" role="row">
-            <span>name</span>
-            <span>scopes</span>
-            <span>created</span>
-            <span>expires</span>
-            <span>last used</span>
-            <span>state</span>
-            <span />
-          </div>
-          {tokens && !tokens.length ? <div class="muted note">no tokens</div> : null}
+          {tokens && !tokens.length ? (
+            <div class="muted note">no token</div>
+          ) : (
+            <div class="tok-t tok-head" role="row">
+              <span>name</span>
+              <span>scopes</span>
+              <span>created</span>
+              <span>expires</span>
+              <span>last used</span>
+              <span>state</span>
+              <span />
+            </div>
+          )}
           {(tokens ?? []).map((t) => {
             const state = tokenState(t, now);
             return (

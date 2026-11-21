@@ -341,8 +341,7 @@ fn a_managed_secret_goes_in_and_no_answer_gives_it_back() {
     let r = call(&s, "GET", "/v1/inventory/secret-key", None);
     assert_eq!(r.status, 200);
     let k = json(&r);
-    assert_eq!(k["present"], true);
-    assert_eq!(k["id"].as_str().unwrap().len(), 16);
+    assert_eq!(k, json!({"present": true}));
     assert!(!String::from_utf8_lossy(&r.body).contains(&key));
 
     let plain = "s3cret-value-8841";

@@ -202,6 +202,13 @@ select:focus-visible,
   flex-grow: 1;
 }
 
+/* A label and its value in a bar. */
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mark-gap);
+}
+
 /* A group at the end of a bar, which stays at the right on a line of its own. */
 .bar .end {
   margin-left: auto;

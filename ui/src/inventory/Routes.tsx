@@ -17,7 +17,7 @@ import {
   routeCredentials,
   routeFields,
 } from "./model";
-import { DeleteButton, type Write, type WriteNew, addKeys } from "./parts";
+import { DeleteButton, HatchCell, type Write, type WriteNew, addKeys } from "./parts";
 
 /** The proxy, the jump hosts in order and the proxy login of a route in an add row or an edit. */
 function RouteEdit(props: { inv: Inventory; f: RouteFields; onChange: (f: RouteFields) => void; keys: (e: KeyboardEvent) => void; autoFocus?: boolean }) {
@@ -139,12 +139,18 @@ export function Routes(props: { inv: Inventory; adding: boolean; onAdding: () =>
       <div class="inv-sec">
         Routes
       </div>
-      <div class="inv-t route inv-head" role="row">
-        <span>name</span>
-        <span>hops</span>
-        <span>credential</span>
-        <span />
-      </div>
+      {inv.routes.length || props.adding ? (
+        <div class="inv-t route inv-head" role="row">
+          <span>name</span>
+          <span>hops</span>
+          <span>credential</span>
+          <span />
+        </div>
+      ) : (
+        <div class="inv-empty" role="row">
+          <HatchCell>no route</HatchCell>
+        </div>
+      )}
       {inv.routes.map((r) => (
         <RouteRow key={r.name} inv={inv} r={r} editing={editing === r.name} onEdit={(on) => setEditing(on ? r.name : null)} write={props.write} />
       ))}
@@ -193,7 +199,7 @@ function JumpHostEdit(props: { inv: Inventory; f: JumpHostFields; onChange: (f: 
         </select>
       </span>
       <span class="edit">
-        <select class="t-value" aria-label="ssh_algorithms" value={f.ssh_algorithms} onChange={(e) => set({ ssh_algorithms: e.currentTarget.value as JumpHostFields["ssh_algorithms"] })} onKeyDown={keys}>
+        <select class="t-value" aria-label="SSH algorithms" value={f.ssh_algorithms} onChange={(e) => set({ ssh_algorithms: e.currentTarget.value as JumpHostFields["ssh_algorithms"] })} onKeyDown={keys}>
           <option value="modern">modern</option>
           <option value="legacy">legacy</option>
         </select>
@@ -262,14 +268,20 @@ export function JumpHosts(props: { inv: Inventory; adding: boolean; onAdding: ()
       <div class="inv-sec">
         Jump hosts
       </div>
-      <div class="inv-t jump inv-head" role="row">
-        <span>name</span>
-        <span>address</span>
-        <span>credential</span>
-        <span>ssh_algorithms</span>
-        <span>routes</span>
-        <span />
-      </div>
+      {inv.jump_hosts.length || props.adding ? (
+        <div class="inv-t jump inv-head" role="row">
+          <span>name</span>
+          <span>address</span>
+          <span>credential</span>
+          <span>SSH algorithms</span>
+          <span>routes</span>
+          <span />
+        </div>
+      ) : (
+        <div class="inv-empty" role="row">
+          <HatchCell>no jump host</HatchCell>
+        </div>
+      )}
       {inv.jump_hosts.map((j) => (
         <JumpHostRow key={j.name} inv={inv} j={j} editing={editing === j.name} onEdit={(on) => setEditing(on ? j.name : null)} write={props.write} />
       ))}

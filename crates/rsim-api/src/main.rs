@@ -170,7 +170,7 @@ fn main() -> ExitCode {
             };
             match rsim_inventory::SecretKey::from_env(&env).map_err(std::io::Error::other)? {
                 Some(key) => {
-                    eprintln!("the managed credentials use the secret key {}", key.id());
+                    eprintln!("RSIM_SECRET_KEY present");
                     handle = handle.with_secret_key(key);
                 }
                 None => eprintln!(

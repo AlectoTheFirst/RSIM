@@ -26,14 +26,11 @@ import { type Fields, type Mode, type QueryField } from "./query";
 import { HatchMark } from "./Hatch";
 import { reloadMark, twinOption } from "./url";
 
-export const VIEWS = ["Trace", "Tables", "Coverage", "Compare", "Inventory", "Admin", "Tokens"] as const;
+export const VIEWS = ["Trace", "Tables", "Coverage", "Inventory", "Tokens"] as const;
 export type View = (typeof VIEWS)[number];
 
-/** The views of this build. */
-export const BUILT: readonly View[] = ["Trace", "Tables", "Coverage", "Inventory", "Tokens"];
-
-/** The views that need a signed-in user. */
-export const SIGNED_IN_VIEWS: readonly View[] = ["Tokens"];
+/** The views of the top bar. The view Tokens opens from the account menu. */
+export const NAV_VIEWS: readonly View[] = ["Trace", "Tables", "Coverage", "Inventory"];
 
 /** The user of a page of a server with no sign-in. */
 const LOCAL_USER = { name: "Local user", initials: "LU", how: "no sign-in on a loopback address" };
@@ -55,7 +52,7 @@ function Choice<T extends string | number>(props: {
   );
 }
 
-function AccountMenu(props: { prefs: Prefs; onPrefs: (p: Prefs) => void; user: Me | null; onTokens?: () => void }) {
+function AccountMenu(props: { prefs: Prefs; onPrefs: (p: Prefs) => void; user: Me | null; onTokens?: () => void; onSignOut?: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -120,6 +117,11 @@ function AccountMenu(props: { prefs: Prefs; onPrefs: (p: Prefs) => void; user: M
                     My API tokens
                   </button>
                 ) : null}
+                {props.onSignOut ? (
+                  <button type="button" onClick={props.onSignOut}>
+                    Sign out
+                  </button>
+                ) : null}
               </span>
             </>
           ) : null}
@@ -144,6 +146,8 @@ export function TopBar(props: {
   /** The signed-in user, or null on a server with no sign-in. */
   user?: Me | null;
   onSignOut?: () => void;
+  /** The label of a twin that cannot answer, with its cause as the title, or null. */
+  state?: { text: string; title: string } | null;
 }) {
   const info = props.info;
   const user = props.user ?? null;
@@ -162,35 +166,18 @@ export function TopBar(props: {
           Load latest run
         </button>
       ) : null}
-      {info ? (
-        <span class="muted">{info.layers.length} what-if layers</span>
-      ) : null}
+      {info?.layers.length ? <span class="muted">{info.layers.length} what-if layers</span> : null}
+      {props.state ? <HatchMark title={props.state.title}>{props.state.text}</HatchMark> : null}
       {reload ? <HatchMark title={reload.title}>{reload.text}</HatchMark> : null}
       <span class="grow" />
       <nav class="group" aria-label="Views">
-        {VIEWS.filter((v) => user || !SIGNED_IN_VIEWS.includes(v)).map((v) =>
-          BUILT.includes(v) ? (
-            <button type="button" aria-current={v === props.view ? "page" : undefined} onClick={() => props.onView(v)}>
-              {v}
-            </button>
-          ) : (
-            <button type="button" disabled title="not in this build">
-              {v}
-            </button>
-          ),
-        )}
+        {NAV_VIEWS.map((v) => (
+          <button type="button" aria-current={v === props.view ? "page" : undefined} onClick={() => props.onView(v)}>
+            {v}
+          </button>
+        ))}
       </nav>
-      {user ? (
-        <span class="group">
-          <span class="t-value">{user.name}</span>
-          {props.onSignOut ? (
-            <button type="button" onClick={props.onSignOut}>
-              Sign out
-            </button>
-          ) : null}
-        </span>
-      ) : null}
-      <AccountMenu prefs={props.prefs} onPrefs={props.onPrefs} user={user} onTokens={user ? () => props.onView("Tokens") : undefined} />
+      <AccountMenu prefs={props.prefs} onPrefs={props.onPrefs} user={user} onTokens={user ? () => props.onView("Tokens") : undefined} onSignOut={props.onSignOut} />
     </header>
   );
 }
@@ -523,8 +510,12 @@ export function ResultLine(props: { children: ComponentChildren; level?: Level; 
   return (
     <div class="bar result" aria-live="polite">
       {props.children}
-      <span class="grow" />
-      {props.level && props.onLevel ? <LevelControl level={props.level} onLevel={props.onLevel} /> : null}
+      {props.level && props.onLevel ? (
+        <>
+          <span class="grow" />
+          <LevelControl level={props.level} onLevel={props.onLevel} />
+        </>
+      ) : null}
     </div>
   );
 }

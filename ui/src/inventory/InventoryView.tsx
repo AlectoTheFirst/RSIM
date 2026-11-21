@@ -166,6 +166,7 @@ export function InventoryView(props: { twin: string }) {
   const n = counts(inv, vendors, seen);
   const toggleAdd = (what: Exclude<Adding, null>) => setAdding((a) => (a === what ? null : what));
   const addOrSubmit = (what: "device" | "group") => (adding === what ? setSubmit((x) => x + 1) : setAdding(what));
+  const empty = !inv.groups.length && !inv.devices.length;
   return (
     <>
       <ResultLine>
@@ -177,27 +178,25 @@ export function InventoryView(props: { twin: string }) {
         {n.seen ? <HatchMark>{deviceCount(n.seen)} seen, not in the inventory</HatchMark> : null}
         {problem ? <span title={problem.detail}>{problem.title}</span> : null}
         <span class="grow" />
-        <span class="group" role="group" aria-label="Arrange by">
-          <span class="muted">Arrange by</span>
-          {ARRANGEMENTS.map((a) => (
-            <button type="button" aria-pressed={a === by} onClick={() => setBy(a)}>
-              {a}
-            </button>
-          ))}
-        </span>
-        <span class="group">
-          {inv.groups.length ? (
-            <button type="button" aria-pressed={adding === "device"} onClick={() => addOrSubmit("device")}>
-              Add device
-            </button>
-          ) : null}
-          <button type="button" aria-pressed={adding === "group"} onClick={() => addOrSubmit("group")}>
-            Add group
-          </button>
-        </span>
+        {inv.devices.length ? (
+          <span class="group" role="group" aria-label="Arrange by">
+            <span class="muted">Arrange by</span>
+            {ARRANGEMENTS.map((a) => (
+              <button type="button" aria-pressed={a === by} onClick={() => setBy(a)}>
+                {a}
+              </button>
+            ))}
+          </span>
+        ) : null}
       </ResultLine>
       <main class="body inv-page">
+        <div class="inv-sec">Devices</div>
         <div class="inv" role="table" aria-label="Devices">
+          {empty ? (
+            <div class="inv-empty" role="row">
+              <HatchCell>no device group</HatchCell>
+            </div>
+          ) : (
           <div class="inv-row inv-head" role="row">
             <span />
             <span>device</span>
@@ -207,29 +206,12 @@ export function InventoryView(props: { twin: string }) {
             <span>location</span>
             <span>credential</span>
             <span>route</span>
-            <span>ssh</span>
+            <span>SSH</span>
             <span>trust</span>
             <span>last cycle</span>
-            <span>serial, collected</span>
+            <span title="from the twin">serial</span>
           </div>
-          {adding === "device" ? (
-            <AddDevice
-              inv={inv}
-              vendors={vendors}
-              submit={submit}
-              onAdd={(f: DeviceFields, d: Draft) => writeChecked(inv.devices, newDeviceChecked(f, d), putDevice)}
-              onClose={() => setAdding(null)}
-            />
-          ) : null}
-          {adding === "group" ? (
-            <AddGroup
-              inv={inv}
-              vendors={vendors}
-              submit={submit}
-              onAdd={(f: GroupFields, d: Draft) => writeChecked(inv.groups, newGroupChecked(f, d), putGroup)}
-              onClose={() => setAdding(null)}
-            />
-          ) : null}
+          )}
           {sections.map((sec) => (
             <>
               {sec.group ? (
@@ -292,11 +274,46 @@ export function InventoryView(props: { twin: string }) {
           ))}
           {seen.length ? <SeenBand seen={seen} inv={inv} write={write} /> : null}
         </div>
+        {adding === "device" ? (
+          <AddDevice
+            inv={inv}
+            vendors={vendors}
+            submit={submit}
+            onAdd={(f: DeviceFields, d: Draft) => writeChecked(inv.devices, newDeviceChecked(f, d), putDevice)}
+            onClose={() => setAdding(null)}
+          />
+        ) : null}
+        {adding === "group" ? (
+          <AddGroup
+            inv={inv}
+            vendors={vendors}
+            submit={submit}
+            onAdd={(f: GroupFields, d: Draft) => writeChecked(inv.groups, newGroupChecked(f, d), putGroup)}
+            onClose={() => setAdding(null)}
+          />
+        ) : null}
+        <div class="actions">
+          <button type="button" aria-pressed={adding === "group"} onClick={() => addOrSubmit("group")}>
+            Add group
+          </button>
+          <button
+            type="button"
+            aria-pressed={adding === "device"}
+            disabled={!inv.groups.length}
+            title={inv.groups.length ? undefined : "needs a device group"}
+            onClick={() => addOrSubmit("device")}
+          >
+            Add device
+          </button>
+          {adding === "device" || adding === "group" ? (
+            <button type="button" onClick={() => setAdding(null)}>
+              Cancel
+            </button>
+          ) : null}
+        </div>
         <div class="inv-tables">
-          <div>
-            <Credentials inv={inv} adding={adding === "credential"} onAdding={() => toggleAdd("credential")} onClose={() => setAdding(null)} writeNew={writeNew} write={write} refuse={setProblem} />
-            <JumpHosts inv={inv} adding={adding === "jump host"} onAdding={() => toggleAdd("jump host")} onClose={() => setAdding(null)} writeNew={writeNew} write={write} />
-          </div>
+          <Credentials inv={inv} adding={adding === "credential"} onAdding={() => toggleAdd("credential")} onClose={() => setAdding(null)} writeNew={writeNew} write={write} refuse={setProblem} />
+          <JumpHosts inv={inv} adding={adding === "jump host"} onAdding={() => toggleAdd("jump host")} onClose={() => setAdding(null)} writeNew={writeNew} write={write} />
           <Routes inv={inv} adding={adding === "route"} onAdding={() => toggleAdd("route")} onClose={() => setAdding(null)} writeNew={writeNew} write={write} />
         </div>
         <datalist id={VENDOR_LIST}>
