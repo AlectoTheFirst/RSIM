@@ -49,6 +49,21 @@ words! {
         /// The user and the password in the URL of the env key `<KEY>`,
         /// for example the login of a proxy URL.
         EnvUrl = "env-url",
+        /// The kind, the user and the sealed secret in the inventory
+        /// database.
+        Managed = "managed",
+    }
+}
+
+words! {
+    /// The kind of the secret of a managed credential.
+    CredentialKind {
+        /// A user and a password: SSH, the HTTPS login and a proxy login.
+        Password = "password",
+        /// A user and a private key with its passphrase: SSH only.
+        SshKey = "ssh-key",
+        /// An API key with no user: HTTPS only.
+        ApiKey = "api-key",
     }
 }
 
@@ -139,19 +154,96 @@ pub const COLLECTOR_VENDORS: &[(&str, CollectorTransport)] = &[
     ("vyos", CollectorTransport::Ssh),
 ];
 
-/// A reference to a credential. The secret stays in its source.
+/// A credential. The source `env` or `env-url` names a key of the env file
+/// of the collector; the source `managed` has its kind, its user and a
+/// sealed secret in the inventory database. No answer gives a secret.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Credential {
-    /// The name of the reference. In a PUT body it can be left out; the
+    /// The name of the credential. In a PUT body it can be left out; the
     /// path gives it.
     #[serde(default)]
     pub name: String,
     pub source: CredentialSource,
-    /// The key in the source.
-    pub key: String,
+    /// The key in the env file: the prefix of `env`, the variable of
+    /// `env-url`. None for `managed`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// The kind of the secret of `managed`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<CredentialKind>,
+    /// The user of `managed` with the kind `password` or `ssh-key`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The count of the writes of the secret of `managed`. The database
+    /// sets it; a PUT body can give it, and the write ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_revision: Option<u64>,
+}
+
+impl Credential {
+    /// A credential of the env file.
+    pub fn env(name: &str, source: CredentialSource, key: &str) -> Credential {
+        Credential {
+            name: name.to_string(),
+            source,
+            key: Some(key.to_string()),
+            kind: None,
+            user: None,
+            description: None,
+            secret_revision: None,
+        }
+    }
+
+    /// The check of the fields of the source, with no database.
+    pub fn check(&self) -> Result<(), String> {
+        let n = &self.name;
+        match self.source {
+            CredentialSource::Env | CredentialSource::EnvUrl => {
+                let key = self.key.as_deref().ok_or_else(|| {
+                    format!(
+                        "the credential {n} of the source {} needs a key",
+                        self.source
+                    )
+                })?;
+                if key.is_empty()
+                    || !key
+                        .chars()
+                        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+                {
+                    return Err(format!(
+                        "the key {key:?} of {n} is not upper-case letters, digits and '_'"
+                    ));
+                }
+                if self.kind.is_some() || self.user.is_some() {
+                    return Err(format!(
+                        "the credential {n} of the source {} takes its kind and user from the env file",
+                        self.source
+                    ));
+                }
+            }
+            CredentialSource::Managed => {
+                if self.key.is_some() {
+                    return Err(format!("the managed credential {n} has no key"));
+                }
+                let kind = self
+                    .kind
+                    .ok_or_else(|| format!("the managed credential {n} needs a kind"))?;
+                match (kind, self.user.as_deref()) {
+                    (CredentialKind::ApiKey, Some(_)) => {
+                        return Err(format!("the api-key credential {n} has no user"));
+                    }
+                    (CredentialKind::Password | CredentialKind::SshKey, None | Some("")) => {
+                        return Err(format!("the {kind} credential {n} needs a user"));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// An SSH jump host with its own credential.

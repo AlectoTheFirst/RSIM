@@ -3,6 +3,7 @@
 //! one audit record for each changed record and increases the inventory
 //! version by 1. The database gives the time of an audit record.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
@@ -16,10 +17,11 @@ use tokio_postgres_rustls::MakeRustlsConnect;
 mod auth;
 pub use auth::*;
 
+use crate::secret::Sealed;
 use crate::types::{
-    Action, AuditPage, AuditRecord, Bindings, CaptureBgp, Credential, CredentialSource, Device,
-    EdgeDeviceBinding, FabricPortBinding, Group, Ha, Inventory, JumpHost, NxosJson, Route,
-    Settings, SshAlgorithms, SshMode, TlsTrust, valid_device_name, valid_name,
+    Action, AuditPage, AuditRecord, Bindings, CaptureBgp, Credential, CredentialKind,
+    CredentialSource, Device, EdgeDeviceBinding, FabricPortBinding, Group, Ha, Inventory, JumpHost,
+    NxosJson, Route, Settings, SshAlgorithms, SshMode, TlsTrust, valid_device_name, valid_name,
 };
 
 /// The migrations: the version, the name and the SQL, in order. A version
@@ -31,6 +33,11 @@ pub const MIGRATIONS: &[(u32, &str, &str)] = &[
         include_str!("../migrations/0001_inventory.sql"),
     ),
     (2, "auth", include_str!("../migrations/0002_auth.sql")),
+    (
+        3,
+        "managed_credentials",
+        include_str!("../migrations/0003_managed_credentials.sql"),
+    ),
 ];
 
 /// The schema version of this build: the last migration.
@@ -248,8 +255,20 @@ impl Db {
         Ok(applied)
     }
 
-    /// The whole inventory at one version, read in one transaction.
+    /// The whole inventory at one version, read in one transaction. It
+    /// gives no secret.
     pub async fn load(&self) -> Result<Inventory> {
+        Ok(self.read(false).await?.0)
+    }
+
+    /// The whole inventory at one version and the sealed secret of each
+    /// managed credential by name, read in one transaction. Only the
+    /// collector reads the secrets.
+    pub async fn load_with_secrets(&self) -> Result<(Inventory, BTreeMap<String, Sealed>)> {
+        self.read(true).await
+    }
+
+    async fn read(&self, secrets: bool) -> Result<(Inventory, BTreeMap<String, Sealed>)> {
         let mut slot = self.client.lock().await;
         let client = self.client(&mut slot).await?;
         let tx = client
@@ -272,8 +291,13 @@ impl Db {
                 edge_devices: edge_devices(&tx, None).await?,
             },
         };
+        let sealed = if secrets {
+            sealed_secrets(&tx).await?
+        } else {
+            BTreeMap::new()
+        };
         tx.commit().await?;
-        Ok(inv)
+        Ok((inv, sealed))
     }
 
     /// A page of the audit log, the newest record first: at most `limit`
@@ -404,7 +428,10 @@ async fn read_version(c: &impl GenericClient) -> Result<u64> {
 /// One change of the inventory. A put makes the record or replaces it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Change {
-    PutCredential(Credential),
+    /// A credential with the new sealed secret of a managed credential. A
+    /// managed credential with no new secret keeps its stored secret, which
+    /// needs the same kind; a new managed credential needs its secret.
+    PutCredential(Credential, Option<Sealed>),
     DeleteCredential(String),
     PutJumpHost(JumpHost),
     DeleteJumpHost(String),
@@ -457,7 +484,17 @@ impl Change {
     /// The checks that need no database.
     fn check(&self) -> Result<()> {
         match self {
-            Change::PutCredential(c) => name_check("credential", &c.name),
+            Change::PutCredential(c, sealed) => {
+                name_check("credential", &c.name)?;
+                c.check().map_err(Error::Invalid)?;
+                if sealed.is_some() && c.source != CredentialSource::Managed {
+                    return Err(Error::Invalid(format!(
+                        "the credential {} of the source {} has no secret in the inventory",
+                        c.name, c.source
+                    )));
+                }
+                Ok(())
+            }
             Change::PutJumpHost(j) => name_check("jump host", &j.name),
             Change::PutRoute(r) => {
                 name_check("route", &r.name)?;
@@ -511,23 +548,71 @@ impl Change {
             };
         let missing = |kind: &str, key: &str| Error::NotFound(format!("no {kind} is named {key}"));
         match self {
-            Change::PutCredential(c) => {
+            Change::PutCredential(c, sealed) => {
                 let old = credentials(tx, Some(&c.name)).await?.pop();
-                if old.as_ref() != Some(c) {
-                    tx.execute(
-                        "INSERT INTO credentials (name, source, key, description)
-                         VALUES ($1, $2, $3, $4)
-                         ON CONFLICT (name) DO UPDATE SET source = EXCLUDED.source,
-                             key = EXCLUDED.key, description = EXCLUDED.description",
-                        &[&c.name, &c.source.word(), &c.key, &c.description],
-                    )
-                    .await?;
+                let stored = old
+                    .as_ref()
+                    .filter(|o| o.source == CredentialSource::Managed && o.kind == c.kind);
+                let mut new = c.clone();
+                new.secret_revision = match (c.source, sealed, stored) {
+                    (CredentialSource::Managed, Some(_), _) => {
+                        Some(old.as_ref().and_then(|o| o.secret_revision).unwrap_or(0) + 1)
+                    }
+                    (CredentialSource::Managed, None, Some(o)) => o.secret_revision,
+                    (CredentialSource::Managed, None, None) => {
+                        return Err(Error::Invalid(format!(
+                            "the managed credential {} needs its secret",
+                            c.name
+                        )));
+                    }
+                    _ => None,
+                };
+                if old.as_ref() != Some(&new) {
+                    let kind = new.kind.map(CredentialKind::word);
+                    if c.source == CredentialSource::Managed && sealed.is_none() {
+                        tx.execute(
+                            "UPDATE credentials SET user_name = $2, description = $3
+                             WHERE name = $1",
+                            &[&new.name, &new.user, &new.description],
+                        )
+                        .await?;
+                    } else {
+                        let revision = new.secret_revision.map(|r| r as i64);
+                        let (bytes, key_id) = sealed
+                            .as_ref()
+                            .map(|s| (s.bytes.clone(), s.key_id.clone()))
+                            .unzip();
+                        tx.execute(
+                            "INSERT INTO credentials (name, source, key, kind, user_name,
+                                 description, sealed, secret_key_id, secret_revision)
+                             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                             ON CONFLICT (name) DO UPDATE SET source = EXCLUDED.source,
+                                 key = EXCLUDED.key, kind = EXCLUDED.kind,
+                                 user_name = EXCLUDED.user_name,
+                                 description = EXCLUDED.description,
+                                 sealed = EXCLUDED.sealed,
+                                 secret_key_id = EXCLUDED.secret_key_id,
+                                 secret_revision = EXCLUDED.secret_revision",
+                            &[
+                                &new.name,
+                                &new.source.word(),
+                                &new.key,
+                                &kind,
+                                &new.user,
+                                &new.description,
+                                &bytes,
+                                &key_id,
+                                &revision,
+                            ],
+                        )
+                        .await?;
+                    }
                 }
                 Ok(audit(
                     "credential",
                     c.name.clone(),
                     old.map(|o| json(&o)),
-                    Some(json(c)),
+                    Some(json(&new)),
                 ))
             }
             Change::DeleteCredential(name) => {
@@ -842,7 +927,8 @@ fn settings(row: &Row) -> Result<Settings> {
 async fn credentials(c: &impl GenericClient, name: Option<&String>) -> Result<Vec<Credential>> {
     let rows = c
         .query(
-            "SELECT name, source, key, description FROM credentials
+            "SELECT name, source, key, kind, user_name, description, secret_revision
+             FROM credentials
              WHERE ($1::text IS NULL OR name = $1) ORDER BY name COLLATE \"C\"",
             &[&name],
         )
@@ -854,10 +940,37 @@ async fn credentials(c: &impl GenericClient, name: Option<&String>) -> Result<Ve
                 source: word(r, "source", CredentialSource::parse)?
                     .ok_or_else(|| Error::Database("a credential has no source".into()))?,
                 key: r.get("key"),
+                kind: word(r, "kind", CredentialKind::parse)?,
+                user: r.get("user_name"),
                 description: r.get("description"),
+                secret_revision: r
+                    .get::<_, Option<i64>>("secret_revision")
+                    .map(|n| n.max(0) as u64),
             })
         })
         .collect()
+}
+
+/// The sealed secret of each managed credential, by name.
+async fn sealed_secrets(c: &impl GenericClient) -> Result<BTreeMap<String, Sealed>> {
+    let rows = c
+        .query(
+            "SELECT name, sealed, secret_key_id FROM credentials WHERE source = 'managed'",
+            &[],
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            (
+                r.get("name"),
+                Sealed {
+                    key_id: r.get("secret_key_id"),
+                    bytes: r.get("sealed"),
+                },
+            )
+        })
+        .collect())
 }
 
 async fn jump_hosts(c: &impl GenericClient, name: Option<&String>) -> Result<Vec<JumpHost>> {
@@ -1014,7 +1127,11 @@ async fn edge_devices(
 /// their dependencies.
 pub fn import_changes(r: crate::env::Records) -> Vec<Change> {
     let mut out = Vec::new();
-    out.extend(r.credentials.into_iter().map(Change::PutCredential));
+    out.extend(
+        r.credentials
+            .into_iter()
+            .map(|c| Change::PutCredential(c, None)),
+    );
     out.extend(r.jump_hosts.into_iter().map(Change::PutJumpHost));
     out.extend(r.routes.into_iter().map(Change::PutRoute));
     out.extend(r.groups.into_iter().map(Change::PutGroup));
@@ -1053,14 +1170,9 @@ mod tests {
         assert!(
             matches!(Change::PutRoute(r).check(), Err(Error::Invalid(e)) if e.contains("login"))
         );
-        let c = Credential {
-            name: "Bad Name".into(),
-            source: CredentialSource::Env,
-            key: "X".into(),
-            description: None,
-        };
+        let c = Credential::env("Bad Name", CredentialSource::Env, "X");
         assert!(matches!(
-            Change::PutCredential(c).check(),
+            Change::PutCredential(c, None).check(),
             Err(Error::Invalid(_))
         ));
         let d = Device {

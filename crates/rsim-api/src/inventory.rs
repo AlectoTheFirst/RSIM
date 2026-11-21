@@ -1,16 +1,18 @@
 //! The inventory routes: the device groups, the devices with their
-//! inherited settings resolved, the credential references, the routes, the
-//! jump hosts, the Equinix bindings and the audit log. A write is one
-//! transaction of the inventory database with its audit records.
+//! inherited settings resolved, the credentials, the routes, the jump
+//! hosts, the Equinix bindings and the audit log. A write is one
+//! transaction of the inventory database with its audit records. The
+//! secret of a managed credential comes only in a PUT body; the server
+//! seals it with its secret key, and no answer gives it back.
 
 use std::future::Future;
 use std::sync::Arc;
 
 use rsim_contract::schema;
 use rsim_inventory::{
-    AuditPage, Bindings, COLLECTOR_VENDORS, Change, CollectorTransport, Credential, Db, Device,
-    EdgeDeviceBinding, Error, FabricPortBinding, Group, Inventory, JumpHost, ResolvedDevice,
-    ResolvedDevices, Route,
+    AuditPage, Bindings, COLLECTOR_VENDORS, Change, CollectorTransport, Credential, CredentialKind,
+    CredentialSource, Db, Device, EdgeDeviceBinding, Error, FabricPortBinding, Group, Inventory,
+    JumpHost, ResolvedDevice, ResolvedDevices, Route, SecretInput, SecretKey,
 };
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -29,11 +31,19 @@ pub const ACTOR: &str = "rsim-api";
 pub struct InventoryHandle {
     db: Arc<Db>,
     rt: tokio::runtime::Handle,
+    key: Option<Arc<SecretKey>>,
 }
 
 impl InventoryHandle {
     pub fn new(db: Arc<Db>, rt: tokio::runtime::Handle) -> Self {
-        InventoryHandle { db, rt }
+        InventoryHandle { db, rt, key: None }
+    }
+
+    /// The handle with the key that seals the secrets of the managed
+    /// credentials.
+    pub fn with_secret_key(mut self, key: SecretKey) -> Self {
+        self.key = Some(Arc::new(key));
+        self
     }
 
     pub(crate) fn run<F: Future>(&self, f: F) -> F::Output {
@@ -50,6 +60,66 @@ impl InventoryHandle {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WrittenOut {
     pub version: u64,
+}
+
+/// The PUT body of a credential: the record with the secret of a managed
+/// credential. A managed credential with no secret keeps its stored secret
+/// when the kind stays; a new managed credential and a new kind need the
+/// secret.
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CredentialPut {
+    /// The name of the credential. It can be left out; the path gives it.
+    #[serde(default)]
+    pub name: String,
+    pub source: CredentialSource,
+    /// The key in the env file: the prefix of `env`, the variable of
+    /// `env-url`. None for `managed`.
+    #[serde(default)]
+    pub key: Option<String>,
+    /// The kind of the secret of `managed`.
+    #[serde(default)]
+    pub kind: Option<CredentialKind>,
+    /// The user of `managed` with the kind `password` or `ssh-key`.
+    #[serde(default)]
+    pub user: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// The revision of the stored record. The write ignores it.
+    #[serde(default)]
+    pub secret_revision: Option<u64>,
+    /// The new secret of `managed`. No answer gives it back.
+    #[serde(default)]
+    pub secret: Option<SecretInput>,
+}
+
+impl CredentialPut {
+    fn split(self) -> (Credential, Option<SecretInput>) {
+        (
+            Credential {
+                name: self.name,
+                source: self.source,
+                key: self.key,
+                kind: self.kind,
+                user: self.user,
+                description: self.description,
+                secret_revision: None,
+            },
+            self.secret,
+        )
+    }
+}
+
+/// The secret key of the server.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SecretKeyOut {
+    /// True if the server has a secret key, so that it can write the secret
+    /// of a managed credential.
+    pub present: bool,
+    /// The id of the key: the first 8 bytes of its SHA-256 in hex. The
+    /// collector needs the key of the same id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
 }
 
 /// The device groups at one version.
@@ -210,7 +280,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/inventory/credentials",
         id: "listCredentials",
-        summary: "The credential references. No secret is in the inventory.",
+        summary: "The credentials. No answer gives a secret.",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<CredentialsOut>]),
@@ -219,19 +289,28 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "put",
         path: "/v1/inventory/credentials/{credential}",
         id: "putCredential",
-        summary: "Makes or replaces a credential reference: its source and its key.",
+        summary: "Makes or replaces a credential: a key of the env file, or a managed credential with its kind, its user and its secret, which the server seals with its secret key.",
         query: ONE,
-        body: &[schema::<Credential>],
+        body: &[schema::<CredentialPut>],
         ok: (200, &[schema::<WrittenOut>]),
     },
     ApiRoute {
         method: "delete",
         path: "/v1/inventory/credentials/{credential}",
         id: "deleteCredential",
-        summary: "Removes a credential reference that nothing uses.",
+        summary: "Removes a credential that nothing uses.",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<WrittenOut>]),
+    },
+    ApiRoute {
+        method: "get",
+        path: "/v1/inventory/secret-key",
+        id: "getSecretKey",
+        summary: "The secret key of the server: present or not, and its id.",
+        query: ONE,
+        body: &[],
+        ok: (200, &[schema::<SecretKeyOut>]),
     },
     ApiRoute {
         method: "get",
@@ -555,12 +634,55 @@ pub fn route(
         ["credentials", name] => {
             allow(req, &["PUT", "DELETE"])?;
             if req.method == "PUT" {
-                let mut c: Credential = body(req)?;
+                let put: CredentialPut = body(req)?;
+                let (mut c, secret) = put.split();
                 named(&mut c.name, name, "name")?;
-                write(vec![Change::PutCredential(c)])
+                let sealed =
+                    match secret {
+                        None => None,
+                        Some(secret) => {
+                            let kind = c.kind.filter(|_| c.source == CredentialSource::Managed);
+                            let kind = kind.ok_or_else(|| {
+                            problem(
+                                422,
+                                "invalid_record",
+                                format!(
+                                    "the credential {} has a secret and is not managed with a kind",
+                                    c.name
+                                ),
+                            )
+                        })?;
+                            secret.check(kind).map_err(|e| {
+                                problem(
+                                    422,
+                                    "invalid_record",
+                                    format!("the credential {}: {e}", c.name),
+                                )
+                            })?;
+                            let key = h.key.as_ref().ok_or_else(|| {
+                                problem(
+                                    409,
+                                    "no_secret_key",
+                                    "the server has no secret key; start it with --secret-key-file"
+                                        .into(),
+                                )
+                            })?;
+                            Some(key.seal(&c.name, kind, &secret).map_err(|e| {
+                                problem(500, "internal", format!("the secret: {e}"))
+                            })?)
+                        }
+                    };
+                write(vec![Change::PutCredential(c, sealed)])
             } else {
                 write(vec![Change::DeleteCredential(name.to_string())])
             }
+        }
+        ["secret-key"] => {
+            allow(req, &["GET"])?;
+            Ok(json_out(&SecretKeyOut {
+                present: h.key.is_some(),
+                id: h.key.as_ref().map(|k| k.id().to_string()),
+            }))
         }
         ["routes"] => {
             allow(req, &["GET"])?;

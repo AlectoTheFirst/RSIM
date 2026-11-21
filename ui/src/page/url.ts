@@ -70,10 +70,10 @@ export function twinState(twins: readonly TwinRef[] | null, twin: string): "load
   return store && store.held == null && store.newest_cycle == null ? "empty" : "ready";
 }
 
-/** The text of a twin that cannot answer, or null. */
-export function twinStateText(state: ReturnType<typeof twinState>): string | null {
-  if (state === "none") return "no store: rsim-api runs with no --store";
-  if (state === "empty") return "no snapshot yet: the collector writes the first snapshot of the store";
+/** The label of a twin that cannot answer, with its cause as the title, or null. */
+export function twinStateText(state: ReturnType<typeof twinState>): { text: string; title: string } | null {
+  if (state === "none") return { text: "no store", title: "rsim-api has no --store" };
+  if (state === "empty") return { text: "no snapshot", title: "the store has no snapshot of the collector" };
   return null;
 }
 

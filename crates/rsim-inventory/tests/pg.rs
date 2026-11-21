@@ -2,18 +2,13 @@
 //! print that they are skipped and pass.
 
 use rsim_inventory::{
-    Action, CaptureBgp, Change, Credential, CredentialSource, Device, EdgeDeviceBinding, Error,
-    FabricPortBinding, Group, Ha, JumpHost, Origin, Route, Settings, SshAlgorithms, env,
-    import_changes, test_database,
+    Action, CaptureBgp, Change, Credential, CredentialKind, CredentialSource, Device,
+    EdgeDeviceBinding, Error, FabricPortBinding, Group, Ha, JumpHost, Origin, Route, SecretInput,
+    SecretKey, Settings, SshAlgorithms, env, import_changes, test_database,
 };
 
 fn credential(name: &str, key: &str) -> Credential {
-    Credential {
-        name: name.into(),
-        source: CredentialSource::Env,
-        key: key.into(),
-        description: None,
-    }
+    Credential::env(name, CredentialSource::Env, key)
 }
 
 fn group(name: &str) -> Group {
@@ -49,8 +44,8 @@ fn device(name: &str, group: &str) -> Device {
 
 fn base() -> Vec<Change> {
     vec![
-        Change::PutCredential(credential("vyos", "VYOS")),
-        Change::PutCredential(credential("jump-a", "JUMP_A")),
+        Change::PutCredential(credential("vyos", "VYOS"), None),
+        Change::PutCredential(credential("jump-a", "JUMP_A"), None),
         Change::PutJumpHost(JumpHost {
             name: "a".into(),
             address: "192.0.2.20".into(),
@@ -210,7 +205,10 @@ async fn a_bad_change_writes_nothing() {
     );
 
     let bad_key = db
-        .apply("tester", &[Change::PutCredential(credential("y", "lower"))])
+        .apply(
+            "tester",
+            &[Change::PutCredential(credential("y", "lower"), None)],
+        )
         .await
         .unwrap_err();
     assert!(matches!(bad_key, Error::Invalid(_)), "{bad_key:?}");
@@ -324,7 +322,7 @@ async fn each_list_is_in_byte_order_of_its_key() {
     // byte order puts them the other way.
     let mut changes = Vec::new();
     for n in ["ab", "a-c"] {
-        changes.push(Change::PutCredential(credential(n, "VYOS")));
+        changes.push(Change::PutCredential(credential(n, "VYOS"), None));
         changes.push(Change::PutJumpHost(JumpHost {
             name: n.into(),
             address: "192.0.2.20".into(),
@@ -401,4 +399,170 @@ async fn each_list_is_in_byte_order_of_its_key() {
     );
     let resolved: Vec<String> = inv.resolve().unwrap().into_iter().map(|d| d.name).collect();
     assert_eq!(resolved, devices);
+}
+
+fn managed(name: &str, kind: CredentialKind, user: Option<&str>) -> Credential {
+    Credential {
+        name: name.into(),
+        source: CredentialSource::Managed,
+        key: None,
+        kind: Some(kind),
+        user: user.map(Into::into),
+        description: None,
+        secret_revision: None,
+    }
+}
+
+fn secret(v: &str) -> SecretInput {
+    SecretInput {
+        value: v.into(),
+        passphrase: None,
+    }
+}
+
+#[tokio::test]
+async fn a_managed_credential_keeps_its_secret_out_of_each_read() {
+    let Some(db) = test_database("a_managed_credential_keeps_its_secret").await else {
+        return;
+    };
+    let key = SecretKey::parse(&SecretKey::generate().unwrap()).unwrap();
+    let plain = "correct-horse-7319";
+    let c = managed("lab", CredentialKind::Password, Some("ro"));
+    let sealed = key
+        .seal("lab", CredentialKind::Password, &secret(plain))
+        .unwrap();
+
+    // A new managed credential needs its secret.
+    let none = db
+        .apply("tester", &[Change::PutCredential(c.clone(), None)])
+        .await
+        .unwrap_err();
+    assert!(matches!(none, Error::Invalid(_)), "{none:?}");
+
+    assert_eq!(
+        db.apply(
+            "tester",
+            &[Change::PutCredential(c.clone(), Some(sealed.clone()))]
+        )
+        .await
+        .unwrap(),
+        1
+    );
+    let inv = db.load().await.unwrap();
+    assert_eq!(inv.credentials[0].secret_revision, Some(1));
+    assert_eq!(inv.credentials[0].user.as_deref(), Some("ro"));
+
+    // No read of the inventory and no audit record holds the secret or the
+    // sealed bytes.
+    let hex: String = sealed.bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let text = format!(
+        "{}{}",
+        serde_json::to_string(&inv).unwrap(),
+        serde_json::to_string(&db.audit(100, None).await.unwrap()).unwrap()
+    );
+    assert!(!text.contains(plain), "{text}");
+    assert!(!text.contains(&hex[2..40]), "{text}");
+
+    // A change of the description keeps the secret and its revision.
+    let mut described = inv.credentials[0].clone();
+    described.description = Some("lab routers".into());
+    assert_eq!(
+        db.apply("tester", &[Change::PutCredential(described, None)])
+            .await
+            .unwrap(),
+        2
+    );
+    let (inv, secrets) = db.load_with_secrets().await.unwrap();
+    assert_eq!(inv.credentials[0].secret_revision, Some(1));
+    assert_eq!(
+        key.open("lab", CredentialKind::Password, &secrets["lab"])
+            .unwrap(),
+        secret(plain)
+    );
+
+    // A new secret alone gives one audit record and the next version.
+    let before = db.audit(100, None).await.unwrap().records.len();
+    let next = key
+        .seal("lab", CredentialKind::Password, &secret("new-secret"))
+        .unwrap();
+    assert_eq!(
+        db.apply(
+            "tester",
+            &[Change::PutCredential(
+                inv.credentials[0].clone(),
+                Some(next)
+            )]
+        )
+        .await
+        .unwrap(),
+        3
+    );
+    let page = db.audit(100, None).await.unwrap();
+    assert_eq!(page.records.len(), before + 1);
+    assert_eq!(page.records[0].action, Action::Update);
+    let (inv, secrets) = db.load_with_secrets().await.unwrap();
+    assert_eq!(inv.credentials[0].secret_revision, Some(2));
+    assert_eq!(
+        key.open("lab", CredentialKind::Password, &secrets["lab"])
+            .unwrap(),
+        secret("new-secret")
+    );
+
+    // A sealed secret moved to another credential does not open.
+    let other = managed("other", CredentialKind::Password, Some("ro"));
+    db.apply(
+        "tester",
+        &[Change::PutCredential(other, Some(secrets["lab"].clone()))],
+    )
+    .await
+    .unwrap();
+    let (_, secrets) = db.load_with_secrets().await.unwrap();
+    assert!(
+        key.open("other", CredentialKind::Password, &secrets["other"])
+            .is_err()
+    );
+
+    // A new kind needs a new secret.
+    let mut api = managed("lab", CredentialKind::ApiKey, None);
+    api.description = Some("lab routers".into());
+    let e = db
+        .apply("tester", &[Change::PutCredential(api.clone(), None)])
+        .await
+        .unwrap_err();
+    assert!(matches!(e, Error::Invalid(_)), "{e:?}");
+
+    // An env source clears the secret.
+    db.apply(
+        "tester",
+        &[Change::PutCredential(credential("lab", "LAB"), None)],
+    )
+    .await
+    .unwrap();
+    let (inv, secrets) = db.load_with_secrets().await.unwrap();
+    assert_eq!(inv.credential("lab").unwrap(), &credential("lab", "LAB"));
+    assert!(!secrets.contains_key("lab"));
+
+    // A managed credential with a key, an env credential with a user and an
+    // env credential with a secret are refused.
+    let mut keyed = managed("x", CredentialKind::Password, Some("u"));
+    keyed.key = Some("X".into());
+    let mut env_user = credential("y", "Y");
+    env_user.user = Some("u".into());
+    let sealed_env = Change::PutCredential(
+        credential("z", "Z"),
+        Some(
+            key.seal("z", CredentialKind::Password, &secret("p"))
+                .unwrap(),
+        ),
+    );
+    for change in [
+        Change::PutCredential(keyed, None),
+        Change::PutCredential(env_user, None),
+        sealed_env,
+        Change::PutCredential(managed("w", CredentialKind::ApiKey, Some("u")), None),
+        Change::PutCredential(managed("v", CredentialKind::SshKey, None), None),
+    ] {
+        let e = db.apply("tester", &[change]).await.unwrap_err();
+        assert!(matches!(e, Error::Invalid(_)), "{e:?}");
+    }
 }

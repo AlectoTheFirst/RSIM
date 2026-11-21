@@ -44,18 +44,23 @@
 //!
 //! With an inventory database, from `--inventory`, the environment variable
 //! `RSIM_INVENTORY_URL` or the env key `RSIM_INVENTORY_URL`, the collector
-//! reads the devices, the groups, the routes and the credential references
-//! from the database at the start of each cycle, and the snapshot records
-//! the inventory version. The env file then gives only the secrets of the
-//! references: the reference `env:<P>` reads `<P>_USER` with `<P>_PASS`,
-//! `<P>_KEY_FILE` and `<P>_KEY_PASS`, or `<P>_AGENT`, and for an HTTPS device
-//! `<P>_API_KEY` or `<P>_USER` with `<P>_PASS`; the reference
-//! `env-url:<KEY>` reads the login in the URL of `<KEY>`. The client
-//! certificate of the UniFi consoles stays in `UNIFI_CLIENT_CERT` and
-//! `UNIFI_CLIENT_KEY`. `--inventory-ca-file`, `RSIM_INVENTORY_CA_FILE` or the
-//! env key of the same name gives the CA bundle of the database server. A
-//! cycle whose inventory read fails writes nothing; with `--repeat` the next
-//! cycle reads again. A device of a vendor with no collector is skipped.
+//! reads the devices, the groups, the routes and the credentials from the
+//! database at the start of each cycle, and the snapshot records the
+//! inventory version. The env file is then optional and gives only the
+//! secrets of the credentials of an env source: `env:<P>` reads `<P>_USER`
+//! with `<P>_PASS`, `<P>_KEY_FILE` and `<P>_KEY_PASS`, or `<P>_AGENT`, and for
+//! an HTTPS device `<P>_API_KEY` or `<P>_USER` with `<P>_PASS`; `env-url:<KEY>`
+//! reads the login in the URL of `<KEY>`. A managed credential has its
+//! sealed secret in the database, which the secret key of
+//! `--secret-key-file`, `RSIM_SECRET_KEY_FILE` or the env key of the same
+//! name opens: a password for SSH, an HTTPS login and a proxy login, a
+//! private key for SSH, and an API key for HTTPS. The client certificate of
+//! the UniFi consoles stays in `UNIFI_CLIENT_CERT` and `UNIFI_CLIENT_KEY`.
+//! `--inventory-ca-file`, `RSIM_INVENTORY_CA_FILE` or the env key of the same
+//! name gives the CA bundle of the database server. A cycle whose inventory
+//! read fails, or whose secret does not open, writes nothing; with
+//! `--repeat` the next cycle reads again. A device of a vendor with no
+//! collector is skipped.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -78,7 +83,7 @@ use rsim_collect::{
     TokioClock, TrustStore, Vendor,
 };
 use rsim_inventory::env::parse_env;
-use rsim_inventory::{CredentialSource, Inventory};
+use rsim_inventory::{CredentialKind, CredentialSource, Inventory, Sealed, SecretKey};
 use rsim_store::{Keys, SectionStatus, Store};
 
 #[derive(Parser)]
@@ -88,9 +93,10 @@ use rsim_store::{Keys, SectionStatus, Store};
 )]
 struct Cli {
     /// The env file with the devices and the credentials, or with only the
-    /// secrets of the credential references of an inventory database.
+    /// secrets of the env credentials of an inventory database. It is
+    /// needed with no inventory database.
     #[arg(long)]
-    env: PathBuf,
+    env: Option<PathBuf>,
     /// The folder of the store, the keys and the pins.
     #[arg(long)]
     data: PathBuf,
@@ -100,6 +106,10 @@ struct Cli {
     /// The PEM file of the CA bundle of the inventory database server.
     #[arg(long, env = rsim_inventory::CA_FILE_VAR)]
     inventory_ca_file: Option<PathBuf>,
+    /// The file of the secret key that opens the secrets of the managed
+    /// credentials of the inventory database: 64 hex digits.
+    #[arg(long, env = rsim_inventory::KEY_FILE_VAR)]
+    secret_key_file: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -497,16 +507,85 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
     Ok(s)
 }
 
-/// The secret of a credential reference from the env file. An HTTPS
-/// device takes `<P>_API_KEY` or `<P>_USER` with `<P>_PASS`; an SSH device
-/// or a jump host takes `<P>_USER` with its SSH secret; `env-url` takes the
-/// login in the URL of its key.
-fn env_credential(
-    env: &BTreeMap<String, String>,
+/// The sources of the secrets of an inventory: the env file, and the
+/// sealed secrets of the managed credentials with the key that opens them.
+struct Secrets<'a> {
+    env: &'a BTreeMap<String, String>,
+    key: Option<&'a SecretKey>,
+    sealed: &'a BTreeMap<String, Sealed>,
+}
+
+#[cfg(test)]
+static NO_SEALED: BTreeMap<String, Sealed> = BTreeMap::new();
+
+#[cfg(test)]
+impl<'a> Secrets<'a> {
+    /// The secrets of an env file only.
+    fn env(env: &'a BTreeMap<String, String>) -> Secrets<'a> {
+        Secrets {
+            env,
+            key: None,
+            sealed: &NO_SEALED,
+        }
+    }
+}
+
+/// The secret of a managed credential for its use: a password for each
+/// use, a private key for SSH and an API key for HTTPS.
+fn managed_credential(
+    secrets: &Secrets,
     c: &rsim_inventory::Credential,
     https: bool,
 ) -> Result<Credential, String> {
-    let p = &c.key;
+    let kind = c.kind.ok_or("the managed credential has no kind")?;
+    let key = secrets.key.ok_or(
+        "the credential is managed and the collector has no secret key; give --secret-key-file",
+    )?;
+    let sealed = secrets
+        .sealed
+        .get(&c.name)
+        .ok_or("the managed credential has no sealed secret")?;
+    let secret = key.open(&c.name, kind, sealed)?;
+    let user = c.user.clone().unwrap_or_default();
+    match (kind, https) {
+        (CredentialKind::Password, _) => Ok(Credential {
+            user,
+            secret: Secret::Password(secret.value),
+        }),
+        (CredentialKind::SshKey, false) => Ok(Credential {
+            user,
+            secret: Secret::Key {
+                pem: secret.value,
+                passphrase: secret.passphrase,
+            },
+        }),
+        (CredentialKind::ApiKey, true) => Ok(Credential {
+            user: String::new(),
+            secret: Secret::ApiKey(secret.value),
+        }),
+        (CredentialKind::SshKey, true) => {
+            Err("an ssh-key credential is not a credential of HTTPS".into())
+        }
+        (CredentialKind::ApiKey, false) => {
+            Err("an api-key credential is not a credential of SSH".into())
+        }
+    }
+}
+
+/// The secret of a credential. An env credential of an HTTPS device takes
+/// `<P>_API_KEY` or `<P>_USER` with `<P>_PASS`; of an SSH device or a jump
+/// host `<P>_USER` with its SSH secret; `env-url` takes the login in the URL
+/// of its key; a managed credential opens its sealed secret.
+fn credential_secret(
+    secrets: &Secrets,
+    c: &rsim_inventory::Credential,
+    https: bool,
+) -> Result<Credential, String> {
+    let env = secrets.env;
+    if c.source == CredentialSource::Managed {
+        return managed_credential(secrets, c, https);
+    }
+    let p = c.key.as_deref().ok_or("the credential has no key")?;
     match c.source {
         CredentialSource::Env if https => {
             match (
@@ -535,6 +614,7 @@ fn env_credential(
                 .clone(),
             secret: ssh_secret(env, p)?,
         }),
+        CredentialSource::Managed => unreachable!("a managed credential returns above"),
         CredentialSource::EnvUrl => {
             let url = env.get(p).ok_or_else(|| format!("{p} is not set"))?;
             let login = match Proxy::parse(url).map_err(|e| format!("{p}: {e}"))? {
@@ -549,17 +629,17 @@ fn env_credential(
     }
 }
 
-/// The credential reference of a name, from the inventory and the env file.
+/// The credential of a name, from the inventory and its secrets.
 fn reference(
     inv: &Inventory,
-    env: &BTreeMap<String, String>,
+    secrets: &Secrets,
     name: &str,
     https: bool,
 ) -> Result<Credential, String> {
     let c = inv
         .credential(name)
-        .ok_or_else(|| format!("no credential reference is named {name}"))?;
-    env_credential(env, c, https).map_err(|e| format!("the credential {name}: {e}"))
+        .ok_or_else(|| format!("no credential is named {name}"))?;
+    credential_secret(secrets, c, https).map_err(|e| format!("the credential {name}: {e}"))
 }
 
 /// The secrets of the credential references of an inventory, with the
@@ -600,7 +680,7 @@ impl References {
 /// credential. No name is a direct connection.
 fn inventory_route(
     inv: &Inventory,
-    env: &BTreeMap<String, String>,
+    secrets: &Secrets,
     name: Option<&str>,
     credentials: &mut References,
 ) -> Result<Route, String> {
@@ -617,7 +697,7 @@ fn inventory_route(
         .transpose()
         .map_err(|e| format!("the route {name}: {e}"))?;
     if let (Some(p), Some(c)) = (&mut proxy, &r.proxy_credential) {
-        let cred = reference(inv, env, c, false)?;
+        let cred = reference(inv, secrets, c, false)?;
         let Secret::Password(password) = cred.secret else {
             return Err(format!(
                 "the proxy credential {c} of {name} has no password"
@@ -638,7 +718,7 @@ fn inventory_route(
             .ok_or_else(|| format!("no jump host is named {j}"))?;
         credentials.add(
             &host.credential,
-            reference(inv, env, &host.credential, false)?,
+            reference(inv, secrets, &host.credential, false)?,
             format!("the jump host {j} (SSH)"),
         )?;
         jumps.push(Jump {
@@ -653,15 +733,16 @@ fn inventory_route(
     Ok(Route { proxy, jumps })
 }
 
-/// The setup of an inventory, with the secrets from the env file, and a
-/// note for each device that is not collected. Each device of a vendor with
-/// a collector needs its credential; a device with no credential, or a
-/// reference that the env file does not give, is an error, so that a
-/// cycle does not remove a device for a typing error.
+/// The setup of an inventory, with its secrets, and a note for each device
+/// that is not collected. Each device of a vendor with a collector needs
+/// its credential; a device with no credential, or a credential whose
+/// secret is not given or does not open, is an error, so that a cycle does
+/// not remove a device for a typing error.
 fn setup_from_inventory(
     inv: &Inventory,
-    env: &BTreeMap<String, String>,
+    secrets: &Secrets,
 ) -> Result<(Setup, Vec<String>), String> {
+    let env = secrets.env;
     let mut s = Setup {
         devices: Vec::new(),
         credentials: MemoryCredentials::new(),
@@ -696,7 +777,7 @@ fn setup_from_inventory(
             .value
             .clone()
             .ok_or_else(|| format!("the device {} has no credential", d.name))?;
-        let secret = reference(inv, env, &credential, https)
+        let secret = reference(inv, secrets, &credential, https)
             .map_err(|e| format!("the device {}: {e}", d.name))?;
         let user = format!(
             "the device {} ({})",
@@ -704,7 +785,7 @@ fn setup_from_inventory(
             if https { "HTTPS" } else { "SSH" }
         );
         references.add(&credential, secret, user)?;
-        let route = inventory_route(inv, env, st.route.value.as_deref(), &mut references)
+        let route = inventory_route(inv, secrets, st.route.value.as_deref(), &mut references)
             .map_err(|e| format!("the device {}: {e}", d.name))?;
         if st.timeout_seconds.is_set() || st.section_timeout_seconds.is_set() {
             s.times.push((
@@ -868,11 +949,17 @@ fn print_report(r: &CycleReport) {
 async fn configure_from_inventory(
     db: &rsim_inventory::Db,
     env: &BTreeMap<String, String>,
+    key: Option<&SecretKey>,
     trust: &Arc<TrustStore>,
     collector: &mut Collector,
 ) -> Result<(Inventory, Vec<Device>), String> {
-    let inv = db.load().await.map_err(|e| e.to_string())?;
-    let (setup, notes) = setup_from_inventory(&inv, env)?;
+    let (inv, sealed) = db.load_with_secrets().await.map_err(|e| e.to_string())?;
+    let secrets = Secrets {
+        env,
+        key,
+        sealed: &sealed,
+    };
+    let (setup, notes) = setup_from_inventory(&inv, &secrets)?;
     for n in notes {
         eprintln!("{n}");
     }
@@ -1009,10 +1096,24 @@ fn inventory_db(
 }
 
 async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
-    let text =
-        std::fs::read_to_string(&cli.env).map_err(|e| format!("{}: {e}", cli.env.display()))?;
-    let env = parse_env(&text);
+    let env = match &cli.env {
+        Some(p) => {
+            parse_env(&std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?)
+        }
+        None => BTreeMap::new(),
+    };
     let db = inventory_db(cli, &env)?;
+    if db.is_none() && cli.env.is_none() {
+        return Err(
+            "give --env, or an inventory database with --inventory or RSIM_INVENTORY_URL".into(),
+        );
+    }
+    let key = cli
+        .secret_key_file
+        .clone()
+        .or_else(|| env.get(rsim_inventory::KEY_FILE_VAR).map(PathBuf::from))
+        .map(|p| SecretKey::read(&p))
+        .transpose()?;
     let store = open_store(&cli.data)?;
     let policy = if strict {
         PinPolicy::Strict
@@ -1059,7 +1160,9 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
                     _ = &mut stop => break,
                     _ = tick.tick() => {}
                 }
-                match configure_from_inventory(&db, &env, &trust, &mut collector).await {
+                match configure_from_inventory(&db, &env, key.as_ref(), &trust, &mut collector)
+                    .await
+                {
                     Ok((inv, devices)) => {
                         if shown != Some(inv.version) {
                             eprintln!("inventory version {}", inv.version);
@@ -1218,7 +1321,7 @@ mod tests {
              UNIFI_USER=ro\nUNIFI_PASS=x\nUNIFI_VIA=bastion-a\nUNIFI_TLS=none\nUNIFI_TIMEOUT=60\n",
         );
         let direct = setup(&env).unwrap();
-        let (through, notes) = setup_from_inventory(&imported(&env), &env).unwrap();
+        let (through, notes) = setup_from_inventory(&imported(&env), &Secrets::env(&env)).unwrap();
         assert!(notes.is_empty(), "{notes:?}");
         let (a, b) = (effective(&direct), effective(&through));
         assert_eq!(a.0, b.0);
@@ -1233,6 +1336,116 @@ mod tests {
             &edge2.route.proxy,
             Some(Proxy::Http { login: Some(l), .. }) if l.user == "u" && l.password == "v"
         ));
+    }
+
+    #[test]
+    fn a_managed_credential_collects_what_its_env_credential_collects() {
+        let env = parse_env(
+            "VYOS_CORE1_IP=10.0.0.1\nVYOS_USER=ro\nVYOS_PASS=p\nVYOS_VIA=bastion\n\
+             VYOS_PROXY=socks5://p:q@192.0.2.9:1080\n\
+             JUMP_BASTION_IP=192.0.2.20\nJUMP_BASTION_USER=hop\nJUMP_BASTION_PASS=h\n\
+             UNIFI_CONTROLLER=192.0.2.8\nUNIFI_API_KEY=k\n",
+        );
+        let direct = setup(&env).unwrap();
+        let mut inv = imported(&env);
+        let key = SecretKey::parse(&SecretKey::generate().unwrap()).unwrap();
+        let mut sealed = BTreeMap::new();
+        for c in &mut inv.credentials {
+            let https = c.name == "unifi";
+            let plain = credential_secret(&Secrets::env(&env), c, https).unwrap();
+            let (kind, user, value) = match plain.secret {
+                Secret::Password(p) => (CredentialKind::Password, Some(plain.user), p),
+                Secret::ApiKey(k) => (CredentialKind::ApiKey, None, k),
+                other => panic!("{other:?}"),
+            };
+            *c = rsim_inventory::Credential {
+                name: c.name.clone(),
+                source: CredentialSource::Managed,
+                key: None,
+                kind: Some(kind),
+                user,
+                description: None,
+                secret_revision: Some(1),
+            };
+            let input = rsim_inventory::SecretInput {
+                value,
+                passphrase: None,
+            };
+            sealed.insert(c.name.clone(), key.seal(&c.name, kind, &input).unwrap());
+        }
+        assert_eq!(inv.credentials.len(), 4, "{:?}", inv.credentials);
+        let none = BTreeMap::new();
+        let managed = Secrets {
+            env: &none,
+            key: Some(&key),
+            sealed: &sealed,
+        };
+        let (through, notes) = setup_from_inventory(&inv, &managed).unwrap();
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(effective(&direct), effective(&through));
+        let core1 = through.devices.iter().find(|d| d.id == "core1").unwrap();
+        assert!(matches!(
+            &core1.route.proxy,
+            Some(Proxy::Socks5 { login: Some(l), .. }) if l.user == "p" && l.password == "q"
+        ));
+
+        // With no key, with another key and with a kind that does not fit
+        // its use, the setup fails.
+        let no_key = Secrets {
+            key: None,
+            ..managed
+        };
+        let e = setup_from_inventory(&inv, &no_key).err().unwrap();
+        assert!(e.contains("no secret key"), "{e}");
+        let other = SecretKey::parse(&SecretKey::generate().unwrap()).unwrap();
+        let wrong = Secrets {
+            key: Some(&other),
+            ..managed
+        };
+        let e = setup_from_inventory(&inv, &wrong).err().unwrap();
+        assert!(e.contains("sealed by the key"), "{e}");
+        let mut api = inv.clone();
+        for g in api.groups.iter_mut().filter(|g| g.vendor == "vyos") {
+            g.settings.credential = Some("unifi".into());
+        }
+        let e = setup_from_inventory(&api, &managed).err().unwrap();
+        assert!(e.contains("not a credential of SSH"), "{e}");
+    }
+
+    #[test]
+    fn a_managed_private_key_is_an_ssh_key() {
+        let mut c = rsim_inventory::Credential::env("k", CredentialSource::Env, "K");
+        c.source = CredentialSource::Managed;
+        c.key = None;
+        c.kind = Some(CredentialKind::SshKey);
+        c.user = Some("ro".into());
+        let key = SecretKey::parse(&SecretKey::generate().unwrap()).unwrap();
+        let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----\n";
+        let input = rsim_inventory::SecretInput {
+            value: pem.into(),
+            passphrase: Some("pp".into()),
+        };
+        let sealed = BTreeMap::from([(
+            "k".to_string(),
+            key.seal("k", CredentialKind::SshKey, &input).unwrap(),
+        )]);
+        let none = BTreeMap::new();
+        let s = Secrets {
+            env: &none,
+            key: Some(&key),
+            sealed: &sealed,
+        };
+        let got = credential_secret(&s, &c, false).unwrap();
+        assert_eq!(got.user, "ro");
+        assert_eq!(
+            got.secret,
+            Secret::Key {
+                pem: pem.into(),
+                passphrase: Some("pp".into())
+            }
+        );
+        let e = credential_secret(&s, &c, true).unwrap_err();
+        assert!(e.contains("not a credential of HTTPS"), "{e}");
     }
 
     #[test]
@@ -1253,19 +1466,18 @@ mod tests {
         let devices = "VYOS_CORE1_IP=192.0.2.1\nVYOS_USER=u\nVYOS_PASS=p\n\
                        UNIFI_CONTROLLER=192.0.2.8\nUNIFI_USER=u\nUNIFI_PASS=p\n";
         let mut inv = imported(&parse_env(devices));
-        inv.credentials.push(rsim_inventory::Credential {
-            name: "lab".into(),
-            source: CredentialSource::Env,
-            key: "LAB".into(),
-            description: None,
-        });
+        inv.credentials.push(rsim_inventory::Credential::env(
+            "lab",
+            CredentialSource::Env,
+            "LAB",
+        ));
         for g in &mut inv.groups {
             g.settings.credential = Some("lab".into());
         }
         assert_eq!(inv.groups.len(), 2);
 
         let same = parse_env("LAB_USER=u\nLAB_PASS=p\n");
-        let (s, _) = setup_from_inventory(&inv, &same).unwrap();
+        let (s, _) = setup_from_inventory(&inv, &Secrets::env(&same)).unwrap();
         assert_eq!(s.devices.len(), 2);
         assert!(s.devices.iter().all(|d| d.credential == "lab"));
 
@@ -1273,7 +1485,9 @@ mod tests {
             "LAB_USER=u\nLAB_PASS=p\nLAB_API_KEY=k\n",
             "LAB_USER=u\nLAB_PASS=p\nLAB_AGENT=default\n",
         ] {
-            let err = setup_from_inventory(&inv, &parse_env(env)).err().unwrap();
+            let err = setup_from_inventory(&inv, &Secrets::env(&parse_env(env)))
+                .err()
+                .unwrap();
             assert!(
                 err.contains("credential lab") && err.contains("different secrets"),
                 "{err}"
@@ -1285,12 +1499,11 @@ mod tests {
             "{devices}UNIFI_VIA=bastion\nJUMP_BASTION_IP=192.0.2.20\n\
              JUMP_BASTION_USER=u\nJUMP_BASTION_PASS=p\n"
         )));
-        inv.credentials.push(rsim_inventory::Credential {
-            name: "lab".into(),
-            source: CredentialSource::Env,
-            key: "LAB".into(),
-            description: None,
-        });
+        inv.credentials.push(rsim_inventory::Credential::env(
+            "lab",
+            CredentialSource::Env,
+            "LAB",
+        ));
         for j in &mut inv.jump_hosts {
             j.credential = "lab".into();
         }
@@ -1298,7 +1511,9 @@ mod tests {
             g.settings.credential = Some("lab".into());
         }
         let env = parse_env(&format!("{devices}LAB_USER=u\nLAB_PASS=p\nLAB_API_KEY=k\n"));
-        let err = setup_from_inventory(&inv, &env).err().unwrap();
+        let err = setup_from_inventory(&inv, &Secrets::env(&env))
+            .err()
+            .unwrap();
         assert!(
             err.contains("jump host") && err.contains("different secrets"),
             "{err}"
@@ -1324,17 +1539,21 @@ mod tests {
             console_site: None,
             settings: Default::default(),
         });
-        let (s, notes) = setup_from_inventory(&inv, &env).unwrap();
+        let (s, notes) = setup_from_inventory(&inv, &Secrets::env(&env)).unwrap();
         assert_eq!(s.devices.len(), 1);
         assert_eq!(notes.len(), 1);
         assert!(notes[0].contains("fw1") && notes[0].contains("checkpoint"));
 
         let no_pass = parse_env("VYOS_USER=u\n");
-        let err = setup_from_inventory(&inv, &no_pass).err().unwrap();
+        let err = setup_from_inventory(&inv, &Secrets::env(&no_pass))
+            .err()
+            .unwrap();
         assert!(err.contains("r1") && err.contains("VYOS_PASS"), "{err}");
 
         inv.devices.retain(|d| d.name == "fw1");
-        let err = setup_from_inventory(&inv, &env).err().unwrap();
+        let err = setup_from_inventory(&inv, &Secrets::env(&env))
+            .err()
+            .unwrap();
         assert!(err.contains("no device with a collector"), "{err}");
     }
 

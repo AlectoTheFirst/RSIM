@@ -540,7 +540,7 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
         <InventoryView twin={usable} />
       ) : stateText ? (
         <main class="body">
-          <span class="muted">{stateText}</span>
+          <span class="muted" title={stateText.title}>{stateText.text}</span>
         </main>
       ) : view === "Tables" ? (
         <div class="grid-page">

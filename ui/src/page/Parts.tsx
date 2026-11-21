@@ -95,7 +95,7 @@ function AccountMenu(props: { prefs: Prefs; onPrefs: (p: Prefs) => void; user: M
           <div class="settings">
             <span class="t-label">Theme</span>
             <Choice<ThemePref> value={p.theme} options={["dark", "light", "system"]} onChange={(theme) => props.onPrefs({ ...p, theme })} />
-            <span class="t-label">Colours</span>
+            <span class="t-label" title="colours of Deliver and Drop">Colours</span>
             <Choice<ColourPref>
               value={p.colours}
               options={["standard", "blue-orange"]}
@@ -105,7 +105,6 @@ function AccountMenu(props: { prefs: Prefs; onPrefs: (p: Prefs) => void; user: M
             <span class="t-label">Row height</span>
             <Choice<RowHeight> value={p.row} options={ROW_HEIGHTS} onChange={(row) => props.onPrefs({ ...p, row })} />
           </div>
-          <div class="muted">blue and orange: colours of Deliver and Drop</div>
           {u ? (
             <>
               <hr />

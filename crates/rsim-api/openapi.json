@@ -691,7 +691,7 @@
       },
       "Credential": {
         "additionalProperties": false,
-        "description": "A reference to a credential. The secret stays in its source.",
+        "description": "A credential. The source `env` or `env-url` names a key of the env file\nof the collector; the source `managed` has its kind, its user and a\nsealed secret in the inventory database. No answer gives a secret.",
         "properties": {
           "description": {
             "type": [
@@ -700,23 +700,147 @@
             ]
           },
           "key": {
-            "description": "The key in the source.",
-            "type": "string"
+            "description": "The key in the env file: the prefix of `env`, the variable of\n`env-url`. None for `managed`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CredentialKind"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The kind of the secret of `managed`."
           },
           "name": {
             "default": "",
-            "description": "The name of the reference. In a PUT body it can be left out; the\npath gives it.",
+            "description": "The name of the credential. In a PUT body it can be left out; the\npath gives it.",
             "type": "string"
+          },
+          "secret_revision": {
+            "description": "The count of the writes of the secret of `managed`. The database\nsets it; a PUT body can give it, and the write ignores it.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "source": {
             "$ref": "#/components/schemas/CredentialSource"
+          },
+          "user": {
+            "description": "The user of `managed` with the kind `password` or `ssh-key`.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
-          "source",
-          "key"
+          "source"
         ],
-        "title": "Credential",
+        "type": "object"
+      },
+      "CredentialKind": {
+        "description": "The kind of the secret of a managed credential.",
+        "oneOf": [
+          {
+            "const": "password",
+            "description": "A user and a password: SSH, the HTTPS login and a proxy login.",
+            "type": "string"
+          },
+          {
+            "const": "ssh-key",
+            "description": "A user and a private key with its passphrase: SSH only.",
+            "type": "string"
+          },
+          {
+            "const": "api-key",
+            "description": "An API key with no user: HTTPS only.",
+            "type": "string"
+          }
+        ]
+      },
+      "CredentialPut": {
+        "additionalProperties": false,
+        "description": "The PUT body of a credential: the record with the secret of a managed\ncredential. A managed credential with no secret keeps its stored secret\nwhen the kind stays; a new managed credential and a new kind need the\nsecret.",
+        "properties": {
+          "description": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "key": {
+            "default": null,
+            "description": "The key in the env file: the prefix of `env`, the variable of\n`env-url`. None for `managed`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CredentialKind"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The kind of the secret of `managed`."
+          },
+          "name": {
+            "default": "",
+            "description": "The name of the credential. It can be left out; the path gives it.",
+            "type": "string"
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SecretInput"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The new secret of `managed`. No answer gives it back."
+          },
+          "secret_revision": {
+            "default": null,
+            "description": "The revision of the stored record. The write ignores it.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/CredentialSource"
+          },
+          "user": {
+            "default": null,
+            "description": "The user of `managed` with the kind `password` or `ssh-key`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "CredentialPut",
         "type": "object"
       },
       "CredentialSource": {
@@ -730,6 +854,11 @@
           {
             "const": "env-url",
             "description": "The user and the password in the URL of the env key `<KEY>`,\nfor example the login of a proxy URL.",
+            "type": "string"
+          },
+          {
+            "const": "managed",
+            "description": "The kind, the user and the sealed secret in the inventory\ndatabase.",
             "type": "string"
           }
         ]
@@ -2935,6 +3064,50 @@
           "routes"
         ],
         "title": "RoutesOut",
+        "type": "object"
+      },
+      "SecretInput": {
+        "additionalProperties": false,
+        "description": "The secret of a managed credential as a PUT body gives it. No answer\ngives it back.",
+        "properties": {
+          "passphrase": {
+            "description": "The passphrase of a private key.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "writeOnly": true
+          },
+          "value": {
+            "description": "The password, the private key in the OpenSSH or PEM form, or the API\nkey, by the kind of the credential.",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "type": "object"
+      },
+      "SecretKeyOut": {
+        "description": "The secret key of the server.",
+        "properties": {
+          "id": {
+            "description": "The id of the key: the first 8 bytes of its SHA-256 in hex. The\ncollector needs the key of the same id.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "present": {
+            "description": "True if the server has a secret key, so that it can write the secret\nof a managed credential.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "present"
+        ],
+        "title": "SecretKeyOut",
         "type": "object"
       },
       "SetAnswerOut": {
@@ -5840,7 +6013,7 @@
             ]
           }
         ],
-        "summary": "The credential references. No secret is in the inventory."
+        "summary": "The credentials. No answer gives a secret."
       }
     },
     "/v1/inventory/credentials/{credential}": {
@@ -5890,7 +6063,7 @@
             ]
           }
         ],
-        "summary": "Removes a credential reference that nothing uses."
+        "summary": "Removes a credential that nothing uses."
       },
       "put": {
         "operationId": "putCredential",
@@ -5908,7 +6081,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Credential"
+                "$ref": "#/components/schemas/CredentialPut"
               }
             }
           },
@@ -5948,7 +6121,7 @@
             ]
           }
         ],
-        "summary": "Makes or replaces a credential reference: its source and its key."
+        "summary": "Makes or replaces a credential: a key of the env file, or a managed credential with its kind, its user and its secret, which the server seals with its secret key."
       }
     },
     "/v1/inventory/devices": {
@@ -6641,6 +6814,47 @@
           }
         ],
         "summary": "Makes or replaces a route. A proxy URL holds no login; the login is a credential reference."
+      }
+    },
+    "/v1/inventory/secret-key": {
+      "get": {
+        "operationId": "getSecretKey",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretKeyOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "The secret key of the server: present or not, and its id."
       }
     },
     "/v1/inventory/vendors": {

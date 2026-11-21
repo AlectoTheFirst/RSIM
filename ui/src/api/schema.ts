@@ -305,7 +305,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The credential references. No secret is in the inventory. */
+        /** The credentials. No answer gives a secret. */
         get: operations["listCredentials"];
         put?: never;
         post?: never;
@@ -323,10 +323,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Makes or replaces a credential reference: its source and its key. */
+        /** Makes or replaces a credential: a key of the env file, or a managed credential with its kind, its user and its secret, which the server seals with its secret key. */
         put: operations["putCredential"];
         post?: never;
-        /** Removes a credential reference that nothing uses. */
+        /** Removes a credential that nothing uses. */
         delete: operations["deleteCredential"];
         options?: never;
         head?: never;
@@ -470,6 +470,23 @@ export interface paths {
         post?: never;
         /** Removes a route that no group and no device uses. */
         delete: operations["deleteRoute"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/secret-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The secret key of the server: present or not, and its id. */
+        get: operations["getSecretKey"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1041,23 +1058,83 @@ export interface components {
             unknown: number;
         };
         /**
-         * Credential
-         * @description A reference to a credential. The secret stays in its source.
+         * @description A credential. The source `env` or `env-url` names a key of the env file
+         *     of the collector; the source `managed` has its kind, its user and a
+         *     sealed secret in the inventory database. No answer gives a secret.
          */
         Credential: {
             description?: string | null;
-            /** @description The key in the source. */
-            key: string;
             /**
-             * @description The name of the reference. In a PUT body it can be left out; the
+             * @description The key in the env file: the prefix of `env`, the variable of
+             *     `env-url`. None for `managed`.
+             */
+            key?: string | null;
+            /** @description The kind of the secret of `managed`. */
+            kind?: components["schemas"]["CredentialKind"] | null;
+            /**
+             * @description The name of the credential. In a PUT body it can be left out; the
              *     path gives it.
              * @default
              */
             name: string;
+            /**
+             * Format: uint64
+             * @description The count of the writes of the secret of `managed`. The database
+             *     sets it; a PUT body can give it, and the write ignores it.
+             */
+            secret_revision?: number | null;
             source: components["schemas"]["CredentialSource"];
+            /** @description The user of `managed` with the kind `password` or `ssh-key`. */
+            user?: string | null;
+        };
+        /** @description The kind of the secret of a managed credential. */
+        CredentialKind: "password" | "ssh-key" | "api-key";
+        /**
+         * CredentialPut
+         * @description The PUT body of a credential: the record with the secret of a managed
+         *     credential. A managed credential with no secret keeps its stored secret
+         *     when the kind stays; a new managed credential and a new kind need the
+         *     secret.
+         */
+        CredentialPut: {
+            /** @default null */
+            description: string | null;
+            /**
+             * @description The key in the env file: the prefix of `env`, the variable of
+             *     `env-url`. None for `managed`.
+             * @default null
+             */
+            key: string | null;
+            /**
+             * @description The kind of the secret of `managed`.
+             * @default null
+             */
+            kind: components["schemas"]["CredentialKind"] | null;
+            /**
+             * @description The name of the credential. It can be left out; the path gives it.
+             * @default
+             */
+            name: string;
+            /**
+             * @description The new secret of `managed`. No answer gives it back.
+             * @default null
+             */
+            secret: components["schemas"]["SecretInput"] | null;
+            /**
+             * Format: uint64
+             * @description The revision of the stored record. The write ignores it.
+             * @default null
+             */
+            secret_revision: number | null;
+            source: components["schemas"]["CredentialSource"];
+            /**
+             * @description The user of `managed` with the kind `password` or `ssh-key`.
+             * @default null
+             */
+            user: string | null;
         };
         /** @description The source of a credential. */
-        CredentialSource: "env" | "env-url";
+        CredentialSource: "env" | "env-url" | "managed";
         /**
          * CredentialsOut
          * @description The credential references at one version.
@@ -1742,6 +1819,35 @@ export interface components {
             routes: components["schemas"]["Route"][];
             /** Format: uint64 */
             version: number;
+        };
+        /**
+         * @description The secret of a managed credential as a PUT body gives it. No answer
+         *     gives it back.
+         */
+        SecretInput: {
+            /** @description The passphrase of a private key. */
+            passphrase?: string | null;
+            /**
+             * @description The password, the private key in the OpenSSH or PEM form, or the API
+             *     key, by the kind of the credential.
+             */
+            value: string;
+        };
+        /**
+         * SecretKeyOut
+         * @description The secret key of the server.
+         */
+        SecretKeyOut: {
+            /**
+             * @description The id of the key: the first 8 bytes of its SHA-256 in hex. The
+             *     collector needs the key of the same id.
+             */
+            id?: string | null;
+            /**
+             * @description True if the server has a secret key, so that it can write the secret
+             *     of a managed credential.
+             */
+            present: boolean;
         };
         /** SetAnswerOut */
         SetAnswerOut: {
@@ -3049,7 +3155,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Credential"];
+                "application/json": components["schemas"]["CredentialPut"];
             };
         };
         responses: {
@@ -3533,6 +3639,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description A problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getSecretKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretKeyOut"];
                 };
             };
             /** @description A problem */

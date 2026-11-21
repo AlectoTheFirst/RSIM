@@ -447,7 +447,8 @@ export function TablesView(props: {
       );
       parts.push(<span class="muted">needs {def.needs}</span>);
     } else if (st.verb === "lpm" && !st.address) {
-      parts.push(<span class="muted">no address · longest prefix match on {prefixColumn(def)}</span>);
+      parts.push(<span class="muted">no address</span>);
+      parts.push(<span class="muted">longest prefix match on {prefixColumn(def)}</span>);
     } else if (body?.verb === "show") {
       parts.push(<span>{pageWords(pages, body.out.rows.length, body.out.total)}</span>);
       if (body.out.total === 0) parts.push(<span class="muted">needs {def.needs}</span>);
