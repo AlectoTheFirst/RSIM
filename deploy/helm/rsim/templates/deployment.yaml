@@ -57,10 +57,6 @@ spec:
             - --trusted-proxy
             - {{ . | quote }}
             {{- end }}
-            {{- if .Values.collector.envSecret }}
-            - --env
-            - /run/rsim/collect.env
-            {{- end }}
           env: {{- include "rsim.databaseEnv" . | nindent 12 }}
           ports:
             - name: http
@@ -77,20 +73,13 @@ spec:
             - name: data
               mountPath: /data
               readOnly: true
-            {{- if .Values.collector.envSecret }}
-            - name: collect-env
-              mountPath: /run/rsim
-              readOnly: true
-            {{- end }}
         {{- if .Values.collector.enabled }}
         - name: collector
           image: {{ include "rsim.image" (dict "repository" .Values.collector.image.repository "tag" .Values.collector.image.tag "digest" .Values.collector.image.digest "appVersion" .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
-            {{- if .Values.collector.envSecret }}
             - --env
             - /run/rsim/collect.env
-            {{- end }}
             - --data
             - /data/rsim
             - run
@@ -104,17 +93,15 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
-            {{- if .Values.collector.envSecret }}
             - name: collect-env
               mountPath: /run/rsim
               readOnly: true
-            {{- end }}
         {{- end }}
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: {{ include "rsim.fullname" . }}-data
-        {{- if .Values.collector.envSecret }}
+        {{- if .Values.collector.enabled }}
         - name: collect-env
           secret:
             secretName: {{ .Values.collector.envSecret }}

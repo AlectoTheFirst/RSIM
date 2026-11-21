@@ -51,13 +51,9 @@ collector:
     repository: rsim-collect
     tag: ""
     digest: ""
-  # The Secret with an env file under the key `collect.env`, optional. It
-  # holds the secrets of the credentials with the source `env` or `env-url`,
-  # and `RSIM_SECRET_KEY`: 64 hex digits from `openssl rand -hex 32`, the key
-  # of the secrets of the managed credentials. The collector and rsim-api
-  # mount it; rsim-api reads only `RSIM_SECRET_KEY`. With no key, the API
-  # refuses the secret of a managed credential. Keep the key: another key
-  # does not open the stored secrets.
+  # The Secret with the env file of the collector under the key `collect.env`.
+  # With the inventory database, the env file holds only the secrets of the
+  # credential references.
   envSecret: ""
   # Rejects a host key or a certificate with no pin.
   strictPins: false
@@ -85,8 +81,12 @@ ingress:
     secretName: ""
 
 secrets:
-  # A Secret with the key `postgres-password`. With no name, the chart makes
-  # the Secret from postgresPassword.
+  # A Secret with the key `postgres-password`, and the optional key
+  # `secret-key`: 64 hex digits from `openssl rand -hex 32`, the key of the
+  # secrets of the managed credentials. rsim-api and the collector read it as
+  # RSIM_SECRET_KEY. With no `secret-key`, the API refuses the secret of a
+  # managed credential. Keep the key: another key does not open the stored
+  # secrets. With no name, the chart makes the Secret from postgresPassword.
   existingSecret: ""
   postgresPassword: ""
 

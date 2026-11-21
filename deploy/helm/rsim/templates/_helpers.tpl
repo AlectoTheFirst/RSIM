@@ -48,6 +48,12 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
     secretKeyRef:
       name: {{ include "rsim.secretName" . }}
       key: postgres-password
+- name: RSIM_SECRET_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "rsim.secretName" . }}
+      key: secret-key
+      optional: true
 - name: RSIM_INVENTORY_URL
   value: postgres://{{ .Values.postgres.username }}:$(RSIM_DB_PASSWORD)@{{ include "rsim.postgresHost" . }}:5432/{{ .Values.postgres.database }}
 {{- end -}}
@@ -78,5 +84,8 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 {{- if and (not .Values.secrets.existingSecret) (not .Values.secrets.postgresPassword) -}}
 {{- fail "set secrets.existingSecret, or secrets.postgresPassword" -}}
+{{- end -}}
+{{- if and .Values.collector.enabled (not .Values.collector.envSecret) -}}
+{{- fail "collector.enabled needs collector.envSecret" -}}
 {{- end -}}
 {{- end -}}
