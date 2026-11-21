@@ -263,6 +263,17 @@ A build of `rsim-api` with no built UI serves a page that says how to build it. 
 | UI types from the OpenAPI document | `npm --prefix ui run api` |
 | UI with reload on change | `npm --prefix ui run dev` on port 5173, with `cargo run -p rsim-api -- --allow-origin http://localhost:5173` |
 
+## Containers
+
+`Containerfile` builds 2 images: `rsim` with `rsim-api`, `rsim-inventory` and `rsim`, and `rsim-collect` with the collector. `compose.yaml` starts a local instance with sign-in: PostgreSQL, `rsim-api` on `http://localhost:8787` and, with the profile `collect`, the collector. It works with `podman compose` and with Docker Compose.
+
+1. Write the database password in the file `.env`, which Git ignores: `echo "RSIM_DB_PASSWORD=$(openssl rand -hex 16)" > .env`.
+2. Start the instance: `podman compose up --build`.
+3. Open `http://localhost:8787/` and make the first admin on the setup page.
+4. To collect, start the collector with the env file of its secrets: `RSIM_ENV_FILE=<env file> podman compose --profile collect up --build`. The collector reads the devices from the inventory of the instance.
+
+The volume `rsim-data` holds the store, the store keys and the pins, and `rsim-api` mounts it read only. The volume `rsim-db` holds the database. A new instance has no snapshot, so the twin `store` gives an error until the collector writes one; the built-in twins work at once.
+
 ## Collection
 
 `rsim-collect` reads the devices into a snapshot store:

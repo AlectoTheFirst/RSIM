@@ -108,7 +108,8 @@ struct Cli {
 enum Command {
     /// Collects the devices.
     Run {
-        /// Runs cycles until Ctrl-C. Without this flag, runs one cycle.
+        /// Runs cycles until SIGINT or SIGTERM. Without this flag, runs one
+        /// cycle.
         #[arg(long)]
         repeat: bool,
         /// Rejects a host key or a certificate with no pin.
@@ -1037,10 +1038,10 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
             print_devices(&devices);
             collector.reconfigure(Box::new(devices), sources, times);
             if repeat {
-                let stop = async {
-                    let _ = tokio::signal::ctrl_c().await;
-                };
-                collector.run(stop).await.map_err(|e| e.to_string())?;
+                collector
+                    .run(stop_signal())
+                    .await
+                    .map_err(|e| e.to_string())?;
             } else {
                 let r = collector.run_cycle().await.map_err(|e| e.to_string())?;
                 print_report(&r);
@@ -1048,7 +1049,7 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
             }
         }
         Some(db) => {
-            let stop = tokio::signal::ctrl_c();
+            let stop = stop_signal();
             tokio::pin!(stop);
             let mut tick = tokio::time::interval(collector.scheduler().schedule().interval);
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -1086,6 +1087,20 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
         eprintln!("pins in {}:\n{pins}", cli.data.join("pins").display());
     }
     Ok(())
+}
+
+/// Waits for SIGINT or, on Unix, SIGTERM, the stop signal of a container.
+async fn stop_signal() {
+    #[cfg(unix)]
+    if let Ok(mut term) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+    {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+        }
+        return;
+    }
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 fn main() -> ExitCode {

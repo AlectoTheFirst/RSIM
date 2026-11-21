@@ -5,3 +5,6 @@
 # Rust build output
 /target/
 .DS_Store
+
+# Local secrets of compose.yaml
+/.env
