@@ -172,5 +172,5 @@ fn the_coverage_view_reads_the_report_of_a_twin_and_the_catalog() {
         .iter()
         .find(|t| t["name"] == "coverage")
         .unwrap();
-    assert!(coverage["needs"].as_str().unwrap().contains("built-in"));
+    assert_eq!(coverage["needs"], "a twin of a store snapshot");
 }

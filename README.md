@@ -179,17 +179,16 @@ You need Rust 1.99 or later.
 
 ## Queries with rsim
 
-The topology is a built-in name or `store:<data folder>`, the newest snapshot of a store. The built-in names are `mini-enterprise`, `edge-dnat`, `ecmp`, `routing-loop`, `hairpin`, `chain` and `leaf-spine`.
+The twin is `store:<data folder>`: the newest snapshot of the store in the data folder of `rsim-collect`. rsim has no built-in topology. A twin comes only from collected data.
 
 | Task | Command |
 |---|---|
-| List the topologies | `cargo run -p rsim-cli -- topologies` |
-| List the devices, functions, endpoints and attachment records | `cargo run -p rsim-cli -- devices mini-enterprise` |
-| Run a path query with its reply | `cargo run -p rsim-cli -- path mini-enterprise --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --source.port 40000 --destination.port 53` |
-| Show one trace step | `cargo run -p rsim-cli -- explain mini-enterprise --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --destination.port 53 --branch 0 --step 7` |
+| List the devices, functions, endpoints and attachment records | `cargo run -p rsim-cli -- devices store:<data folder>` |
+| Run a path query with its reply | `cargo run -p rsim-cli -- path store:<data folder> --source.ip <source> --destination.ip <destination> --network.transport udp --source.port 40000 --destination.port 53` |
+| Show one trace step | `cargo run -p rsim-cli -- explain store:<data folder> --source.ip <source> --destination.ip <destination> --network.transport udp --destination.port 53 --branch 0 --step 7` |
 | Show one trace step of the reply of branch 0 | Add `--reply-of 0` to the `explain` command |
 | Get JSON | Add `--format json`. Add `--pretty` for indented JSON. |
-| Run a set query | `cargo run -p rsim-cli -- set mini-enterprise --source.ip 172.31.10.0/24 --destination.ip 10.20.0.53 --network.transport udp,tcp` |
+| Run a set query | `cargo run -p rsim-cli -- set store:<data folder> --source.ip <source prefix> --destination.ip <destination> --network.transport udp,tcp` |
 | Show one trace step of a set query | Use `explain-set` with the flags of `set`, `--branch` and `--step` |
 | Show all flags | `cargo run -p rsim-cli -- path --help` |
 
@@ -225,19 +224,19 @@ The JSON of a tool result is the same as the output of `rsim` with `--format jso
 `rsim-api` serves the twins, tables, queries and claims as REST resources. The contract is the OpenAPI 3.1 document in `crates/rsim-api/openapi.json`.
 
 ```
-cargo run -p rsim-api -- --listen 127.0.0.1:8787
+cargo run -p rsim-api -- --listen 127.0.0.1:8787 --store <data folder>
 ```
 
 | Resource | Request |
 |---|---|
 | The table catalog | `GET /v1/tables` |
-| The rows of a table | `GET /v1/twins/builtin.leaf-spine/tables/fib/rows?device=leaf1&vrf=tenant` |
-| A route lookup | `GET /v1/twins/builtin.leaf-spine/tables/fib/lpm?device=leaf1&address=10.2.0.10` |
-| A query | `POST /v1/twins/builtin.leaf-spine/queries` with the fields of `rsim path` as a JSON object; the answer is 303 to the query resource |
+| The rows of a table | `GET /v1/twins/store/tables/fib/rows?device=<device>&vrf=<vrf>` |
+| A route lookup | `GET /v1/twins/store/tables/fib/lpm?device=<device>&address=<address>` |
+| A query | `POST /v1/twins/store/queries` with the fields of `rsim path` as a JSON object; the answer is 303 to the query resource |
 | The answer | `GET` the query resource, with `?form=summary`, `steps` or `full` |
 | A claim on the paths of the query | `GET <query resource>/claims/no-unknown` |
 
-The same server gives the MCP tools at `POST /mcp`, the Streamable HTTP transport of MCP, so many agents can share one server and its twins. Add `--store <data folder>` for the twin `store`, which redirects to its snapshot `snap-<cycle>`. A page of another origin needs `--allow-origin <origin>`.
+The same server gives the MCP tools at `POST /mcp`, the Streamable HTTP transport of MCP, so many agents can share one server and its twins. The twin `store` redirects to its snapshot `snap-<cycle>`. A page of another origin needs `--allow-origin <origin>`.
 
 With no inventory database, the server has no sign-in and accepts only a loopback listen address. With `--inventory <postgres URL>`, the server has sign-in and accepts each listen address. While no user exists, the UI shows the one-time setup page of the first admin. A request proves its user by the session cookie or by `Authorization: Bearer <API token>`. `--public-origin https://<host>` gives the host behind a proxy, and `--trusted-proxy <address/length>` gives the proxy.
 
@@ -246,8 +245,8 @@ With no inventory database, the server has no sign-in and accepts only a loopbac
 `rsim-api` serves the browser UI at `/` from its binary. The UI is in `ui/`: TypeScript with Preact, built with Vite. You need Node 24.
 
 1. Build the UI: `npm --prefix ui ci` and `npm --prefix ui run build`.
-2. Build and start the server: `cargo run -p rsim-api -- --listen 127.0.0.1:8787`. Add `--store <data folder>` for the twin `store` of a collected estate.
-3. Open `http://127.0.0.1:8787/`, select a twin, for example `builtin.mini-enterprise`, state the fields of a path query and run it.
+2. Build and start the server: `cargo run -p rsim-api -- --listen 127.0.0.1:8787 --store <data folder>`.
+3. Open `http://127.0.0.1:8787/`, state the fields of a path query on the twin `store` and run it.
 
 A build of `rsim-api` with no built UI serves a page that says how to build it. The UI has these views:
 
@@ -272,7 +271,7 @@ A build of `rsim-api` with no built UI serves a page that says how to build it. 
 3. Open `http://localhost:8787/` and make the first admin on the setup page.
 4. To collect, start the collector with the env file of its secrets: `RSIM_ENV_FILE=<env file> podman compose --profile collect up --build`. The collector reads the devices from the inventory of the instance.
 
-The volume `rsim-data` holds the store, the store keys and the pins, and `rsim-api` mounts it read only. The volume `rsim-db` holds the database. A new instance has no snapshot, so the twin `store` gives an error until the collector writes one; the built-in twins work at once.
+The volume `rsim-data` holds the store, the store keys and the pins, and `rsim-api` mounts it read only. The volume `rsim-db` holds the database. A new instance has no snapshot: the views Trace, Tables and Coverage show "no snapshot yet" until the collector writes the first snapshot, and the view Inventory works at once.
 
 ## Kubernetes
 

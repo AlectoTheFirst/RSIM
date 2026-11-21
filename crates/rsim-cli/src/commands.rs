@@ -10,7 +10,7 @@ use rsim_engine::{Answer, Executor, Twin};
 use crate::error::{ErrorCode, QueryError};
 use crate::json::{
     AnswerJson, AttachmentJson, DeviceJson, DevicesOut, EdgeInterfaceJson, EndpointJson,
-    FunctionJson, PathAnswerOut, SpanJson, StepOut, TopologiesOut, VERSION, snake,
+    FunctionJson, PathAnswerOut, SpanJson, StepOut, VERSION, snake,
 };
 use crate::json::{QueryJson, SetAnswerOut};
 use crate::query::QueryInput;
@@ -24,22 +24,22 @@ pub struct Loaded {
     pub twin: Twin,
     pub identity: TwinJson,
     /// The coverage report of each device of a store twin; empty for a
-    /// built-in topology.
+    /// hand-built topology of the tests.
     pub coverage: BTreeMap<String, rsim_ingest::coverage::Coverage>,
     /// The BGP peer facts of each device of a store twin; empty for a
-    /// built-in topology.
+    /// hand-built topology of the tests.
     pub bgp: BTreeMap<String, Vec<rsim_ingest::links::BgpPeerFact>>,
     /// The facts of each device of a store twin, by twin device; empty for
-    /// a built-in topology.
+    /// a hand-built topology of the tests.
     pub facts: BTreeMap<String, rsim_ingest::facts::DeviceFacts>,
     /// The LLDP and CDP records of a store twin that name a neighbour with
-    /// no device in the twin; empty for a built-in topology.
+    /// no device in the twin; empty for a hand-built topology of the tests.
     pub seen: Vec<rsim_ingest::links::SeenNeighbour>,
     /// The columns of the tables of the twin, built when a request first
     /// names a table.
     pub tables: crate::tables::TableCache,
     /// The store and the snapshot of a store twin, for the text of its
-    /// source lines; none for a built-in topology.
+    /// source lines; none for a hand-built topology of the tests.
     pub source: Option<crate::sources::SourceStore>,
 }
 
@@ -50,18 +50,33 @@ impl std::ops::Deref for Loaded {
     }
 }
 
-/// The twin of a topology: a built-in topology, or `store:<folder>` for the
-/// newest snapshot of the store in the data folder of `rsim-collect`. The
-/// folder holds the store in `store` and the store keys in `keys`.
+/// The twin of `store:<folder>`: the newest snapshot of the store in the
+/// data folder of `rsim-collect`. The folder holds the store in `store` and
+/// the store keys in `keys`.
 pub fn load(topology: &str) -> Result<Loaded, QueryError> {
     if let Some(folder) = topology.strip_prefix(STORE_PREFIX) {
         return load_store(folder);
     }
+    fixture(topology)
+}
+
+/// A twin that is not `store:<folder>`: none in the product.
+#[cfg(not(feature = "test-fixtures"))]
+fn fixture(topology: &str) -> Result<Loaded, QueryError> {
+    Err(QueryError::new(
+        ErrorCode::UnknownTopology,
+        format!("{topology} is not a twin; a twin comes from a store: {STORE_PREFIX}<data folder>"),
+    ))
+}
+
+/// A hand-built topology of the tests by its name.
+#[cfg(feature = "test-fixtures")]
+fn fixture(topology: &str) -> Result<Loaded, QueryError> {
     let unknown = || {
         QueryError::new(
             ErrorCode::UnknownTopology,
             format!(
-                "{topology} is not a built-in topology; the names are {}",
+                "{topology} is not a twin; the hand-built topologies of the tests are {}",
                 rsim_topologies::names().join(", ")
             ),
         )
@@ -90,14 +105,26 @@ pub fn load_store(folder: &str) -> Result<Loaded, QueryError> {
 /// in `store` and the store keys in `keys`.
 pub fn open_store(folder: &str) -> Result<rsim_store::Store, QueryError> {
     let err = |d: String| QueryError::new(ErrorCode::Store, d);
-    let folder = match (folder.strip_prefix("~/"), std::env::var("HOME")) {
-        (Some(rest), Ok(home)) => format!("{home}/{rest}"),
-        _ => folder.to_string(),
-    };
+    let folder = home_path(folder);
     let keys = std::fs::read_to_string(format!("{folder}/keys"))
         .map_err(|e| err(format!("{folder}/keys: {e}")))?;
     let keys = rsim_store::Keys::from_hex(&keys).map_err(|e| err(e.to_string()))?;
     rsim_store::Store::open_read(format!("{folder}/store"), keys).map_err(|e| err(e.to_string()))
+}
+
+/// A data folder with `~/` replaced by the home folder.
+fn home_path(folder: &str) -> String {
+    match (folder.strip_prefix("~/"), std::env::var("HOME")) {
+        (Some(rest), Ok(home)) => format!("{home}/{rest}"),
+        _ => folder.to_string(),
+    }
+}
+
+/// True for a data folder with no store keys and no store: the collector
+/// has not written to it yet.
+pub fn new_data_folder(folder: &str) -> bool {
+    let folder = std::path::PathBuf::from(home_path(folder));
+    !folder.join("keys").exists() && !folder.join("store").exists()
 }
 
 /// The twin of the snapshot `cycle` of a store, or of its newest snapshot
@@ -133,20 +160,13 @@ pub fn load_store_at(folder: &str, cycle: Option<u64>) -> Result<Loaded, QueryEr
     })
 }
 
-/// The names of the built-in topologies, in a fixed order.
+/// The names of the hand-built topologies of the tests, in a fixed order;
+/// none in the product.
 pub fn topology_names() -> Vec<&'static str> {
-    rsim_topologies::names()
-}
-
-pub fn topologies() -> TopologiesOut {
-    TopologiesOut {
-        rsim_json: VERSION,
-        kind: "topologies".into(),
-        topologies: rsim_topologies::names()
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
-    }
+    #[cfg(feature = "test-fixtures")]
+    return rsim_topologies::names();
+    #[cfg(not(feature = "test-fixtures"))]
+    Vec::new()
 }
 
 pub fn devices(topology: &str, twin: &Loaded) -> DevicesOut {

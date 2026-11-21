@@ -145,7 +145,7 @@ pub fn combine(evidence: &[Evidence]) -> (ClaimResult, Counts) {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ClaimArgs {
-    /// A built-in topology, or `store` for the newest snapshot of the store
+    /// `store` for the newest snapshot of the store
     /// of the server.
     pub topology: String,
     /// The claim. The tool `list_claims` gives the claims.

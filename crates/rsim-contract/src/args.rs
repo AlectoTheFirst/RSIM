@@ -13,7 +13,7 @@ use crate::query::{FragmentName, TcpFlag};
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TopologyArgs {
-    /// A built-in topology, or `store` for the newest snapshot of the store
+    /// `store` for the newest snapshot of the store
     /// of the server.
     pub topology: String,
 }
@@ -90,7 +90,7 @@ impl std::str::FromStr for Unstated {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PathQueryArgs {
-    /// A built-in topology, or `store` for the newest snapshot of the store
+    /// `store` for the newest snapshot of the store
     /// of the server.
     pub topology: String,
     /// The ingress point as <device>/<interface>. Without it, the
@@ -190,7 +190,7 @@ pub enum SetArg {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetQueryArgs {
-    /// A built-in topology, or `store` for the newest snapshot of the store
+    /// `store` for the newest snapshot of the store
     /// of the server.
     pub topology: String,
     /// The ingress point as <device>/<interface>. Without it, the
@@ -284,7 +284,7 @@ pub struct StepArgs {
     pub reply_of: Option<u32>,
     /// True to add the source lines of each span of the step, with the
     /// secrets masked; only the lines inside a source span of a function of
-    /// the twin are given. A built-in topology has no source text.
+    /// the twin are given.
     pub source_lines: Option<bool>,
 }
 
@@ -310,7 +310,7 @@ pub enum TableVerb {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TableQueryArgs {
-    /// A built-in topology, or `store` for the newest snapshot of the store
+    /// `store` for the newest snapshot of the store
     /// of the server.
     pub topology: String,
     /// The table. The tool `list_tables` gives the tables and their
@@ -334,7 +334,7 @@ pub struct TableQueryArgs {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TopologyViewArgs {
-    /// A built-in topology, or `store` for the newest snapshot of the store
+    /// `store` for the newest snapshot of the store
     /// of the server. Not used in an HTTP path, which names the twin.
     #[serde(default)]
     pub topology: String,

@@ -161,8 +161,8 @@ impl State {
         self.mcp.twin(topology).map_err(from_query_error)
     }
 
-    /// The twin of a path segment: `builtin.<topology>`, `snap-<cycle>` or
-    /// the alias `store`.
+    /// The twin of a path segment: `snap-<cycle>`, the alias `store`, or
+    /// `builtin.<topology>` for a hand-built topology of the tests.
     fn twin(&self, segment: &str) -> Result<Resolved, Problem> {
         let unknown = |d: String| problem(404, "unknown_twin", d);
         let store = |s: &Self| -> Result<Arc<Loaded>, Problem> {
@@ -180,7 +180,7 @@ impl State {
             None => {
                 let name = id.id.trim_start_matches("builtin.").to_string();
                 if !commands::topology_names().contains(&name.as_str()) {
-                    return Err(unknown(format!("{segment} is not a built-in topology")));
+                    return Err(unknown(format!("{segment} is not a twin of the server")));
                 }
                 let loaded = self.load(&name)?;
                 Ok(Resolved::Twin(TwinRef {

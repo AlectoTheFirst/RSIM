@@ -54,10 +54,10 @@ pub struct Operation {
 pub const OPERATIONS: &[Operation] = &[
     Operation {
         id: "listTopologies",
-        description: "The names of the built-in topologies.",
+        description: "The twins of the server.",
         effect: Effect::Read,
         tool: None,
-        command: Some("topologies"),
+        command: None,
         http: Some((Method::Get, "/v1/twins")),
         input: None,
         outputs: &[schema::<TopologiesOut>],
@@ -117,7 +117,7 @@ pub const OPERATIONS: &[Operation] = &[
     },
     Operation {
         id: "queryTable",
-        description: "A table of a twin with a verb: show the rows with filters, columns, sort and pages; summarize; unique values; top rows; or the longest prefix match of an address. A table with no rows for a built-in topology needs data that only a store has.",
+        description: "A table of a twin with a verb: show the rows with filters, columns, sort and pages; summarize; unique values; top rows; or the longest prefix match of an address.",
         effect: Effect::Read,
         tool: Some("table_query"),
         command: Some("<twin> <table>"),

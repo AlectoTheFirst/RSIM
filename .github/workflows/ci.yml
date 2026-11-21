@@ -65,6 +65,12 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked
       - name: Tests
         run: cargo test --workspace --locked
+      - name: No test topology in the product
+        run: |
+          if cargo tree -e normal -p rsim-api -p rsim-cli -p rsim-mcp --locked | grep -q rsim-topologies; then
+            echo "rsim-topologies is a normal dependency of rsim-api, rsim-cli or rsim-mcp"
+            exit 1
+          fi
 
   image:
     runs-on: ubuntu-24.04

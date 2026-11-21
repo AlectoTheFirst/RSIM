@@ -12,7 +12,7 @@ import {
   shareText,
   writeCoverage,
 } from "../src/coverage/model";
-import { newerRun, pinnedRun, reloadMark, twinOption, viewOf, viewSearch, withTwin } from "../src/page/url";
+import { newerRun, pinnedRun, reloadMark, twinOption, twinState, twinStateText, viewOf, viewSearch, withTwin } from "../src/page/url";
 import { answerOf, nextPage, pageWords, previousPage, syncPages } from "../src/tables/model";
 
 const COLUMNS = ["device", "handled", "irrelevant", "unhandled", "unhandled_paths", "unhandled_stanzas"];
@@ -60,18 +60,28 @@ describe("reload of the store", () => {
   });
 
   it("pins the newest built run and offers a newer run", () => {
-    const twins = [
-      { id: "builtin.ecmp", href: "/v1/twins/builtin.ecmp" },
-      { id: "store", href: "/v1/twins/store", held: "snap-12", previous: "snap-11" },
-    ];
+    const twins = [{ id: "store", href: "/v1/twins/store", held: "snap-12", previous: "snap-11" }];
     expect(pinnedRun(twins, "store")).toBe("snap-12");
     expect(pinnedRun(twins, "snap-11")).toBe("snap-11");
-    expect(pinnedRun(twins, "builtin.ecmp")).toBe("builtin.ecmp");
     expect(pinnedRun([{ id: "store", href: "/v1/twins/store", held: null }], "store")).toBe("store");
     expect(newerRun(twins, "snap-11")).toBe("snap-12");
     expect(newerRun(twins, "snap-12")).toBeNull();
-    expect(newerRun(twins, "builtin.ecmp")).toBeNull();
     expect(newerRun(twins, "store")).toBeNull();
+  });
+
+  it("answers only for a twin with a snapshot, and names the state of the others", () => {
+    const store = (held: string | null, newest: number | null) => [
+      { id: "store", href: "/v1/twins/store", held, newest_cycle: newest },
+    ];
+    expect(twinState(null, "")).toBe("loading");
+    expect(twinState([], "")).toBe("none");
+    expect(twinState(store(null, null), "store")).toBe("empty");
+    expect(twinState(store(null, 3), "store")).toBe("ready");
+    expect(twinState(store("snap-3", 3), "store")).toBe("ready");
+    expect(twinState(store(null, null), "snap-3")).toBe("ready");
+    expect(twinStateText("empty")).toBe("no snapshot yet: the collector writes the first snapshot of the store");
+    expect(twinStateText("none")).toBe("no store: rsim-api runs with no --store");
+    expect(twinStateText("ready")).toBeNull();
   });
 });
 

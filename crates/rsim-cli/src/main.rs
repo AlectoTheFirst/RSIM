@@ -1,5 +1,5 @@
-//! The command `rsim`: path queries and set queries on the built-in
-//! topologies.
+//! The command `rsim`: path queries and set queries on the twin of a
+//! snapshot store.
 
 #![deny(clippy::disallowed_methods, clippy::disallowed_types)]
 
@@ -23,7 +23,7 @@ use rsim_cli::{IcmpType, Protocol, QueryError, QueryInput, StepRef, TcpFlag, com
 use rsim_core::{Mac, Prefix};
 use serde::Serialize;
 
-/// Path queries and set queries on the built-in topologies of rsim.
+/// Path queries and set queries on the twin of a snapshot store.
 #[derive(Parser, Clone)]
 #[command(name = "rsim", version)]
 struct Cli {
@@ -73,11 +73,9 @@ enum Command {
     /// A table of a twin: `rsim <twin> <table> [show|summarize|unique|top|lpm|describe] [--<column> <values>] [--<column>.<op> <value>] [--columns a,b] [--sort a,-b] [--limit n] [--cursor c]`.
     #[command(external_subcommand)]
     Table(Vec<String>),
-    /// The names of the built-in topologies.
-    Topologies,
     /// The devices, the functions and the endpoints of a topology.
     Devices {
-        /// A built-in topology, or `store:<data folder>` for the newest snapshot of a store. or `store:<data folder>` for the newest snapshot of a store.
+        /// `store:<data folder>` for the newest snapshot of a store.
         topology: String,
     },
     /// The answer for one packet, with the trace and the reply. A field
@@ -103,7 +101,7 @@ enum Command {
         #[arg(long)]
         reply_of: Option<usize>,
         /// Add the source lines of each span of the step, with the secrets
-        /// masked. A built-in topology has no source text.
+        /// masked.
         #[arg(long)]
         source_lines: bool,
     },
@@ -122,7 +120,7 @@ enum Command {
         #[arg(long)]
         reply_of: Option<usize>,
         /// Add the source lines of each span of the step, with the secrets
-        /// masked. A built-in topology has no source text.
+        /// masked.
         #[arg(long)]
         source_lines: bool,
     },
@@ -130,7 +128,7 @@ enum Command {
 
 #[derive(Args, Clone)]
 struct QueryArgs {
-    /// A built-in topology, or `store:<data folder>` for the newest snapshot of a store.
+    /// `store:<data folder>` for the newest snapshot of a store.
     topology: String,
     /// The ingress point as <device>/<interface>. Without it, the attachment
     /// records of the source address give the ingress.
@@ -208,7 +206,7 @@ struct QueryArgs {
 /// prefix, a number, a range such as `1-1023`, or a comma list.
 #[derive(Args, Clone)]
 struct SetArgs {
-    /// A built-in topology, or `store:<data folder>` for the newest snapshot of a store.
+    /// `store:<data folder>` for the newest snapshot of a store.
     topology: String,
     /// The ingress point as <device>/<interface>.
     #[arg(long)]
@@ -364,7 +362,6 @@ fn emit<T: Serialize>(
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match &cli.command {
-        Command::Topologies => emit(&cli, Ok(commands::topologies()), text::topologies),
         Command::Tables => emit(&cli, Ok(tables::catalog()), |c| {
             c.tables
                 .iter()

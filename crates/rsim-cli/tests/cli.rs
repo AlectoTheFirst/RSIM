@@ -194,14 +194,9 @@ fn stored_input(topology: &str) -> QueryInput {
 }
 
 #[test]
-fn each_builtin_topology_loads_by_name() {
-    let o = rsim(&["topologies", "--format", "json"]);
-    assert!(o.status.success());
+fn each_test_topology_loads_by_name() {
     let names: Vec<&str> = QUERIES.iter().map(|(n, _)| *n).collect();
-    assert_eq!(
-        json_of(&o),
-        serde_json::json!({"rsim_json": 2, "kind": "topologies", "topologies": names})
-    );
+    assert_eq!(names, rsim_cli::commands::topology_names());
     for name in names {
         let o = rsim(&["devices", name, "--format", "json"]);
         assert_eq!(o.status.code(), Some(0), "{name}");
