@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rsim.fullname" . }}
+  labels: {{- include "rsim.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  selector: {{- include "rsim.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+{{- if .Values.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "rsim.fullname" . }}
+  labels: {{- include "rsim.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.ingress.host | quote }}]
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "rsim.fullname" . }}
+                port:
+                  name: http
+{{- end }}
+{{- if .Values.networkPolicy.enabled }}
+---
+# The API port: only the peers of networkPolicy.apiFrom. The pod can reach
+# each address, because the collector connects to the devices.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "rsim.fullname" . }}-api
+  labels: {{- include "rsim.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "rsim.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress]
+  ingress:
+    - from: {{- toYaml .Values.networkPolicy.apiFrom | nindent 8 }}
+      ports:
+        - port: 8787
+          protocol: TCP
+---
+# PostgreSQL: only the pod of the instance, and no egress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "rsim.fullname" . }}-postgres
+  labels: {{- include "rsim.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "rsim.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "rsim.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: api
+      ports:
+        - port: 5432
+          protocol: TCP
+  egress: []
+{{- end }}

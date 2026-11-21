@@ -1,0 +1,14 @@
+rsim {{ .Chart.AppVersion }} is installed as {{ include "rsim.fullname" . }}.
+{{- if .Values.ingress.enabled }}
+
+Open {{ ternary "https" "http" .Values.ingress.tls.enabled }}://{{ .Values.ingress.host }}/ and make the first admin on the setup page.
+{{- else }}
+
+With no ingress, forward the port and open http://localhost:8787/:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "rsim.fullname" . }} 8787:{{ .Values.service.port }}
+{{- end }}
+While no user exists, the first visitor makes the admin.
+{{- if not .Values.collector.enabled }}
+
+The collector is off, so the twin `store` has no snapshot.
+{{- end }}

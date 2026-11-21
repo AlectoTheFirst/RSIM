@@ -1,0 +1,106 @@
+# The values of one rsim instance: one pod with rsim-api and, when enabled, the
+# collector on one volume, and a PostgreSQL StatefulSet for the inventory and
+# the sign-in. The host names, the registry and the secrets come from the
+# values of each instance, not from this file.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  # The image with rsim-api, rsim-inventory and rsim (target `rsim` of the
+  # Containerfile).
+  repository: rsim
+  tag: ""
+  # sha256:... A digest wins over the tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# The user of the images: the user nonroot of the distroless base.
+podSecurityContext:
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  runAsNonRoot: true
+  seccompProfile: { type: RuntimeDefault }
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: ["ALL"] }
+
+api:
+  # The proxies whose X-Forwarded-For and X-Forwarded-Proto the server reads,
+  # as address/length. An ingress with TLS needs at least one.
+  trustedProxies: []
+  # More origins of the server, for example http://localhost:8787 for a port
+  # forward. The ingress host is added.
+  publicOrigins: []
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "2", memory: 4Gi }
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+collector:
+  enabled: false
+  image:
+    # Target `rsim-collect` of the Containerfile.
+    repository: rsim-collect
+    tag: ""
+    digest: ""
+  # The Secret with the env file of the collector under the key `collect.env`.
+  # With the inventory database, the env file holds only the secrets of the
+  # credential references.
+  envSecret: ""
+  # Rejects a host key or a certificate with no pin.
+  strictPins: false
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "2", memory: 2Gi }
+
+# The volume of the data folder: the store, the store keys and the pins. The
+# data folder is /data/rsim.
+persistence:
+  size: 10Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
+service:
+  port: 8787
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  annotations: {}
+  tls:
+    enabled: true
+    secretName: ""
+
+secrets:
+  # A Secret with the key `postgres-password`. With no name, the chart makes
+  # the Secret from postgresPassword.
+  existingSecret: ""
+  postgresPassword: ""
+
+postgres:
+  image: docker.io/library/postgres:17.6-trixie@sha256:00bc86618629af00d2937fdc5a5d63db3ff8450acf52f0636ec813c7f4902929
+  database: rsim
+  username: rsim
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
+  persistence:
+    size: 5Gi
+    storageClass: ""
+
+networkPolicy:
+  enabled: true
+  # The peers that can reach the API port: the ingress controller.
+  apiFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: traefik

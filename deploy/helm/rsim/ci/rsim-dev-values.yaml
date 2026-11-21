@@ -1,0 +1,23 @@
+# The shape of the instance rsim-dev: the collector of the home network with the development code, with
+# TLS at the ingress. The real values are in argo-setup.
+image:
+  repository: ghcr.io/example/rsim
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+collector:
+  enabled: true
+  image:
+    repository: ghcr.io/example/rsim-collect
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  envSecret: rsim-dev-collect-env
+api:
+  trustedProxies: ["10.244.0.0/16"]
+ingress:
+  enabled: true
+  className: traefik
+  host: rsim-dev.example.invalid
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-cloudflare
+  tls:
+    secretName: rsim-dev-tls
+secrets:
+  existingSecret: rsim-dev-db
