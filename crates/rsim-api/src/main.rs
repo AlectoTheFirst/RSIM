@@ -23,6 +23,20 @@ fn origin(v: &str) -> Option<String> {
     ok.then_some(v)
 }
 
+/// Waits for SIGINT or, on Unix, SIGTERM, the stop signal of a container.
+async fn stop_signal() {
+    #[cfg(unix)]
+    if let Ok(mut term) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+    {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+        }
+        return;
+    }
+    let _ = tokio::signal::ctrl_c().await;
+}
+
 fn main() -> ExitCode {
     let mut listen: SocketAddr = ([127, 0, 0, 1], 8787).into();
     let mut store = None;
@@ -146,7 +160,13 @@ fn main() -> ExitCode {
                 tokio::runtime::Handle::current(),
             ));
         }
-        rsim_api::server::serve(listener, Arc::new(state)).await
+        tokio::select! {
+            r = rsim_api::server::serve(listener, Arc::new(state)) => r,
+            _ = stop_signal() => {
+                eprintln!("rsim-api stops");
+                Ok(())
+            }
+        }
     });
     match r {
         Ok(()) => ExitCode::SUCCESS,
