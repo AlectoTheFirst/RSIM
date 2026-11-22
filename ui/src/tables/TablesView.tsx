@@ -5,7 +5,7 @@ import type { JSX } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { ApiProblem, getSourceLines, getTable } from "../api/client";
 import type { Column, SummarizeOut, TableDef, TableOut, UniqueOut } from "../api/types";
-import { Card, PageHead, PanelLayout } from "../page/Card";
+import { Card, PanelLayout } from "../page/Card";
 import { Icon } from "../page/Icon";
 import { MenuButton } from "../page/Menu";
 import { PageButtons } from "../page/Parts";
@@ -678,25 +678,6 @@ export function TablesView(props: {
 
   return (
     <>
-      <PageHead
-        title="Tables"
-        actions={
-          <>
-            <button type="button" disabled={!def} onClick={() => copy(tableCommand(cliTopology(twin), st, def), "rsim command")}>
-              <span class="with-icon">
-                <Icon name="copy" />
-                Copy as rsim command
-              </span>
-            </button>
-            <button type="button" disabled={!request} onClick={() => request && copy(new URL(request, window.location.href).href, "API URL")}>
-              <span class="with-icon">
-                <Icon name="copy" />
-                Copy API URL
-              </span>
-            </button>
-          </>
-        }
-      />
       <div class="tables-layout">
         <TableList catalog={catalog} current={st.table} onSelect={(t) => t !== st.table && go({ table: t, filters: [], sort: [], by: [], hide: [], verb: st.verb === "lpm" ? "show" : st.verb })} />
         <PanelLayout fill panel={panel}>
@@ -704,6 +685,50 @@ export function TablesView(props: {
             {forms.length ? (
               <div class="table-tabs">
                 <Tabs<Verb> label="Form" tabs={forms.map((v) => ({ id: v, label: FORM_LABELS[v] }))} current={st.verb} onSelect={(v) => go({ verb: v })} />
+                <span class="grow" />
+                <MenuButton
+                  kind="menu"
+                  label="Copy"
+                  buttonClass="ghost"
+                  button={
+                    <span class="with-icon">
+                      <Icon name="copy" />
+                      Copy
+                    </span>
+                  }
+                  align="end"
+                >
+                  {(close) => (
+                    <>
+                      <button
+                        type="button"
+                        class="menu-item"
+                        role="menuitem"
+                        tabIndex={-1}
+                        disabled={!def}
+                        onClick={() => {
+                          close();
+                          copy(tableCommand(cliTopology(twin), st, def), "rsim command");
+                        }}
+                      >
+                        rsim command
+                      </button>
+                      <button
+                        type="button"
+                        class="menu-item"
+                        role="menuitem"
+                        tabIndex={-1}
+                        disabled={!request}
+                        onClick={() => {
+                          close();
+                          if (request) copy(new URL(request, window.location.href).href, "API URL");
+                        }}
+                      >
+                        API URL
+                      </button>
+                    </>
+                  )}
+                </MenuButton>
               </div>
             ) : null}
             {params}

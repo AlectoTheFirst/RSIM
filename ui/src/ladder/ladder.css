@@ -212,19 +212,34 @@ button.icon.swap {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--line-gap);
+  gap: var(--hairline);
 }
 
 .outcome-line {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--group-gap) var(--button-pad);
+  gap: 0 var(--mark-gap);
   min-width: 0;
+  min-height: var(--body-line);
+}
+
+.outcome-line > .group {
+  margin-left: var(--mark-gap);
+}
+
+.outcome-dir {
+  flex: none;
+  width: var(--outcome-dir);
 }
 
 .outcome-controls {
   flex: none;
+  align-items: center;
+}
+
+.outcome-controls > .t-index {
+  margin-right: var(--mark-gap);
 }
 
 .verdict {
@@ -236,29 +251,6 @@ button.icon.swap {
   flex: none;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: var(--outcome-mark);
-  height: var(--outcome-mark);
-  border-radius: calc(var(--outcome-mark) / 2);
-}
-
-.mark-deliver {
-  background: var(--deliver-tint);
-  color: var(--deliver);
-}
-
-.mark-drop {
-  background: var(--drop-tint);
-  color: var(--drop);
-}
-
-.mark-exit {
-  background: var(--ink-tint);
-  color: var(--ink);
-}
-
-.mark-unknown {
-  border: var(--hairline) dashed var(--ink-muted);
 }
 
 /* An outcome with the number of its paths: a click filters the list. */
@@ -282,8 +274,8 @@ button.tally .hatch-text {
 .strip {
   display: flex;
   align-items: center;
-  margin-top: var(--card-pad);
-  padding-top: var(--card-pad);
+  margin-top: var(--group-gap);
+  padding-top: var(--group-gap);
   border-top: var(--hairline) solid var(--rule);
   overflow-x: auto;
 }

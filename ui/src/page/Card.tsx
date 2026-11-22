@@ -2,11 +2,10 @@
 // content with the panel at its right.
 import type { ComponentChildren } from "preact";
 
-/** The head of a page: the title, the tabs of the parts of the page, and the actions at the right. */
-export function PageHead(props: { title: string; tabs?: ComponentChildren; actions?: ComponentChildren }) {
+/** The head of a page: the tabs or the controls of the page, and the actions at the right. */
+export function PageHead(props: { tabs?: ComponentChildren; actions?: ComponentChildren }) {
   return (
     <div class="page-head">
-      <h1 class="t-title">{props.title}</h1>
       {props.tabs ?? null}
       {props.actions ? <span class="page-actions group">{props.actions}</span> : null}
     </div>

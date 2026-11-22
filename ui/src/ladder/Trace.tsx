@@ -4,11 +4,10 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { getInventory, stepUrl, tableRows } from "../api/client";
 import type { Answer, PathAnswer, SetAnswer, SourceText, Span } from "../api/types";
-import { Card, PageHead, PanelLayout } from "../page/Card";
+import { Card, PanelLayout } from "../page/Card";
 import { Hatch, HatchMark } from "../page/Hatch";
-import { Icon } from "../page/Icon";
 import { LEVELS, QueryBar } from "../page/Parts";
-import { Chip, Pill, type PillTone } from "../page/Pill";
+import { Chip } from "../page/Pill";
 import { type Fields, explainCommand, fieldsOf, queryMode, rsimCommand } from "../page/query";
 import { Segmented } from "../page/Segmented";
 import { keyForElement, keyPlace } from "../tables/model";
@@ -47,11 +46,6 @@ export interface TraceResult {
 
 const DIRS: readonly Dir[] = ["forward", "reply"];
 
-/** The tone of the pill of an outcome kind. */
-function toneOf(kind: string): PillTone {
-  return kind === "deliver" || kind === "drop" || kind === "exit" ? kind : "unknown";
-}
-
 /** Whether the query of an answer asks for the reply. */
 const asksReply = (out: PathAnswer | SetAnswer) => (out.query as { reply?: boolean | null }).reply !== false;
 
@@ -68,14 +62,14 @@ function Tally(props: { kinds: readonly string[]; filter: string | null; label: 
   );
 }
 
-/** The outcome of one reply path as a pill, then its destination, or its deciding step and reason. */
+/** The outcome word of one reply path, then its destination, or its deciding step and reason. */
 function ReplyOutcome(props: { p: PathItem; onStep: (d: DecidingStep) => void }) {
   const { p } = props;
   const v = p.verdict;
   const dest = destinationOf(v);
   return (
     <span class="verdict">
-      <Pill tone={toneOf(v.kind)}>{verdictWord(v.kind)}</Pill>
+      <OutcomeWord kind={v.kind} />
       {dest ? (
         <>
           {" to "}
@@ -413,7 +407,7 @@ export function TraceView(props: {
       headline = (
         <>
           <OutcomeSymbol kind={fwdItem.verdict.kind} />
-          <VerdictText v={fwdItem.verdict} headline at={fwdItem.at} onStep={openStep} tunnel={fwdItem.tunnel} />
+          <VerdictText v={fwdItem.verdict} at={fwdItem.at} onStep={openStep} tunnel={fwdItem.tunnel} />
         </>
       );
     } else {
@@ -423,11 +417,11 @@ export function TraceView(props: {
         <>
           {kind ? <OutcomeSymbol kind={kind} /> : null}
           {s?.verdict ? (
-            <VerdictText v={s.verdict} headline />
+            <VerdictText v={s.verdict} />
           ) : kind ? (
-            <OutcomeWord kind={kind} headline />
+            <OutcomeWord kind={kind} />
           ) : (
-            <span class="t-outcome">{s?.kind === "depends_on_path" ? "depends on path" : (s?.kind ?? "")}</span>
+            <span class="strong">{s?.kind === "depends_on_path" ? "depends on path" : (s?.kind ?? "")}</span>
           )}
           <Tally kinds={fwdAll.map((p) => p.verdict.kind)} filter={filter.forward} label="Outcomes" onFilter={(k) => setKind("forward", k)} />
         </>
@@ -441,7 +435,14 @@ export function TraceView(props: {
   const rs = shown && fwdItem ? replyState(shown, fwdItem.ref.branch, reply) : { kind: "none" as const };
   if (rs.kind === "not_run") replyLine = <span class="muted">{rs.reason}</span>;
   else if (rs.kind === "no_reply") replyLine = <span class="muted">no reply</span>;
-  else if (rs.kind === "paths" && rs.paths.length === 1) replyLine = <ReplyOutcome p={rs.paths[0]!} onStep={openStep} />;
+  else if (rs.kind === "paths" && rs.paths.length === 1) {
+    replyLine = (
+      <>
+        <OutcomeSymbol kind={rs.paths[0]!.verdict.kind} />
+        <ReplyOutcome p={rs.paths[0]!} onStep={openStep} />
+      </>
+    );
+  }
   else if (rs.kind === "paths") {
     replyLine = <Tally kinds={rs.paths.map((p) => p.verdict.kind)} filter={filter.reply} label="Reply outcomes" onFilter={(k) => setKind("reply", k)} />;
   }
@@ -451,17 +452,6 @@ export function TraceView(props: {
 
   return (
     <div class="page">
-      <PageHead
-        title="Trace"
-        actions={
-          <button type="button" disabled={!twin} onClick={copyCommand}>
-            <span class="with-icon">
-              <Icon name="copy" />
-              Copy as rsim command
-            </span>
-          </button>
-        }
-      />
       <Card label="Query" class="query-card">
         <QueryBar
           twin={twin}
@@ -475,7 +465,7 @@ export function TraceView(props: {
           firstInput={firstInput}
         />
       </Card>
-      <Card label="Outcome" foot={props.timing ? <span class="t-index muted">{props.timing}</span> : undefined}>
+      <Card label="Outcome" class="outcome-card">
         <div class="outcome" aria-live="polite">
           <div class="outcome-main">
             {props.busy ? (
@@ -484,10 +474,13 @@ export function TraceView(props: {
               <span>{props.problem}</span>
             ) : answer ? (
               <>
-                <div class="outcome-line">{headline}</div>
+                <div class="outcome-line">
+                  {replyLine ? <span class="t-label muted outcome-dir">forward</span> : null}
+                  {headline}
+                </div>
                 {replyLine ? (
                   <div class="outcome-line">
-                    <span class="c-reply strong">reply</span>
+                    <span class="t-label muted outcome-dir">reply</span>
                     {replyLine}
                   </div>
                 ) : null}
@@ -510,6 +503,7 @@ export function TraceView(props: {
           </div>
           {answer && !props.busy && !props.problem ? (
             <span class="group outcome-controls">
+              {props.timing ? <span class="t-index muted">{props.timing}</span> : null}
               {hasReply ? <Segmented<Dir> label="Direction" value={d} options={DIRS} onChange={setDirection} /> : null}
               <Segmented<Level> label="Level" value={level} options={LEVELS} onChange={setLevel} />
             </span>

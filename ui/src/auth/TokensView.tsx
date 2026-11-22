@@ -4,7 +4,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { createToken, listTokens, revokeToken } from "../api/client";
 import type { Me, NewToken, TokenInfo } from "../api/types";
-import { Card, Empty, PageHead } from "../page/Card";
+import { Card, Empty } from "../page/Card";
 import { Icon } from "../page/Icon";
 import { Pill } from "../page/Pill";
 import { useVirtualRows } from "../page/VirtualRows";
@@ -245,17 +245,6 @@ export function TokensView(props: { user: Me }) {
   const now = isoSeconds(Date.now());
   return (
     <>
-      <PageHead
-        title="My API tokens"
-        actions={
-          <button type="button" aria-pressed={adding} onClick={() => setAdding(!adding)}>
-            <span class="with-icon">
-              <Icon name="add" />
-              Add token
-            </span>
-          </button>
-        }
-      />
       {made ? (
         <Card
           title={made.info.name}
@@ -287,7 +276,22 @@ export function TokensView(props: { user: Me }) {
           }}
         />
       ) : null}
-      <Card label="API tokens" flush fill class="token-card">
+      <Card
+        title="My API tokens"
+        head={
+          <span class="page-actions">
+            <button type="button" aria-pressed={adding} onClick={() => setAdding(!adding)}>
+              <span class="with-icon">
+                <Icon name="add" />
+                Add token
+              </span>
+            </button>
+          </span>
+        }
+        flush
+        fill
+        class="token-card"
+      >
         {problem ? (
           <Empty problem>{problem}</Empty>
         ) : !tokens ? (

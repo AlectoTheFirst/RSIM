@@ -301,7 +301,7 @@ export function TopologyView(props: TopologyProps) {
 
   return (
     <>
-      <PageHead title="Topology" tabs={controls} actions={exportMenu} />
+      <PageHead tabs={controls} actions={exportMenu} />
       <PanelLayout fill panel={panel}>
         <Card flush fill>
           {body}

@@ -48,13 +48,6 @@ body,
   font-weight: var(--title-weight);
 }
 
-.t-outcome {
-  font-family: var(--outcome-family);
-  font-size: var(--outcome-size);
-  line-height: var(--outcome-line);
-  font-weight: var(--outcome-weight);
-}
-
 .t-wordmark {
   font-family: var(--wordmark-family);
   font-size: var(--wordmark-size);
@@ -575,10 +568,6 @@ button.account:hover {
   align-items: center;
   gap: var(--group-gap) var(--fact-gap);
   min-height: var(--button);
-}
-
-.page-head > h1 {
-  margin: 0;
 }
 
 .page-actions {
