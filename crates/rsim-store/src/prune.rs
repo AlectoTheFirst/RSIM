@@ -82,14 +82,19 @@ impl Store {
             _ => return Ok(out),
         }
 
-        let mut kept: Vec<SnapshotManifest> = vec![self.snapshot_manifest(head)?];
+        // The walk keeps the cycle and the device manifests of each kept
+        // snapshot, and the whole manifest of the oldest one.
+        let mut keep: BTreeSet<u64> = BTreeSet::new();
+        let mut devices: BTreeSet<Hash> = BTreeSet::new();
+        let mut first: SnapshotManifest = self.snapshot_manifest(head)?;
         loop {
-            let last = kept.last().expect("the newest snapshot is kept");
-            let Some(parent) = last.parent else { break };
-            if parent >= last.cycle {
+            keep.insert(first.cycle);
+            devices.extend(first.devices.values().copied());
+            let Some(parent) = first.parent else { break };
+            if parent >= first.cycle {
                 return Err(StoreError::Integrity(format!(
                     "snapshot {} names the parent {parent}, which is not older",
-                    last.cycle
+                    first.cycle
                 )));
             }
             let m = match self.snapshot_manifest(parent) {
@@ -100,33 +105,27 @@ impl Store {
             if m.time < cutoff {
                 break;
             }
-            kept.push(m);
+            first = m;
         }
 
-        let first = kept.last_mut().expect("the newest snapshot is kept");
         if !first.checkpoint {
-            let (_, devices) = self.chain_names(first.cycle)?;
+            let (_, names) = self.chain_names(first.cycle)?;
             first.checkpoint = true;
             first.parent = None;
             first.removed.clear();
-            first.devices = devices;
+            first.devices = names;
+            devices.extend(first.devices.values().copied());
             write_replace(
                 &self.snapshot_path(first.cycle),
-                &serde_json::to_vec_pretty(&*first)?,
+                &serde_json::to_vec_pretty(&first)?,
             )?;
             out.checkpoint = Some(first.cycle);
         }
 
-        let keep: BTreeSet<u64> = kept.iter().map(|m| m.cycle).collect();
         for c in cycles {
             if c < head && !keep.contains(&c) && delete(&self.snapshot_path(c))? {
                 out.snapshots += 1;
             }
-        }
-
-        let mut devices: BTreeSet<Hash> = BTreeSet::new();
-        for m in &kept {
-            devices.extend(m.devices.values().copied());
         }
         let mut blobs: BTreeSet<Hash> = BTreeSet::new();
         let mut tables: BTreeSet<(String, u64)> = BTreeSet::new();

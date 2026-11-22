@@ -303,11 +303,8 @@ impl Collector {
     pub fn next_wake(&self, now: u64) -> u64 {
         let devices = self.inventory.devices();
         let limit = now.saturating_add(u64::try_from(WAKE_LIMIT.as_millis()).unwrap_or(u64::MAX));
-        if self
-            .state
-            .keys()
-            .any(|d| !devices.iter().any(|x| x.id == *d))
-        {
+        let ids: BTreeSet<&str> = devices.iter().map(|d| d.id.as_str()).collect();
+        if self.state.keys().any(|d| !ids.contains(d.as_str())) {
             return now;
         }
         self.scheduler

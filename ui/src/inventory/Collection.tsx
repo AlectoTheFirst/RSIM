@@ -24,7 +24,8 @@ export function CollectionSettings(props: { inv: Inventory; write: Write; refuse
         <TextRow
           id="collection"
           k="history_days"
-          label="history, days"
+          label="history"
+          note="days"
           draft={{ history_days: text }}
           h={{ onInput: (_, v) => setText(v), onPick: () => {}, keys: () => keys, onBlur: commit }}
         />

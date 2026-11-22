@@ -388,7 +388,7 @@ impl Store {
             .filter(|b| time / 1000 <= b.manifest.time / 1000)
         {
             return Err(StoreError::Invalid(format!(
-                "the time {time} is not in a second after the time {} of snapshot {}",
+                "time {time} not after the second of the time {} of snapshot {}",
                 b.manifest.time, b.manifest.cycle
             )));
         }
