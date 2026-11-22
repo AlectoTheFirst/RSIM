@@ -18,19 +18,19 @@ pub const DEFAULT_REQUEST_TIMEOUT_SECONDS: u32 = 60;
 /// setting.
 pub const DEFAULT_PAGED_SECTION_TIMEOUT_SECONDS: u32 = 300;
 
-/// Where a resolved setting comes from.
+/// Setting origin
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Origin {
-    /// The device sets it.
+    /// Device
     Device,
-    /// The device inherits it from its group.
+    /// Group
     Group,
-    /// Neither sets it.
+    /// Default
     Default,
 }
 
-/// A setting with its origin.
+/// Resolved setting
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Resolved<T> {
     pub value: T,
@@ -61,13 +61,12 @@ fn pick<T: Clone>(device: &Option<T>, group: &Option<T>, default: T) -> Resolved
     }
 }
 
-/// The settings of a device after the inheritance.
+/// Resolved settings
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ResolvedSettings {
-    /// The credential reference; none if neither the device nor the group
-    /// names one.
+    /// Credential
     pub credential: Resolved<Option<String>>,
-    /// The route; none is a direct connection.
+    /// Route
     pub route: Resolved<Option<String>>,
     pub ssh_algorithms: Resolved<SshAlgorithms>,
     pub ssh_mode: Resolved<SshMode>,
@@ -143,12 +142,12 @@ pub fn resolve_settings(device: &Settings, group: &Settings) -> ResolvedSettings
     }
 }
 
-/// A device with the settings of its group resolved.
+/// Resolved device
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ResolvedDevice {
     pub name: String,
     pub group: String,
-    /// The vendor of the group.
+    /// Vendor
     pub vendor: String,
     pub address: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -160,7 +159,7 @@ pub struct ResolvedDevice {
     pub settings: ResolvedSettings,
 }
 
-/// The devices of the inventory resolved, at its version.
+/// Resolved devices
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ResolvedDevices {
     pub version: u64,

@@ -6,7 +6,7 @@ use std::str::FromStr;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Deserializer, Serialize};
 
-/// One TCP flag.
+/// TCP flag
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
 )]
@@ -66,7 +66,7 @@ impl FromStr for TcpFlag {
     }
 }
 
-/// The fragment state of a request.
+/// Fragment
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FragmentName {
@@ -117,10 +117,7 @@ impl Serialize for IngressRef {
     }
 }
 
-/// The query input in the JSON output. Each field is there, and a field
-/// that is not given is `null`. The protocol is a number and has its name
-/// if it has one, the ICMP type is a number, and the TCP flags are in the
-/// order of their bits with no repeat.
+/// Query input
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct QueryEcho {
     pub topology: String,
@@ -162,13 +159,12 @@ pub struct QueryEcho {
     pub ecn: Option<u8>,
     pub fragment: Option<FragmentName>,
     pub reply: Option<bool>,
-    /// The treatment of the unstated fields, when the query gives it.
+    /// Unstated fields
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unstated: Option<crate::args::Unstated>,
 }
 
-/// The set query input in the JSON output. Each field is the normalized
-/// text of its set, or `null` if it is not given.
+/// Set query input
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SetEcho {
     pub topology: String,
@@ -227,7 +223,7 @@ impl JsonSchema for IngressRef {
         json_schema!({
             "type": "string",
             "pattern": "^[^/]+/.+$",
-            "description": "An ingress point as <device>/<interface>."
+            "description": "Ingress"
         })
     }
 }

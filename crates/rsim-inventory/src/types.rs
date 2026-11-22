@@ -40,104 +40,97 @@ macro_rules! words {
 }
 
 words! {
-    /// The source of a credential.
+    /// Credential source
     CredentialSource {
-        /// The keys `<KEY>_USER` and `<KEY>_PASS`, `<KEY>_KEY_FILE` with
-        /// `<KEY>_KEY_PASS`, `<KEY>_AGENT` or `<KEY>_API_KEY` of the env
-        /// file of the collector.
+        /// Env credential
         Env = "env",
-        /// The user and the password in the URL of the env key `<KEY>`,
-        /// for example the login of a proxy URL.
+        /// Env URL credential
         EnvUrl = "env-url",
-        /// The kind, the user and the sealed secret in the inventory
-        /// database.
+        /// Managed credential
         Managed = "managed",
     }
 }
 
 words! {
-    /// The kind of the secret of a managed credential.
+    /// Secret kind
     CredentialKind {
-        /// A user and a password: SSH, the HTTPS login and a proxy login.
+        /// Password
         Password = "password",
-        /// A user and a private key with its passphrase: SSH only.
+        /// SSH key
         SshKey = "ssh-key",
-        /// An API key with no user: HTTPS only.
+        /// API key
         ApiKey = "api-key",
     }
 }
 
 words! {
-    /// The SSH algorithm set of a connection.
+    /// SSH algorithms
     SshAlgorithms {
         Modern = "modern",
-        /// The modern set with the SHA-1 and CBC algorithms that older
-        /// network operating systems need.
+        /// Legacy algorithms
         Legacy = "legacy",
     }
 }
 
 words! {
-    /// How SSH sends the commands of a device.
+    /// SSH command mode
     SshMode {
-        /// One exec channel for each command.
+        /// Exec channel per command
         Exec = "exec",
-        /// One interactive shell for all commands.
+        /// Shell
         Shell = "shell",
-        /// One connection for each command.
+        /// Connection per command
         Connection = "connection",
     }
 }
 
 words! {
-    /// The JSON form of the NX-OS answers.
+    /// NX-OS JSON form
     NxosJson {
-        /// `| json`.
+        /// JSON
         Plain = "plain",
-        /// `| json native`, NX-OS 9.3 and later.
+        /// JSON native
         Native = "native",
     }
 }
 
 words! {
-    /// The check of the TLS certificate of an HTTPS device.
+    /// TLS trust
     TlsTrust {
-        /// The certificate is pinned at first contact.
+        /// Pinned at first contact
         Pin = "pin",
-        /// The certificate chains to the CA bundle of `tls_ca_file`.
+        /// CA bundle
         Ca = "ca",
-        /// No check of the certificate.
+        /// No check
         None = "none",
     }
 }
 
 words! {
-    /// The BGP sections that the collector reads of a router.
+    /// BGP sections
     CaptureBgp {
         Off = "off",
-        /// The summary of each session.
+        /// Sessions
         Sessions = "sessions",
-        /// The summaries, the neighbour detail and the tables of each
-        /// neighbour.
+        /// All
         All = "all",
     }
 }
 
 words! {
-    /// What a trace does at an HA pair or a cluster whose active node is
-    /// not collected.
+    /// HA setting
     Ha {
-        /// The trace stops at the pair with `Unknown`.
+        /// None
         None = "none",
-        /// The trace follows each node.
+        /// All nodes
         All = "all",
-        /// The trace follows one node, chosen in a fixed order.
+        /// One node
         One = "one",
     }
 }
 
 words! {
-    /// The transport of a collector.
+    /// Transport
     CollectorTransport {
         Ssh = "ssh",
         Https = "https",
@@ -154,31 +147,26 @@ pub const COLLECTOR_VENDORS: &[(&str, CollectorTransport)] = &[
     ("vyos", CollectorTransport::Ssh),
 ];
 
-/// A credential. The source `env` or `env-url` names a key of the env file
-/// of the collector; the source `managed` has its kind, its user and a
-/// sealed secret in the inventory database. No answer gives a secret.
+/// Credential
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Credential {
-    /// The name of the credential. In a PUT body it can be left out; the
-    /// path gives it.
+    /// Name
     #[serde(default)]
     pub name: String,
     pub source: CredentialSource,
-    /// The key in the env file: the prefix of `env`, the variable of
-    /// `env-url`. None for `managed`.
+    /// Env key
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
-    /// The kind of the secret of `managed`.
+    /// Secret kind
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<CredentialKind>,
-    /// The user of `managed` with the kind `password` or `ssh-key`.
+    /// User
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// The count of the writes of the secret of `managed`. The database
-    /// sets it; a PUT body can give it, and the write ignores it.
+    /// Secret revision
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_revision: Option<u64>,
 }
@@ -246,15 +234,15 @@ impl Credential {
     }
 }
 
-/// An SSH jump host with its own credential.
+/// Jump host
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct JumpHost {
     #[serde(default)]
     pub name: String,
-    /// The host name or the address, with an optional port.
+    /// Address
     pub address: String,
-    /// The name of the credential reference.
+    /// Name
     pub credential: String,
     #[serde(default = "modern")]
     pub ssh_algorithms: SshAlgorithms,
@@ -264,83 +252,75 @@ fn modern() -> SshAlgorithms {
     SshAlgorithms::Modern
 }
 
-/// The network path to a device: an optional proxy for the first TCP
-/// connection, then the jump hosts in order. A route with no proxy and no
-/// jump host is a direct connection.
+/// Route
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Route {
     #[serde(default)]
     pub name: String,
-    /// `http://host:port`, `socks5://host:port` or `socks5h://host:port`,
-    /// with no login.
+    /// Proxy URL
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<String>,
-    /// The credential reference of the login of the proxy.
+    /// Proxy credential
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy_credential: Option<String>,
-    /// The names of the jump hosts, in order.
+    /// Jump hosts
     #[serde(default)]
     pub jumps: Vec<String>,
 }
 
-/// The settings of a device group or of a device. On a device, a setting
-/// that is not given takes the value of the group; on a group, a setting
-/// that is not given takes the default.
+/// Settings
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
-    /// The name of the credential reference.
+    /// Name
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential: Option<String>,
-    /// The name of the route. The default is a direct connection.
+    /// Route
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_algorithms: Option<SshAlgorithms>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_mode: Option<SshMode>,
-    /// The exec channels at one time. The default is 1.
+    /// Exec channels
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_channels: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nxos_json: Option<NxosJson>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tls_trust: Option<TlsTrust>,
-    /// The PEM file of the CA bundle of `tls_trust` `ca`.
+    /// CA file
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tls_ca_file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture_bgp: Option<CaptureBgp>,
-    /// The time for all sections of a device, from 1 to 86400 seconds.
+    /// Device time limit
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u32>,
-    /// The time for one section, from 1 to 86400 seconds.
+    /// Section time limit
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub section_timeout_seconds: Option<u32>,
-    /// The time for one HTTP request, from 1 to 86400 seconds.
+    /// Request time limit
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_timeout_seconds: Option<u32>,
-    /// The time for the read of all pages of one section, from 1 to 86400
-    /// seconds.
+    /// Paged section time limit
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paged_section_timeout_seconds: Option<u32>,
-    /// The retries of a failed section, from 0 to 10.
+    /// Retries
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retries: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ha: Option<Ha>,
 }
 
-/// A device group: the vendor and the settings of its devices.
+/// Device group
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Group {
     #[serde(default)]
     pub name: String,
-    /// The vendor, for example `vyos`, `nxos`, `iosxr`, `iosxe` or `unifi`.
-    /// A vendor with no collector is allowed; the collector skips its
-    /// devices.
+    /// Vendor
     pub vendor: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -348,70 +328,65 @@ pub struct Group {
     pub settings: Settings,
 }
 
-/// A device of the inventory. Its name is the device of the snapshot
-/// store.
+/// Device
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Device {
     #[serde(default)]
     pub name: String,
-    /// The name of the device group.
+    /// Device group
     pub group: String,
-    /// The host name or the address of the management plane.
+    /// Address
     pub address: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub site: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
-    /// The site of a controller that the device reads, for example the
-    /// UniFi site of a console.
+    /// Controller site
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub console_site: Option<String>,
-    /// The settings that the device sets in place of its group.
+    /// Device settings
     #[serde(default)]
     pub settings: Settings,
 }
 
-/// A Fabric port of an Equinix account and the device port at the other
-/// end of its cross connect.
+/// Fabric port binding
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FabricPortBinding {
-    /// The device of the account. In a PUT body it can be left out; the
-    /// path gives it.
+    /// Device
     #[serde(default)]
     pub account: String,
-    /// The uuid or the name of the Fabric port.
+    /// Fabric port
     #[serde(default)]
     pub fabric_port: String,
     pub device: String,
     pub port: String,
 }
 
-/// A Network Edge device of an Equinix account and the device of the
-/// estate that it is.
+/// Edge device binding
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EdgeDeviceBinding {
     #[serde(default)]
     pub account: String,
-    /// The uuid of the Network Edge device.
+    /// Edge device
     #[serde(default)]
     pub edge_device: String,
     pub device: String,
 }
 
-/// The bindings of the inventory.
+/// Bindings
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Bindings {
     pub fabric_ports: Vec<FabricPortBinding>,
     pub edge_devices: Vec<EdgeDeviceBinding>,
 }
 
-/// The whole inventory at one version, with each list sorted by its key.
+/// Inventory
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Inventory {
-    /// The version. Each change of the inventory increases it by 1.
+    /// Version
     pub version: u64,
     pub credentials: Vec<Credential>,
     pub jump_hosts: Vec<JumpHost>,
@@ -421,7 +396,7 @@ pub struct Inventory {
     pub bindings: Bindings,
 }
 
-/// The kind of a change of the audit log.
+/// Change kind
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Action {
@@ -440,20 +415,18 @@ impl Action {
     }
 }
 
-/// One record of the audit log: who changed what and when, with the old
-/// and the new value of the record.
+/// Audit record
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AuditRecord {
     pub id: i64,
-    /// The time of the change in UTC, RFC 3339.
+    /// Time
     pub at: String,
     pub actor: String,
-    /// The inventory version that the change made.
+    /// Inventory version
     pub version: u64,
-    /// `credential`, `jump_host`, `route`, `group`, `device`,
-    /// `fabric_port_binding` or `edge_device_binding`.
+    /// Record kind
     pub kind: String,
-    /// The key of the record, for example the device name.
+    /// Record key
     pub key: String,
     pub action: Action,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -462,11 +435,11 @@ pub struct AuditRecord {
     pub new: Option<serde_json::Value>,
 }
 
-/// A page of the audit log, the newest record first.
+/// Audit log page
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AuditPage {
     pub records: Vec<AuditRecord>,
-    /// The `before` value of the next page, if there is one.
+    /// Next before
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_before: Option<i64>,
 }

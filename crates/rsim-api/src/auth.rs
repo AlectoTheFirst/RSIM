@@ -313,7 +313,7 @@ pub fn check(state: &State, req: &Request, segs: &[&str]) -> Result<Option<Princ
             let mut r = problem(
                 429,
                 "too_many_requests",
-                format!("too many requests; wait {wait} s"),
+                format!("too many requests, wait {wait} s"),
             )
             .response();
             r.headers.push(("retry-after".into(), wait.to_string()));
@@ -327,11 +327,7 @@ pub fn check(state: &State, req: &Request, segs: &[&str]) -> Result<Option<Princ
     {
         return Err(refuse(
             Some(&u.name),
-            problem(
-                403,
-                "forbidden_origin",
-                "a request with a session cookie that changes data needs an Origin header".into(),
-            ),
+            problem(403, "forbidden_origin", "no Origin header".into()),
         ));
     }
     let ok = match (g, &user) {
@@ -355,13 +351,13 @@ pub fn check(state: &State, req: &Request, segs: &[&str]) -> Result<Option<Princ
     Ok(user)
 }
 
-/// The user of a request as the UI shows it.
+/// Current user
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MeOut {
     pub name: String,
     pub role: Role,
     pub scopes: Vec<String>,
-    /// `session` or `token`.
+    /// Sign-in method
     pub via: String,
 }
 
@@ -377,60 +373,58 @@ fn me(p: &Principal) -> MeOut {
     }
 }
 
-/// The body of a sign-in and of the setup.
+/// Sign-in body
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SignInIn {
     pub name: String,
     pub password: String,
 }
 
-/// The state of the one-time setup.
+/// Setup state
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SetupOut {
-    /// True while the server has no user: the setup can make the first
-    /// admin.
+    /// Setup open
     pub open: bool,
-    /// True if the server has sign-in.
+    /// Sign-in
     pub sign_in: bool,
 }
 
-/// The body of a new API token.
+/// New API token body
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TokenIn {
     pub name: String,
     pub scopes: Vec<String>,
-    /// The days until the token expires. With no value the token does not
-    /// expire.
+    /// Days to expiry
     #[serde(default)]
     pub expires_days: Option<u32>,
 }
 
-/// A new API token: its text, given only in this answer, and its record.
+/// New API token
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct NewTokenOut {
     pub token: String,
     pub info: TokenInfo,
 }
 
-/// The API tokens of the user.
+/// API tokens
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TokensOut {
     pub tokens: Vec<TokenInfo>,
 }
 
-/// The users.
+/// Users
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UsersOut {
     pub users: Vec<User>,
 }
 
-/// The body of a user that an admin makes or changes.
+/// User body
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UserIn {
     pub role: Role,
     #[serde(default)]
     pub disabled: bool,
-    /// A new password. A new user needs one.
+    /// Password
     #[serde(default)]
     pub password: Option<String>,
 }
@@ -441,7 +435,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "post",
         path: "/v1/auth/login",
         id: "signIn",
-        summary: "Signs in with a user name and a password, and sets the session cookie. After 5 failures in 15 minutes for one user name or one client address, the answer is 429.",
+        summary: "Sign in",
         query: &[],
         body: &[schema::<SignInIn>],
         ok: (200, &[schema::<MeOut>]),
@@ -450,7 +444,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "post",
         path: "/v1/auth/logout",
         id: "signOut",
-        summary: "Ends the session of the cookie.",
+        summary: "Sign out",
         query: &[],
         body: &[],
         ok: (204, &[]),
@@ -459,7 +453,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/auth/me",
         id: "getMe",
-        summary: "The user of the request, the role and the scopes.",
+        summary: "Current user",
         query: &[],
         body: &[],
         ok: (200, &[schema::<MeOut>]),
@@ -468,7 +462,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/auth/setup",
         id: "getSetup",
-        summary: "True while the server has no user, so that the one-time setup can make the first admin.",
+        summary: "Setup state",
         query: &[],
         body: &[],
         ok: (200, &[schema::<SetupOut>]),
@@ -477,7 +471,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "post",
         path: "/v1/auth/setup",
         id: "setUp",
-        summary: "Makes the first user, an admin, and signs it in. 409 when a user exists.",
+        summary: "Setup",
         query: &[],
         body: &[schema::<SignInIn>],
         ok: (201, &[schema::<MeOut>]),
@@ -486,7 +480,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/auth/tokens",
         id: "listTokens",
-        summary: "The API tokens of the user of the session.",
+        summary: "API tokens",
         query: &[],
         body: &[],
         ok: (200, &[schema::<TokensOut>]),
@@ -495,7 +489,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "post",
         path: "/v1/auth/tokens",
         id: "createToken",
-        summary: "Makes an API token with scopes of the role of the user. The answer gives the token text one time only.",
+        summary: "New API token",
         query: &[],
         body: &[schema::<TokenIn>],
         ok: (201, &[schema::<NewTokenOut>]),
@@ -504,7 +498,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "delete",
         path: "/v1/auth/tokens/{id}",
         id: "revokeToken",
-        summary: "Revokes an API token of the user of the session.",
+        summary: "Revoke API token",
         query: &[],
         body: &[],
         ok: (204, &[]),
@@ -513,7 +507,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/admin/users",
         id: "listUsers",
-        summary: "The users.",
+        summary: "Users",
         query: &[],
         body: &[],
         ok: (200, &[schema::<UsersOut>]),
@@ -522,7 +516,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "put",
         path: "/v1/admin/users/{name}",
         id: "putUser",
-        summary: "Makes a user or changes its role, its state or its password. A new password or a disabled user ends the sessions of the user. The last enabled admin stays an admin.",
+        summary: "Put user",
         query: &[],
         body: &[schema::<UserIn>],
         ok: (200, &[schema::<User>]),
@@ -531,7 +525,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "delete",
         path: "/v1/admin/users/{name}",
         id: "deleteUser",
-        summary: "Removes a user with the sessions and the tokens of the user.",
+        summary: "Delete user",
         query: &[],
         body: &[],
         ok: (204, &[]),
@@ -540,11 +534,8 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/admin/events",
         id: "listAuthEvents",
-        summary: "The sign-in events, the newest first: the sign-ins, the failures, the setup, the token and user changes and the refused requests.",
-        query: &[
-            ("limit", "The number of events of a page, at most 1000."),
-            ("before", "The id of the last event of the previous page."),
-        ],
+        summary: "Sign-in events",
+        query: &[("limit", "Page size"), ("before", "Before id")],
         body: &[],
         ok: (200, &[schema::<AuthEventPage>]),
     },
@@ -559,11 +550,7 @@ fn no_content() -> Response {
 }
 
 fn no_sign_in() -> Problem {
-    problem(
-        404,
-        "no_inventory",
-        "the server has no inventory database, so it has no sign-in".into(),
-    )
+    problem(404, "no_inventory", "no inventory database".into())
 }
 
 fn with_status(mut r: Response, status: u16) -> Response {
@@ -601,7 +588,7 @@ pub fn route_auth(
                     let mut r = problem(
                         429,
                         "too_many_sign_ins",
-                        format!("too many failed sign-ins; wait {wait} s"),
+                        format!("too many failed sign-ins, wait {wait} s"),
                     )
                     .response();
                     r.headers.push(("retry-after".into(), wait.to_string()));
@@ -627,7 +614,7 @@ pub fn route_auth(
                 return Err(problem(
                     401,
                     "sign_in_failed",
-                    "the user name or the password is wrong".into(),
+                    "wrong user name or password".into(),
                 ));
             };
             inv.run(db.forget_attempt(attempt)).map_err(from_error)?;
@@ -669,11 +656,7 @@ pub fn route_auth(
             }
             let b: SignInIn = body(req)?;
             if !inv.run(db.setup_open()).map_err(from_error)? {
-                return Err(problem(
-                    409,
-                    "conflict",
-                    "the setup is done: a user exists".into(),
-                ));
+                return Err(problem(409, "conflict", "a user exists".into()));
             }
             let hash = hash_password(&b.password).map_err(from_error)?;
             let (session, session_hash) = new_secret("").map_err(from_error)?;

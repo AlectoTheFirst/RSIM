@@ -503,7 +503,7 @@ impl Change {
                         .map_err(|e| Error::Invalid(format!("the proxy of {}: {e}", r.name)))?;
                     if login {
                         return Err(Error::Invalid(format!(
-                            "the proxy of {} holds a login; give the login as proxy_credential",
+                            "the proxy URL of {} holds a login",
                             r.name
                         )));
                     }

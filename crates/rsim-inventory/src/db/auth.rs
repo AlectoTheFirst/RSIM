@@ -51,17 +51,17 @@ pub const MAX_PASSWORD: usize = 1024;
 /// The prefix of an API token.
 pub const TOKEN_PREFIX: &str = "rsim_";
 
-/// The role of a user.
+/// Role
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
-    /// Reads the twins.
+    /// Viewer
     Viewer,
-    /// Reads the twins and writes what-if scenarios.
+    /// Operator
     Operator,
-    /// Each scope, the inventory and the users included.
+    /// Admin
     Admin,
 }
 
@@ -120,7 +120,7 @@ impl Principal {
     }
 }
 
-/// A user as an admin sees it. The password hash is not part of it.
+/// User
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct User {
     pub name: String,
@@ -129,8 +129,7 @@ pub struct User {
     pub created_at: String,
 }
 
-/// An API token as its user sees it. The token text is given only once,
-/// when the token is made.
+/// API token
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TokenInfo {
     pub id: i64,
@@ -142,7 +141,7 @@ pub struct TokenInfo {
     pub revoked: bool,
 }
 
-/// One sign-in event.
+/// Sign-in event
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AuthEvent {
     pub id: i64,
@@ -154,7 +153,7 @@ pub struct AuthEvent {
     pub detail: Option<String>,
 }
 
-/// A page of the sign-in events, the newest first.
+/// Sign-in event page
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AuthEventPage {
     pub events: Vec<AuthEvent>,
@@ -196,7 +195,7 @@ pub fn check_password(password: &str) -> Result<()> {
     let n = password.chars().count();
     if n < MIN_PASSWORD {
         return Err(Error::Invalid(format!(
-            "the password has {n} characters; it needs at least {MIN_PASSWORD}"
+            "password of {n} characters, minimum {MIN_PASSWORD}"
         )));
     }
     if n > MAX_PASSWORD {
@@ -383,7 +382,7 @@ impl Db {
             .await?
             .get(0);
         if n > 0 {
-            return Err(Error::Conflict("the setup is done: a user exists".into()));
+            return Err(Error::Conflict("a user exists".into()));
         }
         let id: i64 = tx
             .query_one(

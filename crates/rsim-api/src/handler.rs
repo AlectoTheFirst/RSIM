@@ -205,14 +205,11 @@ impl State {
                     return Err(problem(
                         410,
                         "snapshot_replaced",
-                        format!(
-                            "{segment} is replaced by {}; ask for the twin store again",
-                            current.identity.id
-                        ),
+                        format!("{segment} is replaced by {}", current.identity.id),
                     ));
                 }
                 Err(unknown(format!(
-                    "{segment} is not built by the server; the newest built snapshot is {}",
+                    "{segment} not built, newest built snapshot {}",
                     current.identity.id
                 )))
             }
@@ -479,7 +476,7 @@ fn method(req: &Request, allowed: &str) -> Result<(), Problem> {
         Err(problem(
             405,
             "method_not_allowed",
-            format!("{} is not allowed; use {allowed}", req.method),
+            format!("{} not allowed, allowed {allowed}", req.method),
         ))
     }
 }
@@ -878,11 +875,7 @@ fn twin_route(
             method(req, "GET")?;
             let mut m = state.recall(q)?;
             if args::mode(&m).map_err(err)? {
-                return Err(problem(
-                    422,
-                    "invalid_query",
-                    "a claim runs on the paths of a path query, not a set query".into(),
-                ));
+                return Err(problem(422, "invalid_query", "claim on a set query".into()));
             }
             m.remove("mode");
             let a = ClaimArgs {
@@ -1179,7 +1172,7 @@ fn mcp(state: &State, req: &Request) -> Result<Response, Problem> {
                     400,
                     &id,
                     -32022,
-                    format!("Unsupported protocol version {v}; the server supports {MCP_REVISION}"),
+                    format!("Unsupported protocol version {v}, supported {MCP_REVISION}"),
                 ));
             }
             Some(_) => {}
