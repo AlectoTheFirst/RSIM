@@ -18,14 +18,14 @@ type Key = Exclude<keyof CoverageRow, "device"> | "device";
 
 /** The columns of the view, with the key of the row that each prints. */
 export const COVERAGE_COLUMNS: { name: string; key: Key; right: boolean; hatch: boolean; title: string }[] = [
-  { name: "device", key: "device", right: false, hatch: false, title: "Device" },
+  { name: "device", key: "device", right: false, hatch: false, title: "" },
   { name: "lines", key: "lines", right: true, hatch: false, title: "Config lines" },
   { name: "handled", key: "handled", right: true, hatch: false, title: "Handled lines" },
   { name: "known-irrelevant", key: "irrelevant", right: true, hatch: false, title: "Known-irrelevant lines" },
   { name: "unhandled", key: "unhandled", right: true, hatch: true, title: "Unhandled lines" },
-  { name: "unhandled share", key: "unhandled", right: true, hatch: false, title: "Unhandled share" },
-  { name: "unhandled paths", key: "paths", right: true, hatch: false, title: "Unhandled paths" },
-  { name: "unhandled stanzas", key: "stanzas", right: true, hatch: false, title: "Unhandled stanzas" },
+  { name: "unhandled share", key: "unhandled", right: true, hatch: false, title: "" },
+  { name: "unhandled paths", key: "paths", right: true, hatch: false, title: "" },
+  { name: "unhandled stanzas", key: "stanzas", right: true, hatch: false, title: "" },
 ];
 
 const num = (v: unknown): number => (typeof v === "number" ? v : 0);
