@@ -8,7 +8,10 @@ With no ingress, forward the port and open http://localhost:8787/:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "rsim.fullname" . }} 8787:{{ .Values.service.port }}
 {{- end }}
 While no user exists, the first visitor makes the admin.
-{{- if not .Values.collector.enabled }}
+{{- if .Values.demo.seed }}
+
+The init container seed writes the demo estate into an empty store.
+{{- else if not .Values.collector.enabled }}
 
 The collector is off, so the twin `store` has no snapshot.
 {{- end }}
