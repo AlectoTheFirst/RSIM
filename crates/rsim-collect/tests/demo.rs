@@ -212,6 +212,6 @@ async fn the_twin_of_the_newest_snapshot_answers_the_planned_queries() {
         &t,
         ("10.12.110.20", "192.0.2.80", tcp, 443),
         VerdictKind::Unknown,
-        "no link · interface GigabitEthernet0/0/0",
+        "no link on interface GigabitEthernet0/0/0",
     );
 }
