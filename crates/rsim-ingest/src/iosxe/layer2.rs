@@ -92,15 +92,13 @@ fn supported(r: &super::state::VlanRow) -> bool {
 /// trunk of a switch with `vlan dot1q tag native`.
 pub(super) fn interfaces(cfg: &Config, st: &State) -> Vec<nxos::config::Interface> {
     let not_in_config = match &cfg.vtp_mode {
-        Some((m, _)) => format!("VTP mode {m}, so the VLANs are not in the running config"),
-        None => "no vtp mode line, so the VLANs are not in the running config".to_string(),
+        Some((m, _)) => format!("VTP mode {m}, VLANs not in the running config"),
+        None => "no vtp mode line, VLANs not in the running config".to_string(),
     };
     let vlans_unknown = match &st.vlans {
         _ if vlans_in_config(cfg) => None,
         Some(Ok(_)) => None,
-        Some(Err(e)) => Some(format!(
-            "{not_in_config}, and show vlan brief is not read: {e}"
-        )),
+        Some(Err(e)) => Some(format!("{not_in_config}, show vlan brief not read: {e}")),
         None => Some(not_in_config),
     };
     cfg.interfaces
@@ -239,7 +237,7 @@ pub(super) fn gateways(active: &[Port], groups: &[Group], st: &State) -> BTreeMa
                     (GroupState::NotActive, None) => {}
                     (GroupState::Active, None) => {
                         g.unknown = Some(format!(
-                            "{} group {}: the virtual MAC is not known",
+                            "{} group {}: virtual MAC not known",
                             x.what, x.group
                         ));
                     }

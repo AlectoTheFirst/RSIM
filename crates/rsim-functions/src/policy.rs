@@ -51,19 +51,13 @@ fn branches_of(
                             set,
                             next,
                             ReasonCode::Permitted,
-                            format!("permitted · {by}"),
+                            format!("permitted, {by}"),
                             ctx.clone(),
                             state,
                         )
                         .with_spans(spans),
                     RuleAction::Deny => meta
-                        .drop(
-                            set,
-                            ReasonCode::Denied,
-                            format!("denied · {by}"),
-                            ctx,
-                            state,
-                        )
+                        .drop(set, ReasonCode::Denied, format!("denied, {by}"), ctx, state)
                         .with_spans(spans),
                 }
             }
@@ -332,8 +326,7 @@ impl FirewallPolicy {
                 differ,
                 ReasonCode::MatchUnknown,
                 format!(
-                    "policy {}: a new and an established connection give different results, \
-                     and the connection state of the flow is not collected",
+                    "policy {}, new and established give different results, connection state not collected",
                     self.policy
                 ),
                 ctx,
@@ -401,7 +394,7 @@ impl NetFunction for FirewallPolicy {
                 input.clone(),
                 &self.next,
                 ReasonCode::SessionMatched,
-                format!("policy {}: packets of session {index} pass", self.policy),
+                format!("policy {}, session {index} passes", self.policy),
                 ctx.clone(),
                 state,
             )];

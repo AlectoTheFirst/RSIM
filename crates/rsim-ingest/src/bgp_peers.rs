@@ -249,7 +249,7 @@ fn walk(
         }
         let Some(t) = templates.get(&key) else {
             out.gaps
-                .push(format!("{INHERITANCE_GAP}: {label} is not defined"));
+                .push(format!("{INHERITANCE_GAP}: {label} not defined"));
             continue;
         };
         if !out.inherits.contains(&label) {
@@ -359,9 +359,8 @@ impl Ctx<'_> {
     fn peer_asn(&self, n: &Neighbour, process: Option<&Process>) -> Asn {
         let Some(remote) = &n.resolved.settings.remote_as else {
             return unknown(
-                gap_reason(&n.resolved).unwrap_or_else(|| {
-                    format!("{ASN_NOT_RESOLVED}: the neighbour has no remote-as")
-                }),
+                gap_reason(&n.resolved)
+                    .unwrap_or_else(|| format!("{ASN_NOT_RESOLVED}: no remote-as")),
             );
         };
         let span = self.span(remote.lines);
@@ -380,16 +379,16 @@ impl Ctx<'_> {
                 )),
             },
             RemoteAs::External => unknown(format!(
-                "{ASN_NOT_RESOLVED}: remote-as external is learned from the session"
+                "{ASN_NOT_RESOLVED}: remote-as external, learned from the session"
             )),
             RemoteAs::Auto => unknown(format!(
-                "{ASN_NOT_RESOLVED}: remote-as auto is learned from the session"
+                "{ASN_NOT_RESOLVED}: remote-as auto, learned from the session"
             )),
-            RemoteAs::RouteMap(m) => unknown(format!(
-                "{ASN_NOT_RESOLVED}: remote-as route-map {m} accepts the AS of a route map"
-            )),
+            RemoteAs::RouteMap(m) => {
+                unknown(format!("{ASN_NOT_RESOLVED}: remote-as route-map {m}"))
+            }
             RemoteAs::Unreadable(t) => unknown(format!(
-                "{ASN_NOT_RESOLVED}: remote-as {t} is not an AS number"
+                "{ASN_NOT_RESOLVED}: remote-as {t} not an AS number"
             )),
         }
     }
@@ -412,7 +411,7 @@ impl Ctx<'_> {
             Ok(v) => *v,
             Err(t) => {
                 return unknown(format!(
-                    "{ASN_NOT_RESOLVED}: the confederation line {t} is not read"
+                    "{ASN_NOT_RESOLVED}: confederation line {t} not read"
                 ));
             }
         };
@@ -423,7 +422,7 @@ impl Ctx<'_> {
             }) => (m.clone(), Some(self.span(*lines))),
             Some(Sourced { value: Err(t), .. }) => {
                 return unknown(format!(
-                    "{ASN_NOT_RESOLVED}: the confederation line {t} is not read"
+                    "{ASN_NOT_RESOLVED}: confederation line {t} not read"
                 ));
             }
             None => (BTreeSet::new(), None),
@@ -436,7 +435,7 @@ impl Ctx<'_> {
             }
             AsnValue::Known(_) => asn(AsnValue::Known(vec![id_value]), vec![self.span(id.lines)]),
             AsnValue::Unknown(_) => unknown(format!(
-                "{ASN_NOT_RESOLVED}: the AS of the peer decides between the confederation identifier and the member AS"
+                "{ASN_NOT_RESOLVED}: confederation identifier or member AS by the AS of the peer"
             )),
         }
     }
@@ -460,7 +459,7 @@ impl Ctx<'_> {
         let span = self.span(l.lines);
         match l.value.asn {
             None => unknown(format!(
-                "{ASN_NOT_RESOLVED}: the line local-as {} is not read",
+                "{ASN_NOT_RESOLVED}: line local-as {} not read",
                 l.value.text
             )),
             Some(a) if l.value.dual_as => {
@@ -531,7 +530,7 @@ impl Ctx<'_> {
                 Some(a) => AddressValue::Known(a),
                 None => AddressValue::Unknown(match &s.update_source {
                     Some(u) => format!(
-                        "{SOURCE_NOT_RESOLVED}: the update-source {} gives no one address of the family of the peer in VRF {}",
+                        "{SOURCE_NOT_RESOLVED}: update-source {} with no single address of the peer family in VRF {}",
                         u.value, n.vrf
                     ),
                     None => match gap_reason(&n.resolved) {
@@ -556,7 +555,7 @@ impl Ctx<'_> {
             families_open: gap_reason(&n.resolved).or_else(|| {
                 (!s.unread_families.is_empty()).then(|| {
                     let names: Vec<&str> = s.unread_families.iter().map(String::as_str).collect();
-                    format!("the address family {} is not read", names.join(", "))
+                    format!("address family {} not read", names.join(", "))
                 })
             }),
             policy_in: s.policy_in.as_ref().map(|p| p.value.clone()),
@@ -587,7 +586,7 @@ impl Ctx<'_> {
         let peer_asn = match observed_asn {
             Some(a) => asn(AsnValue::Known(vec![a]), row_spans.clone()),
             None => unknown(format!(
-                "{ASN_NOT_RESOLVED}: the session rows state no single AS"
+                "{ASN_NOT_RESOLVED}: no single AS in the session rows"
             )),
         };
         let local_asn = match (self.cfg.processes.get(vrf), ranges) {
@@ -605,7 +604,7 @@ impl Ctx<'_> {
             update_source: None,
             local_address: None,
             source_address: AddressValue::Unknown(format!(
-                "{SOURCE_NOT_RESOLVED}: an observed peer has no neighbour"
+                "{SOURCE_NOT_RESOLVED}: observed peer with no neighbour"
             )),
             source_spans: Vec::new(),
             local_asn,
@@ -710,7 +709,7 @@ pub fn lookup_sources(
                 }
                 None => {
                     why = Some(format!(
-                        "the egress interface {} has no one address of the family of the peer in VRF {}",
+                        "egress interface {} with no single address of the peer family in VRF {}",
                         h.interface, f.vrf
                     ));
                 }
@@ -720,7 +719,7 @@ pub fn lookup_sources(
             (Some(w), _) => AddressValue::Unknown(format!("{SOURCE_NOT_RESOLVED}: {w}")),
             (None, 1) => AddressValue::Known(*found.iter().next().expect("one address")),
             (None, _) => AddressValue::Unknown(format!(
-                "{SOURCE_NOT_RESOLVED}: the route lookup on {peer} gives more than one egress address"
+                "{SOURCE_NOT_RESOLVED}: more than one egress address for {peer}"
             )),
         };
     }
@@ -801,7 +800,7 @@ pub fn facts(
             more => {
                 let names: Vec<String> = more.iter().map(|(_, p)| p.to_string()).collect();
                 let reason = format!(
-                    "{ASN_NOT_RESOLVED}: the peer is in more than one listen range: {}",
+                    "{ASN_NOT_RESOLVED}: peer in more than one listen range: {}",
                     names.join(", ")
                 );
                 out.push(f.observed(&vrf, peer, r, Some(reason)));
@@ -1035,7 +1034,7 @@ mod tests {
             r.gaps,
             [
                 "inheritance gap: t A inherits from itself",
-                "inheritance gap: t C is not defined"
+                "inheritance gap: t C not defined"
             ]
         );
     }
@@ -1102,7 +1101,7 @@ mod tests {
             ],
             &templates,
         );
-        assert_eq!(r.gaps, ["inheritance gap: t MISSING is not defined"]);
+        assert_eq!(r.gaps, ["inheritance gap: t MISSING not defined"]);
         // The source before the gap gives its setting; the source after it
         // gives none.
         assert_eq!(
@@ -1206,7 +1205,7 @@ mod tests {
             },
             lines: (20, 20),
         };
-        let gap = format!("{INHERITANCE_GAP}: template peer-session MISSING is not defined");
+        let gap = format!("{INHERITANCE_GAP}: template peer-session MISSING not defined");
         let cfg = |neighbours| BgpConfig {
             processes: BTreeMap::from([(DEFAULT_VRF.to_string(), process(65001, None))]),
             neighbours,
@@ -1335,7 +1334,7 @@ mod tests {
             lines: (20, 20),
         };
         // A gap can hide the update-source of the neighbour.
-        let gap = format!("{INHERITANCE_GAP}: template peer-session MISSING is not defined");
+        let gap = format!("{INHERITANCE_GAP}: template peer-session MISSING not defined");
         let mut gapped = neighbour("198.51.100.3");
         gapped.resolved.gaps = vec![gap.clone()];
         let cfg = BgpConfig {

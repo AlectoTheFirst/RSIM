@@ -7,7 +7,8 @@ import { TokensView } from "./auth/TokensView";
 import { CoverageView } from "./coverage/CoverageView";
 import { InventoryView } from "./inventory/InventoryView";
 import { OutcomeWord, PathLadder, VerdictText } from "./ladder/Ladder";
-import { SetLadder } from "./ladder/SetLadder";
+import { PartList } from "./ladder/SetLadder";
+import { partAnswer, partList, tunnelOf } from "./ladder/setLayout";
 import {
   type DecidingStep,
   type Level,
@@ -15,21 +16,19 @@ import {
   answerNotes,
   autoStep,
   decidingStep,
-  devicesOnPath,
   ingressHint,
   ladder,
   noIngress,
   noteLabel,
+  outcomeCounts,
   partCounts,
   rowKeyOfStep,
-  verdictWord,
 } from "./ladder/layout";
 import { HatchMark } from "./page/Hatch";
 import { keyForElement, keyPlace } from "./tables/model";
-import { KeyLine, LEVELS, QueryBar, ResultLine, TopBar } from "./page/Parts";
+import { LEVELS, QueryBar, ResultLine, StatusLine, TopBar } from "./page/Parts";
 import { isSnapshot, newerRun, pinnedRun, twinState, twinStateText, viewOf, viewSearch, withTwin } from "./page/url";
-import { type Fields, type Mode, explainCommand, fieldsOf, requestBody, rsimCommand } from "./page/query";
-import { QUERY_FIELDS, modeValue } from "./page/fields";
+import { type Fields, explainCommand, fieldsOf, queryMode, requestBody, rsimCommand } from "./page/query";
 import { TablesView } from "./tables/TablesView";
 import { type Prefs, applyTheme, loadPrefs, savePrefs } from "./theme";
 
@@ -41,6 +40,9 @@ interface Result {
   ms: number;
   timing: ServerTiming;
 }
+
+/** The time that a note of the status line shows. */
+const NOTICE_MS = 4_000;
 
 /** The time between 2 reads of the twin list, for a newer run of the store. */
 const TWINS_POLL_MS = 60_000;
@@ -79,21 +81,16 @@ function PathFacts(props: { a: Answer; notes: readonly string[]; onStep: (d: Dec
     <>
       <span>
         {one ? (
-          <VerdictText v={one} headline at={b0 && !multi ? decidingStep(b0) : null} onStep={props.onStep} />
+          <VerdictText v={one} headline at={b0 && !multi ? decidingStep(b0) : null} onStep={props.onStep} tunnel={b0 && !multi ? tunnelOf(b0) : null} />
         ) : (
           <span class="t-headline">{s[0]?.result.kind ?? "no answer"}</span>
         )}
-        {!multi && b0 && b0.steps.length ? (
-          <span class="muted">
-            , {devicesOnPath(b0).length} devices in path
-          </span>
-        ) : null}
       </span>
       {multi
         ? a.branches.map((b) => (
             <span>
               <span class="muted">branch {b.index} </span>
-              <VerdictText v={b.verdict} at={decidingStep(b)} onStep={props.onStep} />
+              <VerdictText v={b.verdict} at={decidingStep(b)} onStep={props.onStep} tunnel={tunnelOf(b)} />
             </span>
           ))
         : null}
@@ -130,27 +127,19 @@ function PathFacts(props: { a: Answer; notes: readonly string[]; onStep: (d: Dec
   );
 }
 
+/** The outcomes of the parts of a set answer that occur, each with its count. */
 function SetFacts(props: { a: Answer }) {
-  const parts = props.a.summary;
-  const n = partCounts(parts);
   return (
     <>
-      <span class="t-headline">{parts.length} parts</span>
-      <span>
-        <OutcomeWord kind="deliver" /> {n.deliver}
-      </span>
-      {n.exit ? (
-        <span>
-          <OutcomeWord kind="exit" /> {n.exit}
-        </span>
-      ) : null}
-      <span>
-        <OutcomeWord kind="drop" /> {n.drop}
-      </span>
-      <span>
-        <span class="strong">{verdictWord("unknown")}</span> {n.unknown}
-      </span>
-      {n.dependsOnPath ? <span class="muted">depends on path {n.dependsOnPath}</span> : null}
+      {outcomeCounts(partCounts(props.a.summary)).map(([k, n]) =>
+        k === "depends_on_path" ? (
+          <span class="muted">depends on path {n}</span>
+        ) : (
+          <span>
+            <OutcomeWord kind={k} headline /> <span class="t-headline">{n}</span>
+          </span>
+        ),
+      )}
     </>
   );
 }
@@ -172,13 +161,14 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
   const [listed, setListed] = useState(false);
   const [twin, setTwin] = useState<string>(readUrl().twin ?? "");
   const [info, setInfo] = useState<Twin | null>(null);
-  const [mode, setMode] = useState<Mode>("path");
   const [fields, setFields] = useState<Fields>({});
   const [result, setResult] = useState<Result | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [level, setLevel] = useState<Level>("function");
   const [selected, setSelected] = useState<string | null>(null);
+  // The branch of the selected part of a set answer.
+  const [part, setPart] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   // A count that the button "Select entry point" raises.
@@ -251,7 +241,7 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
         replaceUrlTwin(out.twin.id);
       }
       setFields(fieldsOf(out.query as unknown as Record<string, unknown>));
-      setMode(isSet(out) ? "set" : "path");
+      setPart(isSet(out) ? (out.answer.branches[0]?.index ?? null) : null);
       setSelected(null);
       setOpen(false);
       autoOpen.current = true;
@@ -290,7 +280,6 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
   useEffect(() => {
     // A page whose run is replaced moves to the newest built run.
     onReplaced(() => {
-      setNotice("run replaced");
       listTwins()
         .then((list) => {
           setTwins(list);
@@ -340,29 +329,13 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  /** A change of the mode, with each value in the form of the new mode. */
-  function changeMode(next: Mode) {
-    const out: Fields = { ...fields };
-    const cleared: string[] = [];
-    for (const k of QUERY_FIELDS) {
-      const v = fields[k];
-      if (v === undefined) continue;
-      const w = modeValue(mode, next, k, v);
-      if (w === null) cleared.push(k);
-      out[k] = w ?? "";
-    }
-    setFields(out);
-    setMode(next);
-    setNotice(cleared.length ? `${cleared.join(", ")} cleared: one flag set in a path query` : null);
-  }
-
   async function run() {
     if (!twin) return;
     setBusy(true);
     setProblem(null);
     const since = performance.now();
     try {
-      const made = await createQuery(twin, requestBody(mode, fields));
+      const made = await createQuery(twin, requestBody(fields));
       // The answer of a query on the store pins the page to its run.
       if (made.twin !== twin) setTwin(made.twin);
       refreshTwins();
@@ -379,19 +352,37 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
   const answer = result?.out.answer ?? null;
   const setMode_ = result ? isSet(result.out) : false;
   const reply = result ? asksReply(result.out) : true;
-  const model = useMemo(() => (answer && !setMode_ ? ladder(answer, level, reply) : null), [answer, level, setMode_, reply]);
-  // A new answer that does not deliver opens the step that decides it, in
-  // the ladder of the current level.
+  const parts = useMemo(() => (answer && setMode_ ? partList(answer) : []), [answer, setMode_]);
+  // The answer of the ladder: the path answer, or the selected part of a set answer.
+  const shown = useMemo(() => (answer && setMode_ ? (part === null ? null : partAnswer(answer, part)) : answer), [answer, setMode_, part]);
+  const model = useMemo(() => (shown ? ladder(shown, level, reply, setMode_) : null), [shown, level, setMode_, reply]);
+  // A new answer or part that does not deliver opens the step that decides
+  // it, in the ladder of the current level.
   useEffect(() => {
-    if (!autoOpen.current || !model || !answer) return;
+    if (!autoOpen.current || !model || !shown) return;
     autoOpen.current = false;
-    const d = autoStep(answer);
+    const d = autoStep(shown);
     const key = d ? rowKeyOfStep(model.rows, d.path, d.step.index) : null;
     if (!key) return;
     setSelected(key);
     setOpen(true);
   }, [model]);
   const stepRows = useMemo(() => (model ? model.rows.filter((r): r is StepRow => r.type === "step") : []), [model]);
+
+  function selectPart(branch: number) {
+    if (branch === part) return;
+    setPart(branch);
+    setSelected(null);
+    setOpen(false);
+    autoOpen.current = true;
+  }
+
+  // A note of the status line goes after NOTICE_MS.
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(null), NOTICE_MS);
+    return () => window.clearTimeout(t);
+  }, [notice]);
 
   function copy(text: string, what: string) {
     navigator.clipboard
@@ -416,7 +407,10 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
     sourceLines,
     copyExplain: (row: StepRow) => {
       const st = row.steps[row.steps.length - 1]!;
-      copy(explainCommand(mode, result?.twin ?? twin, fields, row.path.branch, st.index, row.path.replyOf), "rsim explain command");
+      if (!result) return;
+      // The step of an answer opens through the query type of its query.
+      const sent = fieldsOf(result.out.query as unknown as Record<string, unknown>);
+      copy(explainCommand(isSet(result.out) ? "set" : "path", result.twin, sent, row.path.branch, st.index, row.path.replyOf), "rsim explain command");
     },
     copyUrl: (row: StepRow) => {
       if (!result) return;
@@ -486,7 +480,7 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
         case "y": {
           const r = stepRows[at];
           if (r) actions.copyExplain(r);
-          else copy(rsimCommand(mode, twin, fields), "rsim command");
+          else copy(rsimCommand(queryMode(fields), twin, fields), "rsim command");
           break;
         }
         default:
@@ -497,21 +491,6 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   });
-
-  const keys: [string, string][] = setMode_
-    ? [
-        ["[ ]", "level"],
-        ["/", "query"],
-        ["y", "copy"],
-      ]
-    : [
-        ["j k", "step"],
-        ["enter", "open"],
-        ["[ ]", "level"],
-        ["/", "query"],
-        ["r", "reply"],
-        ["y", "copy"],
-      ];
 
   return (
     <>
@@ -563,12 +542,10 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
       <>
       <QueryBar
         twin={twin}
-        mode={mode}
         fields={fields}
         found={answer && !busy ? ingressHint(answer) : null}
         askIngress={askIngress}
         answered={result !== null}
-        onMode={changeMode}
         onField={(k, v) => setFields({ ...fields, [k]: v })}
         onRun={() => void run()}
         firstInput={firstInput}
@@ -592,9 +569,10 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
         )}
       </ResultLine>
       <main class="body">
-        {answer && model ? (
+        {answer && setMode_ ? <PartList parts={parts} selected={part} onSelect={selectPart} /> : null}
+        {shown && model ? (
           <PathLadder
-            answer={answer}
+            answer={shown}
             model={model}
             h={prefs.row}
             selected={selected}
@@ -602,11 +580,9 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
             onSelect={select}
             actions={actions}
           />
-        ) : answer && setMode_ ? (
-          <SetLadder answer={answer} level={level} h={prefs.row} />
         ) : null}
       </main>
-      <KeyLine keys={notice ? [...keys, ["", notice]] : keys} timing={result && !busy ? timingText(result.ms, result.timing) : null} />
+      <StatusLine notice={notice} timing={result && !busy ? timingText(result.ms, result.timing) : null} />
       </>
       )}
     </>

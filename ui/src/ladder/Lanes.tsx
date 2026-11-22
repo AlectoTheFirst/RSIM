@@ -2,7 +2,7 @@
 // its ring, the step across at a link, and the start and end squares.
 import { SIZE } from "../theme";
 import type { Dir, End, Lane } from "./layout";
-import { laneGroups } from "./layout";
+import { laneGroups, upright } from "./layout";
 import { hatchLines } from "../page/Hatch";
 import { useMemo } from "preact/hooks";
 
@@ -26,16 +26,22 @@ export interface LaneMarks {
   through?: boolean;
 }
 
+/**
+ * The lanes of one row. The drawing takes the height of the row, which
+ * grows with a reason or a value that wraps: the marks of the row sit in
+ * its first `h` px, and the path line of a row with no end runs to the
+ * bottom of the row.
+ */
 export function Lanes(props: { lanes: number; h: number; marks: LaneMarks | null }) {
   const { lanes, h, marks } = props;
   const w = lanes * SIZE.lane;
   const id = useMemo(() => `end-${++next}`, []);
   const guides = Array.from({ length: lanes }, (_, i) => (
-    <line class="lane-guide" x1={laneX(i)} y1={0} x2={laneX(i)} y2={h} />
+    <line class="lane-guide" x1={laneX(i)} y1={0} x2={laneX(i)} y2="100%" />
   ));
   if (!marks) {
     return (
-      <svg width={w} height={h} aria-hidden="true">
+      <svg width={w} height="100%" aria-hidden="true">
         {guides}
       </svg>
     );
@@ -45,8 +51,13 @@ export function Lanes(props: { lanes: number; h: number; marks: LaneMarks | null
   const lw = marks.line ?? SIZE.pathLine;
   const sq = SIZE.endSquare;
   const endLane = marks.endLane ?? null;
-  const bottom = marks.end && endLane === null ? h - sq / 2 : h;
-  const parts = [<rect class={cls} x={x - lw / 2} y={0} width={lw} height={Math.max(0, bottom)} />];
+  const parts = [
+    marks.end ? (
+      <rect class={cls} x={x - lw / 2} y={0} width={lw} height={Math.max(0, endLane === null ? h - sq / 2 : h)} />
+    ) : (
+      <rect class={cls} x={x - lw / 2} y={0} width={lw} height="100%" />
+    ),
+  ];
   if (marks.enterFrom !== null) {
     const a = laneX(marks.enterFrom);
     const x0 = Math.min(a, x) - lw / 2;
@@ -93,7 +104,7 @@ export function Lanes(props: { lanes: number; h: number; marks: LaneMarks | null
     }
   }
   return (
-    <svg width={w} height={h} aria-hidden="true">
+    <svg width={w} height="100%" aria-hidden="true">
       {guides}
       {parts}
     </svg>
@@ -103,12 +114,14 @@ export function Lanes(props: { lanes: number; h: number; marks: LaneMarks | null
 /**
  * The names of the lanes, centred over each lane, with the full name as
  * the title. A site header above a group of lanes of one site gives the
- * site, and the lanes of the group have no site prefix.
+ * site, and the lanes of the group have no site prefix. When a name is
+ * wider than its lane, each name stands upright.
  */
 export function LaneNames(props: { lanes: readonly Lane[] }) {
   const { groups, names } = laneGroups(props.lanes);
+  const up = upright(names, SIZE.lane, SIZE.indexChar);
   return (
-    <span class="lane-names t-index" aria-label={`lanes: ${props.lanes.map((l) => l.name).join(", ")}`}>
+    <span class={`lane-names t-index${up ? " upright" : ""}`} aria-label={`lanes: ${props.lanes.map((l) => l.name).join(", ")}`}>
       {groups.map((g) =>
         g.site ? (
           <span class="lane-site" style={{ gridColumn: `${g.first + 1} / span ${g.count}` }}>

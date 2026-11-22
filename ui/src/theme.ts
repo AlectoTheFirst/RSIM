@@ -76,9 +76,9 @@ export const SIZE = {
   buttonGap: 4,
   factGap: 22,
   lane: 52,
+  /** The advance of a character of the type `index`, rounded up. */
+  indexChar: 5,
   pathLine: 3,
-  partLine: [3, 5, 7],
-  partColumn: 176,
   endSquare: 9,
   deviceSquare: 12,
   ring: 3.75,
@@ -102,7 +102,7 @@ export const SIZE = {
   colStep: 30,
   colFunction: 150,
   colReason: 280,
-  colReasonSet: 260,
+  colReasonMax: 560,
   colIp: 104,
   colPort: 52,
   colTransport: 64,
@@ -111,8 +111,6 @@ export const SIZE = {
   cellPad: 10,
   ribPadX: 6,
   ribPadY: 2,
-  partGap: 5,
-  partPad: 6,
   detailGap: 28,
   factLabel: 120,
   codeNumber: 34,
@@ -156,8 +154,6 @@ export const SIZE = {
   tokenText: 420,
 } as const;
 
-/** The share of the direction colour in the band of a part of a set query. */
-export const BAND_SHARE = "26%";
 
 /** The share of `rule` in the lane guides. */
 export const GUIDE_SHARE = "55%";
@@ -218,7 +214,6 @@ export function properties(s: Scheme, p: Prefs): Record<string, string> {
   for (const [k, v] of Object.entries(SIZE)) {
     if (typeof v === "number") out[`--${kebab(k)}`] = `${v}px`;
   }
-  out["--band"] = `color-mix(in srgb, ${c.forward} ${BAND_SHARE}, transparent)`;
   out["--guide"] = `color-mix(in srgb, ${c.rule} ${GUIDE_SHARE}, transparent)`;
   out["--row"] = `${p.row}px`;
   out["color-scheme"] = s;

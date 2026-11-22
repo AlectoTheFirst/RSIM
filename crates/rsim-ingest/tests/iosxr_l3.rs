@@ -295,7 +295,7 @@ fn an_unread_route_line_makes_its_prefix_unknown() {
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(has(
         &steps,
-        "route 198.51.100.192/27 in VRF default has no next hop"
+        "route 198.51.100.192/27 in VRF default, no next hop"
     ));
     let l = rib_line("B    198.51.100.192/27");
     assert_eq!(spans_of(&a, "pe1/route"), [format!("pe1/rib:{l}-{l}")]);
@@ -306,7 +306,7 @@ fn an_unread_route_line_makes_its_prefix_unknown() {
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(has(
         &steps,
-        "route 198.51.100.160/27 in VRF default has no next hop"
+        "route 198.51.100.160/27 in VRF default, no next hop"
     ));
     let l = rib_line("O    198.51.100.160/27") + 1;
     assert_eq!(spans_of(&a, "pe1/route"), [format!("pe1/rib:{l}-{l}")]);
@@ -321,7 +321,7 @@ fn an_unread_route_line_makes_its_prefix_unknown() {
     assert!(has(&steps, "via 198.51.100.2 on Bundle-Ether10"));
     let notes = &estate().notes["pe1"];
     assert!(notes.contains(&format!(
-        "route 198.51.100.192/27 in VRF default: pe1/rib line {} is not read: B    198.51.100.192/27 [200/0] via 2001:db8::9, 1d00h",
+        "route 198.51.100.192/27 in VRF default, pe1/rib line {} not read: B    198.51.100.192/27 [200/0] via 2001:db8::9, 1d00h",
         rib_line("B    198.51.100.192/27")
     )));
 }
@@ -332,7 +332,7 @@ fn an_unread_line_with_no_prefix_makes_the_vrf_unknown() {
     let a = run(&t, "MgmtEth0/RP0/CPU0/0", "192.0.2.63", "192.0.2.64", 443);
     let (verdict, steps) = only(&a);
     assert_eq!(verdict, VerdictKind::Unknown);
-    assert!(has(&steps, "route 0.0.0.0/0 in VRF MGMT has no next hop"));
+    assert!(has(&steps, "route 0.0.0.0/0 in VRF MGMT, no next hop"));
     let l = rib_line("Route table of this VRF");
     assert_eq!(spans_of(&a, "pe1/route"), [format!("pe1/rib:{l}-{l}")]);
     // An address of the router is still local.
@@ -362,7 +362,7 @@ fn the_output_acl_denies_one_flow_and_the_qos_policies_forward() {
         &steps,
         "route 192.0.2.64/26 in VRF RED connected on Bundle-Ether20.100"
     ));
-    assert!(has(&steps, "denied · ACL pe1:acl:RED-OUT rule RED-OUT/10"));
+    assert!(has(&steps, "denied, ACL pe1:acl:RED-OUT rule RED-OUT/10"));
     let (verdict, steps) = only(&run(
         &t,
         "Bundle-Ether20.100",
@@ -373,7 +373,7 @@ fn the_output_acl_denies_one_flow_and_the_qos_policies_forward() {
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(has(
         &steps,
-        "permitted · ACL pe1:acl:RED-OUT rule RED-OUT/20"
+        "permitted, ACL pe1:acl:RED-OUT rule RED-OUT/20"
     ));
     assert!(has(&steps, "qos-out/Bundle-Ether20.100"));
     assert!(has(&steps, "out/Bundle-Ether20.100 no link"));
@@ -410,7 +410,7 @@ fn an_unreadable_acl_entry_makes_only_the_packets_that_reach_it_unknown() {
         80,
     ));
     assert!(
-        has(&steps, "permitted · ACL pe1:acl:EDGE-IN rule EDGE-IN/20"),
+        has(&steps, "permitted, ACL pe1:acl:EDGE-IN rule EDGE-IN/20"),
         "{steps:#?}"
     );
     assert!(has(&steps, "nexthop 203.0.113.10 is"));
@@ -440,7 +440,7 @@ fn what_is_not_lowered_gives_unknown() {
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(has(
         &steps,
-        "route 198.51.100.96/27 (bgp) in VRF RED has no next hop"
+        "route 198.51.100.96/27 (bgp) in VRF RED, no next hop"
     ));
     // The uRPF line of the interface.
     let (verdict, steps) = only(&run(
@@ -454,9 +454,9 @@ fn what_is_not_lowered_gives_unknown() {
     assert!(has(&steps, "acl-in/Bundle-Ether20.200"));
     let notes = &estate().notes["pe1"];
     for n in [
-        "route 198.51.100.96/27 in VRF RED: a next hop in VRF default is reached through a label switched path, which is not lowered",
-        "GigabitEthernet0/0/0/4: VRF BLUE in show vrf all detail, and the default VRF in the config; the config decides",
-        "IPv6 is not lowered: each IPv6 packet is unknown at the route lookup",
+        "route 198.51.100.96/27 in VRF RED, next hop in VRF default through a label switched path, not lowered",
+        "GigabitEthernet0/0/0/4: VRF BLUE in show vrf all detail, the default VRF in the config, config used",
+        "IPv6 not lowered",
     ] {
         assert!(notes.iter().any(|x| x == n), "{n} is not in {notes:#?}");
     }
@@ -513,7 +513,7 @@ fn without_sections_each_route_lookup_is_unknown() {
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(has(
         &steps,
-        "route 0.0.0.0/0 in VRF default: vrf route table not collected"
+        "route 0.0.0.0/0 in VRF default, vrf route table not collected"
     ));
 }
 
@@ -645,7 +645,7 @@ fn a_resolution_loop_and_a_route_that_is_not_read_give_unknown() {
     assert!(
         has(
             &steps,
-            "route 198.51.100.224/28 (bgp) in VRF default: next hop not resolved: 198.51.100.250"
+            "route 198.51.100.224/28 (bgp) in VRF default, next hop not resolved: 198.51.100.250"
         ),
         "{steps:#?}"
     );
@@ -655,7 +655,7 @@ fn a_resolution_loop_and_a_route_that_is_not_read_give_unknown() {
     assert!(
         has(
             &steps,
-            "route 198.51.100.208/28 (bgp) in VRF default: next hop not resolved: 198.51.100.200"
+            "route 198.51.100.208/28 (bgp) in VRF default, next hop not resolved: 198.51.100.200"
         ),
         "{steps:#?}"
     );

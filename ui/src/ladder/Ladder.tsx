@@ -2,7 +2,7 @@
 // device at the level device, with the forward path and the replies.
 import type { JSX } from "preact";
 import type { Answer, SourceText, Span, TraceStep, Verdict } from "../api/types";
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { Hatch, HatchMark } from "../page/Hatch";
 import { SIZE } from "../theme";
 import { LaneNames, Lanes, laneX } from "./Lanes";
@@ -30,8 +30,8 @@ import {
 /**
  * The columns of a ladder: step, lanes, function, reason, the given
  * columns, rib, source lines, and the spare width at the end. The reason
- * takes the width of its longest text where the page has room, so that the
- * columns after it follow it directly.
+ * takes the width of its longest text up to `SIZE.colReasonMax` where the
+ * page has room, and wraps beyond it.
  */
 export function ladderColumns(lanes: number, fields: number[], reasonMin: number): { columns: string; min: number } {
   const lw = Math.max(1, lanes) * SIZE.lane;
@@ -41,7 +41,7 @@ export function ladderColumns(lanes: number, fields: number[], reasonMin: number
       `${SIZE.colStep}px`,
       `${lw}px`,
       `${SIZE.colFunction}px`,
-      `minmax(${reasonMin}px, max-content)`,
+      `fit-content(${SIZE.colReasonMax}px)`,
       ...fields.map((f) => `${f}px`),
       `${SIZE.colRib}px`,
       `${SIZE.colSource}px`,
@@ -71,19 +71,30 @@ function ShownValue(props: { s: Shown }) {
 }
 
 /**
- * A verdict: its outcome word, its destination and its reason. With the
- * deciding step, the reason follows the device and the function of that
- * step, which a click selects and opens.
+ * A verdict: its outcome word, then the destination of a Deliver, the
+ * device and the interface of an Exit with the tunnel of its outer packet,
+ * or the deciding step and the reason of a Drop or an Unknown. A click on
+ * the device of the deciding step selects and opens that step.
  */
 export function VerdictText(props: {
   v: Verdict;
   headline?: boolean;
   at?: DecidingStep | null;
   onStep?: (d: DecidingStep) => void;
+  tunnel?: string | null;
 }) {
   const { v, at } = props;
   const dest = destinationOf(v);
-  const reason = at ? at.reason : v.reason?.detail;
+  const exit = v.kind === "exit";
+  const reason = exit ? null : at ? at.reason : v.reason?.detail;
+  const step = (label: string) =>
+    at && props.onStep ? (
+      <button type="button" class="link t-value" title="Open step" onClick={() => props.onStep?.(at)}>
+        {label}
+      </button>
+    ) : (
+      <span class="t-value">{label}</span>
+    );
   return (
     <>
       <OutcomeWord kind={v.kind} headline={props.headline} />
@@ -93,15 +104,15 @@ export function VerdictText(props: {
           <span class="t-value">{dest}</span>
         </>
       ) : null}
-      {at ? (
+      {exit && v.reason ? <> {step(v.reason.detail)}</> : null}
+      {!exit && at ? (
         <>
           {" at "}
-          <button type="button" class="link t-value" title="Open step" onClick={() => props.onStep?.(at)}>
-            {at.step.device ? `${at.step.device} ${functionLabel(at.step)}` : at.step.function}
-          </button>
-          {reason ? ":" : ""}
+          {step(at.step.device ? `${at.step.device} ${functionLabel(at.step)}` : at.step.function)}
+          {reason ? "," : ""}
         </>
       ) : null}
+      {props.tunnel ? <span class="t-value">, {props.tunnel}</span> : null}
       {reason ? <span class="muted"> {reason}</span> : null}
     </>
   );
@@ -273,12 +284,6 @@ function Detail(props: { row: StepRow; lanes: number; actions: DetailActions }) 
   const cls = row.dir === "forward" ? "path-forward" : "path-reply";
   const rate = last.rate_condition ? rateShown(last.rate_condition) : null;
   const v = (t: string) => <span class="t-value">{t}</span>;
-  // The full reason, only where the row cuts it.
-  const [cut, setCut] = useState(false);
-  useLayoutEffect(() => {
-    const el = document.querySelector(`[id="row-${row.key}"] > .reason`);
-    setCut(!!el && el.scrollWidth > el.clientWidth);
-  });
   return (
     <div class="ladder-detail" role="row">
       <span />
@@ -298,7 +303,6 @@ function Detail(props: { row: StepRow; lanes: number; actions: DetailActions }) 
           </div>
           <Facts
             rows={[
-              ["reason", cut ? <span class="t-body">{row.reason}</span> : null],
               ["kind", v(last.kind)],
               ["delay", delayShown(last.delay)],
               ["alternative", last.alternative ? v(`${last.alternative.index + 1} of ${last.alternative.count}: ${last.alternative.label}`) : null],
@@ -399,9 +403,7 @@ export function PathLadder(props: {
                 <Lanes lanes={n} h={h} marks={row} />
               </span>
               <span class="t-value">{row.fn}</span>
-              <span class="t-body reason" title={row.reason}>
-                {row.reason}
-              </span>
+              <span class="t-body reason">{row.reason}</span>
               {row.cells.map((c, i) => (
                 <CellView c={c} dir={row.dir} i={i} h={h} />
               ))}

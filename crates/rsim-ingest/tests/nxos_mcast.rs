@@ -471,7 +471,7 @@ fn a_reverse_path_failure_of_an_s_g_route_drops_the_copy() {
     let branches = show(&run(&t));
     let (verdict, steps) = tunnel_copy(&branches);
     assert_eq!(*verdict, VerdictKind::Drop, "{steps:#?}");
-    assert!(has(steps, "the reverse path check fails"), "{steps:#?}");
+    assert!(has(steps, "reverse path check fails"), "{steps:#?}");
 }
 
 #[test]
@@ -505,10 +505,7 @@ fn an_outgoing_interface_that_is_not_lowered_in_2_routes_gives_unknown() {
     assert_eq!(found.len(), 1, "{branches:#?}");
     assert_eq!(found[0].0, VerdictKind::Unknown, "{:#?}", found[0].1);
     assert!(
-        has(
-            &found[0].1,
-            "the outgoing interface Ethernet1/3 is not lowered"
-        ),
+        has(&found[0].1, "outgoing interface Ethernet1/3 not lowered"),
         "{:#?}",
         found[0].1
     );

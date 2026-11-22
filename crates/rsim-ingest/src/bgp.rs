@@ -171,7 +171,7 @@ impl<'a> Answer<'a> {
                 Answer::Failed(error)
             }
             (SectionStatus::Fresh, Some(b)) => Answer::Fresh(b, file),
-            (SectionStatus::Fresh, None) => Answer::Failed("the blob is not read"),
+            (SectionStatus::Fresh, None) => Answer::Failed("blob not read"),
         }
     }
 }
@@ -247,15 +247,15 @@ fn not_fresh(a: Answer<'_>) -> Option<SectionOutcome> {
     match a {
         Answer::NotCollected => Some(SectionOutcome::new(
             Outcome::NotCaptured,
-            "the collector does not read the section",
+            "section not collected",
         )),
         Answer::Absent(r) => Some(SectionOutcome::new(
             Outcome::NotCaptured,
-            format!("the device does not have the command: {r}"),
+            format!("command not on the device: {r}"),
         )),
         Answer::Failed(e) => Some(SectionOutcome::new(
             Outcome::Failed,
-            format!("the read failed: {e}"),
+            format!("read failed: {e}"),
         )),
         Answer::Fresh(..) => None,
     }
@@ -263,7 +263,7 @@ fn not_fresh(a: Answer<'_>) -> Option<SectionOutcome> {
 
 /// The outcome of the rows and of the row-shaped parts that are not read.
 fn rows_outcome(rows: usize, unread: &[String]) -> (Outcome, Option<String>) {
-    let detail = (!unread.is_empty()).then(|| format!("not read: {}", unread.join("; ")));
+    let detail = (!unread.is_empty()).then(|| format!("not read: {}", unread.join(", ")));
     match (rows, unread.is_empty()) {
         (0, true) => (Outcome::CompleteEmpty, None),
         (_, true) => (Outcome::Complete, None),
@@ -317,14 +317,14 @@ pub fn vyos(answer: Answer<'_>) -> Sessions {
         Err(e) => {
             return Sessions::none(SectionOutcome::new(
                 Outcome::Failed,
-                format!("the answer is not JSON: {e}"),
+                format!("answer not JSON: {e}"),
             ));
         }
     };
     let Body::Object(top) = &doc.root.body else {
         return Sessions::none(SectionOutcome::new(
             Outcome::Failed,
-            "the answer is not a JSON object",
+            "answer not a JSON object",
         ));
     };
     let flat = top.iter().any(|s| family(&s.key).is_some());
@@ -337,7 +337,7 @@ pub fn vyos(answer: Answer<'_>) -> Sessions {
     let mut scope = BTreeSet::new();
     for (vrf, v) in vrfs {
         let Body::Object(members) = &v.body else {
-            unread.push(format!("VRF {vrf} is not an object"));
+            unread.push(format!("VRF {vrf} not an object"));
             continue;
         };
         for m in members {
@@ -348,7 +348,7 @@ pub fn vyos(answer: Answer<'_>) -> Sessions {
                 continue;
             };
             let Some(peers) = m.get("peers") else {
-                unread.push(format!("VRF {vrf} {fam} has no peers"));
+                unread.push(format!("VRF {vrf} {fam} with no peers"));
                 continue;
             };
             scope.insert((vrf.to_string(), fam.to_string()));
@@ -425,7 +425,7 @@ pub fn nxos(all: Answer<'_>, default: Answer<'_>) -> Sessions {
         Err(e) => {
             return Sessions::none(SectionOutcome::new(
                 Outcome::Failed,
-                format!("the answer is not JSON: {e}"),
+                format!("answer not JSON: {e}"),
             ));
         }
     };
@@ -445,10 +445,7 @@ pub fn nxos(all: Answer<'_>, default: Answer<'_>) -> Sessions {
         };
     }
     let Some(table) = doc.root.get("TABLE_vrf") else {
-        return Sessions::none(SectionOutcome::new(
-            Outcome::Failed,
-            "the answer has no TABLE_vrf",
-        ));
+        return Sessions::none(SectionOutcome::new(Outcome::Failed, "no TABLE_vrf"));
     };
     let (mut rows, mut unread, mut notes) = (Vec::new(), Vec::new(), Vec::new());
     let mut vrfs = BTreeSet::new();
@@ -461,7 +458,7 @@ pub fn nxos(all: Answer<'_>, default: Answer<'_>) -> Sessions {
             .get("TABLE_neighbor")
             .filter(|t| t.get("ROW_neighbor").is_some())
         else {
-            notes.push(format!("VRF {vrf} has no table of neighbours"));
+            notes.push(format!("VRF {vrf} with no table of neighbours"));
             continue;
         };
         vrfs.insert(vrf.clone());
@@ -485,7 +482,7 @@ pub fn nxos(all: Answer<'_>, default: Answer<'_>) -> Sessions {
         outcome: SectionOutcome {
             outcome,
             scope: Scope::ipv4_unicast(vrfs),
-            detail: (!notes.is_empty()).then(|| notes.join("; ")),
+            detail: (!notes.is_empty()).then(|| notes.join(", ")),
         },
     }
 }
@@ -597,10 +594,7 @@ fn cisco(vendor: Cisco, global: Answer<'_>, vrfs: Answer<'_>) -> Sessions {
         Answer::NotCollected => {}
         a => {
             let o = not_fresh(a).expect("not fresh");
-            notes.push(format!(
-                "the summaries of the VRFs: {}",
-                o.detail.unwrap_or_default()
-            ));
+            notes.push(format!("VRF summaries: {}", o.detail.unwrap_or_default()));
             parts.push(Part {
                 vrf: String::new(),
                 rows: Vec::new(),
@@ -642,7 +636,7 @@ fn cisco(vendor: Cisco, global: Answer<'_>, vrfs: Answer<'_>) -> Sessions {
         outcome: SectionOutcome {
             outcome,
             scope: Scope::ipv4_unicast(scope),
-            detail: (!notes.is_empty()).then(|| notes.join("; ")),
+            detail: (!notes.is_empty()).then(|| notes.join(", ")),
         },
     }
 }
@@ -662,7 +656,7 @@ fn vrf_parts(vendor: Cisco, text: &str, file: &str) -> Vec<Part> {
             vrf: String::new(),
             rows: Vec::new(),
             outcome: Outcome::Failed,
-            detail: Some("a text is before the first VRF".into()),
+            detail: Some("text before the first VRF".into()),
         });
     }
     for (k, &at) in starts.iter().enumerate() {
@@ -673,7 +667,7 @@ fn vrf_parts(vendor: Cisco, text: &str, file: &str) -> Vec<Part> {
                 vrf: name.trim().to_string(),
                 rows: Vec::new(),
                 outcome: Outcome::Failed,
-                detail: Some("the command failed".into()),
+                detail: Some("command failed".into()),
             });
             continue;
         }
@@ -748,7 +742,7 @@ fn summary(vendor: Cisco, vrf: &str, text: &str, offset: usize, file: &str) -> P
     if !content.iter().any(|l| l.starts_with(CISCO_HEADER)) {
         return part(
             Outcome::Failed,
-            Some(format!("no line starts with {CISCO_HEADER:?}")),
+            Some(format!("no line starting with {CISCO_HEADER:?}")),
         );
     }
     let shaped: Vec<(usize, String)> = joined(text)
@@ -758,7 +752,7 @@ fn summary(vendor: Cisco, vrf: &str, text: &str, offset: usize, file: &str) -> P
     if shaped.is_empty() && content.iter().any(|l| l.starts_with(CISCO_COLUMNS)) {
         return part(
             Outcome::Failed,
-            Some("the header of the neighbour columns has no row below it".into()),
+            Some("no row below the neighbour column header".into()),
         );
     }
     let (rows, unread) = match vendor {

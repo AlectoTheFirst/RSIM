@@ -214,7 +214,7 @@ pub fn lower(
     for i in &active {
         if i.vrf.as_deref().is_some_and(|v| zone_vrfs.contains(v)) {
             l.note(format!(
-                "{}: the zone of VRF {} is not lowered",
+                "{}: zone of VRF {} not lowered",
                 i.name,
                 i.vrf.as_deref().unwrap_or_default()
             ));
@@ -253,7 +253,7 @@ pub fn lower(
         let name = format!("dnat/{}", r.number);
         let span = l.span(r.lines);
         if r.matches.inbound_interface.is_some() {
-            l.note(format!("{name}: inbound-interface is not lowered"));
+            l.note(format!("{name}: inbound-interface not lowered"));
             dnat.push(FRule::unhandled(name, span));
             continue;
         }
@@ -277,7 +277,7 @@ pub fn lower(
                 );
             }
             _ => {
-                l.note(format!("{name}: the translation is not lowered"));
+                l.note(format!("{name}: translation not lowered"));
                 dnat.push(FRule::unhandled(name, span));
             }
         }
@@ -317,7 +317,7 @@ pub fn lower(
                         FRule::new(name, pr, t).with_span(span)
                     }
                     None => {
-                        l.note(format!("{name}: the action is not a route table"));
+                        l.note(format!("{name}: action not a route table"));
                         FRule::unhandled(name, span)
                     }
                 };
@@ -448,7 +448,7 @@ pub fn lower(
             }
             _ => {
                 l.note(format!(
-                    "{name}: the translation address of {} is not known",
+                    "{name}: translation address of {} not known",
                     out_if.as_deref().unwrap_or("the rule")
                 ));
                 FRule::unhandled(name, span)
@@ -518,8 +518,11 @@ pub fn lower(
             .collect(),
         point_to_point: active
             .iter()
-            .filter(|i| matches!(i.kind, Kind::Pppoe | Kind::Wireguard))
-            .map(|i| (InterfaceId::new(&i.name), format!("the peer of {}", i.name)))
+            .filter_map(|i| match i.kind {
+                Kind::Pppoe => Some((InterfaceId::new(&i.name), "PPPoE peer".to_string())),
+                Kind::Wireguard => Some((InterfaceId::new(&i.name), "WireGuard peer".to_string())),
+                _ => None,
+            })
             .collect(),
     });
     for i in &active {
@@ -574,7 +577,7 @@ pub fn lower(
     for (phys, (_, prov, _)) in l2 {
         let Some(m) = interface_mac(col, phys) else {
             l.note(format!(
-                "{phys}: no collected MAC, so the layer 2 link is not lowered"
+                "{phys}: no collected MAC, layer 2 link not lowered"
             ));
             continue;
         };
@@ -682,16 +685,16 @@ fn tunnel_source<'a>(
     addrs: &Addrs,
     endpoint: IpAddr,
 ) -> Result<(IpAddr, &'a str), String> {
-    let not_known = |why: String| Err(format!("the WireGuard source address is not known: {why}"));
+    let not_known = |why: String| Err(format!("source address not known: {why}"));
     let Some((p, g)) = main.lookup(endpoint) else {
         return not_known(format!("no route to {endpoint}"));
     };
     if g.unknown.is_some() {
-        return not_known(format!("the route {p} is not known"));
+        return not_known(format!("route {p} not known"));
     }
     let ifaces: BTreeSet<&str> = g.next_hops.iter().map(|h| h.interface.as_str()).collect();
     let [iface] = ifaces.into_iter().collect::<Vec<_>>()[..] else {
-        return not_known(format!("the route {p} has no single interface"));
+        return not_known(format!("route {p} with no single interface"));
     };
     let mine: Vec<IpAddr> = addrs
         .get(iface)
@@ -811,7 +814,7 @@ impl L<'_> {
                 match a.parse::<Prefix>() {
                     Ok(x) => allowed.push(x),
                     Err(_) => self.note(format!(
-                        "{} peer {}: the allowed IP {a} is not valid",
+                        "{} peer {}: allowed IP {a} not valid",
                         i.name, p.name
                     )),
                 }
@@ -826,7 +829,7 @@ impl L<'_> {
                     Ok((a, i)) => (Ok(a), Some(InterfaceId::new(i))),
                     Err(why) => (Err(why), None),
                 },
-                None => (Err("WireGuard peer endpoint not known".to_string()), None),
+                None => (Err("endpoint not known".to_string()), None),
             };
             peers.push(WireguardPeer {
                 name: p.name.clone(),
@@ -838,9 +841,9 @@ impl L<'_> {
             });
         }
         let unknown = if self.cfg.output_filter {
-            Some("the global output filter is not lowered".to_string())
+            Some("global output filter not lowered".to_string())
         } else if self.cfg.local_route {
-            Some("the policy routes of the router itself are not lowered".to_string())
+            Some("policy routes of the router itself not lowered".to_string())
         } else {
             None
         };
@@ -918,7 +921,7 @@ impl L<'_> {
             if !protocols.is_empty() {
                 let names: Vec<&str> = protocols.iter().map(|(n, _)| n.as_str()).collect();
                 self.note(format!(
-                    "protocols {} not lowered and no collected RIB: the routes other than the connected and local routes are unknown",
+                    "protocols {} not lowered, no collected RIB, routes other than the connected and local routes unknown",
                     names.join(", ")
                 ));
                 let spans: Vec<SourceSpan> = protocols.iter().map(|(_, l)| self.span(*l)).collect();
@@ -960,7 +963,7 @@ impl L<'_> {
             let resolver = resolver(&by_prefix, locals);
             for (prefix, rows) in by_prefix {
                 let Ok(p) = prefix.parse::<Prefix>() else {
-                    self.note(format!("route {prefix}: the prefix is not valid"));
+                    self.note(format!("route {prefix}: prefix not valid"));
                     continue;
                 };
                 let spans: Vec<SourceSpan> = rows.iter().map(|r| r.span.clone()).collect();
@@ -1030,10 +1033,7 @@ impl L<'_> {
 
     fn static_route(&mut self, t: &mut Fib, r: &crate::vyos::config::StaticRoute, addrs: &Addrs) {
         let Ok(p) = r.prefix.parse::<Prefix>() else {
-            self.note(format!(
-                "static route {}: the prefix is not valid",
-                r.prefix
-            ));
+            self.note(format!("static route {}: prefix not valid", r.prefix));
             return;
         };
         let span = vec![self.span(r.lines)];
@@ -1145,7 +1145,7 @@ impl L<'_> {
                             .with_span(span)
                     }
                     Some(Action::Other(a)) => {
-                        self.note(format!("{name}: action {a} is not lowered"));
+                        self.note(format!("{name}: action {a} not lowered"));
                         FRule::unhandled(name, span)
                     }
                     None => match self.profile.intra_zone_default {
@@ -1153,7 +1153,7 @@ impl L<'_> {
                             FRule::new(name, RulePredicate::exact(Match::any()), a).with_span(span)
                         }
                         None => {
-                            self.note(format!("{name}: the action is not known"));
+                            self.note(format!("{name}: action not known"));
                             FRule::unhandled(name, span)
                         }
                     },
@@ -1198,7 +1198,7 @@ impl L<'_> {
         // policy is unknown for each packet.
         let whole = SourceSpan::new(self.file, 1, 1);
         if self.cfg.forward_filter {
-            self.note("the global forward filter is not lowered".into());
+            self.note("global forward filter not lowered".into());
             forward.insert(
                 0,
                 (
@@ -1208,7 +1208,7 @@ impl L<'_> {
             );
         }
         if self.cfg.input_filter {
-            self.note("the global input filter is not lowered".into());
+            self.note("global input filter not lowered".into());
             to_local.insert(
                 0,
                 (
@@ -1229,7 +1229,7 @@ impl L<'_> {
             Some(Action::Accept) => StateAction::Accept,
             Some(Action::Drop | Action::Reject) => StateAction::Drop,
             Some(Action::Other(x)) => {
-                self.note(format!("state-policy {state}: action {x} is not lowered"));
+                self.note(format!("state-policy {state}: action {x} not lowered"));
                 StateAction::Unknown
             }
         };
@@ -1251,7 +1251,7 @@ impl L<'_> {
             Some(Action::Accept) => RuleAction::Permit,
             Some(Action::Drop | Action::Reject) => RuleAction::Deny,
             Some(Action::Other(a)) => {
-                self.note(format!("{name}: action {a} is not lowered"));
+                self.note(format!("{name}: action {a} not lowered"));
                 return FRule::unhandled(name.to_string(), span);
             }
             None => self.profile.firewall_default,
@@ -1285,7 +1285,7 @@ impl L<'_> {
             let states = match conn_states(&r.matches.state) {
                 Ok(s) => s,
                 Err(e) => {
-                    self.note(format!("{rname}: state {e} is not lowered"));
+                    self.note(format!("{rname}: state {e} not lowered"));
                     out.push((None, None, None, FRule::unhandled(rname, span)));
                     continue;
                 }
@@ -1294,7 +1294,7 @@ impl L<'_> {
                 Some(Action::Accept) => RuleAction::Permit,
                 Some(Action::Drop | Action::Reject) => RuleAction::Deny,
                 ref a => {
-                    self.note(format!("{rname}: action {a:?} is not lowered"));
+                    self.note(format!("{rname}: action {a:?} not lowered"));
                     out.push((None, None, None, FRule::unhandled(rname, span)));
                     continue;
                 }
@@ -1319,7 +1319,7 @@ impl L<'_> {
                 FRule::new(dname, all, RuleAction::Deny).with_span(span)
             }
             _ => {
-                self.note(format!("{dname}: the default action is not known"));
+                self.note(format!("{dname}: default action not known"));
                 FRule::unhandled(dname, span)
             }
         };

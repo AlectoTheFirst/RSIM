@@ -504,7 +504,7 @@ fn both_peers_hand_the_virtual_mac_and_the_peer_mac_to_layer_3() {
     let a = run(&t, "192.0.2.2");
     let all: Vec<String> = show(&a).into_iter().flat_map(|b| b.1).collect();
     assert!(
-        has(&all, "vpcb/mac 00:00:5e:00:53:1a is on port svi/Vlan10"),
+        has(&all, "vpcb/mac 00:00:5e:00:53:1a on port svi/Vlan10"),
         "{all:#?}"
     );
 }
@@ -528,7 +528,7 @@ fn a_vpc_domain_with_no_state_gives_unknown() {
     });
     let e = assemble(inputs);
     assert!(
-        e.notes["vpca"].contains(&"port-channel20: the vPC domain is not known".to_string()),
+        e.notes["vpca"].contains(&"port-channel20: vPC domain not known".to_string()),
         "{:#?}",
         e.notes
     );
@@ -620,7 +620,7 @@ fn a_frame_that_the_standby_peer_routes_uses_the_collected_row() {
     assert!(
         has(
             steps,
-            "vpcb/mac-svi 00:00:5e:00:53:1a is on port port-channel1"
+            "vpcb/mac-svi 00:00:5e:00:53:1a on port port-channel1"
         ),
         "{steps:#?}"
     );
@@ -672,8 +672,7 @@ fn a_domain_id_alone_makes_no_pair() {
     let e = estate_with(&o);
     assert!(
         e.notes["acc1"].contains(
-            &"port-channel30: the vPC pair does not report the link back, so the port has no link"
-                .to_string()
+            &"port-channel30: link not reported back by the vPC pair, no link".to_string()
         ),
         "{:#?}",
         e.notes

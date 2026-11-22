@@ -315,7 +315,7 @@ pub fn read(s: &Stanza, read: &mut BTreeSet<u32>, mask: &dyn Fn(&str) -> String)
     let asn_text = words.get(2).copied().unwrap_or_default();
     let asn = Sourced::new(
         parse_asn(asn_text)
-            .ok_or_else(|| format!("router bgp {} is not an AS number", mask(asn_text))),
+            .ok_or_else(|| format!("router bgp {} not an AS number", mask(asn_text))),
         (s.first_line, s.first_line),
     );
     let mut confederation = Confederation::default();

@@ -177,43 +177,35 @@ impl Resolver {
         spans: &mut Vec<SourceSpan>,
     ) -> Result<Vec<Hop>, String> {
         let Some(t) = self.tables.get(vrf) else {
-            return Err(format!("the next hop {g} has no route in VRF {vrf}"));
+            return Err(format!("no route to {g} in VRF {vrf}"));
         };
         if let Some(s) = &t.unknown {
             spans.extend(s.iter().cloned());
-            return Err(format!("the route table of VRF {vrf} is not known"));
+            return Err(format!("route table of VRF {vrf} not known"));
         }
         let Some((prefix, i)) = t.trie.longest_match(g) else {
-            return Err(format!("the next hop {g} has no route in VRF {vrf}"));
+            return Err(format!("no route to {g} in VRF {vrf}"));
         };
         if prefix.len() == 0 && !through_default {
-            return Err(format!(
-                "the next hop {g} matches only the default route of VRF {vrf}"
-            ));
+            return Err(format!("{g} matches only the default route of VRF {vrf}"));
         }
         let key = (vrf.to_string(), prefix);
         if visited.contains(&key) {
-            return Err(format!(
-                "the resolution of {g} comes back to {prefix} in VRF {vrf}"
-            ));
+            return Err(format!("resolution of {g} loops at {prefix} in VRF {vrf}"));
         }
         let (target, s) = &t.routes[*i];
         spans.extend(s.iter().cloned());
         let paths = match target {
             Target::Paths(p) => p,
             Target::Local => {
-                return Err(format!(
-                    "the next hop {g} is an address of the device in VRF {vrf}"
-                ));
+                return Err(format!("{g}, local address in VRF {vrf}"));
             }
             Target::Null => {
-                return Err(format!(
-                    "the next hop {g} resolves through the discard route {prefix} in VRF {vrf}"
-                ));
+                return Err(format!("{g} through discard route {prefix} in VRF {vrf}"));
             }
             Target::Unknown => {
                 return Err(format!(
-                    "the next hop {g} resolves through {prefix} in VRF {vrf}, a route that is not read or not known"
+                    "{g} through {prefix} in VRF {vrf}, route not read or not known"
                 ));
             }
         };
@@ -243,16 +235,14 @@ impl Resolver {
                 (None, None) => {
                     visited.pop();
                     return Err(format!(
-                        "the next hop {g} resolves through {prefix} in VRF {vrf}, which has a path with no next hop"
+                        "{g} through {prefix} in VRF {vrf}, path with no next hop"
                     ));
                 }
             }
         }
         visited.pop();
         if out.is_empty() {
-            return Err(format!(
-                "the next hop {g} resolves through {prefix} in VRF {vrf}, which has no path"
-            ));
+            return Err(format!("{g} through {prefix} in VRF {vrf}, no path"));
         }
         Ok(out)
     }

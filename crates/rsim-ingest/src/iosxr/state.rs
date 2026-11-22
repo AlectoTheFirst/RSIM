@@ -412,7 +412,7 @@ pub(crate) fn hsrp(p: &Parsed, names: &Names) -> Result<Vec<HsrpRow>, String> {
                 interface: names.resolve(p.text(r, "INTERFACE")),
                 group: group
                     .parse()
-                    .map_err(|_| format!("the group {group:?} is not a number"))?,
+                    .map_err(|_| format!("group {group:?} not a number"))?,
                 state: p.text(r, "STATE").to_string(),
                 address: p
                     .text(r, "GROUP_ADDR")

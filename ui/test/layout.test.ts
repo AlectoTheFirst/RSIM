@@ -143,7 +143,7 @@ describe("the ladder of mini-enterprise", () => {
 
   it("prints the reason of the engine unchanged and the most specific source", () => {
     const dnat = fwd.find((r) => r.fn === "dnat")!;
-    expect(dnat.reason).toBe("not translated · destination NAT fgt:root:vip default action");
+    expect(dnat.reason).toBe("not translated, destination NAT fgt:root:vip default action");
     expect(fwd.find((r) => r.fn === "route")!.source).toBe("conf:60");
   });
 

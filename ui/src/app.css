@@ -415,6 +415,15 @@ button.mark {
   line-height: var(--row);
 }
 
+/* A reason and a value of a cell wrap; no text is cut. */
+.ladder-row > .reason,
+.ladder-row > .cell.t-value,
+.ladder-row > .cell.t-value-changed {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
 .ladder-row.step {
   cursor: pointer;
 }
@@ -542,6 +551,17 @@ button.mark {
   text-overflow: clip;
 }
 
+/* Upright lane names, when a name is wider than its lane: each reads from
+   the bottom up over its lane. */
+.lane-names.upright > .lane-name {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  justify-self: center;
+  text-align: start;
+  overflow: visible;
+  padding: var(--hairline) 0;
+}
+
 /* The site header over a group of lanes of one site, with a hairline
    below it. */
 .lane-names > .lane-site {
@@ -664,55 +684,67 @@ button.mark {
   padding: 0;
 }
 
-/* The set page */
+/* The parts of a set query: one row for each part, a click selects it. */
+.parts {
+  display: grid;
+  grid-template-columns: var(--col-step) minmax(0, max-content) minmax(0, 1fr);
+  margin-bottom: var(--line-gap);
+}
 
-.part {
+.parts-head,
+.part-row {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  column-gap: var(--fact-gap);
   position: relative;
-  padding-left: var(--part-gap);
 }
 
-.part.band {
-  background: var(--band);
-  padding: 0;
+.parts-head {
+  border-bottom: var(--hairline) solid var(--rule);
+  line-height: var(--label-line);
+  padding-bottom: var(--button-gap);
 }
 
-.part.end {
-  border: var(--hairline) solid var(--drop);
-  padding: 0 var(--part-pad);
-  line-height: calc(var(--row) - 2 * var(--hairline));
-  height: var(--row);
+.part-row {
+  cursor: pointer;
+  line-height: var(--row);
+  border-bottom: var(--hairline) solid var(--rule);
 }
 
-.part.end * {
-  line-height: inherit;
+.part-row:hover,
+.part-row.selected {
+  background: var(--raise);
 }
 
-.part.end.deliver {
-  border-color: var(--deliver);
+.part-row.selected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--selected-bar);
+  background: var(--forward);
 }
 
-.part.end.exit {
-  border-color: var(--ink);
+.part-row > .ix {
+  display: flex;
+  justify-content: flex-end;
+  color: var(--ink-muted);
 }
 
-.part.end.unknown {
-  border-style: dashed;
-  border-color: var(--ink-muted);
+/* A value of a part wraps; no value is cut. */
+.part-fields {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--fact-gap);
+  min-width: 0;
 }
 
-.verdict-unknown {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--button-gap);
-  vertical-align: middle;
-}
-
-.part-head {
-  padding-left: var(--part-gap);
-}
-
-.part-head:nth-child(5) {
-  padding-left: 0;
+.part-field,
+.part-outcome {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* A hatch mark in a fact of the opened row wraps its text. */

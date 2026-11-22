@@ -153,7 +153,7 @@ impl FromEngine<Verdict> for VerdictJson {
                 None,
                 Some(ReasonJson {
                     code: snake(&ReasonCode::Exited),
-                    detail: format!("exit at {x}"),
+                    detail: x.to_string(),
                 }),
             ),
             Verdict::Drop(r) | Verdict::Unknown(r) => (None, Some(ReasonJson::new(r))),

@@ -317,7 +317,7 @@ fn without_a_route_table_section_the_routing_is_unhandled() {
     assert!(
         e.notes["pe1"]
             .iter()
-            .any(|n| n == "no route table section, so each route lookup is unknown")
+            .any(|n| n == "no route table section, each route lookup unknown")
     );
 }
 

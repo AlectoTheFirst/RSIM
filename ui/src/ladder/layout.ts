@@ -41,8 +41,11 @@ function one(x: unknown, f: Field | null): string {
   return String(x);
 }
 
-/** The text of one field value. A range or a list of values is not known. */
-export function fieldText(v: FieldValue, f: Field | null): Shown {
+/**
+ * The text of one field value. A range or a list of values is not known in
+ * a path query, and known in a set query, whose packets are each value.
+ */
+export function fieldText(v: FieldValue, f: Field | null, set = false): Shown {
   if (v === "absent") return { known: true, text: "absent" };
   if (v === "unknown" || v === "original") return { known: false, text: v };
   if ("known" in v) return { known: true, text: one(v.known, f) };
@@ -52,23 +55,23 @@ export function fieldText(v: FieldValue, f: Field | null): Shown {
     }
     return one(r, f);
   });
-  return { known: false, text: parts.join(",") };
+  return { known: set, text: parts.join(",") };
 }
 
 /** The value of a field in the current header of one member. */
-export function memberValue(m: { original: Header; current: Header }, f: Field): Shown {
+export function memberValue(m: { original: Header; current: Header }, f: Field, set = false): Shown {
   let v = rawValue(m.current, f);
   if (v === "original") v = rawValue(m.original, f);
-  return fieldText(v, f);
+  return fieldText(v, f, set);
 }
 
 /**
  * The value of a field over the members of a packet set: known only if
  * each member knows the same value. An empty set has no value.
  */
-export function setValue(ps: PacketSet, f: Field): Shown | null {
+export function setValue(ps: PacketSet, f: Field, set = false): Shown | null {
   if (ps.members.length === 0) return null;
-  const all = ps.members.map((m) => memberValue(m, f));
+  const all = ps.members.map((m) => memberValue(m, f, set));
   const texts = [...new Set(all.map((s) => s.text))];
   return { known: texts.length === 1 && all.every((s) => s.known), text: texts.join(" or ") };
 }
@@ -391,6 +394,7 @@ export function pathRows(
   level: Level,
   lanes: readonly Lane[],
   start: string | null = null,
+  set = false,
 ): StepRow[] {
   const gs = groups(b.steps, level);
   const laneOf = (d: string | null | undefined) => Math.max(0, laneIndex(lanes, d ?? null));
@@ -413,7 +417,7 @@ export function pathRows(
       fn: g.length === 1 ? functionLabel(first) : `${g.length} functions`,
       lane,
       reason: last.reason.detail,
-      cells: FIELDS.map((f) => cell(setValue(first.input, f), setValue(last.output, f), gi === 0)),
+      cells: FIELDS.map((f) => cell(setValue(first.input, f, set), setValue(last.output, f, set), gi === 0)),
       rib: ribOfGroup(g.map((s) => s.rib_guard)),
       source:
         g.length === 1
@@ -435,11 +439,12 @@ export function pathRows(
 }
 
 /**
- * The ladder of a path query answer: the forward branches, then the
- * replies. With `reply`, a forward branch that does not deliver has a muted
- * line in the place of its reply.
+ * The ladder of a path query answer, or of one part of a set query answer
+ * with `set`: the forward branches, then the replies. With `reply`, a
+ * forward branch that does not deliver has a muted line in the place of its
+ * reply.
  */
-export function ladder(a: Answer, level: Level, reply = true): Ladder {
+export function ladder(a: Answer, level: Level, reply = true, set = false): Ladder {
   const starts = sourceEndpoints(a);
   const seqs: LaneKey[][] = a.branches.map((b) => laneSeq(b, starts.get(b.index) ?? null));
   const fwdEnd = new Map(a.branches.map((b) => [b.index, endpointOf(b.verdict)]));
@@ -452,7 +457,7 @@ export function ladder(a: Answer, level: Level, reply = true): Ladder {
       // The result line gives the verdict of each branch.
       rows.push({ type: "section", key: `f.${b.index}`, dir: "forward", text: `branch ${b.index}`, verdict: null, note: null });
     }
-    rows.push(...pathRows(b, { replyOf: null, branch: b.index }, "forward", level, lanes, starts.get(b.index) ?? null));
+    rows.push(...pathRows(b, { replyOf: null, branch: b.index }, "forward", level, lanes, starts.get(b.index) ?? null, set));
   }
   for (const b of a.branches) {
     const replies = a.replies.filter((r) => r.forward_branch === b.index);
@@ -484,7 +489,7 @@ export function ladder(a: Answer, level: Level, reply = true): Ladder {
           verdict: rmulti ? rb.verdict : null,
           note: null,
         });
-        rows.push(...pathRows(rb, { replyOf: fb, branch: rb.index }, "reply", level, lanes, fwdEnd.get(fb) ?? null));
+        rows.push(...pathRows(rb, { replyOf: fb, branch: rb.index }, "reply", level, lanes, fwdEnd.get(fb) ?? null, set));
       }
     }
   }
@@ -579,6 +584,26 @@ export function partCounts(parts: readonly { result: { kind: string; verdict?: V
     if (k === "deliver" || k === "exit" || k === "drop" || k === "unknown") out[k] += 1;
   }
   return out;
+}
+
+/** The outcomes of a set answer that occur, each with its count, in the order deliver, exit, drop, unknown, depends on path. */
+export function outcomeCounts(n: ReturnType<typeof partCounts>): [string, number][] {
+  const all: [string, number][] = [
+    ["deliver", n.deliver],
+    ["exit", n.exit],
+    ["drop", n.drop],
+    ["unknown", n.unknown],
+    ["depends_on_path", n.dependsOnPath],
+  ];
+  return all.filter(([, c]) => c > 0);
+}
+
+/**
+ * Whether the names of the lanes stand upright: when a name is wider than
+ * its lane at `charWidth` px for each character.
+ */
+export function upright(names: readonly string[], lane: number, charWidth: number): boolean {
+  return names.some((n) => n.length * charWidth > lane);
 }
 
 /** The text of a QoS value. A range, a value that varies or an unknown value is not known. */

@@ -185,7 +185,7 @@ fn groups(
                     interface: names.resolve(p.text(r, "INTERFACE")),
                     group: group
                         .parse()
-                        .map_err(|_| format!("the group {group:?} is not a number"))?,
+                        .map_err(|_| format!("group {group:?} not a number"))?,
                     state: p.text(r, "STATE").to_string(),
                     address: p.text(r, address).parse().ok(),
                     span,
@@ -233,16 +233,13 @@ fn stp(p: &Parsed, text: &str, names: &Names) -> Result<Stp, String> {
         .lines()
         .find(|l| l.trim_start().starts_with(STP_MST_HEADER))
     {
-        return Err(format!(
-            "the tree {:?} is not the tree of a VLAN",
-            line.trim()
-        ));
+        return Err(format!("tree {:?} not a VLAN tree", line.trim()));
     }
     let mut out = Stp::new();
     for (r, span) in p.records() {
         let vlan = p.text(r, "VLAN_ID");
         let Ok(vlan) = vlan.parse::<u16>() else {
-            return Err(format!("the row at line {} has no VLAN", span.first_line));
+            return Err(format!("row at line {} with no VLAN", span.first_line));
         };
         let word = p.text(r, "STATUS").to_ascii_lowercase();
         let state = if STP_FORWARDING.contains(&word.as_str()) {
@@ -265,7 +262,7 @@ fn vlans(p: &Parsed) -> Result<Vec<VlanRow>, String> {
             Ok(VlanRow {
                 vlan: vlan
                     .parse()
-                    .map_err(|_| format!("the VLAN {vlan:?} is not a number"))?,
+                    .map_err(|_| format!("VLAN {vlan:?} not a number"))?,
                 status: p.text(r, "STATUS").to_string(),
                 span,
             })
@@ -284,7 +281,7 @@ fn arp_vrfs(text: &str, file: &str, names: &Names) -> Result<VrfArp, String> {
         .collect();
     let first = starts.first().copied().unwrap_or(lines.len());
     if let Some(l) = lines[..first].iter().find(|l| !l.trim().is_empty()) {
-        return Err(format!("the line {:?} is before the first VRF", l.trim()));
+        return Err(format!("line {:?} before the first VRF", l.trim()));
     }
     let mut out = VrfArp::new();
     for (k, &at) in starts.iter().enumerate() {
@@ -294,7 +291,7 @@ fn arp_vrfs(text: &str, file: &str, names: &Names) -> Result<VrfArp, String> {
             let name = name.trim();
             out.insert(
                 name.to_string(),
-                Err(format!("the command of the ARP table of VRF {name} failed")),
+                Err(format!("ARP table command of VRF {name} failed")),
             );
             continue;
         }
@@ -412,7 +409,7 @@ fn acls(p: &Parsed) -> Result<BTreeMap<String, AclList>, String> {
         }
         let n = seq
             .parse::<u64>()
-            .map_err(|_| format!("the entry number {seq:?} of {name} is not a number"))?;
+            .map_err(|_| format!("entry number {seq:?} of {name} not a number"))?;
         list.entries.insert((n, p.text(r, "ACTION").to_string()));
     }
     Ok(out)

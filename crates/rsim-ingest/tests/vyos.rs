@@ -436,7 +436,7 @@ mod twin {
         assert_eq!(path.last().map(String::as_str), Some("r1/wireguard/wg0"));
         match v {
             Verdict::Unknown(r) => {
-                assert_eq!(r.detail, "WireGuard peer endpoint not known · peer roam")
+                assert_eq!(r.detail, "WireGuard wg0 peer roam, endpoint not known")
             }
             v => panic!("{v:?}"),
         }
@@ -507,7 +507,8 @@ mod twin {
         assert!(path.contains(&"r1/wireguard/wg0".to_string()), "{path:?}");
         match v {
             Verdict::Unknown(r) => assert!(
-                r.detail.contains("new and an established connection"),
+                r.detail
+                    .contains("new and established give different results"),
                 "{}",
                 r.detail
             ),
@@ -633,7 +634,7 @@ mod twin {
         assert_eq!(v, exit("pppoe0"));
         let last = b.steps.last().unwrap();
         assert_eq!(last.reason.code, ReasonCode::Exited);
-        assert_eq!(last.reason.detail, "exit at r1 pppoe0 · access link");
+        assert_eq!(last.reason.detail, "exit at r1 pppoe0, access link");
     }
 
     fn exit(iface: &str) -> Verdict {
@@ -672,7 +673,7 @@ mod twin {
         assert_eq!(*b.verdict, exit("eth1"), "{:?}", b.steps.last());
         assert_eq!(
             b.steps.last().unwrap().reason.detail,
-            "exit at r1 eth1 · default route"
+            "exit at r1 eth1, default route"
         );
     }
 
@@ -971,7 +972,7 @@ mod twin {
         let (detail, _, _) = step(&a, "r1/route");
         assert_eq!(
             detail,
-            "route 198.18.0.0/15 (bgp) in VRF default: next hop not resolved: 203.0.113.10"
+            "route 198.18.0.0/15 (bgp) in VRF default, next hop not resolved: 203.0.113.10"
         );
     }
 
@@ -1323,7 +1324,7 @@ mod twin {
         assert_eq!(code, ReasonCode::IncompleteTable);
         assert_eq!(
             detail,
-            "route 198.51.100.128/26 (bgp) in VRF default: next hop not resolved: 198.51.100.200"
+            "route 198.51.100.128/26 (bgp) in VRF default, next hop not resolved: 198.51.100.200"
         );
     }
 }

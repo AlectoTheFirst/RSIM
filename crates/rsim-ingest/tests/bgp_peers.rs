@@ -535,7 +535,7 @@ fn a_missing_group_hides_the_settings_that_the_neighbour_does_not_state() {
     assert!(unknown_starts(&iosxe.local_asn.value, "inheritance gap"));
     assert_eq!(
         iosxe.gaps,
-        ["inheritance gap: template peer-session NOWHERE is not defined"]
+        ["inheritance gap: template peer-session NOWHERE not defined"]
     );
     let config = String::from_utf8(fixture(VYOS)).unwrap().replace(
         r#""198.51.100.2": {"peer-group": "UPSTREAM", "shutdown": {}},"#,
@@ -569,7 +569,7 @@ fn remote_as_auto_and_an_unreadable_local_as_are_unknown() {
     );
     assert!(unknown_starts(
         &xr.local_asn.value,
-        "asn not resolved: the line local-as"
+        "asn not resolved: line local-as"
     ));
 }
 

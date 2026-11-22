@@ -42,7 +42,7 @@ const HSRP_RULES: GroupRules = GroupRules {
     command: "show standby brief",
     active: HSRP_ACTIVE,
     not_active: HSRP_NOT_ACTIVE,
-    no_vmac: "no mac-address line, and show standby brief gives no virtual MAC",
+    no_vmac: "no mac-address line, none in show standby brief",
 };
 
 /// The words of `show vrrp brief`.
@@ -51,7 +51,7 @@ const VRRP_RULES: GroupRules = GroupRules {
     command: "show vrrp brief",
     active: VRRP_MASTER,
     not_active: VRRP_NOT_MASTER,
-    no_vmac: "show vrrp brief gives no virtual MAC",
+    no_vmac: "none in show vrrp brief",
 };
 
 /// The words of `show standby`.
@@ -60,7 +60,7 @@ const HSRP_DETAIL_RULES: GroupRules = GroupRules {
     command: "show standby",
     active: HSRP_ACTIVE,
     not_active: HSRP_NOT_ACTIVE,
-    no_vmac: "no mac-address line, and show standby gives no virtual MAC",
+    no_vmac: "no mac-address line, none in show standby",
 };
 
 /// The words of `show vrrp`.
@@ -69,7 +69,7 @@ const VRRP_DETAIL_RULES: GroupRules = GroupRules {
     command: "show vrrp",
     active: VRRP_MASTER,
     not_active: VRRP_NOT_MASTER,
-    no_vmac: "show vrrp gives no virtual MAC",
+    no_vmac: "none in show vrrp",
 };
 
 /// The MACs of the interfaces of a router or a switch in `show interfaces`.
@@ -134,12 +134,12 @@ pub fn lower(
         ("arp_vrfs", error(&st.arp_vrfs)),
     ] {
         if let Some(e) = e {
-            l.note(format!("the section {name} is not read: {e}"));
+            l.note(format!("section {name} not read: {e}"));
         }
     }
     for (v, status) in super::layer2::inactive_vlans(cfg, &st) {
         l.note(format!(
-            "VLAN {v}: show vlan brief gives the status {status}, so each port that carries it is unknown"
+            "VLAN {v}: status {status} in show vlan brief, each port that carries it unknown"
         ));
     }
     let active = ports(&mut l, cfg, &st);
@@ -284,7 +284,7 @@ pub fn lower(
     let rib = st.l3.rib.as_ref().and_then(|x| x.as_ref().ok());
     if st.l3.rib.is_none() {
         l.note(
-            "no route table section, so each route lookup is unknown and the static routes of the config are not lowered"
+            "no route table section, each route lookup unknown, static routes of the config not lowered"
                 .into(),
         );
     }
@@ -295,7 +295,7 @@ pub fn lower(
         vrfs.extend(r.paths.iter().map(|p| p.vrf.clone()));
         vrfs.extend(r.unread.iter().filter_map(|u| u.vrf.clone()));
     }
-    let other_vrf = |v: &str| format!("a next hop in VRF {v} is not lowered");
+    let other_vrf = |v: &str| format!("next hop in VRF {v} not lowered");
     let resolver = crate::iosxr::lower::resolver(rib, &vrfs);
     sum.routes = resolver.clone();
     let mut tables = BTreeMap::new();
@@ -328,18 +328,14 @@ pub fn lower(
                 Ok(()) => vrf_forwards = true,
                 Err(why) => {
                     let span = vrf_span(&l, cfg, rib, v);
-                    let s = l.sink(
-                        &next,
-                        format!("{why}, so its next hops are not known"),
-                        span,
-                    );
+                    let s = l.sink(&next, format!("{why}, next hops not known"), span);
                     l.add(s);
                 }
             }
         }
         tables.insert(VrfId::new(v), t);
     }
-    l.note("IPv6 is not lowered: each IPv6 packet is unknown at the route lookup".into());
+    l.note("IPv6 not lowered".into());
     let meta = l.meta("route", Vec::new());
     l.add(RouteLookup {
         meta,
@@ -420,7 +416,7 @@ fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
                     vlan: Some(v),
                     routed: true,
                     untagged: true,
-                    reason: format!("the native VLAN of {} is not lowered", p.i.name),
+                    reason: format!("native VLAN of {} not lowered", p.i.name),
                     lines,
                 },
                 None => Unlowered {
@@ -428,7 +424,7 @@ fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
                     vlan: None,
                     routed: true,
                     untagged: true,
-                    reason: format!("the dot1q VLAN of {} is not read", p.i.name),
+                    reason: format!("dot1q VLAN of {} not read", p.i.name),
                     lines: p.i.lines,
                 },
             }
@@ -440,14 +436,12 @@ fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
 /// the default VRF, or why it does not.
 fn vrf_arp_state(st: &State, vrf: &str) -> Result<(), String> {
     match &st.arp_vrfs {
-        None => Err(format!("the ARP table of VRF {vrf} is not collected")),
+        None => Err(format!("ARP table of VRF {vrf} not collected")),
         Some(Err(e)) => Err(format!(
-            "the section arp_vrfs is not read ({e}), so the ARP table of VRF {vrf} is not known"
+            "section arp_vrfs not read: {e}, ARP table of VRF {vrf} not known"
         )),
         Some(Ok(m)) => match m.get(vrf) {
-            None => Err(format!(
-                "the section arp_vrfs has no ARP table of VRF {vrf}"
-            )),
+            None => Err(format!("no ARP table of VRF {vrf} in the section arp_vrfs")),
             Some(Err(e)) => Err(e.clone()),
             Some(Ok(_)) => Ok(()),
         },
@@ -486,7 +480,7 @@ fn ports(l: &mut L, cfg: &Config, st: &State) -> Vec<Port> {
         }
         if s.is_some_and(|s| s.admin_down) {
             l.note(format!(
-                "{}: show interfaces gives administratively down, and the config has no shutdown line",
+                "{}: administratively down in show interfaces, no shutdown line in the config",
                 i.name
             ));
         }
@@ -495,7 +489,7 @@ fn ports(l: &mut L, cfg: &Config, st: &State) -> Vec<Port> {
         }
         if i.dynamic_address.is_some() {
             l.note(format!(
-                "{}: an address that the config does not state is not lowered",
+                "{}: address not in the config, not lowered",
                 i.name
             ));
         }
@@ -581,7 +575,7 @@ fn groups(
                     (None, Some(m)) => vmac = Some(m),
                     (Some(c), Some(m)) if c != m => {
                         state = GroupState::Unknown(format!(
-                            "{cmd} gives the virtual MAC {m:?}, and the config gives {c:?}"
+                            "virtual MAC {m:?} in {cmd}, {c:?} in the config"
                         ));
                     }
                     _ => {}
@@ -589,13 +583,13 @@ fn groups(
                 match (&state, x.active_local) {
                     (GroupState::Active, Some(false)) => {
                         state = GroupState::Unknown(format!(
-                            "{cmd} gives the state {} and another active router",
+                            "state {} and another active router in {cmd}",
                             x.row.state
                         ));
                     }
                     (GroupState::NotActive, Some(true)) => {
                         state = GroupState::Unknown(format!(
-                            "{cmd} gives the state {} and the router itself as the active router",
+                            "state {} and the router itself as the active router in {cmd}",
                             x.row.state
                         ));
                     }
@@ -636,7 +630,7 @@ fn port(i: &Interface, admin: Option<bool>, cfg: &Config) -> nxos::config::Inter
         unhandled.extend(p.unhandled.iter().map(|u| format!("{}: {u}", p.name)));
     }
     if admin.is_none() {
-        unhandled.push("the admin state is not known".into());
+        unhandled.push("admin state not known".into());
     }
     if let (Some((role, _)), Some(v)) = (i.nat, &vrf) {
         let r = match role {
@@ -647,7 +641,7 @@ fn port(i: &Interface, admin: Option<bool>, cfg: &Config) -> nxos::config::Inter
     }
     if let Some(v) = &vrf {
         match cfg.vrfs.get(v) {
-            None => unhandled.push(format!("VRF {v} is not in the config")),
+            None => unhandled.push(format!("VRF {v} not in the config")),
             Some(x) if x.ipv4.is_none() => {
                 unhandled.push(format!("VRF {v} has no IPv4 address family"));
             }
@@ -710,13 +704,13 @@ fn cross_check_acls(l: &mut L, shared: &nxos::Config, st: &State) {
     for (name, acl) in &shared.acls {
         match lists.get(name) {
             None => l.note(format!(
-                "ACL {name}: show ip access-lists does not list it; the config decides"
+                "ACL {name}: not in show ip access-lists, config used"
             )),
             Some(list) => {
                 let mine = entries(acl);
                 if mine != list.entries {
                     l.note(format!(
-                        "ACL {name}: show ip access-lists gives the entries {}, and the config gives {}; the config decides",
+                        "ACL {name}: entries {} in show ip access-lists, {} in the config, config used",
                         show(&list.entries),
                         show(&mine)
                     ));
@@ -727,7 +721,7 @@ fn cross_check_acls(l: &mut L, shared: &nxos::Config, st: &State) {
     for name in lists.keys() {
         if !shared.acls.contains_key(name) {
             l.note(format!(
-                "ACL {name}: show ip access-lists lists it, and the config has no such ACL"
+                "ACL {name}: in show ip access-lists, not in the config"
             ));
         }
     }
@@ -745,7 +739,7 @@ fn cross_check_routes(l: &mut L, cfg: &Config, st: &State) {
     for v in listed {
         if v != DEFAULT_VRF && !cfg.vrfs.contains_key(v) {
             l.note(format!(
-                "VRF {v} is in the route table section, and the config has no such VRF"
+                "VRF {v} in the route table section, not in the config"
             ));
         }
     }
@@ -767,7 +761,7 @@ fn cross_check_routes(l: &mut L, cfg: &Config, st: &State) {
                 .or(r.interface.as_deref())
                 .unwrap_or_default();
             l.note(format!(
-                "static route {} via {via} in VRF {}: the route table has no such static path",
+                "static route {} via {via} in VRF {}, no such static path in the route table",
                 r.prefix, r.vrf
             ));
         }

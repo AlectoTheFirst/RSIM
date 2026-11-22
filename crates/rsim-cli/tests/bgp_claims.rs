@@ -320,16 +320,15 @@ fn estate() -> BTreeMap<String, Summary> {
     let mut gap = neighbour("r14", 10, "198.51.100.50", 64509, 64509, "198.51.100.49");
     gap.peer_asn = Asn {
         value: AsnValue::Unknown(
-            "inheritance gap: template peer-session MISSING is not defined".to_string(),
+            "inheritance gap: template peer-session MISSING not defined".to_string(),
         ),
         spans: Vec::new(),
     };
-    gap.gaps = vec!["inheritance gap: template peer-session MISSING is not defined".to_string()];
+    gap.gaps = vec!["inheritance gap: template peer-session MISSING not defined".to_string()];
     gap.shutdown = None;
     let mut lost = neighbour("r14", 20, "198.51.100.54", 64509, 64511, "198.51.100.53");
     lost.source_address = AddressValue::Unknown(
-        "source address not resolved: the next hop 198.51.100.54 has no route in VRF default"
-            .to_string(),
+        "source address not resolved: no route to 198.51.100.54 in VRF default".to_string(),
     );
     for f in [&mut gap, &mut lost] {
         f.section = SectionOutcome {
@@ -764,7 +763,7 @@ fn a_gap_that_can_hide_a_shutdown_line_turns_a_refute_into_unknown() {
             "Loopback0",
         );
         if gap {
-            a.gaps = vec!["inheritance gap: template peer-session MISSING is not defined".into()];
+            a.gaps = vec!["inheritance gap: template peer-session MISSING not defined".into()];
             a.shutdown = None;
         }
         d.insert("a".to_string(), device(&["198.51.100.1"], vec![a]));
@@ -871,7 +870,7 @@ fn disjoint_address_families_refute_only_when_both_sets_are_known_in_full() {
         let mut b = neighbour("b", 10, "198.51.100.1", 64497, 64496, "198.51.100.2");
         b.families = BTreeSet::from(["ipv4-vpn".to_string()]);
         if gap {
-            b.gaps = vec!["inheritance gap: template peer-policy MISSING is not defined".into()];
+            b.gaps = vec!["inheritance gap: template peer-policy MISSING not defined".into()];
         }
         d.insert("b".to_string(), device(&["198.51.100.2"], vec![b]));
         let bgp = join(&d, &BTreeSet::new(), &BTreeSet::new()).bgp;

@@ -1,8 +1,8 @@
 // The query of the query bar: its fields, its request body, and its forms
 // as an rsim command and as an MCP tool call.
-import { type Mode, QUERY_FIELDS, type QueryField, UNSTATED_ALL, kindOf, listItems, takes } from "./fields";
+import { type Mode, QUERY_FIELDS, type QueryField, UNSTATED_ALL, kindOf, queryMode, takes } from "./fields";
 
-export { type Mode, QUERY_FIELDS, type QueryField } from "./fields";
+export { type Mode, QUERY_FIELDS, type QueryField, queryMode } from "./fields";
 export type Fields = Partial<Record<QueryField, string>>;
 
 /**
@@ -19,15 +19,20 @@ export function stated(f: Fields, mode: Mode = "path"): [QueryField, string][] {
 /**
  * The JSON value of a field. A path query takes a number for a number
  * field and for an ICMP type number, and a list for the TCP flags; both
- * modes take true or false for the reply. Each other value is its text.
+ * query types take true or false for the reply. Each other value is its text.
  */
 export function jsonValue(mode: Mode, k: QueryField, v: string): string | number | boolean | string[] {
   const kind = kindOf(k);
   if (kind === "boolean" && (v === "true" || v === "false")) return v === "true";
   if (mode === "set") return v;
   if ((kind === "number" || kind === "icmp") && /^\d+$/.test(v)) return Number(v);
-  if (kind === "flags") return listItems(v);
+  if (kind === "flags") return flagNames(v);
   return v;
+}
+
+/** The TCP flags of one packet: the names that + joins. */
+function flagNames(v: string): string[] {
+  return v.split("+").map((x) => x.trim());
 }
 
 /**
@@ -39,13 +44,14 @@ function commandArgs(mode: Mode, f: Fields): string[] {
   return stated(f, mode).flatMap(([k, v]) => {
     const kind = kindOf(k);
     if (kind === "boolean" && (v === "true" || v === "false")) return v === "false" ? [`--no-${k}`] : [];
-    if (kind === "flags" && mode === "path") return [`--${k}`, shellWord(listItems(v).join(","))];
+    if (kind === "flags" && mode === "path") return [`--${k}`, shellWord(flagNames(v).join(","))];
     return [`--${k}`, shellWord(v)];
   });
 }
 
-/** The body of `POST /v1/twins/{twin}/queries`. */
-export function requestBody(mode: Mode, f: Fields): Record<string, unknown> {
+/** The body of `POST /v1/twins/{twin}/queries`, of the query type that the values give. */
+export function requestBody(f: Fields): Record<string, unknown> {
+  const mode = queryMode(f);
   const body: Record<string, unknown> = mode === "set" ? { mode: "set" } : {};
   for (const [k, v] of stated(f, mode)) body[k] = jsonValue(mode, k, v);
   return body;
@@ -144,7 +150,8 @@ export function mcpCall(mode: Mode, twin: string, f: Fields): string {
 /**
  * The fields of the query bar from the query of an answer. The echo of a
  * path query gives the protocol number with each protocol name; the field
- * of the number stays empty when the name is there.
+ * of the number stays empty when the name is there. The TCP flags of a path
+ * query are the flags of one packet, joined by +.
  */
 export function fieldsOf(echo: Record<string, unknown>): Fields {
   const out: Fields = {};
@@ -152,7 +159,7 @@ export function fieldsOf(echo: Record<string, unknown>): Fields {
     const v = echo[k];
     if (v === null || v === undefined) continue;
     if (k === "network.iana_number" && typeof v === "number" && echo["network.transport"] != null) continue;
-    out[k] = Array.isArray(v) ? v.map(String).join(",") : String(v);
+    out[k] = Array.isArray(v) ? v.map(String).join(kindOf(k) === "flags" ? "+" : ",") : String(v);
   }
   return out;
 }

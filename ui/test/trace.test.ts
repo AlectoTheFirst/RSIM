@@ -27,7 +27,7 @@ function golden(name: string): PathAnswer {
 function unknownBranch(): Branch {
   const base = golden("mini-enterprise").answer.branches[0]!;
   const steps = base.steps.slice(0, 3).map((s, i) => ({ ...s, outcome: { kind: i === 2 ? "unknown" : "forward" } }));
-  const reason = { code: "incomplete_table", detail: "198.51.100.7 is not in the ARP table of r1 on eth1; the collected table is incomplete" };
+  const reason = { code: "incomplete_table", detail: "198.51.100.7 not in the ARP table of r1 on eth1, table incomplete" };
   steps[2] = { ...steps[2]!, reason };
   return { ...base, steps, verdict: { kind: "unknown", reason } };
 }
@@ -41,7 +41,7 @@ describe("deciding step", () => {
     const b = unknownBranch();
     const d = decidingStep(b)!;
     expect(d.step.index).toBe(b.steps[2]!.index);
-    expect(d.reason).toBe("198.51.100.7 is not in the ARP table of r1 on eth1; the collected table is incomplete");
+    expect(d.reason).toBe("198.51.100.7 not in the ARP table of r1 on eth1, table incomplete");
     expect(d.path).toEqual({ replyOf: null, branch: b.index });
   });
 
@@ -56,7 +56,7 @@ describe("deciding step", () => {
     const b = golden("routing-loop").answer.branches[0]!;
     const d = decidingStep(b)!;
     expect(d.step.index).toBe(b.steps[b.steps.length - 1]!.index);
-    expect(d.reason).toBe("loop · r2/vrf");
+    expect(d.reason).toBe("loop at r2/vrf");
   });
 
   it("does not exist for a path that delivers", () => {
@@ -72,7 +72,7 @@ describe("deciding step", () => {
       const row = ladder(a, level).rows.find((r) => r.type === "step" && r.key === key);
       expect(row && row.type === "step" && row.steps.some((s) => s.index === d.step.index)).toBe(true);
     }
-    expect(autoStep(golden("routing-loop").answer)?.reason).toBe("loop · r2/vrf");
+    expect(autoStep(golden("routing-loop").answer)?.reason).toBe("loop at r2/vrf");
   });
 
   it("is selected for an answer whose branches have one verdict kind with different reasons", () => {

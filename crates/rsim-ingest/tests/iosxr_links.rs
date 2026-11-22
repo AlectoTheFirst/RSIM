@@ -571,7 +571,7 @@ fn a_group_with_no_row_in_show_hsrp_gives_unknown_for_its_address_and_mac() {
     let e = estate();
     assert!(
         e.notes["pe1"].iter().any(|n| n
-            == "Bundle-Ether20.100: HSRP group 3: show hsrp has 0 IPv4 rows of the group, so the packets to its virtual address and MAC are unknown"),
+            == "Bundle-Ether20.100: HSRP group 3: 0 IPv4 rows of the group in show hsrp, virtual address and MAC unknown"),
         "{:#?}",
         e.notes["pe1"]
     );
@@ -626,14 +626,13 @@ fn a_state_that_cannot_be_read_gives_unknown() {
     for (change, why) in [
         (
             &bogus as &dyn Fn(&mut Sections),
-            "the state \"Resign\" is not known",
+            "state \"Resign\" not known",
         ),
         (&without, "no show hsrp section"),
     ] {
         let e = estate_with(change);
-        let note = format!(
-            "Bundle-Ether20.100: HSRP group 1: {why}, so the packets to its virtual address and MAC are unknown"
-        );
+        let note =
+            format!("Bundle-Ether20.100: HSRP group 1: {why}, virtual address and MAC unknown");
         assert!(e.notes["pe1"].contains(&note), "{:#?}", e.notes["pe1"]);
         let t = twin_of(e);
         for (device, ingress, src) in [
@@ -662,8 +661,10 @@ fn an_active_group_with_no_virtual_mac_makes_the_port_unknown() {
         pe2(),
     ]);
     assert!(
-        e.notes["pe1"].iter().any(|n| n
-            == "Bundle-Ether20.100: HSRP group 1: no mac-address line, so the virtual MAC is not known"),
+        e.notes["pe1"]
+            .iter()
+            .any(|n| n
+                == "Bundle-Ether20.100: HSRP group 1: no mac-address line, virtual MAC not known"),
         "{:#?}",
         e.notes["pe1"]
     );

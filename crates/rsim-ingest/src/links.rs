@@ -481,7 +481,7 @@ pub fn join(
             _ => {
                 for d in list {
                     out.notes.entry((*d).to_string()).or_default().push(format!(
-                        "the host name {n} is on more than one device, so it names no neighbour"
+                        "host name {n} on more than one device, no neighbour"
                     ));
                 }
             }
@@ -498,9 +498,10 @@ pub fn join(
     for (m, list) in &owners {
         if list.len() > 1 {
             for (d, p) in list {
-                out.notes.entry(d.clone()).or_default().push(format!(
-                    "{p}: its MAC {m:?} is on more than one port, so it proves no link"
-                ));
+                out.notes
+                    .entry(d.clone())
+                    .or_default()
+                    .push(format!("{p}: MAC {m:?} on more than one port, no link"));
             }
         }
     }
@@ -555,7 +556,7 @@ pub fn join(
                                 }
                                 _ => {
                                     router_notes.push(format!(
-                                        "{port}: the neighbour {o} names no port of its own, so the port has no link"
+                                        "{port}: neighbour {o} names no port of its own, no link"
                                     ));
                                     Some(None)
                                 }
@@ -613,7 +614,7 @@ pub fn join(
                 vpc_named.insert(here, (ends, spans));
             } else {
                 out.notes.entry(d.clone()).or_default().push(format!(
-                    "{port}: the LLDP and CDP rows name more than one neighbour, so the port has no link"
+                    "{port}: more than one neighbour in the LLDP and CDP rows, no link"
                 ));
             }
         }
@@ -642,7 +643,7 @@ pub fn join(
         if !confirmed {
             let End(d, p) = here;
             out.notes.entry(d.clone()).or_default().push(format!(
-                "{p}: the neighbour does not report the link back, so the port has no link"
+                "{p}: link not reported back by the neighbour, no link"
             ));
             continue;
         }
@@ -694,7 +695,7 @@ pub fn join(
         if !confirmed {
             let End(d, p) = here;
             out.notes.entry(d.clone()).or_default().push(format!(
-                "{p}: the vPC pair does not report the link back, so the port has no link"
+                "{p}: link not reported back by the vPC pair, no link"
             ));
             continue;
         }
@@ -732,7 +733,7 @@ pub fn join(
         out.notes
             .entry(dev)
             .or_default()
-            .push(format!("{what}: 2 links claim the port, so it has no link"));
+            .push(format!("{what}: 2 links claim the port, no link"));
     }
 
     let mut l2_far: BTreeMap<(String, String), (String, String)> = BTreeMap::new();
@@ -743,9 +744,10 @@ pub fn join(
         }
         let (Some(ta), Some(tb)) = (target(switches, &a), target(switches, &b)) else {
             let End(d, p) = &a;
-            out.notes.entry(d.clone()).or_default().push(format!(
-                "{p}: an end of the link is not a lowered port, so the port has no link"
-            ));
+            out.notes
+                .entry(d.clone())
+                .or_default()
+                .push(format!("{p}: link end not a lowered port, no link"));
             continue;
         };
         // The far end of each switch port with a link, for the placement of
@@ -925,7 +927,7 @@ fn far_end(
                     FarSide::SourceMismatch(i)
                 }
                 (PeerSource::Configured, AddressValue::Unknown(r)) => FarSide::Unresolved(format!(
-                    "the source address of the neighbour {src} of {b} is not known: {r}"
+                    "source address of the neighbour {src} of {b} not known: {r}"
                 )),
                 _ => FarSide::Paired(i),
             });
@@ -943,13 +945,13 @@ fn far_end(
         [i] => return side(FarSide::Paired(*i)),
         _ => {
             return side(FarSide::Unresolved(format!(
-                "the source address {src} is in more than one listen range of {b}"
+                "source address {src} in more than one listen range of {b}"
             )));
         }
     }
     if in_vrf().any(|(_, g)| g.source == PeerSource::Observed && g.peer == at_src) {
         return side(FarSide::Unresolved(format!(
-            "{b} has a session with {src} and no neighbour or listen range for it"
+            "{b} has a session with {src}, no neighbour or listen range for it"
         )));
     }
     let read = far.bgp_read && !in_vrf().any(|(_, g)| matches!(g.peer, BgpPeer::Interface(_)));
@@ -993,7 +995,7 @@ fn far_end(
         {
             unsure.get_or_insert_with(|| {
                 format!(
-                    "the neighbour {x} of {b} can belong to the neighbour {} of {near}, whose source address is not known",
+                    "neighbour {x} of {b} can pair with neighbour {} of {near}, source address not known",
                     h.peer
                 )
             });
@@ -1123,7 +1125,7 @@ fn place(
             out.notes
                 .entry(dev.clone())
                 .or_default()
-                .push(format!("{id}: {why}, so it is not an endpoint"));
+                .push(format!("{id}: {why}, not an endpoint"));
             continue;
         }
         for (s, v) in &a.svis {
