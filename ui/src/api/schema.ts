@@ -13,7 +13,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** The Model Context Protocol through its Streamable HTTP transport, revision 2026-07-28: one JSON-RPC message in the body; the headers MCP-Protocol-Version, Mcp-Method and, for tools/call, Mcp-Name must agree with it. A request gets its response; a notification gets 202. The tools are the tools of rsim-mcp. */
+        /** MCP message */
         post: operations["mcpMessage"];
         delete?: never;
         options?: never;
@@ -28,7 +28,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The entry point: the links, the contract version and the limits. */
+        /** Entry point */
         get: operations["getEntry"];
         put?: never;
         post?: never;
@@ -45,7 +45,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The sign-in events, the newest first: the sign-ins, the failures, the setup, the token and user changes and the refused requests. */
+        /** Sign-in events */
         get: operations["listAuthEvents"];
         put?: never;
         post?: never;
@@ -62,7 +62,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The users. */
+        /** Users */
         get: operations["listUsers"];
         put?: never;
         post?: never;
@@ -80,10 +80,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Makes a user or changes its role, its state or its password. A new password or a disabled user ends the sessions of the user. The last enabled admin stays an admin. */
+        /** Put user */
         put: operations["putUser"];
         post?: never;
-        /** Removes a user with the sessions and the tokens of the user. */
+        /** Delete user */
         delete: operations["deleteUser"];
         options?: never;
         head?: never;
@@ -99,7 +99,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Signs in with a user name and a password, and sets the session cookie. After 5 failures in 15 minutes for one user name or one client address, the answer is 429. */
+        /** Sign in */
         post: operations["signIn"];
         delete?: never;
         options?: never;
@@ -116,7 +116,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Ends the session of the cookie. */
+        /** Sign out */
         post: operations["signOut"];
         delete?: never;
         options?: never;
@@ -131,7 +131,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The user of the request, the role and the scopes. */
+        /** Current user */
         get: operations["getMe"];
         put?: never;
         post?: never;
@@ -148,10 +148,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** True while the server has no user, so that the one-time setup can make the first admin. */
+        /** Setup state */
         get: operations["getSetup"];
         put?: never;
-        /** Makes the first user, an admin, and signs it in. 409 when a user exists. */
+        /** Setup */
         post: operations["setUp"];
         delete?: never;
         options?: never;
@@ -166,10 +166,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The API tokens of the user of the session. */
+        /** API tokens */
         get: operations["listTokens"];
         put?: never;
-        /** Makes an API token with scopes of the role of the user. The answer gives the token text one time only. */
+        /** New API token */
         post: operations["createToken"];
         delete?: never;
         options?: never;
@@ -187,7 +187,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Revokes an API token of the user of the session. */
+        /** Revoke API token */
         delete: operations["revokeToken"];
         options?: never;
         head?: never;
@@ -201,7 +201,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The catalog of the claims. */
+        /** Claim catalog */
         get: operations["listClaims"];
         put?: never;
         post?: never;
@@ -218,7 +218,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The whole inventory at its version: the credential references, the jump hosts, the routes, the groups, the devices as stored and the bindings. */
+        /** Inventory */
         get: operations["getInventory"];
         put?: never;
         post?: never;
@@ -235,7 +235,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The audit log, the newest record first: who changed which record when, with its old and its new value. */
+        /** Audit log */
         get: operations["listAudit"];
         put?: never;
         post?: never;
@@ -252,7 +252,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The Equinix bindings: each Fabric port with its device port, and each Network Edge device with its device of the estate. */
+        /** Bindings */
         get: operations["listBindings"];
         put?: never;
         post?: never;
@@ -270,10 +270,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Binds a Network Edge device of an account to a device of the estate. */
+        /** Bind Network Edge device */
         put: operations["putEdgeDeviceBinding"];
         post?: never;
-        /** Removes the binding of a Network Edge device. */
+        /** Delete Network Edge device binding */
         delete: operations["deleteEdgeDeviceBinding"];
         options?: never;
         head?: never;
@@ -288,11 +288,29 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Binds a Fabric port of an account to a device port. */
+        /** Bind Fabric port */
         put: operations["putFabricPortBinding"];
         post?: never;
-        /** Removes the binding of a Fabric port. */
+        /** Delete Fabric port binding */
         delete: operations["deleteFabricPortBinding"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/collection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Collector settings */
+        get: operations["getCollection"];
+        /** Put collector settings */
+        put: operations["putCollection"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -305,7 +323,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The credentials. No answer gives a secret. */
+        /** Credentials */
         get: operations["listCredentials"];
         put?: never;
         post?: never;
@@ -323,10 +341,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Makes or replaces a credential: a key of the env file, or a managed credential with its kind, its user and its secret, which the server seals with its secret key. */
+        /** Put credential */
         put: operations["putCredential"];
         post?: never;
-        /** Removes a credential that nothing uses. */
+        /** Delete credential */
         delete: operations["deleteCredential"];
         options?: never;
         head?: never;
@@ -340,7 +358,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The devices with the settings of their groups resolved: each setting has its value and its origin device, group or default. */
+        /** Devices */
         get: operations["listDevices"];
         put?: never;
         post?: never;
@@ -357,12 +375,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A device with the settings of its group resolved. */
+        /** Device */
         get: operations["getDevice"];
-        /** Makes or replaces a device. A setting that is not given inherits from the group. The path gives the name. */
+        /** Put device */
         put: operations["putDevice"];
         post?: never;
-        /** Removes a device with no binding. */
+        /** Delete device */
         delete: operations["deleteDevice"];
         options?: never;
         head?: never;
@@ -376,7 +394,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The device groups. */
+        /** Device groups */
         get: operations["listGroups"];
         put?: never;
         post?: never;
@@ -393,12 +411,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A device group. */
+        /** Device group */
         get: operations["getGroup"];
-        /** Makes or replaces a device group. The path gives the name. */
+        /** Put device group */
         put: operations["putGroup"];
         post?: never;
-        /** Removes a device group with no device. */
+        /** Delete device group */
         delete: operations["deleteGroup"];
         options?: never;
         head?: never;
@@ -412,7 +430,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The SSH jump hosts. */
+        /** Jump hosts */
         get: operations["listJumpHosts"];
         put?: never;
         post?: never;
@@ -430,10 +448,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Makes or replaces a jump host. */
+        /** Put jump host */
         put: operations["putJumpHost"];
         post?: never;
-        /** Removes a jump host that no route uses. */
+        /** Delete jump host */
         delete: operations["deleteJumpHost"];
         options?: never;
         head?: never;
@@ -447,7 +465,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The routes: the proxy and the jump hosts in order. */
+        /** Routes */
         get: operations["listRoutes"];
         put?: never;
         post?: never;
@@ -465,10 +483,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Makes or replaces a route. A proxy URL holds no login; the login is a credential reference. */
+        /** Put route */
         put: operations["putRoute"];
         post?: never;
-        /** Removes a route that no group and no device uses. */
+        /** Delete route */
         delete: operations["deleteRoute"];
         options?: never;
         head?: never;
@@ -482,7 +500,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Whether the server has a secret key. */
+        /** Secret key */
         get: operations["getSecretKey"];
         put?: never;
         post?: never;
@@ -499,7 +517,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The vendors that have a collector, each with its transport. A group of another vendor is allowed; the collector skips its devices. */
+        /** Collector vendors */
         get: operations["listVendors"];
         put?: never;
         post?: never;
@@ -516,7 +534,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** This document. */
+        /** OpenAPI document */
         get: operations["getOpenApi"];
         put?: never;
         post?: never;
@@ -533,7 +551,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The catalog of the tables. */
+        /** Table catalog */
         get: operations["listTables"];
         put?: never;
         post?: never;
@@ -550,7 +568,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The twins of the server: the alias store with the newest built snapshot (held), the snapshot before it that the server keeps (previous), the cycle of the newest snapshot of the store (newest_cycle), the snapshot whose twin builds now in the background (loading), and the newest snapshot that does not build or the HEAD that cannot be read (reload_error, with its snapshot, null for HEAD, and detail), each null when not known. A snapshot older than the held snapshot that the server does not keep gives 410 with the code snapshot_replaced. */
+        /** Twins */
         get: operations["listTopologies"];
         put?: never;
         post?: never;
@@ -567,7 +585,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A twin: its identity and its links. The alias store redirects to its snapshot. */
+        /** Twin */
         get: operations["getTwin"];
         put?: never;
         post?: never;
@@ -586,7 +604,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Many queries, claims and table queries in one request: an object with a list items, each with op query, claim or table. The answer is NDJSON with one line for each item, its result or its problem object. At most 100 items. */
+        /** Batch */
         post: operations["runBatch"];
         delete?: never;
         options?: never;
@@ -601,7 +619,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A claim on the twin, or on the devices of the parameter device. */
+        /** Claim */
         get: operations["runClaim"];
         put?: never;
         post?: never;
@@ -618,7 +636,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The coverage report of a twin: for each device in name order, the config lines that the ingestion handles, that have no effect on the twin and that it does not handle, with the number of unhandled paths and stanzas. The table coverage gives the unhandled paths. */
+        /** Coverage report */
         get: operations["getCoverage"];
         put?: never;
         post?: never;
@@ -637,7 +655,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Makes a query resource from the arguments of a path query, or of a set query with mode set. The answer is 303 to the resource. */
+        /** New query */
         post: operations["createQuery"];
         delete?: never;
         options?: never;
@@ -652,7 +670,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The answer of a query. The query runs again on each request. */
+        /** Query answer */
         get: operations["getQuery"];
         put?: never;
         post?: never;
@@ -669,7 +687,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One trace step of the answer of a query. */
+        /** Trace step */
         get: operations["getStep"];
         put?: never;
         post?: never;
@@ -686,7 +704,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A claim on the paths of a path query. */
+        /** Query claim */
         get: operations["runQueryClaim"];
         put?: never;
         post?: never;
@@ -703,7 +721,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The drawing of the paths of a query: each hop with its branches, and for a tunnel the overlay edge and the underlay edges that name it. */
+        /** Path drawing */
         get: operations["getPathDrawing"];
         put?: never;
         post?: never;
@@ -720,7 +738,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The source lines of a span of a twin with the secrets masked: only the lines inside a source span of a function of the twin, at most 200 lines, with the lines left out and the cut lines named in a note. A section with no mask for its vendor is refused, and a range with no line inside a source span is refused. */
+        /** Source lines */
         get: operations["getSourceLines"];
         put?: never;
         post?: never;
@@ -737,7 +755,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The rows of the longest prefix that contains an address. */
+        /** Longest prefix match */
         get: operations["lpmTable"];
         put?: never;
         post?: never;
@@ -754,7 +772,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The rows of a table. Each other parameter <column>=v1,v2 is an equality filter, and <column>.<op>=v a typed filter with the op contains, prefix, gt, lt or in_prefix. */
+        /** Table rows */
         get: operations["queryTable"];
         put?: never;
         post?: never;
@@ -771,7 +789,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The counts of a table and of each column, with the filters of the rows. */
+        /** Table summary */
         get: operations["summarizeTable"];
         put?: never;
         post?: never;
@@ -788,7 +806,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The rows with the largest values of a column. */
+        /** Top rows */
         get: operations["topTable"];
         put?: never;
         post?: never;
@@ -805,7 +823,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The distinct values of the columns with their counts. */
+        /** Distinct values */
         get: operations["uniqueTable"];
         put?: never;
         post?: never;
@@ -822,7 +840,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The topology of a twin for a drawing: nodes and edges at the level device or function, with the layers physical and overlay, or function. */
+        /** Topology */
         get: operations["getTopology"];
         put?: never;
         post?: never;
@@ -837,7 +855,7 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
-         * @description The kind of a change of the audit log.
+         * @description Change kind
          * @enum {string}
          */
         Action: "create" | "update" | "delete";
@@ -850,10 +868,7 @@ export interface components {
             key: string;
             label: string;
         };
-        /**
-         * @description An answer with no packet set in its ingress and its branches. The
-         *     summary parts keep their packet sets, because each part is a set.
-         */
+        /** @description Brief answer */
         AnswerBriefJson: {
             branches: components["schemas"]["BranchBriefJson"][];
             ingress: components["schemas"]["IngressBriefJson"][];
@@ -869,49 +884,43 @@ export interface components {
             replies: components["schemas"]["ReplyJson"][];
             summary: components["schemas"]["PartJson"][];
         };
-        /** @description A context attribute: {"known": number}, "unset" or "unknown". */
+        /** @description Context attribute */
         AttrJson: {
             known: number;
         } | ("unset" | "unknown");
         /**
          * AuditPage
-         * @description A page of the audit log, the newest record first.
+         * @description Audit log page
          */
         AuditPage: {
             /**
              * Format: int64
-             * @description The `before` value of the next page, if there is one.
+             * @description Next before
              */
             next_before?: number | null;
             records: components["schemas"]["AuditRecord"][];
         };
-        /**
-         * @description One record of the audit log: who changed what and when, with the old
-         *     and the new value of the record.
-         */
+        /** @description Audit record */
         AuditRecord: {
             action: components["schemas"]["Action"];
             actor: string;
-            /** @description The time of the change in UTC, RFC 3339. */
+            /** @description Time */
             at: string;
             /** Format: int64 */
             id: number;
-            /** @description The key of the record, for example the device name. */
+            /** @description Record key */
             key: string;
-            /**
-             * @description `credential`, `jump_host`, `route`, `group`, `device`,
-             *     `fabric_port_binding` or `edge_device_binding`.
-             */
+            /** @description Record kind */
             kind: string;
             new?: unknown;
             old?: unknown;
             /**
              * Format: uint64
-             * @description The inventory version that the change made.
+             * @description Inventory version
              */
             version: number;
         };
-        /** @description One sign-in event. */
+        /** @description Sign-in event */
         AuthEvent: {
             actor?: string | null;
             at: string;
@@ -924,31 +933,28 @@ export interface components {
         };
         /**
          * AuthEventPage
-         * @description A page of the sign-in events, the newest first.
+         * @description Sign-in event page
          */
         AuthEventPage: {
             events: components["schemas"]["AuthEvent"][];
             /** Format: int64 */
             next_before?: number | null;
         };
-        /** @description The bindings of the inventory. */
+        /** @description Bindings */
         Bindings: {
             edge_devices: components["schemas"]["EdgeDeviceBinding"][];
             fabric_ports: components["schemas"]["FabricPortBinding"][];
         };
         /**
          * BindingsOut
-         * @description The bindings at one version.
+         * @description Bindings
          */
         BindingsOut: {
             bindings: components["schemas"]["Bindings"];
             /** Format: uint64 */
             version: number;
         };
-        /**
-         * @description A branch with its verdict, its delay, the number of its steps and, in
-         *     the form `steps`, one line for each step.
-         */
+        /** @description Brief branch */
         BranchBriefJson: {
             delay: components["schemas"]["DelayJson"];
             /** Format: uint */
@@ -966,44 +972,44 @@ export interface components {
             steps: components["schemas"]["TraceStepJson"][];
             verdict: components["schemas"]["VerdictJson"];
         };
-        /** @description The BGP sections that the collector reads of a router. */
+        /** @description BGP sections */
         CaptureBgp: "off" | "sessions" | "all";
-        /** @description One claim of the catalog. */
+        /** @description Claim */
         ClaimDef: {
             description: string;
             name: string;
-            /** @description The data that the claim reads. */
+            /** @description Read data */
             reads: string[];
-            /** @description The scopes on which the claim runs: `twin`, `devices` or `query`. */
+            /** @description Scopes */
             scopes: string[];
         };
         /**
          * ClaimOut
-         * @description The result of a claim on a scope.
+         * @description Claim result
          */
         ClaimOut: {
             claim: string;
             counts: components["schemas"]["Counts"];
-            /** @description What the claim leaves out of its rows, or why it has none. */
+            /** @description Detail */
             detail?: string;
             evidence: components["schemas"]["Evidence"][];
             kind: string;
             result: components["schemas"]["ClaimResult"];
             /** Format: uint32 */
             rsim_json: number;
-            /** @description `twin`, `devices` or `query`. */
+            /** @description Scope */
             scope: string;
             topology: string;
             twin: components["schemas"]["TwinJson"];
         };
         /**
-         * @description The result of a claim or of one evidence row.
+         * @description Claim result
          * @enum {string}
          */
         ClaimResult: "confirmed" | "refuted" | "unknown";
         /**
          * ClaimsOut
-         * @description The claim catalog.
+         * @description Claim catalog
          */
         ClaimsOut: {
             claims: components["schemas"]["ClaimDef"][];
@@ -1012,43 +1018,60 @@ export interface components {
             rsim_json: number;
         };
         /**
-         * @description The transport of a collector.
+         * Collection
+         * @description Collector settings
+         */
+        Collection: {
+            /**
+             * Format: uint32
+             * @description History
+             */
+            history_days: number;
+        };
+        /**
+         * CollectionOut
+         * @description Collector settings
+         */
+        CollectionOut: {
+            collection: components["schemas"]["Collection"];
+            /** Format: uint64 */
+            version: number;
+        };
+        /**
+         * @description Transport
          * @enum {string}
          */
         CollectorTransport: "ssh" | "https";
-        /** @description One column of a table. */
+        /** @description Column */
         Column: {
             description: string;
             name: string;
-            /** @description The table and the column that a value refers to. */
+            /** @description Reference */
             refers_to?: [
                 string,
                 string
             ] | null;
-            /** @description The meaning of the values, for example `device`, `interface`, `vrf`. */
+            /** @description Semantic type */
             semantic: string;
             type: components["schemas"]["ColumnType"];
             unit?: string | null;
         };
-        /** @description The counts of one column. */
+        /** @description Column summary */
         ColumnSummary: {
             column: string;
             /** Format: uint */
             distinct: number;
             /** Format: uint */
             nulls: number;
-            /**
-             * @description The most frequent values with their counts, at most 5, the most
-             *     frequent first.
-             */
+            /** @description Most frequent values */
             top: [
                 unknown,
                 number
             ][];
         };
-        /** @description The type of the values of a column. */
+        /** @description Column type */
         ColumnType: ("text" | "integer" | "boolean") | "address" | "prefix" | "list";
-        /** @description The number of evidence rows of each result. */
+        /** @description Counts */
         Counts: {
             /** Format: uint */
             confirmed: number;
@@ -1057,87 +1080,74 @@ export interface components {
             /** Format: uint */
             unknown: number;
         };
-        /**
-         * @description A credential. The source `env` or `env-url` names a key of the env file
-         *     of the collector; the source `managed` has its kind, its user and a
-         *     sealed secret in the inventory database. No answer gives a secret.
-         */
+        /** @description Credential */
         Credential: {
             description?: string | null;
-            /**
-             * @description The key in the env file: the prefix of `env`, the variable of
-             *     `env-url`. None for `managed`.
-             */
+            /** @description Env key */
             key?: string | null;
-            /** @description The kind of the secret of `managed`. */
+            /** @description Secret kind */
             kind?: components["schemas"]["CredentialKind"] | null;
             /**
-             * @description The name of the credential. In a PUT body it can be left out; the
-             *     path gives it.
+             * @description Name
              * @default
              */
             name: string;
             /**
              * Format: uint64
-             * @description The count of the writes of the secret of `managed`. The database
-             *     sets it; a PUT body can give it, and the write ignores it.
+             * @description Secret revision
              */
             secret_revision?: number | null;
             source: components["schemas"]["CredentialSource"];
-            /** @description The user of `managed` with the kind `password` or `ssh-key`. */
+            /** @description User */
             user?: string | null;
         };
-        /** @description The kind of the secret of a managed credential. */
+        /** @description Secret kind */
         CredentialKind: "password" | "ssh-key" | "api-key";
         /**
          * CredentialPut
-         * @description The PUT body of a credential: the record with the secret of a managed
-         *     credential. A managed credential with no secret keeps its stored secret
-         *     when the kind stays; a new managed credential and a new kind need the
-         *     secret.
+         * @description Credential body
          */
         CredentialPut: {
             /** @default null */
             description: string | null;
             /**
-             * @description The key in the env file: the prefix of `env`, the variable of
-             *     `env-url`. None for `managed`.
+             * @description Env key
              * @default null
              */
             key: string | null;
             /**
-             * @description The kind of the secret of `managed`.
+             * @description Secret kind
              * @default null
              */
             kind: components["schemas"]["CredentialKind"] | null;
             /**
-             * @description The name of the credential. It can be left out; the path gives it.
+             * @description Name
              * @default
              */
             name: string;
             /**
-             * @description The new secret of `managed`. No answer gives it back.
+             * @description Secret
              * @default null
              */
             secret: components["schemas"]["SecretInput"] | null;
             /**
              * Format: uint64
-             * @description The revision of the stored record. The write ignores it.
+             * @description Revision
              * @default null
              */
             secret_revision: number | null;
             source: components["schemas"]["CredentialSource"];
             /**
-             * @description The user of `managed` with the kind `password` or `ssh-key`.
+             * @description User
              * @default null
              */
             user: string | null;
         };
-        /** @description The source of a credential. */
+        /** @description Credential source */
         CredentialSource: "env" | "env-url" | "managed";
         /**
          * CredentialsOut
-         * @description The credential references at one version.
+         * @description Credentials
          */
         CredentialsOut: {
             credentials: components["schemas"]["Credential"][];
@@ -1160,24 +1170,20 @@ export interface components {
         };
         /**
          * Device
-         * @description A device of the inventory. Its name is the device of the snapshot
-         *     store.
+         * @description Device
          */
         Device: {
-            /** @description The host name or the address of the management plane. */
+            /** @description Address */
             address: string;
-            /**
-             * @description The site of a controller that the device reads, for example the
-             *     UniFi site of a console.
-             */
+            /** @description Controller site */
             console_site?: string | null;
-            /** @description The name of the device group. */
+            /** @description Device group */
             group: string;
             location?: string | null;
             /** @default  */
             name: string;
             /**
-             * @description The settings that the device sets in place of its group.
+             * @description Device settings
              * @default {}
              */
             settings: components["schemas"]["Settings"];
@@ -1185,20 +1191,19 @@ export interface components {
         };
         /**
          * EdgeDeviceBinding
-         * @description A Network Edge device of an Equinix account and the device of the
-         *     estate that it is.
+         * @description Edge device binding
          */
         EdgeDeviceBinding: {
             /** @default  */
             account: string;
             device: string;
             /**
-             * @description The uuid of the Network Edge device.
+             * @description Edge device
              * @default
              */
             edge_device: string;
         };
-        /** @description An encapsulation header. The values are field values. */
+        /** @description Encapsulation header */
         EncapJson: {
             dst?: components["schemas"]["Field_string"] | null;
             kind: string;
@@ -1206,62 +1211,60 @@ export interface components {
             src?: components["schemas"]["Field_string"] | null;
             vni?: components["schemas"]["Field_uint32"] | null;
         };
-        /** @description The code of a query error. */
+        /** @description Error code */
         ErrorCode: ("unknown_topology" | "unknown_ingress" | "invalid_query" | "no_such_step" | "start_requires_context" | "contract_violation" | "unknown_table" | "invalid_filter" | "internal") | "store" | "no_source_text" | "not_masked" | "not_a_source_span";
-        /** @description One evidence row. */
+        /** @description Evidence row */
         Evidence: {
             detail: string;
             expected?: unknown;
             observed?: unknown;
-            /** @description The source spans of the data: file:first-last. */
+            /** @description Source spans */
             provenance: string[];
-            /** @description A reason code: `match`, `mismatch`, `not_collected`, `unknown`. */
+            /** @description Reason code */
             reason: string;
             result: components["schemas"]["ClaimResult"];
-            /** @description What the row is about, for example a link or a branch. */
+            /** @description Subject */
             subject: string;
         };
         /**
          * FabricPortBinding
-         * @description A Fabric port of an Equinix account and the device port at the other
-         *     end of its cross connect.
+         * @description Fabric port binding
          */
         FabricPortBinding: {
             /**
-             * @description The device of the account. In a PUT body it can be left out; the
-             *     path gives it.
+             * @description Device
              * @default
              */
             account: string;
             device: string;
             /**
-             * @description The uuid or the name of the Fabric port.
+             * @description Fabric port
              * @default
              */
             fabric_port: string;
             port: string;
         };
-        /** @description A header field value: {"known": value}, {"in": [...]}, "unknown", "absent" or "original". */
+        /** @description Header field value */
         Field_string: {
             known: string;
         } | {
             in: unknown[];
         } | ("unknown" | "absent" | "original");
-        /** @description A header field value: {"known": value}, {"in": [...]}, "unknown", "absent" or "original". */
+        /** @description Header field value */
         Field_uint16: {
             /** Format: uint16 */
             known: number;
         } | {
             in: unknown[];
         } | ("unknown" | "absent" | "original");
-        /** @description A header field value: {"known": value}, {"in": [...]}, "unknown", "absent" or "original". */
+        /** @description Header field value */
         Field_uint32: {
             /** Format: uint32 */
             known: number;
         } | {
             in: unknown[];
         } | ("unknown" | "absent" | "original");
-        /** @description A header field value: {"known": value}, {"in": [...]}, "unknown", "absent" or "original". */
+        /** @description Header field value */
         Field_uint8: {
             /** Format: uint8 */
             known: number;
@@ -1276,16 +1279,16 @@ export interface components {
             index: number;
             port: string;
         };
-        /** @description The form of an answer. */
+        /** @description Answer form */
         Form: "summary" | "steps" | "full";
         /**
-         * @description The fragment state of a request.
+         * @description Fragment
          * @enum {string}
          */
         FragmentName: "unfragmented" | "first" | "later";
         /**
          * Group
-         * @description A device group: the vendor and the settings of its devices.
+         * @description Device group
          */
         Group: {
             description?: string | null;
@@ -1293,26 +1296,19 @@ export interface components {
             name: string;
             /** @default {} */
             settings: components["schemas"]["Settings"];
-            /**
-             * @description The vendor, for example `vyos`, `nxos`, `iosxr`, `iosxe` or `unifi`.
-             *     A vendor with no collector is allowed; the collector skips its
-             *     devices.
-             */
+            /** @description Vendor */
             vendor: string;
         };
         /**
          * GroupsOut
-         * @description The device groups at one version.
+         * @description Device groups
          */
         GroupsOut: {
             groups: components["schemas"]["Group"][];
             /** Format: uint64 */
             version: number;
         };
-        /**
-         * @description What a trace does at an HA pair or a cluster whose active node is
-         *     not collected.
-         */
+        /** @description HA setting */
         Ha: "none" | "all" | "one";
         HeaderJson: {
             "destination.ip": components["schemas"]["Field_string"];
@@ -1324,18 +1320,18 @@ export interface components {
             fragment: components["schemas"]["Field_string"];
             icmp_code: components["schemas"]["Field_uint8"];
             icmp_type: components["schemas"]["Field_uint8"];
-            /** @description The inner header of an encapsulated current header. */
+            /** @description Inner header */
             inner?: components["schemas"]["HeaderJson"] | null;
             inner_l2_priority?: components["schemas"]["Field_uint8"] | null;
             l2_priority: components["schemas"]["Field_uint8"];
             mpls_tc: components["schemas"]["Field_uint8"];
             "network.iana_number": components["schemas"]["Field_uint8"];
-            /** @description The inner tag, only when the frame has one. */
+            /** @description Inner tag */
             "network.inner.vlan.id"?: components["schemas"]["Field_uint16"] | null;
-            /** @description The TPID of the inner tag, only when it is not 33024 (0x8100). */
+            /** @description Inner TPID */
             "network.inner.vlan.tpid"?: components["schemas"]["Field_uint16"] | null;
             "network.vlan.id": components["schemas"]["Field_uint16"];
-            /** @description The TPID of the outer tag, only when it is not 33024 (0x8100). */
+            /** @description TPID */
             "network.vlan.tpid"?: components["schemas"]["Field_uint16"] | null;
             "source.ip": components["schemas"]["Field_string"];
             "source.mac": components["schemas"]["Field_string"];
@@ -1343,16 +1339,13 @@ export interface components {
             tcp_flags: components["schemas"]["Field_uint8"];
         };
         /**
-         * @description The name of an ICMP echo type.
+         * @description ICMP echo type
          * @enum {string}
          */
         IcmpName: "echo-request" | "echo-reply";
-        /**
-         * @description An ICMP type: a number, or the name of the echo request or the echo
-         *     reply.
-         */
+        /** @description ICMP type */
         IcmpTypeArg: components["schemas"]["IcmpName"] | number;
-        /** @description The ingress of one run, with no packet set. */
+        /** @description Brief ingress */
         IngressBriefJson: {
             device?: string | null;
             found: boolean;
@@ -1361,10 +1354,7 @@ export interface components {
             reason?: components["schemas"]["ReasonJson"] | null;
             resolved_by?: string | null;
         };
-        /**
-         * @description The ingress of one run of the answer: the packets of the run and the
-         *     interface where they enter, or the reason why the ingress is not known.
-         */
+        /** @description Ingress */
         IngressJson: {
             device?: string | null;
             found: boolean;
@@ -1377,14 +1367,15 @@ export interface components {
             reason?: components["schemas"]["ReasonJson"] | null;
             resolved_by?: string | null;
         };
-        /** @description An ingress point as <device>/<interface>. */
+        /** @description Ingress */
         IngressRef: string;
         /**
          * Inventory
-         * @description The whole inventory at one version, with each list sorted by its key.
+         * @description Inventory
          */
         Inventory: {
             bindings: components["schemas"]["Bindings"];
+            collection: components["schemas"]["Collection"];
             credentials: components["schemas"]["Credential"][];
             devices: components["schemas"]["Device"][];
             groups: components["schemas"]["Group"][];
@@ -1392,18 +1383,18 @@ export interface components {
             routes: components["schemas"]["Route"][];
             /**
              * Format: uint64
-             * @description The version. Each change of the inventory increases it by 1.
+             * @description Version
              */
             version: number;
         };
         /**
          * JumpHost
-         * @description An SSH jump host with its own credential.
+         * @description Jump host
          */
         JumpHost: {
-            /** @description The host name or the address, with an optional port. */
+            /** @description Address */
             address: string;
-            /** @description The name of the credential reference. */
+            /** @description Name */
             credential: string;
             /** @default  */
             name: string;
@@ -1412,14 +1403,14 @@ export interface components {
         };
         /**
          * JumpHostsOut
-         * @description The jump hosts at one version.
+         * @description Jump hosts
          */
         JumpHostsOut: {
             jump_hosts: components["schemas"]["JumpHost"][];
             /** Format: uint64 */
             version: number;
         };
-        /** @description An inclusive range of line numbers. */
+        /** @description Line range */
         LineRangeJson: {
             /** Format: uint32 */
             first_line: number;
@@ -1428,13 +1419,13 @@ export interface components {
         };
         /**
          * MeOut
-         * @description The user of a request as the UI shows it.
+         * @description Current user
          */
         MeOut: {
             name: string;
             role: components["schemas"]["Role"];
             scopes: string[];
-            /** @description `session` or `token`. */
+            /** @description Sign-in method */
             via: string;
         };
         MemberJson: {
@@ -1443,26 +1434,23 @@ export interface components {
         };
         /**
          * NewTokenOut
-         * @description A new API token: its text, given only in this answer, and its record.
+         * @description New API token
          */
         NewTokenOut: {
             info: components["schemas"]["TokenInfo"];
             token: string;
         };
-        /** @description The JSON form of the NX-OS answers. */
+        /** @description NX-OS JSON form */
         NxosJson: "plain" | "native";
-        /** @description Where a resolved setting comes from. */
+        /** @description Setting origin */
         Origin: "device" | "group" | "default";
         OutcomeJson: {
             destination?: components["schemas"]["DestinationJson"] | null;
-            /** @description `forward`, `deliver`, `exit`, `drop` or `unknown`. */
+            /** @description Verdict kind */
             kind: string;
             next?: string | null;
         };
-        /**
-         * @description A packet set: its members. A member is a product of field values. The
-         *     members are disjoint and in the fixed order of the bit table.
-         */
+        /** @description Packet set */
         PacketSetJson: {
             members: components["schemas"]["MemberJson"][];
         };
@@ -1474,7 +1462,7 @@ export interface components {
         PathAnswerOut: {
             answer: components["schemas"]["AnswerJson"];
             kind: string;
-            /** @description The notes of the query: the defaults that the unstated fields took. */
+            /** @description Notes */
             notes?: string[];
             query: components["schemas"]["QueryEcho"];
             /** Format: uint32 */
@@ -1484,13 +1472,13 @@ export interface components {
         };
         /**
          * PathBriefOut
-         * @description A path answer in the form `summary` or `steps`.
+         * @description Brief path answer
          */
         PathBriefOut: {
             answer: components["schemas"]["AnswerBriefJson"];
             form: components["schemas"]["Form"];
             kind: string;
-            /** @description The notes of the query: the defaults that the unstated fields took. */
+            /** @description Notes */
             notes?: string[];
             query: components["schemas"]["QueryEcho"];
             /** Format: uint32 */
@@ -1500,111 +1488,97 @@ export interface components {
         };
         /**
          * PathQueryArgs
-         * @description The fields of a path query. A field that the query does not state is
-         *     not known, or takes its default value with `unstated` `defaults`.
+         * @description Path query fields
          */
         PathQueryArgs: {
-            /** @description The destination IP address. */
+            /** @description Destination address */
             "destination.ip": string;
-            /** @description The destination MAC address: 6 hexadecimal bytes with colons. */
+            /** @description Destination MAC */
             "destination.mac"?: string | null;
             /**
              * Format: uint16
-             * @description The destination port.
+             * @description Destination port
              */
             "destination.port"?: number | null;
             /**
              * Format: uint8
-             * @description The DSCP.
+             * @description DSCP
              */
             dscp?: number | null;
             /**
              * Format: uint8
-             * @description The ECN.
+             * @description ECN
              */
             ecn?: number | null;
-            /** @description The form of the answer. The default is summary. */
+            /** @description Answer form */
             form?: components["schemas"]["Form"] | null;
-            /** @description The fragment state. */
+            /** @description Fragment */
             fragment?: components["schemas"]["FragmentName"] | null;
             /**
              * Format: uint8
-             * @description The ICMP code.
+             * @description ICMP code
              */
             icmp_code?: number | null;
-            /** @description The ICMP type: 0 to 255, echo-request or echo-reply. */
+            /** @description ICMP type */
             icmp_type?: components["schemas"]["IcmpTypeArg"] | null;
-            /**
-             * @description The ingress point as <device>/<interface>. Without it, the
-             *     attachment records of the source address give the ingress.
-             */
+            /** @description Ingress */
             ingress?: string | null;
             /**
              * Format: uint8
-             * @description The layer 2 priority of the inner tag. It needs network.inner.vlan.id.
+             * @description Inner layer 2 priority
              */
             inner_l2_priority?: number | null;
             /**
              * Format: uint8
-             * @description The layer 2 priority. It needs network.vlan.id.
+             * @description Layer 2 priority
              */
             l2_priority?: number | null;
             /**
              * Format: uint8
-             * @description The protocol number.
+             * @description Protocol number
              */
             "network.iana_number"?: number | null;
             /**
              * Format: uint16
-             * @description The VLAN of the inner tag. It needs network.vlan.id. Not given: no
-             *     inner tag.
+             * @description Inner VLAN
              */
             "network.inner.vlan.id"?: number | null;
             /**
              * Format: uint16
-             * @description The TPID of the inner tag. It needs network.inner.vlan.id. Not
-             *     given: 33024 (0x8100).
+             * @description Inner TPID
              */
             "network.inner.vlan.tpid"?: number | null;
-            /** @description The protocol name. Give network.iana_number or network.transport. */
+            /** @description Protocol */
             "network.transport"?: components["schemas"]["Transport"] | null;
             /**
              * Format: uint16
-             * @description The VLAN tag.
+             * @description VLAN
              */
             "network.vlan.id"?: number | null;
             /**
              * Format: uint16
-             * @description The TPID of the outer tag, for example 34984 (0x88a8). It needs
-             *     network.vlan.id. Not given: 33024 (0x8100), or 34984 with an inner
-             *     tag and unstated defaults.
+             * @description TPID
              */
             "network.vlan.tpid"?: number | null;
-            /** @description Run the reply. The default is true. */
+            /** @description Reply */
             reply?: boolean | null;
-            /** @description The source IP address. */
+            /** @description Source address */
             "source.ip": string;
-            /** @description The source MAC address: 6 hexadecimal bytes with colons. */
+            /** @description Source MAC */
             "source.mac"?: string | null;
             /**
              * Format: uint16
-             * @description The source port.
+             * @description Source port
              */
             "source.port"?: number | null;
-            /** @description The TCP flags that are set. */
+            /** @description TCP flags */
             tcp_flags?: components["schemas"]["TcpFlag"][] | null;
-            /**
-             * @description `store` for the newest snapshot of the store
-             *     of the server.
-             */
+            /** @description Topology */
             topology: string;
-            /**
-             * @description all (the default): an unstated field has all values. defaults: an
-             *     unstated field takes its default value where it has one.
-             */
+            /** @description Unstated fields */
             unstated?: components["schemas"]["Unstated"] | null;
         };
-        /** @description A problem object of RFC 9457 with the rsim error code. */
+        /** @description Problem */
         Problem: {
             code: string;
             detail: string;
@@ -1620,12 +1594,7 @@ export interface components {
             queue: components["schemas"]["AttrJson"];
             traffic_class: components["schemas"]["AttrJson"];
         };
-        /**
-         * @description The query input in the JSON output. Each field is there, and a field
-         *     that is not given is `null`. The protocol is a number and has its name
-         *     if it has one, the ICMP type is a number, and the TCP flags are in the
-         *     order of their bits with no repeat.
-         */
+        /** @description Query input */
         QueryEcho: {
             "destination.ip": string;
             "destination.mac"?: string | null;
@@ -1663,15 +1632,15 @@ export interface components {
             "source.port"?: number | null;
             tcp_flags?: components["schemas"]["TcpFlag"][] | null;
             topology: string;
-            /** @description The treatment of the unstated fields, when the query gives it. */
+            /** @description Unstated fields */
             unstated?: components["schemas"]["Unstated"] | null;
         };
-        /** @description A query error: the code and a text for persons. */
+        /** @description Query error */
         QueryError: {
             code: components["schemas"]["ErrorCode"];
             detail: string;
         };
-        /** @description The query input of an output: of a path query or of a set query. */
+        /** @description Query input */
         QueryJson: components["schemas"]["QueryEcho"] | components["schemas"]["SetEcho"];
         RateConditionJson: {
             evaluated: boolean;
@@ -1684,7 +1653,7 @@ export interface components {
             code: string;
             detail: string;
         };
-        /** @description The reply of a delivered branch in a brief form. */
+        /** @description Brief reply */
         ReplyBriefJson: {
             answer?: components["schemas"]["AnswerBriefJson"] | null;
             /** Format: uint */
@@ -1699,50 +1668,50 @@ export interface components {
             not_run_reason?: string | null;
             ran: boolean;
         };
-        /** @description A setting with its origin. */
+        /** @description Resolved setting */
         Resolved: {
             origin: components["schemas"]["Origin"];
             value?: string | null;
         };
-        /** @description A setting with its origin. */
+        /** @description Resolved setting */
         Resolved2: {
             origin: components["schemas"]["Origin"];
             value: components["schemas"]["SshAlgorithms"];
         };
-        /** @description A setting with its origin. */
+        /** @description Resolved setting */
         Resolved3: {
             origin: components["schemas"]["Origin"];
             value: components["schemas"]["SshMode"];
         };
-        /** @description A setting with its origin. */
+        /** @description Resolved setting */
         Resolved4: {
             origin: components["schemas"]["Origin"];
             /** Format: uint32 */
             value: number;
         };
-        /** @description A setting with its origin. */
+        /** @description Resolved setting */
         Resolved5: {
             origin: components["schemas"]["Origin"];
             value: components["schemas"]["NxosJson"];
         };
-        /** @description A setting with its origin. */
+        /** @description Resolved setting */
         Resolved6: {
             origin: components["schemas"]["Origin"];
             value: components["schemas"]["TlsTrust"];
         };
-        /** @description A setting with its origin. */
+        /** @description Resolved setting */
         Resolved7: {
             origin: components["schemas"]["Origin"];
             value: components["schemas"]["CaptureBgp"];
         };
-        /** @description A setting with its origin. */
+        /** @description Resolved setting */
         Resolved8: {
             origin: components["schemas"]["Origin"];
             value: components["schemas"]["Ha"];
         };
         /**
          * ResolvedDevice
-         * @description A device with the settings of its group resolved.
+         * @description Resolved device
          */
         ResolvedDevice: {
             address: string;
@@ -1752,32 +1721,30 @@ export interface components {
             name: string;
             settings: components["schemas"]["ResolvedSettings"];
             site?: string | null;
-            /** @description The vendor of the group. */
+            /** @description Vendor */
             vendor: string;
         };
         /**
          * ResolvedDevices
-         * @description The devices of the inventory resolved, at its version.
+         * @description Resolved devices
          */
         ResolvedDevices: {
             devices: components["schemas"]["ResolvedDevice"][];
             /** Format: uint64 */
             version: number;
         };
-        /** @description The settings of a device after the inheritance. */
+        /** @description Resolved settings */
         ResolvedSettings: {
             capture_bgp: components["schemas"]["Resolved7"];
-            /**
-             * @description The credential reference; none if neither the device nor the group
-             *     names one.
-             */
+            /** @description Credential */
             credential: components["schemas"]["Resolved"];
             ha: components["schemas"]["Resolved8"];
+            interval_seconds: components["schemas"]["Resolved4"];
             nxos_json: components["schemas"]["Resolved5"];
             paged_section_timeout_seconds: components["schemas"]["Resolved4"];
             request_timeout_seconds: components["schemas"]["Resolved4"];
             retries: components["schemas"]["Resolved4"];
-            /** @description The route; none is a direct connection. */
+            /** @description Route */
             route: components["schemas"]["Resolved"];
             section_timeout_seconds: components["schemas"]["Resolved4"];
             ssh_algorithms: components["schemas"]["Resolved2"];
@@ -1787,61 +1754,47 @@ export interface components {
             tls_ca_file: components["schemas"]["Resolved"];
             tls_trust: components["schemas"]["Resolved6"];
         };
-        /** @description The role of a user. */
+        /** @description Role */
         Role: "viewer" | "operator" | "admin";
         /**
          * Route
-         * @description The network path to a device: an optional proxy for the first TCP
-         *     connection, then the jump hosts in order. A route with no proxy and no
-         *     jump host is a direct connection.
+         * @description Route
          */
         Route: {
             /**
-             * @description The names of the jump hosts, in order.
+             * @description Jump hosts
              * @default []
              */
             jumps: string[];
             /** @default  */
             name: string;
-            /**
-             * @description `http://host:port`, `socks5://host:port` or `socks5h://host:port`,
-             *     with no login.
-             */
+            /** @description Proxy URL */
             proxy?: string | null;
-            /** @description The credential reference of the login of the proxy. */
+            /** @description Proxy credential */
             proxy_credential?: string | null;
         };
         /**
          * RoutesOut
-         * @description The routes at one version.
+         * @description Routes
          */
         RoutesOut: {
             routes: components["schemas"]["Route"][];
             /** Format: uint64 */
             version: number;
         };
-        /**
-         * @description The secret of a managed credential as a PUT body gives it. No answer
-         *     gives it back.
-         */
+        /** @description Secret */
         SecretInput: {
-            /** @description The passphrase of a private key. */
+            /** @description Passphrase */
             passphrase?: string | null;
-            /**
-             * @description The password, the private key in the OpenSSH or PEM form, or the API
-             *     key, by the kind of the credential.
-             */
+            /** @description Secret value */
             value: string;
         };
         /**
          * SecretKeyOut
-         * @description The secret key of the server.
+         * @description Secret key
          */
         SecretKeyOut: {
-            /**
-             * @description True if the server has a secret key, so that it can write the secret
-             *     of a managed credential.
-             */
+            /** @description Secret key present */
             present: boolean;
         };
         /** SetAnswerOut */
@@ -1854,14 +1807,11 @@ export interface components {
             topology: string;
             twin: components["schemas"]["TwinJson"];
         };
-        /**
-         * @description A set: an address, a prefix, a number, a range such as 1-1023, or a
-         *     comma list. A field that is not given has all values.
-         */
+        /** @description Set */
         SetArg: string | number | components["schemas"]["SetItem"][];
         /**
          * SetBriefOut
-         * @description A set answer in the form `summary` or `steps`.
+         * @description Brief set answer
          */
         SetBriefOut: {
             answer: components["schemas"]["AnswerBriefJson"];
@@ -1873,10 +1823,7 @@ export interface components {
             topology: string;
             twin: components["schemas"]["TwinJson"];
         };
-        /**
-         * @description The set query input in the JSON output. Each field is the normalized
-         *     text of its set, or `null` if it is not given.
-         */
+        /** @description Set query input */
         SetEcho: {
             "destination.ip"?: string | null;
             "destination.mac"?: string | null;
@@ -1902,153 +1849,140 @@ export interface components {
             tcp_flags?: string | null;
             topology: string;
         };
-        /** @description One item of a set list. */
+        /** @description Set item */
         SetItem: string | number;
         /**
          * SetQueryArgs
-         * @description The fields of a set query. Each field takes a set. A field that is not
-         *     given has all values.
+         * @description Set query fields
          */
         SetQueryArgs: {
-            /** @description The destination addresses. */
+            /** @description Destination addresses */
             "destination.ip"?: components["schemas"]["SetArg"] | null;
-            /** @description The destination MAC addresses. */
+            /** @description Destination MACs */
             "destination.mac"?: components["schemas"]["SetArg"] | null;
-            /** @description The destination ports. */
+            /** @description Destination ports */
             "destination.port"?: components["schemas"]["SetArg"] | null;
-            /** @description The DSCP values. */
+            /** @description DSCP values */
             dscp?: components["schemas"]["SetArg"] | null;
-            /** @description The ECN values. */
+            /** @description ECN values */
             ecn?: components["schemas"]["SetArg"] | null;
-            /** @description The form of the answer. The default is summary. */
+            /** @description Answer form */
             form?: components["schemas"]["Form"] | null;
-            /** @description The fragment states. */
+            /** @description Fragments */
             fragment?: components["schemas"]["SetArg"] | null;
-            /** @description The ICMP codes. */
+            /** @description ICMP codes */
             icmp_code?: components["schemas"]["SetArg"] | null;
-            /** @description The ICMP types. */
+            /** @description ICMP types */
             icmp_type?: components["schemas"]["SetArg"] | null;
-            /**
-             * @description The ingress point as <device>/<interface>. Without it, the
-             *     attachment records of the source addresses give the ingress.
-             */
+            /** @description Ingress */
             ingress?: string | null;
-            /** @description The layer 2 priorities of the inner tag. */
+            /** @description Inner layer 2 priorities */
             inner_l2_priority?: components["schemas"]["SetArg"] | null;
-            /** @description The layer 2 priorities. */
+            /** @description Layer 2 priorities */
             l2_priority?: components["schemas"]["SetArg"] | null;
-            /** @description The protocol numbers. */
+            /** @description Protocol numbers */
             "network.iana_number"?: components["schemas"]["SetArg"] | null;
-            /**
-             * @description The VLANs of the inner tag. It needs network.vlan.id. With no inner
-             *     field: no inner tag.
-             */
+            /** @description Inner VLANs */
             "network.inner.vlan.id"?: components["schemas"]["SetArg"] | null;
-            /** @description The TPIDs of the inner tag. Not given: 33024 (0x8100). */
+            /** @description Inner TPIDs */
             "network.inner.vlan.tpid"?: components["schemas"]["SetArg"] | null;
-            /** @description The protocol names. */
+            /** @description Protocols */
             "network.transport"?: components["schemas"]["SetArg"] | null;
-            /** @description The VLAN tags. */
+            /** @description VLANs */
             "network.vlan.id"?: components["schemas"]["SetArg"] | null;
-            /** @description The TPIDs of the outer tag. Not given: 33024 (0x8100). */
+            /** @description TPIDs */
             "network.vlan.tpid"?: components["schemas"]["SetArg"] | null;
-            /** @description Run the replies. The default is true. */
+            /** @description Replies */
             reply?: boolean | null;
-            /** @description The source addresses. */
+            /** @description Source addresses */
             "source.ip"?: components["schemas"]["SetArg"] | null;
-            /** @description The source MAC addresses. */
+            /** @description Source MACs */
             "source.mac"?: components["schemas"]["SetArg"] | null;
-            /** @description The source ports. */
+            /** @description Source ports */
             "source.port"?: components["schemas"]["SetArg"] | null;
-            /** @description The TCP flag values: numbers, ranges, or flag names joined with +. */
+            /** @description TCP flags */
             tcp_flags?: components["schemas"]["SetArg"] | null;
-            /**
-             * @description `store` for the newest snapshot of the store
-             *     of the server.
-             */
+            /** @description Topology */
             topology: string;
         };
-        /**
-         * @description The settings of a device group or of a device. On a device, a setting
-         *     that is not given takes the value of the group; on a group, a setting
-         *     that is not given takes the default.
-         */
+        /** @description Settings */
         Settings: {
             capture_bgp?: components["schemas"]["CaptureBgp"] | null;
-            /** @description The name of the credential reference. */
+            /** @description Name */
             credential?: string | null;
             ha?: components["schemas"]["Ha"] | null;
+            /**
+             * Format: uint32
+             * @description Collection interval
+             */
+            interval_seconds?: number | null;
             nxos_json?: components["schemas"]["NxosJson"] | null;
             /**
              * Format: uint32
-             * @description The time for the read of all pages of one section, from 1 to 86400
-             *     seconds.
+             * @description Paged section time limit
              */
             paged_section_timeout_seconds?: number | null;
             /**
              * Format: uint32
-             * @description The time for one HTTP request, from 1 to 86400 seconds.
+             * @description Request time limit
              */
             request_timeout_seconds?: number | null;
             /**
              * Format: uint32
-             * @description The retries of a failed section, from 0 to 10.
+             * @description Retries
              */
             retries?: number | null;
-            /** @description The name of the route. The default is a direct connection. */
+            /** @description Route */
             route?: string | null;
             /**
              * Format: uint32
-             * @description The time for one section, from 1 to 86400 seconds.
+             * @description Section time limit
              */
             section_timeout_seconds?: number | null;
             ssh_algorithms?: components["schemas"]["SshAlgorithms"] | null;
             /**
              * Format: uint32
-             * @description The exec channels at one time. The default is 1.
+             * @description Exec channels
              */
             ssh_channels?: number | null;
             ssh_mode?: components["schemas"]["SshMode"] | null;
             /**
              * Format: uint32
-             * @description The time for all sections of a device, from 1 to 86400 seconds.
+             * @description Device time limit
              */
             timeout_seconds?: number | null;
-            /** @description The PEM file of the CA bundle of `tls_trust` `ca`. */
+            /** @description CA file */
             tls_ca_file?: string | null;
             tls_trust?: components["schemas"]["TlsTrust"] | null;
         };
         /**
          * SetupOut
-         * @description The state of the one-time setup.
+         * @description Setup state
          */
         SetupOut: {
-            /**
-             * @description True while the server has no user: the setup can make the first
-             *     admin.
-             */
+            /** @description Setup open */
             open: boolean;
-            /** @description True if the server has sign-in. */
+            /** @description Sign-in */
             sign_in: boolean;
         };
         /**
          * SignInIn
-         * @description The body of a sign-in and of the setup.
+         * @description Sign-in body
          */
         SignInIn: {
             name: string;
             password: string;
         };
-        /** @description One source line with its number in the canonical form of its section. */
+        /** @description Source line */
         SourceLineJson: {
             /** Format: uint32 */
             number: number;
-            /** @description The text of the line with each secret masked as `<secret>`. */
+            /** @description Text */
             text: string;
         };
         /**
          * SourceLinesOut
-         * @description The masked lines of one source span of a twin.
+         * @description Source lines
          */
         SourceLinesOut: {
             kind: string;
@@ -2058,14 +1992,7 @@ export interface components {
             topology: string;
             twin: components["schemas"]["TwinJson"];
         };
-        /**
-         * @description The masked lines of one source span: the lines from `first_line` to
-         *     `last_line` that lie inside a source span of a function of the twin, at
-         *     most `MAX_LINES` lines from `first_line`. `left_out` lists the ranges of
-         *     the request that are outside every such span or past the end of the
-         *     section, so `lines` can be empty; `cut` is the number of
-         *     lines after the limit that the answer leaves out. A note names both.
-         */
+        /** @description Source lines */
         SourceTextJson: {
             /** Format: uint32 */
             cut: number;
@@ -2085,17 +2012,17 @@ export interface components {
             /** Format: uint32 */
             last_line: number;
         };
-        /** @description The SSH algorithm set of a connection. */
+        /** @description SSH algorithms */
         SshAlgorithms: "modern" | "legacy";
-        /** @description How SSH sends the commands of a device. */
+        /** @description SSH command mode */
         SshMode: "exec" | "shell" | "connection";
-        /** @description One trace step with no packet set. */
+        /** @description Brief trace step */
         StepLineJson: {
             device?: string | null;
             function: string;
             /** Format: uint */
             index: number;
-            /** @description `forward`, `deliver`, `exit`, `drop` or `unknown`. */
+            /** @description Verdict kind */
             outcome: string;
             reason: components["schemas"]["ReasonJson"];
         };
@@ -2109,10 +2036,7 @@ export interface components {
             reply_of?: number | null;
             /** Format: uint32 */
             rsim_json: number;
-            /**
-             * @description The masked source lines of each span of the step, when they are
-             *     asked for.
-             */
+            /** @description Source lines */
             source_lines?: components["schemas"]["StepSourceJson"][] | null;
             /** Format: uint */
             step: number;
@@ -2120,10 +2044,7 @@ export interface components {
             trace_step: components["schemas"]["TraceStepJson"];
             twin: components["schemas"]["TwinJson"];
         };
-        /**
-         * @description The source lines of one span of a trace step: the masked lines, or the
-         *     error that refuses them.
-         */
+        /** @description Span source lines */
         StepSourceJson: components["schemas"]["SourceTextJson"] | {
             error: components["schemas"]["QueryError"];
             file: string;
@@ -2134,7 +2055,7 @@ export interface components {
         };
         /**
          * SummarizeOut
-         * @description The counts of a table and of each column.
+         * @description Table summary
          */
         SummarizeOut: {
             columns: components["schemas"]["ColumnSummary"][];
@@ -2150,29 +2071,29 @@ export interface components {
         SummaryResultJson: {
             kind: string;
             verdict?: components["schemas"]["VerdictJson"] | null;
-            /** @description `deliver`, `exit`, `drop`, `unknown` or `null`. */
+            /** @description Verdict */
             verdict_kind?: string | null;
         };
-        /** @description One table of the catalog. */
+        /** @description Table */
         TableDef: {
             columns: components["schemas"]["Column"][];
             description: string;
-            /** @description The key columns, which give the default order of the rows. */
+            /** @description Key columns */
             key: string[];
             name: string;
-            /** @description The data that the table needs, so a client knows why it is empty. */
+            /** @description Needed data */
             needs: string;
-            /** @description The verbs of the table. */
+            /** @description Verbs */
             verbs: string[];
         };
         /**
          * TableOut
-         * @description The rows of a table.
+         * @description Table rows
          */
         TableOut: {
             columns: string[];
             kind: string;
-            /** @description The cursor of the next page, or `null` on the last page. */
+            /** @description Next cursor */
             next_cursor?: string | null;
             rows: unknown[][];
             /** Format: uint32 */
@@ -2181,14 +2102,14 @@ export interface components {
             topology: string;
             /**
              * Format: uint
-             * @description The number of rows that match the filters, on all pages.
+             * @description Total rows
              */
             total: number;
             twin: components["schemas"]["TwinJson"];
         };
         /**
          * TablesOut
-         * @description The table catalog.
+         * @description Table catalog
          */
         TablesOut: {
             kind: string;
@@ -2197,31 +2118,27 @@ export interface components {
             tables: components["schemas"]["TableDef"][];
         };
         /**
-         * @description One TCP flag.
+         * @description TCP flag
          * @enum {string}
          */
         TcpFlag: "fin" | "syn" | "rst" | "psh" | "ack" | "urg" | "ece" | "cwr";
-        /** @description The check of the TLS certificate of an HTTPS device. */
+        /** @description TLS trust */
         TlsTrust: "pin" | "ca" | "none";
         /**
          * TokenIn
-         * @description The body of a new API token.
+         * @description New API token body
          */
         TokenIn: {
             /**
              * Format: uint32
-             * @description The days until the token expires. With no value the token does not
-             *     expire.
+             * @description Days to expiry
              * @default null
              */
             expires_days: number | null;
             name: string;
             scopes: string[];
         };
-        /**
-         * @description An API token as its user sees it. The token text is given only once,
-         *     when the token is made.
-         */
+        /** @description API token */
         TokenInfo: {
             created_at: string;
             expires_at?: string | null;
@@ -2234,60 +2151,53 @@ export interface components {
         };
         /**
          * TokensOut
-         * @description The API tokens of the user.
+         * @description API tokens
          */
         TokensOut: {
             tokens: components["schemas"]["TokenInfo"][];
         };
-        /** @description One edge. */
+        /** @description Edge */
         TopoEdge: {
-            /** @description In a path drawing: the branches that cross the edge. */
+            /** @description Branches */
             branches: number[];
-            /** @description The result of each requested claim on the edge. */
+            /** @description Claim results */
             claims: {
                 [key: string]: components["schemas"]["ClaimResult"];
             };
-            /**
-             * @description The facts of the edge, for example the speed and the duplex of both
-             *     ends of a link, or the tunnels of an overlay edge, each with its
-             *     encapsulation function, its source, its peer and its VNIs.
-             */
+            /** @description Edge facts */
             facts: unknown;
             from: string;
             id: string;
-            /**
-             * @description `physical`, `overlay` or `function`; in a path drawing also
-             *     `underlay` for a hop of an encapsulated packet.
-             */
+            /** @description Layer */
             layer: string;
-            /** @description In a path drawing: the overlay edge of an underlay edge. */
+            /** @description Overlay edge */
             overlay?: string | null;
-            /** @description The source spans of the facts: file:first-last. */
+            /** @description Source spans */
             provenance: string[];
             to: string;
         };
-        /** @description One node. */
+        /** @description Node */
         TopoNode: {
             device?: string | null;
             /**
              * Format: uint
-             * @description The number of functions of a device node.
+             * @description Functions
              */
             functions?: number | null;
             id: string;
-            /** @description `device` or `function`. */
+            /** @description Level */
             kind: string;
             label: string;
         };
         /**
          * TopologyOut
-         * @description The topology of a twin, or the drawing of the paths of a query.
+         * @description Topology
          */
         TopologyOut: {
             edges: components["schemas"]["TopoEdge"][];
             kind: string;
             layers: string[];
-            /** @description `device` or `function`. */
+            /** @description Level */
             level: string;
             nodes: components["schemas"]["TopoNode"][];
             /** Format: uint32 */
@@ -2314,34 +2224,31 @@ export interface components {
             rib_guard: string;
         };
         /**
-         * @description A protocol name.
+         * @description Protocol
          * @enum {string}
          */
         Transport: "tcp" | "udp" | "icmp" | "icmpv6";
-        /** @description The twin that gave an answer. */
+        /** @description Twin */
         TwinJson: {
-            /** @description The identifier of the base: a snapshot, or a hand-built topology of the tests. */
+            /** @description Base */
             base: string;
-            /** @description The twin identifier. */
+            /** @description Twin */
             id: string;
-            /** @description The what-if layers on the base, in order. Empty with no scenario. */
+            /** @description Layers */
             layers: string[];
-            /**
-             * Format: uint64
-             * @description The snapshot cycle of the base, or `null` for a hand-built topology of the tests.
-             */
-            snapshot?: number | null;
+            /** @description Snapshot time */
+            snapshot?: string | null;
         };
-        /** @description A QoS header field over the members of a set: {"value": field value}, "varies" or "none". */
+        /** @description QoS field */
         UniformJson: {
             value: components["schemas"]["Field_uint8"];
         } | ("varies" | "none");
         /**
          * UniqueOut
-         * @description The distinct values of columns with their counts.
+         * @description Distinct values
          */
         UniqueOut: {
-            /** @description The columns, then `count`. */
+            /** @description Columns */
             columns: string[];
             kind: string;
             rows: unknown[][];
@@ -2351,11 +2258,11 @@ export interface components {
             topology: string;
             twin: components["schemas"]["TwinJson"];
         };
-        /** @description How a path query treats a field that it does not state. */
+        /** @description Unstated fields */
         Unstated: "all" | "defaults";
         /**
          * User
-         * @description A user as an admin sees it. The password hash is not part of it.
+         * @description User
          */
         User: {
             created_at: string;
@@ -2365,13 +2272,13 @@ export interface components {
         };
         /**
          * UserIn
-         * @description The body of a user that an admin makes or changes.
+         * @description User body
          */
         UserIn: {
             /** @default false */
             disabled: boolean;
             /**
-             * @description A new password. A new user needs one.
+             * @description Password
              * @default null
              */
             password: string | null;
@@ -2379,35 +2286,32 @@ export interface components {
         };
         /**
          * UsersOut
-         * @description The users.
+         * @description Users
          */
         UsersOut: {
             users: components["schemas"]["User"][];
         };
-        /** @description A vendor that has a collector, with its transport. */
+        /** @description Collector vendor */
         VendorOut: {
             transport: components["schemas"]["CollectorTransport"];
             vendor: string;
         };
         /**
          * VendorsOut
-         * @description The vendors that have a collector, in name order.
+         * @description Collector vendors
          */
         VendorsOut: {
             vendors: components["schemas"]["VendorOut"][];
         };
         VerdictJson: {
             destination?: components["schemas"]["DestinationJson"] | null;
-            /**
-             * @description `deliver`, `exit`, `drop` or `unknown`. `exit`: the packets left the
-             *     twin on an edge interface, which the reason names.
-             */
+            /** @description Verdict */
             kind: string;
             reason?: components["schemas"]["ReasonJson"] | null;
         };
         /**
          * WrittenOut
-         * @description The answer of a write: the inventory version after it.
+         * @description Write result
          */
         WrittenOut: {
             /** Format: uint64 */
@@ -2444,7 +2348,7 @@ export interface operations {
                     "application/json": Record<string, never>;
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2473,7 +2377,7 @@ export interface operations {
                     "application/json": Record<string, never>;
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2487,9 +2391,9 @@ export interface operations {
     listAuthEvents: {
         parameters: {
             query?: {
-                /** @description The number of events of a page, at most 1000. */
+                /** @description Page size */
                 limit?: string;
-                /** @description The id of the last event of the previous page. */
+                /** @description Before id */
                 before?: string;
             };
             header?: never;
@@ -2507,7 +2411,7 @@ export interface operations {
                     "application/json": components["schemas"]["AuthEventPage"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2536,7 +2440,7 @@ export interface operations {
                     "application/json": components["schemas"]["UsersOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2571,7 +2475,7 @@ export interface operations {
                     "application/json": components["schemas"]["User"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2600,7 +2504,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2633,7 +2537,7 @@ export interface operations {
                     "application/json": components["schemas"]["MeOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2660,7 +2564,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2689,7 +2593,7 @@ export interface operations {
                     "application/json": components["schemas"]["MeOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2718,7 +2622,7 @@ export interface operations {
                     "application/json": components["schemas"]["SetupOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2751,7 +2655,7 @@ export interface operations {
                     "application/json": components["schemas"]["MeOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2780,7 +2684,7 @@ export interface operations {
                     "application/json": components["schemas"]["TokensOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2813,7 +2717,7 @@ export interface operations {
                     "application/json": components["schemas"]["NewTokenOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2842,7 +2746,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2871,7 +2775,7 @@ export interface operations {
                     "application/json": components["schemas"]["ClaimsOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2900,7 +2804,7 @@ export interface operations {
                     "application/json": components["schemas"]["Inventory"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2914,9 +2818,9 @@ export interface operations {
     listAudit: {
         parameters: {
             query?: {
-                /** @description The records of a page, from 1 to 1000; 100 if not given. */
+                /** @description Page size */
                 limit?: string;
-                /** @description Only the records with an id below this id: the next_before of the page before. */
+                /** @description Before id */
                 before?: string;
             };
             header?: never;
@@ -2934,7 +2838,7 @@ export interface operations {
                     "application/json": components["schemas"]["AuditPage"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2963,7 +2867,7 @@ export interface operations {
                     "application/json": components["schemas"]["BindingsOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2999,7 +2903,7 @@ export interface operations {
                     "application/json": components["schemas"]["WrittenOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3031,7 +2935,7 @@ export interface operations {
                     "application/json": components["schemas"]["WrittenOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3067,7 +2971,7 @@ export interface operations {
                     "application/json": components["schemas"]["WrittenOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3099,7 +3003,69 @@ export interface operations {
                     "application/json": components["schemas"]["WrittenOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getCollection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionOut"];
+                };
+            };
+            /** @description Problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    putCollection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Collection"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3128,7 +3094,7 @@ export interface operations {
                     "application/json": components["schemas"]["CredentialsOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3163,7 +3129,7 @@ export interface operations {
                     "application/json": components["schemas"]["WrittenOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3194,7 +3160,7 @@ export interface operations {
                     "application/json": components["schemas"]["WrittenOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3223,7 +3189,7 @@ export interface operations {
                     "application/json": components["schemas"]["ResolvedDevices"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3254,7 +3220,7 @@ export interface operations {
                     "application/json": components["schemas"]["ResolvedDevice"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3289,7 +3255,7 @@ export interface operations {
                     "application/json": components["schemas"]["WrittenOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3320,7 +3286,7 @@ export interface operations {
                     "application/json": components["schemas"]["WrittenOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3349,7 +3315,7 @@ export interface operations {
                     "application/json": components["schemas"]["GroupsOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3380,7 +3346,7 @@ export interface operations {
                     "application/json": components["schemas"]["Group"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3415,7 +3381,7 @@ export interface operations {
                     "application/json": components["schemas"]["WrittenOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3446,7 +3412,7 @@ export interface operations {
                     "application/json": components["schemas"]["WrittenOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3475,7 +3441,7 @@ export interface operations {
                     "application/json": components["schemas"]["JumpHostsOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3510,7 +3476,7 @@ export interface operations {
                     "application/json": components["schemas"]["WrittenOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3541,7 +3507,7 @@ export interface operations {
                     "application/json": components["schemas"]["WrittenOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3570,7 +3536,7 @@ export interface operations {
                     "application/json": components["schemas"]["RoutesOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3605,7 +3571,7 @@ export interface operations {
                     "application/json": components["schemas"]["WrittenOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3636,7 +3602,7 @@ export interface operations {
                     "application/json": components["schemas"]["WrittenOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3665,7 +3631,7 @@ export interface operations {
                     "application/json": components["schemas"]["SecretKeyOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3694,7 +3660,7 @@ export interface operations {
                     "application/json": components["schemas"]["VendorsOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3723,7 +3689,7 @@ export interface operations {
                     "application/json": Record<string, never>;
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3752,7 +3718,7 @@ export interface operations {
                     "application/json": components["schemas"]["TablesOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3781,7 +3747,7 @@ export interface operations {
                     "application/json": Record<string, never>;
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3812,7 +3778,7 @@ export interface operations {
                     "application/json": Record<string, never>;
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3847,7 +3813,7 @@ export interface operations {
                     "application/json": Record<string, never>;
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3861,7 +3827,7 @@ export interface operations {
     runClaim: {
         parameters: {
             query?: {
-                /** @description The devices of the scope, separated by commas. */
+                /** @description Devices */
                 device?: string;
             };
             header?: never;
@@ -3882,7 +3848,7 @@ export interface operations {
                     "application/json": components["schemas"]["ClaimOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3896,9 +3862,9 @@ export interface operations {
     getCoverage: {
         parameters: {
             query?: {
-                /** @description The number of rows of a page. */
+                /** @description Page size */
                 limit?: string;
-                /** @description The cursor of the next page. */
+                /** @description Cursor */
                 cursor?: string;
             };
             header?: never;
@@ -3918,7 +3884,7 @@ export interface operations {
                     "application/json": components["schemas"]["TableOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3953,7 +3919,7 @@ export interface operations {
                     "application/json": Record<string, never>;
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3967,7 +3933,7 @@ export interface operations {
     getQuery: {
         parameters: {
             query?: {
-                /** @description summary (the default), steps or full. */
+                /** @description Answer form */
                 form?: string;
             };
             header?: never;
@@ -3988,7 +3954,7 @@ export interface operations {
                     "application/json": components["schemas"]["PathBriefOut"] | components["schemas"]["SetBriefOut"] | components["schemas"]["PathAnswerOut"] | components["schemas"]["SetAnswerOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -4002,9 +3968,9 @@ export interface operations {
     getStep: {
         parameters: {
             query?: {
-                /** @description Select the reply of this forward branch. */
+                /** @description Reply of branch */
                 reply_of?: string;
-                /** @description true to add the source lines of each span of the step, with the secrets masked. */
+                /** @description Source lines */
                 source_lines?: string;
             };
             header?: never;
@@ -4027,7 +3993,7 @@ export interface operations {
                     "application/json": components["schemas"]["StepOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -4060,7 +4026,7 @@ export interface operations {
                     "application/json": components["schemas"]["ClaimOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -4074,7 +4040,7 @@ export interface operations {
     getPathDrawing: {
         parameters: {
             query?: {
-                /** @description json (the default), mermaid, d2 or graphml. */
+                /** @description Format */
                 format?: string;
             };
             header?: never;
@@ -4095,7 +4061,7 @@ export interface operations {
                     "application/json": components["schemas"]["TopologyOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -4109,9 +4075,9 @@ export interface operations {
     getSourceLines: {
         parameters: {
             query?: {
-                /** @description The file of a source span: <device>/<section>@<blob>. */
+                /** @description Source file */
                 file?: string;
-                /** @description The line range a-b, or a for one line. */
+                /** @description Line range */
                 lines?: string;
             };
             header?: never;
@@ -4131,7 +4097,7 @@ export interface operations {
                     "application/json": components["schemas"]["SourceLinesOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -4145,9 +4111,9 @@ export interface operations {
     lpmTable: {
         parameters: {
             query?: {
-                /** @description The address. */
+                /** @description Address */
                 address?: string;
-                /** @description The prefix column; prefix if not given. */
+                /** @description Prefix column */
                 column?: string;
             };
             header?: never;
@@ -4168,7 +4134,7 @@ export interface operations {
                     "application/json": components["schemas"]["TableOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -4182,13 +4148,13 @@ export interface operations {
     queryTable: {
         parameters: {
             query?: {
-                /** @description The columns of the output, separated by commas. */
+                /** @description Columns */
                 columns?: string;
-                /** @description The order: column names separated by commas, - before a name for a falling order. */
+                /** @description Sort order */
                 sort?: string;
-                /** @description The number of rows of a page. */
+                /** @description Page size */
                 limit?: string;
-                /** @description The cursor of the next page. */
+                /** @description Cursor */
                 cursor?: string;
             };
             header?: never;
@@ -4209,7 +4175,7 @@ export interface operations {
                     "application/json": components["schemas"]["TableOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -4241,7 +4207,7 @@ export interface operations {
                     "application/json": components["schemas"]["SummarizeOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -4255,11 +4221,11 @@ export interface operations {
     topTable: {
         parameters: {
             query?: {
-                /** @description The column. */
+                /** @description Column */
                 column?: string;
-                /** @description The number of rows; 5 if not given. */
+                /** @description Row count */
                 count?: string;
-                /** @description true for the smallest values. */
+                /** @description Ascending */
                 ascending?: string;
             };
             header?: never;
@@ -4280,7 +4246,7 @@ export interface operations {
                     "application/json": components["schemas"]["TableOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -4294,7 +4260,7 @@ export interface operations {
     uniqueTable: {
         parameters: {
             query?: {
-                /** @description The columns, separated by commas. */
+                /** @description Columns */
                 columns?: string;
             };
             header?: never;
@@ -4315,7 +4281,7 @@ export interface operations {
                     "application/json": components["schemas"]["UniqueOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -4329,19 +4295,19 @@ export interface operations {
     getTopology: {
         parameters: {
             query?: {
-                /** @description device (the default) or function. */
+                /** @description Level */
                 level?: string;
-                /** @description The layers, separated by commas. */
+                /** @description Layers */
                 layer?: string;
-                /** @description Only these devices, separated by commas. */
+                /** @description Devices */
                 device?: string;
-                /** @description Only the devices near this device. */
+                /** @description Around device */
                 around?: string;
-                /** @description The number of links of around; 1 if not given. */
+                /** @description Hops */
                 hops?: string;
-                /** @description The claims of each edge: link-speed-duplex. */
+                /** @description Claims */
                 claims?: string;
-                /** @description json (the default), mermaid, d2 or graphml. */
+                /** @description Format */
                 format?: string;
             };
             header?: never;
@@ -4361,7 +4327,7 @@ export interface operations {
                     "application/json": components["schemas"]["TopologyOut"];
                 };
             };
-            /** @description A problem */
+            /** @description Problem */
             default: {
                 headers: {
                     [name: string]: unknown;

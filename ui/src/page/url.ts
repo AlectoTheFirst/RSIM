@@ -67,20 +67,19 @@ export function twinState(twins: readonly TwinRef[] | null, twin: string): "load
   if (twins.length === 0) return "none";
   if (twin !== "store") return "ready";
   const store = twins.find((t) => t.id === "store");
-  return store && store.held == null && store.newest_cycle == null ? "empty" : "ready";
+  return store && store.held == null && store.newest == null ? "empty" : "ready";
 }
 
 /** The label of a twin that cannot answer, with its cause as the title, or null. */
 export function twinStateText(state: ReturnType<typeof twinState>): { text: string; title: string } | null {
   if (state === "none") return { text: "no store", title: "rsim-api has no --store" };
-  if (state === "empty") return { text: "no snapshot", title: "the store has no snapshot of the collector" };
+  if (state === "empty") return { text: "no snapshot", title: "empty store" };
   return null;
 }
 
-/** The cycle of a snapshot identifier `snap-<cycle>`, or null. */
-function cycleOf(id: string | null | undefined): number | null {
-  const m = id ? /^snap-(\d+)$/.exec(id) : null;
-  return m ? Number(m[1]) : null;
+/** True for a snapshot name `snapshot-YYYY-MM-DD-HHMMSS`, which sorts by its UTC second. */
+export function isSnapshot(id: string | null | undefined): id is string {
+  return id != null && /^snapshot-\d{4}-\d{2}-\d{2}-\d{6}$/.test(id);
 }
 
 /**
@@ -95,17 +94,15 @@ export function pinnedRun(twins: readonly TwinRef[], twin: string): string {
 /** The newest built snapshot when the page shows an older run of the store, or null. */
 export function newerRun(twins: readonly TwinRef[], twin: string): string | null {
   const held = twins.find((t) => t.id === "store")?.held ?? null;
-  const page = cycleOf(twin);
-  const newest = cycleOf(held);
-  return page !== null && newest !== null && newest > page ? held : null;
+  return isSnapshot(twin) && isSnapshot(held) && held > twin ? held : null;
 }
 
 /**
  * The option of the twin selector for a twin: the twin itself, or `store`
- * for a snapshot `snap-<cycle>` when the list names the store `store`.
+ * for a snapshot name when the list names the store `store`.
  */
 export function twinOption(ids: readonly string[], twin: string): string {
   if (ids.includes(twin)) return twin;
-  if (/^snap-\d+$/.test(twin) && ids.includes("store")) return "store";
+  if (isSnapshot(twin) && ids.includes("store")) return "store";
   return twin;
 }

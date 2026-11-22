@@ -17,20 +17,23 @@ pub const DEFAULT_REQUEST_TIMEOUT_SECONDS: u32 = 60;
 /// The time for the read of all pages of one section, in seconds, with no
 /// setting.
 pub const DEFAULT_PAGED_SECTION_TIMEOUT_SECONDS: u32 = 300;
+/// The time between 2 collections of a device, in seconds, with no
+/// setting.
+pub const DEFAULT_INTERVAL_SECONDS: u32 = 60;
 
-/// Where a resolved setting comes from.
+/// Setting origin
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Origin {
-    /// The device sets it.
+    /// Device
     Device,
-    /// The device inherits it from its group.
+    /// Group
     Group,
-    /// Neither sets it.
+    /// Default
     Default,
 }
 
-/// A setting with its origin.
+/// Resolved setting
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Resolved<T> {
     pub value: T,
@@ -61,13 +64,12 @@ fn pick<T: Clone>(device: &Option<T>, group: &Option<T>, default: T) -> Resolved
     }
 }
 
-/// The settings of a device after the inheritance.
+/// Resolved settings
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ResolvedSettings {
-    /// The credential reference; none if neither the device nor the group
-    /// names one.
+    /// Credential
     pub credential: Resolved<Option<String>>,
-    /// The route; none is a direct connection.
+    /// Route
     pub route: Resolved<Option<String>>,
     pub ssh_algorithms: Resolved<SshAlgorithms>,
     pub ssh_mode: Resolved<SshMode>,
@@ -82,6 +84,7 @@ pub struct ResolvedSettings {
     pub paged_section_timeout_seconds: Resolved<u32>,
     pub retries: Resolved<u32>,
     pub ha: Resolved<Ha>,
+    pub interval_seconds: Resolved<u32>,
 }
 
 /// The settings of a device that inherits from a group.
@@ -140,15 +143,20 @@ pub fn resolve_settings(device: &Settings, group: &Settings) -> ResolvedSettings
         ),
         retries: pick(&device.retries, &group.retries, 0),
         ha: pick(&device.ha, &group.ha, Ha::None),
+        interval_seconds: pick(
+            &device.interval_seconds,
+            &group.interval_seconds,
+            DEFAULT_INTERVAL_SECONDS,
+        ),
     }
 }
 
-/// A device with the settings of its group resolved.
+/// Resolved device
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ResolvedDevice {
     pub name: String,
     pub group: String,
-    /// The vendor of the group.
+    /// Vendor
     pub vendor: String,
     pub address: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -160,7 +168,7 @@ pub struct ResolvedDevice {
     pub settings: ResolvedSettings,
 }
 
-/// The devices of the inventory resolved, at its version.
+/// Resolved devices
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ResolvedDevices {
     pub version: u64,
@@ -293,6 +301,32 @@ mod tests {
         assert_eq!(s.timeout_seconds.value, 45);
         assert_eq!(s.request_timeout_seconds.value, 60);
         assert_eq!(s.paged_section_timeout_seconds.value, 300);
+        assert_eq!(
+            (s.interval_seconds.value, s.interval_seconds.origin),
+            (60, Origin::Default)
+        );
+    }
+
+    #[test]
+    fn the_interval_of_a_device_wins_over_its_group() {
+        let g = group(Settings {
+            interval_seconds: Some(300),
+            ..Settings::default()
+        });
+        let s = resolve_device(&device(Settings::default()), &g).settings;
+        assert_eq!(
+            (s.interval_seconds.value, s.interval_seconds.origin),
+            (300, Origin::Group)
+        );
+        let d = device(Settings {
+            interval_seconds: Some(3_600),
+            ..Settings::default()
+        });
+        let s = resolve_device(&d, &g).settings;
+        assert_eq!(
+            (s.interval_seconds.value, s.interval_seconds.origin),
+            (3_600, Origin::Device)
+        );
     }
 
     #[test]

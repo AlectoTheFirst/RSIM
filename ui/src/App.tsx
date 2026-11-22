@@ -27,7 +27,7 @@ import {
 import { HatchMark } from "./page/Hatch";
 import { keyForElement, keyPlace } from "./tables/model";
 import { KeyLine, LEVELS, QueryBar, ResultLine, TopBar } from "./page/Parts";
-import { newerRun, pinnedRun, twinState, twinStateText, viewOf, viewSearch, withTwin } from "./page/url";
+import { isSnapshot, newerRun, pinnedRun, twinState, twinStateText, viewOf, viewSearch, withTwin } from "./page/url";
 import { type Fields, type Mode, explainCommand, fieldsOf, requestBody, rsimCommand } from "./page/query";
 import { QUERY_FIELDS, modeValue } from "./page/fields";
 import { TablesView } from "./tables/TablesView";
@@ -60,7 +60,7 @@ function replaced(e: unknown): boolean {
 /** The time of a query: the round trip, then the engine time or a cache hit. */
 export function timingText(ms: number, t: ServerTiming): string {
   const fmt = (x: number) => (x < 10 ? x.toFixed(1) : String(Math.round(x)));
-  const server = t.engineMs !== null ? ` · engine ${fmt(t.engineMs)} ms` : t.cacheHit ? " · cache hit" : "";
+  const server = t.engineMs !== null ? `, engine ${fmt(t.engineMs)} ms` : t.cacheHit ? ", cache hit" : "";
   return `round trip ${fmt(ms)} ms${server}`;
 }
 
@@ -290,11 +290,11 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
   useEffect(() => {
     // A page whose run is replaced moves to the newest built run.
     onReplaced(() => {
-      setNotice("run replaced: page on the newest run");
+      setNotice("run replaced");
       listTwins()
         .then((list) => {
           setTwins(list);
-          setTwin((t) => (/^snap-\d+$/.test(t) ? pinnedRun(list, "store") : t));
+          setTwin((t) => (isSnapshot(t) ? pinnedRun(list, "store") : t));
         })
         .catch(() => undefined);
     });

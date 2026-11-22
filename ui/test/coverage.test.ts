@@ -36,7 +36,7 @@ describe("coverage report", () => {
 
   it("keeps the page and the opened device in the URL", () => {
     const s = { cursor: "o200", limit: 200, device: "r1" };
-    const search = writeCoverage(s, { view: "coverage", twin: "snap-3" });
+    const search = writeCoverage(s, { view: "coverage", twin: "snapshot-2026-11-22-140503" });
     expect(readCoverage(search)).toEqual(s);
     expect(viewOf(search)).toBe("Coverage");
     expect(writeCoverage({ cursor: null, limit: 200, device: null })).toBe("");
@@ -45,41 +45,43 @@ describe("coverage report", () => {
 
 describe("reload of the store", () => {
   it("marks a newest snapshot that does not build, with the held snapshot", () => {
-    const base = { id: "store", href: "/v1/twins/store", held: "snap-4", newest_cycle: 5 };
+    const base = { id: "store", href: "/v1/twins/store", held: "snapshot-2026-11-22-140504", newest: "snapshot-2026-11-22-140505" };
     expect(reloadMark([{ ...base, reload_error: null }])).toBeNull();
     expect(reloadMark([{ id: "builtin.ecmp", href: "/v1/twins/builtin.ecmp" }])).toBeNull();
-    expect(reloadMark([{ ...base, reload_error: { snapshot: "snap-5", detail: "the twin does not build" } }])).toEqual({
-      text: "snap-5 does not build, snap-4 answers",
+    expect(reloadMark([{ ...base, reload_error: { snapshot: "snapshot-2026-11-22-140505", detail: "the twin does not build" } }])).toEqual({
+      text: "snapshot-2026-11-22-140505 does not build, snapshot-2026-11-22-140504 answers",
       title: "the twin does not build",
     });
     expect(reloadMark([{ ...base, reload_error: { snapshot: null, detail: "HEAD: no such file" } }])).toEqual({
-      text: "store HEAD not read, snap-4 answers",
+      text: "store HEAD not read, snapshot-2026-11-22-140504 answers",
       title: "HEAD: no such file",
     });
-    expect(reloadMark([{ ...base, loading: "snap-5", reload_error: null }])).toBeNull();
+    expect(reloadMark([{ ...base, loading: "snapshot-2026-11-22-140505", reload_error: null }])).toBeNull();
   });
 
   it("pins the newest built run and offers a newer run", () => {
-    const twins = [{ id: "store", href: "/v1/twins/store", held: "snap-12", previous: "snap-11" }];
-    expect(pinnedRun(twins, "store")).toBe("snap-12");
-    expect(pinnedRun(twins, "snap-11")).toBe("snap-11");
+    const twins = [{ id: "store", href: "/v1/twins/store", held: "snapshot-2026-11-22-140512", previous: "snapshot-2026-11-22-140511" }];
+    expect(pinnedRun(twins, "store")).toBe("snapshot-2026-11-22-140512");
+    expect(pinnedRun(twins, "snapshot-2026-11-22-140511")).toBe("snapshot-2026-11-22-140511");
     expect(pinnedRun([{ id: "store", href: "/v1/twins/store", held: null }], "store")).toBe("store");
-    expect(newerRun(twins, "snap-11")).toBe("snap-12");
-    expect(newerRun(twins, "snap-12")).toBeNull();
+    expect(newerRun(twins, "snapshot-2026-11-22-140511")).toBe("snapshot-2026-11-22-140512");
+    expect(newerRun(twins, "snapshot-2026-11-22-140512")).toBeNull();
     expect(newerRun(twins, "store")).toBeNull();
+    // A name of a later day is newer, and the old form is not a snapshot.
+    expect(newerRun(twins, "snapshot-2026-11-21-235959")).toBe("snapshot-2026-11-22-140512");
+    expect(newerRun(twins, "snap-11")).toBeNull();
   });
 
   it("answers only for a twin with a snapshot, and names the state of the others", () => {
-    const store = (held: string | null, newest: number | null) => [
-      { id: "store", href: "/v1/twins/store", held, newest_cycle: newest },
-    ];
+    const store = (held: string | null, newest: string | null) => [{ id: "store", href: "/v1/twins/store", held, newest }];
+    const s3 = "snapshot-2026-11-22-140503";
     expect(twinState(null, "")).toBe("loading");
     expect(twinState([], "")).toBe("none");
     expect(twinState(store(null, null), "store")).toBe("empty");
-    expect(twinState(store(null, 3), "store")).toBe("ready");
-    expect(twinState(store("snap-3", 3), "store")).toBe("ready");
-    expect(twinState(store(null, null), "snap-3")).toBe("ready");
-    expect(twinStateText("empty")).toEqual({ text: "no snapshot", title: "the store has no snapshot of the collector" });
+    expect(twinState(store(null, s3), "store")).toBe("ready");
+    expect(twinState(store(s3, s3), "store")).toBe("ready");
+    expect(twinState(store(null, null), "snapshot-2026-11-22-140503")).toBe("ready");
+    expect(twinStateText("empty")).toEqual({ text: "no snapshot", title: "empty store" });
     expect(twinStateText("none")).toEqual({ text: "no store", title: "rsim-api has no --store" });
     expect(twinStateText("ready")).toBeNull();
   });
@@ -124,7 +126,7 @@ describe("opened device in the URL", () => {
   const COLS = ["device", "handled", "irrelevant", "unhandled", "unhandled_paths", "unhandled_stanzas"];
   const rows = ["r1", "r2", "r3"].map((d) => coverageRow(COLS, [d, 1, 0, 0, 0, 0]));
   const url = (selected: number | null, open: boolean) =>
-    writeCoverage({ cursor: null, limit: 200, device: openedDevice(rows, selected, open) }, { view: "coverage", twin: "snap-3" });
+    writeCoverage({ cursor: null, limit: 200, device: openedDevice(rows, selected, open) }, { view: "coverage", twin: "snapshot-2026-11-22-140503" });
 
   it("names the device of the opened row after j, k and Escape", () => {
     expect(readCoverage(url(0, true)).device).toBe("r1");
@@ -176,10 +178,10 @@ describe("unhandled paths of a device", () => {
 describe("twin selector", () => {
   it("shows the store for its snapshot name and for its alias", () => {
     const ids = ["builtin.leaf-spine", "builtin.mini-enterprise", "store"];
-    expect(twinOption(ids, "snap-12")).toBe("store");
+    expect(twinOption(ids, "snapshot-2026-11-22-140512")).toBe("store");
     expect(twinOption(ids, "store")).toBe("store");
     expect(twinOption(ids, "builtin.leaf-spine")).toBe("builtin.leaf-spine");
-    expect(twinOption(["builtin.leaf-spine"], "snap-12")).toBe("snap-12");
-    expect(twinOption([...ids, "snap-12"], "snap-12")).toBe("snap-12");
+    expect(twinOption(["builtin.leaf-spine"], "snapshot-2026-11-22-140512")).toBe("snapshot-2026-11-22-140512");
+    expect(twinOption([...ids, "snapshot-2026-11-22-140512"], "snapshot-2026-11-22-140512")).toBe("snapshot-2026-11-22-140512");
   });
 });

@@ -71,7 +71,7 @@ function Frame(props: { headline: string; problem: string | null; children?: Com
   );
 }
 
-const NAME_HINT = "lower-case letters, digits, . _ @ -; at most 64";
+const NAME_HINT = "lower-case letters, digits, . _ @ -, at most 64";
 const PASSWORD_HINT = "12 to 1024 characters";
 
 function SignInPage(props: { onIn: (u: Me) => void }) {

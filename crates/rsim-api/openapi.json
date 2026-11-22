@@ -2,7 +2,7 @@
   "components": {
     "schemas": {
       "Action": {
-        "description": "The kind of a change of the audit log.",
+        "description": "Change kind",
         "enum": [
           "create",
           "update",
@@ -42,7 +42,7 @@
         "type": "object"
       },
       "AnswerBriefJson": {
-        "description": "An answer with no packet set in its ingress and its branches. The\nsummary parts keep their packet sets, because each part is a set.",
+        "description": "Brief answer",
         "properties": {
           "branches": {
             "items": {
@@ -125,7 +125,7 @@
         "type": "object"
       },
       "AttrJson": {
-        "description": "A context attribute: {\"known\": number}, \"unset\" or \"unknown\".",
+        "description": "Context attribute",
         "oneOf": [
           {
             "additionalProperties": false,
@@ -150,10 +150,10 @@
         ]
       },
       "AuditPage": {
-        "description": "A page of the audit log, the newest record first.",
+        "description": "Audit log page",
         "properties": {
           "next_before": {
-            "description": "The `before` value of the next page, if there is one.",
+            "description": "Next before",
             "format": "int64",
             "type": [
               "integer",
@@ -174,7 +174,7 @@
         "type": "object"
       },
       "AuditRecord": {
-        "description": "One record of the audit log: who changed what and when, with the old\nand the new value of the record.",
+        "description": "Audit record",
         "properties": {
           "action": {
             "$ref": "#/components/schemas/Action"
@@ -183,7 +183,7 @@
             "type": "string"
           },
           "at": {
-            "description": "The time of the change in UTC, RFC 3339.",
+            "description": "Time",
             "type": "string"
           },
           "id": {
@@ -191,17 +191,17 @@
             "type": "integer"
           },
           "key": {
-            "description": "The key of the record, for example the device name.",
+            "description": "Record key",
             "type": "string"
           },
           "kind": {
-            "description": "`credential`, `jump_host`, `route`, `group`, `device`,\n`fabric_port_binding` or `edge_device_binding`.",
+            "description": "Record kind",
             "type": "string"
           },
           "new": true,
           "old": true,
           "version": {
-            "description": "The inventory version that the change made.",
+            "description": "Inventory version",
             "format": "uint64",
             "minimum": 0,
             "type": "integer"
@@ -219,7 +219,7 @@
         "type": "object"
       },
       "AuthEvent": {
-        "description": "One sign-in event.",
+        "description": "Sign-in event",
         "properties": {
           "actor": {
             "type": [
@@ -264,7 +264,7 @@
         "type": "object"
       },
       "AuthEventPage": {
-        "description": "A page of the sign-in events, the newest first.",
+        "description": "Sign-in event page",
         "properties": {
           "events": {
             "items": {
@@ -287,7 +287,7 @@
         "type": "object"
       },
       "Bindings": {
-        "description": "The bindings of the inventory.",
+        "description": "Bindings",
         "properties": {
           "edge_devices": {
             "items": {
@@ -309,7 +309,7 @@
         "type": "object"
       },
       "BindingsOut": {
-        "description": "The bindings at one version.",
+        "description": "Bindings",
         "properties": {
           "bindings": {
             "$ref": "#/components/schemas/Bindings"
@@ -328,7 +328,7 @@
         "type": "object"
       },
       "BranchBriefJson": {
-        "description": "A branch with its verdict, its delay, the number of its steps and, in\nthe form `steps`, one line for each step.",
+        "description": "Brief branch",
         "properties": {
           "delay": {
             "$ref": "#/components/schemas/DelayJson"
@@ -395,7 +395,7 @@
         "type": "object"
       },
       "CaptureBgp": {
-        "description": "The BGP sections that the collector reads of a router.",
+        "description": "BGP sections",
         "oneOf": [
           {
             "enum": [
@@ -405,18 +405,18 @@
           },
           {
             "const": "sessions",
-            "description": "The summary of each session.",
+            "description": "Sessions",
             "type": "string"
           },
           {
             "const": "all",
-            "description": "The summaries, the neighbour detail and the tables of each\nneighbour.",
+            "description": "All",
             "type": "string"
           }
         ]
       },
       "ClaimDef": {
-        "description": "One claim of the catalog.",
+        "description": "Claim",
         "properties": {
           "description": {
             "type": "string"
@@ -425,14 +425,14 @@
             "type": "string"
           },
           "reads": {
-            "description": "The data that the claim reads.",
+            "description": "Read data",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "scopes": {
-            "description": "The scopes on which the claim runs: `twin`, `devices` or `query`.",
+            "description": "Scopes",
             "items": {
               "type": "string"
             },
@@ -448,7 +448,7 @@
         "type": "object"
       },
       "ClaimOut": {
-        "description": "The result of a claim on a scope.",
+        "description": "Claim result",
         "properties": {
           "claim": {
             "type": "string"
@@ -457,7 +457,7 @@
             "$ref": "#/components/schemas/Counts"
           },
           "detail": {
-            "description": "What the claim leaves out of its rows, or why it has none.",
+            "description": "Detail",
             "type": "string"
           },
           "evidence": {
@@ -478,7 +478,7 @@
             "type": "integer"
           },
           "scope": {
-            "description": "`twin`, `devices` or `query`.",
+            "description": "Scope",
             "type": "string"
           },
           "topology": {
@@ -503,7 +503,7 @@
         "type": "object"
       },
       "ClaimResult": {
-        "description": "The result of a claim or of one evidence row.",
+        "description": "Claim result",
         "enum": [
           "confirmed",
           "refuted",
@@ -512,7 +512,7 @@
         "type": "string"
       },
       "ClaimsOut": {
-        "description": "The claim catalog.",
+        "description": "Claim catalog",
         "properties": {
           "claims": {
             "items": {
@@ -537,8 +537,44 @@
         "title": "ClaimsOut",
         "type": "object"
       },
+      "Collection": {
+        "additionalProperties": false,
+        "description": "Collector settings",
+        "properties": {
+          "history_days": {
+            "description": "History",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "history_days"
+        ],
+        "title": "Collection",
+        "type": "object"
+      },
+      "CollectionOut": {
+        "description": "Collector settings",
+        "properties": {
+          "collection": {
+            "$ref": "#/components/schemas/Collection"
+          },
+          "version": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "collection"
+        ],
+        "title": "CollectionOut",
+        "type": "object"
+      },
       "CollectorTransport": {
-        "description": "The transport of a collector.",
+        "description": "Transport",
         "enum": [
           "ssh",
           "https"
@@ -546,7 +582,7 @@
         "type": "string"
       },
       "Column": {
-        "description": "One column of a table.",
+        "description": "Column",
         "properties": {
           "description": {
             "type": "string"
@@ -555,7 +591,7 @@
             "type": "string"
           },
           "refers_to": {
-            "description": "The table and the column that a value refers to.",
+            "description": "Reference",
             "maxItems": 2,
             "minItems": 2,
             "prefixItems": [
@@ -572,7 +608,7 @@
             ]
           },
           "semantic": {
-            "description": "The meaning of the values, for example `device`, `interface`, `vrf`.",
+            "description": "Semantic type",
             "type": "string"
           },
           "type": {
@@ -594,7 +630,7 @@
         "type": "object"
       },
       "ColumnSummary": {
-        "description": "The counts of one column.",
+        "description": "Column summary",
         "properties": {
           "column": {
             "type": "string"
@@ -610,7 +646,7 @@
             "type": "integer"
           },
           "top": {
-            "description": "The most frequent values with their counts, at most 5, the most\nfrequent first.",
+            "description": "Most frequent values",
             "items": {
               "maxItems": 2,
               "minItems": 2,
@@ -636,7 +672,7 @@
         "type": "object"
       },
       "ColumnType": {
-        "description": "The type of the values of a column.",
+        "description": "Column type",
         "oneOf": [
           {
             "enum": [
@@ -648,23 +684,23 @@
           },
           {
             "const": "address",
-            "description": "An IPv4 or IPv6 address.",
+            "description": "Address",
             "type": "string"
           },
           {
             "const": "prefix",
-            "description": "An address with a prefix length.",
+            "description": "Prefix",
             "type": "string"
           },
           {
             "const": "list",
-            "description": "A list of text values.",
+            "description": "Text list",
             "type": "string"
           }
         ]
       },
       "Counts": {
-        "description": "The number of evidence rows of each result.",
+        "description": "Counts",
         "properties": {
           "confirmed": {
             "format": "uint",
@@ -691,7 +727,7 @@
       },
       "Credential": {
         "additionalProperties": false,
-        "description": "A credential. The source `env` or `env-url` names a key of the env file\nof the collector; the source `managed` has its kind, its user and a\nsealed secret in the inventory database. No answer gives a secret.",
+        "description": "Credential",
         "properties": {
           "description": {
             "type": [
@@ -700,7 +736,7 @@
             ]
           },
           "key": {
-            "description": "The key in the env file: the prefix of `env`, the variable of\n`env-url`. None for `managed`.",
+            "description": "Env key",
             "type": [
               "string",
               "null"
@@ -715,15 +751,15 @@
                 "type": "null"
               }
             ],
-            "description": "The kind of the secret of `managed`."
+            "description": "Secret kind"
           },
           "name": {
             "default": "",
-            "description": "The name of the credential. In a PUT body it can be left out; the\npath gives it.",
+            "description": "Name",
             "type": "string"
           },
           "secret_revision": {
-            "description": "The count of the writes of the secret of `managed`. The database\nsets it; a PUT body can give it, and the write ignores it.",
+            "description": "Secret revision",
             "format": "uint64",
             "minimum": 0,
             "type": [
@@ -735,7 +771,7 @@
             "$ref": "#/components/schemas/CredentialSource"
           },
           "user": {
-            "description": "The user of `managed` with the kind `password` or `ssh-key`.",
+            "description": "User",
             "type": [
               "string",
               "null"
@@ -748,28 +784,28 @@
         "type": "object"
       },
       "CredentialKind": {
-        "description": "The kind of the secret of a managed credential.",
+        "description": "Secret kind",
         "oneOf": [
           {
             "const": "password",
-            "description": "A user and a password: SSH, the HTTPS login and a proxy login.",
+            "description": "Password",
             "type": "string"
           },
           {
             "const": "ssh-key",
-            "description": "A user and a private key with its passphrase: SSH only.",
+            "description": "SSH key",
             "type": "string"
           },
           {
             "const": "api-key",
-            "description": "An API key with no user: HTTPS only.",
+            "description": "API key",
             "type": "string"
           }
         ]
       },
       "CredentialPut": {
         "additionalProperties": false,
-        "description": "The PUT body of a credential: the record with the secret of a managed\ncredential. A managed credential with no secret keeps its stored secret\nwhen the kind stays; a new managed credential and a new kind need the\nsecret.",
+        "description": "Credential body",
         "properties": {
           "description": {
             "default": null,
@@ -780,7 +816,7 @@
           },
           "key": {
             "default": null,
-            "description": "The key in the env file: the prefix of `env`, the variable of\n`env-url`. None for `managed`.",
+            "description": "Env key",
             "type": [
               "string",
               "null"
@@ -796,11 +832,11 @@
               }
             ],
             "default": null,
-            "description": "The kind of the secret of `managed`."
+            "description": "Secret kind"
           },
           "name": {
             "default": "",
-            "description": "The name of the credential. It can be left out; the path gives it.",
+            "description": "Name",
             "type": "string"
           },
           "secret": {
@@ -813,11 +849,11 @@
               }
             ],
             "default": null,
-            "description": "The new secret of `managed`. No answer gives it back."
+            "description": "Secret"
           },
           "secret_revision": {
             "default": null,
-            "description": "The revision of the stored record. The write ignores it.",
+            "description": "Revision",
             "format": "uint64",
             "minimum": 0,
             "type": [
@@ -830,7 +866,7 @@
           },
           "user": {
             "default": null,
-            "description": "The user of `managed` with the kind `password` or `ssh-key`.",
+            "description": "User",
             "type": [
               "string",
               "null"
@@ -844,27 +880,27 @@
         "type": "object"
       },
       "CredentialSource": {
-        "description": "The source of a credential.",
+        "description": "Credential source",
         "oneOf": [
           {
             "const": "env",
-            "description": "The keys `<KEY>_USER` and `<KEY>_PASS`, `<KEY>_KEY_FILE` with\n`<KEY>_KEY_PASS`, `<KEY>_AGENT` or `<KEY>_API_KEY` of the env\nfile of the collector.",
+            "description": "Env credential",
             "type": "string"
           },
           {
             "const": "env-url",
-            "description": "The user and the password in the URL of the env key `<KEY>`,\nfor example the login of a proxy URL.",
+            "description": "Env URL credential",
             "type": "string"
           },
           {
             "const": "managed",
-            "description": "The kind, the user and the sealed secret in the inventory\ndatabase.",
+            "description": "Managed credential",
             "type": "string"
           }
         ]
       },
       "CredentialsOut": {
-        "description": "The credential references at one version.",
+        "description": "Credentials",
         "properties": {
           "credentials": {
             "items": {
@@ -943,21 +979,21 @@
       },
       "Device": {
         "additionalProperties": false,
-        "description": "A device of the inventory. Its name is the device of the snapshot\nstore.",
+        "description": "Device",
         "properties": {
           "address": {
-            "description": "The host name or the address of the management plane.",
+            "description": "Address",
             "type": "string"
           },
           "console_site": {
-            "description": "The site of a controller that the device reads, for example the\nUniFi site of a console.",
+            "description": "Controller site",
             "type": [
               "string",
               "null"
             ]
           },
           "group": {
-            "description": "The name of the device group.",
+            "description": "Device group",
             "type": "string"
           },
           "location": {
@@ -973,7 +1009,7 @@
           "settings": {
             "$ref": "#/components/schemas/Settings",
             "default": {},
-            "description": "The settings that the device sets in place of its group."
+            "description": "Device settings"
           },
           "site": {
             "type": [
@@ -991,7 +1027,7 @@
       },
       "EdgeDeviceBinding": {
         "additionalProperties": false,
-        "description": "A Network Edge device of an Equinix account and the device of the\nestate that it is.",
+        "description": "Edge device binding",
         "properties": {
           "account": {
             "default": "",
@@ -1002,7 +1038,7 @@
           },
           "edge_device": {
             "default": "",
-            "description": "The uuid of the Network Edge device.",
+            "description": "Edge device",
             "type": "string"
           }
         },
@@ -1013,7 +1049,7 @@
         "type": "object"
       },
       "EncapJson": {
-        "description": "An encapsulation header. The values are field values.",
+        "description": "Encapsulation header",
         "properties": {
           "dst": {
             "anyOf": [
@@ -1065,7 +1101,7 @@
         "type": "object"
       },
       "ErrorCode": {
-        "description": "The code of a query error.",
+        "description": "Error code",
         "oneOf": [
           {
             "enum": [
@@ -1083,28 +1119,28 @@
           },
           {
             "const": "store",
-            "description": "The store of a `store:` topology cannot be read.",
+            "description": "Store not readable",
             "type": "string"
           },
           {
             "const": "no_source_text",
-            "description": "The twin has no text of the source: a hand-built twin of the tests, or a file\nthat is not a section of the snapshot of the twin.",
+            "description": "No source text",
             "type": "string"
           },
           {
             "const": "not_masked",
-            "description": "The section has no mask of its secrets for its vendor and format, so\nits lines are not given.",
+            "description": "Not masked",
             "type": "string"
           },
           {
             "const": "not_a_source_span",
-            "description": "The lines are outside every source span of a function of the twin,\nso they are not given.",
+            "description": "Not a source span",
             "type": "string"
           }
         ]
       },
       "Evidence": {
-        "description": "One evidence row.",
+        "description": "Evidence row",
         "properties": {
           "detail": {
             "type": "string"
@@ -1112,21 +1148,21 @@
           "expected": true,
           "observed": true,
           "provenance": {
-            "description": "The source spans of the data: file:first-last.",
+            "description": "Source spans",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "reason": {
-            "description": "A reason code: `match`, `mismatch`, `not_collected`, `unknown`.",
+            "description": "Reason code",
             "type": "string"
           },
           "result": {
             "$ref": "#/components/schemas/ClaimResult"
           },
           "subject": {
-            "description": "What the row is about, for example a link or a branch.",
+            "description": "Subject",
             "type": "string"
           }
         },
@@ -1141,11 +1177,11 @@
       },
       "FabricPortBinding": {
         "additionalProperties": false,
-        "description": "A Fabric port of an Equinix account and the device port at the other\nend of its cross connect.",
+        "description": "Fabric port binding",
         "properties": {
           "account": {
             "default": "",
-            "description": "The device of the account. In a PUT body it can be left out; the\npath gives it.",
+            "description": "Device",
             "type": "string"
           },
           "device": {
@@ -1153,7 +1189,7 @@
           },
           "fabric_port": {
             "default": "",
-            "description": "The uuid or the name of the Fabric port.",
+            "description": "Fabric port",
             "type": "string"
           },
           "port": {
@@ -1168,7 +1204,7 @@
         "type": "object"
       },
       "Field_string": {
-        "description": "A header field value: {\"known\": value}, {\"in\": [...]}, \"unknown\", \"absent\" or \"original\".",
+        "description": "Header field value",
         "oneOf": [
           {
             "additionalProperties": false,
@@ -1204,7 +1240,7 @@
         ]
       },
       "Field_uint16": {
-        "description": "A header field value: {\"known\": value}, {\"in\": [...]}, \"unknown\", \"absent\" or \"original\".",
+        "description": "Header field value",
         "oneOf": [
           {
             "additionalProperties": false,
@@ -1243,7 +1279,7 @@
         ]
       },
       "Field_uint32": {
-        "description": "A header field value: {\"known\": value}, {\"in\": [...]}, \"unknown\", \"absent\" or \"original\".",
+        "description": "Header field value",
         "oneOf": [
           {
             "additionalProperties": false,
@@ -1281,7 +1317,7 @@
         ]
       },
       "Field_uint8": {
-        "description": "A header field value: {\"known\": value}, {\"in\": [...]}, \"unknown\", \"absent\" or \"original\".",
+        "description": "Header field value",
         "oneOf": [
           {
             "additionalProperties": false,
@@ -1347,27 +1383,27 @@
         "type": "object"
       },
       "Form": {
-        "description": "The form of an answer.",
+        "description": "Answer form",
         "oneOf": [
           {
             "const": "summary",
-            "description": "The verdicts, the parts and the branches with no trace steps.",
+            "description": "Summary",
             "type": "string"
           },
           {
             "const": "steps",
-            "description": "The summary, and one line for each trace step, with no packet sets.",
+            "description": "Steps",
             "type": "string"
           },
           {
             "const": "full",
-            "description": "The full answer with each packet set.",
+            "description": "Full answer",
             "type": "string"
           }
         ]
       },
       "FragmentName": {
-        "description": "The fragment state of a request.",
+        "description": "Fragment",
         "enum": [
           "unfragmented",
           "first",
@@ -1377,7 +1413,7 @@
       },
       "Group": {
         "additionalProperties": false,
-        "description": "A device group: the vendor and the settings of its devices.",
+        "description": "Device group",
         "properties": {
           "description": {
             "type": [
@@ -1394,7 +1430,7 @@
             "default": {}
           },
           "vendor": {
-            "description": "The vendor, for example `vyos`, `nxos`, `iosxr`, `iosxe` or `unifi`.\nA vendor with no collector is allowed; the collector skips its\ndevices.",
+            "description": "Vendor",
             "type": "string"
           }
         },
@@ -1405,7 +1441,7 @@
         "type": "object"
       },
       "GroupsOut": {
-        "description": "The device groups at one version.",
+        "description": "Device groups",
         "properties": {
           "groups": {
             "items": {
@@ -1427,21 +1463,21 @@
         "type": "object"
       },
       "Ha": {
-        "description": "What a trace does at an HA pair or a cluster whose active node is\nnot collected.",
+        "description": "HA setting",
         "oneOf": [
           {
             "const": "none",
-            "description": "The trace stops at the pair with `Unknown`.",
+            "description": "None",
             "type": "string"
           },
           {
             "const": "all",
-            "description": "The trace follows each node.",
+            "description": "All nodes",
             "type": "string"
           },
           {
             "const": "one",
-            "description": "The trace follows one node, chosen in a fixed order.",
+            "description": "One node",
             "type": "string"
           }
         ]
@@ -1487,7 +1523,7 @@
                 "type": "null"
               }
             ],
-            "description": "The inner header of an encapsulated current header."
+            "description": "Inner header"
           },
           "inner_l2_priority": {
             "anyOf": [
@@ -1517,7 +1553,7 @@
                 "type": "null"
               }
             ],
-            "description": "The inner tag, only when the frame has one."
+            "description": "Inner tag"
           },
           "network.inner.vlan.tpid": {
             "anyOf": [
@@ -1528,7 +1564,7 @@
                 "type": "null"
               }
             ],
-            "description": "The TPID of the inner tag, only when it is not 33024 (0x8100)."
+            "description": "Inner TPID"
           },
           "network.vlan.id": {
             "$ref": "#/components/schemas/Field_uint16"
@@ -1542,7 +1578,7 @@
                 "type": "null"
               }
             ],
-            "description": "The TPID of the outer tag, only when it is not 33024 (0x8100)."
+            "description": "TPID"
           },
           "source.ip": {
             "$ref": "#/components/schemas/Field_string"
@@ -1579,7 +1615,7 @@
         "type": "object"
       },
       "IcmpName": {
-        "description": "The name of an ICMP echo type.",
+        "description": "ICMP echo type",
         "enum": [
           "echo-request",
           "echo-reply"
@@ -1598,10 +1634,10 @@
             "type": "integer"
           }
         ],
-        "description": "An ICMP type: a number, or the name of the echo request or the echo\nreply."
+        "description": "ICMP type"
       },
       "IngressBriefJson": {
-        "description": "The ingress of one run, with no packet set.",
+        "description": "Brief ingress",
         "properties": {
           "device": {
             "type": [
@@ -1647,7 +1683,7 @@
         "type": "object"
       },
       "IngressJson": {
-        "description": "The ingress of one run of the answer: the packets of the run and the\ninterface where they enter, or the reason why the ingress is not known.",
+        "description": "Ingress",
         "properties": {
           "device": {
             "type": [
@@ -1714,15 +1750,18 @@
         "type": "object"
       },
       "IngressRef": {
-        "description": "An ingress point as <device>/<interface>.",
+        "description": "Ingress",
         "pattern": "^[^/]+/.+$",
         "type": "string"
       },
       "Inventory": {
-        "description": "The whole inventory at one version, with each list sorted by its key.",
+        "description": "Inventory",
         "properties": {
           "bindings": {
             "$ref": "#/components/schemas/Bindings"
+          },
+          "collection": {
+            "$ref": "#/components/schemas/Collection"
           },
           "credentials": {
             "items": {
@@ -1755,7 +1794,7 @@
             "type": "array"
           },
           "version": {
-            "description": "The version. Each change of the inventory increases it by 1.",
+            "description": "Version",
             "format": "uint64",
             "minimum": 0,
             "type": "integer"
@@ -1768,21 +1807,22 @@
           "routes",
           "groups",
           "devices",
-          "bindings"
+          "bindings",
+          "collection"
         ],
         "title": "Inventory",
         "type": "object"
       },
       "JumpHost": {
         "additionalProperties": false,
-        "description": "An SSH jump host with its own credential.",
+        "description": "Jump host",
         "properties": {
           "address": {
-            "description": "The host name or the address, with an optional port.",
+            "description": "Address",
             "type": "string"
           },
           "credential": {
-            "description": "The name of the credential reference.",
+            "description": "Name",
             "type": "string"
           },
           "name": {
@@ -1802,7 +1842,7 @@
         "type": "object"
       },
       "JumpHostsOut": {
-        "description": "The jump hosts at one version.",
+        "description": "Jump hosts",
         "properties": {
           "jump_hosts": {
             "items": {
@@ -1824,7 +1864,7 @@
         "type": "object"
       },
       "LineRangeJson": {
-        "description": "An inclusive range of line numbers.",
+        "description": "Line range",
         "properties": {
           "first_line": {
             "format": "uint32",
@@ -1844,7 +1884,7 @@
         "type": "object"
       },
       "MeOut": {
-        "description": "The user of a request as the UI shows it.",
+        "description": "Current user",
         "properties": {
           "name": {
             "type": "string"
@@ -1859,7 +1899,7 @@
             "type": "array"
           },
           "via": {
-            "description": "`session` or `token`.",
+            "description": "Sign-in method",
             "type": "string"
           }
         },
@@ -1888,7 +1928,7 @@
         "type": "object"
       },
       "NewTokenOut": {
-        "description": "A new API token: its text, given only in this answer, and its record.",
+        "description": "New API token",
         "properties": {
           "info": {
             "$ref": "#/components/schemas/TokenInfo"
@@ -1905,36 +1945,36 @@
         "type": "object"
       },
       "NxosJson": {
-        "description": "The JSON form of the NX-OS answers.",
+        "description": "NX-OS JSON form",
         "oneOf": [
           {
             "const": "plain",
-            "description": "`| json`.",
+            "description": "JSON",
             "type": "string"
           },
           {
             "const": "native",
-            "description": "`| json native`, NX-OS 9.3 and later.",
+            "description": "JSON native",
             "type": "string"
           }
         ]
       },
       "Origin": {
-        "description": "Where a resolved setting comes from.",
+        "description": "Setting origin",
         "oneOf": [
           {
             "const": "device",
-            "description": "The device sets it.",
+            "description": "Device",
             "type": "string"
           },
           {
             "const": "group",
-            "description": "The device inherits it from its group.",
+            "description": "Group",
             "type": "string"
           },
           {
             "const": "default",
-            "description": "Neither sets it.",
+            "description": "Default",
             "type": "string"
           }
         ]
@@ -1952,7 +1992,7 @@
             ]
           },
           "kind": {
-            "description": "`forward`, `deliver`, `exit`, `drop` or `unknown`.",
+            "description": "Verdict kind",
             "type": "string"
           },
           "next": {
@@ -1968,7 +2008,7 @@
         "type": "object"
       },
       "PacketSetJson": {
-        "description": "A packet set: its members. A member is a product of field values. The\nmembers are disjoint and in the fixed order of the bit table.",
+        "description": "Packet set",
         "properties": {
           "members": {
             "items": {
@@ -2006,7 +2046,7 @@
             "type": "string"
           },
           "notes": {
-            "description": "The notes of the query: the defaults that the unstated fields took.",
+            "description": "Notes",
             "items": {
               "type": "string"
             },
@@ -2039,7 +2079,7 @@
         "type": "object"
       },
       "PathBriefOut": {
-        "description": "A path answer in the form `summary` or `steps`.",
+        "description": "Brief path answer",
         "properties": {
           "answer": {
             "$ref": "#/components/schemas/AnswerBriefJson"
@@ -2051,7 +2091,7 @@
             "type": "string"
           },
           "notes": {
-            "description": "The notes of the query: the defaults that the unstated fields took.",
+            "description": "Notes",
             "items": {
               "type": "string"
             },
@@ -2086,21 +2126,21 @@
       },
       "PathQueryArgs": {
         "additionalProperties": false,
-        "description": "The fields of a path query. A field that the query does not state is\nnot known, or takes its default value with `unstated` `defaults`.",
+        "description": "Path query fields",
         "properties": {
           "destination.ip": {
-            "description": "The destination IP address.",
+            "description": "Destination address",
             "type": "string"
           },
           "destination.mac": {
-            "description": "The destination MAC address: 6 hexadecimal bytes with colons.",
+            "description": "Destination MAC",
             "type": [
               "string",
               "null"
             ]
           },
           "destination.port": {
-            "description": "The destination port.",
+            "description": "Destination port",
             "format": "uint16",
             "maximum": 65535,
             "minimum": 0,
@@ -2110,7 +2150,7 @@
             ]
           },
           "dscp": {
-            "description": "The DSCP.",
+            "description": "DSCP",
             "format": "uint8",
             "maximum": 63,
             "minimum": 0,
@@ -2120,7 +2160,7 @@
             ]
           },
           "ecn": {
-            "description": "The ECN.",
+            "description": "ECN",
             "format": "uint8",
             "maximum": 3,
             "minimum": 0,
@@ -2138,7 +2178,7 @@
                 "type": "null"
               }
             ],
-            "description": "The form of the answer. The default is summary."
+            "description": "Answer form"
           },
           "fragment": {
             "anyOf": [
@@ -2149,10 +2189,10 @@
                 "type": "null"
               }
             ],
-            "description": "The fragment state."
+            "description": "Fragment"
           },
           "icmp_code": {
-            "description": "The ICMP code.",
+            "description": "ICMP code",
             "format": "uint8",
             "maximum": 255,
             "minimum": 0,
@@ -2170,17 +2210,17 @@
                 "type": "null"
               }
             ],
-            "description": "The ICMP type: 0 to 255, echo-request or echo-reply."
+            "description": "ICMP type"
           },
           "ingress": {
-            "description": "The ingress point as <device>/<interface>. Without it, the\nattachment records of the source address give the ingress.",
+            "description": "Ingress",
             "type": [
               "string",
               "null"
             ]
           },
           "inner_l2_priority": {
-            "description": "The layer 2 priority of the inner tag. It needs network.inner.vlan.id.",
+            "description": "Inner layer 2 priority",
             "format": "uint8",
             "maximum": 7,
             "minimum": 0,
@@ -2190,7 +2230,7 @@
             ]
           },
           "l2_priority": {
-            "description": "The layer 2 priority. It needs network.vlan.id.",
+            "description": "Layer 2 priority",
             "format": "uint8",
             "maximum": 7,
             "minimum": 0,
@@ -2200,7 +2240,7 @@
             ]
           },
           "network.iana_number": {
-            "description": "The protocol number.",
+            "description": "Protocol number",
             "format": "uint8",
             "maximum": 255,
             "minimum": 0,
@@ -2210,7 +2250,7 @@
             ]
           },
           "network.inner.vlan.id": {
-            "description": "The VLAN of the inner tag. It needs network.vlan.id. Not given: no\ninner tag.",
+            "description": "Inner VLAN",
             "format": "uint16",
             "maximum": 4095,
             "minimum": 0,
@@ -2220,7 +2260,7 @@
             ]
           },
           "network.inner.vlan.tpid": {
-            "description": "The TPID of the inner tag. It needs network.inner.vlan.id. Not\ngiven: 33024 (0x8100).",
+            "description": "Inner TPID",
             "format": "uint16",
             "maximum": 65535,
             "minimum": 0,
@@ -2238,10 +2278,10 @@
                 "type": "null"
               }
             ],
-            "description": "The protocol name. Give network.iana_number or network.transport."
+            "description": "Protocol"
           },
           "network.vlan.id": {
-            "description": "The VLAN tag.",
+            "description": "VLAN",
             "format": "uint16",
             "maximum": 4095,
             "minimum": 0,
@@ -2251,7 +2291,7 @@
             ]
           },
           "network.vlan.tpid": {
-            "description": "The TPID of the outer tag, for example 34984 (0x88a8). It needs\nnetwork.vlan.id. Not given: 33024 (0x8100), or 34984 with an inner\ntag and unstated defaults.",
+            "description": "TPID",
             "format": "uint16",
             "maximum": 65535,
             "minimum": 0,
@@ -2261,25 +2301,25 @@
             ]
           },
           "reply": {
-            "description": "Run the reply. The default is true.",
+            "description": "Reply",
             "type": [
               "boolean",
               "null"
             ]
           },
           "source.ip": {
-            "description": "The source IP address.",
+            "description": "Source address",
             "type": "string"
           },
           "source.mac": {
-            "description": "The source MAC address: 6 hexadecimal bytes with colons.",
+            "description": "Source MAC",
             "type": [
               "string",
               "null"
             ]
           },
           "source.port": {
-            "description": "The source port.",
+            "description": "Source port",
             "format": "uint16",
             "maximum": 65535,
             "minimum": 0,
@@ -2289,7 +2329,7 @@
             ]
           },
           "tcp_flags": {
-            "description": "The TCP flags that are set.",
+            "description": "TCP flags",
             "items": {
               "$ref": "#/components/schemas/TcpFlag"
             },
@@ -2299,7 +2339,7 @@
             ]
           },
           "topology": {
-            "description": "`store` for the newest snapshot of the store\nof the server.",
+            "description": "Topology",
             "type": "string"
           },
           "unstated": {
@@ -2311,7 +2351,7 @@
                 "type": "null"
               }
             ],
-            "description": "all (the default): an unstated field has all values. defaults: an\nunstated field takes its default value where it has one."
+            "description": "Unstated fields"
           }
         },
         "required": [
@@ -2323,7 +2363,7 @@
         "type": "object"
       },
       "Problem": {
-        "description": "A problem object of RFC 9457 with the rsim error code.",
+        "description": "Problem",
         "properties": {
           "code": {
             "type": "string"
@@ -2382,7 +2422,7 @@
         "type": "object"
       },
       "QueryEcho": {
-        "description": "The query input in the JSON output. Each field is there, and a field\nthat is not given is `null`. The protocol is a number and has its name\nif it has one, the ICMP type is a number, and the TCP flags are in the\norder of their bits with no repeat.",
+        "description": "Query input",
         "properties": {
           "destination.ip": {
             "type": "string"
@@ -2572,7 +2612,7 @@
                 "type": "null"
               }
             ],
-            "description": "The treatment of the unstated fields, when the query gives it."
+            "description": "Unstated fields"
           }
         },
         "required": [
@@ -2583,7 +2623,7 @@
         "type": "object"
       },
       "QueryError": {
-        "description": "A query error: the code and a text for persons.",
+        "description": "Query error",
         "properties": {
           "code": {
             "$ref": "#/components/schemas/ErrorCode"
@@ -2607,7 +2647,7 @@
             "$ref": "#/components/schemas/SetEcho"
           }
         ],
-        "description": "The query input of an output: of a path query or of a set query."
+        "description": "Query input"
       },
       "RateConditionJson": {
         "properties": {
@@ -2652,7 +2692,7 @@
         "type": "object"
       },
       "ReplyBriefJson": {
-        "description": "The reply of a delivered branch in a brief form.",
+        "description": "Brief reply",
         "properties": {
           "answer": {
             "anyOf": [
@@ -2719,7 +2759,7 @@
         "type": "object"
       },
       "Resolved": {
-        "description": "A setting with its origin.",
+        "description": "Resolved setting",
         "properties": {
           "origin": {
             "$ref": "#/components/schemas/Origin"
@@ -2737,7 +2777,7 @@
         "type": "object"
       },
       "Resolved2": {
-        "description": "A setting with its origin.",
+        "description": "Resolved setting",
         "properties": {
           "origin": {
             "$ref": "#/components/schemas/Origin"
@@ -2753,7 +2793,7 @@
         "type": "object"
       },
       "Resolved3": {
-        "description": "A setting with its origin.",
+        "description": "Resolved setting",
         "properties": {
           "origin": {
             "$ref": "#/components/schemas/Origin"
@@ -2769,7 +2809,7 @@
         "type": "object"
       },
       "Resolved4": {
-        "description": "A setting with its origin.",
+        "description": "Resolved setting",
         "properties": {
           "origin": {
             "$ref": "#/components/schemas/Origin"
@@ -2787,7 +2827,7 @@
         "type": "object"
       },
       "Resolved5": {
-        "description": "A setting with its origin.",
+        "description": "Resolved setting",
         "properties": {
           "origin": {
             "$ref": "#/components/schemas/Origin"
@@ -2803,7 +2843,7 @@
         "type": "object"
       },
       "Resolved6": {
-        "description": "A setting with its origin.",
+        "description": "Resolved setting",
         "properties": {
           "origin": {
             "$ref": "#/components/schemas/Origin"
@@ -2819,7 +2859,7 @@
         "type": "object"
       },
       "Resolved7": {
-        "description": "A setting with its origin.",
+        "description": "Resolved setting",
         "properties": {
           "origin": {
             "$ref": "#/components/schemas/Origin"
@@ -2835,7 +2875,7 @@
         "type": "object"
       },
       "Resolved8": {
-        "description": "A setting with its origin.",
+        "description": "Resolved setting",
         "properties": {
           "origin": {
             "$ref": "#/components/schemas/Origin"
@@ -2851,7 +2891,7 @@
         "type": "object"
       },
       "ResolvedDevice": {
-        "description": "A device with the settings of its group resolved.",
+        "description": "Resolved device",
         "properties": {
           "address": {
             "type": "string"
@@ -2884,7 +2924,7 @@
             ]
           },
           "vendor": {
-            "description": "The vendor of the group.",
+            "description": "Vendor",
             "type": "string"
           }
         },
@@ -2899,7 +2939,7 @@
         "type": "object"
       },
       "ResolvedDevices": {
-        "description": "The devices of the inventory resolved, at its version.",
+        "description": "Resolved devices",
         "properties": {
           "devices": {
             "items": {
@@ -2921,17 +2961,20 @@
         "type": "object"
       },
       "ResolvedSettings": {
-        "description": "The settings of a device after the inheritance.",
+        "description": "Resolved settings",
         "properties": {
           "capture_bgp": {
             "$ref": "#/components/schemas/Resolved7"
           },
           "credential": {
             "$ref": "#/components/schemas/Resolved",
-            "description": "The credential reference; none if neither the device nor the group\nnames one."
+            "description": "Credential"
           },
           "ha": {
             "$ref": "#/components/schemas/Resolved8"
+          },
+          "interval_seconds": {
+            "$ref": "#/components/schemas/Resolved4"
           },
           "nxos_json": {
             "$ref": "#/components/schemas/Resolved5"
@@ -2947,7 +2990,7 @@
           },
           "route": {
             "$ref": "#/components/schemas/Resolved",
-            "description": "The route; none is a direct connection."
+            "description": "Route"
           },
           "section_timeout_seconds": {
             "$ref": "#/components/schemas/Resolved4"
@@ -2986,37 +3029,38 @@
           "request_timeout_seconds",
           "paged_section_timeout_seconds",
           "retries",
-          "ha"
+          "ha",
+          "interval_seconds"
         ],
         "type": "object"
       },
       "Role": {
-        "description": "The role of a user.",
+        "description": "Role",
         "oneOf": [
           {
             "const": "viewer",
-            "description": "Reads the twins.",
+            "description": "Viewer",
             "type": "string"
           },
           {
             "const": "operator",
-            "description": "Reads the twins and writes what-if scenarios.",
+            "description": "Operator",
             "type": "string"
           },
           {
             "const": "admin",
-            "description": "Each scope, the inventory and the users included.",
+            "description": "Admin",
             "type": "string"
           }
         ]
       },
       "Route": {
         "additionalProperties": false,
-        "description": "The network path to a device: an optional proxy for the first TCP\nconnection, then the jump hosts in order. A route with no proxy and no\njump host is a direct connection.",
+        "description": "Route",
         "properties": {
           "jumps": {
             "default": [],
-            "description": "The names of the jump hosts, in order.",
+            "description": "Jump hosts",
             "items": {
               "type": "string"
             },
@@ -3027,14 +3071,14 @@
             "type": "string"
           },
           "proxy": {
-            "description": "`http://host:port`, `socks5://host:port` or `socks5h://host:port`,\nwith no login.",
+            "description": "Proxy URL",
             "type": [
               "string",
               "null"
             ]
           },
           "proxy_credential": {
-            "description": "The credential reference of the login of the proxy.",
+            "description": "Proxy credential",
             "type": [
               "string",
               "null"
@@ -3045,7 +3089,7 @@
         "type": "object"
       },
       "RoutesOut": {
-        "description": "The routes at one version.",
+        "description": "Routes",
         "properties": {
           "routes": {
             "items": {
@@ -3068,10 +3112,10 @@
       },
       "SecretInput": {
         "additionalProperties": false,
-        "description": "The secret of a managed credential as a PUT body gives it. No answer\ngives it back.",
+        "description": "Secret",
         "properties": {
           "passphrase": {
-            "description": "The passphrase of a private key.",
+            "description": "Passphrase",
             "type": [
               "string",
               "null"
@@ -3079,7 +3123,7 @@
             "writeOnly": true
           },
           "value": {
-            "description": "The password, the private key in the OpenSSH or PEM form, or the API\nkey, by the kind of the credential.",
+            "description": "Secret value",
             "type": "string",
             "writeOnly": true
           }
@@ -3090,10 +3134,10 @@
         "type": "object"
       },
       "SecretKeyOut": {
-        "description": "The secret key of the server.",
+        "description": "Secret key",
         "properties": {
           "present": {
-            "description": "True if the server has a secret key, so that it can write the secret\nof a managed credential.",
+            "description": "Secret key present",
             "type": "boolean"
           }
         },
@@ -3154,10 +3198,10 @@
             "type": "array"
           }
         ],
-        "description": "A set: an address, a prefix, a number, a range such as 1-1023, or a\ncomma list. A field that is not given has all values."
+        "description": "Set"
       },
       "SetBriefOut": {
-        "description": "A set answer in the form `summary` or `steps`.",
+        "description": "Brief set answer",
         "properties": {
           "answer": {
             "$ref": "#/components/schemas/AnswerBriefJson"
@@ -3196,7 +3240,7 @@
         "type": "object"
       },
       "SetEcho": {
-        "description": "The set query input in the JSON output. Each field is the normalized\ntext of its set, or `null` if it is not given.",
+        "description": "Set query input",
         "properties": {
           "destination.ip": {
             "type": [
@@ -3354,11 +3398,11 @@
             "type": "integer"
           }
         ],
-        "description": "One item of a set list."
+        "description": "Set item"
       },
       "SetQueryArgs": {
         "additionalProperties": false,
-        "description": "The fields of a set query. Each field takes a set. A field that is not\ngiven has all values.",
+        "description": "Set query fields",
         "properties": {
           "destination.ip": {
             "anyOf": [
@@ -3369,7 +3413,7 @@
                 "type": "null"
               }
             ],
-            "description": "The destination addresses."
+            "description": "Destination addresses"
           },
           "destination.mac": {
             "anyOf": [
@@ -3380,7 +3424,7 @@
                 "type": "null"
               }
             ],
-            "description": "The destination MAC addresses."
+            "description": "Destination MACs"
           },
           "destination.port": {
             "anyOf": [
@@ -3391,7 +3435,7 @@
                 "type": "null"
               }
             ],
-            "description": "The destination ports."
+            "description": "Destination ports"
           },
           "dscp": {
             "anyOf": [
@@ -3402,7 +3446,7 @@
                 "type": "null"
               }
             ],
-            "description": "The DSCP values."
+            "description": "DSCP values"
           },
           "ecn": {
             "anyOf": [
@@ -3413,7 +3457,7 @@
                 "type": "null"
               }
             ],
-            "description": "The ECN values."
+            "description": "ECN values"
           },
           "form": {
             "anyOf": [
@@ -3424,7 +3468,7 @@
                 "type": "null"
               }
             ],
-            "description": "The form of the answer. The default is summary."
+            "description": "Answer form"
           },
           "fragment": {
             "anyOf": [
@@ -3435,7 +3479,7 @@
                 "type": "null"
               }
             ],
-            "description": "The fragment states."
+            "description": "Fragments"
           },
           "icmp_code": {
             "anyOf": [
@@ -3446,7 +3490,7 @@
                 "type": "null"
               }
             ],
-            "description": "The ICMP codes."
+            "description": "ICMP codes"
           },
           "icmp_type": {
             "anyOf": [
@@ -3457,10 +3501,10 @@
                 "type": "null"
               }
             ],
-            "description": "The ICMP types."
+            "description": "ICMP types"
           },
           "ingress": {
-            "description": "The ingress point as <device>/<interface>. Without it, the\nattachment records of the source addresses give the ingress.",
+            "description": "Ingress",
             "type": [
               "string",
               "null"
@@ -3475,7 +3519,7 @@
                 "type": "null"
               }
             ],
-            "description": "The layer 2 priorities of the inner tag."
+            "description": "Inner layer 2 priorities"
           },
           "l2_priority": {
             "anyOf": [
@@ -3486,7 +3530,7 @@
                 "type": "null"
               }
             ],
-            "description": "The layer 2 priorities."
+            "description": "Layer 2 priorities"
           },
           "network.iana_number": {
             "anyOf": [
@@ -3497,7 +3541,7 @@
                 "type": "null"
               }
             ],
-            "description": "The protocol numbers."
+            "description": "Protocol numbers"
           },
           "network.inner.vlan.id": {
             "anyOf": [
@@ -3508,7 +3552,7 @@
                 "type": "null"
               }
             ],
-            "description": "The VLANs of the inner tag. It needs network.vlan.id. With no inner\nfield: no inner tag."
+            "description": "Inner VLANs"
           },
           "network.inner.vlan.tpid": {
             "anyOf": [
@@ -3519,7 +3563,7 @@
                 "type": "null"
               }
             ],
-            "description": "The TPIDs of the inner tag. Not given: 33024 (0x8100)."
+            "description": "Inner TPIDs"
           },
           "network.transport": {
             "anyOf": [
@@ -3530,7 +3574,7 @@
                 "type": "null"
               }
             ],
-            "description": "The protocol names."
+            "description": "Protocols"
           },
           "network.vlan.id": {
             "anyOf": [
@@ -3541,7 +3585,7 @@
                 "type": "null"
               }
             ],
-            "description": "The VLAN tags."
+            "description": "VLANs"
           },
           "network.vlan.tpid": {
             "anyOf": [
@@ -3552,10 +3596,10 @@
                 "type": "null"
               }
             ],
-            "description": "The TPIDs of the outer tag. Not given: 33024 (0x8100)."
+            "description": "TPIDs"
           },
           "reply": {
-            "description": "Run the replies. The default is true.",
+            "description": "Replies",
             "type": [
               "boolean",
               "null"
@@ -3570,7 +3614,7 @@
                 "type": "null"
               }
             ],
-            "description": "The source addresses."
+            "description": "Source addresses"
           },
           "source.mac": {
             "anyOf": [
@@ -3581,7 +3625,7 @@
                 "type": "null"
               }
             ],
-            "description": "The source MAC addresses."
+            "description": "Source MACs"
           },
           "source.port": {
             "anyOf": [
@@ -3592,7 +3636,7 @@
                 "type": "null"
               }
             ],
-            "description": "The source ports."
+            "description": "Source ports"
           },
           "tcp_flags": {
             "anyOf": [
@@ -3603,10 +3647,10 @@
                 "type": "null"
               }
             ],
-            "description": "The TCP flag values: numbers, ranges, or flag names joined with +."
+            "description": "TCP flags"
           },
           "topology": {
-            "description": "`store` for the newest snapshot of the store\nof the server.",
+            "description": "Topology",
             "type": "string"
           }
         },
@@ -3618,7 +3662,7 @@
       },
       "Settings": {
         "additionalProperties": false,
-        "description": "The settings of a device group or of a device. On a device, a setting\nthat is not given takes the value of the group; on a group, a setting\nthat is not given takes the default.",
+        "description": "Settings",
         "properties": {
           "capture_bgp": {
             "anyOf": [
@@ -3631,7 +3675,7 @@
             ]
           },
           "credential": {
-            "description": "The name of the credential reference.",
+            "description": "Name",
             "type": [
               "string",
               "null"
@@ -3647,6 +3691,15 @@
               }
             ]
           },
+          "interval_seconds": {
+            "description": "Collection interval",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "nxos_json": {
             "anyOf": [
               {
@@ -3658,7 +3711,7 @@
             ]
           },
           "paged_section_timeout_seconds": {
-            "description": "The time for the read of all pages of one section, from 1 to 86400\nseconds.",
+            "description": "Paged section time limit",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -3667,7 +3720,7 @@
             ]
           },
           "request_timeout_seconds": {
-            "description": "The time for one HTTP request, from 1 to 86400 seconds.",
+            "description": "Request time limit",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -3676,7 +3729,7 @@
             ]
           },
           "retries": {
-            "description": "The retries of a failed section, from 0 to 10.",
+            "description": "Retries",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -3685,14 +3738,14 @@
             ]
           },
           "route": {
-            "description": "The name of the route. The default is a direct connection.",
+            "description": "Route",
             "type": [
               "string",
               "null"
             ]
           },
           "section_timeout_seconds": {
-            "description": "The time for one section, from 1 to 86400 seconds.",
+            "description": "Section time limit",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -3711,7 +3764,7 @@
             ]
           },
           "ssh_channels": {
-            "description": "The exec channels at one time. The default is 1.",
+            "description": "Exec channels",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -3730,7 +3783,7 @@
             ]
           },
           "timeout_seconds": {
-            "description": "The time for all sections of a device, from 1 to 86400 seconds.",
+            "description": "Device time limit",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -3739,7 +3792,7 @@
             ]
           },
           "tls_ca_file": {
-            "description": "The PEM file of the CA bundle of `tls_trust` `ca`.",
+            "description": "CA file",
             "type": [
               "string",
               "null"
@@ -3759,14 +3812,14 @@
         "type": "object"
       },
       "SetupOut": {
-        "description": "The state of the one-time setup.",
+        "description": "Setup state",
         "properties": {
           "open": {
-            "description": "True while the server has no user: the setup can make the first\nadmin.",
+            "description": "Setup open",
             "type": "boolean"
           },
           "sign_in": {
-            "description": "True if the server has sign-in.",
+            "description": "Sign-in",
             "type": "boolean"
           }
         },
@@ -3778,7 +3831,7 @@
         "type": "object"
       },
       "SignInIn": {
-        "description": "The body of a sign-in and of the setup.",
+        "description": "Sign-in body",
         "properties": {
           "name": {
             "type": "string"
@@ -3795,7 +3848,7 @@
         "type": "object"
       },
       "SourceLineJson": {
-        "description": "One source line with its number in the canonical form of its section.",
+        "description": "Source line",
         "properties": {
           "number": {
             "format": "uint32",
@@ -3803,7 +3856,7 @@
             "type": "integer"
           },
           "text": {
-            "description": "The text of the line with each secret masked as `<secret>`.",
+            "description": "Text",
             "type": "string"
           }
         },
@@ -3814,7 +3867,7 @@
         "type": "object"
       },
       "SourceLinesOut": {
-        "description": "The masked lines of one source span of a twin.",
+        "description": "Source lines",
         "properties": {
           "kind": {
             "type": "string"
@@ -3845,7 +3898,7 @@
         "type": "object"
       },
       "SourceTextJson": {
-        "description": "The masked lines of one source span: the lines from `first_line` to\n`last_line` that lie inside a source span of a function of the twin, at\nmost `MAX_LINES` lines from `first_line`. `left_out` lists the ranges of\nthe request that are outside every such span or past the end of the\nsection, so `lines` can be empty; `cut` is the number of\nlines after the limit that the answer leaves out. A note names both.",
+        "description": "Source lines",
         "properties": {
           "cut": {
             "format": "uint32",
@@ -3918,7 +3971,7 @@
         "type": "object"
       },
       "SshAlgorithms": {
-        "description": "The SSH algorithm set of a connection.",
+        "description": "SSH algorithms",
         "oneOf": [
           {
             "enum": [
@@ -3928,33 +3981,33 @@
           },
           {
             "const": "legacy",
-            "description": "The modern set with the SHA-1 and CBC algorithms that older\nnetwork operating systems need.",
+            "description": "Legacy algorithms",
             "type": "string"
           }
         ]
       },
       "SshMode": {
-        "description": "How SSH sends the commands of a device.",
+        "description": "SSH command mode",
         "oneOf": [
           {
             "const": "exec",
-            "description": "One exec channel for each command.",
+            "description": "Exec channel per command",
             "type": "string"
           },
           {
             "const": "shell",
-            "description": "One interactive shell for all commands.",
+            "description": "Shell",
             "type": "string"
           },
           {
             "const": "connection",
-            "description": "One connection for each command.",
+            "description": "Connection per command",
             "type": "string"
           }
         ]
       },
       "StepLineJson": {
-        "description": "One trace step with no packet set.",
+        "description": "Brief trace step",
         "properties": {
           "device": {
             "type": [
@@ -3971,7 +4024,7 @@
             "type": "integer"
           },
           "outcome": {
-            "description": "`forward`, `deliver`, `exit`, `drop` or `unknown`.",
+            "description": "Verdict kind",
             "type": "string"
           },
           "reason": {
@@ -4013,7 +4066,7 @@
             "type": "integer"
           },
           "source_lines": {
-            "description": "The masked source lines of each span of the step, when they are\nasked for.",
+            "description": "Source lines",
             "items": {
               "$ref": "#/components/schemas/StepSourceJson"
             },
@@ -4083,10 +4136,10 @@
             "type": "object"
           }
         ],
-        "description": "The source lines of one span of a trace step: the masked lines, or the\nerror that refuses them."
+        "description": "Span source lines"
       },
       "SummarizeOut": {
-        "description": "The counts of a table and of each column.",
+        "description": "Table summary",
         "properties": {
           "columns": {
             "items": {
@@ -4145,7 +4198,7 @@
             ]
           },
           "verdict_kind": {
-            "description": "`deliver`, `exit`, `drop`, `unknown` or `null`.",
+            "description": "Verdict",
             "type": [
               "string",
               "null"
@@ -4158,7 +4211,7 @@
         "type": "object"
       },
       "TableDef": {
-        "description": "One table of the catalog.",
+        "description": "Table",
         "properties": {
           "columns": {
             "items": {
@@ -4170,7 +4223,7 @@
             "type": "string"
           },
           "key": {
-            "description": "The key columns, which give the default order of the rows.",
+            "description": "Key columns",
             "items": {
               "type": "string"
             },
@@ -4180,11 +4233,11 @@
             "type": "string"
           },
           "needs": {
-            "description": "The data that the table needs, so a client knows why it is empty.",
+            "description": "Needed data",
             "type": "string"
           },
           "verbs": {
-            "description": "The verbs of the table.",
+            "description": "Verbs",
             "items": {
               "type": "string"
             },
@@ -4202,7 +4255,7 @@
         "type": "object"
       },
       "TableOut": {
-        "description": "The rows of a table.",
+        "description": "Table rows",
         "properties": {
           "columns": {
             "items": {
@@ -4214,7 +4267,7 @@
             "type": "string"
           },
           "next_cursor": {
-            "description": "The cursor of the next page, or `null` on the last page.",
+            "description": "Next cursor",
             "type": [
               "string",
               "null"
@@ -4239,7 +4292,7 @@
             "type": "string"
           },
           "total": {
-            "description": "The number of rows that match the filters, on all pages.",
+            "description": "Total rows",
             "format": "uint",
             "minimum": 0,
             "type": "integer"
@@ -4262,7 +4315,7 @@
         "type": "object"
       },
       "TablesOut": {
-        "description": "The table catalog.",
+        "description": "Table catalog",
         "properties": {
           "kind": {
             "type": "string"
@@ -4288,7 +4341,7 @@
         "type": "object"
       },
       "TcpFlag": {
-        "description": "One TCP flag.",
+        "description": "TCP flag",
         "enum": [
           "fin",
           "syn",
@@ -4302,31 +4355,31 @@
         "type": "string"
       },
       "TlsTrust": {
-        "description": "The check of the TLS certificate of an HTTPS device.",
+        "description": "TLS trust",
         "oneOf": [
           {
             "const": "pin",
-            "description": "The certificate is pinned at first contact.",
+            "description": "Pinned at first contact",
             "type": "string"
           },
           {
             "const": "ca",
-            "description": "The certificate chains to the CA bundle of `tls_ca_file`.",
+            "description": "CA bundle",
             "type": "string"
           },
           {
             "const": "none",
-            "description": "No check of the certificate.",
+            "description": "No check",
             "type": "string"
           }
         ]
       },
       "TokenIn": {
-        "description": "The body of a new API token.",
+        "description": "New API token body",
         "properties": {
           "expires_days": {
             "default": null,
-            "description": "The days until the token expires. With no value the token does not\nexpire.",
+            "description": "Days to expiry",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -4352,7 +4405,7 @@
         "type": "object"
       },
       "TokenInfo": {
-        "description": "An API token as its user sees it. The token text is given only once,\nwhen the token is made.",
+        "description": "API token",
         "properties": {
           "created_at": {
             "type": "string"
@@ -4396,7 +4449,7 @@
         "type": "object"
       },
       "TokensOut": {
-        "description": "The API tokens of the user.",
+        "description": "API tokens",
         "properties": {
           "tokens": {
             "items": {
@@ -4412,10 +4465,10 @@
         "type": "object"
       },
       "TopoEdge": {
-        "description": "One edge.",
+        "description": "Edge",
         "properties": {
           "branches": {
-            "description": "In a path drawing: the branches that cross the edge.",
+            "description": "Branches",
             "items": {
               "format": "uint",
               "minimum": 0,
@@ -4427,11 +4480,11 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/ClaimResult"
             },
-            "description": "The result of each requested claim on the edge.",
+            "description": "Claim results",
             "type": "object"
           },
           "facts": {
-            "description": "The facts of the edge, for example the speed and the duplex of both\nends of a link, or the tunnels of an overlay edge, each with its\nencapsulation function, its source, its peer and its VNIs."
+            "description": "Edge facts"
           },
           "from": {
             "type": "string"
@@ -4440,18 +4493,18 @@
             "type": "string"
           },
           "layer": {
-            "description": "`physical`, `overlay` or `function`; in a path drawing also\n`underlay` for a hop of an encapsulated packet.",
+            "description": "Layer",
             "type": "string"
           },
           "overlay": {
-            "description": "In a path drawing: the overlay edge of an underlay edge.",
+            "description": "Overlay edge",
             "type": [
               "string",
               "null"
             ]
           },
           "provenance": {
-            "description": "The source spans of the facts: file:first-last.",
+            "description": "Source spans",
             "items": {
               "type": "string"
             },
@@ -4474,7 +4527,7 @@
         "type": "object"
       },
       "TopoNode": {
-        "description": "One node.",
+        "description": "Node",
         "properties": {
           "device": {
             "type": [
@@ -4483,7 +4536,7 @@
             ]
           },
           "functions": {
-            "description": "The number of functions of a device node.",
+            "description": "Functions",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -4495,7 +4548,7 @@
             "type": "string"
           },
           "kind": {
-            "description": "`device` or `function`.",
+            "description": "Level",
             "type": "string"
           },
           "label": {
@@ -4510,7 +4563,7 @@
         "type": "object"
       },
       "TopologyOut": {
-        "description": "The topology of a twin, or the drawing of the paths of a query.",
+        "description": "Topology",
         "properties": {
           "edges": {
             "items": {
@@ -4528,7 +4581,7 @@
             "type": "array"
           },
           "level": {
-            "description": "`device` or `function`.",
+            "description": "Level",
             "type": "string"
           },
           "nodes": {
@@ -4655,7 +4708,7 @@
         "type": "object"
       },
       "Transport": {
-        "description": "A protocol name.",
+        "description": "Protocol",
         "enum": [
           "tcp",
           "udp",
@@ -4665,29 +4718,27 @@
         "type": "string"
       },
       "TwinJson": {
-        "description": "The twin that gave an answer.",
+        "description": "Twin",
         "properties": {
           "base": {
-            "description": "The identifier of the base: a snapshot, or a hand-built topology of the tests.",
+            "description": "Base",
             "type": "string"
           },
           "id": {
-            "description": "The twin identifier.",
+            "description": "Twin",
             "type": "string"
           },
           "layers": {
-            "description": "The what-if layers on the base, in order. Empty with no scenario.",
+            "description": "Layers",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "snapshot": {
-            "description": "The snapshot cycle of the base, or `null` for a hand-built topology of the tests.",
-            "format": "uint64",
-            "minimum": 0,
+            "description": "Snapshot time",
             "type": [
-              "integer",
+              "string",
               "null"
             ]
           }
@@ -4700,7 +4751,7 @@
         "type": "object"
       },
       "UniformJson": {
-        "description": "A QoS header field over the members of a set: {\"value\": field value}, \"varies\" or \"none\".",
+        "description": "QoS field",
         "oneOf": [
           {
             "additionalProperties": false,
@@ -4723,10 +4774,10 @@
         ]
       },
       "UniqueOut": {
-        "description": "The distinct values of columns with their counts.",
+        "description": "Distinct values",
         "properties": {
           "columns": {
-            "description": "The columns, then `count`.",
+            "description": "Columns",
             "items": {
               "type": "string"
             },
@@ -4770,22 +4821,22 @@
         "type": "object"
       },
       "Unstated": {
-        "description": "How a path query treats a field that it does not state.",
+        "description": "Unstated fields",
         "oneOf": [
           {
             "const": "all",
-            "description": "An unstated field has all values.",
+            "description": "All values",
             "type": "string"
           },
           {
             "const": "defaults",
-            "description": "An unstated field takes its default value where it has one: dscp 0,\necn 0, an untagged frame, an unfragmented packet, the TCP flag SYN,\nan ICMP or ICMPv6 echo request with code 0, and a source port in the\nrange 49152 to 65535. The MAC addresses and the destination port\nhave no default. The answer names each default in its notes.",
+            "description": "Default values",
             "type": "string"
           }
         ]
       },
       "User": {
-        "description": "A user as an admin sees it. The password hash is not part of it.",
+        "description": "User",
         "properties": {
           "created_at": {
             "type": "string"
@@ -4810,7 +4861,7 @@
         "type": "object"
       },
       "UserIn": {
-        "description": "The body of a user that an admin makes or changes.",
+        "description": "User body",
         "properties": {
           "disabled": {
             "default": false,
@@ -4818,7 +4869,7 @@
           },
           "password": {
             "default": null,
-            "description": "A new password. A new user needs one.",
+            "description": "Password",
             "type": [
               "string",
               "null"
@@ -4835,7 +4886,7 @@
         "type": "object"
       },
       "UsersOut": {
-        "description": "The users.",
+        "description": "Users",
         "properties": {
           "users": {
             "items": {
@@ -4851,7 +4902,7 @@
         "type": "object"
       },
       "VendorOut": {
-        "description": "A vendor that has a collector, with its transport.",
+        "description": "Collector vendor",
         "properties": {
           "transport": {
             "$ref": "#/components/schemas/CollectorTransport"
@@ -4867,7 +4918,7 @@
         "type": "object"
       },
       "VendorsOut": {
-        "description": "The vendors that have a collector, in name order.",
+        "description": "Collector vendors",
         "properties": {
           "vendors": {
             "items": {
@@ -4895,7 +4946,7 @@
             ]
           },
           "kind": {
-            "description": "`deliver`, `exit`, `drop` or `unknown`. `exit`: the packets left the\ntwin on an edge interface, which the reason names.",
+            "description": "Verdict",
             "type": "string"
           },
           "reason": {
@@ -4915,7 +4966,7 @@
         "type": "object"
       },
       "WrittenOut": {
-        "description": "The answer of a write: the inventory version after it.",
+        "description": "Write result",
         "properties": {
           "version": {
             "format": "uint64",
@@ -4932,20 +4983,20 @@
     },
     "securitySchemes": {
       "session": {
-        "description": "The session of POST /v1/auth/login. On plain HTTP to a loopback address the cookie is rsim_session. A request that changes data needs an Origin header. The scopes are those of the role of the user: viewer rsim.read; operator also rsim.scenario.write; admin also rsim.inventory.write and rsim.admin. With no inventory database the server has no sign-in and listens only on a loopback address.",
+        "description": "Session cookie",
         "in": "cookie",
         "name": "__Host-rsim_session",
         "type": "apiKey"
       },
       "token": {
-        "description": "An API token of POST /v1/auth/tokens, rsim_ and 64 hex digits. It has the scopes that it names and that the role of its user gives: rsim.read reads the twins, the tables, the queries and the claims; rsim.scenario.write makes and changes what-if scenarios; rsim.inventory.write changes the inventory; rsim.admin manages the users.",
+        "description": "API token",
         "scheme": "bearer",
         "type": "http"
       }
     }
   },
   "info": {
-    "description": "The REST API of the rsim network digital twin. Each table, query and claim is below its twin. GraphQL, Cypher and gRPC are not used.",
+    "description": "rsim REST API",
     "license": {
       "identifier": "MIT",
       "name": "MIT"
@@ -4989,7 +5040,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5004,7 +5055,7 @@
             ]
           }
         ],
-        "summary": "The Model Context Protocol through its Streamable HTTP transport, revision 2026-07-28: one JSON-RPC message in the body; the headers MCP-Protocol-Version, Mcp-Method and, for tools/call, Mcp-Name must agree with it. A request gets its response; a notification gets 202. The tools are the tools of rsim-mcp."
+        "summary": "MCP message"
       }
     },
     "/v1": {
@@ -5030,7 +5081,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5045,7 +5096,7 @@
             ]
           }
         ],
-        "summary": "The entry point: the links, the contract version and the limits."
+        "summary": "Entry point"
       }
     },
     "/v1/admin/events": {
@@ -5053,7 +5104,7 @@
         "operationId": "listAuthEvents",
         "parameters": [
           {
-            "description": "The number of events of a page, at most 1000.",
+            "description": "Page size",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -5062,7 +5113,7 @@
             }
           },
           {
-            "description": "The id of the last event of the previous page.",
+            "description": "Before id",
             "in": "query",
             "name": "before",
             "required": false,
@@ -5090,7 +5141,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5105,7 +5156,7 @@
             ]
           }
         ],
-        "summary": "The sign-in events, the newest first: the sign-ins, the failures, the setup, the token and user changes and the refused requests."
+        "summary": "Sign-in events"
       }
     },
     "/v1/admin/users": {
@@ -5131,7 +5182,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5146,7 +5197,7 @@
             ]
           }
         ],
-        "summary": "The users."
+        "summary": "Users"
       }
     },
     "/v1/admin/users/{name}": {
@@ -5174,7 +5225,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5189,7 +5240,7 @@
             ]
           }
         ],
-        "summary": "Removes a user with the sessions and the tokens of the user."
+        "summary": "Delete user"
       },
       "put": {
         "operationId": "putUser",
@@ -5232,7 +5283,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5247,7 +5298,7 @@
             ]
           }
         ],
-        "summary": "Makes a user or changes its role, its state or its password. A new password or a disabled user ends the sessions of the user. The last enabled admin stays an admin."
+        "summary": "Put user"
       }
     },
     "/v1/auth/login": {
@@ -5283,11 +5334,11 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [],
-        "summary": "Signs in with a user name and a password, and sets the session cookie. After 5 failures in 15 minutes for one user name or one client address, the answer is 429."
+        "summary": "Sign in"
       }
     },
     "/v1/auth/logout": {
@@ -5306,7 +5357,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5317,7 +5368,7 @@
             "token": []
           }
         ],
-        "summary": "Ends the session of the cookie."
+        "summary": "Sign out"
       }
     },
     "/v1/auth/me": {
@@ -5343,7 +5394,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5354,7 +5405,7 @@
             "token": []
           }
         ],
-        "summary": "The user of the request, the role and the scopes."
+        "summary": "Current user"
       }
     },
     "/v1/auth/setup": {
@@ -5380,11 +5431,11 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [],
-        "summary": "True while the server has no user, so that the one-time setup can make the first admin."
+        "summary": "Setup state"
       },
       "post": {
         "operationId": "setUp",
@@ -5418,11 +5469,11 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [],
-        "summary": "Makes the first user, an admin, and signs it in. 409 when a user exists."
+        "summary": "Setup"
       }
     },
     "/v1/auth/tokens": {
@@ -5448,7 +5499,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5456,7 +5507,7 @@
             "session": []
           }
         ],
-        "summary": "The API tokens of the user of the session."
+        "summary": "API tokens"
       },
       "post": {
         "operationId": "createToken",
@@ -5490,7 +5541,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5498,7 +5549,7 @@
             "session": []
           }
         ],
-        "summary": "Makes an API token with scopes of the role of the user. The answer gives the token text one time only."
+        "summary": "New API token"
       }
     },
     "/v1/auth/tokens/{id}": {
@@ -5526,7 +5577,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5534,7 +5585,7 @@
             "session": []
           }
         ],
-        "summary": "Revokes an API token of the user of the session."
+        "summary": "Revoke API token"
       }
     },
     "/v1/claims": {
@@ -5560,7 +5611,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5575,7 +5626,7 @@
             ]
           }
         ],
-        "summary": "The catalog of the claims."
+        "summary": "Claim catalog"
       }
     },
     "/v1/inventory": {
@@ -5601,7 +5652,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5616,7 +5667,7 @@
             ]
           }
         ],
-        "summary": "The whole inventory at its version: the credential references, the jump hosts, the routes, the groups, the devices as stored and the bindings."
+        "summary": "Inventory"
       }
     },
     "/v1/inventory/audit": {
@@ -5624,7 +5675,7 @@
         "operationId": "listAudit",
         "parameters": [
           {
-            "description": "The records of a page, from 1 to 1000; 100 if not given.",
+            "description": "Page size",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -5633,7 +5684,7 @@
             }
           },
           {
-            "description": "Only the records with an id below this id: the next_before of the page before.",
+            "description": "Before id",
             "in": "query",
             "name": "before",
             "required": false,
@@ -5661,7 +5712,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5676,7 +5727,7 @@
             ]
           }
         ],
-        "summary": "The audit log, the newest record first: who changed which record when, with its old and its new value."
+        "summary": "Audit log"
       }
     },
     "/v1/inventory/bindings": {
@@ -5702,7 +5753,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5717,7 +5768,7 @@
             ]
           }
         ],
-        "summary": "The Equinix bindings: each Fabric port with its device port, and each Network Edge device with its device of the estate."
+        "summary": "Bindings"
       }
     },
     "/v1/inventory/bindings/edge-devices/{account}/{edge_device}": {
@@ -5760,7 +5811,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5775,7 +5826,7 @@
             ]
           }
         ],
-        "summary": "Removes the binding of a Network Edge device."
+        "summary": "Delete Network Edge device binding"
       },
       "put": {
         "operationId": "putEdgeDeviceBinding",
@@ -5826,7 +5877,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5841,7 +5892,7 @@
             ]
           }
         ],
-        "summary": "Binds a Network Edge device of an account to a device of the estate."
+        "summary": "Bind Network Edge device"
       }
     },
     "/v1/inventory/bindings/fabric-ports/{account}/{fabric_port}": {
@@ -5884,7 +5935,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5899,7 +5950,7 @@
             ]
           }
         ],
-        "summary": "Removes the binding of a Fabric port."
+        "summary": "Delete Fabric port binding"
       },
       "put": {
         "operationId": "putFabricPortBinding",
@@ -5950,7 +6001,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -5965,7 +6016,97 @@
             ]
           }
         ],
-        "summary": "Binds a Fabric port of an account to a device port."
+        "summary": "Bind Fabric port"
+      }
+    },
+    "/v1/inventory/collection": {
+      "get": {
+        "operationId": "getCollection",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "Collector settings"
+      },
+      "put": {
+        "operationId": "putCollection",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Collection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Put collector settings"
       }
     },
     "/v1/inventory/credentials": {
@@ -5991,7 +6132,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6006,7 +6147,7 @@
             ]
           }
         ],
-        "summary": "The credentials. No answer gives a secret."
+        "summary": "Credentials"
       }
     },
     "/v1/inventory/credentials/{credential}": {
@@ -6041,7 +6182,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6056,7 +6197,7 @@
             ]
           }
         ],
-        "summary": "Removes a credential that nothing uses."
+        "summary": "Delete credential"
       },
       "put": {
         "operationId": "putCredential",
@@ -6099,7 +6240,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6114,7 +6255,7 @@
             ]
           }
         ],
-        "summary": "Makes or replaces a credential: a key of the env file, or a managed credential with its kind, its user and its secret, which the server seals with its secret key."
+        "summary": "Put credential"
       }
     },
     "/v1/inventory/devices": {
@@ -6140,7 +6281,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6155,7 +6296,7 @@
             ]
           }
         ],
-        "summary": "The devices with the settings of their groups resolved: each setting has its value and its origin device, group or default."
+        "summary": "Devices"
       }
     },
     "/v1/inventory/devices/{device}": {
@@ -6190,7 +6331,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6205,7 +6346,7 @@
             ]
           }
         ],
-        "summary": "Removes a device with no binding."
+        "summary": "Delete device"
       },
       "get": {
         "operationId": "getDevice",
@@ -6238,7 +6379,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6253,7 +6394,7 @@
             ]
           }
         ],
-        "summary": "A device with the settings of its group resolved."
+        "summary": "Device"
       },
       "put": {
         "operationId": "putDevice",
@@ -6296,7 +6437,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6311,7 +6452,7 @@
             ]
           }
         ],
-        "summary": "Makes or replaces a device. A setting that is not given inherits from the group. The path gives the name."
+        "summary": "Put device"
       }
     },
     "/v1/inventory/groups": {
@@ -6337,7 +6478,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6352,7 +6493,7 @@
             ]
           }
         ],
-        "summary": "The device groups."
+        "summary": "Device groups"
       }
     },
     "/v1/inventory/groups/{group}": {
@@ -6387,7 +6528,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6402,7 +6543,7 @@
             ]
           }
         ],
-        "summary": "Removes a device group with no device."
+        "summary": "Delete device group"
       },
       "get": {
         "operationId": "getGroup",
@@ -6435,7 +6576,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6450,7 +6591,7 @@
             ]
           }
         ],
-        "summary": "A device group."
+        "summary": "Device group"
       },
       "put": {
         "operationId": "putGroup",
@@ -6493,7 +6634,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6508,7 +6649,7 @@
             ]
           }
         ],
-        "summary": "Makes or replaces a device group. The path gives the name."
+        "summary": "Put device group"
       }
     },
     "/v1/inventory/jump-hosts": {
@@ -6534,7 +6675,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6549,7 +6690,7 @@
             ]
           }
         ],
-        "summary": "The SSH jump hosts."
+        "summary": "Jump hosts"
       }
     },
     "/v1/inventory/jump-hosts/{jump_host}": {
@@ -6584,7 +6725,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6599,7 +6740,7 @@
             ]
           }
         ],
-        "summary": "Removes a jump host that no route uses."
+        "summary": "Delete jump host"
       },
       "put": {
         "operationId": "putJumpHost",
@@ -6642,7 +6783,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6657,7 +6798,7 @@
             ]
           }
         ],
-        "summary": "Makes or replaces a jump host."
+        "summary": "Put jump host"
       }
     },
     "/v1/inventory/routes": {
@@ -6683,7 +6824,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6698,7 +6839,7 @@
             ]
           }
         ],
-        "summary": "The routes: the proxy and the jump hosts in order."
+        "summary": "Routes"
       }
     },
     "/v1/inventory/routes/{route}": {
@@ -6733,7 +6874,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6748,7 +6889,7 @@
             ]
           }
         ],
-        "summary": "Removes a route that no group and no device uses."
+        "summary": "Delete route"
       },
       "put": {
         "operationId": "putRoute",
@@ -6791,7 +6932,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6806,7 +6947,7 @@
             ]
           }
         ],
-        "summary": "Makes or replaces a route. A proxy URL holds no login; the login is a credential reference."
+        "summary": "Put route"
       }
     },
     "/v1/inventory/secret-key": {
@@ -6832,7 +6973,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6847,7 +6988,7 @@
             ]
           }
         ],
-        "summary": "Whether the server has a secret key."
+        "summary": "Secret key"
       }
     },
     "/v1/inventory/vendors": {
@@ -6873,7 +7014,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6888,7 +7029,7 @@
             ]
           }
         ],
-        "summary": "The vendors that have a collector, each with its transport. A group of another vendor is allowed; the collector skips its devices."
+        "summary": "Collector vendors"
       }
     },
     "/v1/openapi.json": {
@@ -6914,7 +7055,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6929,7 +7070,7 @@
             ]
           }
         ],
-        "summary": "This document."
+        "summary": "OpenAPI document"
       }
     },
     "/v1/tables": {
@@ -6955,7 +7096,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -6970,7 +7111,7 @@
             ]
           }
         ],
-        "summary": "The catalog of the tables."
+        "summary": "Table catalog"
       }
     },
     "/v1/twins": {
@@ -6996,7 +7137,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -7011,7 +7152,7 @@
             ]
           }
         ],
-        "summary": "The twins of the server: the alias store with the newest built snapshot (held), the snapshot before it that the server keeps (previous), the cycle of the newest snapshot of the store (newest_cycle), the snapshot whose twin builds now in the background (loading), and the newest snapshot that does not build or the HEAD that cannot be read (reload_error, with its snapshot, null for HEAD, and detail), each null when not known. A snapshot older than the held snapshot that the server does not keep gives 410 with the code snapshot_replaced."
+        "summary": "Twins"
       }
     },
     "/v1/twins/{twin}": {
@@ -7046,7 +7187,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -7061,7 +7202,7 @@
             ]
           }
         ],
-        "summary": "A twin: its identity and its links. The alias store redirects to its snapshot."
+        "summary": "Twin"
       }
     },
     "/v1/twins/{twin}/batch": {
@@ -7106,7 +7247,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -7121,7 +7262,7 @@
             ]
           }
         ],
-        "summary": "Many queries, claims and table queries in one request: an object with a list items, each with op query, claim or table. The answer is NDJSON with one line for each item, its result or its problem object. At most 100 items."
+        "summary": "Batch"
       }
     },
     "/v1/twins/{twin}/claims/{claim}": {
@@ -7145,7 +7286,7 @@
             }
           },
           {
-            "description": "The devices of the scope, separated by commas.",
+            "description": "Devices",
             "in": "query",
             "name": "device",
             "required": false,
@@ -7173,7 +7314,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -7188,7 +7329,7 @@
             ]
           }
         ],
-        "summary": "A claim on the twin, or on the devices of the parameter device."
+        "summary": "Claim"
       }
     },
     "/v1/twins/{twin}/coverage": {
@@ -7204,7 +7345,7 @@
             }
           },
           {
-            "description": "The number of rows of a page.",
+            "description": "Page size",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -7213,7 +7354,7 @@
             }
           },
           {
-            "description": "The cursor of the next page.",
+            "description": "Cursor",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -7241,7 +7382,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -7256,7 +7397,7 @@
             ]
           }
         ],
-        "summary": "The coverage report of a twin: for each device in name order, the config lines that the ingestion handles, that have no effect on the twin and that it does not handle, with the number of unhandled paths and stanzas. The table coverage gives the unhandled paths."
+        "summary": "Coverage report"
       }
     },
     "/v1/twins/{twin}/queries": {
@@ -7308,7 +7449,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -7323,7 +7464,7 @@
             ]
           }
         ],
-        "summary": "Makes a query resource from the arguments of a path query, or of a set query with mode set. The answer is 303 to the resource."
+        "summary": "New query"
       }
     },
     "/v1/twins/{twin}/queries/{qid}": {
@@ -7347,7 +7488,7 @@
             }
           },
           {
-            "description": "summary (the default), steps or full.",
+            "description": "Answer form",
             "in": "query",
             "name": "form",
             "required": false,
@@ -7388,7 +7529,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -7403,7 +7544,7 @@
             ]
           }
         ],
-        "summary": "The answer of a query. The query runs again on each request."
+        "summary": "Query answer"
       }
     },
     "/v1/twins/{twin}/queries/{qid}/branches/{branch}/steps/{step}": {
@@ -7443,7 +7584,7 @@
             }
           },
           {
-            "description": "Select the reply of this forward branch.",
+            "description": "Reply of branch",
             "in": "query",
             "name": "reply_of",
             "required": false,
@@ -7452,7 +7593,7 @@
             }
           },
           {
-            "description": "true to add the source lines of each span of the step, with the secrets masked.",
+            "description": "Source lines",
             "in": "query",
             "name": "source_lines",
             "required": false,
@@ -7480,7 +7621,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -7495,7 +7636,7 @@
             ]
           }
         ],
-        "summary": "One trace step of the answer of a query."
+        "summary": "Trace step"
       }
     },
     "/v1/twins/{twin}/queries/{qid}/claims/{claim}": {
@@ -7546,7 +7687,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -7561,7 +7702,7 @@
             ]
           }
         ],
-        "summary": "A claim on the paths of a path query."
+        "summary": "Query claim"
       }
     },
     "/v1/twins/{twin}/queries/{qid}/topology": {
@@ -7585,7 +7726,7 @@
             }
           },
           {
-            "description": "json (the default), mermaid, d2 or graphml.",
+            "description": "Format",
             "in": "query",
             "name": "format",
             "required": false,
@@ -7613,7 +7754,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -7628,7 +7769,7 @@
             ]
           }
         ],
-        "summary": "The drawing of the paths of a query: each hop with its branches, and for a tunnel the overlay edge and the underlay edges that name it."
+        "summary": "Path drawing"
       }
     },
     "/v1/twins/{twin}/sources": {
@@ -7644,7 +7785,7 @@
             }
           },
           {
-            "description": "The file of a source span: <device>/<section>@<blob>.",
+            "description": "Source file",
             "in": "query",
             "name": "file",
             "required": false,
@@ -7653,7 +7794,7 @@
             }
           },
           {
-            "description": "The line range a-b, or a for one line.",
+            "description": "Line range",
             "in": "query",
             "name": "lines",
             "required": false,
@@ -7681,7 +7822,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -7696,7 +7837,7 @@
             ]
           }
         ],
-        "summary": "The source lines of a span of a twin with the secrets masked: only the lines inside a source span of a function of the twin, at most 200 lines, with the lines left out and the cut lines named in a note. A section with no mask for its vendor is refused, and a range with no line inside a source span is refused."
+        "summary": "Source lines"
       }
     },
     "/v1/twins/{twin}/tables/{table}/lpm": {
@@ -7720,7 +7861,7 @@
             }
           },
           {
-            "description": "The address.",
+            "description": "Address",
             "in": "query",
             "name": "address",
             "required": false,
@@ -7729,7 +7870,7 @@
             }
           },
           {
-            "description": "The prefix column; prefix if not given.",
+            "description": "Prefix column",
             "in": "query",
             "name": "column",
             "required": false,
@@ -7757,7 +7898,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -7772,7 +7913,7 @@
             ]
           }
         ],
-        "summary": "The rows of the longest prefix that contains an address."
+        "summary": "Longest prefix match"
       }
     },
     "/v1/twins/{twin}/tables/{table}/rows": {
@@ -7796,7 +7937,7 @@
             }
           },
           {
-            "description": "The columns of the output, separated by commas.",
+            "description": "Columns",
             "in": "query",
             "name": "columns",
             "required": false,
@@ -7805,7 +7946,7 @@
             }
           },
           {
-            "description": "The order: column names separated by commas, - before a name for a falling order.",
+            "description": "Sort order",
             "in": "query",
             "name": "sort",
             "required": false,
@@ -7814,7 +7955,7 @@
             }
           },
           {
-            "description": "The number of rows of a page.",
+            "description": "Page size",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -7823,7 +7964,7 @@
             }
           },
           {
-            "description": "The cursor of the next page.",
+            "description": "Cursor",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -7851,7 +7992,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -7866,7 +8007,7 @@
             ]
           }
         ],
-        "summary": "The rows of a table. Each other parameter <column>=v1,v2 is an equality filter, and <column>.<op>=v a typed filter with the op contains, prefix, gt, lt or in_prefix."
+        "summary": "Table rows"
       }
     },
     "/v1/twins/{twin}/tables/{table}/summary": {
@@ -7909,7 +8050,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -7924,7 +8065,7 @@
             ]
           }
         ],
-        "summary": "The counts of a table and of each column, with the filters of the rows."
+        "summary": "Table summary"
       }
     },
     "/v1/twins/{twin}/tables/{table}/top": {
@@ -7948,7 +8089,7 @@
             }
           },
           {
-            "description": "The column.",
+            "description": "Column",
             "in": "query",
             "name": "column",
             "required": false,
@@ -7957,7 +8098,7 @@
             }
           },
           {
-            "description": "The number of rows; 5 if not given.",
+            "description": "Row count",
             "in": "query",
             "name": "count",
             "required": false,
@@ -7966,7 +8107,7 @@
             }
           },
           {
-            "description": "true for the smallest values.",
+            "description": "Ascending",
             "in": "query",
             "name": "ascending",
             "required": false,
@@ -7994,7 +8135,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -8009,7 +8150,7 @@
             ]
           }
         ],
-        "summary": "The rows with the largest values of a column."
+        "summary": "Top rows"
       }
     },
     "/v1/twins/{twin}/tables/{table}/unique": {
@@ -8033,7 +8174,7 @@
             }
           },
           {
-            "description": "The columns, separated by commas.",
+            "description": "Columns",
             "in": "query",
             "name": "columns",
             "required": false,
@@ -8061,7 +8202,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -8076,7 +8217,7 @@
             ]
           }
         ],
-        "summary": "The distinct values of the columns with their counts."
+        "summary": "Distinct values"
       }
     },
     "/v1/twins/{twin}/topology": {
@@ -8092,7 +8233,7 @@
             }
           },
           {
-            "description": "device (the default) or function.",
+            "description": "Level",
             "in": "query",
             "name": "level",
             "required": false,
@@ -8101,7 +8242,7 @@
             }
           },
           {
-            "description": "The layers, separated by commas.",
+            "description": "Layers",
             "in": "query",
             "name": "layer",
             "required": false,
@@ -8110,7 +8251,7 @@
             }
           },
           {
-            "description": "Only these devices, separated by commas.",
+            "description": "Devices",
             "in": "query",
             "name": "device",
             "required": false,
@@ -8119,7 +8260,7 @@
             }
           },
           {
-            "description": "Only the devices near this device.",
+            "description": "Around device",
             "in": "query",
             "name": "around",
             "required": false,
@@ -8128,7 +8269,7 @@
             }
           },
           {
-            "description": "The number of links of around; 1 if not given.",
+            "description": "Hops",
             "in": "query",
             "name": "hops",
             "required": false,
@@ -8137,7 +8278,7 @@
             }
           },
           {
-            "description": "The claims of each edge: link-speed-duplex.",
+            "description": "Claims",
             "in": "query",
             "name": "claims",
             "required": false,
@@ -8146,7 +8287,7 @@
             }
           },
           {
-            "description": "json (the default), mermaid, d2 or graphml.",
+            "description": "Format",
             "in": "query",
             "name": "format",
             "required": false,
@@ -8174,7 +8315,7 @@
                 }
               }
             },
-            "description": "A problem"
+            "description": "Problem"
           }
         },
         "security": [
@@ -8189,7 +8330,7 @@
             ]
           }
         ],
-        "summary": "The topology of a twin for a drawing: nodes and edges at the level device or function, with the layers physical and overlay, or function."
+        "summary": "Topology"
       }
     }
   }

@@ -23,16 +23,14 @@ const FORMAT: u8 = 1;
 /// The largest secret value in bytes.
 pub const MAX_SECRET: usize = 16 * 1024;
 
-/// The secret of a managed credential as a PUT body gives it. No answer
-/// gives it back.
+/// Secret
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SecretInput {
-    /// The password, the private key in the OpenSSH or PEM form, or the API
-    /// key, by the kind of the credential.
+    /// Secret value
     #[schemars(extend("writeOnly" = true))]
     pub value: String,
-    /// The passphrase of a private key.
+    /// Passphrase
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(extend("writeOnly" = true))]
     pub passphrase: Option<String>,

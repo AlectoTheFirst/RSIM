@@ -16,7 +16,7 @@ export function problemText(e: unknown): string {
  */
 export function waitDetail(detail: string, seconds: number): string {
   const wait = `wait ${seconds} s`;
-  return /wait \d+ s/.test(detail) ? detail.replace(/wait \d+ s/, wait) : `${detail}; ${wait}`;
+  return /wait \d+ s/.test(detail) ? detail.replace(/wait \d+ s/, wait) : `${detail}, ${wait}`;
 }
 
 /** The end of the wait of a problem in ms since the epoch, or null with no wait. */

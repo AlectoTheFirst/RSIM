@@ -269,6 +269,7 @@ mod tests {
                 site: None,
                 capture_bgp: Default::default(),
                 route: Default::default(),
+                interval: crate::DEFAULT_INTERVAL,
             },
             collected_at: 5,
             sections: vec![RawSection {

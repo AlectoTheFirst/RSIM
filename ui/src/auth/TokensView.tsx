@@ -24,7 +24,7 @@ function NewTokenForm(props: { user: Me; onMade: (t: NewToken) => void; onCancel
     e.preventDefault();
     const d = daysValue(days);
     if (d === "invalid") {
-      props.onProblem("days: a whole number from 1");
+      props.onProblem("days not valid");
       return;
     }
     const chosen = chosenScopes(props.user.scopes, scopes);
@@ -64,7 +64,7 @@ function NewTokenForm(props: { user: Me; onMade: (t: NewToken) => void; onCancel
         class="t-value"
         value={days}
         placeholder="no expiry"
-        title="days until expiry; empty for no expiry"
+        title="Days to expiry"
         onInput={(e) => setDays(e.currentTarget.value)}
       />
       <span class="span2 group">

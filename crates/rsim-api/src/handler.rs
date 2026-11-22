@@ -161,7 +161,7 @@ impl State {
         self.mcp.twin(topology).map_err(from_query_error)
     }
 
-    /// The twin of a path segment: `snap-<cycle>`, the alias `store`, or
+    /// The twin of a path segment: `snapshot-YYYY-MM-DD-HHMMSS`, the alias `store`, or
     /// `builtin.<topology>` for a hand-built topology of the tests.
     fn twin(&self, segment: &str) -> Result<Resolved, Problem> {
         let unknown = |d: String| problem(404, "unknown_twin", d);
@@ -176,7 +176,7 @@ impl State {
             return Ok(Resolved::Redirect(t));
         }
         let id = TwinJson::parse(segment).map_err(unknown)?;
-        match id.snapshot {
+        match id.snapshot_second() {
             None => {
                 let name = id.id.trim_start_matches("builtin.").to_string();
                 if !commands::topology_names().contains(&name.as_str()) {
@@ -188,31 +188,32 @@ impl State {
                     loaded,
                 }))
             }
-            Some(cycle) => {
+            Some(second) => {
                 // The current twin and the previous twin of the store answer
                 // for their own snapshots.
                 if self.settings.store.is_none() {
                     return Err(unknown("the server has no store".into()));
                 }
-                let (found, current) = self.mcp.store_snapshot(cycle).map_err(from_query_error)?;
+                let (found, current) = self.mcp.store_snapshot(second).map_err(from_query_error)?;
                 if let Some(loaded) = found {
                     return Ok(Resolved::Twin(TwinRef {
                         topology: "store".into(),
                         loaded,
                     }));
                 }
-                if current.identity.snapshot.is_some_and(|c| cycle < c) {
+                if current
+                    .identity
+                    .snapshot_second()
+                    .is_some_and(|c| second < c)
+                {
                     return Err(problem(
                         410,
                         "snapshot_replaced",
-                        format!(
-                            "{segment} is replaced by {}; ask for the twin store again",
-                            current.identity.id
-                        ),
+                        format!("{segment} is replaced by {}", current.identity.id),
                     ));
                 }
                 Err(unknown(format!(
-                    "{segment} is not built by the server; the newest built snapshot is {}",
+                    "{segment} not built, newest built snapshot {}",
                     current.identity.id
                 )))
             }
@@ -479,7 +480,7 @@ fn method(req: &Request, allowed: &str) -> Result<(), Problem> {
         Err(problem(
             405,
             "method_not_allowed",
-            format!("{} is not allowed; use {allowed}", req.method),
+            format!("{} not allowed, allowed {allowed}", req.method),
         ))
     }
 }
@@ -561,15 +562,14 @@ fn route(
                 .collect();
             if state.settings.store.is_some() {
                 let status = state.mcp.store_status();
-                let snap = |c: Option<u64>| c.map(|c| format!("snap-{c}"));
                 let held = status.as_ref().and_then(|s| s.held.clone());
                 let previous = status.as_ref().and_then(|s| s.previous.clone());
-                let newest = status.as_ref().and_then(|s| s.newest_cycle);
-                let loading = snap(status.as_ref().and_then(|s| s.loading));
+                let newest = status.as_ref().and_then(|s| s.newest.clone());
+                let loading = status.as_ref().and_then(|s| s.loading.clone());
                 let failed = status.and_then(|s| match (s.failed, s.head_error) {
                     (_, Some(detail)) => Some(json!({"snapshot": null, "detail": detail})),
-                    (Some((cycle, detail)), None) => {
-                        Some(json!({"snapshot": format!("snap-{cycle}"), "detail": detail}))
+                    (Some((name, detail)), None) => {
+                        Some(json!({"snapshot": name, "detail": detail}))
                     }
                     (None, None) => None,
                 });
@@ -578,7 +578,7 @@ fn route(
                     "href": "/v1/twins/store",
                     "held": held,
                     "previous": previous,
-                    "newest_cycle": newest,
+                    "newest": newest,
                     "loading": loading,
                     "reload_error": failed
                 }));
@@ -878,11 +878,7 @@ fn twin_route(
             method(req, "GET")?;
             let mut m = state.recall(q)?;
             if args::mode(&m).map_err(err)? {
-                return Err(problem(
-                    422,
-                    "invalid_query",
-                    "a claim runs on the paths of a path query, not a set query".into(),
-                ));
+                return Err(problem(422, "invalid_query", "claim on a set query".into()));
             }
             m.remove("mode");
             let a = ClaimArgs {
@@ -1179,7 +1175,7 @@ fn mcp(state: &State, req: &Request) -> Result<Response, Problem> {
                     400,
                     &id,
                     -32022,
-                    format!("Unsupported protocol version {v}; the server supports {MCP_REVISION}"),
+                    format!("Unsupported protocol version {v}, supported {MCP_REVISION}"),
                 ));
             }
             Some(_) => {}

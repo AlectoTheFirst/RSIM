@@ -233,6 +233,33 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
+/// The address of a URL `<scheme>://<address>`, with or without a final `/`,
+/// or the address itself when it is not a URL. A URL of another scheme, or
+/// with a user, a path, a query or a fragment, is an error.
+#[cfg(any(feature = "ssh", feature = "https"))]
+pub(crate) fn plain_address<'a>(address: &'a str, scheme: &str) -> Result<&'a str, String> {
+    let Some((given, rest)) = address.split_once("://") else {
+        return Ok(address);
+    };
+    let head = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
+    if !given.eq_ignore_ascii_case(scheme) {
+        return Err(format!("the URL scheme {given} is not {scheme}"));
+    }
+    if head.contains('@') {
+        return Err(format!("the {scheme} URL has a user"));
+    }
+    let rest = rest.strip_suffix('/').unwrap_or(rest);
+    if head.is_empty() {
+        return Err(format!("the {scheme} URL has no host"));
+    }
+    if rest != head {
+        return Err(format!(
+            "the URL {scheme}://{head} has a path, a query or a fragment"
+        ));
+    }
+    Ok(head)
+}
+
 /// The host and the port of an address. The address is a host name, an IP
 /// address, `host:port`, or `[ipv6]:port`.
 #[cfg(any(feature = "ssh", feature = "https"))]
@@ -355,6 +382,36 @@ mod tests {
             ("2001:db8::1".into(), 443)
         );
         assert!(host_port("r1:x", 22).is_err());
+    }
+
+    #[test]
+    #[cfg(any(feature = "ssh", feature = "https"))]
+    fn a_url_gives_its_address() {
+        assert_eq!(plain_address("192.0.2.8", "https").unwrap(), "192.0.2.8");
+        assert_eq!(
+            plain_address("https://192.0.2.8", "https").unwrap(),
+            "192.0.2.8"
+        );
+        assert_eq!(
+            plain_address("HTTPS://192.0.2.8/", "https").unwrap(),
+            "192.0.2.8"
+        );
+        assert_eq!(
+            plain_address("https://unifi.example:8443", "https").unwrap(),
+            "unifi.example:8443"
+        );
+        assert_eq!(
+            plain_address("https://[2001:db8::8]:8443/", "https").unwrap(),
+            "[2001:db8::8]:8443"
+        );
+        assert_eq!(plain_address("ssh://r1:2222", "ssh").unwrap(), "r1:2222");
+        assert!(plain_address("http://192.0.2.8", "https").is_err());
+        assert!(plain_address("https://192.0.2.8", "ssh").is_err());
+        assert!(plain_address("https://192.0.2.8/manage", "https").is_err());
+        assert!(plain_address("https://192.0.2.8?x=1", "https").is_err());
+        assert!(plain_address("https://", "https").is_err());
+        let e = plain_address("https://admin:hunter2@192.0.2.8", "https").unwrap_err();
+        assert!(!e.contains("hunter2"));
     }
 
     #[test]

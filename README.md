@@ -13,7 +13,7 @@ flowchart TD
   X --> A[Answer with trace]
 ```
 
-1. `rsim-collect` reads each device with read-only commands and writes the answers to an append-only snapshot store.
+1. `rsim-collect` reads each device with read-only commands and writes the answers to a snapshot store, which keeps the snapshots of the last 30 days by default and always the newest snapshot.
 2. `rsim-ingest` reads one snapshot. It classifies each config stanza as handled, known-irrelevant or unhandled, and lowers the handled stanzas and the collected rows into function instances.
 3. The twin build checks the composition of the functions. The twin is immutable and is built again from the store.
 4. The executor sends the packet set of the query from the ingress function. Each function splits its input into branches, and the executor follows each branch to its outcome. For each delivered branch, it then runs the reply.
@@ -33,7 +33,7 @@ flowchart TD
     T --> SRC --> CL
   end
   subgraph S["rsim-store"]
-    ST["Store<br/>append-only snapshots"]
+    ST["Store<br/>snapshots"]
     TBL["table.rs<br/>routes, neighbours, mac_table, links,<br/>addresses, link_speeds, clients"]
     ST --- TBL
   end
@@ -150,7 +150,7 @@ A VXLAN tunnel end uses `VxlanEncap` and `VxlanDecap`. `VxlanEncap` puts the pac
 | `rsim-dd` | Reduced ordered binary decision diagrams with complement edges, for the packet sets |
 | `rsim-functions` | The network functions: forwarding, layer 2, routing, ACL, firewall policy, NAT, sessions, VXLAN tunnel ends |
 | `rsim-engine` | The twin, the executor, verdict aggregation, the return path |
-| `rsim-store` | The append-only snapshot store: the format, the writer and the reader |
+| `rsim-store` | The snapshot store: the format, the writer, the reader and the prune |
 | `rsim-collect` | The collectors: SSH and HTTPS transports, jump hosts and proxies, the vendor sources |
 | `rsim-ingest` | The stanza reader, the coverage report and the lowering of each vendor into functions |
 | `rsim-textfsm` | A TextFSM engine, the ntc-templates index and the IOS-XR and IOS-XE templates |
@@ -236,7 +236,7 @@ cargo run -p rsim-api -- --listen 127.0.0.1:8787 --store <data folder>
 | The answer | `GET` the query resource, with `?form=summary`, `steps` or `full` |
 | A claim on the paths of the query | `GET <query resource>/claims/no-unknown` |
 
-The same server gives the MCP tools at `POST /mcp`, the Streamable HTTP transport of MCP, so many agents can share one server and its twins. The twin `store` redirects to its snapshot `snap-<cycle>`. A page of another origin needs `--allow-origin <origin>`.
+The same server gives the MCP tools at `POST /mcp`, the Streamable HTTP transport of MCP, so many agents can share one server and its twins. The twin `store` redirects to its snapshot `snapshot-YYYY-MM-DD-HHMMSS`, named by its UTC second. A page of another origin needs `--allow-origin <origin>`.
 
 With no inventory database, the server has no sign-in and accepts only a loopback listen address. With `--inventory <postgres URL>`, the server has sign-in and accepts each listen address. While no user exists, the UI shows the one-time setup page of the first admin. A request proves its user by the session cookie or by `Authorization: Bearer <API token>`. `--public-origin https://<host>` gives the host behind a proxy, and `--trusted-proxy <address/length>` gives the proxy.
 
@@ -286,7 +286,7 @@ helm install rsim deploy/helm/rsim -n rsim --create-namespace -f <values file>
 |---|---|
 | `image`, `collector.image` | The images `rsim` and `rsim-collect`, by `digest` or `tag` |
 | `secrets.existingSecret` | A Secret with the key `postgres-password`, and the optional key `secret-key`. Use hex digits only for the password, because the password goes into the database URL. `secret-key` is 64 hex digits from `openssl rand -hex 32`, the key of the managed credentials, which `rsim-api` and the collector get as `RSIM_SECRET_KEY`. With no key, the API refuses a managed secret. Keep the key across upgrades. |
-| `collector.enabled`, `collector.envSecret` | The collector, and the Secret with its env file under the key `collect.env`: the secrets of the credentials of the source `env` or `env-url`. |
+| `collector.enabled`, `collector.envSecret` | The collector, and the optional Secret with its env file under the key `collect.env`: the secrets of the credentials of the source `env` or `env-url`. With no env file, the collector uses only the managed credentials. |
 | `ingress.host`, `ingress.tls.secretName`, `api.trustedProxies` | The host behind the ingress. An HTTPS host needs the address of the proxy in `api.trustedProxies`. |
 | `networkPolicy.apiFrom` | The peers that can reach the API port, by default the namespace `traefik` |
 

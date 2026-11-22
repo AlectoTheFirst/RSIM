@@ -11,7 +11,9 @@ use russh::keys::{Algorithm, EcdsaCurve, HashAlg, PrivateKeyWithHashAlg, PublicK
 use russh::{ChannelStream, Disconnect, Preferred, cipher, kex, mac};
 
 use crate::path::{Algorithms, Io, Route, tcp};
-use crate::trust::{Credential, Credentials, PinKind, Secret, TrustStore, host_port};
+use crate::trust::{
+    Credential, Credentials, PinKind, Secret, TrustStore, host_port, plain_address,
+};
 
 /// The time before the second try of a hop that closes the connection
 /// before the key exchange ends.
@@ -356,11 +358,13 @@ impl Tunnel {
             let credential = credentials
                 .get(&jump.credential)
                 .map_err(|e| format!("{name}: {e}"))?;
-            let (host, port) = host_port(&jump.address, 22).map_err(|e| format!("{name}: {e}"))?;
+            let address =
+                plain_address(&jump.address, "ssh").map_err(|e| format!("{name}: {e}"))?;
+            let (host, port) = host_port(address, 22).map_err(|e| format!("{name}: {e}"))?;
             let hop = Hop {
                 role: "bastion",
-                address: &jump.address,
-                pin: route.pin_name(i, &jump.address),
+                address,
+                pin: route.pin_name(i, address),
                 credential,
                 algorithms: jump.algorithms,
                 last: last && i + 1 == route.jumps.len(),

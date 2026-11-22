@@ -139,7 +139,7 @@ export function SetLadder(props: { answer: Answer; level: Level; h: number }) {
   ));
   return (
     <div class="ladder" role="table" style={{ "--ladder-columns": grid.columns, minWidth: `${grid.min}px` }}>
-      <LadderHead model={l} fieldHeads={heads} reason="reason for the packets that go on" />
+      <LadderHead model={l} fieldHeads={heads} reason="reason" />
       {l.rows.map((r) => (
         <div class="ladder-row" role="row" key={r.key}>
           <span class="ix t-index">{r.label}</span>

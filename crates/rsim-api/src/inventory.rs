@@ -1,18 +1,18 @@
 //! The inventory routes: the device groups, the devices with their
 //! inherited settings resolved, the credentials, the routes, the jump
-//! hosts, the Equinix bindings and the audit log. A write is one
-//! transaction of the inventory database with its audit records. The
-//! secret of a managed credential comes only in a PUT body; the server
-//! seals it with its secret key, and no answer gives it back.
+//! hosts, the Equinix bindings, the settings of the collector and the audit
+//! log. A write is one transaction of the inventory database with its audit
+//! records. The secret of a managed credential comes only in a PUT body; the
+//! server seals it with its secret key, and no answer gives it back.
 
 use std::future::Future;
 use std::sync::Arc;
 
 use rsim_contract::schema;
 use rsim_inventory::{
-    AuditPage, Bindings, COLLECTOR_VENDORS, Change, CollectorTransport, Credential, CredentialKind,
-    CredentialSource, Db, Device, EdgeDeviceBinding, Error, FabricPortBinding, Group, Inventory,
-    JumpHost, ResolvedDevice, ResolvedDevices, Route, SecretInput, SecretKey,
+    AuditPage, Bindings, COLLECTOR_VENDORS, Change, Collection, CollectorTransport, Credential,
+    CredentialKind, CredentialSource, Db, Device, EdgeDeviceBinding, Error, FabricPortBinding,
+    Group, Inventory, JumpHost, ResolvedDevice, ResolvedDevices, Route, SecretInput, SecretKey,
 };
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -56,39 +56,35 @@ impl InventoryHandle {
     }
 }
 
-/// The answer of a write: the inventory version after it.
+/// Write result
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WrittenOut {
     pub version: u64,
 }
 
-/// The PUT body of a credential: the record with the secret of a managed
-/// credential. A managed credential with no secret keeps its stored secret
-/// when the kind stays; a new managed credential and a new kind need the
-/// secret.
+/// Credential body
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CredentialPut {
-    /// The name of the credential. It can be left out; the path gives it.
+    /// Name
     #[serde(default)]
     pub name: String,
     pub source: CredentialSource,
-    /// The key in the env file: the prefix of `env`, the variable of
-    /// `env-url`. None for `managed`.
+    /// Env key
     #[serde(default)]
     pub key: Option<String>,
-    /// The kind of the secret of `managed`.
+    /// Secret kind
     #[serde(default)]
     pub kind: Option<CredentialKind>,
-    /// The user of `managed` with the kind `password` or `ssh-key`.
+    /// User
     #[serde(default)]
     pub user: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
-    /// The revision of the stored record. The write ignores it.
+    /// Revision
     #[serde(default)]
     pub secret_revision: Option<u64>,
-    /// The new secret of `managed`. No answer gives it back.
+    /// Secret
     #[serde(default)]
     pub secret: Option<SecretInput>,
 }
@@ -110,57 +106,63 @@ impl CredentialPut {
     }
 }
 
-/// The secret key of the server.
+/// Secret key
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SecretKeyOut {
-    /// True if the server has a secret key, so that it can write the secret
-    /// of a managed credential.
+    /// Secret key present
     pub present: bool,
 }
 
-/// The device groups at one version.
+/// Device groups
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct GroupsOut {
     pub version: u64,
     pub groups: Vec<Group>,
 }
 
-/// The credential references at one version.
+/// Collector settings
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CollectionOut {
+    pub version: u64,
+    pub collection: Collection,
+}
+
+/// Credentials
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct CredentialsOut {
     pub version: u64,
     pub credentials: Vec<Credential>,
 }
 
-/// The routes at one version.
+/// Routes
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct RoutesOut {
     pub version: u64,
     pub routes: Vec<Route>,
 }
 
-/// The jump hosts at one version.
+/// Jump hosts
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct JumpHostsOut {
     pub version: u64,
     pub jump_hosts: Vec<JumpHost>,
 }
 
-/// The bindings at one version.
+/// Bindings
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct BindingsOut {
     pub version: u64,
     pub bindings: Bindings,
 }
 
-/// A vendor that has a collector, with its transport.
+/// Collector vendor
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct VendorOut {
     pub vendor: String,
     pub transport: CollectorTransport,
 }
 
-/// The vendors that have a collector, in name order.
+/// Collector vendors
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct VendorsOut {
     pub vendors: Vec<VendorOut>,
@@ -186,7 +188,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/inventory",
         id: "getInventory",
-        summary: "The whole inventory at its version: the credential references, the jump hosts, the routes, the groups, the devices as stored and the bindings.",
+        summary: "Inventory",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<Inventory>]),
@@ -195,16 +197,34 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/inventory/vendors",
         id: "listVendors",
-        summary: "The vendors that have a collector, each with its transport. A group of another vendor is allowed; the collector skips its devices.",
+        summary: "Collector vendors",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<VendorsOut>]),
     },
     ApiRoute {
         method: "get",
+        path: "/v1/inventory/collection",
+        id: "getCollection",
+        summary: "Collector settings",
+        query: ONE,
+        body: &[],
+        ok: (200, &[schema::<CollectionOut>]),
+    },
+    ApiRoute {
+        method: "put",
+        path: "/v1/inventory/collection",
+        id: "putCollection",
+        summary: "Put collector settings",
+        query: ONE,
+        body: &[schema::<Collection>],
+        ok: (200, &[schema::<WrittenOut>]),
+    },
+    ApiRoute {
+        method: "get",
         path: "/v1/inventory/groups",
         id: "listGroups",
-        summary: "The device groups.",
+        summary: "Device groups",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<GroupsOut>]),
@@ -213,7 +233,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/inventory/groups/{group}",
         id: "getGroup",
-        summary: "A device group.",
+        summary: "Device group",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<Group>]),
@@ -222,7 +242,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "put",
         path: "/v1/inventory/groups/{group}",
         id: "putGroup",
-        summary: "Makes or replaces a device group. The path gives the name.",
+        summary: "Put device group",
         query: ONE,
         body: &[schema::<Group>],
         ok: (200, &[schema::<WrittenOut>]),
@@ -231,7 +251,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "delete",
         path: "/v1/inventory/groups/{group}",
         id: "deleteGroup",
-        summary: "Removes a device group with no device.",
+        summary: "Delete device group",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<WrittenOut>]),
@@ -240,7 +260,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/inventory/devices",
         id: "listDevices",
-        summary: "The devices with the settings of their groups resolved: each setting has its value and its origin device, group or default.",
+        summary: "Devices",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<ResolvedDevices>]),
@@ -249,7 +269,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/inventory/devices/{device}",
         id: "getDevice",
-        summary: "A device with the settings of its group resolved.",
+        summary: "Device",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<ResolvedDevice>]),
@@ -258,7 +278,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "put",
         path: "/v1/inventory/devices/{device}",
         id: "putDevice",
-        summary: "Makes or replaces a device. A setting that is not given inherits from the group. The path gives the name.",
+        summary: "Put device",
         query: ONE,
         body: &[schema::<Device>],
         ok: (200, &[schema::<WrittenOut>]),
@@ -267,7 +287,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "delete",
         path: "/v1/inventory/devices/{device}",
         id: "deleteDevice",
-        summary: "Removes a device with no binding.",
+        summary: "Delete device",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<WrittenOut>]),
@@ -276,7 +296,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/inventory/credentials",
         id: "listCredentials",
-        summary: "The credentials. No answer gives a secret.",
+        summary: "Credentials",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<CredentialsOut>]),
@@ -285,7 +305,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "put",
         path: "/v1/inventory/credentials/{credential}",
         id: "putCredential",
-        summary: "Makes or replaces a credential: a key of the env file, or a managed credential with its kind, its user and its secret, which the server seals with its secret key.",
+        summary: "Put credential",
         query: ONE,
         body: &[schema::<CredentialPut>],
         ok: (200, &[schema::<WrittenOut>]),
@@ -294,7 +314,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "delete",
         path: "/v1/inventory/credentials/{credential}",
         id: "deleteCredential",
-        summary: "Removes a credential that nothing uses.",
+        summary: "Delete credential",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<WrittenOut>]),
@@ -303,7 +323,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/inventory/secret-key",
         id: "getSecretKey",
-        summary: "Whether the server has a secret key.",
+        summary: "Secret key",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<SecretKeyOut>]),
@@ -312,7 +332,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/inventory/routes",
         id: "listRoutes",
-        summary: "The routes: the proxy and the jump hosts in order.",
+        summary: "Routes",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<RoutesOut>]),
@@ -321,7 +341,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "put",
         path: "/v1/inventory/routes/{route}",
         id: "putRoute",
-        summary: "Makes or replaces a route. A proxy URL holds no login; the login is a credential reference.",
+        summary: "Put route",
         query: ONE,
         body: &[schema::<Route>],
         ok: (200, &[schema::<WrittenOut>]),
@@ -330,7 +350,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "delete",
         path: "/v1/inventory/routes/{route}",
         id: "deleteRoute",
-        summary: "Removes a route that no group and no device uses.",
+        summary: "Delete route",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<WrittenOut>]),
@@ -339,7 +359,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/inventory/jump-hosts",
         id: "listJumpHosts",
-        summary: "The SSH jump hosts.",
+        summary: "Jump hosts",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<JumpHostsOut>]),
@@ -348,7 +368,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "put",
         path: "/v1/inventory/jump-hosts/{jump_host}",
         id: "putJumpHost",
-        summary: "Makes or replaces a jump host.",
+        summary: "Put jump host",
         query: ONE,
         body: &[schema::<JumpHost>],
         ok: (200, &[schema::<WrittenOut>]),
@@ -357,7 +377,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "delete",
         path: "/v1/inventory/jump-hosts/{jump_host}",
         id: "deleteJumpHost",
-        summary: "Removes a jump host that no route uses.",
+        summary: "Delete jump host",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<WrittenOut>]),
@@ -366,7 +386,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/inventory/bindings",
         id: "listBindings",
-        summary: "The Equinix bindings: each Fabric port with its device port, and each Network Edge device with its device of the estate.",
+        summary: "Bindings",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<BindingsOut>]),
@@ -375,7 +395,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "put",
         path: "/v1/inventory/bindings/fabric-ports/{account}/{fabric_port}",
         id: "putFabricPortBinding",
-        summary: "Binds a Fabric port of an account to a device port.",
+        summary: "Bind Fabric port",
         query: ONE,
         body: &[schema::<FabricPortBinding>],
         ok: (200, &[schema::<WrittenOut>]),
@@ -384,7 +404,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "delete",
         path: "/v1/inventory/bindings/fabric-ports/{account}/{fabric_port}",
         id: "deleteFabricPortBinding",
-        summary: "Removes the binding of a Fabric port.",
+        summary: "Delete Fabric port binding",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<WrittenOut>]),
@@ -393,7 +413,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "put",
         path: "/v1/inventory/bindings/edge-devices/{account}/{edge_device}",
         id: "putEdgeDeviceBinding",
-        summary: "Binds a Network Edge device of an account to a device of the estate.",
+        summary: "Bind Network Edge device",
         query: ONE,
         body: &[schema::<EdgeDeviceBinding>],
         ok: (200, &[schema::<WrittenOut>]),
@@ -402,7 +422,7 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "delete",
         path: "/v1/inventory/bindings/edge-devices/{account}/{edge_device}",
         id: "deleteEdgeDeviceBinding",
-        summary: "Removes the binding of a Network Edge device.",
+        summary: "Delete Network Edge device binding",
         query: ONE,
         body: &[],
         ok: (200, &[schema::<WrittenOut>]),
@@ -411,17 +431,8 @@ pub const ROUTES: &[ApiRoute] = &[
         method: "get",
         path: "/v1/inventory/audit",
         id: "listAudit",
-        summary: "The audit log, the newest record first: who changed which record when, with its old and its new value.",
-        query: &[
-            (
-                "limit",
-                "The records of a page, from 1 to 1000; 100 if not given.",
-            ),
-            (
-                "before",
-                "Only the records with an id below this id: the next_before of the page before.",
-            ),
-        ],
+        summary: "Audit log",
+        query: &[("limit", "Page size"), ("before", "Before id")],
         body: &[],
         ok: (200, &[schema::<AuditPage>]),
     },
@@ -437,8 +448,7 @@ pub(crate) fn from_error(e: Error) -> Problem {
             problem(
                 503,
                 "inventory_unavailable",
-                "the inventory database cannot be used; the log of the server has the reason"
-                    .into(),
+                "inventory database not usable".into(),
             )
         }
     }
@@ -509,7 +519,7 @@ fn named(field: &mut String, path: &str, what: &str) -> Result<(), Problem> {
         Err(problem(
             422,
             "invalid_body",
-            format!("the {what} of the body is {field} and the path names {path}"),
+            format!("{what} {field} in the body, {path} in the path"),
         ))
     }
 }
@@ -545,11 +555,7 @@ pub fn route(
         return Ok(json_out(&vendors()));
     }
     let Some(h) = state.inventory.as_ref() else {
-        return Err(problem(
-            404,
-            "no_inventory",
-            "the server has no inventory database; start it with --inventory".into(),
-        ));
+        return Err(problem(404, "no_inventory", "no inventory database".into()));
     };
     let segs: Vec<String> = rest.iter().map(|s| decode(s)).collect::<Result<_, _>>()?;
     let segs: Vec<&str> = segs.iter().map(String::as_str).collect();
@@ -564,6 +570,18 @@ pub fn route(
         [] => {
             allow(req, &["GET"])?;
             Ok(json_out(&load()?))
+        }
+        ["collection"] => {
+            allow(req, &["GET", "PUT"])?;
+            if req.method == "PUT" {
+                let c: Collection = body(req)?;
+                return write(vec![Change::PutCollection(c)]);
+            }
+            let inv = load()?;
+            Ok(json_out(&CollectionOut {
+                version: inv.version,
+                collection: inv.collection,
+            }))
         }
         ["groups"] => {
             allow(req, &["GET"])?;

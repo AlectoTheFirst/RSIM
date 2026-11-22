@@ -31,7 +31,6 @@ import {
   hiddenSelection,
   nextPage,
   nextSort,
-  opsOf,
   pageWords,
   prefixColumn,
   previousPage,
@@ -81,14 +80,13 @@ function summaryRows(out: SummarizeOut, def: TableDef | null): unknown[][] {
 function FilterCell(props: { col: Column | undefined; name: string; text: string; onApply: (t: string) => void; first: boolean; inputRef: { current: HTMLInputElement | null } }) {
   const [v, setV] = useState(props.text);
   useEffect(() => setV(props.text), [props.text]);
-  const ops = props.col ? opsOf(props.col).filter((o) => o !== "=") : [];
   return (
     <span class="cell filter" role="cell">
       <input
         ref={props.first ? props.inputRef : undefined}
         class="t-value"
         aria-label={`filter of ${props.name}`}
-        title={ops.length ? `values, comma list · op and value: ${ops.join(", ")} · parts separated by ;` : "values, comma list"}
+        title="Filter values"
         value={v}
         spellcheck={false}
         autocomplete="off"
@@ -323,7 +321,7 @@ export function TablesView(props: {
           <button
             type="button"
             class="plain head"
-            title={`${d?.description ?? ""} · click: sort · shift-click: add to the sort`}
+            title={d?.description}
             onClick={(e) => go({ sort: nextSort(st.sort, name, e.shiftKey) })}
           >
             {name}

@@ -51,9 +51,10 @@ collector:
     repository: rsim-collect
     tag: ""
     digest: ""
-  # The Secret with the env file of the collector under the key `collect.env`.
-  # With the inventory database, the env file holds only the secrets of the
-  # credential references.
+  # The optional Secret with the env file of the collector under the key
+  # `collect.env`: the secrets of the credentials of the source `env` or
+  # `env-url`. With none, the collector reads the devices from the inventory
+  # database and uses only the managed credentials.
   envSecret: ""
   # Rejects a host key or a certificate with no pin.
   strictPins: false

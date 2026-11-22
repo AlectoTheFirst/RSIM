@@ -461,7 +461,7 @@ export function ladder(a: Answer, level: Level, reply = true): Ladder {
         type: "section",
         key: `n${b.index}`,
         dir: "reply",
-        text: multi ? `no reply of branch ${b.index}: forward path not delivered` : "no reply: forward path not delivered",
+        text: multi ? `no reply of branch ${b.index}` : "no reply",
         verdict: null,
         note: null,
         muted: true,
@@ -599,11 +599,7 @@ export function headerQosShown(v: Qos["dscp"]): Shown {
 /** The delay of a step. A delay with no data for some functions or links is a lower bound and not known. */
 export function delayShown(d: Branch["delay"]): Shown {
   if (!d.lower_bound) return { known: true, text: `${d.known_ns} ns` };
-  const g = delayGaps({ delay: d });
-  return {
-    known: false,
-    text: `at least ${d.known_ns} ns · no data: ${g.functions} functions, ${g.links} links`,
-  };
+  return { known: false, text: `at least ${d.known_ns} ns` };
 }
 
 /** The rate condition of a step: its exceed action, then its rate, which is not known with no rate. */

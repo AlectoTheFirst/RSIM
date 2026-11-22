@@ -8,7 +8,6 @@ collector:
   image:
     repository: ghcr.io/example/rsim-collect
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
-  envSecret: rsim-dev-collect-env
 api:
   trustedProxies: ["10.244.0.0/16"]
 ingress:

@@ -38,10 +38,11 @@ pub mod unifi;
 pub mod vyos;
 
 pub use classify::{Classified, classify};
-pub use device::{CaptureBgp, Device, Inventory, InventoryList, Vendor};
+pub use device::{CaptureBgp, DEFAULT_INTERVAL, Device, Inventory, InventoryList, Vendor};
 pub use path::{Algorithms, Jump, Proxy, ProxyLogin, Route};
 pub use pipeline::{
-    Clock, CollectError, Collector, CycleReport, Limits, OsEntropy, Sink, TimeLimits, TokioClock,
+    Clock, CollectError, Collector, CycleReport, DEFAULT_HISTORY, Limits, OsEntropy,
+    PRUNE_INTERVAL, Sink, TimeLimits, TokioClock, WAKE_LIMIT,
 };
 pub use schedule::{Due, Schedule, Scheduler};
 pub use source::{Capture, Extract, RawSection, SectionSpec, Source, Timeouts, fetch_sections};

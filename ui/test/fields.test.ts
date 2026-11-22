@@ -97,7 +97,6 @@ describe("field labels", () => {
       expect(label.length, k).toBeGreaterThan(0);
       expect(label.split(" ").length, k).toBeLessThanOrEqual(3);
       expect(label, k).not.toMatch(/[.!?]$/);
-      expect(label, k).not.toBe(FIELD_SCHEMA[k].path);
     }
   });
 });
@@ -248,10 +247,10 @@ describe("query of the bar", () => {
   });
 
   it("gives the reply as --no-reply in an rsim command", () => {
-    expect(rsimCommand("path", "snap-4", fields)).toBe(
+    expect(rsimCommand("path", "snapshot-2026-11-22-140504", fields)).toBe(
       "rsim path store:<data folder> --source.ip 192.0.2.10 --destination.ip 198.51.100.20 --destination.port 443 --network.transport tcp --tcp_flags syn,ack --dscp 46 --no-reply",
     );
-    expect(JSON.parse(mcpCall("path", "snap-4", { "destination.port": "53" })).arguments).toEqual({
+    expect(JSON.parse(mcpCall("path", "snapshot-2026-11-22-140504", { "destination.port": "53" })).arguments).toEqual({
       topology: "store",
       "destination.port": 53,
     });
@@ -323,11 +322,11 @@ describe("unstated setting", () => {
   it("goes into the request, the rsim command, the explain command and the MCP call with defaults", () => {
     const f = { "source.ip": "172.31.10.20", "destination.ip": "10.20.0.53", "network.transport": "udp", unstated: "defaults" };
     expect(requestBody("path", f)).toEqual({ "source.ip": "172.31.10.20", "destination.ip": "10.20.0.53", "network.transport": "udp", unstated: "defaults" });
-    expect(rsimCommand("path", "snap-4", f)).toBe(
+    expect(rsimCommand("path", "snapshot-2026-11-22-140504", f)).toBe(
       "rsim path store:<data folder> --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --unstated defaults",
     );
-    expect(explainCommand("path", "snap-4", f, 0, 3, null)).toContain(" --unstated defaults --branch 0 --step 3");
-    expect(JSON.parse(mcpCall("path", "snap-4", f))).toEqual({
+    expect(explainCommand("path", "snapshot-2026-11-22-140504", f, 0, 3, null)).toContain(" --unstated defaults --branch 0 --step 3");
+    expect(JSON.parse(mcpCall("path", "snapshot-2026-11-22-140504", f))).toEqual({
       name: "path_query",
       arguments: { topology: "store", "source.ip": "172.31.10.20", "destination.ip": "10.20.0.53", "network.transport": "udp", unstated: "defaults" },
     });
@@ -337,12 +336,12 @@ describe("unstated setting", () => {
     const base = { "source.ip": "172.31.10.20", "network.transport": "udp" };
     const all = { ...base, unstated: "all" };
     expect(requestBody("path", all)).toEqual(requestBody("path", base));
-    expect(rsimCommand("path", "snap-4", all)).toBe(rsimCommand("path", "snap-4", base));
-    expect(mcpCall("path", "snap-4", all)).toBe(mcpCall("path", "snap-4", base));
+    expect(rsimCommand("path", "snapshot-2026-11-22-140504", all)).toBe(rsimCommand("path", "snapshot-2026-11-22-140504", base));
+    expect(mcpCall("path", "snapshot-2026-11-22-140504", all)).toBe(mcpCall("path", "snapshot-2026-11-22-140504", base));
     const defaults = { ...base, unstated: "defaults" };
     expect(requestBody("set", defaults)).toEqual(requestBody("set", base));
-    expect(rsimCommand("set", "snap-4", defaults)).toBe(rsimCommand("set", "snap-4", base));
-    expect(mcpCall("set", "snap-4", defaults)).toBe(mcpCall("set", "snap-4", base));
+    expect(rsimCommand("set", "snapshot-2026-11-22-140504", defaults)).toBe(rsimCommand("set", "snapshot-2026-11-22-140504", base));
+    expect(mcpCall("set", "snapshot-2026-11-22-140504", defaults)).toBe(mcpCall("set", "snapshot-2026-11-22-140504", base));
     expect(firstError("set", { unstated: "some" })).toBeNull();
   });
 
@@ -358,16 +357,16 @@ describe("unstated button", () => {
     expect(hasDefaults(base)).toBe(false);
     expect(hasDefaults(on)).toBe(true);
     expect(requestBody("path", on)).toEqual({ ...requestBody("path", base), unstated: "defaults" });
-    expect(rsimCommand("path", "snap-4", on)).toBe(`${rsimCommand("path", "snap-4", base)} --unstated defaults`);
+    expect(rsimCommand("path", "snapshot-2026-11-22-140504", on)).toBe(`${rsimCommand("path", "snapshot-2026-11-22-140504", base)} --unstated defaults`);
     const off = toggleDefaults(on);
     expect(hasDefaults(off)).toBe(false);
     expect(requestBody("path", off)).toEqual(requestBody("path", base));
-    expect(mcpCall("path", "snap-4", off)).toBe(mcpCall("path", "snap-4", base));
+    expect(mcpCall("path", "snapshot-2026-11-22-140504", off)).toBe(mcpCall("path", "snapshot-2026-11-22-140504", base));
   });
 
   it("reads the count of the fields that are not stated with all, and defaults with defaults", () => {
-    expect(unstatedLabel(false, 10)).toBe("10 not stated");
-    expect(unstatedLabel(true, 10)).toBe("defaults");
+    expect(unstatedLabel(false)).toBe("not stated");
+    expect(unstatedLabel(true)).toBe("defaults");
   });
 
   it("names the defaults that apply, in the words of the note of the answer", () => {

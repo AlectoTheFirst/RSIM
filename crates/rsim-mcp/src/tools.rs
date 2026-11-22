@@ -10,6 +10,7 @@ use rsim_contract::args::Form;
 use rsim_contract::args::{TableQueryArgs, TableVerb};
 use rsim_contract::claim::ClaimArgs;
 use rsim_contract::registry;
+use rsim_contract::twin::snapshot_name;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
@@ -71,6 +72,8 @@ pub struct Tools {
     twins: Arc<Cache<Loaded>>,
     store: Option<String>,
     reload: Option<Arc<Reload<Loaded>>>,
+    /// The cycle of `HEAD` of the last read and the time of its snapshot.
+    head: Arc<Mutex<Option<(u64, u64)>>>,
 }
 
 /// The build of the value of a version, with the text of its error.
@@ -143,14 +146,14 @@ impl<T: Send + Sync + 'static> Reload<T> {
         }
     }
 
-    /// The current value or the previous value of a version, with no read
-    /// of the newest version.
-    fn find(&self, version: u64) -> Option<Arc<T>> {
+    /// The current value or the previous value whose version `matches`,
+    /// with no read of the newest version.
+    fn find(&self, matches: impl Fn(u64) -> bool) -> Option<Arc<T>> {
         let h = self.lock();
         [&h.current, &h.previous]
             .into_iter()
             .flatten()
-            .find(|v| (self.version)(v) == Some(version))
+            .find(|v| (self.version)(v).is_some_and(&matches))
             .cloned()
     }
 
@@ -267,24 +270,35 @@ impl<T: Send + Sync + 'static> Reload<T> {
     }
 }
 
-/// The state of the store of the tools: the identifiers of the current twin
-/// and of the previous twin, the cycle of the newest snapshot of the store,
-/// the cycle whose twin builds now, the cycle and the error of the newest
-/// snapshot that did not build, and the error of the last read of the
-/// newest cycle.
+/// The state of the store of the tools, each snapshot by its name: the
+/// current twin, the previous twin, the newest snapshot of the store, the
+/// snapshot whose twin builds now, the newest snapshot that did not build
+/// with its error, and the error of the last read of the newest snapshot.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoreStatus {
     pub held: Option<String>,
     pub previous: Option<String>,
-    pub newest_cycle: Option<u64>,
-    pub loading: Option<u64>,
-    pub failed: Option<(u64, String)>,
+    pub newest: Option<String>,
+    pub loading: Option<String>,
+    pub failed: Option<(String, String)>,
     pub head_error: Option<String>,
 }
 
-/// The cycle of the snapshot of a store twin.
-fn cycle_of(t: &Loaded) -> Option<u64> {
-    t.source.as_ref().map(|s| s.snapshot.manifest.cycle)
+/// The time of the snapshot of a store twin, in milliseconds since the Unix
+/// epoch: the version of the reload.
+fn time_of(t: &Loaded) -> Option<u64> {
+    t.source.as_ref().map(|s| s.snapshot.manifest.time)
+}
+
+/// The twin of the snapshot of the time `time` of the store in a data
+/// folder, found on the parents of the newest snapshot by its second.
+fn load_at_time(folder: &str, time: u64) -> Result<Loaded, String> {
+    let store = commands::open_store(folder).map_err(|e| e.detail)?;
+    let cycle = store
+        .cycle_at(time / 1000)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("{} not in the store", snapshot_name(time)))?;
+    commands::load_store_at(folder, Some(cycle)).map_err(|e| e.detail)
 }
 
 impl Tools {
@@ -294,29 +308,29 @@ impl Tools {
             twins: Arc::default(),
             store: Some(folder),
             reload: None,
+            head: Arc::default(),
         }
     }
 
     /// The same tools with the topology `store` as the newest built
-    /// snapshot of the store. A call for the store reads the number of the
-    /// newest snapshot; if it is newer than the current twin, the twin of
-    /// the newest snapshot builds on its own thread while the current twin
+    /// snapshot of the store. A call for the store reads the newest
+    /// snapshot; if it is newer than the current twin, the twin of the
+    /// newest snapshot builds on its own thread while the current twin
     /// answers, and then becomes the current twin. The tools keep the
     /// previous twin until the next build starts. The first call builds the
     /// twin and waits for it. If a snapshot does not build, its error goes
     /// to stderr and to the state of the store, and it is not built again.
     pub fn reload_store(mut self) -> Tools {
         if let Some(folder) = self.store.clone() {
-            let load: Load<Loaded> = Arc::new(move |cycle| {
-                commands::load_store_at(&folder, Some(cycle)).map_err(|e| {
+            let load: Load<Loaded> = Arc::new(move |time| {
+                load_at_time(&folder, time).inspect_err(|e| {
                     eprintln!(
-                        "rsim: snapshot {cycle} of the store does not build: {}",
-                        e.detail
+                        "rsim: {} of the store does not build: {e}",
+                        snapshot_name(time)
                     );
-                    e.detail
                 })
             });
-            self.reload = Some(Arc::new(Reload::new(load, cycle_of)));
+            self.reload = Some(Arc::new(Reload::new(load, time_of)));
         }
         self
     }
@@ -328,20 +342,39 @@ impl Tools {
         }
     }
 
-    /// The cycle of the newest snapshot of the store, read through the store
-    /// of `held` when there is one; none for a new data folder.
+    /// The time of the newest snapshot of the store, read through the store
+    /// of `held` when there is one; none for a new data folder. The time of
+    /// the manifest of a cycle is read once.
     fn store_head(&self, held: Option<&Loaded>) -> Result<Option<u64>, String> {
-        if let Some(s) = held.and_then(|t| t.source.as_ref()) {
-            return s.store.head().map_err(|e| e.to_string());
-        }
-        let Some(folder) = &self.store else {
+        let opened;
+        let store = match held.and_then(|t| t.source.as_ref()) {
+            Some(s) => &s.store,
+            None => {
+                let Some(folder) = &self.store else {
+                    return Ok(None);
+                };
+                if commands::new_data_folder(folder) {
+                    return Ok(None);
+                }
+                opened = commands::open_store(folder).map_err(|e| e.detail)?;
+                &opened
+            }
+        };
+        let Some(cycle) = store.head().map_err(|e| e.to_string())? else {
             return Ok(None);
         };
-        if commands::new_data_folder(folder) {
-            return Ok(None);
+        let mut head = self.head.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some((c, time)) = *head
+            && c == cycle
+        {
+            return Ok(Some(time));
         }
-        let store = commands::open_store(folder).map_err(|e| e.detail)?;
-        store.head().map_err(|e| e.to_string())
+        let time = store
+            .snapshot_manifest(cycle)
+            .map_err(|e| e.to_string())?
+            .time;
+        *head = Some((cycle, time));
+        Ok(Some(time))
     }
 
     /// The topology names: the hand-built topologies of the tests, then `store` if the
@@ -392,25 +425,29 @@ impl Tools {
         let head = self.store_head(st.current.as_deref());
         Some(StoreStatus {
             head_error: st.head_error.or_else(|| head.as_ref().err().cloned()),
-            newest_cycle: head.ok().flatten(),
+            newest: head.ok().flatten().map(snapshot_name),
             held: id(st.current),
             previous: id(st.previous),
-            loading: st.building,
-            failed: st.failed,
+            loading: st.building.map(snapshot_name),
+            failed: st.failed.map(|(t, e)| (snapshot_name(t), e)),
         })
     }
 
-    /// The twin of the snapshot `cycle` of the store, if the tools hold it
-    /// as the current or the previous twin, and the current twin. The call
-    /// is a call for the store, so a newer snapshot starts its build.
+    /// The twin of the snapshot of the second `second` of the store, if the
+    /// tools hold it as the current or the previous twin, and the current
+    /// twin. The call is a call for the store, so a newer snapshot starts
+    /// its build.
     pub fn store_snapshot(
         &self,
-        cycle: u64,
+        second: u64,
     ) -> Result<(Option<Arc<Loaded>>, Arc<Loaded>), QueryError> {
         let current = self.twin(STORE)?;
+        let at = |t: u64| t / 1000 == second;
         let found = match &self.reload {
-            Some(r) => r.find(cycle),
-            None => (cycle_of(&current) == Some(cycle)).then(|| Arc::clone(&current)),
+            Some(r) => r.find(at),
+            None => time_of(&current)
+                .is_some_and(at)
+                .then(|| Arc::clone(&current)),
         };
         Ok((found, current))
     }
@@ -666,9 +703,9 @@ mod tests {
         assert_eq!(s.builds(), 2, "one build of 2");
         assert_eq!(newest(&r, &s), Ok(2));
         assert_eq!(held(&r), (Some(2), Some(1)));
-        assert_eq!(r.find(1).map(|v| *v), Some(1));
-        assert_eq!(r.find(2).map(|v| *v), Some(2));
-        assert_eq!(r.find(3), None);
+        assert_eq!(r.find(|v| v == 1).map(|v| *v), Some(1));
+        assert_eq!(r.find(|v| v == 2).map(|v| *v), Some(2));
+        assert_eq!(r.find(|v| v == 3), None);
     }
 
     #[test]
@@ -680,7 +717,7 @@ mod tests {
         s.set(2);
         assert_eq!(newest(&r, &s), Ok(1));
         r.wait();
-        let one = Arc::downgrade(&r.find(1).unwrap());
+        let one = Arc::downgrade(&r.find(|v| v == 1).unwrap());
         s.set(3);
         let gate = s.gate.lock().unwrap();
         assert_eq!(newest(&r, &s), Ok(2));
@@ -689,7 +726,7 @@ mod tests {
         drop(gate);
         r.wait();
         assert_eq!(held(&r), (Some(3), Some(2)));
-        assert_eq!(r.find(1), None);
+        assert_eq!(r.find(|v| v == 1), None);
     }
 
     #[test]

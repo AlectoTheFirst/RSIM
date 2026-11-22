@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::error::QueryError;
 use crate::query::{QueryEcho, SetEcho};
 
-/// The query input of an output: of a path query or of a set query.
+/// Query input
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum QueryJson {
@@ -88,7 +88,7 @@ pub struct PathAnswerOut {
     pub topology: String,
     pub twin: crate::twin::TwinJson,
     pub query: QueryEcho,
-    /// The notes of the query: the defaults that the unstated fields took.
+    /// Notes
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
     pub answer: AnswerJson,
@@ -115,8 +115,7 @@ pub struct StepOut {
     pub branch: usize,
     pub step: usize,
     pub trace_step: TraceStepJson,
-    /// The masked source lines of each span of the step, when they are
-    /// asked for.
+    /// Source lines
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_lines: Option<Vec<crate::source::StepSourceJson>>,
 }
@@ -150,8 +149,7 @@ pub struct AnswerJson {
     pub replies: Vec<ReplyJson>,
 }
 
-/// The ingress of one run of the answer: the packets of the run and the
-/// interface where they enter, or the reason why the ingress is not known.
+/// Ingress
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct IngressJson {
     pub packets: PacketSetJson,
@@ -175,14 +173,13 @@ pub struct PartJson {
 pub struct SummaryResultJson {
     pub kind: String,
     pub verdict: Option<VerdictJson>,
-    /// `deliver`, `exit`, `drop`, `unknown` or `null`.
+    /// Verdict
     pub verdict_kind: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct VerdictJson {
-    /// `deliver`, `exit`, `drop` or `unknown`. `exit`: the packets left the
-    /// twin on an edge interface, which the reason names.
+    /// Verdict
     pub kind: String,
     pub destination: Option<DestinationJson>,
     pub reason: Option<ReasonJson>,
@@ -253,7 +250,7 @@ pub struct TraceStepJson {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct OutcomeJson {
-    /// `forward`, `deliver`, `exit`, `drop` or `unknown`.
+    /// Verdict kind
     pub kind: String,
     pub next: Option<String>,
     pub destination: Option<DestinationJson>,
@@ -300,8 +297,7 @@ pub struct RateConditionJson {
     pub evaluated: bool,
 }
 
-/// A QoS header field over the members of a set: `{"value": field value}`,
-/// `"varies"` or `"none"`.
+/// QoS field
 #[derive(Clone, Debug)]
 pub enum UniformJson {
     Value(FieldJson<u8>),
@@ -324,7 +320,7 @@ impl Serialize for UniformJson {
     }
 }
 
-/// A context attribute: `{"known": number}`, `"unset"` or `"unknown"`.
+/// Context attribute
 #[derive(Clone, Debug)]
 pub enum AttrJson {
     Known(u8),
@@ -349,8 +345,7 @@ impl Serialize for AttrJson {
 
 // ------------------------------------------------------------ packet set
 
-/// A packet set: its members. A member is a product of field values. The
-/// members are disjoint and in the fixed order of the bit table.
+/// Packet set
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct PacketSetJson {
     pub members: Vec<MemberJson>,
@@ -362,8 +357,7 @@ pub struct MemberJson {
     pub current: HeaderJson,
 }
 
-/// A header field value: `{"known": value}`, `{"in": [...]}`, `"unknown"`,
-/// `"absent"` or, in the current header and the inner header, `"original"`.
+/// Header field value
 #[derive(Clone, Debug)]
 pub enum FieldJson<T> {
     Known(T),
@@ -400,17 +394,17 @@ pub struct HeaderJson {
     #[serde(rename = "network.vlan.id")]
     pub vlan_id: FieldJson<u16>,
     pub l2_priority: FieldJson<u8>,
-    /// The TPID of the outer tag, only when it is not 33024 (0x8100).
+    /// TPID
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(rename = "network.vlan.tpid")]
     pub vlan_tpid: Option<FieldJson<u16>>,
-    /// The inner tag, only when the frame has one.
+    /// Inner tag
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(rename = "network.inner.vlan.id")]
     pub inner_vlan_id: Option<FieldJson<u16>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inner_l2_priority: Option<FieldJson<u8>>,
-    /// The TPID of the inner tag, only when it is not 33024 (0x8100).
+    /// Inner TPID
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(rename = "network.inner.vlan.tpid")]
     pub inner_vlan_tpid: Option<FieldJson<u16>>,
@@ -432,12 +426,12 @@ pub struct HeaderJson {
     pub icmp_code: FieldJson<u8>,
     pub mpls_tc: FieldJson<u8>,
     pub encap: Vec<EncapJson>,
-    /// The inner header of an encapsulated current header.
+    /// Inner header
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inner: Option<Box<HeaderJson>>,
 }
 
-/// An encapsulation header. The values are field values.
+/// Encapsulation header
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct EncapJson {
     pub kind: String,
@@ -488,7 +482,7 @@ impl JsonSchema for AttrJson {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "A context attribute: {\"known\": number}, \"unset\" or \"unknown\".",
+            "description": "Context attribute",
             "oneOf": [
                 {
                     "type": "object",
@@ -529,7 +523,7 @@ impl JsonSchema for UniformJson {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let value = generator.subschema_for::<FieldJson<u8>>();
         json_schema!({
-            "description": "A QoS header field over the members of a set: {\"value\": field value}, \"varies\" or \"none\".",
+            "description": "QoS field",
             "oneOf": [
                 {
                     "type": "object",
@@ -580,7 +574,7 @@ impl<T: JsonSchema> JsonSchema for FieldJson<T> {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let known = generator.subschema_for::<T>();
         json_schema!({
-            "description": "A header field value: {\"known\": value}, {\"in\": [...]}, \"unknown\", \"absent\" or \"original\".",
+            "description": "Header field value",
             "oneOf": [
                 {
                     "type": "object",
@@ -602,7 +596,7 @@ impl<T: JsonSchema> JsonSchema for FieldJson<T> {
 
 // ------------------------------------------------------------ brief forms
 
-/// A path answer in the form `summary` or `steps`.
+/// Brief path answer
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct PathBriefOut {
     pub rsim_json: u32,
@@ -611,13 +605,13 @@ pub struct PathBriefOut {
     pub twin: crate::twin::TwinJson,
     pub form: crate::args::Form,
     pub query: QueryEcho,
-    /// The notes of the query: the defaults that the unstated fields took.
+    /// Notes
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
     pub answer: AnswerBriefJson,
 }
 
-/// A set answer in the form `summary` or `steps`.
+/// Brief set answer
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SetBriefOut {
     pub rsim_json: u32,
@@ -629,8 +623,7 @@ pub struct SetBriefOut {
     pub answer: AnswerBriefJson,
 }
 
-/// An answer with no packet set in its ingress and its branches. The
-/// summary parts keep their packet sets, because each part is a set.
+/// Brief answer
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AnswerBriefJson {
     pub mode: String,
@@ -640,7 +633,7 @@ pub struct AnswerBriefJson {
     pub replies: Vec<ReplyBriefJson>,
 }
 
-/// The ingress of one run, with no packet set.
+/// Brief ingress
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct IngressBriefJson {
     pub found: bool,
@@ -651,8 +644,7 @@ pub struct IngressBriefJson {
     pub reason: Option<ReasonJson>,
 }
 
-/// A branch with its verdict, its delay, the number of its steps and, in
-/// the form `steps`, one line for each step.
+/// Brief branch
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct BranchBriefJson {
     pub index: usize,
@@ -662,18 +654,18 @@ pub struct BranchBriefJson {
     pub steps: Vec<StepLineJson>,
 }
 
-/// One trace step with no packet set.
+/// Brief trace step
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct StepLineJson {
     pub index: usize,
     pub function: String,
     pub device: Option<String>,
-    /// `forward`, `deliver`, `exit`, `drop` or `unknown`.
+    /// Verdict kind
     pub outcome: String,
     pub reason: ReasonJson,
 }
 
-/// The reply of a delivered branch in a brief form.
+/// Brief reply
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ReplyBriefJson {
     pub forward_branch: usize,

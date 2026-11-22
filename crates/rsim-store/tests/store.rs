@@ -52,8 +52,14 @@ fn wrap_key() -> [u8; 32] {
     *KEY.get_or_init(random)
 }
 
+/// The hash key of the tests, made one time in each test process.
+fn hash_key() -> [u8; 32] {
+    static KEY: OnceLock<[u8; 32]> = OnceLock::new();
+    *KEY.get_or_init(random)
+}
+
 fn keys() -> Keys {
-    Keys::new([7; 32], wrap_key())
+    Keys::new(hash_key(), wrap_key())
 }
 
 fn files(dir: &Path) -> Vec<String> {
@@ -122,8 +128,9 @@ fn update(
     }
 }
 
-fn commit(store: &Store, time: u64, updates: Vec<DeviceUpdate>) -> Option<Snapshot> {
-    let mut c = store.begin(time).unwrap();
+/// Commits the updates as a snapshot of the second `second`.
+fn commit(store: &Store, second: u64, updates: Vec<DeviceUpdate>) -> Option<Snapshot> {
+    let mut c = store.begin(second * 1000).unwrap();
     for u in updates {
         c.add(u).unwrap();
     }
@@ -273,7 +280,7 @@ fn a_cycle_that_stops_before_head_is_not_visible() {
         vec![update(&store, "r1", "a", Some(&[("eth0", 1)]))],
     )
     .unwrap();
-    let mut c = store.begin(1).unwrap();
+    let mut c = store.begin(1000).unwrap();
     assert_eq!(c.number(), 1);
     c.add(update(&store, "r1", "b", Some(&[("eth0", 2)])))
         .unwrap();
@@ -305,12 +312,12 @@ fn other_keys_do_not_read_the_store() {
     let blob = s.devices["r1"].sections[0].blob.unwrap();
     let raw = fs::read(dir.path().join("blobs").join(blob.to_string())).unwrap();
     assert!(!raw.windows(6).any(|w| w == b"secret"));
-    let other_wrap = Store::open(dir.path(), Keys::new([7; 32], random())).unwrap();
+    let other_wrap = Store::open(dir.path(), Keys::new(hash_key(), random())).unwrap();
     assert!(matches!(
         other_wrap.read_blob(&blob),
         Err(StoreError::Integrity(_))
     ));
-    let other_hash = Store::open(dir.path(), Keys::new([6; 32], wrap_key())).unwrap();
+    let other_hash = Store::open(dir.path(), Keys::new(random(), wrap_key())).unwrap();
     assert!(matches!(other_hash.latest(), Err(StoreError::Integrity(_))));
 }
 
@@ -343,9 +350,9 @@ fn a_second_writer_of_the_same_cycle_fails_and_publishes_nothing() {
     let b = Store::open(dir.path(), keys()).unwrap();
     commit(&a, 0, vec![update(&a, "r1", "a", Some(&[("eth0", 1)]))]).unwrap();
     // All 3 cycles take the number 1.
-    let mut ca = a.begin(1).unwrap();
-    let mut cb = b.begin(1).unwrap();
-    let mut cc = b.begin(1).unwrap();
+    let mut ca = a.begin(1000).unwrap();
+    let mut cb = b.begin(1000).unwrap();
+    let mut cc = b.begin(1000).unwrap();
     assert_eq!((ca.number(), cb.number(), cc.number()), (1, 1, 1));
     ca.add(update(&a, "r1", "b", Some(&[("eth0", 2)]))).unwrap();
     cb.add(update(&b, "r2", "x", Some(&[("eth9", 9)]))).unwrap();
@@ -366,11 +373,11 @@ fn a_second_writer_of_the_same_cycle_fails_and_publishes_nothing() {
 
 fn commit_removing(
     store: &Store,
-    time: u64,
+    second: u64,
     remove: &[&str],
     updates: Vec<DeviceUpdate>,
 ) -> Option<Snapshot> {
-    let mut c = store.begin(time).unwrap();
+    let mut c = store.begin(second * 1000).unwrap();
     for d in remove {
         c.remove(d);
     }
@@ -464,7 +471,7 @@ fn a_removed_device_that_comes_back_has_only_its_new_state() {
     let s3 = commit_removing(&store, 3, &["r2"], vec![update(&store, "r2", "b3", None)]).unwrap();
     assert!(s3.manifest.removed.is_empty());
     assert_eq!(names(&s3), ["r1", "r2"]);
-    let mut c = store.begin(4).unwrap();
+    let mut c = store.begin(4000).unwrap();
     c.add(update(&store, "r2", "b4", None)).unwrap();
     c.remove("r2");
     let s4 = c.prepare().unwrap().unwrap().publish().unwrap();
@@ -497,7 +504,7 @@ fn a_snapshot_records_the_inventory_version_and_an_older_manifest_has_none() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path(), keys()).unwrap();
     commit(&store, 0, vec![update(&store, "r1", "a", None)]);
-    let mut c = store.begin(1).unwrap();
+    let mut c = store.begin(1000).unwrap();
     c.set_inventory_version(Some(7));
     c.add(update(&store, "r1", "a1", None)).unwrap();
     let s1 = c.prepare().unwrap().unwrap().publish().unwrap();
@@ -603,4 +610,254 @@ fn a_table_range_that_overflows_is_an_integrity_error() {
         store.read_table(&s, &LINK_SPEEDS),
         Err(StoreError::Integrity(_))
     ));
+}
+
+#[test]
+fn a_snapshot_in_the_second_of_the_newest_snapshot_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    commit(&store, 5, vec![update(&store, "r1", "a", None)]).unwrap();
+    for time in [5_000, 5_999, 4_000] {
+        assert!(
+            matches!(store.begin(time), Err(StoreError::Invalid(_))),
+            "{time}"
+        );
+    }
+    assert_eq!(store.begin(6_000).unwrap().number(), 1);
+}
+
+#[test]
+fn the_cycle_of_a_second_is_on_the_parents_of_the_newest_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    assert_eq!(store.cycle_at(1).unwrap(), None);
+    for (second, config) in [(10, "a"), (20, "b"), (30, "c")] {
+        commit(&store, second, vec![update(&store, "r1", config, None)]).unwrap();
+    }
+    assert_eq!(store.cycle_at(10).unwrap(), Some(0));
+    assert_eq!(store.cycle_at(20).unwrap(), Some(1));
+    assert_eq!(store.cycle_at(30).unwrap(), Some(2));
+    for second in [0, 15, 31] {
+        assert_eq!(store.cycle_at(second).unwrap(), None, "{second}");
+    }
+    assert_eq!(store.head_manifest().unwrap().unwrap().time, 30_000);
+}
+
+/// A store of 6 snapshots at the seconds 0 to 5: r2 does not change after
+/// cycle 0, and r1 changes its config in each cycle and its link speeds in
+/// the cycles 1, 2 and 4.
+fn six_cycles(store: &Store) {
+    commit(
+        store,
+        0,
+        vec![
+            update(store, "r1", "a0", Some(&[("eth0", 1)])),
+            update(store, "r2", "b", Some(&[("eth1", 1)])),
+        ],
+    )
+    .unwrap();
+    for c in 1..6u64 {
+        let speeds = [("eth5", 5), ("eth6", 6), ("eth8", 8)];
+        let s = match c {
+            1 => Some(&speeds[..1]),
+            2 => Some(&speeds[1..2]),
+            4 => Some(&speeds[2..]),
+            _ => None,
+        };
+        commit(store, c, vec![update(store, "r1", &format!("a{c}"), s)]).unwrap();
+    }
+}
+
+type State = (Vec<String>, Vec<(String, Vec<String>)>);
+
+/// The configs and the link speeds of the snapshot of each cycle.
+fn states(store: &Store, cycles: &[u64]) -> Vec<State> {
+    cycles
+        .iter()
+        .map(|c| {
+            let s = store.snapshot(*c).unwrap();
+            let configs = s
+                .devices
+                .values()
+                .map(|m| {
+                    let blob = store.read_blob(&m.sections[0].blob.unwrap()).unwrap();
+                    String::from_utf8(blob).unwrap()
+                })
+                .collect();
+            (configs, speeds(store, &s))
+        })
+        .collect()
+}
+
+/// The cycles of the snapshot manifests of a store.
+fn snapshot_cycles(dir: &Path) -> Vec<u64> {
+    files(&dir.join("snapshots"))
+        .iter()
+        .map(|n| n.parse().unwrap())
+        .collect()
+}
+
+fn table_file(c: u64) -> String {
+    format!("{c:020}.parquet")
+}
+
+#[test]
+fn a_prune_keeps_the_newest_snapshots_and_makes_the_oldest_kept_a_checkpoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    six_cycles(&store);
+    let before = states(&store, &[3, 4, 5]);
+    let blob = |text: &str| keys().hash(text.as_bytes());
+
+    let p = store.prune(3_000).unwrap();
+    assert_eq!((p.snapshots, p.checkpoint), (3, Some(3)));
+    assert_eq!(snapshot_cycles(dir.path()), [3, 4, 5]);
+    let first = store.snapshot(3).unwrap().manifest;
+    assert!(first.checkpoint);
+    assert_eq!(first.parent, None);
+    assert_eq!(first.time, 3_000);
+    assert_eq!(first.devices.keys().collect::<Vec<_>>(), ["r1", "r2"]);
+    assert_eq!(states(&store, &[3, 4, 5]), before);
+    assert_eq!(store.cycle_at(3).unwrap(), Some(3));
+    assert_eq!(store.cycle_at(2).unwrap(), None);
+
+    // The config of r2 of cycle 0 and its rows stay; the older configs of
+    // r1 and the table file of cycle 1 go.
+    assert!(store.read_blob(&blob("b")).is_ok());
+    for gone in ["a0", "a1", "a2"] {
+        assert!(
+            matches!(store.read_blob(&blob(gone)), Err(StoreError::NotFound(_))),
+            "{gone}"
+        );
+    }
+    let tables = files(&dir.path().join("tables").join("link_speeds"));
+    assert_eq!(tables, [table_file(0), table_file(2), table_file(4)]);
+    // r2, and r1 of the cycles 3, 4 and 5.
+    assert_eq!(files(&dir.path().join("devices")).len(), 4);
+
+    // A second prune with the same cutoff changes nothing.
+    let after = files(dir.path());
+    assert_eq!(store.prune(3_000).unwrap(), Pruned::default());
+    assert_eq!(files(dir.path()), after);
+}
+
+#[test]
+fn a_prune_keeps_a_blob_and_a_device_manifest_that_a_kept_snapshot_shares() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    commit(&store, 0, vec![update(&store, "r1", "a", None)]).unwrap();
+    commit(&store, 1, vec![update(&store, "r1", "x", None)]).unwrap();
+    // The device comes back to its first state: the same device manifest.
+    let s2 = commit(&store, 2, vec![update(&store, "r1", "a", None)]).unwrap();
+    let p = store.prune(1_500).unwrap();
+    assert_eq!(p.snapshots, 2);
+    assert_eq!(snapshot_cycles(dir.path()), [2]);
+    assert_eq!(store.latest().unwrap().unwrap().devices, s2.devices);
+    assert!(store.read_blob(&keys().hash(b"a")).is_ok());
+    assert!(store.read_blob(&keys().hash(b"x")).is_err());
+}
+
+#[test]
+fn a_prune_keeps_the_newest_snapshot_when_each_snapshot_is_old() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    six_cycles(&store);
+    let before = states(&store, &[5]);
+    let p = store.prune(u64::MAX).unwrap();
+    assert_eq!((p.snapshots, p.checkpoint), (5, Some(5)));
+    assert_eq!(snapshot_cycles(dir.path()), [5]);
+    assert_eq!(store.head().unwrap(), Some(5));
+    assert_eq!(states(&store, &[5]), before);
+    // The next cycle builds on the kept snapshot.
+    let s6 = commit(&store, 6, vec![update(&store, "r2", "b6", None)]).unwrap();
+    assert_eq!(s6.manifest.parent, Some(5));
+    assert_eq!(names(&store.latest().unwrap().unwrap()), ["r1", "r2"]);
+}
+
+#[test]
+fn a_prune_of_a_store_with_no_old_snapshot_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    assert_eq!(store.prune(u64::MAX).unwrap(), Pruned::default());
+    six_cycles(&store);
+    let before = files(dir.path());
+    assert_eq!(store.prune(0).unwrap(), Pruned::default());
+    assert_eq!(files(dir.path()), before);
+}
+
+#[test]
+fn a_prune_deletes_a_stopped_cycle_before_the_newest_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    commit(&store, 0, vec![update(&store, "r1", "a", None)]).unwrap();
+    // Cycle 1 stops before HEAD.
+    let mut c = store.begin(1_000).unwrap();
+    c.add(update(&store, "r1", "stopped", Some(&[("eth0", 9)])))
+        .unwrap();
+    drop(c.prepare().unwrap().unwrap());
+    commit(&store, 2, vec![update(&store, "r1", "b", None)]).unwrap();
+    commit(&store, 3, vec![update(&store, "r1", "c", None)]).unwrap();
+    // A cycle after HEAD that stops keeps its table file and its manifest.
+    let mut c = store.begin(4_000).unwrap();
+    c.add(update(&store, "r1", "later", Some(&[("eth0", 4)])))
+        .unwrap();
+    drop(c.prepare().unwrap().unwrap());
+    assert_eq!(store.head().unwrap(), Some(3));
+
+    let p = store.prune(2_000).unwrap();
+    assert_eq!((p.snapshots, p.checkpoint), (2, Some(2)));
+    assert_eq!(snapshot_cycles(dir.path()), [2, 3, 4]);
+    assert!(store.read_blob(&keys().hash(b"stopped")).is_err());
+    let tables = files(&dir.path().join("tables").join("link_speeds"));
+    assert_eq!(tables, [table_file(4)]);
+    assert_eq!(names(&store.latest().unwrap().unwrap()), ["r1"]);
+}
+
+/// Copies each file of `from` that `to` does not have and that `pick`
+/// selects into `to`.
+fn restore(from: &Path, to: &Path, pick: impl Fn(&str) -> bool) {
+    for f in files(from) {
+        let target = to.join(&f);
+        if !target.exists() && pick(&f) {
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::copy(from.join(&f), target).unwrap();
+        }
+    }
+}
+
+#[test]
+fn a_prune_that_stops_in_each_step_leaves_a_store_that_reads() {
+    // Each state is the pruned store with a part of the deleted files put
+    // back: the state of a prune that stops in that step.
+    type Pick = fn(&str) -> bool;
+    let steps: [(&str, Pick); 4] = [
+        ("after the checkpoint", |_| true),
+        ("in the deletion of the manifests", |f| {
+            f.starts_with("snapshots/") && f.ends_with('2')
+        }),
+        ("before the sweep", |f| !f.starts_with("snapshots/")),
+        ("in the sweep", |f| f.starts_with("blobs/")),
+    ];
+    for (step, pick) in steps {
+        let full = tempfile::tempdir().unwrap();
+        let store = Store::open(full.path(), keys()).unwrap();
+        six_cycles(&store);
+        let copy = tempfile::tempdir().unwrap();
+        restore(full.path(), copy.path(), |_| true);
+        let want = states(&store, &[4, 5]);
+        store.prune(3_000).unwrap();
+
+        let stopped = tempfile::tempdir().unwrap();
+        restore(full.path(), stopped.path(), |_| true);
+        restore(copy.path(), stopped.path(), pick);
+        let partial = Store::open(stopped.path(), keys()).unwrap();
+        assert_eq!(states(&partial, &[4, 5]), want, "{step}");
+        assert!(partial.snapshot(3).unwrap().manifest.checkpoint, "{step}");
+        // The next prune that deletes a snapshot ends with the files of a
+        // store whose prunes do not stop.
+        store.prune(4_000).unwrap();
+        partial.prune(4_000).unwrap();
+        assert_eq!(files(stopped.path()), files(full.path()), "{step}");
+        assert_eq!(states(&partial, &[4, 5]), want, "{step}");
+    }
 }

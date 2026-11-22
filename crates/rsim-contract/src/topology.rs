@@ -11,49 +11,46 @@ use serde_json::Value;
 use crate::claim::ClaimResult;
 use crate::twin::TwinJson;
 
-/// One node.
+/// Node
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TopoNode {
     pub id: String,
-    /// `device` or `function`.
+    /// Level
     pub kind: String,
     pub label: String,
     pub device: Option<String>,
-    /// The number of functions of a device node.
+    /// Functions
     pub functions: Option<usize>,
 }
 
-/// One edge.
+/// Edge
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TopoEdge {
     pub id: String,
-    /// `physical`, `overlay` or `function`; in a path drawing also
-    /// `underlay` for a hop of an encapsulated packet.
+    /// Layer
     pub layer: String,
     pub from: String,
     pub to: String,
-    /// The facts of the edge, for example the speed and the duplex of both
-    /// ends of a link, or the tunnels of an overlay edge, each with its
-    /// encapsulation function, its source, its peer and its VNIs.
+    /// Edge facts
     pub facts: Value,
-    /// The source spans of the facts: file:first-last.
+    /// Source spans
     pub provenance: Vec<String>,
-    /// The result of each requested claim on the edge.
+    /// Claim results
     pub claims: BTreeMap<String, ClaimResult>,
-    /// In a path drawing: the branches that cross the edge.
+    /// Branches
     pub branches: Vec<usize>,
-    /// In a path drawing: the overlay edge of an underlay edge.
+    /// Overlay edge
     pub overlay: Option<String>,
 }
 
-/// The topology of a twin, or the drawing of the paths of a query.
+/// Topology
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct TopologyOut {
     pub rsim_json: u32,
     pub kind: String,
     pub topology: String,
     pub twin: TwinJson,
-    /// `device` or `function`.
+    /// Level
     pub level: String,
     pub layers: Vec<String>,
     pub nodes: Vec<TopoNode>,

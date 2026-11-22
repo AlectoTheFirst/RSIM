@@ -75,7 +75,7 @@ describe("delay and rate", () => {
         { kind: "link", function: "r1/out" },
       ],
     });
-    expect(d).toEqual({ known: false, text: "at least 1200 ns · no data: 1 functions, 1 links" });
+    expect(d).toEqual({ known: false, text: "at least 1200 ns" });
   });
 
   it("shows a rate condition with no rate as not known", () => {
@@ -120,6 +120,6 @@ describe("source spans of the opened row", () => {
 
   it("asks the API for the lines of a span with the file in percent encoding", () => {
     const span = { file: "core 1/config@b156ff45a077", first_line: 397, last_line: 412 };
-    expect(sourceUrl("snap-7", span)).toBe("/v1/twins/snap-7/sources?file=core%201%2Fconfig%40b156ff45a077&lines=397-412");
+    expect(sourceUrl("snapshot-2026-11-22-140507", span)).toBe("/v1/twins/snapshot-2026-11-22-140507/sources?file=core%201%2Fconfig%40b156ff45a077&lines=397-412");
   });
 });

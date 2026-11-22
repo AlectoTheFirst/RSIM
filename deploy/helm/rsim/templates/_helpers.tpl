@@ -85,7 +85,4 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- if and (not .Values.secrets.existingSecret) (not .Values.secrets.postgresPassword) -}}
 {{- fail "set secrets.existingSecret, or secrets.postgresPassword" -}}
 {{- end -}}
-{{- if and .Values.collector.enabled (not .Values.collector.envSecret) -}}
-{{- fail "collector.enabled needs collector.envSecret" -}}
-{{- end -}}
 {{- end -}}

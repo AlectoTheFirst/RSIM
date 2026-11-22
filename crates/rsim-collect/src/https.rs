@@ -22,7 +22,9 @@ use rustls::{DigitallySignedStruct, RootCertStore, SignatureScheme};
 use tokio_rustls::TlsConnector;
 
 use crate::path::Route;
-use crate::trust::{Credential, Credentials, PinKind, Secret, TrustStore, host_port};
+use crate::trust::{
+    Credential, Credentials, PinKind, Secret, TrustStore, host_port, plain_address,
+};
 use crate::tunnel::{HopLimits, Tunnel, stream};
 use crate::{BoxFuture, Device, Https, TransportError};
 
@@ -351,9 +353,10 @@ impl HttpsTransport {
             return Ok(c.clone());
         }
         let credential = self.credentials.get(&device.credential).map_err(connect)?;
-        let (host, port) = host_port(&device.address, 443).map_err(connect)?;
+        let address = plain_address(&device.address, "https").map_err(connect)?;
+        let (host, port) = host_port(address, 443).map_err(connect)?;
         let route = &device.route;
-        let pin = route.pin_name(route.jumps.len(), &device.address);
+        let pin = route.pin_name(route.jumps.len(), address);
         let config = tls_config(profile, &self.trust, pin)
             .map_err(|e| connect(format!("console {}: {e}", device.address)))?;
         let console = Arc::new(Console {
