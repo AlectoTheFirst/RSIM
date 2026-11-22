@@ -511,7 +511,7 @@ fn a_vni_section_with_no_vni_table_makes_the_tunnel_end_unknown() {
     assert_eq!(branches.len(), 1, "{branches:#?}");
     let (verdict, steps) = &branches[0];
     assert_eq!(*verdict, VerdictKind::Unknown, "{steps:#?}");
-    assert!(has(steps, "has no TABLE_nve_vni"), "{steps:#?}");
+    assert!(has(steps, "no TABLE_nve_vni"), "{steps:#?}");
 }
 
 #[test]
@@ -543,7 +543,7 @@ fn a_peer_section_with_no_peer_table_makes_the_flood_unknown() {
     assert!(
         branches
             .iter()
-            .any(|(v, s)| *v == VerdictKind::Unknown && has(s, "has no TABLE_nve_peers")),
+            .any(|(v, s)| *v == VerdictKind::Unknown && has(s, "no TABLE_nve_peers")),
         "{branches:#?}"
     );
 }

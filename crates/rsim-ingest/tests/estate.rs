@@ -441,7 +441,7 @@ fn a_wired_client_of_another_network_than_its_port_is_not_placed() {
         assert!(
             notes
                 .iter()
-                .any(|n| n.starts_with("client h1: its network n-guest")),
+                .any(|n| n.starts_with("client h1: network n-guest")),
             "{notes:?}"
         );
         let t = e.builder.build().unwrap();
@@ -451,7 +451,7 @@ fn a_wired_client_of_another_network_than_its_port_is_not_placed() {
         unknown_reason(&a);
         let a = run(&t, ip, "192.0.2.70", 443);
         let r = unknown_reason(&a);
-        assert!(r.detail.contains("client h1 is not placed"), "{r:?}");
+        assert!(r.detail.contains("client h1 not placed"), "{r:?}");
         let first = a.branches()[0].steps[0].function.to_string();
         assert_eq!(first, "sw1/unplaced/h1-005351");
     }
@@ -481,7 +481,7 @@ fn a_client_listed_twice_that_is_not_placed_gives_one_ingress() {
     let t = e.builder.build().unwrap();
     let a = run(&t, "192.0.2.50", "192.0.2.70", 443);
     let r = unknown_reason(&a);
-    assert!(r.detail.contains("client h1 is not placed"), "{r:?}");
+    assert!(r.detail.contains("client h1 not placed"), "{r:?}");
 }
 
 /// A second WLAN `guest` of the network LAN.
@@ -694,7 +694,7 @@ fn a_client_of_an_ssid_with_a_network_on_each_radio_needs_its_radio() {
     let t = e.builder.build().unwrap();
     let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
     let r = unknown_reason(&a);
-    assert!(r.detail.contains("client g1 is not placed"), "{r:?}");
+    assert!(r.detail.contains("client g1 not placed"), "{r:?}");
     let a = run(&t, "192.0.2.50", "192.0.2.70", 443);
     unknown_reason(&a);
     // g2 names its radio.
@@ -738,7 +738,7 @@ fn a_vap_with_no_radio_leaves_the_radio_of_a_client_unmatched() {
     let t = e.builder.build().unwrap();
     let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
     let r = unknown_reason(&a);
-    assert!(r.detail.contains("client g1 is not placed"), "{r:?}");
+    assert!(r.detail.contains("client g1 not placed"), "{r:?}");
 }
 
 #[test]

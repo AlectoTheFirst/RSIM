@@ -522,7 +522,7 @@ fn the_static_rule_translates_both_ways() {
     let (_, steps) = only_reply(&a);
     assert!(has(&steps, "rule WAN2-IN/30"), "{steps:#?}");
     assert!(has(&steps, "session-lookup session 0, reply, translated"));
-    assert!(has(&steps, "nexthop 192.0.2.220 is"));
+    assert!(has(&steps, "nexthop 192.0.2.220,"));
     // Outside to inside: the NAT of the outside destination comes before
     // the route lookup.
     let t = twin();
@@ -543,7 +543,7 @@ fn the_static_rule_translates_both_ways() {
         dnat.is_some() && route.is_some() && dnat < route,
         "{steps:#?}"
     );
-    assert!(has(&steps, "nexthop 192.0.2.220 is"));
+    assert!(has(&steps, "nexthop 192.0.2.220,"));
     // The rule applies only on an outside interface.
     let (_, steps) = only(&run(
         &t,
@@ -898,8 +898,8 @@ fn with_the_arp_of_the_vrfs_a_next_hop_in_a_vrf_resolves() {
     // The port has no link, so the egress gives `Unknown` after the next
     // hop resolves.
     for (dst, hop, hop_line) in [
-        ("203.0.113.60", "203.0.113.60 is 00:00:5e:00:53:f6", 5),
-        ("192.0.2.77", "203.0.113.1 is 00:00:5e:00:53:f1", 3),
+        ("203.0.113.60", "203.0.113.60, 00:00:5e:00:53:f6", 5),
+        ("192.0.2.77", "203.0.113.1, 00:00:5e:00:53:f1", 3),
     ] {
         let a = run(&t, "GigabitEthernet0", "203.0.113.50", dst, 443);
         let (_, steps) = only(&a);

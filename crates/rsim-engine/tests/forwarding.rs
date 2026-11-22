@@ -274,7 +274,7 @@ fn an_unstated_source_port_against_a_rule_that_reads_it_is_unknown() {
         panic!("{:?}", a.summary)
     };
     assert_eq!(r.code, ReasonCode::MatchUnknown);
-    assert!(r.detail.contains("does not state"), "{r:?}");
+    assert!(r.detail.contains("unstated fields"), "{r:?}");
     // The branches are exact: the low source ports are denied by the rule
     // that reads the port, and the other ports are delivered.
     let denied = a

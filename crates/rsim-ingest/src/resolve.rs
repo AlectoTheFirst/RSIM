@@ -358,7 +358,7 @@ mod tests {
             .resolve("default", &[via(None, Some("198.51.100.250"))], true)
             .unwrap_err();
         assert_eq!(e.reason, "next hop not resolved: 198.51.100.250");
-        assert!(e.why.contains("comes back"), "{e:?}");
+        assert!(e.why.contains("loops at"), "{e:?}");
         assert_eq!(e.spans, [span(2), span(1)].concat());
         let e = r
             .resolve("default", &[via(None, Some("192.0.2.1"))], true)

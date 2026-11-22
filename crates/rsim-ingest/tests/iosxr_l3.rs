@@ -206,7 +206,7 @@ fn a_packet_follows_the_static_default_through_its_connected_next_hop() {
         ),
         "{steps:#?}"
     );
-    assert!(has(&steps, "nexthop 203.0.113.254 is"));
+    assert!(has(&steps, "nexthop 203.0.113.254,"));
     // The interface has no link, so the egress is unknown.
     assert!(has(&steps, "out/GigabitEthernet0/0/0/3 no link"));
     assert_eq!(verdict, VerdictKind::Unknown);
@@ -396,7 +396,7 @@ fn a_vrf_static_route_resolves_through_the_connected_network() {
         ),
         "{steps:#?}"
     );
-    assert!(has(&steps, "nexthop 192.0.2.10 is"));
+    assert!(has(&steps, "nexthop 192.0.2.10,"));
 }
 
 #[test]
@@ -413,7 +413,7 @@ fn an_unreadable_acl_entry_makes_only_the_packets_that_reach_it_unknown() {
         has(&steps, "permitted, ACL pe1:acl:EDGE-IN rule EDGE-IN/20"),
         "{steps:#?}"
     );
-    assert!(has(&steps, "nexthop 203.0.113.10 is"));
+    assert!(has(&steps, "nexthop 203.0.113.10,"));
     let (verdict, steps) = only(&run(
         &t,
         "GigabitEthernet0/0/0/3",

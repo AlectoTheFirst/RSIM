@@ -138,7 +138,7 @@ fn a_chassis_mac_names_the_device_and_the_port_name_the_port() {
     assert!(
         notes
             .iter()
-            .any(|n| n.starts_with("p2: the neighbour r names no port of its own")),
+            .any(|n| n.starts_with("p2: neighbour r names no port of its own")),
         "{notes:?}"
     );
 }

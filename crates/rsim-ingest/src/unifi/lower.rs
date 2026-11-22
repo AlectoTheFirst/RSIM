@@ -393,11 +393,14 @@ pub fn lower(
                     }
                     _ if ports.is_empty() => ((ap.clone(), format!("wlan/{ssid}")), None),
                     _ => {
-                        let radio = c.radio.as_deref().unwrap_or("not known");
+                        let radio = match c.radio.as_deref() {
+                            Some(r) => format!("no WLAN on radio {r}"),
+                            None => "radio not known".to_string(),
+                        };
                         not_placed(
                             ap,
                             format!(
-                                "SSID {ssid} has {} WLANs on the access point, radio {radio} names none",
+                                "SSID {ssid}: {} WLANs on the access point, {radio}",
                                 ports.len()
                             ),
                             &mut l.out.notes,
