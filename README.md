@@ -13,7 +13,7 @@ flowchart TD
   X --> A[Answer with trace]
 ```
 
-1. `rsim-collect` reads each device with read-only commands and writes the answers to an append-only snapshot store.
+1. `rsim-collect` reads each device with read-only commands and writes the answers to a snapshot store, which keeps the snapshots of the last 30 days by default and always the newest snapshot.
 2. `rsim-ingest` reads one snapshot. It classifies each config stanza as handled, known-irrelevant or unhandled, and lowers the handled stanzas and the collected rows into function instances.
 3. The twin build checks the composition of the functions. The twin is immutable and is built again from the store.
 4. The executor sends the packet set of the query from the ingress function. Each function splits its input into branches, and the executor follows each branch to its outcome. For each delivered branch, it then runs the reply.
@@ -33,7 +33,7 @@ flowchart TD
     T --> SRC --> CL
   end
   subgraph S["rsim-store"]
-    ST["Store<br/>append-only snapshots"]
+    ST["Store<br/>snapshots"]
     TBL["table.rs<br/>routes, neighbours, mac_table, links,<br/>addresses, link_speeds, clients"]
     ST --- TBL
   end
@@ -150,7 +150,7 @@ A VXLAN tunnel end uses `VxlanEncap` and `VxlanDecap`. `VxlanEncap` puts the pac
 | `rsim-dd` | Reduced ordered binary decision diagrams with complement edges, for the packet sets |
 | `rsim-functions` | The network functions: forwarding, layer 2, routing, ACL, firewall policy, NAT, sessions, VXLAN tunnel ends |
 | `rsim-engine` | The twin, the executor, verdict aggregation, the return path |
-| `rsim-store` | The append-only snapshot store: the format, the writer and the reader |
+| `rsim-store` | The snapshot store: the format, the writer, the reader and the prune |
 | `rsim-collect` | The collectors: SSH and HTTPS transports, jump hosts and proxies, the vendor sources |
 | `rsim-ingest` | The stanza reader, the coverage report and the lowering of each vendor into functions |
 | `rsim-textfsm` | A TextFSM engine, the ntc-templates index and the IOS-XR and IOS-XE templates |

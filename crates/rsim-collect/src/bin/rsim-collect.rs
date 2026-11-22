@@ -937,6 +937,12 @@ fn print_report(r: &CycleReport) {
     for device in &r.removed {
         println!("removed {device}");
     }
+    if let Some(p) = r.pruned.as_ref().filter(|p| p.snapshots > 0) {
+        println!("pruned {} snapshots, {} files", p.snapshots, p.files);
+    }
+    if let Some(e) = &r.prune_error {
+        println!("prune error: {e}");
+    }
 }
 
 /// Reads the inventory and sets the collector up for one cycle. Gives the
@@ -971,6 +977,9 @@ async fn configure_from_inventory(
         sources,
         times,
     );
+    collector.set_history(Duration::from_secs(
+        u64::from(inv.collection.history_days) * 86_400,
+    ));
     Ok((inv, devices))
 }
 
@@ -1235,6 +1244,7 @@ mod tests {
             groups: r.groups,
             devices: r.devices,
             bindings: Default::default(),
+            collection: Default::default(),
         }
     }
 

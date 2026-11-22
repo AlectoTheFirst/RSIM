@@ -32,10 +32,10 @@ pub use resolve::{
 };
 pub use secret::{KEY_VAR, MAX_SECRET, Sealed, SecretInput, SecretKey};
 pub use types::{
-    Action, AuditPage, AuditRecord, Bindings, COLLECTOR_VENDORS, CaptureBgp, CollectorTransport,
-    Credential, CredentialKind, CredentialSource, Device, EdgeDeviceBinding, FabricPortBinding,
-    Group, Ha, Inventory, JumpHost, NxosJson, Route, Settings, SshAlgorithms, SshMode, TlsTrust,
-    valid_device_name, valid_name,
+    Action, AuditPage, AuditRecord, Bindings, COLLECTOR_VENDORS, CaptureBgp, Collection,
+    CollectorTransport, Credential, CredentialKind, CredentialSource, DEFAULT_HISTORY_DAYS, Device,
+    EdgeDeviceBinding, FabricPortBinding, Group, Ha, Inventory, JumpHost, NxosJson, Route,
+    Settings, SshAlgorithms, SshMode, TlsTrust, valid_device_name, valid_name,
 };
 
 /// The environment variable of the URL of the inventory database.

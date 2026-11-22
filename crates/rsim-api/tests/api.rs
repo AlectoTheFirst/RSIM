@@ -359,16 +359,17 @@ fn the_store_alias_redirects_to_its_snapshot() {
     );
 }
 
-/// Writes the snapshot `cycle` of the store in `dir` with the device
-/// `device` removed, and gives its cycle.
-fn remove_device(dir: &std::path::Path, device: &str, cycle: u64) -> u64 {
+/// Writes a snapshot of the second after the newest snapshot of the store
+/// in `dir` with the device `device` removed, and gives its cycle.
+fn remove_device(dir: &std::path::Path, device: &str) -> u64 {
     let keys = std::fs::read_to_string(dir.join("keys")).unwrap();
     let store = rsim_store::Store::open(
         dir.join("store"),
         rsim_store::Keys::from_hex(&keys).unwrap(),
     )
     .unwrap();
-    let mut c = store.begin(cycle).unwrap();
+    let newest = store.head_manifest().unwrap().unwrap().time;
+    let mut c = store.begin(newest / 1000 * 1000 + 1000).unwrap();
     c.remove(device);
     c.prepare()
         .unwrap()
@@ -424,7 +425,7 @@ fn a_newer_snapshot_of_the_store_builds_in_the_background_and_keeps_the_previous
 
     // A new snapshot: the current twin answers at once while the new twin
     // builds in the background.
-    let cycle = remove_device(&dir, "site1", 2);
+    let cycle = remove_device(&dir, "site1");
     let held = format!("/v1/twins/{first}/tables/devices/rows");
     assert_eq!(get(&s, &held).status, 200);
     s.wait_store();
@@ -487,7 +488,7 @@ fn a_newer_snapshot_of_the_store_builds_in_the_background_and_keeps_the_previous
     );
 
     // A third snapshot: the first one is replaced.
-    let third = remove_device(&dir, "r1", cycle + 1);
+    let third = remove_device(&dir, "r1");
     assert_eq!(get(&s, "/v1/twins/store").status, 307);
     s.wait_store();
     let entry = store_entry(&s);

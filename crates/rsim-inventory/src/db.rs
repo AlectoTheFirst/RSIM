@@ -19,7 +19,7 @@ pub use auth::*;
 
 use crate::secret::Sealed;
 use crate::types::{
-    Action, AuditPage, AuditRecord, Bindings, CaptureBgp, Credential, CredentialKind,
+    Action, AuditPage, AuditRecord, Bindings, CaptureBgp, Collection, Credential, CredentialKind,
     CredentialSource, Device, EdgeDeviceBinding, FabricPortBinding, Group, Ha, Inventory, JumpHost,
     NxosJson, Route, Settings, SshAlgorithms, SshMode, TlsTrust, valid_device_name, valid_name,
 };
@@ -37,6 +37,11 @@ pub const MIGRATIONS: &[(u32, &str, &str)] = &[
         3,
         "managed_credentials",
         include_str!("../migrations/0003_managed_credentials.sql"),
+    ),
+    (
+        4,
+        "collection",
+        include_str!("../migrations/0004_collection.sql"),
     ),
 ];
 
@@ -290,6 +295,7 @@ impl Db {
                 fabric_ports: fabric_ports(&tx, None).await?,
                 edge_devices: edge_devices(&tx, None).await?,
             },
+            collection: collection(&tx).await?,
         };
         let sealed = if secrets {
             sealed_secrets(&tx).await?
@@ -451,6 +457,7 @@ pub enum Change {
         account: String,
         edge_device: String,
     },
+    PutCollection(Collection),
 }
 
 struct Audit {
@@ -523,6 +530,7 @@ impl Change {
                 }
                 settings_params(&d.settings).map(|_| ())
             }
+            Change::PutCollection(c) => c.check().map_err(Error::Invalid),
             _ => Ok(()),
         }
     }
@@ -821,8 +829,32 @@ impl Change {
                 .await?;
                 Ok(audit("edge_device_binding", key, Some(json(&old)), None))
             }
+            Change::PutCollection(c) => {
+                let old = collection(tx).await?;
+                if old != *c {
+                    let days = number("history_days", Some(c.history_days))?;
+                    tx.execute("UPDATE collection_settings SET history_days = $1", &[&days])
+                        .await?;
+                }
+                Ok(audit(
+                    "collection",
+                    "collection".to_string(),
+                    Some(json(&old)),
+                    Some(json(c)),
+                ))
+            }
         }
     }
+}
+
+/// The settings of the collector.
+async fn collection(c: &impl GenericClient) -> Result<Collection> {
+    let row = c
+        .query_one("SELECT history_days FROM collection_settings", &[])
+        .await?;
+    Ok(Collection {
+        history_days: count(&row, "history_days").unwrap_or_default(),
+    })
 }
 
 /// The settings columns, in the order of [`settings_params`].

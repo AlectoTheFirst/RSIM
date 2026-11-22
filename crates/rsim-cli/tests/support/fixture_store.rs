@@ -28,8 +28,8 @@ impl Entropy for Os {
     }
 }
 
-/// The keys of the data folder: those of its file `keys`, else new keys
-/// with a random wrap key, which the file then holds.
+/// The keys of the data folder: those of its file `keys`, else new random
+/// keys, which the file then holds.
 #[allow(clippy::disallowed_methods)]
 fn keys(dir: &Path) -> Keys {
     let path = dir.join("keys");
@@ -37,7 +37,7 @@ fn keys(dir: &Path) -> Keys {
         return Keys::from_hex(&text).unwrap();
     }
     let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
-    let text = format!("{}\n{}\n", hex(&[1u8; 32]), hex(&random::<32>()));
+    let text = format!("{}\n{}\n", hex(&random::<32>()), hex(&random::<32>()));
     std::fs::write(&path, &text).unwrap();
     Keys::from_hex(&text).unwrap()
 }
@@ -66,8 +66,12 @@ fn s(v: &str) -> Cell {
     Cell::Str(v.into())
 }
 
+/// The time of the snapshot of a new store: 2026-11-22 14:05:12 UTC.
+pub const TIME: u64 = 1_795_356_312_000;
+
 /// Writes the data folder of `rsim-collect` in `dir`: the store keys in
-/// `keys` and the store in `store`, with one snapshot.
+/// `keys` and the store in `store`, with one snapshot at [`TIME`], or at the
+/// second after the newest snapshot of a store that has one.
 #[allow(clippy::disallowed_methods)]
 pub fn write(dir: &Path) {
     std::fs::create_dir_all(dir).unwrap();
@@ -163,7 +167,8 @@ pub fn write(dir: &Path) {
         tables: BTreeMap::new(),
         management_address: Some("192.0.2.253".into()),
     };
-    let mut c = store.begin(1).unwrap();
+    let newest = store.head_manifest().unwrap().map_or(0, |m| m.time);
+    let mut c = store.begin(TIME.max(newest / 1000 * 1000 + 1000)).unwrap();
     c.add(r1).unwrap();
     c.add(site).unwrap();
     c.prepare()

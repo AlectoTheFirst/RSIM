@@ -1,5 +1,5 @@
 // The calls of the UI to the REST API of rsim-api, on the origin of the page.
-import type { Credential, CredentialPut, Device, Group, Inventory, JumpHost, ResolvedDevice, Route, SecretKeyOut, Vendors } from "../inventory/model";
+import type { Collection, Credential, CredentialPut, Device, Group, Inventory, JumpHost, ResolvedDevice, Route, SecretKeyOut, Vendors } from "../inventory/model";
 import type { Me, NewToken, PathAnswer, SetAnswer, SetupState, SourceText, Span, TableOut, TablesOut, TokenIn, TokenInfo, Twin } from "./types";
 
 /** A refused request: the problem object of RFC 9457. */
@@ -306,6 +306,7 @@ export const putGroup = (g: Group) => put(`/v1/inventory/groups/${encodeURICompo
 export const putCredential = (c: Credential | CredentialPut) => put(`/v1/inventory/credentials/${encodeURIComponent(c.name)}`, c);
 export const putRoute = (r: Route) => put(`/v1/inventory/routes/${encodeURIComponent(r.name)}`, r);
 export const putJumpHost = (j: JumpHost) => put(`/v1/inventory/jump-hosts/${encodeURIComponent(j.name)}`, j);
+export const putCollection = (c: Collection) => put("/v1/inventory/collection", c);
 
 /** Removes a record of the inventory; the answer is the inventory version. */
 async function del(path: string): Promise<number> {

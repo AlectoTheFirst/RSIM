@@ -8,6 +8,7 @@ import {
   ageText,
   arrange,
   cellState,
+  collectionChecked,
   counts,
   credentialGroups,
   credentialBody,
@@ -83,6 +84,7 @@ const INV: Inventory = {
     { name: "x1", group: "g-other", address: "203.0.113.10", site: "s2", settings: { credential: "cred-a" } },
   ],
   bindings: { fabric_ports: [], edge_devices: [] },
+  collection: { history_days: 30 },
 };
 
 const r = <T>(value: T, origin: "device" | "group" | "default") => ({ value, origin });
@@ -487,5 +489,15 @@ describe("the credential form", () => {
     expect(credentialBody(undefined, "e", { ...credentialFields(), source: "env", key: "lower" }).ok).toBe(false);
     const env = credentialBody(managed, "lab", { ...credentialFields(managed), source: "env", key: "LAB" });
     expect(env.ok && env.body).toMatchObject({ source: "env", key: "LAB", kind: null, user: null, secret: null });
+  });
+});
+
+describe("the history of the store", () => {
+  it("takes a whole number of days from 1 to 3650", () => {
+    expect(collectionChecked(" 7 ")).toEqual({ ok: true, body: { history_days: 7 } });
+    expect(collectionChecked("3650").ok).toBe(true);
+    for (const bad of ["0", "3651", "", "7.5", "-1", "x"]) expect(collectionChecked(bad).ok, bad).toBe(false);
+    const out = collectionChecked("0");
+    expect(!out.ok && out.problem.title).toBe("history_days out of range");
   });
 });

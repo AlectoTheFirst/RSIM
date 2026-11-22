@@ -2,7 +2,7 @@
 //! print that they are skipped and pass.
 
 use rsim_inventory::{
-    Action, CaptureBgp, Change, Credential, CredentialKind, CredentialSource, Device,
+    Action, CaptureBgp, Change, Collection, Credential, CredentialKind, CredentialSource, Device,
     EdgeDeviceBinding, Error, FabricPortBinding, Group, Ha, JumpHost, Origin, Route, SecretInput,
     SecretKey, Settings, SshAlgorithms, env, import_changes, test_database,
 };
@@ -78,6 +78,31 @@ async fn the_migrations_run_once() {
     let inv = db.load().await.unwrap();
     assert_eq!(inv.version, 0);
     assert!(inv.devices.is_empty());
+}
+
+#[tokio::test]
+async fn the_history_of_the_store_is_one_setting_with_its_audit() {
+    let Some(db) = test_database("the_history_of_the_store").await else {
+        return;
+    };
+    assert_eq!(db.load().await.unwrap().collection.history_days, 30);
+    let put = |days| Change::PutCollection(Collection { history_days: days });
+    assert_eq!(db.apply("tester", &[put(30)]).await.unwrap(), 0);
+    assert_eq!(db.apply("tester", &[put(7)]).await.unwrap(), 1);
+    let inv = db.load().await.unwrap();
+    assert_eq!((inv.version, inv.collection.history_days), (1, 7));
+    let last = &db.audit(1, None).await.unwrap().records[0];
+    assert_eq!(
+        (last.kind.as_str(), last.key.as_str(), last.action),
+        ("collection", "collection", Action::Update)
+    );
+    assert_eq!(last.old.as_ref().unwrap()["history_days"], 30);
+    assert_eq!(last.new.as_ref().unwrap()["history_days"], 7);
+    for days in [0, 3651] {
+        let e = db.apply("tester", &[put(days)]).await.unwrap_err();
+        assert!(matches!(e, Error::Invalid(_)), "{e:?}");
+    }
+    assert_eq!(db.load().await.unwrap(), inv);
 }
 
 #[tokio::test]

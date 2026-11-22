@@ -383,6 +383,39 @@ pub struct Bindings {
     pub edge_devices: Vec<EdgeDeviceBinding>,
 }
 
+/// The history of the snapshot store, in days, with no setting.
+pub const DEFAULT_HISTORY_DAYS: u32 = 30;
+
+/// Collector settings
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Collection {
+    /// History
+    pub history_days: u32,
+}
+
+impl Default for Collection {
+    fn default() -> Collection {
+        Collection {
+            history_days: DEFAULT_HISTORY_DAYS,
+        }
+    }
+}
+
+impl Collection {
+    /// The check of the range of each setting.
+    pub fn check(&self) -> Result<(), String> {
+        if (1..=3650).contains(&self.history_days) {
+            Ok(())
+        } else {
+            Err(format!(
+                "history_days {} not from 1 to 3650",
+                self.history_days
+            ))
+        }
+    }
+}
+
 /// Inventory
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Inventory {
@@ -394,6 +427,7 @@ pub struct Inventory {
     pub groups: Vec<Group>,
     pub devices: Vec<Device>,
     pub bindings: Bindings,
+    pub collection: Collection,
 }
 
 /// Change kind

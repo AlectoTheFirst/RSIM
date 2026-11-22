@@ -1,18 +1,18 @@
 //! The inventory routes: the device groups, the devices with their
 //! inherited settings resolved, the credentials, the routes, the jump
-//! hosts, the Equinix bindings and the audit log. A write is one
-//! transaction of the inventory database with its audit records. The
-//! secret of a managed credential comes only in a PUT body; the server
-//! seals it with its secret key, and no answer gives it back.
+//! hosts, the Equinix bindings, the settings of the collector and the audit
+//! log. A write is one transaction of the inventory database with its audit
+//! records. The secret of a managed credential comes only in a PUT body; the
+//! server seals it with its secret key, and no answer gives it back.
 
 use std::future::Future;
 use std::sync::Arc;
 
 use rsim_contract::schema;
 use rsim_inventory::{
-    AuditPage, Bindings, COLLECTOR_VENDORS, Change, CollectorTransport, Credential, CredentialKind,
-    CredentialSource, Db, Device, EdgeDeviceBinding, Error, FabricPortBinding, Group, Inventory,
-    JumpHost, ResolvedDevice, ResolvedDevices, Route, SecretInput, SecretKey,
+    AuditPage, Bindings, COLLECTOR_VENDORS, Change, Collection, CollectorTransport, Credential,
+    CredentialKind, CredentialSource, Db, Device, EdgeDeviceBinding, Error, FabricPortBinding,
+    Group, Inventory, JumpHost, ResolvedDevice, ResolvedDevices, Route, SecretInput, SecretKey,
 };
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -120,6 +120,13 @@ pub struct GroupsOut {
     pub groups: Vec<Group>,
 }
 
+/// Collector settings
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CollectionOut {
+    pub version: u64,
+    pub collection: Collection,
+}
+
 /// Credentials
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct CredentialsOut {
@@ -194,6 +201,24 @@ pub const ROUTES: &[ApiRoute] = &[
         query: ONE,
         body: &[],
         ok: (200, &[schema::<VendorsOut>]),
+    },
+    ApiRoute {
+        method: "get",
+        path: "/v1/inventory/collection",
+        id: "getCollection",
+        summary: "Collector settings",
+        query: ONE,
+        body: &[],
+        ok: (200, &[schema::<CollectionOut>]),
+    },
+    ApiRoute {
+        method: "put",
+        path: "/v1/inventory/collection",
+        id: "putCollection",
+        summary: "Put collector settings",
+        query: ONE,
+        body: &[schema::<Collection>],
+        ok: (200, &[schema::<WrittenOut>]),
     },
     ApiRoute {
         method: "get",
@@ -545,6 +570,18 @@ pub fn route(
         [] => {
             allow(req, &["GET"])?;
             Ok(json_out(&load()?))
+        }
+        ["collection"] => {
+            allow(req, &["GET", "PUT"])?;
+            if req.method == "PUT" {
+                let c: Collection = body(req)?;
+                return write(vec![Change::PutCollection(c)]);
+            }
+            let inv = load()?;
+            Ok(json_out(&CollectionOut {
+                version: inv.version,
+                collection: inv.collection,
+            }))
         }
         ["groups"] => {
             allow(req, &["GET"])?;

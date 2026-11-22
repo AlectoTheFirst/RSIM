@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rsim_store::{
-    Class, DeviceManifest, DeviceUpdate, Entropy, Hash, Row, Snapshot, Store, StoreError,
+    Class, DeviceManifest, DeviceUpdate, Entropy, Hash, Pruned, Row, Snapshot, Store, StoreError,
 };
 use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinSet;
@@ -168,7 +168,17 @@ pub struct CycleReport {
     /// The devices of the store that are not in the inventory. The
     /// published snapshot removes them.
     pub removed: Vec<String>,
+    /// The prune after the published snapshot, if one runs.
+    pub pruned: Option<Pruned>,
+    /// The error of the prune. The collector goes on.
+    pub prune_error: Option<String>,
 }
+
+/// The history of the store with no setting.
+pub const DEFAULT_HISTORY: Duration = Duration::from_secs(30 * 86_400);
+
+/// The least time between 2 prunes of the store.
+pub const PRUNE_INTERVAL: Duration = Duration::from_secs(3_600);
 
 /// Collects the devices of an inventory into a store.
 pub struct Collector {
@@ -181,6 +191,11 @@ pub struct Collector {
     clock: Arc<dyn Clock>,
     sinks: Vec<Arc<dyn Sink>>,
     state: Arc<BTreeMap<String, DeviceManifest>>,
+    /// The time of the newest snapshot of the store.
+    newest: Option<u64>,
+    history: Duration,
+    /// The time of the last prune.
+    pruned_at: Option<u64>,
 }
 
 impl fmt::Debug for Collector {
@@ -203,8 +218,13 @@ impl Collector {
         limits: Limits,
         clock: Arc<dyn Clock>,
     ) -> Result<Collector, CollectError> {
-        let state = store.latest()?.map(|s| s.devices).unwrap_or_default();
+        let latest = store.latest()?;
+        let newest = latest.as_ref().map(|s| s.manifest.time);
+        let state = latest.map(|s| s.devices).unwrap_or_default();
         Ok(Collector {
+            newest,
+            history: DEFAULT_HISTORY,
+            pruned_at: None,
             store: Arc::new(store),
             inventory,
             sources: BTreeMap::new(),
@@ -248,6 +268,12 @@ impl Collector {
         self.times = Arc::new(times);
     }
 
+    /// Sets the history of the store: a prune deletes the snapshots that
+    /// are older, except the newest snapshot.
+    pub fn set_history(&mut self, history: Duration) {
+        self.history = history;
+    }
+
     /// Adds a sink.
     pub fn with_sink(mut self, sink: Arc<dyn Sink>) -> Collector {
         self.sinks.push(sink);
@@ -279,9 +305,18 @@ impl Collector {
     }
 
     /// Collects the due devices and writes one snapshot. The snapshot
-    /// removes each device of the store that is not in the inventory.
+    /// removes each device of the store that is not in the inventory. A
+    /// cycle in the second of the newest snapshot, or before it, first
+    /// waits for the next second, so each snapshot has its own second.
+    /// After a written snapshot, and at most once in [`PRUNE_INTERVAL`],
+    /// the store deletes the snapshots that are older than the history.
     pub async fn run_cycle(&mut self) -> Result<CycleReport, CollectError> {
-        let now = self.clock.now_ms();
+        let mut now = self.clock.now_ms();
+        if let Some(newest) = self.newest.filter(|t| t / 1000 >= now / 1000) {
+            let next = (newest / 1000 + 1) * 1000;
+            tokio::time::sleep(Duration::from_millis(next - now)).await;
+            now = self.clock.now_ms().max(next);
+        }
         let devices = self.inventory.devices();
         let inventory_version = self.inventory.version();
         let mut ids = BTreeSet::new();
@@ -330,11 +365,25 @@ impl Collector {
         ));
         // The store stage runs on its own thread for the whole cycle.
         let store = self.store.clone();
+        let prune_interval = u64::try_from(PRUNE_INTERVAL.as_millis()).unwrap_or(u64::MAX);
+        let cutoff = self
+            .pruned_at
+            .is_none_or(|t| now.saturating_sub(t) >= prune_interval)
+            .then(|| {
+                now.saturating_sub(u64::try_from(self.history.as_millis()).unwrap_or(u64::MAX))
+            });
         let (done_tx, done_rx) = tokio::sync::oneshot::channel();
         std::thread::Builder::new()
             .name("rsim-store-writer".into())
             .spawn(move || {
-                let _ = done_tx.send(store_stage(cls_rx, &store, now, &ids, inventory_version));
+                let _ = done_tx.send(store_stage(
+                    cls_rx,
+                    &store,
+                    now,
+                    &ids,
+                    inventory_version,
+                    cutoff,
+                ));
             })
             .map_err(|e| CollectError::Stage(e.to_string()))?;
 
@@ -343,6 +392,7 @@ impl Collector {
             snapshot,
             mut results,
             removed,
+            pruned,
         } = done_rx
             .await
             .map_err(|_| CollectError::Stage("the store stage stopped".into()))??;
@@ -362,7 +412,15 @@ impl Collector {
                     .push((r.device.id.clone(), section.clone(), e.clone()));
             }
         }
+        if let Some(p) = pruned {
+            self.pruned_at = Some(now);
+            match p {
+                Ok(p) => report.pruned = Some(p),
+                Err(e) => report.prune_error = Some(e.to_string()),
+            }
+        }
         if let Some(s) = snapshot {
+            self.newest = Some(s.manifest.time);
             report.snapshot = Some(s.manifest.cycle);
             for d in &removed {
                 self.scheduler.forget(d);
@@ -499,17 +557,21 @@ struct Stored {
     snapshot: Option<Snapshot>,
     results: Vec<DeviceResult>,
     removed: Vec<String>,
+    /// The prune after the published snapshot, if one runs.
+    pruned: Option<Result<Pruned, StoreError>>,
 }
 
 /// Writes the classified devices as one snapshot that removes each device
 /// of the base snapshot that is not in `inventory` and records the
-/// inventory version.
+/// inventory version. With `cutoff`, a published snapshot is followed by a
+/// prune of the snapshots before `cutoff`.
 fn store_stage(
     mut rx: mpsc::Receiver<(Result<Classified, StoreError>, bool)>,
     store: &Store,
     time: u64,
     inventory: &BTreeSet<String>,
     inventory_version: Option<u64>,
+    cutoff: Option<u64>,
 ) -> Result<Stored, StoreError> {
     let mut cycle = store.begin(time)?;
     cycle.set_inventory_version(inventory_version);
@@ -570,10 +632,14 @@ fn store_stage(
         Some(p) => Some(p.publish()?),
         None => None,
     };
+    let pruned = cutoff
+        .filter(|_| snapshot.is_some())
+        .map(|c| store.prune(c));
     Ok(Stored {
         snapshot,
         results,
         removed,
+        pruned,
     })
 }
 

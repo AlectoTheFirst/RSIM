@@ -18,6 +18,7 @@ export type Route = S["Route"];
 export type JumpHost = S["JumpHost"];
 export type ResolvedDevice = S["ResolvedDevice"];
 export type Origin = S["Origin"];
+export type Collection = S["Collection"];
 export type Vendors = S["VendorsOut"];
 export type Transport = S["CollectorTransport"];
 
@@ -436,6 +437,19 @@ export interface Problem {
 export type Checked<T> = { ok: true; body: T } | { ok: false; problem: Problem };
 
 export type SettingKey = keyof Settings & string;
+
+/** The range of the history of the store, in days, of the inventory database. */
+export const HISTORY_DAYS = { min: 1, max: 3650 } as const;
+
+/** The body of a write of the settings of the collector from the text of the history. */
+export function collectionChecked(text: string): Checked<Collection> {
+  const t = text.trim();
+  const detail = `history_days from ${HISTORY_DAYS.min} to ${HISTORY_DAYS.max}`;
+  if (!/^\d+$/.test(t)) return { ok: false, problem: { title: "history_days not a whole number", detail } };
+  const n = Number(t);
+  if (n < HISTORY_DAYS.min || n > HISTORY_DAYS.max) return { ok: false, problem: { title: "history_days out of range", detail } };
+  return { ok: true, body: { history_days: n } };
+}
 
 /** How a setting is edited and checked, its default, its transport and whether the collector reads it. */
 export interface SettingField {

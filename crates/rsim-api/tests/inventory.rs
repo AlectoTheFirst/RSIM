@@ -149,6 +149,33 @@ fn the_openapi_document_has_the_inventory_routes() {
 }
 
 #[test]
+fn the_history_setting_reads_and_writes_with_its_range() {
+    let put = &rsim_api::openapi::document()["paths"]["/v1/inventory/collection"]["put"];
+    assert_eq!(put["security"][0]["session"][0], "rsim.inventory.write");
+    let Some((s, _rt)) = with_db("api_collection") else {
+        return;
+    };
+    let r = call(&s, "GET", "/v1/inventory/collection", None);
+    assert_eq!(r.status, 200);
+    assert_eq!(
+        json(&r),
+        json!({"version": 0, "collection": {"history_days": 30}})
+    );
+    let body = |days: u64| Some(json!({ "history_days": days }));
+    let r = call(&s, "PUT", "/v1/inventory/collection", body(7));
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
+    assert_eq!(json(&r)["version"], 1);
+    let inv = json(&call(&s, "GET", "/v1/inventory", None));
+    assert_eq!(inv["collection"]["history_days"], 7);
+    for days in [0, 3651] {
+        let r = call(&s, "PUT", "/v1/inventory/collection", body(days));
+        assert_eq!(r.status, 422, "{days}");
+    }
+    let r = call(&s, "DELETE", "/v1/inventory/collection", None);
+    assert_eq!(r.status, 405);
+}
+
+#[test]
 fn the_inventory_routes_write_with_an_audit_and_resolve_the_devices() {
     let Some((s, _rt)) = with_db("api_inventory_routes") else {
         return;
