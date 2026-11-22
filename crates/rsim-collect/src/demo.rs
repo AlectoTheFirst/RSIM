@@ -22,7 +22,9 @@ use crate::fake::FakeTransport;
 use crate::iosxe::IosxeSource;
 use crate::iosxr::IosxrSource;
 use crate::nxos::NxosSource;
-use crate::{CaptureBgp, Clock, Collector, CycleReport, Device, Limits, Schedule, Vendor};
+use crate::{
+    CaptureBgp, Clock, Collector, CycleReport, DEFAULT_INTERVAL, Device, Limits, Schedule, Vendor,
+};
 
 /// The time of the first cycle: 2026-11-02 08:00:00 UTC, in milliseconds
 /// since the Unix epoch.
@@ -82,6 +84,7 @@ pub fn devices(folder: &Path) -> Result<Vec<Device>, String> {
                 site: None,
                 capture_bgp: CaptureBgp::Sessions,
                 route: Default::default(),
+                interval: DEFAULT_INTERVAL,
             })
         })
         .collect()
