@@ -34,47 +34,68 @@ A comment or a docstring describes the code that it belongs to. Do not write des
 AI slop in any form is forbidden. The rule has no exception. It applies to each text that Claude writes for this project:
 
 - the product text: a label, a button, a column head, a section head, a placeholder, a hint, a note, a `title`, an `aria-label`, an option of a select, an empty state
-- the API text: a problem title and detail, a description of a table, a column, a claim, an operation, an argument or a field, an OpenAPI or MCP text
-- the reason text of the engine
-- the README, the docs, the design notes in `../rsim-project/`, the code comments and the docstrings
-- the commit messages, the pull request texts and the answers to the owner
+- the API text: a problem title and detail, a description of a table, a column, a claim, an operation, an argument or a field, an OpenAPI or MCP text, a CLI help text and error
+- the reason text of the engine and the evidence text of a claim
+- the README, `STATUS.md`, the docs, the design notes in `../rsim-project/`, the code comments, the docstrings and the test names
+- the commit messages, the pull request texts, the review comments and the answers to the owner
 
-The table below lists known patterns. It is not complete. A text that pads, explains what nobody asked, hedges, compares, sells, narrates, summarizes or decorates is AI slop, also when no word of the table is in it. Write the fact and stop.
+AI slop is text that a generator adds and a person does not need: padding, explanation that nobody asked for, hedging, comparison, selling, narration, summary, decoration, false precision or false warmth. The tables below list known forms. They are not complete. A text in any of these forms is forbidden, also when no listed word is in it. Write the fact and stop.
 
 ### Product text
 
-- A name is the bare name of the thing, with nothing added: "Network functions", "Forwarding table", "Manifest time", "Next hops". No qualifier, no "with ...", no "of the twin", no format, no unit, no list of values, no second part after a comma or a colon. A unit goes in the `unit` field of a column.
+- A name is the bare name of the thing, with nothing added: "Network functions", "Forwarding table", "Manifest time", "Next hops". No qualifier, no "with ...", no "of the twin", no format, no unit, no list of values, no second part after a comma or a colon. A unit goes in the `unit` field of a column or a setting.
 - A label names a thing or a state in a few words: "not known", "no reply", "no secret key", "no device group". A button names its action: "Add credential", "Delete core-01", "Select entry point".
-- A label, a hint, a note or a description is never a sentence. No full stop. No explanation that a person did not ask for. A `title` holds one short phrase at most.
+- A label, a hint, a note or a description is never a sentence. No full stop. A `title` holds one short phrase at most.
 - A section head has no note that explains the section, its rules or its security.
-- No text repeats what the page already shows. A snapshot name beside the snapshot selector, a count that a person does not act on ("12 not stated", "22 functions on 3 devices") and a box with a summary ("2 route lookups, no RIB check") are slop.
-- A value shows as the value itself. "varies", "mixed" or a summary word in place of the value is slop. A value with no information shows the hatch with "not available". A value that the twin cannot know shows the hatch with "not known".
-- Sentence case, present tense.
+- No text explains why a thing is absent, disabled or not used. A setting, a field or a control that does nothing for the record is not shown. "not used over HTTPS" and "not read by the collector" are slop.
+- No text repeats what the page already shows. A count, a total or a summary box that a person does not act on is slop: "12 not stated", "22 functions on 3 devices", "2 route lookups, no RIB check", "Deliver 0".
+- A value shows as the value itself, in full. "varies", "mixed", "several" or a cut text with an ellipsis in place of the value is slop. A value with no information shows the hatch with "not available". A value that the twin cannot know shows the hatch with "not known".
+- No key hints, tips, onboarding text, help paragraphs or legends that explain the controls.
+- Sentence case, present tense. No Title Case, no ALL CAPS.
 
-### Docs, design notes, comments and messages
+### Docs, design notes, STATUS.md and the README
 
-- State the current design and the current facts only. No reason why, no history, no earlier decision, no rejected option, no comparison with an earlier state, no conjecture.
-- Short and plain. No wall of text, no introduction, no closing summary, no restatement of the question.
-- An answer to the owner leads with the result. It does not praise, apologize at length, or offer options that nobody asked for.
+- State the current design and the current facts only. No reason why, no history, no earlier decision, no rejected option, no comparison with an earlier state, no conjecture, no plan written as a fact.
+- No introduction, no "Overview" that restates the headings, no closing summary, no "Why X?" or "Features" sales section, no "Next steps" that nobody asked for.
+- A number in place of a vague quantity: "3 devices", not "several devices" or "a number of devices".
+- The concrete noun in place of an abstract noun: "the collector reads the inventory", not "the collection functionality leverages inventory capabilities".
 
-### Forbidden patterns
+### Code comments, docstrings and test names
 
-| Pattern | Examples |
+- A comment states what the code does or holds, in the terms of the code. It does not narrate obvious code, it does not address the reader, it gives no reason for a decision, and it does not hedge.
+- No "Note:", "Here we", "This function", "Simply", "Basically", "Helper to", "Handles the case where", "TODO: maybe".
+
+### Commit messages, pull request texts and answers to the owner
+
+- A commit message names the change: "rsim-collect: random store keys in the demo test". No "This commit", "Refactor to improve", "Enhance", "Update X to better", "various fixes".
+- A pull request text lists the changes and the checks. No sales text, no "This PR", no summary of the summary.
+- An answer to the owner leads with the result, and then gives only the facts that the owner needs. It does not praise the question, it does not apologize, it does not restate the question, it does not narrate what Claude is about to do in more than one sentence, it does not end with an offer or a question that nobody needs, and it does not claim a result that no check confirmed.
+- Options go to the owner only when the owner must decide. Each option has a distinct label. One question at a time when the questions depend on each other.
+
+### Forbidden forms
+
+| Form | Examples |
 |---|---|
-| Sentences and explanations in product text | "A jump host never gets the device credential.", "RSIM keeps the reference. The secret stays in its source.", "A managed secret is written once and never shown.", "The network functions of the twin, with the source lines from which each came." |
+| Sentences and explanations in product text | "A jump host never gets the device credential.", "RSIM keeps the reference. The secret stays in its source.", "The network functions of the twin, with the source lines from which each came." |
 | Qualifiers in a name | "network functions with source lines", "manifest time, UTC", "next hops as `<gateway>@<interface>`", "devices of the twin with their facts" |
-| Redundant text | a value that the page shows elsewhere, a count or a summary box that no person acts on |
-| Conjectures and hedges | might, may, likely, probably, possibly, perhaps, seems, appears to, it looks like, should work, typically, generally, in most cases |
-| Comparisons | instead of, rather than, unlike, better than, more than before, no longer, now as a comparison, compared to, as opposed to |
-| Filler and intensifiers | simply, just, easily, actually, really, basically, quickly, fully, truly, very, quite, literally, essentially, of course, clearly, obviously |
-| Connectors of generated text | furthermore, moreover, additionally, notably, importantly, ultimately, effectively, indeed, that said, with that in mind |
-| Hype words and Claudisms | seamless, seamlessly, powerful, robust, comprehensive, intuitive, effortless, leverage, unlock, empower, elevate, streamline, delve, dive into, explore, journey, landscape, realm, crucial, vital, pivotal, essential, key (as an adjective), ensure, holistic, nuanced, tailored, foster, harness, enhance, showcase, underscore, testament, tapestry, navigate (as a metaphor), boasts, myriad, plethora, a variety of, state-of-the-art, best-in-class, world-class, game-changer, cutting-edge, next-level, revolutionize, supercharge |
-| Talk to the user | you, your, you can, feel free to, let's, we, please, don't worry, great, oops, sorry |
-| Chat forms | Certainly, Absolutely, Great question, I hope this helps, Happy to help, Let me know if, It is important to note |
-| Narration | Here is, Below you will find, This view shows, Note that, Keep in mind, It is worth noting, As mentioned |
-| Summaries | In short, Overall, In summary, All in all, To sum up, In conclusion |
-| Rhetorical forms | a question in a label, "Not only ... but also", "It's not X, it's Y", groups of 3 adjectives |
-| Decoration | emoji, glyphs such as `·`, `→`, `✓` and `•`, an em dash, an ellipsis as style, an exclamation mark, quotation marks for emphasis |
+| Notes on what does not apply | "not used over HTTPS", "not read by the collector", "only for NX-OS", "has no effect here" |
+| Redundant text | a value that the page shows elsewhere, a count or a summary box that no person acts on, a count of 0 |
+| Placeholder values | "varies", "mixed", "N/A", "TBD", "...", "etc.", "and more", "and so on" |
+| Conjectures and hedges | might, may, could, likely, probably, possibly, perhaps, seems, appears to, it looks like, should work, typically, generally, usually, in most cases, tends to, arguably, to some extent |
+| Vague quantities | several, various, numerous, a number of, many, some, a few, a lot of, significant, substantial, a wide range of |
+| Comparisons | instead of, rather than, unlike, better than, more than before, no longer, now as a comparison, compared to, as opposed to, whereas, while (as a contrast) |
+| Filler and intensifiers | simply, just, easily, actually, really, basically, quickly, fully, truly, very, quite, rather, pretty, literally, essentially, of course, clearly, obviously, needless to say, it goes without saying |
+| Connectors of generated text | furthermore, moreover, additionally, in addition, notably, importantly, ultimately, effectively, indeed, that said, with that in mind, to that end, as such, in other words, that is to say, this means that |
+| Hype words and Claudisms | seamless, seamlessly, powerful, robust, comprehensive, intuitive, effortless, elegant, clean, smart, intelligent, modern, lightweight, blazing, leverage, unlock, empower, elevate, streamline, delve, dive into, explore, journey, landscape, realm, crucial, vital, pivotal, paramount, essential, key (as an adjective), ensure, holistic, nuanced, intricate, meticulous, tailored, foster, harness, enhance, showcase, underscore, testament, tapestry, beacon, embark, navigate (as a metaphor), boasts, myriad, plethora, a variety of, ever-evolving, game-changer, cutting-edge, next-level, state-of-the-art, best-in-class, world-class, revolutionize, supercharge |
+| Buzzword phrases | best practices, out of the box, under the hood, at scale, end-to-end, first-class, battle-tested, production-ready, single source of truth, peace of mind, gracefully, with ease |
+| Abstract nouns | functionality, capability, capabilities, solution, mechanism, utilize, facilitate, in order to, the ability to |
+| Talk to the user | you, your, you can, feel free to, let's, we, our, please, don't worry, great, oops, sorry, rest assured |
+| Chat forms | Certainly, Absolutely, Of course, Sure, Great question, Good catch, You're right to ask, I hope this helps, Happy to help, Let me know if, I'd be glad to, It is important to note, To be clear, Honestly, Frankly |
+| Meta-commentary | I will now, Let me, As an AI, As mentioned, As noted above, In this section, The following, This document describes |
+| Narration | Here is, Below you will find, This view shows, This page lets, Note that, Keep in mind, It is worth noting |
+| Summaries | In short, Overall, In summary, All in all, To sum up, In conclusion, TL;DR, Key takeaways |
+| Rhetorical forms | a question in a label or a heading, "Not only ... but also", "It's not X, it's Y", "X, Y, and Z" lists and groups of 3 adjectives for rhythm, a sentence fragment for effect |
+| Decoration | emoji, glyphs such as `·`, `→`, `✓`, `✔`, `✕` and `•`, an em dash, an ellipsis as style, an exclamation mark, quotation marks for emphasis, bold for emphasis in running text, a heading or a table for 2 items |
 
 Before a change is done, read each new or changed text of the change against this section. Section 7.1 "Forbidden prose" of `../rsim-project/design/ui-design-language.md` carries the same rule.
 
