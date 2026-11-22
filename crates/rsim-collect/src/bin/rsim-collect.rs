@@ -98,7 +98,7 @@ struct Cli {
     /// needed with no inventory database.
     #[arg(long)]
     env: Option<PathBuf>,
-    /// The folder of the store, the keys and the pins. It is needed.
+    /// Data folder
     #[arg(long, global = true)]
     data: Option<PathBuf>,
     /// The URL of the inventory database: postgres://user:password@host:port/db.
@@ -127,15 +127,12 @@ enum Command {
     Status,
     /// Writes the raw bytes of a section of the newest snapshot to stdout.
     Show { device: String, section: String },
-    /// Writes the cycles of a demo folder into a new store through the fake
-    /// transport, with no network. A data folder whose store has a snapshot
-    /// is an error, or with `--if-empty` writes nothing.
+    /// Seed a new store from a demo folder
     Seed {
-        /// The demo folder, such as `demo/` of the repository or
-        /// `/usr/share/rsim/demo` of the image.
+        /// Demo folder
         #[arg(long)]
         demo: PathBuf,
-        /// Writes nothing and succeeds when the store has a snapshot.
+        /// Skip a store with a snapshot
         #[arg(long)]
         if_empty: bool,
     },
@@ -151,7 +148,7 @@ fn data(cli: &Cli) -> Result<&Path, String> {
 async fn seed(data: &Path, demo: &Path, if_empty: bool) -> Result<(), String> {
     let store = open_store(data)?;
     if if_empty && store.latest().map_err(|e| e.to_string())?.is_some() {
-        println!("the store has a snapshot; the seed writes nothing");
+        println!("store has a snapshot, nothing written");
         return Ok(());
     }
     let reports = rsim_collect::demo::seed(store, demo).await?;
