@@ -27,7 +27,7 @@ import {
 import { HatchMark } from "./page/Hatch";
 import { keyForElement, keyPlace } from "./tables/model";
 import { KeyLine, LEVELS, QueryBar, ResultLine, TopBar } from "./page/Parts";
-import { newerRun, pinnedRun, twinState, twinStateText, viewOf, viewSearch, withTwin } from "./page/url";
+import { isSnapshot, newerRun, pinnedRun, twinState, twinStateText, viewOf, viewSearch, withTwin } from "./page/url";
 import { type Fields, type Mode, explainCommand, fieldsOf, requestBody, rsimCommand } from "./page/query";
 import { QUERY_FIELDS, modeValue } from "./page/fields";
 import { TablesView } from "./tables/TablesView";
@@ -294,7 +294,7 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
       listTwins()
         .then((list) => {
           setTwins(list);
-          setTwin((t) => (/^snap-\d+$/.test(t) ? pinnedRun(list, "store") : t));
+          setTwin((t) => (isSnapshot(t) ? pinnedRun(list, "store") : t));
         })
         .catch(() => undefined);
     });

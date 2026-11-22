@@ -773,14 +773,15 @@ fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
     let b = rsim(&args);
     assert_eq!(a.stdout, b.stdout);
     let v: Value = serde_json::from_slice(&a.stdout).unwrap();
-    // The answer names the snapshot cycle of the store.
-    let cycle = v["twin"]["snapshot"].as_u64().expect("a snapshot cycle");
+    // The answer names the snapshot of the store by its UTC second.
+    let id = v["twin"]["id"].as_str().expect("a snapshot name");
+    let second = rsim_contract::twin::snapshot_second(id).expect("a snapshot name");
     assert_eq!(
         v["twin"],
         serde_json::json!({
-            "id": format!("snap-{cycle}"),
-            "base": format!("snap-{cycle}"),
-            "snapshot": cycle,
+            "id": id,
+            "base": id,
+            "snapshot": rsim_contract::twin::utc_time(second * 1000),
             "layers": []
         })
     );

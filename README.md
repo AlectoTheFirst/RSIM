@@ -236,7 +236,7 @@ cargo run -p rsim-api -- --listen 127.0.0.1:8787 --store <data folder>
 | The answer | `GET` the query resource, with `?form=summary`, `steps` or `full` |
 | A claim on the paths of the query | `GET <query resource>/claims/no-unknown` |
 
-The same server gives the MCP tools at `POST /mcp`, the Streamable HTTP transport of MCP, so many agents can share one server and its twins. The twin `store` redirects to its snapshot `snap-<cycle>`. A page of another origin needs `--allow-origin <origin>`.
+The same server gives the MCP tools at `POST /mcp`, the Streamable HTTP transport of MCP, so many agents can share one server and its twins. The twin `store` redirects to its snapshot `snapshot-YYYY-MM-DD-HHMMSS`, named by its UTC second. A page of another origin needs `--allow-origin <origin>`.
 
 With no inventory database, the server has no sign-in and accepts only a loopback listen address. With `--inventory <postgres URL>`, the server has sign-in and accepts each listen address. While no user exists, the UI shows the one-time setup page of the first admin. A request proves its user by the session cookie or by `Authorization: Bearer <API token>`. `--public-origin https://<host>` gives the host behind a proxy, and `--trusted-proxy <address/length>` gives the proxy.
 

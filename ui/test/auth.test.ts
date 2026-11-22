@@ -126,35 +126,35 @@ describe("the requests", () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const path = String(input);
       paths.push(path);
-      return path.startsWith("/v1/twins/snap-3")
-        ? new Response(JSON.stringify({ code: "snapshot_replaced", detail: "snap-3 is replaced by snap-5" }), {
+      return path.startsWith("/v1/twins/snapshot-2026-11-22-140503")
+        ? new Response(JSON.stringify({ code: "snapshot_replaced", detail: "snapshot-2026-11-22-140503 is replaced by snapshot-2026-11-22-140505" }), {
             status: 410,
             headers: { "content-type": "application/problem+json" },
           })
-        : new Response(JSON.stringify({ twin: { id: "snap-5" } }), { status: 200, headers: { "content-type": "application/json" } });
+        : new Response(JSON.stringify({ twin: { id: "snapshot-2026-11-22-140505" } }), { status: 200, headers: { "content-type": "application/json" } });
     }) as typeof fetch;
     try {
-      await expect(getTwin("snap-3")).resolves.toMatchObject({ twin: { id: "snap-5" } });
-      await expect(getSourceLines("snap-3", { file: "r1/config@ab", first_line: 1, last_line: 2 })).rejects.toMatchObject({
+      await expect(getTwin("snapshot-2026-11-22-140503")).resolves.toMatchObject({ twin: { id: "snapshot-2026-11-22-140505" } });
+      await expect(getSourceLines("snapshot-2026-11-22-140503", { file: "r1/config@ab", first_line: 1, last_line: 2 })).rejects.toMatchObject({
         status: 410,
         code: "snapshot_replaced",
       });
     } finally {
       onReplaced(null);
     }
-    expect(paths[0]).toBe("/v1/twins/snap-3");
+    expect(paths[0]).toBe("/v1/twins/snapshot-2026-11-22-140503");
     expect(paths[1]).toBe("/v1/twins/store");
-    expect(paths.slice(2).every((p) => p.startsWith("/v1/twins/snap-3/sources"))).toBe(true);
+    expect(paths.slice(2).every((p) => p.startsWith("/v1/twins/snapshot-2026-11-22-140503/sources"))).toBe(true);
     expect(replaced).toBe(2);
     expect(calls).toBe(0);
   });
 
   it("keeps a trace step and source lines on their run", () => {
-    expect(onNewestRun("/v1/twins/snap-3/tables/devices/rows?limit=5")).toBe("/v1/twins/store/tables/devices/rows?limit=5");
-    expect(onNewestRun("/v1/twins/snap-3/queries")).toBe("/v1/twins/store/queries");
-    expect(onNewestRun("/v1/twins/snap-3")).toBe("/v1/twins/store");
-    expect(onNewestRun("/v1/twins/snap-3/queries/q1/steps/0/7")).toBeNull();
-    expect(onNewestRun("/v1/twins/snap-3/sources?file=x&lines=1-2")).toBeNull();
+    expect(onNewestRun("/v1/twins/snapshot-2026-11-22-140503/tables/devices/rows?limit=5")).toBe("/v1/twins/store/tables/devices/rows?limit=5");
+    expect(onNewestRun("/v1/twins/snapshot-2026-11-22-140503/queries")).toBe("/v1/twins/store/queries");
+    expect(onNewestRun("/v1/twins/snapshot-2026-11-22-140503")).toBe("/v1/twins/store");
+    expect(onNewestRun("/v1/twins/snapshot-2026-11-22-140503/queries/q1/steps/0/7")).toBeNull();
+    expect(onNewestRun("/v1/twins/snapshot-2026-11-22-140503/sources?file=x&lines=1-2")).toBeNull();
     expect(onNewestRun("/v1/twins/builtin.ecmp/tables")).toBeNull();
   });
 

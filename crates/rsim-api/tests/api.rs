@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use rsim_api::handler::{Request, Response, Settings, State, handle};
+use rsim_contract::twin::{snapshot_name, snapshot_second};
 use serde_json::{Value, json};
 
 #[path = "../../rsim-cli/tests/support/fixture_store.rs"]
@@ -291,6 +292,18 @@ fn errors_are_problem_objects() {
         ("GET", "/v1/nothing", 404, "not_found"),
         ("GET", "/v1/twins/builtin.nothing", 404, "unknown_twin"),
         ("GET", "/v1/twins/snap-3", 404, "unknown_twin"),
+        (
+            "GET",
+            "/v1/twins/snapshot-2026-11-22-140512",
+            404,
+            "unknown_twin",
+        ),
+        (
+            "GET",
+            "/v1/twins/snapshot-2026-02-30-000000",
+            404,
+            "unknown_twin",
+        ),
         ("GET", "/v1/twins/store", 404, "unknown_twin"),
         (
             "GET",
@@ -346,38 +359,74 @@ fn the_store_alias_redirects_to_its_snapshot() {
     let r = get(&s, "/v1/twins/store/tables/devices/rows");
     assert_eq!(r.status, 307);
     let location = r.header("location").unwrap().to_string();
-    assert!(location.starts_with("/v1/twins/snap-"), "{location}");
+    let name = location.split('/').nth(3).unwrap();
+    assert!(snapshot_second(name).is_some(), "{location}");
     assert!(location.ends_with("/tables/devices/rows"), "{location}");
     let rows = json(&get(&s, &location));
-    assert_eq!(rows["twin"]["id"], location.split('/').nth(3).unwrap());
+    assert_eq!(rows["twin"]["id"], name);
+    assert_eq!(rows["twin"]["snapshot"].as_str().unwrap().len(), 20);
     assert_eq!(rows["topology"], "store");
     let cov = json(&get(&s, &location.replace("devices", "coverage")));
     assert!(cov["total"].as_u64().unwrap() > 0);
-    assert_eq!(
-        get(&s, "/v1/twins/snap-999999/tables/devices/rows").status,
-        404
-    );
+    // The cycle number is not a name, and a later second is not built.
+    for gone in ["/v1/twins/snap-0", "/v1/twins/snapshot-2999-01-01-000000"] {
+        assert_eq!(get(&s, &format!("{gone}/tables/devices/rows")).status, 404);
+    }
 }
 
-/// Writes a snapshot of the second after the newest snapshot of the store
-/// in `dir` with the device `device` removed, and gives its cycle.
-fn remove_device(dir: &std::path::Path, device: &str) -> u64 {
+/// The name of the snapshot one second after the snapshot `name`.
+fn next_second(name: &str) -> String {
+    snapshot_name((snapshot_second(name).unwrap() + 1) * 1000)
+}
+
+fn open_store(dir: &std::path::Path) -> rsim_store::Store {
     let keys = std::fs::read_to_string(dir.join("keys")).unwrap();
-    let store = rsim_store::Store::open(
+    rsim_store::Store::open(
         dir.join("store"),
         rsim_store::Keys::from_hex(&keys).unwrap(),
     )
-    .unwrap();
+    .unwrap()
+}
+
+/// Writes a snapshot of the second after the newest snapshot of the store
+/// in `dir` with the device `device` removed, and gives its name.
+fn remove_device(dir: &std::path::Path, device: &str) -> String {
+    let store = open_store(dir);
     let newest = store.head_manifest().unwrap().unwrap().time;
     let mut c = store.begin(newest / 1000 * 1000 + 1000).unwrap();
     c.remove(device);
-    c.prepare()
+    let time = c
+        .prepare()
         .unwrap()
         .expect("the cycle removes the device")
         .publish()
         .unwrap()
         .manifest
-        .cycle
+        .time;
+    snapshot_name(time)
+}
+
+/// Makes the newest snapshot of the store in `dir` a snapshot of the next
+/// second that names a device manifest that the store does not have, and
+/// gives its name.
+#[allow(clippy::disallowed_methods)]
+fn write_broken_snapshot(dir: &std::path::Path) -> String {
+    let store = open_store(dir);
+    let mut m = store.head_manifest().unwrap().unwrap();
+    m.parent = Some(m.cycle);
+    m.cycle += 7;
+    m.time = (m.time / 1000 + 1) * 1000;
+    m.checkpoint = false;
+    m.removed.clear();
+    m.devices = [("r9".to_string(), "0".repeat(64).parse().unwrap())].into();
+    let snapshots = dir.join("store/snapshots");
+    std::fs::write(
+        snapshots.join(format!("{:020}", m.cycle)),
+        serde_json::to_vec(&m).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(dir.join("store/HEAD"), format!("{}\n", m.cycle)).unwrap();
+    snapshot_name(m.time)
 }
 
 #[test]
@@ -425,15 +474,15 @@ fn a_newer_snapshot_of_the_store_builds_in_the_background_and_keeps_the_previous
 
     // A new snapshot: the current twin answers at once while the new twin
     // builds in the background.
-    let cycle = remove_device(&dir, "site1");
+    let second = remove_device(&dir, "site1");
+    assert_eq!(second, next_second(&first));
     let held = format!("/v1/twins/{first}/tables/devices/rows");
     assert_eq!(get(&s, &held).status, 200);
     s.wait_store();
     let entry = store_entry(&s);
-    let second = format!("snap-{cycle}");
     assert_eq!(entry["held"], second.as_str());
     assert_eq!(entry["previous"], first.as_str());
-    assert_eq!(entry["newest_cycle"], cycle);
+    assert_eq!(entry["newest"], second.as_str());
     assert_eq!(entry["loading"], Value::Null);
     // A new query on the alias gets its resource on the new snapshot at once.
     let mut post = req("POST", "/v1/twins/store/queries");
@@ -450,14 +499,8 @@ fn a_newer_snapshot_of_the_store_builds_in_the_background_and_keeps_the_previous
     assert_eq!(after, vec!["r1".to_string()]);
     // The previous snapshot still answers.
     assert_eq!(get(&s, &held).status, 200);
-    assert_eq!(
-        get(
-            &s,
-            &format!("/v1/twins/snap-{}/tables/devices/rows", cycle + 1)
-        )
-        .status,
-        404
-    );
+    let later = format!("/v1/twins/{}/tables/devices/rows", next_second(&second));
+    assert_eq!(get(&s, &later).status, 404);
     assert_eq!(json(&get(&s, "/v1/twins/builtin.ecmp")), builtin);
     // Other tools give their current twin until their build ends.
     assert_eq!(tools.twin("store").unwrap().identity.id, first);
@@ -492,16 +535,16 @@ fn a_newer_snapshot_of_the_store_builds_in_the_background_and_keeps_the_previous
     assert_eq!(get(&s, "/v1/twins/store").status, 307);
     s.wait_store();
     let entry = store_entry(&s);
-    assert_eq!(entry["held"], format!("snap-{third}"), "{entry}");
+    assert_eq!(entry["held"], third.as_str(), "{entry}");
     assert_eq!(entry["previous"], second.as_str());
     let gone = get(&s, &held);
     assert_eq!(gone.status, 410);
     assert_eq!(json(&gone)["code"], "snapshot_replaced");
-    let (cycle, previous, second) = (third, second, format!("snap-{third}"));
+    let (previous, second) = (second, third);
 
     // A newest snapshot that does not build leaves the current twin, and
     // the twin list names it.
-    std::fs::write(dir.join("store/HEAD"), format!("{}\n", cycle + 7)).unwrap();
+    let broken = write_broken_snapshot(&dir);
     let r = get(&s, "/v1/twins/store");
     assert_eq!(r.status, 307);
     s.wait_store();
@@ -513,12 +556,9 @@ fn a_newer_snapshot_of_the_store_builds_in_the_background_and_keeps_the_previous
         r.header("location")
     );
     let entry = store_entry(&s);
-    assert_eq!(entry["newest_cycle"], cycle + 7);
+    assert_eq!(entry["newest"], broken.as_str());
     assert_eq!(entry["loading"], Value::Null);
-    assert_eq!(
-        entry["reload_error"]["snapshot"],
-        format!("snap-{}", cycle + 7)
-    );
+    assert_eq!(entry["reload_error"]["snapshot"], broken.as_str());
     assert!(!entry["reload_error"]["detail"].as_str().unwrap().is_empty());
     assert_eq!(
         get(&s, &format!("/v1/twins/{second}/tables/devices/rows")).status,
@@ -527,6 +567,14 @@ fn a_newer_snapshot_of_the_store_builds_in_the_background_and_keeps_the_previous
     // The start of the build released the previous twin.
     assert_eq!(entry["previous"], Value::Null);
     assert_eq!(get(&s, &format!("/v1/twins/{previous}")).status, 410);
+
+    // A HEAD with no snapshot manifest is a HEAD that cannot be read.
+    std::fs::write(dir.join("store/HEAD"), "999999\n").unwrap();
+    assert_eq!(get(&s, "/v1/twins/store").status, 307);
+    let entry = store_entry(&s);
+    assert_eq!(entry["held"], second.as_str());
+    assert_eq!(entry["newest"], Value::Null);
+    assert_eq!(entry["reload_error"]["snapshot"], Value::Null);
 }
 
 #[test]
@@ -1131,7 +1179,7 @@ fn the_store_alias_keeps_the_query_of_the_request() {
     assert_eq!(res.status, 307);
     let location = res.header("location").unwrap();
     let (path, query) = location.split_once('?').unwrap();
-    assert!(path.starts_with("/v1/twins/snap-"), "{location}");
+    assert!(path.starts_with("/v1/twins/snapshot-"), "{location}");
     assert_eq!(query, "limit=1&device=a%26b%20c%2B%3D%C3%A9");
     let rows = json(&get(&s, &format!("{path}?limit=1")));
     assert_eq!(rows["rows"].as_array().unwrap().len(), 1);
@@ -1329,7 +1377,7 @@ fn a_new_data_folder_has_no_snapshot_and_a_folder_with_no_keys_has_a_reload_erro
     let store = store_of(&s);
     assert_eq!(store["id"], "store");
     assert_eq!(store["held"], Value::Null);
-    assert_eq!(store["newest_cycle"], Value::Null);
+    assert_eq!(store["newest"], Value::Null);
     assert_eq!(store["reload_error"], Value::Null);
 
     std::fs::create_dir_all(dir.join("store")).unwrap();

@@ -59,7 +59,7 @@ export function onReplaced(handler: (() => void) | null): void {
  * and source lines belong to the answer of that snapshot.
  */
 export function onNewestRun(path: string): string | null {
-  const m = /^\/v1\/twins\/snap-\d+(\/.*)?$/.exec(path);
+  const m = /^\/v1\/twins\/snapshot-\d{4}-\d{2}-\d{2}-\d{6}(\/.*)?$/.exec(path);
   if (!m) return null;
   const rest = m[1] ?? "";
   if (/\/(steps|sources)(\/|\?|$)/.test(rest)) return null;
@@ -145,8 +145,8 @@ export interface TwinRef {
   href: string;
   /** For the alias `store`: the newest built snapshot, or null before the first build. */
   held?: string | null;
-  /** For the alias `store`: the cycle of the newest snapshot of the store, or null when not known. */
-  newest_cycle?: number | null;
+  /** For the alias `store`: the newest snapshot of the store, or null when not known. */
+  newest?: string | null;
   /** For the alias `store`: the snapshot before the held snapshot that the server keeps, or null. */
   previous?: string | null;
   /** For the alias `store`: the snapshot whose twin builds now in the background, or null. */

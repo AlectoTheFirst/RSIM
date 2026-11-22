@@ -150,7 +150,7 @@ pub fn load_store_at(folder: &str, cycle: Option<u64>) -> Result<Loaded, QueryEr
     })?;
     Ok(Loaded {
         twin,
-        identity: TwinJson::snapshot(snap.manifest.cycle),
+        identity: TwinJson::snapshot(snap.manifest.time),
         coverage,
         bgp,
         facts,
