@@ -62,6 +62,14 @@ collector:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "2", memory: 2Gi }
 
+demo:
+  # An init container with the collector image writes the demo estate of
+  # /usr/share/rsim/demo into the store when the store has no snapshot.
+  seed: false
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "2", memory: 2Gi }
+
 # The volume of the data folder: the store, the store keys and the pins. The
 # data folder is /data/rsim.
 persistence:

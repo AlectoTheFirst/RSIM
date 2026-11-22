@@ -40,6 +40,23 @@ spec:
           resources:
             requests: { cpu: 10m, memory: 16Mi }
             limits: { cpu: 100m, memory: 64Mi }
+        {{- if .Values.demo.seed }}
+        - name: seed
+          image: {{ include "rsim.image" (dict "repository" .Values.collector.image.repository "tag" .Values.collector.image.tag "digest" .Values.collector.image.digest "appVersion" .Chart.AppVersion) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --data
+            - /data/rsim
+            - seed
+            - --demo
+            - /usr/share/rsim/demo
+            - --if-empty
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          resources: {{- toYaml .Values.demo.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+        {{- end }}
       containers:
         - name: api
           image: {{ include "rsim.image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "digest" .Values.image.digest "appVersion" .Chart.AppVersion) }}
