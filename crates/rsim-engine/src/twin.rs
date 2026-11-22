@@ -141,7 +141,7 @@ impl fmt::Display for BuildError {
             BuildError::DuplicateFunction(id) => write!(f, "function {id} is defined twice"),
             BuildError::DuplicateEndpoint(id) => write!(f, "endpoint {id} is defined twice"),
             BuildError::UnknownSuccessor { from, to } => {
-                write!(f, "{from} forwards to {to}, which does not exist")
+                write!(f, "{from} forwards to {to}, no such function")
             }
             BuildError::UnknownInterface { device, interface } => {
                 write!(f, "{device}/{interface} has no ingress function")
