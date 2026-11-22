@@ -9,7 +9,7 @@ Instructions for Claude Code in this repository.
 - `../rsim-project/PROJECT_SUMMARY.md`: the reasoning. Read it first.
 - `../rsim-project/roadmap.md`: the order of the work
 - `../rsim-project/design/architecture.md`: the crates, the modules, the tools and CI
-- `../rsim-project/design/step-1b-cli-mcp.md`, `step-2-packet-set.md` and `step-3-collect.md`: the design of steps 1b, 2 and 3
+- `../rsim-project/design/step-1b-cli-mcp.md`, `../rsim-project/design/step-2-packet-set.md` and `../rsim-project/design/step-3-collect.md`: the design of steps 1b, 2 and 3
 - `../rsim-project/design/vendors.md`: the vendor rules and the transports
 - `../rsim-project/design/http-api.md`: the API specification
 - `../rsim-project/design/twin-reload.md`: the reload of the store twin and the delta twin
@@ -225,7 +225,7 @@ Section 18 of the brief defines layer 2.
 - Only `rsim-collect` talks to devices. It writes the snapshot store, and the engine reads only the store.
 - Lowering changes vendor structures directly into function instances. There is no vendor-neutral config model between them (section 9).
 - The structural parsers contain no vendor knowledge. Classify each stanza as handled, known-irrelevant or unhandled. Do not drop a stanza silently.
-- A new handled path of the VyOS table needs a handler that reads it.
+- A new handled path needs a handler that reads it.
 - Routing convergence gives one of 3 results: `Converged`, `MultipleStableOutcomes` or `NoConvergence`. Detect the last 2. Do not hide them behind an iteration limit.
 - The compiled twin is immutable for each version and is not persisted. The source snapshots are persisted: the writer adds files, and only the prune of the history deletes them. Rebuild the twin from the sources.
 - The engine does not read the inventory database. A twin is built from the snapshot store only.

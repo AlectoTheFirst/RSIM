@@ -1,6 +1,6 @@
 # Status
 
-Section 13 of `../rsim-project/BUILD_BRIEF.md` gives the steps. `../rsim-project/roadmap.md` gives the order and the pull requests.
+Section 13 of `../rsim-project/BUILD_BRIEF.md` gives the steps. `../rsim-project/roadmap.md` gives the order.
 
 | Step | State |
 |---|---|
@@ -22,23 +22,26 @@ The packet-set engine in `rsim-dd`, `PacketSet` on `rsim-dd`, the sessions as re
 
 Complete:
 
-- the snapshot store `rsim-store` and the collector `rsim-collect` with the SSH and HTTPS transports, jump hosts and proxies
+- the snapshot store `rsim-store` and the collector `rsim-collect` with the SSH and HTTPS transports
 - the collection and the ingestion of VyOS, UniFi, NX-OS, IOS-XR and IOS-XE, with one link join for all vendors
 - EVPN, VXLAN and the anycast gateway on NX-OS
 - the Rust TextFSM engine `rsim-textfsm`
-- BGP parts B1 to B5: the route table of each VRF, the next-hop resolution, the session collection, the neighbour config and the claims `bgp-peers-up` and `bgp-peers-agree`
-- the HTTP API parts A1 to A3b: the registry, the twin identity, the tables, the claims, the REST server `rsim-api` and the MCP tools over HTTP
+- the BGP sessions, the BGP neighbour config and the claims `bgp-peers-up` and `bgp-peers-agree`
+- the collection interval of each device and the retention of the snapshot history
+
+Next vendor: Equinix Fabric.
+
+Open: the snapshot view.
+
+## Other parts
+
+Complete:
+
+- the REST server `rsim-api` with the tables, the claims and the MCP tools over HTTP
 - the inventory in PostgreSQL, `rsim-inventory`
-- the sign-in of `rsim-api` (A6-1) and the load of a newer snapshot with no restart (A6-2)
+- the sign-in of `rsim-api` and the load of a newer snapshot with no restart
 - the browser UI in `ui/`
 - the second VLAN tag with the TPIDs
 - the container images, the compose file, the Helm chart and the CI image build
-- the collection interval of each device and the retention of the snapshot history
-
-Next: Equinix Fabric F1 to F6. Check Point and VeloCloud follow the owner decisions of their design notes.
-
-Open in step 3: the snapshot view, pull request 4b.
-
-Deployment, open: the Argo CD applications, the demo seed and OIDC sign-in (A6-3).
 
 The Cargo workspace has 14 crates. The other crates of section 3 of the brief come with their steps.
