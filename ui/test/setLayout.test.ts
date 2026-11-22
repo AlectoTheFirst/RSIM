@@ -44,7 +44,7 @@ describe("the parts of mini-enterprise", () => {
     expect(parts[1]!.reason).toBeNull();
   });
 
-  it("compares each header field over the members, not only the 5 fields of the ladder", () => {
+  it("compares each header field over the members, the DSCP included", () => {
     const b = a.branches[1]!;
     const members = b.packets.members.map((m) => ({ ...m, original: { ...m.original, dscp: { known: 46 } } as Header }));
     expect(partFields(a.input, { members })).toContainEqual(["dscp", "46"]);

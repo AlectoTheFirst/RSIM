@@ -479,7 +479,7 @@ export const LEVELS: readonly Level[] = ["device", "function"];
 
 export function LevelControl(props: { level: Level; onLevel: (l: Level) => void }) {
   return (
-    <span class="group" role="group" aria-label="Level" title="keys [ ]">
+    <span class="group" role="group" aria-label="Level">
       <span class="muted">Level</span>
       {(["estate", "site"] as const).map((l) => (
         <button type="button" disabled title="not in this build">

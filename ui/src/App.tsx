@@ -377,7 +377,7 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
     autoOpen.current = true;
   }
 
-  // A note of the status line goes after a few seconds.
+  // A note of the status line goes after NOTICE_MS.
   useEffect(() => {
     if (!notice) return;
     const t = window.setTimeout(() => setNotice(null), NOTICE_MS);
