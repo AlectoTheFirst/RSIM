@@ -31,7 +31,7 @@ function UnhandledCount(props: { n: number; h: number }) {
   if (!props.n) return <span class="cell num">0</span>;
   const s = props.h - 2 * SIZE.buttonGap;
   return (
-    <span class="cell num unhandled" title="functions from these lines: Unknown">
+    <span class="cell num unhandled" title="Unknown functions">
       <Hatch w={s} h={s} />
       <span>{props.n}</span>
     </span>
@@ -109,9 +109,6 @@ function Paths(props: { twin: string; device: string; onTables: () => void }) {
       </div>
       <div>
         <div class="t-label">paths</div>
-        <p class="note">
-          <span class="t-value">*</span> key of the classification table · secrets masked · counts, no line numbers
-        </p>
         <div class="group actions">
           <button type="button" onClick={props.onTables}>
             Show in Tables

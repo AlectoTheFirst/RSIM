@@ -461,7 +461,7 @@ export function QueryBar(props: {
           value={value(k)}
           found={k === "ingress" ? props.found : null}
           invalid={errorOf(k) !== null}
-          hint={errorOf(k) ?? `${k} · ${formOf(props.mode, k)}`}
+          hint={errorOf(k) ?? formOf(props.mode, k)}
           onInput={(v) => props.onField(k, v)}
           onRun={run}
           onBlur={() => {

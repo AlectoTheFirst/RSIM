@@ -154,7 +154,7 @@ function DeviceEdit(props: { d: ResolvedDevice; stored: Device; inv: Inventory; 
       </div>
       <div>
         <div class="head">
-          <span title={`empty: from ${stored.group}, else the default`}>Settings</span>
+          <span>Settings</span>
         </div>
         <SettingsEditor id={id} inv={inv} draft={draft} group={group?.settings ?? null} vendor={props.d.vendor} vendors={props.vendors} h={h} />
       </div>
@@ -191,7 +191,7 @@ export function GroupDetail(props: { g: Group; inv: Inventory; vendors: Vendors 
           </div>
         </div>
         <div class="span2">
-          <div class="head" title="empty: the default">
+          <div class="head">
             Settings
           </div>
           <SettingsEditor id={id} inv={inv} draft={draft} group={null} vendor={g.vendor} vendors={props.vendors} h={h} />
@@ -250,7 +250,7 @@ export function AddDevice(props: {
           </div>
         </div>
         <div class="span2">
-          <div class="head" title={`empty: from ${f.group}, else the default`}>
+          <div class="head">
             Settings
           </div>
           <SettingsEditor id="new-device" inv={props.inv} draft={draft} group={group?.settings ?? null} vendor={group?.vendor ?? ""} vendors={props.vendors} h={h} />
@@ -288,7 +288,7 @@ export function AddGroup(props: {
           </div>
         </div>
         <div class="span2">
-          <div class="head" title="empty: the default">
+          <div class="head">
             Settings
           </div>
           <SettingsEditor id="new-group" inv={props.inv} draft={draft} group={null} vendor={f.vendor.trim()} vendors={props.vendors} omit={["credential", "route"]} h={h} />

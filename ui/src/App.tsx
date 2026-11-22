@@ -60,7 +60,7 @@ function replaced(e: unknown): boolean {
 /** The time of a query: the round trip, then the engine time or a cache hit. */
 export function timingText(ms: number, t: ServerTiming): string {
   const fmt = (x: number) => (x < 10 ? x.toFixed(1) : String(Math.round(x)));
-  const server = t.engineMs !== null ? ` · engine ${fmt(t.engineMs)} ms` : t.cacheHit ? " · cache hit" : "";
+  const server = t.engineMs !== null ? `, engine ${fmt(t.engineMs)} ms` : t.cacheHit ? ", cache hit" : "";
   return `round trip ${fmt(ms)} ms${server}`;
 }
 
@@ -290,7 +290,7 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
   useEffect(() => {
     // A page whose run is replaced moves to the newest built run.
     onReplaced(() => {
-      setNotice("run replaced: page on the newest run");
+      setNotice("run replaced");
       listTwins()
         .then((list) => {
           setTwins(list);

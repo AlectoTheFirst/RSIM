@@ -406,7 +406,7 @@ export function credentialBody(stored: Credential | undefined, name: string, f: 
   const keeps = stored?.source === "managed" && stored.kind === f.kind;
   if (f.secret) {
     if (f.kind === "ssh-key" && !/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(f.secret)) {
-      return refuse("private key not valid", `the secret of ${n}: a private key in the OpenSSH or PEM form`);
+      return refuse("private key not valid", `${n}: not OpenSSH or PEM`);
     }
     body.secret = { value: f.secret, passphrase: f.kind === "ssh-key" && f.passphrase ? f.passphrase : null };
   } else if (!keeps) {
