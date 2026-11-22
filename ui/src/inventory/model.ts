@@ -447,7 +447,7 @@ export function collectionChecked(text: string): Checked<Collection> {
   const detail = `history_days from ${HISTORY_DAYS.min} to ${HISTORY_DAYS.max}`;
   if (!/^\d+$/.test(t)) return { ok: false, problem: { title: "history_days not a whole number", detail } };
   const n = Number(t);
-  if (n < HISTORY_DAYS.min || n > HISTORY_DAYS.max) return { ok: false, problem: { title: "history_days out of range", detail } };
+  if (n < HISTORY_DAYS.min || n > HISTORY_DAYS.max) return { ok: false, problem: { title: "history out of range", detail } };
   return { ok: true, body: { history_days: n } };
 }
 
@@ -507,29 +507,25 @@ export function parseSetting(f: SettingField, text: string): { ok: true; value: 
   const t = text.trim();
   if (t === "") return { ok: true, value: null };
   if (f.kind === "number") {
-    const range = `${f.key} from ${f.min} to ${f.max}`;
-    if (!/^\d+$/.test(t)) return { ok: false, problem: { title: `${f.key} not a whole number`, detail: range } };
+    const range = `${f.label} from ${f.min} to ${f.max}`;
+    if (!/^\d+$/.test(t)) return { ok: false, problem: { title: `${f.label} not a whole number`, detail: range } };
     const n = Number(t);
-    if (n < f.min! || n > f.max!) return { ok: false, problem: { title: `${f.key} out of range`, detail: range } };
+    if (n < f.min! || n > f.max!) return { ok: false, problem: { title: `${f.label} out of range`, detail: range } };
     return { ok: true, value: n };
   }
   if (f.kind === "choice" && !f.choices!.includes(t)) {
-    return { ok: false, problem: { title: `${f.key} not known`, detail: `${f.key} is one of ${f.choices!.join(", ")}` } };
+    return { ok: false, problem: { title: `${f.label} not known`, detail: f.choices!.join(", ") } };
   }
   return { ok: true, value: t };
 }
 
-/**
- * Whether the collector reads a setting of a device of the vendor: null
- * when it does or when the vendor has no collector, else the words of the
- * reason.
- */
-export function notUsed(f: SettingField, vendors: Vendors | null, vendor: string): string | null {
+/** Whether the collector reads a setting of a device of the vendor; each setting for a vendor with no collector. */
+export function usedSetting(f: SettingField, vendors: Vendors | null, vendor: string): boolean {
+  if (f.unread) return false;
   const t = transportOf(vendors, vendor);
-  if (t === null) return null;
-  if (f.transport !== null && f.transport !== t) return `not used over ${t.toUpperCase()}`;
-  if (f.vendors && !f.vendors.includes(vendor)) return `not used by ${vendor}`;
-  return f.unread ? "not read by the collector" : null;
+  if (t === null) return true;
+  if (f.transport !== null && f.transport !== t) return false;
+  return !f.vendors || f.vendors.includes(vendor);
 }
 
 /** The value that an empty setting takes: the value of the group, else the default. */

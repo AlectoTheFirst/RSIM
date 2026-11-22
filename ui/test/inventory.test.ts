@@ -40,7 +40,7 @@ import {
   newDeviceChecked,
   newGroupChecked,
   newJumpHostBody,
-  notUsed,
+  usedSetting,
   parseSetting,
   rebase,
   routeBody,
@@ -328,7 +328,7 @@ describe("edits of the settings", () => {
     expect(parseSetting(timeout, "0").ok).toBe(false);
     expect(parseSetting(timeout, "1")).toEqual({ ok: true, value: 1 });
     expect(parseSetting(timeout, "86400")).toEqual({ ok: true, value: 86400 });
-    expect(parseSetting(timeout, "86401")).toEqual({ ok: false, problem: { title: "timeout_seconds out of range", detail: "timeout_seconds from 1 to 86400" } });
+    expect(parseSetting(timeout, "86401")).toEqual({ ok: false, problem: { title: "device time limit out of range", detail: "device time limit from 1 to 86400" } });
     expect(parseSetting(timeout, "")).toEqual({ ok: true, value: null });
     expect(parseSetting(timeout, " ")).toEqual({ ok: true, value: null });
     const interval = field("interval_seconds");
@@ -336,24 +336,23 @@ describe("edits of the settings", () => {
     expect(parseSetting(interval, "60")).toEqual({ ok: true, value: 60 });
     expect(parseSetting(interval, "86400")).toEqual({ ok: true, value: 86400 });
     expect(parseSetting(interval, "86401").ok).toBe(false);
-    expect(parseSetting(timeout, "1.5")).toEqual({ ok: false, problem: { title: "timeout_seconds not a whole number", detail: "timeout_seconds from 1 to 86400" } });
+    expect(parseSetting(timeout, "1.5")).toEqual({ ok: false, problem: { title: "device time limit not a whole number", detail: "device time limit from 1 to 86400" } });
     expect(parseSetting(timeout, "-1").ok).toBe(false);
     expect(parseSetting(field("ssh_channels"), "0").ok).toBe(false);
     expect(parseSetting(field("ssh_channels"), "2147483648").ok).toBe(false);
     expect(parseSetting(field("ssh_mode"), "telnet").ok).toBe(false);
   });
 
-  it("names the settings that the collector of the vendor does not read, and none with no collector", () => {
-    expect(notUsed(field("tls_trust"), VENDORS, "vyos")).toBe("not used over SSH");
-    expect(notUsed(field("ssh_mode"), VENDORS, "unifi")).toBe("not used over HTTPS");
-    expect(notUsed(field("nxos_json"), VENDORS, "vyos")).toBe("not used by vyos");
-    expect(notUsed(field("nxos_json"), VENDORS, "nxos")).toBeNull();
-    expect(notUsed(field("timeout_seconds"), VENDORS, "unifi")).toBeNull();
-    expect(notUsed(field("retries"), VENDORS, "vyos")).toBe("not read by the collector");
-    expect(notUsed(field("request_timeout_seconds"), VENDORS, "unifi")).toBe("not read by the collector");
-    expect(notUsed(field("request_timeout_seconds"), VENDORS, "vyos")).toBe("not used over SSH");
-    expect(notUsed(field("tls_trust"), VENDORS, "othervendor")).toBeNull();
-    expect(notUsed(field("tls_trust"), null, "vyos")).toBeNull();
+  it("hides the settings that the collector of the vendor does not read, and shows each with no collector", () => {
+    expect(usedSetting(field("tls_trust"), VENDORS, "vyos")).toBe(false);
+    expect(usedSetting(field("ssh_mode"), VENDORS, "unifi")).toBe(false);
+    expect(usedSetting(field("nxos_json"), VENDORS, "vyos")).toBe(false);
+    expect(usedSetting(field("nxos_json"), VENDORS, "nxos")).toBe(true);
+    expect(usedSetting(field("timeout_seconds"), VENDORS, "unifi")).toBe(true);
+    expect(usedSetting(field("retries"), VENDORS, "vyos")).toBe(false);
+    expect(usedSetting(field("request_timeout_seconds"), VENDORS, "unifi")).toBe(false);
+    expect(usedSetting(field("tls_trust"), VENDORS, "othervendor")).toBe(true);
+    expect(usedSetting(field("tls_trust"), null, "vyos")).toBe(true);
   });
 
   it("gives the inherited value of an empty setting: the group, else the default", () => {
@@ -504,6 +503,6 @@ describe("the history of the store", () => {
     expect(collectionChecked("3650").ok).toBe(true);
     for (const bad of ["0", "3651", "", "7.5", "-1", "x"]) expect(collectionChecked(bad).ok, bad).toBe(false);
     const out = collectionChecked("0");
-    expect(!out.ok && out.problem.title).toBe("history_days out of range");
+    expect(!out.ok && out.problem.title).toBe("history out of range");
   });
 });

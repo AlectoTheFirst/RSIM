@@ -2,7 +2,7 @@
 // choices of the record, and each setting with the value that it inherits
 // when it is empty and the collectors that do not read it.
 import type { Inventory, SettingField, SettingKey, Settings, Vendors } from "./model";
-import { type Draft, SETTING_FIELDS, inherited, notUsed } from "./model";
+import { type Draft, SETTING_FIELDS, inherited, usedSetting } from "./model";
 
 /** The handlers of the fields of an edit: a text change, a choice, the keys and the end of the focus of each field. */
 export interface FieldHandlers {
@@ -86,7 +86,7 @@ function choices(f: SettingField, inv: Inventory, inherit: string, current: stri
 /**
  * The settings of a device or a group. An empty setting inherits: for a
  * device the value of its group, else the default. A setting that the
- * collector of the vendor does not read keeps its value and names why.
+ * collector of the vendor does not read is not shown.
  */
 export function SettingsEditor(props: {
   id: string;
@@ -101,11 +101,10 @@ export function SettingsEditor(props: {
 }) {
   return (
     <div class="inv-settings">
-      {SETTING_FIELDS.filter((f) => !props.omit?.includes(f.key)).map((f) => {
+      {SETTING_FIELDS.filter((f) => !props.omit?.includes(f.key) && usedSetting(f, props.vendors, props.vendor)).map((f) => {
         const i = inherited(f, props.group);
         const inherit = `${i.from}: ${i.text}`;
-        const note = notUsed(f, props.vendors, props.vendor);
-        const common = { id: props.id, k: f.key, label: f.label, draft: props.draft, h: props.h, note: note ?? f.unit ?? null };
+        const common = { id: props.id, k: f.key, label: f.label, draft: props.draft, h: props.h, note: f.unit ?? null };
         return f.kind === "number" || f.kind === "text" ? (
           <TextRow {...common} placeholder={inherit} />
         ) : (
