@@ -1,0 +1,54 @@
+{
+  "TABLE_if": {
+    "ROW_if": [
+      {
+        "if_name": "loopback0",
+        "soo": "--",
+        "vrf_id": 1,
+        "vrf_name": "default"
+      },
+      {
+        "if_name": "loopback1",
+        "soo": "--",
+        "vrf_id": 1,
+        "vrf_name": "default"
+      },
+      {
+        "if_name": "Ethernet1/49",
+        "soo": "--",
+        "vrf_id": 1,
+        "vrf_name": "default"
+      },
+      {
+        "if_name": "Ethernet1/50",
+        "soo": "--",
+        "vrf_id": 1,
+        "vrf_name": "default"
+      },
+      {
+        "if_name": "Vlan50",
+        "soo": "--",
+        "vrf_id": 3,
+        "vrf_name": "PROD"
+      },
+      {
+        "if_name": "Vlan3001",
+        "soo": "--",
+        "vrf_id": 3,
+        "vrf_name": "PROD"
+      },
+      {
+        "if_name": "nve1",
+        "soo": "--",
+        "vrf_id": 1,
+        "vrf_name": "default"
+      },
+      {
+        "if_name": "mgmt0",
+        "soo": "--",
+        "vrf_id": 2,
+        "vrf_name": "management"
+      }
+    ]
+  }
+}

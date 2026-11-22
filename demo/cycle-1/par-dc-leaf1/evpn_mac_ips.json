@@ -1,0 +1,24 @@
+{
+  "TABLE_l2route_evpn_mac_ip_all": {
+    "ROW_l2route_evpn_mac_ip_all": [
+      {
+        "flags": "L,",
+        "host-ip": "10.21.10.11",
+        "mac-addr": "025e.0a15.0a0b",
+        "next-hop1": "Eth1/1",
+        "prod-type": "Local",
+        "seq-num": "0",
+        "topo-id": "10"
+      },
+      {
+        "flags": "L,",
+        "host-ip": "10.21.40.53",
+        "mac-addr": "025e.0a15.2835",
+        "next-hop1": "Eth1/2",
+        "prod-type": "Local",
+        "seq-num": "0",
+        "topo-id": "40"
+      }
+    ]
+  }
+}

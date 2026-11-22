@@ -1,0 +1,22 @@
+{
+  "TABLE_l2route_evpn_mac_all": {
+    "ROW_l2route_evpn_mac_all": [
+      {
+        "flags": "L,",
+        "mac-addr": "025e.0a15.1e0b",
+        "next-hop1": "Eth1/1",
+        "prod-type": "Local",
+        "seq-num": "0",
+        "topo-id": "30"
+      },
+      {
+        "flags": "L,",
+        "mac-addr": "025e.0a15.3c0b",
+        "next-hop1": "Eth1/2",
+        "prod-type": "Local",
+        "seq-num": "0",
+        "topo-id": "60"
+      }
+    ]
+  }
+}

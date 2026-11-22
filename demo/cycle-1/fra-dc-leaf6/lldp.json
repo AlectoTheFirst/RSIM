@@ -1,0 +1,46 @@
+{
+  "TABLE_nbor_detail": {
+    "ROW_nbor_detail": [
+      {
+        "chassis_id": "025e.0003.0000",
+        "l_port_id": "Eth1/49",
+        "mgmt_addr": "10.255.1.12",
+        "port_desc": "fra-dc-leaf6",
+        "port_id": "Ethernet1/6",
+        "sys_desc": "Cisco Nexus Operating System (NX-OS) Software 10.3(4a)",
+        "sys_name": "fra-dc-spine1",
+        "ttl": 120
+      },
+      {
+        "chassis_id": "025e.0004.0000",
+        "l_port_id": "Eth1/50",
+        "mgmt_addr": "10.255.1.13",
+        "port_desc": "fra-dc-leaf6",
+        "port_id": "Ethernet1/6",
+        "sys_desc": "Cisco Nexus Operating System (NX-OS) Software 10.3(4a)",
+        "sys_name": "fra-dc-spine2",
+        "ttl": 120
+      },
+      {
+        "chassis_id": "025e.0009.0000",
+        "l_port_id": "Eth1/53",
+        "mgmt_addr": "10.255.1.18",
+        "port_desc": "vpc peer-link",
+        "port_id": "Ethernet1/53",
+        "sys_desc": "Cisco Nexus Operating System (NX-OS) Software 10.3(4a)",
+        "sys_name": "fra-dc-leaf5",
+        "ttl": 120
+      },
+      {
+        "chassis_id": "025e.0009.0000",
+        "l_port_id": "Eth1/54",
+        "mgmt_addr": "10.255.1.18",
+        "port_desc": "vpc peer-link",
+        "port_id": "Ethernet1/54",
+        "sys_desc": "Cisco Nexus Operating System (NX-OS) Software 10.3(4a)",
+        "sys_name": "fra-dc-leaf5",
+        "ttl": 120
+      }
+    ]
+  }
+}

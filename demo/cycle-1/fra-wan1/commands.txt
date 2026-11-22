@@ -1,0 +1,11 @@
+config.txt	show running-config
+version.txt	show version
+interfaces.txt	show interfaces
+lldp.txt	show lldp neighbors detail
+cdp.txt	show cdp neighbors detail
+vrfs.txt	show vrf all detail
+rib.txt	show route vrf all ipv4
+arp.txt	show arp vrf all
+inventory.txt	show inventory
+hsrp.txt	show hsrp
+bgp_sessions.txt	show bgp summary

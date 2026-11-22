@@ -1,6 +1,7 @@
 # The images of rsim:
 #   rsim          rsim-api, rsim-inventory and rsim
-#   rsim-collect  the collector
+#   rsim-collect  the collector, with the replies of the demo estate in
+#                 /usr/share/rsim/demo for `rsim-collect --data /data seed --demo /usr/share/rsim/demo --if-empty`
 # Build one with `podman build --target rsim -t rsim .` or through compose.yaml.
 
 # The browser UI, which rsim-api embeds at build time.
@@ -36,6 +37,7 @@ VOLUME /data
 
 FROM runtime AS rsim-collect
 COPY --from=build /out/bin/rsim-collect /usr/local/bin/
+COPY demo/ /usr/share/rsim/demo/
 ENTRYPOINT ["/usr/local/bin/rsim-collect"]
 CMD ["--env", "/run/rsim/collect.env", "--data", "/data", "run", "--repeat"]
 

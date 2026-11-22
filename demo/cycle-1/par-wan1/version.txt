@@ -1,0 +1,14 @@
+Mon Nov  2 08:00:00.000 UTC
+Cisco IOS XR Software, Version 7.11.2
+Copyright (c) 2013-2026 by Cisco Systems, Inc.
+
+Build Information:
+ Built By     : demo
+ Built On     : Thu Jan 15 10:00:00 UTC 2026
+ Build Host   : demo-build
+ Workspace    : /demo/workspace
+ Version      : 7.11.2
+ Label        : 7.11.2
+
+cisco ASR-9901 (Intel 8 core CPU) processor with 32GB of memory
+par-wan1 uptime is 5 weeks, 6 days, 3 hours, 12 minutes

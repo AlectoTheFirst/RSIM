@@ -1,0 +1,222 @@
+------------------------------------------------
+Local Intf: Te1/0/1
+Chassis id: 025e.0002.0000
+Port id: TenGigE0/0/0/2
+Port Description: fra-core2
+System Name: fra-wan2
+
+System Description:
+Cisco IOS XR Software, Version 7.11.2
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.255.1.11
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Te1/0/47
+Chassis id: 025e.000d.0000
+Port id: Te1/0/47
+Port Description: fra-core2
+System Name: fra-core1
+
+System Description:
+Cisco IOS Software [Cupertino], C9500-48Y4C Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.255.1.22
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Te1/0/48
+Chassis id: 025e.000d.0000
+Port id: Te1/0/48
+Port Description: fra-core2
+System Name: fra-core1
+
+System Description:
+Cisco IOS Software [Cupertino], C9500-48Y4C Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.255.1.22
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Te1/0/10
+Chassis id: 025e.000f.0000
+Port id: Te1/1/2
+Port Description: fra-core2
+System Name: fra-acc1
+
+System Description:
+Cisco IOS Software [Cupertino], C9300-48P Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.12.99.10
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Te1/0/11
+Chassis id: 025e.0010.0000
+Port id: Te1/1/2
+Port Description: fra-core2
+System Name: fra-acc2
+
+System Description:
+Cisco IOS Software [Cupertino], C9300-48P Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.12.99.11
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Te1/0/12
+Chassis id: 025e.0011.0000
+Port id: Te1/1/2
+Port Description: fra-core2
+System Name: fra-acc3
+
+System Description:
+Cisco IOS Software [Cupertino], C9300-48P Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.12.99.12
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Te1/0/13
+Chassis id: 025e.0012.0000
+Port id: Te1/1/2
+Port Description: fra-core2
+System Name: fra-acc4
+
+System Description:
+Cisco IOS Software [Cupertino], C9300-48P Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.12.99.13
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Te1/0/14
+Chassis id: 025e.0013.0000
+Port id: Te1/1/2
+Port Description: fra-core2
+System Name: fra-acc5
+
+System Description:
+Cisco IOS Software [Cupertino], C9300-48P Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.12.99.14
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Te1/0/15
+Chassis id: 025e.0014.0000
+Port id: Te1/1/2
+Port Description: fra-core2
+System Name: fra-acc6
+
+System Description:
+Cisco IOS Software [Cupertino], C9300-48P Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.12.99.15
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Te1/0/16
+Chassis id: 025e.0015.0000
+Port id: Te1/1/2
+Port Description: fra-core2
+System Name: fra-acc7
+
+System Description:
+Cisco IOS Software [Cupertino], C9300-48P Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.12.99.16
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Te1/0/17
+Chassis id: 025e.0016.0000
+Port id: Te1/1/2
+Port Description: fra-core2
+System Name: fra-acc8
+
+System Description:
+Cisco IOS Software [Cupertino], C9300-48P Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.12.99.17
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+
+Total entries displayed: 11

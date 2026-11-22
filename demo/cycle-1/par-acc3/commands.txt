@@ -1,0 +1,19 @@
+config.txt	show running-config
+version.txt	show version
+interfaces.txt	show interfaces
+lldp.txt	show lldp neighbors detail
+cdp.txt	show cdp neighbors detail
+vrfs.txt	show vrf detail
+rib.txt	show ip route vrf *
+rib_global.txt	show ip route
+arp.txt	show ip arp
+acls.txt	show ip access-lists
+inventory.txt	show inventory
+hsrp.txt	show standby brief
+vrrp.txt	show vrrp brief
+mac_table.txt	show mac address-table
+spanning_tree.txt	show spanning-tree
+vlans.txt	show vlan brief
+hsrp_detail.txt	show standby
+vrrp_detail.txt	show vrrp
+bgp_sessions.txt	show ip bgp summary

@@ -1,0 +1,32 @@
+{
+  "TABLE_ip_ipv6_mac": {
+    "ROW_ip_ipv6_mac": [
+      {
+        "TABLE_seqno": {
+          "ROW_seqno": [
+            {
+              "permitdeny": "deny",
+              "proto_str": "tcp",
+              "seqno": 10,
+              "text": "deny tcp any 10.11.30.0/24 eq 1433"
+            },
+            {
+              "permitdeny": "deny",
+              "proto_str": "tcp",
+              "seqno": 20,
+              "text": "deny tcp any 10.11.30.0/24 eq 5432"
+            },
+            {
+              "permitdeny": "permit",
+              "proto_str": "ip",
+              "seqno": 100,
+              "text": "permit ip any any"
+            }
+          ]
+        },
+        "op_ip_ipv6_mac": "ip",
+        "show_ip_ipv6_mac": "DC-IN"
+      }
+    ]
+  }
+}

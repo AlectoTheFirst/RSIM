@@ -1,0 +1,24 @@
+{
+  "TABLE_vrf": {
+    "ROW_vrf": [
+      {
+        "vrf_id": 1,
+        "vrf_name": "default",
+        "vrf_reason": "--",
+        "vrf_state": "Up"
+      },
+      {
+        "vrf_id": 2,
+        "vrf_name": "management",
+        "vrf_reason": "--",
+        "vrf_state": "Up"
+      },
+      {
+        "vrf_id": 3,
+        "vrf_name": "PROD",
+        "vrf_reason": "--",
+        "vrf_state": "Up"
+      }
+    ]
+  }
+}

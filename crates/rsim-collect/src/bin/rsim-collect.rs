@@ -40,7 +40,9 @@
 //! key is also the section time of the vendor or of another device name.
 //!
 //! The data folder holds the store, the store keys and the pin file. The
-//! keys are made at the first run.
+//! keys are made at the first run. The command `seed` writes the cycles of a
+//! demo folder into a new store through the fake transport, with no env
+//! file and no network.
 //!
 //! With an inventory database, from `--inventory`, the environment variable
 //! `RSIM_INVENTORY_URL` or the env key `RSIM_INVENTORY_URL`, the collector
@@ -96,9 +98,9 @@ struct Cli {
     /// needed with no inventory database.
     #[arg(long)]
     env: Option<PathBuf>,
-    /// The folder of the store, the keys and the pins.
-    #[arg(long)]
-    data: PathBuf,
+    /// Data folder
+    #[arg(long, global = true)]
+    data: Option<PathBuf>,
     /// The URL of the inventory database: postgres://user:password@host:port/db.
     #[arg(long, env = rsim_inventory::URL_VAR, hide_env_values = true)]
     inventory: Option<String>,
@@ -125,6 +127,41 @@ enum Command {
     Status,
     /// Writes the raw bytes of a section of the newest snapshot to stdout.
     Show { device: String, section: String },
+    /// Seed a new store from a demo folder
+    Seed {
+        /// Demo folder
+        #[arg(long)]
+        demo: PathBuf,
+        /// Skip a store with a snapshot
+        #[arg(long)]
+        if_empty: bool,
+    },
+}
+
+/// The data folder of the flags.
+fn data(cli: &Cli) -> Result<&Path, String> {
+    cli.data.as_deref().ok_or_else(|| "give --data".to_string())
+}
+
+/// Seeds a new store from a demo folder and prints the report of each
+/// cycle.
+async fn seed(data: &Path, demo: &Path, if_empty: bool) -> Result<(), String> {
+    let store = open_store(data)?;
+    if if_empty && store.latest().map_err(|e| e.to_string())?.is_some() {
+        println!("store has a snapshot, nothing written");
+        return Ok(());
+    }
+    let reports = rsim_collect::demo::seed(store, demo).await?;
+    for r in &reports {
+        println!(
+            "cycle at {} ms: snapshot {:?}, {} devices, {} changed",
+            r.time,
+            r.snapshot,
+            r.due,
+            r.changed.len()
+        );
+    }
+    Ok(())
 }
 
 struct Setup {
@@ -1122,13 +1159,14 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
         );
     }
     let key = SecretKey::from_env(&env)?;
-    let store = open_store(&cli.data)?;
+    let data = data(cli)?;
+    let store = open_store(data)?;
     let policy = if strict {
         PinPolicy::Strict
     } else {
         PinPolicy::AcceptNew
     };
-    let trust = Arc::new(TrustStore::open(&cli.data.join("pins"), policy)?);
+    let trust = Arc::new(TrustStore::open(&data.join("pins"), policy)?);
     let mut collector = Collector::new(
         store,
         Box::new(Vec::<Device>::new()),
@@ -1198,7 +1236,7 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
     }
     let pins = trust.to_text();
     if !pins.is_empty() {
-        eprintln!("pins in {}:\n{pins}", cli.data.join("pins").display());
+        eprintln!("pins in {}:\n{pins}", data.join("pins").display());
     }
     Ok(())
 }
@@ -1228,10 +1266,17 @@ fn main() -> ExitCode {
             .build()
             .map_err(|e| e.to_string())
             .and_then(|rt| rt.block_on(run(&cli, *repeat, *strict_pins))),
-        Command::Status => open_store(&cli.data).and_then(|s| status(&s)),
-        Command::Show { device, section } => {
-            open_store(&cli.data).and_then(|s| show(&s, device, section))
-        }
+        Command::Status => data(&cli).and_then(open_store).and_then(|s| status(&s)),
+        Command::Show { device, section } => data(&cli)
+            .and_then(open_store)
+            .and_then(|s| show(&s, device, section)),
+        Command::Seed { demo, if_empty } => data(&cli).and_then(|d| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| e.to_string())
+                .and_then(|rt| rt.block_on(seed(d, demo, *if_empty)))
+        }),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

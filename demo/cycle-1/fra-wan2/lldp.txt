@@ -1,0 +1,96 @@
+Mon Nov  2 08:00:00.000 UTC
+Capability codes:
+        (R) Router, (B) Bridge, (T) Telephone, (C) DOCSIS Cable Device
+        (W) WLAN Access Point, (P) Repeater, (S) Station, (O) Other
+
+------------------------------------------------
+Local Interface: TenGigE0/0/0/1
+Chassis id: 025e.0001.0000
+Port id: TenGigE0/0/0/1
+Port Description: fra-wan2
+System Name: fra-wan1
+
+System Description: 
+Cisco IOS XR Software, Version 7.11.2
+
+Time remaining: 101 seconds
+Hold Time: 120 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+  IPv4 address: 10.255.1.10
+Peer MAC Address: 02:5e:00:01:00:03
+
+------------------------------------------------
+Local Interface: TenGigE0/0/0/3
+Chassis id: 025e.000c.0000
+Port id: Ethernet1/1
+Port Description: fra-wan2
+System Name: fra-dc-bl2
+
+System Description: 
+Cisco Nexus Operating System (NX-OS) Software 10.3(4a)
+
+Time remaining: 101 seconds
+Hold Time: 120 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+  IPv4 address: 10.255.1.21
+Peer MAC Address: 02:5e:00:0c:00:0d
+
+------------------------------------------------
+Local Interface: TenGigE0/0/0/2
+Chassis id: 025e.000e.0000
+Port id: Te1/0/1
+Port Description: fra-wan2
+System Name: fra-core2
+
+System Description: 
+Cisco IOS Software [Cupertino], C9500-48Y4C Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+Hold Time: 120 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+  IPv4 address: 10.255.1.23
+Peer MAC Address: 02:5e:00:0e:00:02
+
+------------------------------------------------
+Local Interface: TenGigE0/0/0/4
+Chassis id: 025e.0017.0000
+Port id: Te0/1/1
+Port Description: fra-wan2
+System Name: fra-inet1
+
+System Description: 
+Cisco IOS Software [Cupertino], ASR1001-X Software, Version 17.09.04a
+
+Time remaining: 101 seconds
+Hold Time: 120 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+  IPv4 address: 10.255.1.32
+Peer MAC Address: 02:5e:00:17:00:03
+
+------------------------------------------------
+Local Interface: TenGigE0/0/0/0
+Chassis id: 025e.0019.0000
+Port id: TenGigE0/0/0/0
+Port Description: fra-wan2
+System Name: par-wan2
+
+System Description: 
+Cisco IOS XR Software, Version 7.11.2
+
+Time remaining: 101 seconds
+Hold Time: 120 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+  IPv4 address: 10.255.2.11
+Peer MAC Address: 02:5e:00:19:00:07
+
+Total entries displayed: 5

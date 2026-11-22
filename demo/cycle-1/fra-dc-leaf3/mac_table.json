@@ -1,0 +1,56 @@
+{
+  "TABLE_mac_address": {
+    "ROW_mac_address": [
+      {
+        "disp_age": "0",
+        "disp_is_ntfy": "disabled",
+        "disp_is_secure": "disabled",
+        "disp_is_static": "disabled",
+        "disp_mac_addr": "025e.0a0b.1e0b",
+        "disp_port": "Eth1/1",
+        "disp_type": "dynamic",
+        "disp_vlan": "30"
+      },
+      {
+        "disp_age": "0",
+        "disp_is_ntfy": "disabled",
+        "disp_is_secure": "disabled",
+        "disp_is_static": "disabled",
+        "disp_mac_addr": "025e.0a0b.1e0c",
+        "disp_port": "Po1",
+        "disp_type": "dynamic",
+        "disp_vlan": "30"
+      },
+      {
+        "disp_age": "0",
+        "disp_is_ntfy": "disabled",
+        "disp_is_secure": "disabled",
+        "disp_is_static": "disabled",
+        "disp_mac_addr": "025e.0a0b.280a",
+        "disp_port": "Eth1/3",
+        "disp_type": "dynamic",
+        "disp_vlan": "40"
+      },
+      {
+        "disp_age": "0",
+        "disp_is_ntfy": "disabled",
+        "disp_is_secure": "disabled",
+        "disp_is_static": "disabled",
+        "disp_mac_addr": "025e.0a0b.2835",
+        "disp_port": "Eth1/2",
+        "disp_type": "dynamic",
+        "disp_vlan": "40"
+      },
+      {
+        "disp_age": "0",
+        "disp_is_ntfy": "disabled",
+        "disp_is_secure": "disabled",
+        "disp_is_static": "disabled",
+        "disp_mac_addr": "025e.0a0b.287b",
+        "disp_port": "Po1",
+        "disp_type": "dynamic",
+        "disp_vlan": "40"
+      }
+    ]
+  }
+}

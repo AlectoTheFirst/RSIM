@@ -1,4 +1,5 @@
-//! A transport that replays recorded replies, for tests and benchmarks.
+//! A transport that replays recorded replies, for the tests, the
+//! benchmarks and the seed of the demo estate.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;

@@ -1,0 +1,12 @@
+Mon Nov  2 08:00:00.000 UTC
+
+VRF MGMT; RD not set; VPN ID not set
+VRF mode: Regular
+Description not set
+Interfaces:
+  MgmtEth0/RP0/CPU0/0
+Address family IPV4 Unicast
+  No import VPN route-target communities
+  No export VPN route-target communities
+  No import route policy
+  No export route policy

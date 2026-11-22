@@ -1,0 +1,32 @@
+          Mac Address Table
+-------------------------------------------
+
+Vlan    Mac Address       Type        Ports
+----    -----------       --------    -----
+ All    0100.0ccc.cccc    STATIC      CPU
+ All    0100.0ccc.cccd    STATIC      CPU
+  99    025e.0023.0006    DYNAMIC     Po1
+  99    025e.0024.0003    DYNAMIC     Te1/0/10
+  99    025e.0025.0003    DYNAMIC     Te1/0/11
+  99    025e.0026.0003    DYNAMIC     Te1/0/12
+  99    025e.0027.0003    DYNAMIC     Te1/0/13
+ 110    025e.0023.0007    DYNAMIC     Po1
+ 110    025e.0a16.6e14    DYNAMIC     Te1/0/10
+ 110    025e.0a16.6e15    DYNAMIC     Te1/0/10
+ 110    025e.0a16.6e16    DYNAMIC     Te1/0/10
+ 110    025e.0a16.6e18    DYNAMIC     Te1/0/11
+ 110    025e.0a16.6e19    DYNAMIC     Te1/0/11
+ 110    025e.0a16.6e1a    DYNAMIC     Te1/0/11
+ 110    025e.0a16.6e1c    DYNAMIC     Te1/0/12
+ 110    025e.0a16.6e1d    DYNAMIC     Te1/0/12
+ 110    025e.0a16.6e1e    DYNAMIC     Te1/0/12
+ 110    025e.0a16.6e20    DYNAMIC     Te1/0/13
+ 110    025e.0a16.6e21    DYNAMIC     Te1/0/13
+ 110    025e.0a16.6e22    DYNAMIC     Te1/0/13
+ 120    025e.0023.0008    DYNAMIC     Po1
+ 120    025e.0a16.7814    DYNAMIC     Te1/0/10
+ 120    025e.0a16.7815    DYNAMIC     Te1/0/11
+ 120    025e.0a16.7816    DYNAMIC     Te1/0/12
+ 120    025e.0a16.7817    DYNAMIC     Te1/0/13
+ 900    025e.0023.0009    DYNAMIC     Po1
+Total Mac Addresses for this criterion: 26

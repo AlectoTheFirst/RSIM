@@ -1,0 +1,83 @@
+Codes: L - local, C - connected, S - static, R - RIP, M - mobile, B - BGP
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2, m - OMP
+       n - NAT, Ni - NAT inside, No - NAT outside, Nd - NAT DIA
+       i - IS-IS, su - IS-IS summary, L1 - IS-IS level-1, L2 - IS-IS level-2
+       ia - IS-IS inter area, * - candidate default, U - per-user static route
+       H - NHRP, G - NHRP registered, g - NHRP registration summary
+       o - ODR, P - periodic downloaded static route, l - LISP
+       a - application route
+       + - replicated route, % - next hop override, p - overrides from PfR
+       & - replicated local route overrides by connected
+
+Gateway of last resort is 10.18.0.2 to network 0.0.0.0
+
+O*E2  0.0.0.0/0 [110/21] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+      10.0.0.0/8 is variably subnetted, 52 subnets, 4 masks
+O        10.11.10.0/24 [110/51] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.11.20.0/24 [110/51] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.11.30.0/24 [110/51] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.11.40.0/24 [110/51] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.11.50.0/24 [110/51] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.11.90.0/24 [110/41] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+C        10.12.99.0/24 is directly connected, Vlan99
+L        10.12.99.3/32 is directly connected, Vlan99
+C        10.12.110.0/24 is directly connected, Vlan110
+L        10.12.110.3/32 is directly connected, Vlan110
+C        10.12.120.0/24 is directly connected, Vlan120
+L        10.12.120.3/32 is directly connected, Vlan120
+C        10.12.250.0/29 is directly connected, Vlan900
+L        10.12.250.2/32 is directly connected, Vlan900
+O        10.16.0.0/31 [110/21] via 10.12.250.1, 5w6d, Vlan900
+                      [110/21] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.16.0.2/31 [110/11] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.16.255.1/32 [110/21] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.17.0.1/32 [110/21] via 10.12.250.1, 5w6d, Vlan900
+                      [110/21] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.17.0.2/32 [110/11] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.17.1.0/31 [110/11] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.18.0.0/31 [110/11] via 10.12.250.1, 5w6d, Vlan900
+C        10.18.0.2/31 is directly connected, TenGigabitEthernet1/0/1
+L        10.18.0.3/32 is directly connected, TenGigabitEthernet1/0/1
+O        10.18.255.1/32 [110/11] via 10.12.250.1, 5w6d, Vlan900
+C        10.18.255.2/32 is directly connected, Loopback0
+O        10.19.0.0/31 [110/21] via 10.12.250.1, 5w6d, Vlan900
+                      [110/21] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.19.0.2/31 [110/11] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.21.10.0/24 [110/151] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.21.30.0/24 [110/151] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.21.40.0/24 [110/151] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.21.60.0/24 [110/151] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.21.90.0/24 [110/141] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.22.99.0/24 [110/121] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.22.110.0/24 [110/121] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.22.120.0/24 [110/121] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.22.250.0/29 [110/121] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.26.0.0/31 [110/121] via 10.12.250.1, 5w6d, Vlan900
+                      [110/121] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.26.0.2/31 [110/111] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.26.255.1/32 [110/121] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.27.0.1/32 [110/121] via 10.12.250.1, 5w6d, Vlan900
+                      [110/121] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.27.0.2/32 [110/111] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.27.1.0/31 [110/111] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.28.0.0/31 [110/121] via 10.12.250.1, 5w6d, Vlan900
+                      [110/121] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.28.0.2/31 [110/111] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.28.255.1/32 [110/131] via 10.12.250.1, 5w6d, Vlan900
+                        [110/131] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.28.255.2/32 [110/121] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.29.0.0/31 [110/121] via 10.12.250.1, 5w6d, Vlan900
+                      [110/121] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.29.0.2/31 [110/111] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.99.0.0/31 [110/51] via 10.12.250.1, 5w6d, Vlan900
+                      [110/51] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.99.0.2/31 [110/41] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.250.0.0/31 [110/21] via 10.12.250.1, 5w6d, Vlan900
+                       [110/21] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+O        10.250.0.2/31 [110/11] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+      198.51.100.0/24 is variably subnetted, 1 subnets, 1 masks
+O        198.51.100.0/31 [110/121] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1
+      203.0.113.0/24 is variably subnetted, 1 subnets, 1 masks
+O        203.0.113.0/31 [110/21] via 10.18.0.2, 5w6d, TenGigabitEthernet1/0/1

@@ -264,7 +264,7 @@ A build of `rsim-api` with no built UI serves a page that says how to build it. 
 
 ## Containers
 
-`Containerfile` builds 2 images: `rsim` with `rsim-api`, `rsim-inventory` and `rsim`, and `rsim-collect` with the collector. `compose.yaml` starts a local instance with sign-in: PostgreSQL, `rsim-api` on `http://localhost:8787` and, with the profile `collect`, the collector. It works with `podman compose` and with Docker Compose.
+`Containerfile` builds 2 images: `rsim` with `rsim-api`, `rsim-inventory` and `rsim`, and `rsim-collect` with the collector and the demo estate in `/usr/share/rsim/demo`. `compose.yaml` starts a local instance with sign-in: PostgreSQL, `rsim-api` on `http://localhost:8787` and, with the profile `collect`, the collector. It works with `podman compose` and with Docker Compose.
 
 1. Write the database password in the file `.env`, which Git ignores: `echo "RSIM_DB_PASSWORD=$(openssl rand -hex 16)" > .env`.
 2. Write the key of the managed credentials in an env file outside the repository, and write the path of that file in `.env`: `echo "RSIM_SECRET_KEY=$(openssl rand -hex 32)" >> <env file>` and `echo "RSIM_ENV_FILE=<env file>" >> .env`. Keep the key: another key does not open the stored secrets. The same env file holds the secrets of the credentials of the source `env` or `env-url`; `rsim-api` reads only `RSIM_SECRET_KEY`.
@@ -313,6 +313,16 @@ rsim-api --inventory "$RSIM_INVENTORY_URL" --env <env file>   # GET and PUT /v1/
 ```
 
 With `RSIM_INVENTORY_URL` set, `rsim-collect` reads the inventory at the start of each cycle. The env file is then optional and gives only the secrets of the `env` and `env-url` credentials.
+
+### Demo estate
+
+The demo estate is a synthetic Cisco enterprise of 40 devices in 2 sites, Frankfurt and Paris. Each site has an NX-OS data centre fabric with EVPN, VXLAN and vPC, an IOS-XE campus, 2 IOS-XR WAN routers and an IOS-XE internet edge. `demo/` holds the command replies of each device in 3 cycles. The seed writes them into a new store through the fake transport of the collector, with no network, and refuses a store that has a snapshot; with `--if-empty` it writes nothing and succeeds:
+
+```sh
+rsim-collect --data <data folder> seed --demo demo
+```
+
+`cargo run -p rsim-collect --example demo_enterprise -- demo` writes `demo/` again from the generator in `crates/rsim-collect/examples/demo_enterprise/`, and `cargo test -p rsim-collect --test demo` fails when `demo/` is not its output.
 
 ## License
 

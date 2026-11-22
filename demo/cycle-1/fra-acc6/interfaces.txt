@@ -1,0 +1,73 @@
+TenGigabitEthernet1/1/1 is up, line protocol is up (connected)
+  Hardware is Ten Gigabit Ethernet, address is 025e.0014.0001 (bia 025e.0014.0001)
+  Description: fra-core1
+  MTU 1500 bytes, BW 10000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+  Full-duplex, 10Gb/s, media type is SFP
+  5 minute input rate 112000 bits/sec, 41 packets/sec
+  5 minute output rate 98000 bits/sec, 37 packets/sec
+     18422011 packets input, 2210643120 bytes, 0 no buffer
+     17690455 packets output, 2005548221 bytes, 0 underruns
+TenGigabitEthernet1/1/2 is up, line protocol is up (connected)
+  Hardware is Ten Gigabit Ethernet, address is 025e.0014.0002 (bia 025e.0014.0002)
+  Description: fra-core2
+  MTU 1500 bytes, BW 10000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+  Full-duplex, 10Gb/s, media type is SFP
+  5 minute input rate 112000 bits/sec, 41 packets/sec
+  5 minute output rate 98000 bits/sec, 37 packets/sec
+     18422011 packets input, 2210643120 bytes, 0 no buffer
+     17690455 packets output, 2005548221 bytes, 0 underruns
+Vlan99 is up, line protocol is up
+  Hardware is Ethernet SVI, address is 025e.0014.0003 (bia 025e.0014.0003)
+  Description: MGMT
+  Internet address is 10.12.99.15/24
+  MTU 1500 bytes, BW 10000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+GigabitEthernet1/0/1 is up, line protocol is up (connected)
+  Hardware is Gigabit Ethernet, address is 025e.0014.0004 (bia 025e.0014.0004)
+  Description: user
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+  Full-duplex, 1Gb/s, media type is SFP
+  5 minute input rate 112000 bits/sec, 41 packets/sec
+  5 minute output rate 98000 bits/sec, 37 packets/sec
+     18422011 packets input, 2210643120 bytes, 0 no buffer
+     17690455 packets output, 2005548221 bytes, 0 underruns
+GigabitEthernet1/0/2 is up, line protocol is up (connected)
+  Hardware is Gigabit Ethernet, address is 025e.0014.0005 (bia 025e.0014.0005)
+  Description: user
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+  Full-duplex, 1Gb/s, media type is SFP
+  5 minute input rate 112000 bits/sec, 41 packets/sec
+  5 minute output rate 98000 bits/sec, 37 packets/sec
+     18422011 packets input, 2210643120 bytes, 0 no buffer
+     17690455 packets output, 2005548221 bytes, 0 underruns
+GigabitEthernet1/0/3 is up, line protocol is up (connected)
+  Hardware is Gigabit Ethernet, address is 025e.0014.0006 (bia 025e.0014.0006)
+  Description: user
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+  Full-duplex, 1Gb/s, media type is SFP
+  5 minute input rate 112000 bits/sec, 41 packets/sec
+  5 minute output rate 98000 bits/sec, 37 packets/sec
+     18422011 packets input, 2210643120 bytes, 0 no buffer
+     17690455 packets output, 2005548221 bytes, 0 underruns
+GigabitEthernet1/0/40 is up, line protocol is up (connected)
+  Hardware is Gigabit Ethernet, address is 025e.0014.0007 (bia 025e.0014.0007)
+  Description: printer
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+  Full-duplex, 1Gb/s, media type is SFP
+  5 minute input rate 112000 bits/sec, 41 packets/sec
+  5 minute output rate 98000 bits/sec, 37 packets/sec
+     18422011 packets input, 2210643120 bytes, 0 no buffer
+     17690455 packets output, 2005548221 bytes, 0 underruns

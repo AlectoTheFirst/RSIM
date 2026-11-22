@@ -1,0 +1,12 @@
+{
+  "TABLE_vlanbrief": {
+    "ROW_vlanbrief": [
+      {
+        "vlanshowbr-shutstate": "noshutdown",
+        "vlanshowbr-vlanid": "1",
+        "vlanshowbr-vlanname": "default",
+        "vlanshowbr-vlanstate": "active"
+      }
+    ]
+  }
+}

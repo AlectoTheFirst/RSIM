@@ -1,0 +1,6 @@
+NAME: "Chassis", DESCR: "Cisco Catalyst 9500 Series Chassis"
+PID: C9500-48Y4C       , VID: V02  , SN: DEMO010014
+
+NAME: "Power Supply Module 0", DESCR: "Cisco 650W AC Power Supply"
+PID: PWR-C1-650WAC     , VID: V01  , SN: DEMOPS010014
+
