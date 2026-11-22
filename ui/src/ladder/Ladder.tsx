@@ -59,7 +59,7 @@ export function OutcomeWord(props: { kind: string; headline?: boolean }) {
   const { kind } = props;
   const known = outcomeKnown(kind);
   const word = (
-    <span class={`${props.headline ? "t-headline" : "strong"}${known ? ` c-${kind}` : ""}`}>{verdictWord(kind)}</span>
+    <span class={`${props.headline ? "t-outcome" : "strong"}${known ? ` c-${kind}` : ""}`}>{verdictWord(kind)}</span>
   );
   return known ? word : <HatchMark>{word}</HatchMark>;
 }

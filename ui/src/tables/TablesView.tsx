@@ -434,7 +434,7 @@ export function TablesView(props: {
   else if (busy) facts = <span class="muted">running</span>;
   else if (problem) facts = <span>{problem}</span>;
   else {
-    const parts: JSX.Element[] = [<span class="t-headline">{def.name}</span>];
+    const parts: JSX.Element[] = [<span class="t-title">{def.name}</span>];
     if (st.verb === "describe") {
       parts.push(<span>{def.description}</span>);
       parts.push(
@@ -502,7 +502,7 @@ export function TablesView(props: {
             ))}
           </select>
         </label>
-        <span class="group" role="group" aria-label="Verb">
+        <span class="seg" role="group" aria-label="Verb">
           {verbs.map((v) => (
             <button type="button" aria-pressed={v === st.verb} onClick={() => go({ verb: v })}>
               {v}

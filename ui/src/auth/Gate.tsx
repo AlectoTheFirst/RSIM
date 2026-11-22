@@ -63,7 +63,7 @@ function Frame(props: { headline: string; problem: string | null; children?: Com
         <span class="t-wordmark">RSIM</span>
       </header>
       <ResultLine>
-        <span class="t-headline">{props.headline}</span>
+        <span class="t-title">{props.headline}</span>
         {props.problem ? <span>{props.problem}</span> : null}
       </ResultLine>
       <main class="body auth-page">{props.children}</main>

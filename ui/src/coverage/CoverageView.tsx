@@ -255,12 +255,12 @@ export function CoverageView(props: {
           <span class="muted">no twin</span>
         ) : out.total === 0 ? (
           <>
-            <span class="t-headline">No coverage report</span>
+            <span class="t-title">No coverage report</span>
             {needs ? <span class="muted">needs {needs}</span> : null}
           </>
         ) : (
           <>
-            <span class="t-headline">{out.total} devices</span>
+            <span class="t-title">{out.total} devices</span>
             <span>{pageWords(pages, out.rows.length, out.total)}</span>
             <span>
               <span class="t-value">{sums.handled}</span> lines handled{onPage}

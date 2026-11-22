@@ -114,7 +114,7 @@ export function TokensView(props: { user: Me }) {
     <>
       <ResultLine>
         <span>
-          <span class="t-headline">API tokens</span>
+          <span class="t-title">API tokens</span>
           {tokens ? <span class="muted"> {active} active</span> : null}
         </span>
         {problem ? <span>{problem}</span> : null}

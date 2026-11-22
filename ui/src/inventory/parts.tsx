@@ -61,6 +61,7 @@ export function DeleteButton(props: { name: string; onDelete: () => Promise<bool
   return (
     <button
       type="button"
+      class="danger"
       aria-pressed={armed}
       onClick={(e) => {
         e.stopPropagation();

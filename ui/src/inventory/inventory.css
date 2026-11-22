@@ -4,11 +4,6 @@
    Routes. Each colour, font and size is a custom
    property of the theme. */
 
-.inv-page .t-value,
-.inv-page input.t-value {
-  font-stretch: var(--value-stretch);
-}
-
 .inv {
   width: max-content;
   min-width: 100%;
@@ -39,8 +34,8 @@
 
 .inv-group {
   border-top: var(--hairline) solid var(--rule);
-  background: var(--raise);
-  font-weight: var(--headline-weight);
+  background: var(--ground);
+  font-weight: var(--section-weight);
 }
 
 .inv-group .muted {
@@ -57,19 +52,23 @@
 }
 
 .inv-device:hover,
-.inv-device.opened,
 .inv-detail {
   background: var(--raise);
 }
 
 .inv-device.opened,
+.inv-device.opened:hover {
+  background: var(--selected);
+}
+
+.inv-device.opened,
 .inv-open.opened {
-  box-shadow: inset var(--selected-bar) 0 0 var(--forward);
+  box-shadow: inset var(--selected-bar) 0 0 var(--action-ink);
 }
 
 .inv-device:focus-visible,
 .inv-open:focus-visible {
-  outline: var(--focus-ring) solid var(--forward);
+  outline: var(--focus-ring) solid var(--action-ink);
   outline-offset: calc(-1 * var(--focus-ring));
 }
 

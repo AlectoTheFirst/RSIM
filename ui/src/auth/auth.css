@@ -1,11 +1,6 @@
 /* The styles of the setup page, the sign-in page and the Tokens view. Each
    colour, font and size is a custom property of the theme. */
 
-.auth-page .t-value,
-.auth-page input.t-value {
-  font-stretch: var(--value-stretch);
-}
-
 .auth-form {
   display: grid;
   grid-template-columns: var(--fact-label) var(--auth-input);

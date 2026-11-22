@@ -151,7 +151,7 @@ export function InventoryView(props: { twin: string }) {
   if (absent) {
     return (
       <ResultLine>
-        <span class="t-headline">Inventory</span>
+        <span class="t-title">Inventory</span>
         <HatchMark>no inventory database</HatchMark>
       </ResultLine>
     );
@@ -159,7 +159,7 @@ export function InventoryView(props: { twin: string }) {
   if (!inv) {
     return (
       <ResultLine>
-        <span class="t-headline">Inventory</span>
+        <span class="t-title">Inventory</span>
         {problem ? <span title={problem.detail}>{problem.title}</span> : null}
       </ResultLine>
     );
@@ -173,7 +173,7 @@ export function InventoryView(props: { twin: string }) {
     <>
       <ResultLine>
         <span>
-          <span class="t-headline">Inventory</span> {deviceCount(n.devices)} in {n.groups} {n.groups === 1 ? "group" : "groups"}
+          <span class="t-title">Inventory</span> {deviceCount(n.devices)} in {n.groups} {n.groups === 1 ? "group" : "groups"}
         </span>
         {n.noCollector ? <HatchMark>{devicesHave(n.noCollector)} no collector</HatchMark> : null}
         {n.noSite ? <HatchMark>{devicesHave(n.noSite)} no site</HatchMark> : null}
@@ -183,11 +183,13 @@ export function InventoryView(props: { twin: string }) {
         {inv.devices.length ? (
           <span class="group" role="group" aria-label="Arrange by">
             <span class="muted">Arrange by</span>
-            {ARRANGEMENTS.map((a) => (
-              <button type="button" aria-pressed={a === by} onClick={() => setBy(a)}>
-                {a}
-              </button>
-            ))}
+            <span class="seg">
+              {ARRANGEMENTS.map((a) => (
+                <button type="button" aria-pressed={a === by} onClick={() => setBy(a)}>
+                  {a}
+                </button>
+              ))}
+            </span>
           </span>
         ) : null}
       </ResultLine>

@@ -62,6 +62,7 @@ fn media_type(path: &str) -> &'static str {
         Some("js") => "text/javascript; charset=utf-8",
         Some("css") => "text/css; charset=utf-8",
         Some("ttf") => "font/ttf",
+        Some("woff2") => "font/woff2",
         Some("txt") => "text/plain; charset=utf-8",
         _ => "",
     }

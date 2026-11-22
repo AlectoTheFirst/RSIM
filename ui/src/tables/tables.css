@@ -15,20 +15,8 @@
   flex-direction: column;
 }
 
-/* Sans text at the width 88% and mono text at the width 75%. */
-.grid-page,
-.grid-page .t-body,
-.grid-page .t-label,
-.grid-page .t-headline,
-.grid-page button {
-  font-stretch: 88%;
-}
-
-.grid-page .t-value,
-.grid-page .t-query,
-.grid-page .t-index,
-.grid-page .grid {
-  font-stretch: 75%;
+.grid-page {
+  background: var(--surface);
 }
 
 .grid-page > .bar,
@@ -76,9 +64,13 @@
 }
 
 .grid-row.step:hover,
-.grid-row.selected,
 .grid-detail {
   background: var(--raise);
+}
+
+.grid-row.selected,
+.grid-row.selected:hover {
+  background: var(--selected);
 }
 
 .grid-row.selected::before {
@@ -88,14 +80,14 @@
   top: 0;
   bottom: 0;
   width: var(--selected-bar);
-  background: var(--forward);
+  background: var(--action-ink);
 }
 
 .grid-head {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--ground);
+  background: var(--raise);
   border-bottom: var(--hairline) solid var(--rule);
   align-items: end;
   /* The head has the label line at each row height, so the filter row
@@ -112,19 +104,20 @@
   height: var(--label-line);
   padding: 0;
   border: 0;
+  background: transparent;
   color: inherit;
   font: inherit;
 }
 
 .grid-head button.head .t-index {
-  color: var(--forward);
+  color: var(--action-ink);
 }
 
 .grid-filters {
   position: sticky;
   top: calc(var(--label-line) + var(--hairline));
   z-index: 1;
-  background: var(--ground);
+  background: var(--raise);
   border-bottom: var(--hairline) solid var(--rule);
 }
 
@@ -165,7 +158,6 @@
   padding-left: var(--margin);
   font-family: var(--body-family);
   font-size: var(--body-size);
-  font-stretch: 88%;
 }
 
 .cell.num.unhandled {

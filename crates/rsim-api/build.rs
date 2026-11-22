@@ -9,10 +9,10 @@ const APP: &[&str] = &["index.html", "assets/app.js", "assets/app.css"];
 
 /// The font files and their licenses, from `ui/public/fonts`.
 const FONTS: &[&str] = &[
-    "fonts/InstrumentSans-VariableFont.ttf",
-    "fonts/MartianMono-VariableFont.ttf",
-    "fonts/OFL-InstrumentSans.txt",
-    "fonts/OFL-MartianMono.txt",
+    "fonts/Inter-Variable.woff2",
+    "fonts/JetBrainsMono-Variable.ttf",
+    "fonts/OFL-Inter.txt",
+    "fonts/OFL-JetBrainsMono.txt",
 ];
 
 fn main() {

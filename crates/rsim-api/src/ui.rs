@@ -49,10 +49,10 @@ const APP: &[File] = &[File {
 
 #[cfg(rsim_ui_fonts)]
 const FONTS: &[File] = &[
-    dist!("fonts/InstrumentSans-VariableFont.ttf", "font/ttf"),
-    dist!("fonts/MartianMono-VariableFont.ttf", "font/ttf"),
-    dist!("fonts/OFL-InstrumentSans.txt", "text/plain; charset=utf-8"),
-    dist!("fonts/OFL-MartianMono.txt", "text/plain; charset=utf-8"),
+    dist!("fonts/Inter-Variable.woff2", "font/woff2"),
+    dist!("fonts/JetBrainsMono-Variable.ttf", "font/ttf"),
+    dist!("fonts/OFL-Inter.txt", "text/plain; charset=utf-8"),
+    dist!("fonts/OFL-JetBrainsMono.txt", "text/plain; charset=utf-8"),
 ];
 
 #[cfg(not(rsim_ui_fonts))]

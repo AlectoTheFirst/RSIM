@@ -83,7 +83,7 @@ function PathFacts(props: { a: Answer; notes: readonly string[]; onStep: (d: Dec
         {one ? (
           <VerdictText v={one} headline at={b0 && !multi ? decidingStep(b0) : null} onStep={props.onStep} tunnel={b0 && !multi ? tunnelOf(b0) : null} />
         ) : (
-          <span class="t-headline">{s[0]?.result.kind ?? "no answer"}</span>
+          <span class="t-outcome">{s[0]?.result.kind ?? "no answer"}</span>
         )}
       </span>
       {multi
@@ -136,7 +136,7 @@ function SetFacts(props: { a: Answer }) {
           <span class="muted">depends on path {n}</span>
         ) : (
           <span>
-            <OutcomeWord kind={k} headline /> <span class="t-headline">{n}</span>
+            <OutcomeWord kind={k} headline /> <span class="t-outcome">{n}</span>
           </span>
         ),
       )}

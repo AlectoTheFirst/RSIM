@@ -6,7 +6,7 @@ import type { TwinRef } from "../api/client";
 import type { Me, Twin } from "../api/types";
 import { howText, initials } from "../auth/model";
 import type { Level } from "../ladder/layout";
-import { type ColourPref, type Prefs, ROW_HEIGHTS, type RowHeight, type ThemePref } from "../theme";
+import { type ColourPref, type Prefs, ROW_HEIGHTS, type RowHeight, THEMES, type ThemePref } from "../theme";
 import {
   BASE_FIELDS,
   FIELD_CHARS,
@@ -42,7 +42,7 @@ function Choice<T extends string | number>(props: {
   onChange: (v: T) => void;
 }) {
   return (
-    <span class="group">
+    <span class="seg">
       {props.options.map((o) => (
         <button type="button" aria-pressed={o === props.value} onClick={() => props.onChange(o)}>
           {props.label ? props.label(o) : String(o)}
@@ -91,7 +91,7 @@ function AccountMenu(props: { prefs: Prefs; onPrefs: (p: Prefs) => void; user: M
           <hr />
           <div class="settings">
             <span class="t-label">Theme</span>
-            <Choice<ThemePref> value={p.theme} options={["dark", "light", "system"]} onChange={(theme) => props.onPrefs({ ...p, theme })} />
+            <Choice<ThemePref> value={p.theme} options={THEMES} onChange={(theme) => props.onPrefs({ ...p, theme })} />
             <span class="t-label" title="colours of Deliver and Drop">Colours</span>
             <Choice<ColourPref>
               value={p.colours}
@@ -345,6 +345,7 @@ function AddField(props: {
     <span class="qadd" ref={ref}>
       <button
         type="button"
+        class="ghost"
         data-edit=""
         // A press keeps the focus in the field that has it, so that the query bar stays open.
         onMouseDown={(e) => {
@@ -481,11 +482,13 @@ export function LevelControl(props: { level: Level; onLevel: (l: Level) => void 
   return (
     <span class="group" role="group" aria-label="Level">
       <span class="muted">Level</span>
-      {LEVELS.map((l) => (
-        <button type="button" aria-pressed={l === props.level} aria-keyshortcuts={l === "device" ? "[" : "]"} onClick={() => props.onLevel(l)}>
-          {l}
-        </button>
-      ))}
+      <span class="seg">
+        {LEVELS.map((l) => (
+          <button type="button" aria-pressed={l === props.level} aria-keyshortcuts={l === "device" ? "[" : "]"} onClick={() => props.onLevel(l)}>
+            {l}
+          </button>
+        ))}
+      </span>
     </span>
   );
 }
