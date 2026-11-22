@@ -1,198 +1,305 @@
-/* The styles of the Tables and Coverage pages: a dense table with virtual
-   rows in a box that fills the window below the bars. Each colour, font
-   and size is a custom property of the theme. */
-
-#app:has(.grid-page) {
-  display: flex;
-  flex-direction: column;
-  height: 100dvh;
-}
-
-.grid-page {
-  flex: 1 1 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.grid-page {
-  background: var(--surface);
-}
-
-.grid-page > .bar,
-.grid-page > .keyline {
-  flex: none;
-}
-
-.body.grid-body {
-  flex: 1 1 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding-bottom: 0;
-}
-
-.grid-box {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-}
-
-.grid {
-  width: max-content;
-  min-width: 100%;
-}
-
-.grid-row {
-  display: grid;
-  grid-template-columns: var(--grid-columns);
-  min-height: var(--row);
-  align-items: stretch;
-  position: relative;
-}
-
-.grid-row > * {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: var(--row);
-}
-
-.grid-row.step {
-  cursor: pointer;
-}
-
-.grid-row.step:hover,
-.grid-detail {
-  background: var(--raise);
-}
-
-.grid-row.selected,
-.grid-row.selected:hover {
-  background: var(--selected);
-}
-
-.grid-row.selected::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: var(--selected-bar);
-  background: var(--action-ink);
-}
-
-.grid-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--raise);
-  border-bottom: var(--hairline) solid var(--rule);
-  align-items: end;
-  /* The head has the label line at each row height, so the filter row
-     sticks right below it. */
-  min-height: var(--label-line);
-  height: calc(var(--label-line) + var(--hairline));
-}
-
-.grid-head > * {
-  line-height: var(--label-line);
-}
-
-.grid-head button.head {
-  height: var(--label-line);
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-}
-
-.grid-head button.head .t-index {
-  color: var(--action-ink);
-}
-
-.grid-filters {
-  position: sticky;
-  top: calc(var(--label-line) + var(--hairline));
-  z-index: 1;
-  background: var(--raise);
-  border-bottom: var(--hairline) solid var(--rule);
-}
-
-.grid-filters > .cell {
-  padding: var(--hairline) var(--button-gap) var(--hairline) 0;
-  line-height: var(--input);
-}
-
-.grid-filters input {
-  width: 100%;
-  padding: 0 var(--button-gap);
-}
-
-.grid-detail {
-  border-bottom: var(--hairline) solid var(--rule);
-}
-
-.grid-row .cell.hatched {
-  gap: var(--button-gap);
-}
-
-.grid-row .cell.hatched svg {
-  flex: none;
-}
-
-.grid-row .cell.hatched .not-known {
-  color: var(--ink-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* The opened row has the width of the window, so its text does not widen
-   the table. */
-.grid-detail .detail {
-  position: sticky;
-  left: 0;
-  width: calc(100vw - 3 * var(--margin));
-  padding-left: var(--margin);
-  font-family: var(--body-family);
-  font-size: var(--body-size);
-}
-
-.cell.num.unhandled {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--button-gap);
-}
-
-.unhandled {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--button-gap);
-}
+/* The styles of the Tables page. Each colour, font and size is a custom
+   property of the theme. */
 
 .group.wrap {
   flex-wrap: wrap;
 }
 
-.paths {
-  border-collapse: collapse;
+/* The Tables page: the table list, the table card and the row panel. */
+
+.tables-layout {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--tables-list) minmax(0, 1fr);
+  gap: var(--card-gap);
 }
 
-.paths th {
-  font-weight: inherit;
+.tables-layout > .with-panel {
+  min-height: 0;
+}
+
+.table-list {
+  align-self: start;
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.table-list > .card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mark-gap);
+  padding: var(--group-gap);
+  overflow: hidden;
+}
+
+.table-search {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--group-gap);
+  height: var(--input-panel);
+  padding: 0 var(--input-pad);
+  background: var(--ground);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--input-radius);
+  color: var(--ink-muted);
+}
+
+.table-search:focus-within {
+  outline: var(--focus-ring) solid var(--action-ink);
+  outline-offset: var(--focus-offset);
+}
+
+.table-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.table-search input:focus-visible {
+  outline: none;
+}
+
+.table-names {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--hairline);
+}
+
+button.table-name {
+  flex: none;
+  height: auto;
+  min-height: var(--button);
+  border-color: transparent;
+  background: transparent;
   text-align: left;
-  padding-right: var(--button-pad);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  font-weight: var(--weight-regular);
+  padding: 0 var(--input-pad);
 }
 
-.paths td {
-  padding-right: var(--button-pad);
-  line-height: var(--row);
+button.table-name:focus-visible {
+  outline-offset: calc(-1 * var(--focus-ring));
+}
+
+button.table-name[aria-current="page"] {
+  border-color: transparent;
+  background: var(--selected);
+  color: var(--action-ink);
+  font-weight: var(--weight-strong);
+}
+
+.table-card .grow {
+  flex-grow: 1;
+}
+
+.table-tabs {
+  flex: none;
+  padding: 0 var(--button-pad);
+}
+
+.table-tabs .tabs {
+  flex-wrap: wrap;
+}
+
+.table-params,
+.table-tools {
+  flex: none;
+  column-gap: var(--group-gap);
+  row-gap: var(--group-gap);
+}
+
+.table-tools button.ghost .with-icon > .icon {
+  color: inherit;
+}
+
+.chip-value {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.filter-edit {
+  flex-wrap: wrap;
+}
+
+.filter-edit input {
+  width: var(--tables-filter-input);
+  max-width: 100%;
+}
+
+.table-facts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--fact-gap);
+  row-gap: var(--button-gap);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.table-rows {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tgrid-box {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.tgrid {
+  width: max-content;
+  min-width: 100%;
+}
+
+.thead,
+.trow {
+  display: grid;
+  grid-template-columns: var(--tgrid-columns);
+}
+
+.thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: var(--tables-head);
+  align-items: center;
+  background: var(--raise);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.thead-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--button-gap);
+  min-width: 0;
+  padding: 0 var(--cell-pad);
   white-space: nowrap;
+  font-weight: var(--weight-control);
 }
 
-.paths .num {
+.thead-cell.num {
+  justify-content: flex-end;
+}
+
+.thead-cell button.head {
+  height: var(--chip-button);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--button-gap);
+}
+
+.thead-cell .sort-word {
+  color: var(--action-ink);
+}
+
+.tgrid-rows:focus-visible {
+  outline: var(--focus-ring) solid var(--action-ink);
+  outline-offset: calc(-1 * var(--focus-ring));
+}
+
+.trow {
+  min-height: var(--row);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.tcell {
+  position: relative;
+  min-width: 0;
+  padding: calc((var(--row) - var(--value-line) - var(--hairline)) / 2) var(--cell-pad);
+  line-height: var(--value-line);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.tcell.num {
   text-align: right;
+}
+
+.tcell.same::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--cell-pad) + var(--button-gap));
+  top: 0;
+  bottom: 0;
+  width: var(--hairline);
+  background: var(--rule);
+}
+
+.tcell.num.same::before {
+  left: auto;
+  right: calc(var(--cell-pad) + var(--button-gap));
+}
+
+/* The row panel */
+
+.row-facts {
+  align-items: start;
+}
+
+.row-unknown {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--group-gap);
+}
+
+.row-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--button-gap);
+}
+
+.row-section > h3 {
+  margin: 0;
+}
+
+button.span-button {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--action-ink);
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-weight: var(--weight-regular);
+}
+
+button.span-button[aria-pressed="true"] {
+  background: transparent;
+  color: var(--ink);
+  font-weight: var(--weight-strong);
+}
+
+.span-text {
+  overflow-wrap: anywhere;
+}
+
+.row-panel .panel-foot button {
+  height: auto;
+  min-height: var(--button);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
 }

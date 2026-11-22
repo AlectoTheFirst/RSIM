@@ -1,5 +1,5 @@
-// The layout of the coverage report: its columns, the row of a device, the
-// sums of a page and the URL state. No drawing code.
+// The layout of the coverage report: its columns and their widths, the row
+// of a device, the current row and the URL state. No drawing code.
 import type { TableOut } from "../api/types";
 import { DEFAULT_LIMIT, type Pages } from "../tables/model";
 
@@ -16,8 +16,16 @@ export interface CoverageRow {
 
 type Key = Exclude<keyof CoverageRow, "device"> | "device";
 
+export interface CoverageColumn {
+  name: string;
+  key: Key;
+  right: boolean;
+  hatch: boolean;
+  title: string;
+}
+
 /** The columns of the view, with the key of the row that each prints. */
-export const COVERAGE_COLUMNS: { name: string; key: Key; right: boolean; hatch: boolean; title: string }[] = [
+export const COVERAGE_COLUMNS: CoverageColumn[] = [
   { name: "device", key: "device", right: false, hatch: false, title: "" },
   { name: "lines", key: "lines", right: true, hatch: false, title: "Config lines" },
   { name: "handled", key: "handled", right: true, hatch: false, title: "Handled lines" },
@@ -53,16 +61,26 @@ export function shareText(r: CoverageRow): string {
   return `${((100 * r.unhandled) / r.lines).toFixed(1)}%`;
 }
 
-/** The sums of a page, and the number of its devices with unhandled lines. */
-export function coverageSums(rows: readonly CoverageRow[]): { handled: number; irrelevant: number; unhandled: number; devices: number } {
-  const out = { handled: 0, irrelevant: 0, unhandled: 0, devices: 0 };
-  for (const r of rows) {
-    out.handled += r.handled;
-    out.irrelevant += r.irrelevant;
-    out.unhandled += r.unhandled;
-    if (r.unhandled) out.devices += 1;
-  }
-  return out;
+/** The text of the cell of a row in a column. */
+export function cellText(r: CoverageRow, c: CoverageColumn): string {
+  return c.name === "unhandled share" ? shareText(r) : String(r[c.key]);
+}
+
+/** The width of each column in characters: the longest of its name and of its cells on the page. */
+export function columnChars(rows: readonly CoverageRow[]): number[] {
+  return COVERAGE_COLUMNS.map((c) => rows.reduce((w, r) => Math.max(w, cellText(r, c).length), c.name.length));
+}
+
+/** The parts of a path between which a line can break: each part ends with its `/`. */
+export function pathParts(path: string): string[] {
+  return path.match(/[^/]*\/|[^/]+$/g) ?? [path];
+}
+
+/** The row after a key `j` or `k` from the current row, or null for another key or no rows. */
+export function stepRow(key: string, current: number | null, count: number): number | null {
+  if (!count || (key !== "j" && key !== "k")) return null;
+  if (current === null) return 0;
+  return key === "j" ? Math.min(count - 1, current + 1) : Math.max(0, current - 1);
 }
 
 export interface CoverageState {

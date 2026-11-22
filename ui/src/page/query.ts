@@ -49,6 +49,27 @@ function commandArgs(mode: Mode, f: Fields): string[] {
   });
 }
 
+/** The pairs of fields that "Swap source and destination" exchanges. */
+const SWAPS: [QueryField, QueryField][] = [
+  ["source.ip", "destination.ip"],
+  ["source.port", "destination.port"],
+  ["source.mac", "destination.mac"],
+];
+
+/** The fields after a swap of each source field with its destination field. */
+export function swapped(f: Fields): Fields {
+  const out: Fields = { ...f };
+  for (const [a, b] of SWAPS) {
+    const va = f[a];
+    const vb = f[b];
+    if (vb === undefined) delete out[a];
+    else out[a] = vb;
+    if (va === undefined) delete out[b];
+    else out[b] = va;
+  }
+  return out;
+}
+
 /** The body of `POST /v1/twins/{twin}/queries`, of the query type that the values give. */
 export function requestBody(f: Fields): Record<string, unknown> {
   const mode = queryMode(f);

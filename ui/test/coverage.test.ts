@@ -5,11 +5,15 @@ import {
   type PathsState,
   coverageKey,
   coverageRow,
-  coverageSums,
+  cellText,
+  columnChars,
+  COVERAGE_COLUMNS,
   openedDevice,
+  pathParts,
   pathsStep,
   readCoverage,
   shareText,
+  stepRow,
   writeCoverage,
 } from "../src/coverage/model";
 import { newerRun, pinnedRun, reloadMark, twinOption, twinState, twinStateText, viewOf, viewSearch, withTwin } from "../src/page/url";
@@ -28,10 +32,32 @@ describe("coverage report", () => {
     expect(coverageRow(["unhandled", "device"], [7, "x"]).unhandled).toBe(7);
   });
 
-  it("gives the unhandled share and the sums of a page", () => {
+  it("gives the unhandled share", () => {
     expect(shareText(rows[0]!)).toBe("5.0%");
     expect(shareText(coverageRow(COLUMNS, ["e", 0, 0, 0, 0, 0]))).toBe("0.0%");
-    expect(coverageSums(rows)).toEqual({ handled: 120, irrelevant: 15, unhandled: 5, devices: 1 });
+  });
+
+  it("gives the text of each cell and the width of each column in characters", () => {
+    expect(COVERAGE_COLUMNS.map((c) => cellText(rows[0]!, c))).toEqual(["r1", "100", "80", "15", "5", "5.0%", "2", "3"]);
+    const long = coverageRow(COLUMNS, ["distribution-switch-0042", 1234567, 0, 0, 0, 0]);
+    expect(columnChars([...rows, long])).toEqual([24, 7, 7, 16, 9, 15, 15, 17]);
+    expect(columnChars([])).toEqual(COVERAGE_COLUMNS.map((c) => c.name.length));
+  });
+
+  it("breaks a path after each slash", () => {
+    expect(pathParts("networks/*/is_nat")).toEqual(["networks/", "*/", "is_nat"]);
+    expect(pathParts("interface */ip address ..")).toEqual(["interface */", "ip address .."]);
+    expect(pathParts("system/")).toEqual(["system/"]);
+  });
+
+  it("moves the current row with j and k inside the page", () => {
+    expect(stepRow("j", null, 3)).toBe(0);
+    expect(stepRow("j", 1, 3)).toBe(2);
+    expect(stepRow("j", 2, 3)).toBe(2);
+    expect(stepRow("k", 0, 3)).toBe(0);
+    expect(stepRow("k", 2, 3)).toBe(1);
+    expect(stepRow("j", null, 0)).toBeNull();
+    expect(stepRow("x", 1, 3)).toBeNull();
   });
 
   it("keeps the page and the opened device in the URL", () => {
@@ -88,7 +114,7 @@ describe("reload of the store", () => {
 });
 
 describe("views in the URL", () => {
-  it("takes a URL with no view as Trace, so a query link stays as it is", () => {
+  it("takes a URL with no view as Trace", () => {
     expect(viewOf("?twin=builtin.leaf-spine&q=abc")).toBe("Trace");
     expect(viewOf("?view=tables")).toBe("Tables");
     expect(viewOf("?view=admin")).toBe("Trace");

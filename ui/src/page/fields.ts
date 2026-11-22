@@ -78,7 +78,7 @@ export function maxOf(k: QueryField): number | null {
 
 /**
  * The width of the value of each field in characters: room for a normal
- * value, so that a value that is typed does not move the fields after it.
+ * value.
  */
 export const FIELD_CHARS: Partial<Record<QueryField, number>> = {
   "source.ip": 15,

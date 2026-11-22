@@ -4,14 +4,17 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Answer, Branch, PathAnswer } from "../src/api/types";
-import { autoStep, decidingStep, ingressHint, ladder, rowKeyOfStep, type SectionRow } from "../src/ladder/layout";
+import { autoStep, decidingStep, ingressHint, ladder, rowKeyOfStep } from "../src/ladder/layout";
+import { replyState } from "../src/ladder/paths";
 import { keyForElement, keyPlace } from "../src/tables/model";
 import {
   type EndpointRow,
   PICKER_CLOSED,
   endpointAddresses,
   endpointRows,
+  hasMore,
   matchEndpoints,
+  pickerLimit,
   pickerKey,
   pickerQuery,
   placesByHost,
@@ -68,9 +71,9 @@ describe("deciding step", () => {
     const d = autoStep(a)!;
     expect(d.step.outcome.kind).toBe("unknown");
     for (const level of ["function", "device"] as const) {
-      const key = rowKeyOfStep(ladder(a, level).rows, d.path, d.step.index);
-      const row = ladder(a, level).rows.find((r) => r.type === "step" && r.key === key);
-      expect(row && row.type === "step" && row.steps.some((s) => s.index === d.step.index)).toBe(true);
+      const key = rowKeyOfStep(ladder(a, level, d.path).rows, d.path, d.step.index);
+      const row = ladder(a, level, d.path).rows.find((r) => r.key === key);
+      expect(row && row.steps.some((s) => s.index === d.step.index)).toBe(true);
     }
     expect(autoStep(golden("routing-loop").answer)?.reason).toBe("loop at r2/vrf");
   });
@@ -87,31 +90,26 @@ describe("deciding step", () => {
   });
 });
 
-describe("no reply", () => {
-  const sections = (a: Answer, reply = true) =>
-    ladder(a, "function", reply).rows.filter((r): r is SectionRow => r.type === "section");
-
-  it("says why in one muted line in the place of the reply", () => {
-    const s = sections(golden("routing-loop").answer);
-    expect(s).toEqual([
-      expect.objectContaining({ dir: "reply", text: "no reply", muted: true, verdict: null, note: null }),
-    ]);
+describe("reply of a forward path", () => {
+  it("is no reply for a path that does not deliver and has no reply", () => {
+    expect(replyState(golden("routing-loop").answer, 0, true)).toEqual({ kind: "no_reply" });
   });
 
-  it("names the branch of an answer with more than one branch, before the reply of a later branch", () => {
-    const s = sections(golden("leaf-spine-no-route").answer).map((r) => r.text);
-    expect(s).toEqual([
-      "branch 0",
-      "branch 1",
-      "no reply of branch 0",
-      "reply of branch 1, branch 0",
-      "reply of branch 1, branch 1",
-    ]);
+  it("is the paths of the reply of that forward path", () => {
+    const a = golden("leaf-spine-no-route").answer;
+    expect(replyState(a, 0, true)).toEqual({ kind: "no_reply" });
+    const r = replyState(a, 1, true);
+    expect(r.kind === "paths" && r.paths.map((p) => p.number)).toEqual(["2.1", "2.2"]);
   });
 
-  it("has no line for a path that delivers or a query with no reply", () => {
-    expect(sections(golden("mini-enterprise").answer).some((r) => r.muted)).toBe(false);
-    expect(sections(golden("routing-loop").answer, false)).toEqual([]);
+  it("is nothing for a query with no reply", () => {
+    expect(replyState(golden("routing-loop").answer, 0, false)).toEqual({ kind: "none" });
+  });
+
+  it("gives the reason of a reply that did not run", () => {
+    const a = golden("mini-enterprise").answer;
+    const x = { ...a, replies: [{ forward_branch: 0, ran: false, not_run_reason: "the forward path does not deliver", answer: null }] };
+    expect(replyState(x, 0, true)).toEqual({ kind: "not_run", reason: "the forward path does not deliver" });
   });
 });
 
@@ -148,11 +146,15 @@ describe("endpoint picker", () => {
     expect(pickerQuery(" web ")).toBe("web");
   });
 
-  it("shows at most 10 endpoints", () => {
-    const many = Array.from({ length: 25 }, (_, i) => ({ name: `h${String(i).padStart(2, "0")}`, addresses: [`192.0.2.${i}`], places: [] }));
+  it("shows one page of 50 endpoints, and one more page for each page that the list reads", () => {
+    const many = Array.from({ length: 120 }, (_, i) => ({ name: `h${String(i).padStart(3, "0")}`, addresses: [`192.0.2.${i}`], places: [] }));
     const got = matchEndpoints(many, "h");
-    expect(got.length).toBe(10);
-    expect(got[0]!.name).toBe("h00");
+    expect(got.length).toBe(50);
+    expect(got[0]!.name).toBe("h000");
+    expect(matchEndpoints(many, "h", pickerLimit(2)).length).toBe(100);
+    expect(hasMore({ rows: new Array(50).fill([]) }, 50)).toBe(true);
+    expect(hasMore({ rows: new Array(49).fill([]), next_cursor: null }, 50)).toBe(false);
+    expect(hasMore({ rows: [], next_cursor: "c" }, 50)).toBe(true);
   });
 
   it("reads the rows of the tables endpoints and attachments, each endpoint once", () => {

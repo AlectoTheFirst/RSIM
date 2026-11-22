@@ -1,0 +1,293 @@
+/* The Topology view: the controls, the map and the panel of a card. */
+
+.map-controls {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--group-gap) var(--card-pad);
+}
+
+.map-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--group-gap);
+}
+
+.map-device-box {
+  position: relative;
+  display: inline-flex;
+}
+
+.map-device input {
+  width: var(--map-device-field);
+  height: var(--button);
+}
+
+.map-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mark-gap);
+  cursor: pointer;
+}
+
+.map-check input[type="checkbox"] {
+  height: auto;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--action);
+}
+
+.map-check input[type="checkbox"]:focus-visible {
+  outline: var(--focus-ring) solid var(--action-ink);
+  outline-offset: var(--focus-offset);
+}
+
+/* The map card */
+
+.map {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border-radius: var(--card-radius);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.map:focus-visible {
+  outline: var(--focus-ring) solid var(--action-ink);
+  outline-offset: calc(-1 * var(--focus-ring));
+}
+
+.map-svg {
+  display: block;
+}
+
+.map-state {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--group-gap);
+  padding: var(--card-pad);
+}
+
+.map-zoom {
+  position: absolute;
+  right: var(--card-pad);
+  bottom: var(--card-pad);
+  display: inline-flex;
+  background: var(--surface);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-panel);
+  cursor: default;
+}
+
+.map-zoom > button.icon {
+  color: var(--ink);
+}
+
+.map-zoom > button + button {
+  border-left: var(--hairline) solid var(--rule);
+  border-radius: 0;
+}
+
+/* Lines */
+
+.map-line {
+  fill: none;
+  stroke: var(--control);
+  stroke-width: var(--map-line);
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.map-line.dashed {
+  stroke-dasharray: var(--map-dash) var(--map-dash);
+}
+
+.map-line.path {
+  stroke: var(--forward);
+  stroke-width: var(--path-line);
+}
+
+.map-line.active {
+  stroke: var(--action-ink);
+}
+
+/* Cards */
+
+.map-card {
+  cursor: pointer;
+  outline: none;
+}
+
+.map-box {
+  fill: var(--surface);
+  stroke: var(--control);
+  stroke-width: var(--hairline);
+  vector-effect: non-scaling-stroke;
+}
+
+.map-card.hover .map-box {
+  fill: var(--raise);
+}
+
+.map-card.outside .map-box {
+  stroke: var(--ink-muted);
+  stroke-dasharray: var(--dash) var(--dash);
+}
+
+.map-card.path .map-box {
+  stroke: var(--forward);
+  stroke-width: var(--map-line);
+}
+
+.map-card.end-deliver .map-box {
+  fill: var(--deliver-tint);
+  stroke: var(--deliver);
+  stroke-width: var(--map-line);
+}
+
+.map-card.end-drop .map-box {
+  fill: var(--drop-tint);
+  stroke: var(--drop);
+  stroke-width: var(--map-line);
+}
+
+.map-card.end-exit .map-box {
+  stroke: var(--ink);
+  stroke-width: var(--map-line);
+}
+
+.map-card.end-unknown .map-box {
+  stroke: var(--ink-muted);
+  stroke-width: var(--map-line);
+  stroke-dasharray: var(--dash) var(--dash);
+}
+
+.map-ring,
+.map-focus {
+  fill: none;
+  stroke: var(--action-ink);
+  stroke-width: var(--focus-ring);
+  vector-effect: non-scaling-stroke;
+}
+
+.map-hatch line,
+.map-unknown line {
+  stroke: var(--ink-muted);
+  stroke-width: var(--hatch-line);
+  vector-effect: non-scaling-stroke;
+}
+
+.map-unknown rect {
+  fill: var(--surface);
+}
+
+.map-name {
+  font-family: var(--value-family);
+  font-size: var(--value-size);
+  font-weight: var(--weight-strong);
+  fill: var(--ink);
+  dominant-baseline: central;
+}
+
+.map-sub {
+  font-family: var(--index-family);
+  font-size: var(--index-size);
+  fill: var(--ink-muted);
+  dominant-baseline: central;
+}
+
+/* Port tags, the number of links and the speed */
+
+.map-tag rect,
+.map-count rect {
+  fill: var(--surface);
+  stroke: var(--control);
+  stroke-width: var(--hairline);
+  vector-effect: non-scaling-stroke;
+}
+
+.map-count rect {
+  fill: var(--raise);
+}
+
+.map-tag text,
+.map-count text,
+.map-speed {
+  font-family: var(--index-family);
+  font-size: var(--index-size);
+  fill: var(--ink);
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.map-count text {
+  font-weight: var(--weight-strong);
+}
+
+.map-speed {
+  fill: var(--ink-muted);
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: var(--map-halo);
+  stroke-linejoin: round;
+}
+
+/* The panel of a card */
+
+.map-facts {
+  display: grid;
+  grid-template-columns: var(--map-fact-label) minmax(0, 1fr);
+  gap: var(--button-gap) var(--cell-pad);
+  align-items: center;
+}
+
+.map-facts > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.map-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mark-gap);
+}
+
+.map-section > h3 {
+  margin: 0;
+}
+
+.map-list {
+  max-height: var(--map-panel-list);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--input-radius);
+}
+
+.map-row {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 5fr) minmax(0, 4fr);
+  gap: var(--cell-pad);
+  align-items: center;
+  min-height: var(--button);
+  padding: var(--button-gap) var(--cell-pad);
+}
+
+.map-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.map-row.head {
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.map-row.head > .t-label {
+  font-weight: var(--weight-control);
+}

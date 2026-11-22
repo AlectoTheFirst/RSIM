@@ -1,4 +1,4 @@
-// The Credentials section of the Inventory view: the credentials of the env
+// The part Credentials of the Inventory view: the credentials of the env
 // file and the managed credentials, whose secret goes to the server once and
 // comes back never. An empty secret field keeps the stored secret.
 import { useEffect, useState } from "preact/hooks";
@@ -16,7 +16,9 @@ import {
   secretFrom,
   usedByRoutes,
 } from "./model";
-import { DeleteButton, HatchCell, type Refuse, type Write, type WriteNew, addKeys } from "./parts";
+import { Card, Empty } from "../page/Card";
+import { HatchMark } from "../page/Hatch";
+import { DeleteButton, Names, type Refuse, type Write, type WriteNew, addKeys } from "./parts";
 
 const SOURCES: readonly [Credential["source"], string][] = [
   ["managed", "managed"],
@@ -126,7 +128,7 @@ function CredentialRow(props: { inv: Inventory; c: Credential; keyPresent: boole
       ) : (
         <>
           <SourceCell c={c} />
-          {groups.length ? <span class="t-value">{groups.join(", ")}</span> : usedByRoutes(inv, c.name) ? <span class="muted">routes only</span> : <span />}
+          {groups.length ? <Names names={groups} /> : usedByRoutes(inv, c.name) ? <span class="muted">routes only</span> : <span />}
         </>
       )}
       <span class="group">
@@ -176,39 +178,40 @@ export function Credentials(props: { inv: Inventory; adding: boolean; onAdding: 
   };
   const keys = addKeys(add, props.onClose);
   return (
-    <div>
-      <div class="inv-sec">
-        Credentials {key && !keyPresent ? <HatchCell title="rsim-api has no RSIM_SECRET_KEY">no secret key</HatchCell> : null}
-      </div>
-      {inv.credentials.length || props.adding ? (
-        <div class="inv-t cred inv-head" role="row">
-          <span>name</span>
-          <span>source</span>
-          <span>device groups</span>
-          <span />
-        </div>
-      ) : (
-        <div class="inv-empty" role="row">
-          <HatchCell>no credential</HatchCell>
-        </div>
-      )}
-      {inv.credentials.map((c) => (
-        <CredentialRow key={c.name} inv={inv} c={c} keyPresent={keyPresent} editing={editing === c.name} onEdit={(on) => setEditing(on ? c.name : null)} write={props.write} refuse={props.refuse} />
-      ))}
-      {props.adding ? (
-        <div class="inv-t cred" role="row" aria-label="New credential">
-          <span class="edit">
-            <input class="t-value" aria-label="name" value={f.name} spellcheck={false} autoFocus onInput={(e) => setF({ ...f, name: e.currentTarget.value })} onKeyDown={keys} />
-          </span>
-          <CredentialEdit f={f} keyPresent={keyPresent} onChange={(x) => setF({ ...f, ...x })} keys={keys} />
-          <span />
-        </div>
-      ) : null}
-      <div class="actions">
+    <Card
+      title="Credentials"
+      head={key && !keyPresent ? <HatchMark title="rsim-api has no RSIM_SECRET_KEY">no secret key</HatchMark> : undefined}
+      flush
+      foot={
         <button type="button" aria-pressed={props.adding} onClick={() => (props.adding ? add() : props.onAdding())}>
           Add credential
         </button>
+      }
+    >
+      <div class="inv-table cred" role="table" aria-label="Credentials">
+        {inv.credentials.length || props.adding ? (
+          <div class="inv-t cred inv-head" role="row">
+            <span>name</span>
+            <span>source</span>
+            <span>device groups</span>
+            <span />
+          </div>
+        ) : (
+          <Empty role="row">no credential</Empty>
+        )}
+        {inv.credentials.map((c) => (
+          <CredentialRow key={c.name} inv={inv} c={c} keyPresent={keyPresent} editing={editing === c.name} onEdit={(on) => setEditing(on ? c.name : null)} write={props.write} refuse={props.refuse} />
+        ))}
+        {props.adding ? (
+          <div class="inv-t cred" role="row" aria-label="New credential">
+            <span class="edit">
+              <input class="t-value" aria-label="name" value={f.name} spellcheck={false} autoFocus onInput={(e) => setF({ ...f, name: e.currentTarget.value })} onKeyDown={keys} />
+            </span>
+            <CredentialEdit f={f} keyPresent={keyPresent} onChange={(x) => setF({ ...f, ...x })} keys={keys} />
+            <span />
+          </div>
+        ) : null}
       </div>
-    </div>
+    </Card>
   );
 }

@@ -31,6 +31,7 @@ import {
   mcpCall,
   requestBody,
   rsimCommand,
+  swapped,
   toggleDefaults,
   unstatedLabel,
 } from "../src/page/query";
@@ -211,7 +212,7 @@ describe("query type", () => {
   });
 
   it("is a set query when a field has a prefix, a list or a range", () => {
-    expect(queryMode({ "source.ip": "192.168.2.0/24" })).toBe("set");
+    expect(queryMode({ "source.ip": "198.51.100.0/24" })).toBe("set");
     expect(queryMode({ "source.ip": "192.0.2.10,192.0.2.11" })).toBe("set");
     expect(queryMode({ "source.port": "1-1000" })).toBe("set");
     expect(queryMode({ "network.transport": "tcp,udp" })).toBe("set");
@@ -286,9 +287,9 @@ describe("query of the bar", () => {
       "destination.port": "80,443",
       reply: true,
     });
-    expect(requestBody({ "source.ip": "192.168.2.0/24", "source.port": "1-1000", tcp_flags: "syn+ack" })).toEqual({
+    expect(requestBody({ "source.ip": "198.51.100.0/24", "source.port": "1-1000", tcp_flags: "syn+ack" })).toEqual({
       mode: "set",
-      "source.ip": "192.168.2.0/24",
+      "source.ip": "198.51.100.0/24",
       "source.port": "1-1000",
       tcp_flags: "syn+ack",
     });
@@ -414,5 +415,13 @@ describe("unstated button", () => {
       expect(echo).toHaveProperty(k, null);
       expect(n).not.toContain(k);
     }
+  });
+});
+
+describe("swap of source and destination", () => {
+  it("exchanges the addresses, the ports and the MACs, and keeps each other field", () => {
+    const f = { "source.ip": "192.0.2.10", "destination.ip": "198.51.100.53", "destination.port": "53", "network.transport": "udp" };
+    expect(swapped(f)).toEqual({ "source.ip": "198.51.100.53", "destination.ip": "192.0.2.10", "source.port": "53", "network.transport": "udp" });
+    expect(swapped(swapped(f))).toEqual(f);
   });
 });

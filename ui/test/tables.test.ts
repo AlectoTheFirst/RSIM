@@ -19,8 +19,6 @@ import {
   columnWidths,
   deviceFunctions,
   filterCellText,
-  filterCells,
-  filterWords,
   hiddenSelection,
   nextPage,
   nextSort,
@@ -29,15 +27,13 @@ import {
   previousPage,
   readState,
   repeats,
-  rowTop,
-  rowWindow,
-  scrollFor,
   setColumnFilters,
   shownColumns,
   syncPages,
   tableCommand,
   writeState,
 } from "../src/tables/model";
+import { rowTop, rowWindow, scrollFor } from "../src/page/virtual";
 
 const col = (name: string, type: Column["type"]): Column => ({ name, type, semantic: name, description: "" });
 
@@ -225,10 +221,6 @@ describe("hairline cells", () => {
     expect(repeats(rows)).toEqual([0, 2, 1, 0]);
   });
 
-  it("prints each value in the first row and below an opened row", () => {
-    expect(repeats(rows, 0)).toEqual([0, 0, 1, 0]);
-  });
-
   it("prints the last cell even when the whole row repeats", () => {
     expect(repeats([["a", "b"], ["a", "b"]])).toEqual([0, 1]);
   });
@@ -278,52 +270,25 @@ describe("device rows", () => {
 
 describe("shown columns", () => {
   const cols = ["device", "serial", "serial_reason", "drop_reason", "provenance"];
-  const defs = cols.map((n) => (n === "provenance" ? { ...col(n, "list"), semantic: "source_span" } : col(n, "text")));
 
-  it("hides the reason column of another column and the source spans that the opened row lists", () => {
-    expect(shownColumns(cols, defs, true)).toEqual([0, 1, 3]);
-  });
-
-  it("keeps the source spans when no row opens", () => {
-    expect(shownColumns(cols, defs, false)).toEqual([0, 1, 3, 4]);
+  it("hides the reason column of another column and keeps the source spans", () => {
+    expect(shownColumns(cols)).toEqual([0, 1, 3, 4]);
   });
 });
 
-describe("filter cells with hidden columns", () => {
-  const cols = ["device", "platform", "platform_reason", "management_address", "asn", "provenance"];
-  const defs = cols.map((n) =>
-    n === "management_address"
-      ? col(n, "address")
-      : n === "asn"
-        ? col(n, "integer")
-        : n === "provenance"
-          ? { ...col(n, "list"), semantic: "source_span" }
-          : col(n, "text"),
-  );
-  const shown = shownColumns(cols, defs, true);
+describe("selection of hidden columns", () => {
+  const cols = ["device", "platform", "platform_reason", "provenance"];
+  const shown = shownColumns(cols);
 
-  it("gives each cell the definition of its own column after a hidden column", () => {
-    const cells = filterCells(cols, defs, shown);
-    expect(cells.map((c) => [c.name, c.col?.name, c.first])).toEqual([
-      ["device", "device", true],
-      ["platform", "platform", false],
-      ["management_address", "management_address", false],
-      ["asn", "asn", false],
-    ]);
-    expect(cells[2]!.col?.type).toBe("address");
-    expect(cells[3]!.col?.type).toBe("integer");
-  });
-
-  it("names the filters and the sort keys of the hidden columns", () => {
+  it("names the filters and the sort keys of the columns that the table does not show", () => {
     const filters = [
       { column: "platform_reason", op: "=" as const, value: "not_read" },
       { column: "device", op: "=" as const, value: "r1" },
       { column: "provenance", op: "contains" as const, value: "r1/" },
     ];
     const h = hiddenSelection(cols, shown, filters, ["-platform_reason", "device"]);
-    expect(h.filters).toEqual([filters[0], filters[2]]);
+    expect(h.filters).toEqual([filters[0]]);
     expect(h.sort).toEqual(["-platform_reason"]);
-    expect(filterWords(h.filters)).toBe("platform_reason=not_read provenance.contains=r1/");
     expect(hiddenSelection(cols, shown, [filters[1]!], ["device"])).toEqual({ filters: [], sort: [] });
   });
 });
@@ -431,6 +396,6 @@ describe("words of the Tables view", () => {
   });
 
   it("has labels and no sentences", () => {
-    for (const f of ["TablesView.tsx", "Grid.tsx", "model.ts"]) expect(code(f)).not.toMatch(/[a-z]{2,}\.(<\/|`|")/);
+    for (const f of ["TablesView.tsx", "Table.tsx", "RowPanel.tsx", "model.ts"]) expect(code(f)).not.toMatch(/[a-z]{2,}\.(<\/|`|")/);
   });
 });

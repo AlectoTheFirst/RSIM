@@ -72,7 +72,3 @@ export function initials(name: string): string {
   return letters.toUpperCase();
 }
 
-/** The text of the role and the sign-in method of a user. */
-export function howText(role: string, via: string): string {
-  return `${role}, ${via === "token" ? "API token" : "session"}`;
-}

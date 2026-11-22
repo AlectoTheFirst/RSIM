@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COLOURS, type ColourToken, DEFAULT_PREFS, SCHEMES, type Scheme, prefsOf, properties } from "../src/theme";
+import { COLOURS, type ColourToken, DEFAULT_PREFS, SCHEMES, SIZE, type Scheme, prefsOf, properties } from "../src/theme";
 
 const channel = (c: number) => {
   const s = c / 255;
@@ -66,6 +66,12 @@ describe("the properties of a scheme", () => {
     const p = properties("light", { ...DEFAULT_PREFS, colours: "blue-orange" });
     expect(p["--deliver"]).toBe(COLOURS.light["deliver-alt"]);
     expect(p["--drop"]).toBe(COLOURS.light["drop-alt"]);
+  });
+
+  it("gives no size the name of a colour", () => {
+    const colours = new Set(Object.keys(COLOURS.light).map((k) => `--${k}`));
+    const sizes = Object.keys(SIZE).map((k) => `--${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`);
+    expect(sizes.filter((k) => colours.has(k))).toEqual([]);
   });
 
   it("sets the row height of the preferences", () => {

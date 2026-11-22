@@ -1,35 +1,21 @@
-// The Trace view: the query bar, the result line and the ladder of the
-// answer of a path query or a set query.
+// The page: the frame with the rail and the top bar, and the views. The
+// page holds the query of the Trace view and its answer.
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { ApiProblem, type ServerTiming, type TwinRef, createQuery, getCatalog, getQuery, getSourceLines, getTwin, listTwins, onReplaced, stepUrl } from "./api/client";
-import type { Answer, Me, PathAnswer, SetAnswer, Span, TableDef, Twin } from "./api/types";
+import { ApiProblem, type ServerTiming, type TwinRef, createQuery, getCatalog, getQuery, getSourceLines, getTwin, listTwins, onReplaced } from "./api/client";
+import type { Me, PathAnswer, SetAnswer, Span, TableDef, Twin } from "./api/types";
 import { TokensView } from "./auth/TokensView";
 import { CoverageView } from "./coverage/CoverageView";
 import { InventoryView } from "./inventory/InventoryView";
-import { OutcomeWord, PathLadder, VerdictText } from "./ladder/Ladder";
-import { PartList } from "./ladder/SetLadder";
-import { partAnswer, partList, tunnelOf } from "./ladder/setLayout";
-import {
-  type DecidingStep,
-  type Level,
-  type StepRow,
-  answerNotes,
-  autoStep,
-  decidingStep,
-  ingressHint,
-  ladder,
-  noIngress,
-  noteLabel,
-  outcomeCounts,
-  partCounts,
-  rowKeyOfStep,
-} from "./ladder/layout";
-import { HatchMark } from "./page/Hatch";
-import { keyForElement, keyPlace } from "./tables/model";
-import { LEVELS, QueryBar, ResultLine, StatusLine, TopBar } from "./page/Parts";
-import { isSnapshot, newerRun, pinnedRun, twinState, twinStateText, viewOf, viewSearch, withTwin } from "./page/url";
-import { type Fields, explainCommand, fieldsOf, queryMode, requestBody, rsimCommand } from "./page/query";
+import { TraceView } from "./ladder/Trace";
+import type { View } from "./page/frame";
+import { Rail } from "./page/Rail";
+import { ToastHost } from "./page/Toast";
+import { toast } from "./page/notes";
+import { TopBar } from "./page/TopBar";
+import { functionsSearch, isSnapshot, newerRun, pinnedRun, queryOf, twinState, twinStateText, viewOf, viewSearch, withTwin } from "./page/url";
+import { type Fields, fieldsOf, requestBody } from "./page/query";
 import { TablesView } from "./tables/TablesView";
+import { TopologyView } from "./topology/TopologyView";
 import { type Prefs, applyTheme, loadPrefs, savePrefs } from "./theme";
 
 interface Result {
@@ -40,9 +26,6 @@ interface Result {
   ms: number;
   timing: ServerTiming;
 }
-
-/** The time that a note of the status line shows. */
-const NOTICE_MS = 4_000;
 
 /** The time between 2 reads of the twin list, for a newer run of the store. */
 const TWINS_POLL_MS = 60_000;
@@ -66,84 +49,6 @@ export function timingText(ms: number, t: ServerTiming): string {
   return `round trip ${fmt(ms)} ms${server}`;
 }
 
-const isSet = (out: PathAnswer | SetAnswer) => out.kind === "set_answer";
-
-/** Whether the query of an answer asks for the reply. */
-const asksReply = (out: PathAnswer | SetAnswer) => (out.query as { reply?: boolean | null }).reply !== false;
-
-function PathFacts(props: { a: Answer; notes: readonly string[]; onStep: (d: DecidingStep) => void }) {
-  const a = props.a;
-  const s = a.summary;
-  const multi = a.branches.length > 1;
-  const one = s.length === 1 && s[0]!.result.verdict ? s[0]!.result.verdict : null;
-  const b0 = a.branches[0];
-  return (
-    <>
-      <span>
-        {one ? (
-          <VerdictText v={one} headline at={b0 && !multi ? decidingStep(b0) : null} onStep={props.onStep} tunnel={b0 && !multi ? tunnelOf(b0) : null} />
-        ) : (
-          <span class="t-outcome">{s[0]?.result.kind ?? "no answer"}</span>
-        )}
-      </span>
-      {multi
-        ? a.branches.map((b) => (
-            <span>
-              <span class="muted">branch {b.index} </span>
-              <VerdictText v={b.verdict} at={decidingStep(b)} onStep={props.onStep} tunnel={tunnelOf(b)} />
-            </span>
-          ))
-        : null}
-      {a.replies.map((r) => {
-        const label = multi ? `reply of branch ${r.forward_branch}` : "reply";
-        if (!r.ran || !r.answer) {
-          return (
-            <span>
-              <span class="c-reply">{label}</span> <span class="muted">{r.not_run_reason ?? "not run"}</span>
-            </span>
-          );
-        }
-        const kinds = [...new Set(r.answer.branches.map((b) => b.verdict.kind))];
-        return (
-          <span>
-            <span class="c-reply">{label}</span>{" "}
-            {kinds.length === 1 && r.answer.branches[0] ? (
-              <VerdictText v={r.answer.branches[0].verdict} />
-            ) : (
-              kinds.map((k, i) => (
-                <>
-                  {i ? ", " : ""}
-                  <OutcomeWord kind={k} />
-                </>
-              ))
-            )}
-          </span>
-        );
-      })}
-      {props.notes.map((n) => (
-        <HatchMark title={n}>{noteLabel(n)}</HatchMark>
-      ))}
-    </>
-  );
-}
-
-/** The outcomes of the parts of a set answer that occur, each with its count. */
-function SetFacts(props: { a: Answer }) {
-  return (
-    <>
-      {outcomeCounts(partCounts(props.a.summary)).map(([k, n]) =>
-        k === "depends_on_path" ? (
-          <span class="muted">depends on path {n}</span>
-        ) : (
-          <span>
-            <OutcomeWord kind={k} headline /> <span class="t-outcome">{n}</span>
-          </span>
-        ),
-      )}
-    </>
-  );
-}
-
 function readUrl(): { twin: string | null; q: string | null } {
   const u = new URLSearchParams(window.location.search);
   return { twin: u.get("twin"), q: u.get("q") };
@@ -165,30 +70,19 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
   const [result, setResult] = useState<Result | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [level, setLevel] = useState<Level>("function");
-  const [selected, setSelected] = useState<string | null>(null);
-  // The branch of the selected part of a set answer.
-  const [part, setPart] = useState<number | null>(null);
-  const [open, setOpen] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  // A count that the button "Select entry point" raises.
-  const [askIngress, setAskIngress] = useState(0);
-  const firstInput = useRef<HTMLInputElement | null>(null);
-  // Whether the next ladder opens the deciding step of its answer.
   const rerunning = useRef(false);
-  const autoOpen = useRef(false);
-  // The view of the URL: Trace with no view parameter, else Tables, Coverage or Inventory.
+  // The view of the URL: Trace with no view parameter, else the view of the parameter `view`.
   const [search, setSearch] = useState(window.location.search);
   const [catalog, setCatalog] = useState<TableDef[] | null>(null);
   const urlView = viewOf(search);
-  const view = urlView === "Tokens" && !user ? "Trace" : urlView;
+  const view: View = urlView === "Tokens" && !user ? "Trace" : urlView;
   // The twin when it can answer, else empty, and the text of a twin that cannot.
   const state = twinState(listed ? twins : null, twin);
   const usable = state === "ready" ? twin : "";
   const stateText = twinStateText(state);
 
   useEffect(() => {
-    if (view === "Trace" || view === "Tokens" || catalog) return;
+    if (view === "Trace" || view === "Tokens" || view === "Topology" || catalog) return;
     getCatalog()
       .then((c) => setCatalog(c.tables))
       .catch((e: unknown) => setProblem(String(e instanceof Error ? e.message : e)));
@@ -232,8 +126,8 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
     setProblem(null);
     try {
       const { out, timing } = await getQuery(t, qid);
-      // The answer names its snapshot, so the steps and the source lines
-      // of the answer stay on it after a newer snapshot comes.
+      // The result holds the snapshot that the answer names; its steps and
+      // source lines read that snapshot.
       setResult({ twin: out.twin.id, qid, out, ms: performance.now() - since, timing });
       // A query on the store pins the page to the run of its answer.
       if (out.twin.id !== t) {
@@ -241,10 +135,6 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
         replaceUrlTwin(out.twin.id);
       }
       setFields(fieldsOf(out.query as unknown as Record<string, unknown>));
-      setPart(isSet(out) ? (out.answer.branches[0]?.index ?? null) : null);
-      setSelected(null);
-      setOpen(false);
-      autoOpen.current = true;
     } catch (e) {
       if (replaced(e) && t !== "store") {
         await rerun(t, qid, since);
@@ -268,7 +158,7 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
   async function rerun(old: string, qid: string, since: number = performance.now()) {
     if (rerunning.current) return;
     rerunning.current = true;
-    setNotice(`${old} replaced: query ran on the newest snapshot`);
+    toast(`${old} replaced`);
     refreshTwins();
     try {
       await load("store", qid, since);
@@ -305,7 +195,6 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
   /** Moves the page to the newest built run, with the query of its answer. */
   function loadLatest(run: string) {
     setTwin(run);
-    setNotice(null);
     if (result && view === "Trace") {
       window.history.pushState(null, "", `?twin=${encodeURIComponent(run)}&q=${encodeURIComponent(result.qid)}`);
       void load(run, result.qid);
@@ -349,46 +238,11 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
     }
   }
 
-  const answer = result?.out.answer ?? null;
-  const setMode_ = result ? isSet(result.out) : false;
-  const reply = result ? asksReply(result.out) : true;
-  const parts = useMemo(() => (answer && setMode_ ? partList(answer) : []), [answer, setMode_]);
-  // The answer of the ladder: the path answer, or the selected part of a set answer.
-  const shown = useMemo(() => (answer && setMode_ ? (part === null ? null : partAnswer(answer, part)) : answer), [answer, setMode_, part]);
-  const model = useMemo(() => (shown ? ladder(shown, level, reply, setMode_) : null), [shown, level, setMode_, reply]);
-  // A new answer or part that does not deliver opens the step that decides
-  // it, in the ladder of the current level.
-  useEffect(() => {
-    if (!autoOpen.current || !model || !shown) return;
-    autoOpen.current = false;
-    const d = autoStep(shown);
-    const key = d ? rowKeyOfStep(model.rows, d.path, d.step.index) : null;
-    if (!key) return;
-    setSelected(key);
-    setOpen(true);
-  }, [model]);
-  const stepRows = useMemo(() => (model ? model.rows.filter((r): r is StepRow => r.type === "step") : []), [model]);
-
-  function selectPart(branch: number) {
-    if (branch === part) return;
-    setPart(branch);
-    setSelected(null);
-    setOpen(false);
-    autoOpen.current = true;
-  }
-
-  // A note of the status line goes after NOTICE_MS.
-  useEffect(() => {
-    if (!notice) return;
-    const t = window.setTimeout(() => setNotice(null), NOTICE_MS);
-    return () => window.clearTimeout(t);
-  }, [notice]);
-
   function copy(text: string, what: string) {
     navigator.clipboard
       .writeText(text)
-      .then(() => setNotice(`${what} copied`))
-      .catch(() => setNotice(`${what} not copied`));
+      .then(() => toast(`${what} copied`))
+      .catch(() => toast(`${what} not copied`));
   }
 
   const sourceTwin = result ? result.twin : null;
@@ -403,188 +257,113 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
         : undefined,
     [sourceTwin, result?.qid],
   );
-  const actions = {
-    sourceLines,
-    copyExplain: (row: StepRow) => {
-      const st = row.steps[row.steps.length - 1]!;
-      if (!result) return;
-      // The step of an answer opens through the query type of its query.
-      const sent = fieldsOf(result.out.query as unknown as Record<string, unknown>);
-      copy(explainCommand(isSet(result.out) ? "set" : "path", result.twin, sent, row.path.branch, st.index, row.path.replyOf), "rsim explain command");
-    },
-    copyUrl: (row: StepRow) => {
-      if (!result) return;
-      const st = row.steps[row.steps.length - 1]!;
-      copy(new URL(stepUrl(result.twin, result.qid, row.path.branch, st.index, row.path.replyOf), window.location.href).href, "step URL");
-    },
+  const onTwin = (t: string) => {
+    setTwin(t);
+    setResult(null);
+    if (view === "Trace") window.history.pushState(null, "", `?twin=${encodeURIComponent(t)}`);
+    else navigate(withTwin(search, t));
   };
 
-  function openStep(d: DecidingStep) {
-    const key = model ? rowKeyOfStep(model.rows, d.path, d.step.index) : null;
-    if (!key) return;
-    setSelected(key);
-    setOpen(true);
-  }
+  const timing = result && !busy ? timingText(result.ms, result.timing) : null;
 
-  function select(key: string) {
-    if (key === selected) setOpen(!open);
-    else {
-      setSelected(key);
-      setOpen(true);
-    }
-  }
-
-  useEffect(() => {
-    if (selected) document.getElementById(`row-${selected}`)?.scrollIntoView({ block: "nearest" });
-  }, [selected]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (view !== "Trace") return;
-      const t = e.target as HTMLElement | null;
-      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
-      const place = keyPlace(t);
-      if (keyForElement(place, e.key)) {
-        if (place === "text" && e.key === "Escape") t?.blur();
-        return;
-      }
-      const at = stepRows.findIndex((r) => r.key === selected);
-      switch (e.key) {
-        case "j":
-          if (stepRows.length) setSelected(stepRows[Math.min(stepRows.length - 1, at + 1)]!.key);
-          break;
-        case "k":
-          if (stepRows.length) setSelected(stepRows[Math.max(0, at - 1)]!.key);
-          break;
-        case "Enter":
-          if (selected) setOpen(!open);
-          else return;
-          break;
-        case "Escape":
-          setOpen(false);
-          break;
-        case "[":
-        case "]": {
-          const i = LEVELS.indexOf(level) + (e.key === "]" ? 1 : -1);
-          if (i >= 0 && i < LEVELS.length) setLevel(LEVELS[i]!);
-          break;
-        }
-        case "/":
-          firstInput.current?.focus();
-          break;
-        case "r": {
-          const r = stepRows.find((x) => x.dir === "reply");
-          if (r) setSelected(r.key);
-          break;
-        }
-        case "y": {
-          const r = stepRows[at];
-          if (r) actions.copyExplain(r);
-          else copy(rsimCommand(queryMode(fields), twin, fields), "rsim command");
-          break;
-        }
-        default:
-          return;
-      }
-      e.preventDefault();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  });
-
-  return (
-    <>
-      <TopBar
-        twins={twins}
-        twin={twin}
-        info={info}
-        latest={newerRun(twins, twin)}
-        onLatest={loadLatest}
-        onTwin={(t) => {
-          setTwin(t);
-          setResult(null);
-          if (view === "Trace") window.history.pushState(null, "", `?twin=${encodeURIComponent(t)}`);
-          else navigate(withTwin(search, t));
-        }}
-        view={view}
-        onView={(v) => navigate(viewSearch(v, twin, search, result?.qid ?? null))}
-        prefs={prefs}
-        onPrefs={setPrefs}
-        user={user}
-        onSignOut={props.onSignOut}
-        state={stateText}
-      />
-      {view === "Tokens" && user ? (
+  let content;
+  if (view === "Tokens" && user) {
+    content = (
+      <div class="page fill">
         <TokensView user={user} />
-      ) : view === "Inventory" ? (
-        <InventoryView twin={usable} />
-      ) : stateText ? (
-        <main class="body" />
-      ) : view === "Tables" ? (
-        <div class="grid-page">
-          <TablesView
-            twin={twin}
-            row={prefs.row}
-            catalog={catalog}
-            search={search}
-            navigate={navigate}
-            onUseAddress={(k, a) => {
-              setFields((f) => ({ ...f, [k]: a }));
-              navigate(viewSearch("Trace", twin));
-            }}
-          />
-        </div>
-      ) : view === "Coverage" ? (
-        <div class="grid-page">
-          <CoverageView twin={twin} row={prefs.row} catalog={catalog} search={search} navigate={navigate} />
-        </div>
-      ) : (
-      <>
-      <QueryBar
+      </div>
+    );
+  } else if (view === "Inventory") {
+    content = (
+      <div class="page fill">
+        <InventoryView twin={usable} row={prefs.row} />
+      </div>
+    );
+  } else if (stateText) {
+    content = null;
+  } else if (view === "Topology") {
+    content = (
+      <div class="page fill">
+        <TopologyView
+          twin={usable}
+          qid={queryOf(search)}
+          search={search}
+          navigate={navigate}
+          onFunctions={(device) => navigate(functionsSearch(twin, device))}
+          onEntryPoint={(ingress) => {
+            setFields((f) => ({ ...f, ingress }));
+            navigate(viewSearch("Trace", twin));
+          }}
+        />
+      </div>
+    );
+  } else if (view === "Tables") {
+    content = (
+      <div class="page fill">
+        <TablesView
+          twin={twin}
+          row={prefs.row}
+          catalog={catalog}
+          search={search}
+          navigate={navigate}
+          onUseAddress={(k, a) => {
+            setFields((f) => ({ ...f, [k]: a }));
+            navigate(viewSearch("Trace", twin));
+          }}
+        />
+      </div>
+    );
+  } else if (view === "Coverage") {
+    content = (
+      <div class="page fill">
+        <CoverageView twin={twin} row={prefs.row} search={search} navigate={navigate} />
+      </div>
+    );
+  } else {
+    content = (
+      <TraceView
         twin={twin}
         fields={fields}
-        found={answer && !busy ? ingressHint(answer) : null}
-        askIngress={askIngress}
-        answered={result !== null}
-        onField={(k, v) => setFields({ ...fields, [k]: v })}
+        onFields={setFields}
+        result={result}
+        problem={problem}
+        busy={busy}
+        timing={timing}
+        row={prefs.row}
         onRun={() => void run()}
-        firstInput={firstInput}
+        copy={copy}
+        sourceLines={sourceLines}
       />
-      <ResultLine level={level} onLevel={setLevel}>
-        {busy ? (
-          <span class="muted">running</span>
-        ) : problem ? (
-          <span>{problem}</span>
-        ) : answer ? (
-          <>
-            {setMode_ ? <SetFacts a={answer} /> : <PathFacts a={answer} notes={result ? answerNotes(result.out) : []} onStep={openStep} />}
-            {noIngress(answer) ? (
-              <button type="button" onClick={() => setAskIngress((n) => n + 1)}>
-                Select entry point
-              </button>
-            ) : null}
-          </>
-        ) : (
-          <span class="muted">no query</span>
-        )}
-      </ResultLine>
-      <main class="body">
-        {answer && setMode_ ? <PartList parts={parts} selected={part} onSelect={selectPart} /> : null}
-        {shown && model ? (
-          <PathLadder
-            answer={shown}
-            model={model}
-            h={prefs.row}
-            selected={selected}
-            open={open}
-            onSelect={select}
-            actions={actions}
-          />
-        ) : null}
-      </main>
-      <StatusLine notice={notice} timing={result && !busy ? timingText(result.ms, result.timing) : null} />
-      </>
-      )}
-    </>
+    );
+  }
+
+  return (
+    <div class="frame">
+      <Rail
+        view={view}
+        href={(v) => viewSearch(v, twin, search, result?.qid ?? null) || "/"}
+        onView={(v) => navigate(viewSearch(v, twin, search, result?.qid ?? null))}
+      />
+      <div class="frame-main">
+        <TopBar
+          twins={twins}
+          twin={twin}
+          info={info}
+          latest={newerRun(twins, twin)}
+          onLatest={loadLatest}
+          onTwin={onTwin}
+          prefs={prefs}
+          onPrefs={setPrefs}
+          user={user}
+          onTokens={() => navigate(viewSearch("Tokens", twin, search))}
+          onSignOut={props.onSignOut}
+          state={stateText}
+        />
+        <main class="content" id="content">
+          {content}
+        </main>
+      </div>
+      <ToastHost />
+    </div>
   );
 }

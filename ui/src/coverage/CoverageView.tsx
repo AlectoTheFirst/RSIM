@@ -1,45 +1,60 @@
 // The Coverage view: the config lines of each device that the ingestion
-// handles, that have no effect on the twin and that it does not handle,
-// with the unhandled paths of a device in its opened row.
+// handles, that have no effect on the twin and that it does not handle, in
+// a table card, with the unhandled paths of the selected device in the panel.
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { ApiProblem, getCoverage, getUnhandled } from "../api/client";
-import type { TableDef, TableOut } from "../api/types";
-import { Hatch, HatchMark } from "../page/Hatch";
-import { KeyLine, ResultLine } from "../page/Parts";
+import type { TableOut } from "../api/types";
+import { Card, Empty, PageHead, PanelLayout } from "../page/Card";
+import { Hatch } from "../page/Hatch";
+import { Panel } from "../page/Panel";
+import { PageButtons } from "../page/Parts";
+import { VirtualRows } from "../page/VirtualRows";
 import { type Pages, answerOf, keyForElement, keyPlace, nextPage, pageWords, previousPage, syncPages } from "../tables/model";
-import { Grid, type GridColumn, PageButtons } from "../tables/Grid";
 import { SIZE, type RowHeight } from "../theme";
 import {
   COVERAGE_COLUMNS,
   type CoverageRow,
   type PathsState,
+  cellText,
+  columnChars,
   coverageKey,
   coverageRow,
-  coverageSums,
   openedDevice,
+  pathParts,
   pathsStep,
   readCoverage,
-  shareText,
+  stepRow,
   writeCoverage,
 } from "./model";
 
 /** The page size of the unhandled paths of one device. */
 const PATHS_LIMIT = 200;
 
-/** A count of unhandled config: the number with a hatch square when it is not 0. */
-function UnhandledCount(props: { n: number; h: number }) {
-  if (!props.n) return <span class="cell num">0</span>;
-  const s = props.h - 2 * SIZE.buttonGap;
+/** A count of unhandled config: the number, with a hatch square when it is not 0. */
+function UnhandledCount(props: { n: string }) {
+  if (props.n === "0") return <span class="num">0</span>;
   return (
-    <span class="cell num unhandled" title="Unknown functions">
-      <Hatch w={s} h={s} />
+    <span class="num unhandled">
+      <Hatch w={SIZE.hatchSquare} h={SIZE.hatchSquare} />
       <span>{props.n}</span>
     </span>
   );
 }
 
-function Paths(props: { twin: string; device: string; onTables: () => void }) {
+/** The grid columns of the report: each column as wide as its longest text on the page. */
+function template(rows: readonly CoverageRow[]): string {
+  const chars = columnChars(rows);
+  return COVERAGE_COLUMNS.map((c, j) => {
+    const mark = c.hatch ? " + var(--hatch-square) + var(--mark-gap)" : "";
+    return `calc(${chars[j]!} * 1ch + 2 * var(--cell-pad)${mark})`;
+  })
+    .concat("1fr")
+    .join(" ");
+}
+
+function Paths(props: { twin: string; device: string; onClose: () => void; onTables: () => void }) {
   const [st, setSt] = useState<PathsState>(() => ({ want: syncPages(null, null, PATHS_LIMIT), shown: null, problem: null }));
+  const [current, setCurrent] = useState<number | null>(null);
   const want = st.want;
   useEffect(() => {
     let live = true;
@@ -50,82 +65,92 @@ function Paths(props: { twin: string; device: string; onTables: () => void }) {
       live = false;
     };
   }, [props.twin, props.device, want]);
-  const go = (to: Pages) => setSt((s) => pathsStep(s, { kind: "go", to }));
+  const go = (to: Pages) => {
+    setCurrent(null);
+    setSt((s) => pathsStep(s, { kind: "go", to }));
+  };
   const problem = st.problem;
-  const out = st.shown?.out ?? null;
+  const out: TableOut | null = st.shown?.out ?? null;
   // The answer of the page that the view asks for, which gives the next page.
-  const current = st.shown && st.shown.at === want ? st.shown.out : null;
+  const asked = st.shown && st.shown.at === want ? st.shown.out : null;
   const col = (n: string) => out?.columns.indexOf(n) ?? -1;
+  const paged = !!st.shown && st.shown.out.total > st.shown.out.rows.length;
   return (
-    <>
-      <div>
-        <div class="t-label">unhandled paths</div>
-        {problem ? (
-          <div>{problem}</div>
-        ) : !out ? (
-          <div class="muted">loading</div>
-        ) : out.rows.length === 0 ? (
-          <div class="muted">no unhandled stanzas</div>
-        ) : (
-          <table class="paths">
-            <thead class="t-label">
-              <tr>
-                <th>path</th>
-                <th class="num">stanzas</th>
-                <th class="num">lines</th>
-              </tr>
-            </thead>
-            <tbody class="t-value">
-              {out.rows.map((r) => (
-                <tr>
-                  <td>
-                    <span class="unhandled">
-                      <Hatch w={SIZE.hatchMark / 2} h={SIZE.hatchMark / 2} />
-                      <span>{String(r[col("path")])}</span>
-                    </span>
-                  </td>
-                  <td class="num">{String(r[col("stanzas")])}</td>
-                  <td class="num">{String(r[col("lines")])}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {st.shown && st.shown.out.total > st.shown.out.rows.length ? (
-          <div class="group actions">
-            <span class="muted">{problem ? null : current ? pageWords(want, current.rows.length, current.total) : "loading"}</span>
-            <button type="button" disabled={!want.back.length} onClick={() => go(previousPage(want, PATHS_LIMIT))}>
-              Previous page
-            </button>
-            <button
-              type="button"
-              disabled={!current?.next_cursor}
-              onClick={() => current?.next_cursor && go(nextPage(want, current.next_cursor, current.rows.length))}
-            >
-              Next page
-            </button>
-          </div>
-        ) : null}
-      </div>
-      <div>
-        <div class="t-label">paths</div>
-        <div class="group actions">
+    <Panel
+      title={<span class="t-value strong">{props.device}</span>}
+      label="Unhandled paths"
+      onClose={props.onClose}
+      class="cov-panel"
+      foot={
+        <>
+          {paged ? (
+            <>
+              <span class="muted cov-place">{problem ? null : asked ? pageWords(want, asked.rows.length, asked.total) : "loading"}</span>
+              <PageButtons
+                onPrevious={() => go(previousPage(want, PATHS_LIMIT))}
+                onNext={() => asked?.next_cursor && go(nextPage(want, asked.next_cursor, asked.rows.length))}
+                previous={want.back.length > 0}
+                next={!!asked?.next_cursor}
+              />
+            </>
+          ) : null}
           <button type="button" onClick={props.onTables}>
             Show in Tables
           </button>
-        </div>
-      </div>
-    </>
+        </>
+      }
+    >
+      {problem ? (
+        <Empty problem>{problem}</Empty>
+      ) : !out ? (
+        <Empty>loading</Empty>
+      ) : out.rows.length === 0 ? (
+        <Empty>no unhandled stanzas</Empty>
+      ) : (
+        <VirtualRows
+          id="cov-path"
+          label="Unhandled paths"
+          class="cov-paths"
+          count={out.rows.length}
+          estimate={SIZE.button}
+          current={current}
+          onCurrent={setCurrent}
+          resetKey={want}
+          headHeight={SIZE.button}
+          head={
+            <div class="cov-path t-label">
+              <span>path</span>
+              <span class="num">stanzas</span>
+              <span class="num">lines</span>
+            </div>
+          }
+          row={(i) => {
+            const r = out.rows[i]!;
+            return (
+              <div class="cov-path t-value">
+                <span class="unhandled">
+                  <Hatch w={SIZE.hatchSquare} h={SIZE.hatchSquare} />
+                  <span>
+                    {pathParts(String(r[col("path")])).map((part, k) => (
+                      <>
+                        {k ? <wbr /> : null}
+                        {part}
+                      </>
+                    ))}
+                  </span>
+                </span>
+                <span class="num">{String(r[col("stanzas")])}</span>
+                <span class="num">{String(r[col("lines")])}</span>
+              </div>
+            );
+          }}
+        />
+      )}
+    </Panel>
   );
 }
 
-export function CoverageView(props: {
-  twin: string;
-  row: RowHeight;
-  catalog: TableDef[] | null;
-  search: string;
-  navigate: (search: string) => void;
-}) {
+export function CoverageView(props: { twin: string; row: RowHeight; search: string; navigate: (search: string) => void }) {
   const { twin, search, navigate } = props;
   const st = readCoverage(search);
   const [pages, setPages] = useState<Pages>(() => syncPages(null, st.cursor, st.limit));
@@ -166,8 +191,7 @@ export function CoverageView(props: {
   }, [key]);
 
   const rows: CoverageRow[] = useMemo(() => (out ? out.rows.map((r) => coverageRow(out.columns, r)) : []), [out]);
-  const grid = useMemo(() => rows.map((r) => COVERAGE_COLUMNS.map((c) => (c.name === "unhandled share" ? shareText(r) : r[c.key]))), [rows]);
-  const sums = coverageSums(rows);
+  const columns = useMemo(() => template(rows), [rows]);
 
   const go = (cursor: string | null, device: string | null) => {
     const base: Record<string, string> = { view: "coverage" };
@@ -201,121 +225,106 @@ export function CoverageView(props: {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
       if (keyForElement(keyPlace(e.target as HTMLElement | null), e.key)) return;
-      const n = rows.length;
-      switch (e.key) {
-        case "j":
-          if (n) setSelected((s) => (s === null ? 0 : Math.min(n - 1, s + 1)));
-          break;
-        case "k":
-          if (n) setSelected((s) => (s === null ? 0 : Math.max(0, s - 1)));
-          break;
-        case "Enter":
-          if (selected === null) return;
-          select(selected);
-          break;
-        case "Escape":
-          setOpen(false);
-          break;
-        case "n":
-          goNext();
-          break;
-        case "p":
-          goPrevious();
-          break;
-        default:
-          return;
-      }
+      const step = stepRow(e.key, selected, rows.length);
+      if (step !== null) setSelected(step);
+      else if (e.key === "Enter" && selected !== null && !(e.target instanceof HTMLElement && e.target.closest(".vrows"))) select(selected);
+      else if (e.key === "n") goNext();
+      else if (e.key === "p") goPrevious();
+      else return;
       e.preventDefault();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   });
 
-  const needs = props.catalog?.find((t) => t.name === "coverage")?.needs;
-  const more = !!out && out.total > out.rows.length;
-  const onPage = more ? " on this page" : "";
-
-  const columns: GridColumn[] = COVERAGE_COLUMNS.map((c, j) => ({
-    name: c.name,
-    width: Math.max(c.name.length, ...grid.map((r) => String(r[j] ?? "").length + (c.hatch ? 3 : 0))),
-    right: c.right,
-    title: c.title,
-  }));
+  const opened = open && selected !== null ? (rows[selected] ?? null) : null;
+  const report = out && out.total > 0;
+  const paged = !!out && out.total > out.rows.length;
 
   return (
     <>
-      <ResultLine>
-        {busy ? (
-          <span class="muted">loading</span>
-        ) : problem ? (
-          <span>{problem}</span>
-        ) : !out ? (
-          <span class="muted">no twin</span>
-        ) : out.total === 0 ? (
-          <>
-            <span class="t-title">No coverage report</span>
-            {needs ? <span class="muted">needs {needs}</span> : null}
-          </>
-        ) : (
-          <>
-            <span class="t-title">{out.total} devices</span>
-            <span>{pageWords(pages, out.rows.length, out.total)}</span>
-            <span>
-              <span class="t-value">{sums.handled}</span> lines handled{onPage}
-            </span>
-            <span>
-              <span class="t-value">{sums.irrelevant}</span> lines known-irrelevant{onPage}
-            </span>
-            {sums.unhandled ? (
-              <HatchMark>
-                {sums.unhandled} lines unhandled in {sums.devices} devices{onPage}
-              </HatchMark>
-            ) : (
-              <span>no unhandled lines{onPage}</span>
-            )}
-            <PageButtons
-              onFirst={() => go(null, null)}
-              onPrevious={goPrevious}
-              onNext={goNext}
-              first={st.cursor !== null}
-              previous={pages.back.length > 0}
-              next={!!out.next_cursor}
+      <PageHead title="Coverage" />
+      <PanelLayout
+        fill
+        panel={
+          opened ? (
+            <Paths
+              key={opened.device}
+              twin={twin}
+              device={opened.device}
+              onClose={() => setOpen(false)}
+              onTables={() => navigate(`?view=tables&twin=${encodeURIComponent(twin)}&table=coverage&f.device=${encodeURIComponent(opened.device)}`)}
             />
-          </>
-        )}
-      </ResultLine>
-      <main class="body grid-body">
-        {out && out.total > 0 ? (
-          <Grid
-            label="coverage"
-            columns={columns}
-            rows={grid}
-            cell={(i, j) => ({ known: true, text: String(grid[i]![j] ?? "") })}
-            custom={(i, j) => (COVERAGE_COLUMNS[j]!.hatch ? <UnhandledCount n={Number(grid[i]![j])} h={props.row} /> : null)}
-            h={props.row}
-            selected={selected}
-            open={open}
-            onSelect={select}
-            detail={(i) => (
-              <Paths
-                key={rows[i]!.device}
-                twin={twin}
-                device={rows[i]!.device}
-                onTables={() => navigate(`?view=tables&twin=${encodeURIComponent(twin)}&table=coverage&f.device=${encodeURIComponent(rows[i]!.device)}`)}
+          ) : null
+        }
+      >
+        <Card
+          label="Devices"
+          flush
+          fill
+          foot={
+            paged ? (
+              <>
+                <span class="muted cov-place">{pageWords(pages, out.rows.length, out.total)}</span>
+                <PageButtons
+                  onFirst={() => go(null, null)}
+                  onPrevious={goPrevious}
+                  onNext={goNext}
+                  first={st.cursor !== null}
+                  previous={pages.back.length > 0}
+                  next={!!out.next_cursor}
+                />
+              </>
+            ) : undefined
+          }
+        >
+          {busy ? (
+            <Empty>loading</Empty>
+          ) : problem ? (
+            <Empty problem>{problem}</Empty>
+          ) : !out ? (
+            <Empty>no twin</Empty>
+          ) : !report ? (
+            <Empty>no coverage report</Empty>
+          ) : (
+            <div class="cov-table" style={{ "--cov-columns": columns }}>
+              <VirtualRows
+                id="cov-device"
+                label="Devices"
+                class="cov-list"
+                count={rows.length}
+                rowHeight={props.row}
+                headHeight={props.row}
+                current={selected}
+                onCurrent={setSelected}
+                onActivate={select}
+                resetKey={key}
+                head={
+                  <div class="cov-row cov-head t-label" aria-hidden="true">
+                    {COVERAGE_COLUMNS.map((c) => (
+                      <span class={c.right ? "num" : undefined} title={c.title || undefined}>
+                        {c.name}
+                      </span>
+                    ))}
+                  </div>
+                }
+                row={(i) => {
+                  const r = rows[i]!;
+                  return (
+                    <div class="cov-row t-value">
+                      {COVERAGE_COLUMNS.map((c) =>
+                        c.hatch ? <UnhandledCount n={cellText(r, c)} /> : <span class={c.right ? "num" : undefined}>{cellText(r, c)}</span>,
+                      )}
+                    </div>
+                  );
+                }}
               />
-            )}
-          />
-        ) : null}
-      </main>
-      <KeyLine
-        keys={[
-          ["j k", "device"],
-          ["enter", "open"],
-          ["n p", "page"],
-        ]}
-      />
+            </div>
+          )}
+        </Card>
+      </PanelLayout>
     </>
   );
 }

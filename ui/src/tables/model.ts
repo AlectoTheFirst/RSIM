@@ -1,7 +1,8 @@
 // The state of the Tables view and the layout of a table: the URL state,
-// the parameters of the API, the filters of a column, the pages, the
-// hairline cells, the virtual rows and the column widths. No drawing code.
-import type { Column, TableDef } from "../api/types";
+// the parameters of the API, the forms, the filters of a column, the
+// hidden columns, the pages, the hairline cells, the virtual rows, the
+// column widths, the source spans and the row panel. No drawing code.
+import type { Column, Span, TableDef } from "../api/types";
 import { shellWord } from "../page/query";
 
 /** The verbs of the Tables view: the verbs of the API and `describe`. */
@@ -76,6 +77,8 @@ export interface TablesState {
   ascending: boolean;
   /** The address of `lpm`. */
   address: string;
+  /** The columns that the person hides. */
+  hide: string[];
 }
 
 export const EMPTY: TablesState = {
@@ -89,6 +92,7 @@ export const EMPTY: TablesState = {
   count: 5,
   ascending: false,
   address: "",
+  hide: [],
 };
 
 const list = (v: string | null): string[] => (v ? v.split(",").filter((x) => x !== "") : []);
@@ -98,7 +102,7 @@ const FILTER = "f.";
 
 /**
  * The state of the URL of the page. A filter is `f.<column>=v1,v2` or
- * `f.<column>.<op>=v`, so a column name never meets a parameter of the page.
+ * `f.<column>.<op>=v`.
  * A later filter with the same column and op takes the place of an earlier
  * one, as in the API.
  */
@@ -132,6 +136,7 @@ export function readState(search: string): TablesState {
     count: Number.isInteger(count) && count > 0 ? count : 5,
     ascending: u.get("ascending") === "true",
     address: u.get("address") ?? "",
+    hide: list(u.get("hide")),
   };
 }
 
@@ -148,6 +153,7 @@ export function writeState(s: TablesState, base: Record<string, string> = {}): s
   if (s.count !== 5) u.set("count", String(s.count));
   if (s.ascending) u.set("ascending", "true");
   if (s.address) u.set("address", s.address);
+  if (s.hide.length) u.set("hide", s.hide.join(","));
   const q = u.toString();
   return q ? `?${q}` : "";
 }
@@ -267,21 +273,6 @@ export function setColumnFilters(filters: readonly Filter[], column: string, tex
   return [...filters.filter((f) => f.column !== column), ...parseFilterCell(column, text)];
 }
 
-/** The ops that a column type offers, for the hint of its filter cell. */
-export function opsOf(c: Column): Op[] {
-  switch (c.type) {
-    case "integer":
-      return ["=", "gt", "lt"];
-    case "boolean":
-      return ["="];
-    case "address":
-    case "prefix":
-      return ["=", "in_prefix", "prefix", "contains"];
-    default:
-      return ["=", "contains", "prefix"];
-  }
-}
-
 /** The order after a click on the head of a column: up, down, then none. */
 export function nextSort(sort: readonly string[], column: string, add: boolean): string[] {
   const at = sort.findIndex((s) => s === column || s === `-${column}`);
@@ -355,12 +346,11 @@ const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.str
 /**
  * The number of leading cells of each row that repeat the row above: the
  * cells from the left while each value equals the value above. These cells
- * have a hairline. The first row of a page, and a row after an opened row,
- * print each value.
+ * have a hairline. The first row of a page prints each value.
  */
-export function repeats(rows: readonly (readonly unknown[])[], opened: number | null = null): number[] {
+export function repeats(rows: readonly (readonly unknown[])[]): number[] {
   return rows.map((r, i) => {
-    if (i === 0 || opened === i - 1) return 0;
+    if (i === 0) return 0;
     const above = rows[i - 1]!;
     let n = 0;
     while (n < r.length - 1 && same(r[n], above[n])) n += 1;
@@ -407,37 +397,19 @@ export function isReasonOf(columns: readonly string[], name: string): boolean {
   return name.endsWith("_reason") && columns.includes(name.slice(0, -"_reason".length));
 }
 
-/**
- * The indices of the columns that the grid shows: each column except a
- * reason column of another column, and, when the opened row lists the
- * source lines, except a column of source spans.
- */
-export function shownColumns(
-  columns: readonly string[],
-  defs: readonly (Column | undefined)[],
-  detail: boolean,
-): number[] {
+/** The indices of the columns that the table shows: each column except a reason column of another column. */
+export function shownColumns(columns: readonly string[]): number[] {
   const out: number[] = [];
   columns.forEach((c, j) => {
     if (isReasonOf(columns, c)) return;
-    if (detail && defs[j]?.semantic === SPAN_SEMANTIC) return;
     out.push(j);
   });
   return out;
 }
 
-/** The filter cells of the shown columns, each with the name and the definition of its own column. */
-export function filterCells(
-  columns: readonly string[],
-  defs: readonly (Column | undefined)[],
-  shown: readonly number[],
-): { name: string; col: Column | undefined; first: boolean }[] {
-  return shown.map((j, k) => ({ name: columns[j]!, col: defs[j], first: k === 0 }));
-}
-
 /**
- * The filters and the sort keys of the columns that the grid does not show,
- * which no filter cell and no column head gives.
+ * The filters and the sort keys of the columns that the table does not show,
+ * which no chip and no column head gives.
  */
 export function hiddenSelection(
   columns: readonly string[],
@@ -451,10 +423,6 @@ export function hiddenSelection(
     sort: sort.filter((s) => !names.has(s.startsWith("-") ? s.slice(1) : s)),
   };
 }
-
-/** The text of filters as the URL gives them. */
-export const filterWords = (filters: readonly Filter[]): string =>
-  filters.map((f) => `${f.op === "=" ? f.column : `${f.column}.${f.op}`}=${f.value}`).join(" ");
 
 /** True for a column whose values align right. */
 export const alignsRight = (c: Column | undefined): boolean => c?.type === "integer";
@@ -476,6 +444,7 @@ export function columnWidths(
   min = 4,
   max = 48,
   known?: (row: number, col: number) => boolean,
+  text?: (row: number, col: number) => string,
 ): number[] {
   return columns.map((name, i) => {
     let w = name.length;
@@ -484,7 +453,9 @@ export function columnWidths(
       const n =
         known && !known(k, i)
           ? NOT_KNOWN_WIDTH
-          : (v === null || v === undefined ? "" : Array.isArray(v) ? v.map(String).join(", ") : String(v)).length;
+          : text
+            ? text(k, i).length
+            : (v === null || v === undefined ? "" : Array.isArray(v) ? v.map(String).join(", ") : String(v)).length;
       if (n > w) w = n;
       if (w >= max) break;
     }
@@ -492,60 +463,122 @@ export function columnWidths(
   });
 }
 
-/** The rows of a virtual table that the view draws, and the space around them. */
-export interface RowWindow {
-  first: number;
-  /** One past the last row. */
-  end: number;
-  padTop: number;
-  padBottom: number;
-}
-
-/**
- * The window of rows in view. The rows have the height `h`; the opened
- * row adds `openH` below it. `top` is the scroll offset from the first row
- * and `height` the height of the view.
- */
-export function rowWindow(p: {
-  top: number;
-  height: number;
-  h: number;
-  count: number;
-  open: number | null;
-  openH: number;
-  overscan?: number;
-}): RowWindow {
-  const { h, count, open } = p;
-  const extra = open === null || open >= count ? 0 : p.openH;
-  const total = count * h + extra;
-  if (count === 0) return { first: 0, end: 0, padTop: 0, padBottom: 0 };
-  const at = (y: number): number => {
-    if (y <= 0) return 0;
-    if (open === null || open >= count || y < (open + 1) * h) return Math.min(count - 1, Math.floor(y / h));
-    if (y < (open + 1) * h + extra) return open;
-    return Math.min(count - 1, Math.floor((y - extra) / h));
-  };
-  const over = p.overscan ?? 8;
-  const first = Math.max(0, at(p.top) - over);
-  const end = Math.min(count, at(p.top + p.height) + 1 + over);
-  return { first, end, padTop: rowTop(first, h, open, extra), padBottom: total - rowTop(end, h, open, extra) };
-}
-
-/** The offset of the top of row `i`, with the opened row above it. */
-export function rowTop(i: number, h: number, open: number | null, openH: number): number {
-  return i * h + (open !== null && i > open ? openH : 0);
-}
-
-/** The scroll offset that brings row `i` into a view of `height`, or null. */
-export function scrollFor(i: number, top: number, height: number, h: number, open: number | null, openH: number): number | null {
-  const y = rowTop(i, h, open, openH);
-  if (y < top) return y;
-  if (y + h > top + height) return y + h - height;
-  return null;
-}
-
 /** The filter of the functions table for the device of a row of the devices table, or null for no device. */
 export function deviceFunctions(columns: readonly string[], row: readonly unknown[]): Filter[] | null {
   const v = row[columns.indexOf("device")];
   return typeof v === "string" && v !== "" ? [{ column: "device", op: "=", value: v }] : null;
+}
+
+/** The name of the tab of each form of a table. */
+export const FORM_LABELS: Record<Verb, string> = {
+  show: "Rows",
+  summarize: "Summary",
+  unique: "Distinct",
+  top: "Top",
+  lpm: "Longest match",
+  describe: "Columns",
+};
+
+/** The forms of a table in tab order: the verbs of its catalog entry and `describe`. */
+export function formsOf(def: TableDef | null): Verb[] {
+  return def ? VERBS.filter((v) => v === "describe" || def.verbs.includes(v)) : [];
+}
+
+/** True for a form whose rows are rows of the table, which open the row panel. */
+export const rowsForm = (v: Verb): boolean => v === "show" || v === "top" || v === "lpm";
+
+/** The columns that the table draws: the shown columns less the columns that the person hides. */
+export function visibleColumns(columns: readonly string[], hide: readonly string[]): number[] {
+  return shownColumns(columns).filter((j) => !hide.includes(columns[j]!));
+}
+
+/** The hidden columns after the person hides or shows `column`. */
+export function toggleHidden(hide: readonly string[], column: string): string[] {
+  return hide.includes(column) ? hide.filter((c) => c !== column) : [...hide, column];
+}
+
+/** The order with `column` alone in the direction `dir`, or with no `column` for null. */
+export function sortBy(sort: readonly string[], column: string, dir: "up" | "down" | null): string[] {
+  if (dir === null) return sort.filter((s) => s !== column && s !== `-${column}`);
+  return [dir === "up" ? column : `-${column}`];
+}
+
+/** The text of a filter chip: the values, or the op and the value. */
+export const chipValue = (f: Filter): string => (f.op === "=" ? f.value : `${f.op} ${f.value}`);
+
+/** The filters with one filter left out. */
+export const withoutFilter = (filters: readonly Filter[], f: Filter): Filter[] =>
+  filters.filter((x) => !(x.column === f.column && x.op === f.op && x.value === f.value));
+
+/** The columns that a filter can name: each column of the table except a reason column of another column. */
+export function filterColumns(def: TableDef | null): string[] {
+  if (!def) return [];
+  const names = def.columns.map((c) => c.name);
+  return names.filter((n) => !isReasonOf(names, n));
+}
+
+/**
+ * The parts of a function name for a line break: each part ends after a
+ * `/`.
+ */
+export function nameParts(name: string): string[] {
+  return name.split(/(?<=\/)/);
+}
+
+/** True for a column whose values are function names. */
+export const isFunctionColumn = (c: Column | undefined): boolean => c?.semantic === "function";
+
+/** A source span of a cell, `<file>:<first>-<last>` or `<file>:<line>`, or null for another text. */
+export function parseSpan(text: string): Span | null {
+  const m = /^(.+):(\d+)(?:-(\d+))?$/.exec(text);
+  if (!m) return null;
+  const first = Number(m[2]);
+  return { file: m[1]!, first_line: first, last_line: m[3] === undefined ? first : Number(m[3]) };
+}
+
+/** True for a span that names the rows of a collected table. */
+export const isRowSpan = (s: Span): boolean => s.file.endsWith("#row");
+
+/**
+ * The label of a span in a cell: the section of its file with the device
+ * folder and the content hash left out, and its lines or rows.
+ */
+export function spanCellLabel(text: string): string {
+  const s = parseSpan(text);
+  if (!s) return text;
+  let f = s.file.slice(s.file.lastIndexOf("/") + 1);
+  const at = f.indexOf("@");
+  if (at > 0) f = f.slice(0, at);
+  const lines = s.first_line === s.last_line ? `${s.first_line}` : `${s.first_line}-${s.last_line}`;
+  return isRowSpan(s) ? `${f} ${s.first_line === s.last_line ? "row" : "rows"} ${lines}` : `${f}:${lines}`;
+}
+
+/** The text of a cell as the table prints it: the labels of a column of source spans, else the value. */
+export function cellLabel(c: CellText, col: Column | undefined, v: unknown): string {
+  if (!c.known || col?.semantic !== SPAN_SEMANTIC || !Array.isArray(v)) return c.text;
+  return v.map((x) => (typeof x === "string" ? spanCellLabel(x) : JSON.stringify(x))).join(", ");
+}
+
+/** The source spans of a row, in column order, each with its text. */
+export function rowSpans(columns: readonly string[], defs: readonly (Column | undefined)[], row: readonly unknown[]): { text: string; span: Span | null }[] {
+  return columns.flatMap((_, j) =>
+    defs[j]?.semantic === SPAN_SEMANTIC && Array.isArray(row[j])
+      ? (row[j] as unknown[]).filter((x): x is string => typeof x === "string").map((text) => ({ text, span: parseSpan(text) }))
+      : [],
+  );
+}
+
+/** The title of the row panel: the values of the key columns of the table, or the first value. */
+export function rowTitle(def: TableDef | null, columns: readonly string[], row: readonly unknown[]): string {
+  const keys = def ? def.key.map((k) => row[columns.indexOf(k)]).filter((v) => typeof v === "string" || typeof v === "number") : [];
+  if (keys.length) return keys.map(String).join(" ");
+  const v = row[0];
+  return v === null || v === undefined ? "row" : String(v);
+}
+
+/** The row after `i` in the direction `step`, inside the rows, or null at an end. */
+export function stepRow(i: number | null, step: 1 | -1, count: number): number | null {
+  if (i === null || count === 0) return null;
+  const n = i + step;
+  return n < 0 || n >= count ? null : n;
 }

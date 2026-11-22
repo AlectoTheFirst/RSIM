@@ -1,7 +1,7 @@
-// The Inventory page as data: the arrangement of the devices, the state of
-// each inherited cell, the counts of the result line, the join with the
-// device facts of the twin, the usage of the credentials, the hops of the
-// routes and the bodies of the writes.
+// The Inventory page as data: the arrangement of the devices, the rows of
+// the device list with the filter and the folded groups, the widths of its
+// columns, the state of each inherited cell, the join with the device facts of the twin, the usage of the
+// credentials, the hops of the routes and the bodies of the writes.
 import type { components } from "../api/schema";
 
 type S = components["schemas"];
@@ -43,12 +43,118 @@ const byName = (a: { name: string }, b: { name: string }) => (a.name < b.name ? 
  */
 export function arrange(inv: Inventory, devices: readonly ResolvedDevice[], by: Arrange): Section[] {
   const sorted = [...devices].sort(byName);
-  if (by === "device group") {
-    return [...inv.groups].sort(byName).map((g) => ({ key: g.name, group: g, devices: sorted.filter((d) => d.group === g.name) }));
+  const keyOf = (d: ResolvedDevice): string | null =>
+    by === "device group" ? d.group : by === "site" ? (d.site ?? null) : (d.settings.credential.value ?? null);
+  const parts = new Map<string | null, ResolvedDevice[]>();
+  for (const d of sorted) {
+    const k = keyOf(d);
+    const list = parts.get(k);
+    if (list) list.push(d);
+    else parts.set(k, [d]);
   }
-  const keyOf = (d: ResolvedDevice): string | null => (by === "site" ? (d.site ?? null) : (d.settings.credential.value ?? null));
-  const keys = [...new Set(sorted.map(keyOf))].sort((a, b) => (a === null ? 1 : b === null ? -1 : a < b ? -1 : a > b ? 1 : 0));
-  return keys.map((k) => ({ key: k, group: null, devices: sorted.filter((d) => keyOf(d) === k) }));
+  if (by === "device group") {
+    return [...inv.groups].sort(byName).map((g) => ({ key: g.name, group: g, devices: parts.get(g.name) ?? [] }));
+  }
+  const keys = [...parts.keys()].sort((a, b) => (a === null ? 1 : b === null ? -1 : a < b ? -1 : a > b ? 1 : 0));
+  return keys.map((k) => ({ key: k, group: null, devices: parts.get(k)! }));
+}
+
+/** True when the device name, the address or the site holds the text of the filter, in any case. */
+export function deviceMatches(d: ResolvedDevice, filter: string): boolean {
+  const q = filter.trim().toLowerCase();
+  if (q === "") return true;
+  return d.name.toLowerCase().includes(q) || d.address.toLowerCase().includes(q) || (d.site ?? "").toLowerCase().includes(q);
+}
+
+/** The key of a section in the set of folded sections. */
+export function foldKey(s: Section): string {
+  return s.key === null ? "" : `=${s.key}`;
+}
+
+/** A row of the device list: a group row with the count of its devices in the list, or a device row. */
+export type ListRow =
+  | { kind: "group"; section: Section; fold: string; count: number; folded: boolean }
+  | { kind: "device"; device: ResolvedDevice; underGroup: boolean };
+
+/**
+ * The rows of the device list: each section with the devices that match the
+ * filter, the devices of a folded section left out. With a filter, a
+ * section with no matching device is left out.
+ */
+export function listRows(sections: readonly Section[], folded: ReadonlySet<string>, filter: string): ListRow[] {
+  const out: ListRow[] = [];
+  const q = filter.trim();
+  for (const s of sections) {
+    const devices = q === "" ? s.devices : s.devices.filter((d) => deviceMatches(d, q));
+    if (q !== "" && devices.length === 0) continue;
+    const fold = foldKey(s);
+    const isFolded = folded.has(fold);
+    out.push({ kind: "group", section: s, fold, count: devices.length, folded: isFolded });
+    if (isFolded) continue;
+    for (const d of devices) out.push({ kind: "device", device: d, underGroup: s.group !== null });
+  }
+  return out;
+}
+
+/** The text of the first cell of a group row: the group, the site or the credential. */
+export function sectionText(s: Section, by: Arrange): string {
+  if (s.key !== null) return s.key;
+  return by === "site" ? "no site" : "none";
+}
+
+/** The widths in characters of the text columns of the device list: the longest text of each column. */
+export interface ColumnChars {
+  device: number;
+  address: number;
+  vendor: number;
+  site: number;
+  credential: number;
+  route: number;
+  ssh: number;
+  trust: number;
+}
+
+/** The smallest width of a column in characters: the width of a hatch mark and its words. */
+export const MIN_CHARS = 12;
+
+export function columnChars(sections: readonly Section[], by: Arrange): ColumnChars {
+  const w: ColumnChars = { device: MIN_CHARS, address: MIN_CHARS, vendor: MIN_CHARS, site: MIN_CHARS, credential: MIN_CHARS, route: MIN_CHARS, ssh: MIN_CHARS, trust: MIN_CHARS };
+  const fit = (k: keyof ColumnChars, t: string | null | undefined) => {
+    if (t && t.length > w[k]) w[k] = t.length;
+  };
+  for (const s of sections) {
+    fit("device", `${sectionText(s, by)} ${deviceCount(s.devices.length)}`);
+    if (s.group) {
+      fit("vendor", s.group.vendor);
+      fit("credential", s.group.settings.credential);
+      fit("route", s.group.settings.route);
+      fit("ssh", sshText(s.group.settings.ssh_algorithms, s.group.settings.ssh_mode));
+      fit("trust", trustText(s.group.settings.tls_trust));
+    }
+    for (const d of s.devices) {
+      fit("device", d.name);
+      fit("address", d.address);
+      fit("vendor", d.vendor);
+      fit("site", d.site);
+      fit("credential", d.settings.credential.value);
+      fit("route", d.settings.route.value);
+      fit("ssh", sshText(d.settings.ssh_algorithms.value, d.settings.ssh_mode.value));
+      fit("trust", trustText(d.settings.tls_trust.value));
+    }
+  }
+  return w;
+}
+
+/** The origin of a setting in an edit: the record when its text is not empty, else the group or the default. */
+export function draftOrigin(f: SettingField, draft: Draft, group: Settings | null, own: "device" | "group"): Origin {
+  const t = (draft[f.key] ?? "").trim();
+  if (t !== "") return own;
+  return inherited(f, group).from;
+}
+
+/** The device names of a list of names, each one time, that a comma list of a table filter can name. */
+export function factNames(names: Iterable<string>): string[] {
+  return [...new Set(names)].filter((n) => n !== "" && !n.includes(",")).sort();
 }
 
 /** The count of a group row: "1 device", "2 devices". */
@@ -74,12 +180,6 @@ export function cellState(text: string | null, origin: Origin, underGroup: boole
   return text === null ? { kind: "none" } : { kind: "value", text };
 }
 
-
-/** The SSH words of a group or a device: "modern, exec". */
-export function sshText(algorithms: string, mode: string): string {
-  return `${algorithms}, ${mode}`;
-}
-
 /** The transport of the collector of a vendor, or null for a vendor with no collector. */
 export function transportOf(vendors: Vendors | null, vendor: string): Transport | null {
   return vendors?.vendors.find((v) => v.vendor === vendor)?.transport ?? null;
@@ -90,61 +190,25 @@ export function noCollector(vendors: Vendors | null, vendor: string): boolean {
   return vendors !== null && transportOf(vendors, vendor) === null;
 }
 
-/** The SSH cell of a device: empty for a vendor that is not collected over SSH. */
-export function deviceSsh(vendors: Vendors | null, d: ResolvedDevice, underGroup: boolean): CellState | null {
-  if (transportOf(vendors, d.vendor) !== "ssh") return null;
-  const a = d.settings.ssh_algorithms;
-  const m = d.settings.ssh_mode;
-  const origin: Origin = a.origin === "device" || m.origin === "device" ? "device" : a.origin === "group" || m.origin === "group" ? "group" : "default";
-  return cellState(sshText(a.value, m.value), origin, underGroup);
+/** The text of the SSH settings: the algorithms and the mode, each with its default for none. */
+export function sshText(algorithms: string | null | undefined, mode: string | null | undefined): string {
+  return `${algorithms ?? "modern"} ${mode ?? "exec"}`;
 }
 
-/** The SSH words of a group row, with the defaults; null for a vendor that is not collected over SSH. */
-export function groupSsh(vendors: Vendors | null, g: Group): string | null {
-  if (transportOf(vendors, g.vendor) !== "ssh") return null;
-  return sshText(g.settings.ssh_algorithms ?? "modern", g.settings.ssh_mode ?? "exec");
+/** The text of the TLS trust, with its default for none. */
+export function trustText(trust: string | null | undefined): string {
+  return trust ?? "pin";
 }
 
-const TLS_TRUST: Record<string, string> = { pin: "pin", ca: "CA", none: "none" };
-
-/**
- * The trust policy of a group: the TLS trust of a vendor collected over
- * HTTPS, with its default; "not known" for a vendor collected over SSH,
- * whose pin policy the inventory does not hold; null for a vendor with no
- * collector.
- */
-export function groupTrust(vendors: Vendors | null, g: Group): { kind: "value"; text: string } | { kind: "not known" } | null {
-  const t = transportOf(vendors, g.vendor);
-  if (t === "https") {
-    const v = g.settings.tls_trust ?? "pin";
-    return { kind: "value", text: TLS_TRUST[v] ?? v };
-  }
-  return t === "ssh" ? { kind: "not known" } : null;
+/** The SSH cell of a device: the algorithms and the mode. */
+export function sshState(st: ResolvedDevice["settings"], underGroup: boolean): CellState {
+  const own = st.ssh_algorithms.origin === "device" || st.ssh_mode.origin === "device";
+  return cellState(sshText(st.ssh_algorithms.value, st.ssh_mode.value), own ? "device" : "group", underGroup);
 }
 
-/** The counts of the result line. */
-export interface Counts {
-  devices: number;
-  groups: number;
-  noSite: number;
-  noCollector: number;
-  seen: number;
-}
-
-export function counts(inv: Inventory, vendors: Vendors | null, seen: readonly SeenRow[]): Counts {
-  const vendorOf = new Map(inv.groups.map((g) => [g.name, g.vendor]));
-  return {
-    devices: inv.devices.length,
-    groups: inv.groups.length,
-    noSite: inv.devices.filter((d) => !d.site).length,
-    noCollector: inv.devices.filter((d) => noCollector(vendors, vendorOf.get(d.group) ?? "")).length,
-    seen: new Set(seen.map((s) => s.name)).size,
-  };
-}
-
-/** A count with its noun: "1 device has", "2 devices have". */
-export function devicesHave(n: number): string {
-  return n === 1 ? "1 device has" : `${n} devices have`;
+/** The trust cell of a device. */
+export function trustState(st: ResolvedDevice["settings"], underGroup: boolean): CellState {
+  return cellState(trustText(st.tls_trust.value), st.tls_trust.origin, underGroup);
 }
 
 /** The facts of a device that the collector reads, from the table `devices` of the twin. */
@@ -236,6 +300,17 @@ export function seenRows(columns: readonly string[], rows: readonly (readonly un
     out.push({ name, device: s("device"), port: s("port"), protocol: s("protocol") });
   }
   return out;
+}
+
+/** The widths in characters of the columns neighbour, device and port of the devices that the twin sees. */
+export function seenChars(seen: readonly SeenRow[]): { name: number; device: number; port: number } {
+  const w = { name: MIN_CHARS, device: MIN_CHARS, port: MIN_CHARS };
+  for (const s of seen) {
+    w.name = Math.max(w.name, s.name.length);
+    w.device = Math.max(w.device, s.device.length);
+    w.port = Math.max(w.port, s.port.length);
+  }
+  return w;
 }
 
 /** "LLDP" or "CDP" for the protocol word of the table. */
@@ -356,11 +431,6 @@ export function newGroupChecked(f: Parameters<typeof newGroupBody>[0], draft: Dr
   return { ok: true, body: out };
 }
 
-/** The body of a new credential reference. */
-export function newCredentialBody(f: { name: string; source: Credential["source"]; key: string }): Credential {
-  return { name: f.name.trim(), source: f.source, key: f.key.trim() };
-}
-
 /** The fields of the form of a credential. An empty secret keeps the stored secret. */
 export interface CredentialFields {
   source: Credential["source"];
@@ -464,7 +534,7 @@ export interface SettingField {
   max?: number;
   /** The unit of a number. */
   unit?: string;
-  /** The text of the default: "none" or "direct" for a setting with no default value. */
+  /** The text of the default when no resolved device gives it: "none" or "direct" for a setting with no default value. */
   fallback: string;
   /** The transport of the setting; null for each transport. */
   transport: Transport | null;
@@ -528,10 +598,25 @@ export function usedSetting(f: SettingField, vendors: Vendors | null, vendor: st
   return !f.vendors || f.vendors.includes(vendor);
 }
 
-/** The value that an empty setting takes: the value of the group, else the default. */
-export function inherited(f: SettingField, group: Settings | null): { from: "group" | "default"; text: string } {
+/** The default value of a setting as text, by setting. */
+export type SettingDefaults = Partial<Record<SettingKey, string>>;
+
+/** The defaults that the resolved devices give: the value of each setting whose origin is the default. */
+export function settingDefaults(devices: readonly ResolvedDevice[]): SettingDefaults {
+  const out: SettingDefaults = {};
+  for (const d of devices) {
+    for (const f of SETTING_FIELDS) {
+      const r = d.settings[f.key as keyof ResolvedDevice["settings"]];
+      if (r && r.origin === "default" && r.value !== null && r.value !== undefined && out[f.key] === undefined) out[f.key] = String(r.value);
+    }
+  }
+  return out;
+}
+
+/** The value that an empty setting takes: the value of the group, else the default of the resolved devices, else `fallback`. */
+export function inherited(f: SettingField, group: Settings | null, defaults: SettingDefaults = {}): { from: "group" | "default"; text: string } {
   const v = group?.[f.key];
-  return v === null || v === undefined ? { from: "default", text: f.fallback } : { from: "group", text: String(v) };
+  return v === null || v === undefined ? { from: "default", text: defaults[f.key] ?? f.fallback } : { from: "group", text: String(v) };
 }
 
 /** The texts of an edit of a record: one text for each field, an empty text for none. */

@@ -1,25 +1,10 @@
 // The layout of the ladder: the lanes, the rows and the content of each
-// cell, from a query answer in the full form. No drawing code.
-import type {
-  Answer,
-  Branch,
-  FieldValue,
-  Header,
-  PacketSet,
-  Qos,
-  Span,
-  TraceStep,
-  Verdict,
-} from "../api/types";
+// cell of one path of a query answer in the full form. No drawing code.
+import type { Answer, Branch, FieldValue, Header, PacketSet, Qos, Span, TraceStep, Verdict } from "../api/types";
+import { SIZE } from "../theme";
 
-/** The header field columns of the path query page. */
-export const FIELDS = [
-  "source.ip",
-  "source.port",
-  "destination.ip",
-  "destination.port",
-  "network.transport",
-] as const;
+/** The header fields of the path strip and of the deciding step. */
+export const FIELDS = ["source.ip", "source.port", "destination.ip", "destination.port", "network.transport"] as const;
 export type Field = (typeof FIELDS)[number];
 
 /** The protocol names of the engine. */
@@ -76,34 +61,80 @@ export function setValue(ps: PacketSet, f: Field, set = false): Shown | null {
   return { known: texts.length === 1 && all.every((s) => s.known), text: texts.join(" or ") };
 }
 
-/**
- * One header cell. `value` prints a value, `changed` prints the value that
- * the function wrote, `same` is the hairline of a value that stays, and
- * `hatch` is a value that the twin does not know.
- */
-export type Cell =
-  | { kind: "value"; text: string }
-  | { kind: "changed"; text: string }
-  | { kind: "same" }
-  | { kind: "hatch"; text: string };
-
-/**
- * The cell of a row from the value before and after its functions. The
- * first row of a path prints each value; a later row prints a value only
- * where it changes.
- */
-export function cell(before: Shown | null, after: Shown | null, first: boolean): Cell {
-  const a = before ?? after;
-  const b = after ?? before;
-  if (!a || !b) return { kind: "hatch", text: "no packets" };
-  if (a.text !== b.text || a.known !== b.known) {
-    return b.known ? { kind: "changed", text: b.text } : { kind: "hatch", text: b.text };
-  }
-  if (!a.known) return { kind: "hatch", text: a.text };
-  return first ? { kind: "value", text: a.text } : { kind: "same" };
+/** The name of a header key in the UI: the protocol number shows as the transport. */
+export function fieldName(key: string): string {
+  return key === "network.iana_number" ? "network.transport" : key;
 }
 
-/** The RIB guard cell. */
+/** The text of the encapsulation of a header: the kind and the VNI or label of each level, or absent. */
+function encapText(h: Header): Shown {
+  const list = h.encap ?? [];
+  if (list.length === 0) return { known: true, text: "absent" };
+  let known = true;
+  const parts = list.map((e) => {
+    const id = e.vni ?? e.label;
+    if (id === null || id === undefined) return e.kind;
+    const t = fieldText(id as FieldValue, null);
+    if (!t.known) known = false;
+    return `${e.kind} ${t.text}`;
+  });
+  return { known, text: parts.join(",") };
+}
+
+/** The value of one header key of a member, with `original` taken from the original header. */
+function keyValue(m: { original: Header; current: Header }, key: string, set: boolean): Shown {
+  if (key === "encap") return encapText(m.current);
+  const cur = m.current as unknown as Record<string, FieldValue | null | undefined>;
+  const org = m.original as unknown as Record<string, FieldValue | null | undefined>;
+  let v = cur[key];
+  if (v === "original") v = org[key];
+  if (v === null || v === undefined) return { known: true, text: "absent" };
+  return fieldText(v, fieldName(key) === "network.transport" ? "network.transport" : null, set);
+}
+
+/** The keys of the headers of a set, in the order of the header; the inner header is no key. */
+function headerKeys(ps: PacketSet): string[] {
+  const out: string[] = [];
+  for (const m of ps.members) for (const k of Object.keys(m.current)) if (k !== "inner" && !out.includes(k)) out.push(k);
+  return out;
+}
+
+/** The value of one header key over the members of a set, or null for an empty set. */
+export function keyShown(ps: PacketSet, key: string, set = false): Shown | null {
+  if (ps.members.length === 0) return null;
+  const all = ps.members.map((m) => keyValue(m, key, set));
+  const texts = [...new Set(all.map((s) => s.text))];
+  return { known: texts.length === 1 && all.every((s) => s.known), text: texts.join(" or ") };
+}
+
+/** A header field that the functions of a row write: its value before and after. */
+export interface Rewrite {
+  field: string;
+  before: Shown;
+  after: Shown;
+}
+
+/**
+ * The header fields that a group of steps writes: each field whose value
+ * over the packets after the last step differs from its value before the
+ * first step. A step with no packets after it writes nothing.
+ */
+export function rewritesOf(steps: readonly TraceStep[], set = false): Rewrite[] {
+  const first = steps[0];
+  const last = steps[steps.length - 1];
+  if (!first || !last || last.output.members.length === 0 || first.input.members.length === 0) return [];
+  const keys = headerKeys(first.input);
+  for (const k of headerKeys(last.output)) if (!keys.includes(k)) keys.push(k);
+  const out: Rewrite[] = [];
+  for (const k of keys) {
+    const before = keyShown(first.input, k, set)!;
+    const after = keyShown(last.output, k, set)!;
+    if (before.text !== after.text || before.known !== after.known) out.push({ field: fieldName(k), before, after });
+  }
+  return out;
+}
+
+/** The RIB guard of a step: none, matches, differs or not checked. */
 export type Rib = "none" | "hatch" | "matches" | "differs";
 
 export function ribOf(guard: string): Rib {
@@ -121,7 +152,7 @@ export function ribOf(guard: string): Rib {
 
 const RIB_ORDER: Rib[] = ["none", "matches", "hatch", "differs"];
 
-/** The RIB cell of a group of steps: the strongest of its steps. */
+/** The RIB guard of a group of steps: the strongest of its steps. */
 export function ribOfGroup(guards: string[]): Rib {
   let r: Rib = "none";
   for (const g of guards) {
@@ -192,6 +223,45 @@ export function functionLabel(st: TraceStep): string {
   return d && st.function.startsWith(`${d}/`) ? st.function.slice(d.length + 1) : st.function;
 }
 
+/** The space at the right of a function name in its column, in px. */
+export const FUNCTION_PAD = SIZE.buttonPad;
+
+/**
+ * The width of the function column in px: the longest name at `charPx` px
+ * for each character, from `SIZE.colFunction` to `SIZE.colFunctionMax`.
+ */
+export function functionWidth(names: readonly string[], charPx: number = SIZE.valueChar): number {
+  const longest = names.reduce((n, s) => Math.max(n, s.length), 0);
+  const w = Math.ceil(longest * charPx) + FUNCTION_PAD;
+  return Math.min(SIZE.colFunctionMax, Math.max(SIZE.colFunction, w));
+}
+
+/** The function names of each step of an answer and of its replies, with no device prefix. */
+export function functionNames(a: Answer): string[] {
+  return allBranches(a).flatMap((b) => b.steps.map(functionLabel));
+}
+
+const NBSP = " ";
+
+/**
+ * The parts of a name between its line breaks: a part ends after each `/`.
+ * A part that fits in a column of `width` px keeps its spaces from breaking,
+ * so the name breaks after a `/` first, then at a space, then at the edge.
+ */
+export function nameParts(name: string, width: number, charPx: number = SIZE.valueChar): string[] {
+  const chars = Math.floor((width - FUNCTION_PAD) / charPx);
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 0; i < name.length; i++) {
+    if (name[i] === "/") {
+      parts.push(name.slice(start, i + 1));
+      start = i + 1;
+    }
+  }
+  if (start < name.length) parts.push(name.slice(start));
+  return parts.map((p) => (p.length <= chars ? p.replace(/ /g, NBSP) : p));
+}
+
 export type Dir = "forward" | "reply";
 export type Level = "device" | "function";
 export type End = "deliver" | "exit" | "drop" | "unknown";
@@ -202,56 +272,13 @@ export interface PathRef {
   branch: number;
 }
 
+export function samePath(a: PathRef, b: PathRef): boolean {
+  return a.replyOf === b.replyOf && a.branch === b.branch;
+}
+
 export interface Lane {
   device: string | null;
-  /** The endpoint of a lane at the start or the end of a path. */
-  endpoint: string | null;
   name: string;
-}
-
-/** A group of adjacent lanes of one site, and the short names of its lanes. */
-export interface LaneGroup {
-  /** The site, or null for a lane that is in no group. */
-  site: string | null;
-  /** The first lane and the count of lanes. */
-  first: number;
-  count: number;
-}
-
-/**
- * The site header of the lanes: adjacent lanes whose names start with the
- * same word before the first `-` are one group of that site, when the group
- * has 2 lanes or more. Each lane gets its name with no site prefix.
- */
-export function laneGroups(lanes: readonly Lane[]): { groups: LaneGroup[]; names: string[] } {
-  const siteOf = (n: string) => {
-    const i = n.indexOf("-");
-    return i > 0 && i < n.length - 1 ? n.slice(0, i) : null;
-  };
-  const groups: LaneGroup[] = [];
-  const names = lanes.map((l) => l.name);
-  let i = 0;
-  while (i < lanes.length) {
-    const site = siteOf(lanes[i]!.name);
-    let j = i + 1;
-    while (site && j < lanes.length && siteOf(lanes[j]!.name) === site) j++;
-    if (site && j - i >= 2) {
-      groups.push({ site, first: i, count: j - i });
-      for (let k = i; k < j; k++) names[k] = lanes[k]!.name.slice(site.length + 1);
-    } else {
-      for (let k = i; k < j; k++) groups.push({ site: null, first: k, count: 1 });
-    }
-    i = j;
-  }
-  return { groups, names };
-}
-
-/** A lane of a path: a device, no device (`null`), or an endpoint. */
-export type LaneKey = string | null | { endpoint: string };
-
-function laneId(k: LaneKey): string {
-  if (k === null) return "n";
-  return typeof k === "string" ? `d:${k}` : `e:${k.endpoint}`;
 }
 
 export interface StepRow {
@@ -265,46 +292,27 @@ export interface StepRow {
   fn: string;
   lane: number;
   reason: string;
-  cells: Cell[];
-  rib: Rib;
+  rewrites: Rewrite[];
   source: string;
-  /**
-   * The lane from which the path steps across at the top of this row: the
-   * lane of the row above, or the source endpoint at the start.
-   */
+  /** The lane from which the path steps across at the top of this row: the lane of the row above. */
   enterFrom: number | null;
   start: boolean;
   end: End | null;
-  /** The lane of the end square when the path ends at an endpoint lane. */
-  endLane: number | null;
   /** A device-level row with more than one function. */
   group: boolean;
 }
 
-export interface SectionRow {
-  type: "section";
-  key: string;
-  dir: Dir;
-  text: string;
-  verdict: Verdict | null;
-  note: string | null;
-  /** A line that says why a path has no reply, in muted text. */
-  muted?: boolean;
-}
-
-export type Row = StepRow | SectionRow;
-
 export interface Ladder {
   lanes: Lane[];
-  rows: Row[];
+  rows: StepRow[];
 }
 
-function endOf(v: Verdict): End {
+export function endOf(v: Verdict): End {
   return v.kind === "deliver" || v.kind === "exit" || v.kind === "drop" ? v.kind : "unknown";
 }
 
 /** The device sequence of a branch, with each run of one device once. */
-function devicesOf(b: Branch): (string | null)[] {
+export function devicesOf(b: Branch): (string | null)[] {
   const out: (string | null)[] = [];
   for (const s of b.steps) {
     const d = s.device ?? null;
@@ -320,35 +328,35 @@ export function allBranches(a: Answer): Branch[] {
   return out;
 }
 
-/**
- * The lanes in path order. A device that a later path adds goes before the
- * next device of that path that has a lane, so that equal-cost paths keep
- * their devices side by side.
- */
-export function lanesOf(paths: readonly (readonly LaneKey[])[]): Lane[] {
-  const lanes: LaneKey[] = [];
-  const ids: string[] = [];
-  for (const seq of paths) {
-    const sids = seq.map(laneId);
-    seq.forEach((d, i) => {
-      if (ids.includes(sids[i]!)) return;
-      const next = sids.slice(i + 1).find((x) => ids.includes(x));
-      const at = next === undefined ? ids.length : ids.indexOf(next);
-      lanes.splice(at, 0, d);
-      ids.splice(at, 0, sids[i]!);
-    });
-  }
-  return lanes.map((d) =>
-    d !== null && typeof d === "object"
-      ? { device: null, endpoint: d.endpoint, name: d.endpoint }
-      : { device: d, endpoint: null, name: d ?? "no device" },
-  );
+/** The branch of a path of an answer, or null. */
+export function branchOf(a: Answer, p: PathRef): Branch | null {
+  if (p.replyOf === null) return a.branches.find((b) => b.index === p.branch) ?? null;
+  const r = a.replies.find((x) => x.forward_branch === p.replyOf);
+  return r?.answer?.branches.find((b) => b.index === p.branch) ?? null;
 }
 
-/** The index of the lane of a device, or of an endpoint. */
-export function laneIndex(lanes: readonly Lane[], k: LaneKey): number {
-  const id = laneId(k);
-  return lanes.findIndex((l) => laneId(l.endpoint !== null ? { endpoint: l.endpoint } : l.device) === id);
+/**
+ * The lanes in path order: the devices, each once. A device that a later
+ * sequence adds goes before the next device of that sequence that has a
+ * lane.
+ */
+export function lanesOf(paths: readonly (readonly (string | null)[])[]): Lane[] {
+  const lanes: (string | null)[] = [];
+  for (const seq of paths) {
+    const before = new Set(lanes);
+    seq.forEach((d, i) => {
+      if (lanes.includes(d)) return;
+      const next = seq.slice(i + 1).find((x) => before.has(x));
+      const at = next === undefined ? lanes.length : lanes.indexOf(next);
+      lanes.splice(at, 0, d);
+    });
+  }
+  return lanes.map((d) => ({ device: d, name: d ?? "no device" }));
+}
+
+/** The index of the lane of a device. */
+export function laneIndex(lanes: readonly Lane[], d: string | null): number {
+  return lanes.findIndex((l) => l.device === d);
 }
 
 /** The endpoint that a verdict delivers to, if it names one. */
@@ -369,12 +377,6 @@ export function sourceEndpoints(a: Answer): Map<number, string> {
   return out;
 }
 
-/** The lane sequence of a branch: its start endpoint, its devices, its end endpoint. */
-export function laneSeq(b: Branch, start: string | null): LaneKey[] {
-  const end = endpointOf(b.verdict);
-  return [...(start ? [{ endpoint: start }] : []), ...devicesOf(b), ...(end ? [{ endpoint: end }] : [])];
-}
-
 /** The groups of steps of one row each at a level. */
 function groups(steps: readonly TraceStep[], level: Level): TraceStep[][] {
   const out: TraceStep[][] = [];
@@ -386,22 +388,17 @@ function groups(steps: readonly TraceStep[], level: Level): TraceStep[][] {
   return out;
 }
 
+/** The key of the rows of a path. */
+export function pathKey(p: PathRef): string {
+  return `${p.replyOf === null ? "f" : `r${p.replyOf}`}.${p.branch}`;
+}
+
 /** The rows of one path. */
-export function pathRows(
-  b: Branch,
-  path: PathRef,
-  dir: Dir,
-  level: Level,
-  lanes: readonly Lane[],
-  start: string | null = null,
-  set = false,
-): StepRow[] {
+export function pathRows(b: Branch, path: PathRef, level: Level, lanes: readonly Lane[], set = false): StepRow[] {
   const gs = groups(b.steps, level);
+  const dir: Dir = path.replyOf === null ? "forward" : "reply";
   const laneOf = (d: string | null | undefined) => Math.max(0, laneIndex(lanes, d ?? null));
-  const startLane = start ? laneIndex(lanes, { endpoint: start }) : -1;
-  const endEp = endpointOf(b.verdict);
-  const endLane = endEp ? laneIndex(lanes, { endpoint: endEp }) : -1;
-  const prefix = `${path.replyOf === null ? "f" : `r${path.replyOf}`}.${path.branch}`;
+  const prefix = pathKey(path);
   let prevLane: number | null = null;
   return gs.map((g, gi) => {
     const first = g[0]!;
@@ -417,8 +414,7 @@ export function pathRows(
       fn: g.length === 1 ? functionLabel(first) : `${g.length} functions`,
       lane,
       reason: last.reason.detail,
-      cells: FIELDS.map((f) => cell(setValue(first.input, f, set), setValue(last.output, f, set), gi === 0)),
-      rib: ribOfGroup(g.map((s) => s.rib_guard)),
+      rewrites: rewritesOf(g, set),
       source:
         g.length === 1
           ? (() => {
@@ -426,11 +422,9 @@ export function pathRows(
               return s ? spanLabel(s, first.device) : "";
             })()
           : groupSource(g, first.device),
-      enterFrom:
-        prevLane !== null && prevLane !== lane ? prevLane : gi === 0 && startLane >= 0 && startLane !== lane ? startLane : null,
+      enterFrom: prevLane !== null && prevLane !== lane ? prevLane : null,
       start: gi === 0,
       end: gi === gs.length - 1 ? endOf(b.verdict) : null,
-      endLane: gi === gs.length - 1 && endLane >= 0 && endLane !== lane ? endLane : null,
       group: g.length > 1,
     };
     prevLane = lane;
@@ -439,82 +433,20 @@ export function pathRows(
 }
 
 /**
- * The ladder of a path query answer, or of one part of a set query answer
- * with `set`: the forward branches, then the replies. With `reply`, a
- * forward branch that does not deliver has a muted line in the place of its
- * reply.
+ * The ladder of one path of a path query answer, or of one part of a set
+ * query answer with `set`: a lane for each device of the path in path
+ * order, and a row for each function or each device.
  */
-export function ladder(a: Answer, level: Level, reply = true, set = false): Ladder {
-  const starts = sourceEndpoints(a);
-  const seqs: LaneKey[][] = a.branches.map((b) => laneSeq(b, starts.get(b.index) ?? null));
-  const fwdEnd = new Map(a.branches.map((b) => [b.index, endpointOf(b.verdict)]));
-  for (const r of a.replies) for (const b of r.answer?.branches ?? []) seqs.push(laneSeq(b, fwdEnd.get(r.forward_branch) ?? null));
-  const lanes = lanesOf(seqs);
-  const rows: Row[] = [];
-  const multi = a.branches.length > 1;
-  for (const b of a.branches) {
-    if (multi) {
-      // The result line gives the verdict of each branch.
-      rows.push({ type: "section", key: `f.${b.index}`, dir: "forward", text: `branch ${b.index}`, verdict: null, note: null });
-    }
-    rows.push(...pathRows(b, { replyOf: null, branch: b.index }, "forward", level, lanes, starts.get(b.index) ?? null, set));
-  }
-  for (const b of a.branches) {
-    const replies = a.replies.filter((r) => r.forward_branch === b.index);
-    if (replies.length === 0 && reply && b.verdict.kind !== "deliver") {
-      rows.push({
-        type: "section",
-        key: `n${b.index}`,
-        dir: "reply",
-        text: multi ? `no reply of branch ${b.index}` : "no reply",
-        verdict: null,
-        note: null,
-        muted: true,
-      });
-    }
-    for (const r of replies) {
-      const fb = r.forward_branch;
-      if (!r.ran || !r.answer) {
-        rows.push({ type: "section", key: `r${fb}`, dir: "reply", text: `reply of branch ${fb}`, verdict: null, note: r.not_run_reason ?? null });
-        continue;
-      }
-      const rmulti = r.answer.branches.length > 1;
-      for (const rb of r.answer.branches) {
-        rows.push({
-          type: "section",
-          key: `r${fb}.${rb.index}`,
-          dir: "reply",
-          text: rmulti ? `reply of branch ${fb}, branch ${rb.index}` : `reply of branch ${fb}`,
-          // The result line gives the verdict of a reply with one branch.
-          verdict: rmulti ? rb.verdict : null,
-          note: null,
-        });
-        rows.push(...pathRows(rb, { replyOf: fb, branch: rb.index }, "reply", level, lanes, fwdEnd.get(fb) ?? null, set));
-      }
-    }
-  }
-  return { lanes, rows };
-}
-
-/** The number of functions with no delay data and of links with no delay data. */
-export function delayGaps(b: Pick<Branch, "delay">): { functions: number; links: number } {
-  const fns = new Set<string>();
-  let links = 0;
-  for (const m of b.delay.missing) {
-    if (m.kind === "link") links += 1;
-    else fns.add(m.function);
-  }
-  return { functions: fns.size, links };
+export function ladder(a: Answer, level: Level, path: PathRef, set = false): Ladder {
+  const b = branchOf(a, path);
+  if (!b) return { lanes: [], rows: [] };
+  const lanes = lanesOf([devicesOf(b)]);
+  return { lanes, rows: pathRows(b, path, level, lanes, set) };
 }
 
 /** The number of route lookups of the answer that no collected RIB checks. */
 export function ribNotChecked(a: Answer): number {
   return allBranches(a).reduce((n, b) => n + b.steps.filter((s) => s.rib_guard === "not_checked").length, 0);
-}
-
-/** The devices of a branch in order, each once. */
-export function devicesOnPath(b: Branch): string[] {
-  return [...new Set(b.steps.map((s) => s.device).filter((d): d is string => !!d))];
 }
 
 /** The engine word of a verdict kind, in the case of the engine. */
@@ -586,18 +518,6 @@ export function partCounts(parts: readonly { result: { kind: string; verdict?: V
   return out;
 }
 
-/** The outcomes of a set answer that occur, each with its count, in the order deliver, exit, drop, unknown, depends on path. */
-export function outcomeCounts(n: ReturnType<typeof partCounts>): [string, number][] {
-  const all: [string, number][] = [
-    ["deliver", n.deliver],
-    ["exit", n.exit],
-    ["drop", n.drop],
-    ["unknown", n.unknown],
-    ["depends_on_path", n.dependsOnPath],
-  ];
-  return all.filter(([, c]) => c > 0);
-}
-
 /**
  * Whether the names of the lanes stand upright: when a name is wider than
  * its lane at `charWidth` px for each character.
@@ -662,6 +582,32 @@ export function detailSources(steps: readonly TraceStep[]): DetailSource[] {
   return out;
 }
 
+/**
+ * The span whose lines the step panel opens first: the smallest span of
+ * text of the same file that holds the most specific span, else the most
+ * specific span. Null with no span of text.
+ */
+export function openSpan(sources: readonly DetailSource[]): DetailSource | null {
+  const best = sources[0];
+  if (!best || isRowSpan(best.span)) return null;
+  let out = best;
+  for (const e of sources) {
+    const s = e.span;
+    if (e === best || isRowSpan(s) || s.file !== best.span.file) continue;
+    if (s.first_line > best.span.first_line || s.last_line < best.span.last_line) continue;
+    if (out === best || s.last_line - s.first_line < out.span.last_line - out.span.first_line) out = e;
+  }
+  return out;
+}
+
+/** The lines of `shown` that the mark of the most specific span `best` covers, or null. */
+export function markedLines(shown: Span, best: Span | null): [number, number] | null {
+  if (!best || best.file !== shown.file) return null;
+  const a = Math.max(shown.first_line, best.first_line);
+  const b = Math.min(shown.last_line, best.last_line);
+  return a <= b ? [a, b] : null;
+}
+
 /** The step that decides the verdict of a path, with the reason of the verdict. */
 export interface DecidingStep {
   path: PathRef;
@@ -688,9 +634,9 @@ export function decidingStep(b: Branch, path: PathRef = { replyOf: null, branch:
 }
 
 /** The key of the row of a ladder that holds a step of a path. */
-export function rowKeyOfStep(rows: readonly Row[], path: PathRef, step: number): string | null {
+export function rowKeyOfStep(rows: readonly StepRow[], path: PathRef, step: number): string | null {
   for (const r of rows) {
-    if (r.type !== "step" || r.path.branch !== path.branch || r.path.replyOf !== path.replyOf) continue;
+    if (!samePath(r.path, path)) continue;
     if (r.steps.some((s) => s.index === step)) return r.key;
   }
   return null;

@@ -1,8 +1,18 @@
 // The endpoint picker of the query bar: the endpoints of the twin that
 // match the text of an address field, and the state of the keys of its list.
 
-/** The most endpoints that the list shows. */
-export const PICKER_MAX = 10;
+/** The options of one page of a picker: the list shows one page, and one more each time it scrolls to its end. */
+export const PICKER_MAX = 50;
+
+/** The options that a picker reads for a number of pages. */
+export function pickerLimit(pages: number): number {
+  return PICKER_MAX * Math.max(1, pages);
+}
+
+/** Whether a table answer can have more rows than the `limit` that it was read with. */
+export function hasMore(t: { rows: unknown[]; next_cursor?: string | null }, limit: number): boolean {
+  return !!t.next_cursor || t.rows.length >= limit;
+}
 
 /** One endpoint of the twin: its name, its addresses and where it attaches. */
 export interface EndpointRow {
@@ -57,10 +67,9 @@ export function pickerQuery(value: string): string | null {
 }
 
 /**
- * The endpoints that match a text: by a prefix of the name or of an
- * address, with no regard to case. An endpoint with no address is left
- * out, because a choice fills in an address. The order is by name, and the
- * list has at most `max` endpoints.
+ * The endpoints with an address that match a text: by a prefix of the
+ * name or of an address, with no regard to case. The order is by name,
+ * and the list has at most `max` endpoints.
  */
 export function matchEndpoints(rows: readonly EndpointRow[], value: string, max = PICKER_MAX): Suggestion[] {
   const q = pickerQuery(value)?.toLowerCase();

@@ -42,7 +42,7 @@ const FUNCTIONS = [
 ];
 
 describe("ingress field", () => {
-  it("is not a base field, so it shows only from Add field, a value or the button", () => {
+  it("is not a base field", () => {
     expect(BASE_FIELDS.has("ingress")).toBe(false);
   });
 });

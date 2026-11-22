@@ -1,12 +1,13 @@
 // The view and the twin in the URL of the page. A URL with no view is the
-// Trace view, so a link of a query stays as it is.
+// Trace view.
 import type { TwinRef } from "../api/client";
-import type { View } from "./Parts";
+import type { View } from "./frame";
 
-const PARAM: Partial<Record<View, string>> = { Tables: "tables", Coverage: "coverage", Inventory: "inventory", Tokens: "tokens" };
+const PARAM: Partial<Record<View, string>> = { Topology: "topology", Tables: "tables", Coverage: "coverage", Inventory: "inventory", Tokens: "tokens" };
 
 export function viewOf(search: string): View {
   const v = new URLSearchParams(search).get("view");
+  if (v === "topology") return "Topology";
   if (v === "tables") return "Tables";
   if (v === "coverage") return "Coverage";
   if (v === "inventory") return "Inventory";
@@ -14,20 +15,28 @@ export function viewOf(search: string): View {
   return "Trace";
 }
 
-export function twinOf(search: string): string | null {
-  return new URLSearchParams(search).get("twin");
+/** The query id of a URL, or null. */
+export function queryOf(search: string): string | null {
+  return new URLSearchParams(search).get("q");
+}
+
+/** The URL of the Tables view on the table `functions` of a device. */
+export function functionsSearch(twin: string, device: string): string {
+  const u = new URLSearchParams({ view: "tables", twin, table: "functions", "f.device": device });
+  return `?${u.toString()}`;
 }
 
 /**
  * The URL of a view of a twin, with the table of the Tables view kept, and
- * for the Trace view the query `qid` of the shown answer.
+ * for the Trace view and the Topology view the query `qid` of the shown
+ * answer.
  */
 export function viewSearch(view: View, twin: string, from = "", qid: string | null = null): string {
   const u = new URLSearchParams();
   const p = PARAM[view];
   if (p) u.set("view", p);
   if (twin) u.set("twin", twin);
-  if (view === "Trace" && twin && qid) u.set("q", qid);
+  if ((view === "Trace" || view === "Topology") && twin && qid) u.set("q", qid);
   const table = new URLSearchParams(from).get("table");
   if (view === "Tables" && table && viewOf(from) === "Tables") u.set("table", table);
   const q = u.toString();

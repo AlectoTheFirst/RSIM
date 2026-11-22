@@ -8,17 +8,16 @@ import {
   ageText,
   arrange,
   cellState,
+  sshState,
+  sshText,
+  trustState,
+  trustText,
   collectionChecked,
-  counts,
   credentialGroups,
   credentialBody,
   credentialFields,
   deviceCount,
-  deviceSsh,
-  devicesHave,
   factsByName,
-  groupSsh,
-  groupTrust,
   hops,
   lastCycle,
   nameTaken,
@@ -35,6 +34,7 @@ import {
   groupBody,
   groupDraft,
   inherited,
+  settingDefaults,
   jumpHostBody,
   jumpHostRoutes,
   newDeviceChecked,
@@ -46,6 +46,14 @@ import {
   routeBody,
   routeFields,
   sameRecord,
+  columnChars,
+  deviceMatches,
+  draftOrigin,
+  factNames,
+  foldKey,
+  listRows,
+  seenChars,
+  MIN_CHARS,
 } from "../src/inventory/model";
 import { viewOf, viewSearch } from "../src/page/url";
 
@@ -173,48 +181,19 @@ describe("cells of the settings", () => {
     expect(cellState(null, "default", false)).toEqual({ kind: "none" });
   });
 
-  it("gives the SSH words, an override when the device sets one of them", () => {
-    expect(deviceSsh(VENDORS, R2, true)).toEqual({ kind: "override", text: "legacy, shell" });
-    expect(deviceSsh(VENDORS, R1, true)).toEqual({ kind: "inherit" });
-    expect(deviceSsh(VENDORS, R1, false)).toEqual({ kind: "value", text: "modern, exec" });
+  it("gives the SSH algorithms and mode and the TLS trust, with the defaults for none", () => {
+    expect(sshText(null, undefined)).toBe("modern exec");
+    expect(sshText("legacy", "shell")).toBe("legacy shell");
+    expect(trustText(null)).toBe("pin");
+    expect(trustText("ca")).toBe("ca");
   });
 
-  it("leaves the SSH cell empty for a vendor with no SSH collector", () => {
-    expect(deviceSsh(VENDORS, X1, true)).toBeNull();
-    expect(deviceSsh(VENDORS, resolved("u1", "g-u", "unifi", {}), true)).toBeNull();
-    expect(groupSsh(VENDORS, INV.groups[1]!)).toBeNull();
-    expect(groupSsh(VENDORS, INV.groups[0]!)).toBe("modern, exec");
-    expect(groupSsh(VENDORS, INV.groups[2]!)).toBe("legacy, exec");
-  });
-});
-
-describe("trust of a group", () => {
-  it("gives the TLS trust over HTTPS, not known over SSH and none with no collector", () => {
-    expect(groupTrust(VENDORS, { name: "u", vendor: "unifi", settings: {} })).toEqual({ kind: "value", text: "pin" });
-    expect(groupTrust(VENDORS, { name: "u", vendor: "unifi", settings: { tls_trust: "ca" } })).toEqual({ kind: "value", text: "CA" });
-    expect(groupTrust(VENDORS, INV.groups[0]!)).toEqual({ kind: "not known" });
-    expect(groupTrust(VENDORS, INV.groups[1]!)).toBeNull();
-  });
-});
-
-describe("result line", () => {
-  it("counts the devices, the groups, the devices with no site or no collector, and the names seen", () => {
-    const seen = seenRows(
-      ["device", "port", "neighbour", "remote_port", "protocol", "provenance"],
-      [
-        ["r1", "eth1", "n-out", "e1", "lldp", []],
-        ["r2", "eth1", "n-out", "e2", "cdp", []],
-        ["r1", "eth2", "r2", "eth1", "lldp", []],
-      ],
-      INV.devices.map((d) => d.name),
-    );
-    expect(counts(INV, VENDORS, seen)).toEqual({ devices: 3, groups: 3, noSite: 1, noCollector: 1, seen: 1 });
-    expect(devicesHave(1)).toBe("1 device has");
-    expect(devicesHave(4)).toBe("4 devices have");
-  });
-
-  it("counts no device with no collector when the vendors are not known", () => {
-    expect(counts(INV, null, []).noCollector).toBe(0);
+  it("prints the SSH cell of a device as an override when the device sets one of its 2 settings", () => {
+    expect(sshState(R2.settings, true)).toEqual({ kind: "override", text: "legacy shell" });
+    expect(sshState(R1.settings, true)).toEqual({ kind: "inherit" });
+    expect(sshState(R1.settings, false)).toEqual({ kind: "value", text: "modern exec" });
+    expect(trustState(R1.settings, true)).toEqual({ kind: "inherit" });
+    expect(trustState(resolved("h1", "g-https", "unifi", { tls_trust: r("ca", "device") }).settings, true)).toEqual({ kind: "override", text: "ca" });
   });
 });
 
@@ -361,6 +340,21 @@ describe("edits of the settings", () => {
     expect(inherited(field("route"), null)).toEqual({ from: "default", text: "direct" });
   });
 
+  it("takes the default of an empty setting from the resolved devices", () => {
+    const devices = [
+      resolved("r1", "g-vyos", "vyos", { timeout_seconds: r(30, "device"), section_timeout_seconds: r(25, "group") }),
+      resolved("r2", "g-vyos", "vyos", { timeout_seconds: r(90, "default") }),
+    ];
+    const d = settingDefaults(devices);
+    expect(d.timeout_seconds).toBe("90");
+    expect(d.section_timeout_seconds).toBe("20");
+    expect(d.credential).toBeUndefined();
+    expect(inherited(field("timeout_seconds"), INV.groups[2]!.settings, d)).toEqual({ from: "default", text: "90" });
+    expect(inherited(field("ssh_algorithms"), INV.groups[2]!.settings, d)).toEqual({ from: "group", text: "legacy" });
+    expect(inherited(field("credential"), null, d)).toEqual({ from: "default", text: "none" });
+    expect(settingDefaults([])).toEqual({});
+  });
+
   it("clears a setting of a device to inherit, with no other field changed", () => {
     const r2 = storedDevice(INV, "r2")!;
     const b = deviceBody(r2, { ...deviceDraft(r2), ssh_mode: "" });
@@ -504,5 +498,92 @@ describe("the history of the store", () => {
     for (const bad of ["0", "3651", "", "7.5", "-1", "x"]) expect(collectionChecked(bad).ok, bad).toBe(false);
     const out = collectionChecked("0");
     expect(!out.ok && out.problem.title).toBe("history out of range");
+  });
+});
+
+describe("the device list", () => {
+  const sections = () => arrange(INV, DEVICES, "device group");
+
+  it("finds a device by its name, its address or its site, in any case", () => {
+    expect(deviceMatches(R1, "R1")).toBe(true);
+    expect(deviceMatches(R1, "192.0.2.99")).toBe(true);
+    expect(deviceMatches(R1, " S1 ")).toBe(true);
+    expect(deviceMatches(R1, "x1")).toBe(false);
+    expect(deviceMatches(R2, "")).toBe(true);
+  });
+
+  it("gives a group row and its device rows for each section", () => {
+    const rows = listRows(sections(), new Set(), "");
+    expect(rows.map((r) => (r.kind === "group" ? `group ${r.section.key} ${r.count}` : `device ${r.device.name}`))).toEqual([
+      "group g-empty 0",
+      "group g-other 1",
+      "device x1",
+      "group g-vyos 2",
+      "device r1",
+      "device r2",
+    ]);
+    expect(rows.every((r) => r.kind === "group" || r.underGroup)).toBe(true);
+  });
+
+  it("leaves out the devices of a folded group and keeps its count", () => {
+    const vyos = sections().find((s) => s.key === "g-vyos")!;
+    const rows = listRows(sections(), new Set([foldKey(vyos)]), "");
+    const g = rows.find((r) => r.kind === "group" && r.section.key === "g-vyos");
+    expect(g).toMatchObject({ folded: true, count: 2 });
+    expect(rows.some((r) => r.kind === "device" && r.device.group === "g-vyos")).toBe(false);
+  });
+
+  it("keeps only the sections with a matching device under a filter, with the count of the matches", () => {
+    const rows = listRows(sections(), new Set(), "s1");
+    expect(rows.map((r) => (r.kind === "group" ? `group ${r.section.key} ${r.count}` : `device ${r.device.name}`))).toEqual(["group g-vyos 1", "device r1"]);
+  });
+
+  it("gives a section with no key its own fold key", () => {
+    const bySite = arrange(INV, DEVICES, "site");
+    expect(bySite.map(foldKey)).toEqual(["=s1", "=s2", ""]);
+  });
+
+  it("draws 10,000 devices in 40 groups as 10,040 rows", () => {
+    const groups = Array.from({ length: 40 }, (_, i) => ({ name: `g-${String(i).padStart(2, "0")}`, vendor: "vyos", settings: {} }));
+    const devices = Array.from({ length: 10_000 }, (_, i) => resolved(`d-${i}`, groups[i % 40]!.name, "vyos", {}));
+    const inv: Inventory = { ...INV, groups, devices: [] };
+    expect(listRows(arrange(inv, devices, "device group"), new Set(), "").length).toBe(10_040);
+  });
+
+  it("sizes each text column by its longest text, with a floor", () => {
+    const long = resolved("core-switch-with-a-long-name", "g-vyos", "vyos", {});
+    const inv: Inventory = { ...INV, devices: [] };
+    const w = columnChars(arrange(inv, [long, R1], "device group"), "device group");
+    expect(w.device).toBe("core-switch-with-a-long-name".length);
+    expect(w.address).toBe(MIN_CHARS);
+    expect(w.credential).toBe(MIN_CHARS);
+  });
+
+  it("sizes the columns of the devices that the twin sees", () => {
+    expect(seenChars([{ name: "ap-lobby-north-wing", device: "sw1", port: "GigabitEthernet1/0/24", protocol: "lldp" }])).toEqual({
+      name: "ap-lobby-north-wing".length,
+      device: MIN_CHARS,
+      port: "GigabitEthernet1/0/24".length,
+    });
+  });
+
+  it("asks for the facts of each name one time, with no name that a comma list cannot hold", () => {
+    expect(factNames(["r2", "r1", "r2", "", "a,b"])).toEqual(["r1", "r2"]);
+  });
+});
+
+describe("origins of the settings in a panel", () => {
+  const field = (k: string) => SETTING_FIELDS.find((f) => f.key === k)!;
+
+  it("gives the device for a set text, else the group, else the default", () => {
+    const group = { credential: "cred-a" };
+    expect(draftOrigin(field("credential"), { credential: "cred-hop" }, group, "device")).toBe("device");
+    expect(draftOrigin(field("credential"), { credential: " " }, group, "device")).toBe("group");
+    expect(draftOrigin(field("ssh_mode"), {}, group, "device")).toBe("default");
+  });
+
+  it("gives the group for a set text of a group, else the default", () => {
+    expect(draftOrigin(field("interval_seconds"), { interval_seconds: "300" }, null, "group")).toBe("group");
+    expect(draftOrigin(field("interval_seconds"), { interval_seconds: "" }, null, "group")).toBe("default");
   });
 });

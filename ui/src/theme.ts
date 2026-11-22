@@ -134,18 +134,57 @@ export type TypeStyle = keyof typeof TYPE;
 
 /** The sizes in px. */
 export const SIZE = {
+  // Frame and controls
+  railWidth: 72,
+  railItemPad: 10,
+  railIcon: 20,
+  topBar: 56,
+  topBarDivider: 24,
   margin: 24,
+  pageTop: 20,
+  cardGap: 16,
+  cardPad: 16,
+  cardRadius: 8,
+  panel: 352,
   button: 32,
   buttonRadius: 6,
   buttonPad: 12,
-  input: 32,
+  input: 36,
+  inputPanel: 32,
   inputRadius: 6,
   inputPad: 10,
   buttonGap: 4,
   groupGap: 8,
-  cardRadius: 8,
+  icon: 16,
+  iconSmall: 12,
+  iconStroke: 1.5,
+  chip: 26,
+  chipButton: 20,
+  pill: 20,
+  pillRadius: 10,
+  pillPad: 8,
+  tabLine: 2,
   factGap: 24,
-  lane: 52,
+  account: 28,
+  accountRadius: 14,
+  hairline: 1,
+  hatchPitch: 5,
+  hatchLine: 1,
+  hatchMark: 22,
+  hatchSquare: 12,
+  markGap: 6,
+  selectedBar: 3,
+  focusRing: 2,
+  focusOffset: 2,
+  topBarPad: 12,
+  topBarGap: 16,
+  resultPad: 12,
+  lineGap: 6,
+  menu: 420,
+  menuMin: 200,
+  dash: 2,
+  // Trace
+  lane: 44,
   /** The advance of a character of the type `index`, rounded up. */
   indexChar: 7,
   pathLine: 3,
@@ -153,79 +192,81 @@ export const SIZE = {
   deviceSquare: 12,
   ring: 3.75,
   ringStroke: 2.5,
-  account: 28,
-  accountRadius: 14,
-  hairline: 1,
-  hatchPitch: 5,
-  hatchLine: 1,
-  hatchMark: 22,
-  markGap: 6,
-  selectedBar: 3,
-  focusRing: 2,
-  focusOffset: 2,
-  topBarPad: 12,
-  topBarGap: 20,
-  queryBarPad: 12,
-  queryBarGap: 18,
-  resultPad: 12,
-  lineGap: 6,
+  queryBarGap: 12,
   colStep: 36,
   colFunction: 168,
-  colReason: 280,
-  colReasonMax: 560,
-  colIp: 128,
-  colPort: 56,
-  colTransport: 76,
-  colRib: 36,
+  colFunctionMax: 264,
+  colReason: 200,
+  colRewrite: 176,
   colSource: 140,
+  /** The advance of a character of the type `value`. */
+  valueChar: 7.2,
+  outcomeMark: 40,
+  outcomeIcon: 20,
+  stripNode: 28,
+  stripLine: 2,
+  stripLineMin: 24,
+  stripGap: 12,
+  listMax: 320,
+  pickerList: 320,
+  pickName: 160,
+  pickAddress: 136,
   cellPad: 10,
-  ribPadX: 6,
-  ribPadY: 2,
-  detailGap: 28,
   factLabel: 128,
   codeNumber: 40,
-  menu: 420,
-  dash: 2,
-  invMark: 28,
-  invDevice: 160,
-  invAddress: 128,
-  invVendor: 96,
-  invSite: 88,
-  invLocation: 140,
-  invCredential: 116,
-  invRoute: 120,
-  invSsh: 116,
-  invTrust: 96,
-  invCycle: 150,
-  invSerial: 132,
-  invHatch: 12,
-  invKvLabel: 136,
-  invDetailGap: 32,
-  invDetailBottom: 14,
-  invSiteInput: 128,
-  invLocationInput: 232,
-  invSettingLabel: 210,
-  invSettingInput: 216,
-  credName: 128,
-  credSecret: 216,
-  routeName: 128,
-  routeHops: 380,
-  routeCredential: 128,
-  jumpName: 128,
-  jumpAddress: 168,
-  jumpCredential: 128,
-  jumpSsh: 120,
-  invActions: 190,
-  authInput: 240,
+  // Tables
+  tablesList: 184,
+  tablesHead: 36,
+  tablesPanelList: 240,
+  tablesFilterInput: 240,
+  // Inventory
+  invMark: 16,
+  invCycle: 120,
+  invSerial: 160,
+  invGroupAction: 72,
+  invFilter: 240,
+  invSettingLabel: 128,
+  invNumber: 128,
+  invSeenProtocol: 72,
+  invSeenAction: 136,
+  // Coverage
+  covPathCount: 72,
+  // Sign-in and tokens
+  authCard: 360,
+  tokenDays: 96,
   tokenName: 160,
   tokenScopes: 250,
-  tokenTime: 132,
+  tokenTime: 144,
   tokenState: 76,
-  tokenText: 460,
+  // Topology
+  mapCard: 144,
+  mapCardHeight: 48,
+  mapColGap: 128,
+  mapRowGap: 80,
+  mapStackGap: 16,
+  mapMargin: 48,
+  mapTrack: 4,
+  mapTextMin: 9,
+  mapHit: 6,
+  mapCardPad: 10,
+  mapCardLine: 14,
+  mapTag: 18,
+  mapTagPad: 4,
+  mapTagGap: 4,
+  mapTagRadius: 4,
+  mapRing: 4,
+  mapPanStep: 64,
+  mapDrag: 4,
+  mapPanelList: 240,
+  mapFactLabel: 112,
+  mapLine: 2,
+  mapDash: 6,
+  mapDeviceField: 200,
+  mapHalo: 3,
 } as const;
 
-/** The share of `rule` in the lane guides. */
-export const GUIDE_SHARE = "55%";
+/** The font weights of the controls: a button, a column head and a strong word. */
+export const WEIGHT = { regular: 400, control: 500, strong: 600 } as const;
 
 /** The share of a colour in its tint on `surface`. */
 export const TINT_SHARE = "14%";
@@ -236,14 +277,23 @@ export const DANGER_LINE_SHARE = "40%";
 /** The time of an open, a close and a change of state. */
 export const MOTION = "120ms";
 
-/** The colours that have a tint. */
-const TINTED: readonly ColourToken[] = ["forward", "reply", "parameter", "deliver", "drop", "action"];
+/** The time that a toast shows, in ms. */
+export const TOAST_TIME = 4_000;
 
-/** The shadows of a card, a panel and a menu, as offset, blur and the share of black. */
+/** The share of `ink` in the ground of the primary button under the pointer. */
+export const HOVER_SHARE = "14%";
+
+/** The share of `rail-ink` in the ground of the current view of the rail. */
+export const RAIL_CURRENT_SHARE = "8%";
+
+/** The colours that have a tint. */
+const TINTED: readonly ColourToken[] = ["forward", "reply", "parameter", "deliver", "drop", "action", "ink"];
+
+/** The shadow of a card, of a panel, and of a menu and a toast. */
 const SHADOWS = {
-  card: { light: "0 1px 2px rgba(16, 24, 40, 0.05)", dark: "0 1px 2px rgba(0, 0, 0, 0.3)" },
-  panel: { light: "0 4px 12px rgba(16, 24, 40, 0.08)", dark: "0 4px 12px rgba(0, 0, 0, 0.4)" },
-  menu: { light: "0 12px 32px rgba(16, 24, 40, 0.18)", dark: "0 12px 32px rgba(0, 0, 0, 0.55)" },
+  card: "0 1px 2px rgba(16, 24, 40, 0.05)",
+  panel: "0 4px 12px rgba(16, 24, 40, 0.08)",
+  menu: "0 12px 32px rgba(16, 24, 40, 0.18)",
 } as const;
 
 export interface Prefs {
@@ -301,15 +351,17 @@ export function properties(s: Scheme, p: Prefs): Record<string, string> {
     out[`--${name}-size`] = `${t.size}px`;
     out[`--${name}-line`] = `${t.line}px`;
     out[`--${name}-weight`] = String(t.weight);
-    out[`--${name}-spacing`] = t.spacing;
+    if (t.spacing !== "normal") out[`--${name}-spacing`] = t.spacing;
   }
   for (const [k, v] of Object.entries(SIZE)) {
     if (typeof v === "number") out[`--${kebab(k)}`] = `${v}px`;
   }
   for (const k of TINTED) out[`--${k}-tint`] = `color-mix(in srgb, var(--${k}) ${TINT_SHARE}, var(--surface))`;
+  for (const [k, v] of Object.entries(WEIGHT)) out[`--weight-${k}`] = String(v);
+  out["--action-hover"] = `color-mix(in srgb, var(--ink) ${HOVER_SHARE}, var(--action))`;
+  out["--rail-current"] = `color-mix(in srgb, var(--rail-ink) ${RAIL_CURRENT_SHARE}, var(--rail))`;
   out["--danger-line"] = `color-mix(in srgb, var(--drop) ${DANGER_LINE_SHARE}, var(--surface))`;
-  out["--guide"] = `color-mix(in srgb, ${c.rule} ${GUIDE_SHARE}, transparent)`;
-  for (const [k, v] of Object.entries(SHADOWS)) out[`--shadow-${k}`] = dark ? v.dark : v.light;
+  for (const [k, v] of Object.entries(SHADOWS)) out[`--shadow-${k}`] = v;
   out["--motion"] = MOTION;
   out["--row"] = `${p.row}px`;
   out["color-scheme"] = dark ? "dark" : "light";

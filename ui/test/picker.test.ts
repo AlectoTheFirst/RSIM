@@ -14,7 +14,7 @@ vi.mock("../src/api/client", () => ({
     new Promise<Rows>((resolve) => pending.push({ twin, table, params, resolve })),
 }));
 
-const { useAsk, useEntryPoints } = await import("../src/page/Picker");
+const { useAsk, useEntryList } = await import("../src/page/Picker");
 
 // The answers that resolved reach their handlers.
 const settled = () => new Promise<void>((r) => queueMicrotask(() => queueMicrotask(() => queueMicrotask(r))));
@@ -71,7 +71,7 @@ describe("request count of Select entry point", () => {
 describe("rows of the entry point list", () => {
   let shown: EntryOption[] = [];
   function Entries(props: { twin: string; value: string }) {
-    shown = useEntryPoints(props.twin, props.value, true, null);
+    shown = useEntryList(props.twin, props.value, true, null, 1).list;
     return null;
   }
 
