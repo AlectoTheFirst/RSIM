@@ -1,9 +1,11 @@
 // The fields of the query bar: their order, their labels and help text,
-// the names that a field takes, and the check of the form of a value. The
+// the names that a field takes, the check of the form of a value and the
+// query type that the values give. The
 // number ranges and the names come from the OpenAPI document; the checks
 // follow the argument parser of the server.
 import { FIELD_SCHEMA, type FieldName } from "../api/fields";
 
+/** The query type: a path query or a set query. */
 export type Mode = "path" | "set";
 
 /** The fields of the query bar, in order. */
@@ -34,14 +36,9 @@ export const QUERY_FIELDS = [
 ] as const satisfies readonly FieldName[];
 export type QueryField = (typeof QUERY_FIELDS)[number];
 
-/** Whether a mode takes a field: a set query does not take the fields of a path query only. */
+/** Whether a query type takes a field: a set query does not take the fields of a path query only. */
 export function takes(mode: Mode, k: QueryField): boolean {
   return mode === "path" || FIELD_SCHEMA[k].set !== null;
-}
-
-/** The fields of a mode, in the order of the query bar. */
-export function fieldsOfMode(mode: Mode): QueryField[] {
-  return QUERY_FIELDS.filter((k) => takes(mode, k));
 }
 
 /**
@@ -130,33 +127,31 @@ export function labelOf(k: QueryField): string {
 
 const names = (vs: readonly string[]) => vs.join(", ");
 
-/** The form of a value of a field for a mode, as a short phrase. */
-export function formOf(mode: Mode, k: QueryField): string {
+/**
+ * The form of a value of a field, as a short phrase. A comma separates the
+ * values of a list, and + joins the TCP flags of one packet.
+ */
+export function formOf(k: QueryField): string {
   const max = maxOf(k);
   const vs = FIELD_SCHEMA[k].values;
   switch (kindOf(k)) {
     case "address":
-      return mode === "path" ? "address, no prefix" : "addresses and prefixes, comma list";
+      return "addresses and prefixes, comma list";
     case "mac":
-      return mode === "path" ? "6 hex bytes with colons" : "MAC addresses, comma list";
+      return "MAC addresses, comma list";
     case "ingress":
       return "<device>/<interface>";
     case "boolean":
       return "true or false";
     case "number":
-      return mode === "path" ? `0 to ${max}` : `0 to ${max} and ranges a-b, comma list`;
+      return `0 to ${max} and ranges a-b, comma list`;
     case "icmp":
-      return mode === "path" ? `0 to ${max}, ${names(vs)}` : `0 to ${max} and ranges a-b, comma list`;
+      return `0 to ${max}, ${names(vs)}, ranges a-b, comma list`;
     case "names":
-      return mode === "path" ? names(vs) : `${names(vs)}, comma list`;
+      return k === "unstated" ? names(vs) : `${names(vs)}, comma list`;
     case "flags":
-      return mode === "path" ? `flags set, comma list` : `flag sets with +, 0 to 255, ranges a-b, comma list`;
+      return "flags with +, 0 to 255, ranges a-b, comma list";
   }
-}
-
-/** The value of a field that a query does not state, in a mode. */
-export function notStatedNote(mode: Mode): string {
-  return mode === "set" ? "not stated: all values" : "not stated: not known";
 }
 
 // The forms of the values, as the parser of the server reads them.
@@ -270,11 +265,11 @@ export function listItems(v: string): string[] {
 }
 
 /**
- * The message for a value of a field that the server refuses by its
- * form, or null. An empty value is not stated and has no message. The
- * rules between fields stay with the server.
+ * The message for a value of a field that the server refuses by its form
+ * in a query type, or null. An empty value is not stated and has no
+ * message. The rules between fields stay with the server.
  */
-export function checkValue(mode: Mode, k: QueryField, value: string): string | null {
+export function checkIn(mode: Mode, k: QueryField, value: string): string | null {
   const v = value.trim();
   if (v === "") return null;
   const max = maxOf(k) ?? 0;
@@ -284,6 +279,7 @@ export function checkValue(mode: Mode, k: QueryField, value: string): string | n
     return bad === undefined ? null : `not ${what}: ${bad === "" ? "empty item" : bad}`;
   };
   const single = (ok: boolean, what: string) => (ok ? null : `not ${what}: ${v}`);
+  const flagSet = (x: string) => x.split("+").every((f) => vs.includes(f.trim()));
   switch (kindOf(k)) {
     case "ingress": {
       const slash = v.indexOf("/");
@@ -313,40 +309,52 @@ export function checkValue(mode: Mode, k: QueryField, value: string): string | n
       }
       return mode === "path" ? single(vs.includes(v), `one of ${names(vs)}`) : each((x) => vs.includes(x), `one of ${names(vs)}`);
     case "flags":
-      if (mode === "path") return each((x) => vs.includes(x), `a TCP flag, ${names(vs)}`);
-      return each(
-        (x) => (/^[A-Za-z]/.test(x) ? x.split("+").every((f) => vs.includes(f)) : isRange(x, 255)),
-        "0 to 255, a range a-b or flags with +",
-      );
+      if (mode === "path") return single(flagSet(v), "flags with +");
+      return each((x) => (/^[A-Za-z]/.test(x) ? flagSet(x) : isRange(x, 255)), "0 to 255, a range a-b or flags with +");
   }
 }
 
 /**
- * The value of a field after a change of the mode, or null when the value
- * has no form in the new mode. The TCP flags of a path query are a comma
- * list of the flags of one packet, and those of a set query are a comma
- * list of flag sets with the flags of a set joined by +: "syn,ack" of a
- * path query is "syn+ack" of a set query. A set value with more than one
- * flag set has no path form. Each other value stays as it is.
+ * The message for a value of a field that neither query type takes, or
+ * null. An ICMP name is a value of a path query, and a list, a range or a
+ * prefix a value of a set query.
  */
-export function modeValue(from: Mode, to: Mode, k: QueryField, value: string): string | null {
-  const v = value.trim();
-  if (from === to || kindOf(k) !== "flags" || v === "") return value;
+export function checkValue(k: QueryField, value: string): string | null {
+  if (checkIn("path", k, value) === null) return null;
+  const set = checkIn("set", k, value);
+  if (set === null || kindOf(k) !== "icmp") return set;
   const vs = FIELD_SCHEMA[k].values as readonly string[];
-  const items = listItems(v);
-  if (to === "set") {
-    return items.every((x) => vs.includes(x)) ? items.join("+") : value;
-  }
-  if (checkValue("set", k, v) !== null) return value;
-  if (items.length > 1) return null;
-  const parts = (items[0] ?? "").split("+").map((x) => x.trim());
-  return parts.every((x) => vs.includes(x)) ? parts.join(",") : value;
+  const bad = listItems(value.trim()).find((x) => !vs.includes(x) && !isRange(x, maxOf(k) ?? 0));
+  return `not 0 to ${maxOf(k)}, ${vs.join(", ")} or a range a-b: ${bad === "" || bad === undefined ? "empty item" : bad}`;
 }
 
-/** The first stated field of the shown fields whose value has a wrong form, with its message. */
-export function firstError(mode: Mode, fields: Partial<Record<QueryField, string>>): { field: QueryField; message: string } | null {
-  for (const k of fieldsOfMode(mode)) {
-    const message = checkValue(mode, k, fields[k] ?? "");
+/** Whether only a set query takes a value: a list, a range, a prefix or a number of TCP flags. */
+export function setOnly(k: QueryField, value: string): boolean {
+  return value.trim() !== "" && checkIn("path", k, value) !== null && checkIn("set", k, value) === null;
+}
+
+/**
+ * The query type of the fields: a set query when a stated field has a
+ * value of a set query only, else a path query.
+ */
+export function queryMode(fields: Partial<Record<QueryField, string>>): Mode {
+  return QUERY_FIELDS.some((k) => takes("set", k) && setOnly(k, fields[k] ?? "")) ? "set" : "path";
+}
+
+/**
+ * The first stated field whose value has a wrong form, with its message:
+ * a value that neither query type takes, then a value that the query type
+ * of the fields does not take, such as an ICMP name in a set query.
+ */
+export function firstError(fields: Partial<Record<QueryField, string>>): { field: QueryField; message: string } | null {
+  for (const k of QUERY_FIELDS) {
+    const message = checkValue(k, fields[k] ?? "");
+    if (message) return { field: k, message };
+  }
+  const mode = queryMode(fields);
+  for (const k of QUERY_FIELDS) {
+    if (!takes(mode, k)) continue;
+    const message = checkIn(mode, k, fields[k] ?? "");
     if (message) return { field: k, message };
   }
   return null;
@@ -354,14 +362,13 @@ export function firstError(mode: Mode, fields: Partial<Record<QueryField, string
 
 // The names that a field takes, for the list of values.
 
-/** The names that the list of a field proposes in a mode. */
-export function valuesOf(mode: Mode, k: QueryField): readonly string[] {
+/** The names that the list of a field proposes. */
+export function valuesOf(k: QueryField): readonly string[] {
   switch (kindOf(k)) {
     case "names":
     case "flags":
-      return FIELD_SCHEMA[k].values;
     case "icmp":
-      return mode === "path" ? FIELD_SCHEMA[k].values : [];
+      return FIELD_SCHEMA[k].values;
     case "boolean":
       return ["true", "false"];
     default:
@@ -370,24 +377,24 @@ export function valuesOf(mode: Mode, k: QueryField): readonly string[] {
 }
 
 /** The characters that separate the items of a value of a field. */
-function separators(mode: Mode, k: QueryField): string {
+function separators(k: QueryField): string {
   const kind = kindOf(k);
-  if (kind === "flags") return mode === "set" ? ",+" : ",";
-  if (mode === "set" && kind !== "boolean" && kind !== "ingress") return ",";
-  return "";
+  if (kind === "flags") return ",+";
+  if (kind === "boolean" || kind === "ingress") return "";
+  return ",";
 }
 
 /** The index where the item that is typed starts: after the last separator and the spaces after it. */
-function tokenStart(mode: Mode, k: QueryField, value: string): number {
+function tokenStart(k: QueryField, value: string): number {
   let at = 0;
-  for (const c of separators(mode, k)) at = Math.max(at, value.lastIndexOf(c) + 1);
+  for (const c of separators(k)) at = Math.max(at, value.lastIndexOf(c) + 1);
   while (at < value.length && value[at] === " ") at++;
   return at;
 }
 
 /** The item of a value that the list filters by: the text after the last separator. */
-export function valueToken(mode: Mode, k: QueryField, value: string): string {
-  return value.slice(tokenStart(mode, k, value)).trim();
+export function valueToken(k: QueryField, value: string): string {
+  return value.slice(tokenStart(k, value)).trim();
 }
 
 /** The names that contain a text, with no regard to case; the names that start with it come first. */
@@ -399,6 +406,6 @@ export function filterValues(values: readonly string[], token: string): string[]
 }
 
 /** The value after a choice from the list: the choice in the place of the item that is typed. */
-export function insertValue(mode: Mode, k: QueryField, value: string, choice: string): string {
-  return value.slice(0, tokenStart(mode, k, value)) + choice;
+export function insertValue(k: QueryField, value: string, choice: string): string {
+  return value.slice(0, tokenStart(k, value)) + choice;
 }

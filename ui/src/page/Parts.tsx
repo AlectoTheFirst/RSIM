@@ -10,8 +10,8 @@ import { type ColourPref, type Prefs, ROW_HEIGHTS, type RowHeight, type ThemePre
 import {
   BASE_FIELDS,
   FIELD_CHARS,
+  QUERY_FIELDS,
   checkValue,
-  fieldsOfMode,
   filterValues,
   firstError,
   formOf,
@@ -22,7 +22,7 @@ import {
 } from "./fields";
 import { NameList, PickerList, useAsk, useEndpoints, useEntryPoints } from "./Picker";
 import { type EntryOption, PICKER_CLOSED, type PickerState, type Suggestion, ingressStage, pickerKey } from "./pick";
-import { type Fields, type Mode, type QueryField } from "./query";
+import { type Fields, type QueryField } from "./query";
 import { HatchMark } from "./Hatch";
 import { isSnapshot, reloadMark, twinOption } from "./url";
 
@@ -203,7 +203,6 @@ const edits = (el: EventTarget | null) => el instanceof HTMLElement && el.datase
  */
 function QueryValue(props: {
   twin: string;
-  mode: Mode;
   name: QueryField;
   value: string;
   found?: string | null;
@@ -217,13 +216,13 @@ function QueryValue(props: {
 }) {
   const endpoints = PICKED.has(props.name);
   const entry = props.name === "ingress";
-  const names = valuesOf(props.mode, props.name);
+  const names = valuesOf(props.name);
   const picks = endpoints || entry || names.length > 0;
   const [edited, setEdited] = useState(false);
   const [state, setState] = useState<PickerState>(PICKER_CLOSED);
   const found = useEndpoints(props.twin, props.value, endpoints && edited);
   const entries = useEntryPoints(props.twin, props.value, entry && state.open, entry ? (props.found ?? null) : null);
-  const named = names.length ? filterValues(names, valueToken(props.mode, props.name, props.value)) : [];
+  const named = names.length ? filterValues(names, valueToken(props.name, props.value)) : [];
   const count = endpoints ? found.length : entry ? entries.length : named.length;
   const open = state.open && count > 0;
   const id = `pick-${props.name.replace(/\./g, "-")}`;
@@ -236,7 +235,7 @@ function QueryValue(props: {
     setState(PICKER_CLOSED);
   };
   const chooseName = (n: string) => {
-    props.onInput(insertValue(props.mode, props.name, props.value, n));
+    props.onInput(insertValue(props.name, props.value, n));
     setState(PICKER_CLOSED);
   };
   // A device keeps the list open on its interfaces; an interface or the found entry point closes it.
@@ -325,7 +324,6 @@ function QueryValue(props: {
 
 /** The button "Add field" and its list of the fields that do not show. */
 function AddField(props: {
-  mode: Mode;
   fields: readonly QueryField[];
   onAdd: (k: QueryField) => void;
 }) {
@@ -386,7 +384,6 @@ function AddField(props: {
 
 export function QueryBar(props: {
   twin: string;
-  mode: Mode;
   fields: Fields;
   /** The entry point that the shown answer found, or null. */
   found: string | null;
@@ -394,7 +391,6 @@ export function QueryBar(props: {
   askIngress: number;
   /** Whether an answer shows. */
   answered: boolean;
-  onMode: (m: Mode) => void;
   onField: (k: QueryField, v: string) => void;
   onRun: () => void;
   firstInput: { current: HTMLInputElement | null };
@@ -416,18 +412,17 @@ export function QueryBar(props: {
   // no stated field, each base field of a query shows so that a click can
   // edit it. Each other field shows when it has a value or is added.
   const value = (k: QueryField) => props.fields[k] ?? "";
-  // A field that the mode does not take does not show, and `unstated` is
-  // the button of the mark of the fields that are not stated.
-  const ofMode = fieldsOfMode(props.mode).filter((k) => k !== "unstated");
+  // `unstated` is the button of the mark of the fields that are not stated.
+  const ofMode = QUERY_FIELDS.filter((k) => k !== "unstated");
   const none = ofMode.every((k) => value(k).trim() === "");
   const shown = ofMode.filter((k) => value(k) !== "" || added.has(k) || (BASE_FIELDS.has(k) && (editing || none)));
   const hidden = ofMode.filter((k) => !shown.includes(k));
-  const errorOf = (k: QueryField) => (checked.has(k) ? checkValue(props.mode, k, value(k)) : null);
+  const errorOf = (k: QueryField) => (checked.has(k) ? checkValue(k, value(k)) : null);
   const mark = (k: QueryField) => setChecked((c) => (c.has(k) ? c : new Set(c).add(k)));
   // A value with a wrong form stops the run: its field gets the focus and
   // its title gives the message.
   const run = () => {
-    const bad = firstError(props.mode, props.fields);
+    const bad = firstError(props.fields);
     if (bad) {
       mark(bad.field);
       setFocusNext(bad.field);
@@ -451,17 +446,15 @@ export function QueryBar(props: {
         }
       }}
     >
-      <Choice<Mode> value={props.mode} options={["path", "set"]} onChange={props.onMode} />
       {shown.map((k, i) => (
         <QueryValue
           key={k}
           twin={props.twin}
-          mode={props.mode}
           name={k}
           value={value(k)}
           found={k === "ingress" ? props.found : null}
           invalid={errorOf(k) !== null}
-          hint={errorOf(k) ?? formOf(props.mode, k)}
+          hint={errorOf(k) ?? formOf(k)}
           onInput={(v) => props.onField(k, v)}
           onRun={run}
           onBlur={() => {
@@ -473,7 +466,6 @@ export function QueryBar(props: {
       <button type="submit">Run</button>
       {hidden.length ? (
         <AddField
-          mode={props.mode}
           fields={hidden}
           onAdd={(k) => {
             setAdded((a) => new Set(a).add(k));

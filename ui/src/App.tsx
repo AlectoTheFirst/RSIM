@@ -28,8 +28,7 @@ import { HatchMark } from "./page/Hatch";
 import { keyForElement, keyPlace } from "./tables/model";
 import { KeyLine, LEVELS, QueryBar, ResultLine, TopBar } from "./page/Parts";
 import { isSnapshot, newerRun, pinnedRun, twinState, twinStateText, viewOf, viewSearch, withTwin } from "./page/url";
-import { type Fields, type Mode, explainCommand, fieldsOf, requestBody, rsimCommand } from "./page/query";
-import { QUERY_FIELDS, modeValue } from "./page/fields";
+import { type Fields, explainCommand, fieldsOf, queryMode, requestBody, rsimCommand } from "./page/query";
 import { TablesView } from "./tables/TablesView";
 import { type Prefs, applyTheme, loadPrefs, savePrefs } from "./theme";
 
@@ -172,7 +171,6 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
   const [listed, setListed] = useState(false);
   const [twin, setTwin] = useState<string>(readUrl().twin ?? "");
   const [info, setInfo] = useState<Twin | null>(null);
-  const [mode, setMode] = useState<Mode>("path");
   const [fields, setFields] = useState<Fields>({});
   const [result, setResult] = useState<Result | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -251,7 +249,6 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
         replaceUrlTwin(out.twin.id);
       }
       setFields(fieldsOf(out.query as unknown as Record<string, unknown>));
-      setMode(isSet(out) ? "set" : "path");
       setSelected(null);
       setOpen(false);
       autoOpen.current = true;
@@ -340,29 +337,13 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  /** A change of the mode, with each value in the form of the new mode. */
-  function changeMode(next: Mode) {
-    const out: Fields = { ...fields };
-    const cleared: string[] = [];
-    for (const k of QUERY_FIELDS) {
-      const v = fields[k];
-      if (v === undefined) continue;
-      const w = modeValue(mode, next, k, v);
-      if (w === null) cleared.push(k);
-      out[k] = w ?? "";
-    }
-    setFields(out);
-    setMode(next);
-    setNotice(cleared.length ? `${cleared.join(", ")} cleared: one flag set in a path query` : null);
-  }
-
   async function run() {
     if (!twin) return;
     setBusy(true);
     setProblem(null);
     const since = performance.now();
     try {
-      const made = await createQuery(twin, requestBody(mode, fields));
+      const made = await createQuery(twin, requestBody(fields));
       // The answer of a query on the store pins the page to its run.
       if (made.twin !== twin) setTwin(made.twin);
       refreshTwins();
@@ -416,7 +397,10 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
     sourceLines,
     copyExplain: (row: StepRow) => {
       const st = row.steps[row.steps.length - 1]!;
-      copy(explainCommand(mode, result?.twin ?? twin, fields, row.path.branch, st.index, row.path.replyOf), "rsim explain command");
+      if (!result) return;
+      // The step of an answer opens through the query type of its query.
+      const sent = fieldsOf(result.out.query as unknown as Record<string, unknown>);
+      copy(explainCommand(isSet(result.out) ? "set" : "path", result.twin, sent, row.path.branch, st.index, row.path.replyOf), "rsim explain command");
     },
     copyUrl: (row: StepRow) => {
       if (!result) return;
@@ -486,7 +470,7 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
         case "y": {
           const r = stepRows[at];
           if (r) actions.copyExplain(r);
-          else copy(rsimCommand(mode, twin, fields), "rsim command");
+          else copy(rsimCommand(queryMode(fields), twin, fields), "rsim command");
           break;
         }
         default:
@@ -563,12 +547,10 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
       <>
       <QueryBar
         twin={twin}
-        mode={mode}
         fields={fields}
         found={answer && !busy ? ingressHint(answer) : null}
         askIngress={askIngress}
         answered={result !== null}
-        onMode={changeMode}
         onField={(k, v) => setFields({ ...fields, [k]: v })}
         onRun={() => void run()}
         firstInput={firstInput}

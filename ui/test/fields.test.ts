@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { FIELD_SCHEMA, MODE_TEXT, SET_SYNTAX } from "../src/api/fields";
 import {
   QUERY_FIELDS,
+  checkIn,
   checkValue,
   filterValues,
   firstError,
@@ -15,10 +16,8 @@ import {
   kindOf,
   FIELD_LABELS,
   labelOf,
-  notStatedNote,
-  modeValue,
   parseIp,
-  fieldsOfMode,
+  queryMode,
   takes,
   valueToken,
   valuesOf,
@@ -67,7 +66,7 @@ describe("field module", () => {
     expect(MODE_TEXT.set).toBe(schemas.SetQueryArgs.description.replace(/\s+/g, " "));
   });
 
-  it("gives each field a kind and a form in each mode", () => {
+  it("gives each field a kind and one form", () => {
     expect(kindOf("source.ip")).toBe("address");
     expect(kindOf("destination.mac")).toBe("mac");
     expect(kindOf("ingress")).toBe("ingress");
@@ -76,16 +75,11 @@ describe("field module", () => {
     expect(kindOf("tcp_flags")).toBe("flags");
     expect(kindOf("fragment")).toBe("names");
     expect(kindOf("reply")).toBe("boolean");
-    expect(formOf("path", "source.ip")).toBe("address, no prefix");
-    expect(formOf("path", "destination.port")).toBe("0 to 65535");
-    expect(formOf("set", "destination.port")).toBe("0 to 65535 and ranges a-b, comma list");
-    expect(formOf("path", "network.transport")).toBe("tcp, udp, icmp, icmpv6");
-    expect(notStatedNote("path")).toBe("not stated: not known");
-    expect(notStatedNote("set")).toBe("not stated: all values");
-    for (const k of QUERY_FIELDS) {
-      expect(formOf("path", k).length).toBeGreaterThan(0);
-      expect(formOf("set", k).length).toBeGreaterThan(0);
-    }
+    expect(formOf("source.ip")).toBe("addresses and prefixes, comma list");
+    expect(formOf("destination.port")).toBe("0 to 65535 and ranges a-b, comma list");
+    expect(formOf("icmp_type")).toBe("0 to 255, echo-request, echo-reply, ranges a-b, comma list");
+    expect(formOf("network.transport")).toBe("tcp, udp, icmp, icmpv6, comma list");
+    for (const k of QUERY_FIELDS) expect(formOf(k).length).toBeGreaterThan(0);
   });
 });
 
@@ -114,83 +108,130 @@ describe("form check", () => {
   });
 
   it("takes one address in a path query, and a host prefix of it", () => {
-    expect(checkValue("path", "source.ip", "192.0.2.10")).toBeNull();
-    expect(checkValue("path", "source.ip", "192.0.2.10/32")).toBeNull();
-    expect(checkValue("path", "source.ip", "2001:db8::1/128")).toBeNull();
-    expect(checkValue("path", "source.ip", "192.0.2.0/24")).toBe("prefix in a path query: 192.0.2.0/24");
-    expect(checkValue("path", "source.ip", "192.0.2.")).toBe("not an IP address: 192.0.2.");
-    expect(checkValue("path", "source.ip", "")).toBeNull();
+    expect(checkIn("path", "source.ip", "192.0.2.10")).toBeNull();
+    expect(checkIn("path", "source.ip", "192.0.2.10/32")).toBeNull();
+    expect(checkIn("path", "source.ip", "2001:db8::1/128")).toBeNull();
+    expect(checkIn("path", "source.ip", "192.0.2.0/24")).toBe("prefix in a path query: 192.0.2.0/24");
+    expect(checkIn("path", "source.ip", "192.0.2.")).toBe("not an IP address: 192.0.2.");
+    expect(checkIn("path", "source.ip", "")).toBeNull();
   });
 
   it("takes addresses and prefixes with no host bits in a set query", () => {
-    expect(checkValue("set", "source.ip", "192.0.2.0/24, 198.51.100.7, 2001:db8::/32")).toBeNull();
-    expect(checkValue("set", "source.ip", "192.0.2.5/24")).toBe("not an address or a prefix: 192.0.2.5/24");
-    expect(checkValue("set", "source.ip", "192.0.2.0/33")).not.toBeNull();
-    expect(checkValue("set", "source.ip", "192.0.2.0/24,")).toBe("not an address or a prefix: empty item");
+    expect(checkIn("set", "source.ip", "192.0.2.0/24, 198.51.100.7, 2001:db8::/32")).toBeNull();
+    expect(checkIn("set", "source.ip", "192.0.2.5/24")).toBe("not an address or a prefix: 192.0.2.5/24");
+    expect(checkIn("set", "source.ip", "192.0.2.0/33")).not.toBeNull();
+    expect(checkIn("set", "source.ip", "192.0.2.0/24,")).toBe("not an address or a prefix: empty item");
   });
 
   it("takes numbers in range in a path query and ranges in a set query", () => {
-    expect(checkValue("path", "destination.port", "65535")).toBeNull();
-    expect(checkValue("path", "destination.port", "65536")).toBe("not 0 to 65535: 65536");
-    expect(checkValue("path", "destination.port", "80,443")).not.toBeNull();
-    expect(checkValue("path", "dscp", "64")).not.toBeNull();
-    expect(checkValue("set", "destination.port", "53,80,1024-65535")).toBeNull();
-    expect(checkValue("set", "destination.port", "443-80")).not.toBeNull();
-    expect(checkValue("set", "destination.port", "1 - 2")).not.toBeNull();
-    expect(checkValue("set", "network.vlan.id", "4095")).toBeNull();
-    expect(checkValue("set", "network.vlan.id", "4096")).not.toBeNull();
+    expect(checkIn("path", "destination.port", "65535")).toBeNull();
+    expect(checkIn("path", "destination.port", "65536")).toBe("not 0 to 65535: 65536");
+    expect(checkIn("path", "destination.port", "80,443")).not.toBeNull();
+    expect(checkIn("path", "dscp", "64")).not.toBeNull();
+    expect(checkIn("set", "destination.port", "53,80,1024-65535")).toBeNull();
+    expect(checkIn("set", "destination.port", "443-80")).not.toBeNull();
+    expect(checkIn("set", "destination.port", "1 - 2")).not.toBeNull();
+    expect(checkIn("set", "network.vlan.id", "4095")).toBeNull();
+    expect(checkIn("set", "network.vlan.id", "4096")).not.toBeNull();
   });
 
   it("takes the names of a field as the server reads them", () => {
-    expect(checkValue("path", "network.transport", "UDP")).toBeNull();
-    expect(checkValue("path", "network.transport", "6")).toBeNull();
-    expect(checkValue("path", "network.transport", "7")).not.toBeNull();
-    expect(checkValue("set", "network.transport", "tcp, Udp")).toBeNull();
-    expect(checkValue("path", "fragment", "first")).toBeNull();
-    expect(checkValue("path", "fragment", "First")).not.toBeNull();
-    expect(checkValue("path", "icmp_type", "echo-request")).toBeNull();
-    expect(checkValue("path", "icmp_type", "8")).toBeNull();
-    expect(checkValue("set", "icmp_type", "echo-request")).not.toBeNull();
-    expect(checkValue("set", "icmp_type", "0,8")).toBeNull();
-    expect(checkValue("path", "reply", "false")).toBeNull();
-    expect(checkValue("path", "reply", "no")).not.toBeNull();
+    expect(checkIn("path", "network.transport", "UDP")).toBeNull();
+    expect(checkIn("path", "network.transport", "6")).toBeNull();
+    expect(checkIn("path", "network.transport", "7")).not.toBeNull();
+    expect(checkIn("set", "network.transport", "tcp, Udp")).toBeNull();
+    expect(checkIn("path", "fragment", "first")).toBeNull();
+    expect(checkIn("path", "fragment", "First")).not.toBeNull();
+    expect(checkIn("path", "icmp_type", "echo-request")).toBeNull();
+    expect(checkIn("path", "icmp_type", "8")).toBeNull();
+    expect(checkIn("set", "icmp_type", "echo-request")).not.toBeNull();
+    expect(checkIn("set", "icmp_type", "0,8")).toBeNull();
+    expect(checkIn("path", "reply", "false")).toBeNull();
+    expect(checkIn("path", "reply", "no")).not.toBeNull();
   });
 
-  it("takes TCP flag names in a path query and flag values in a set query", () => {
-    expect(checkValue("path", "tcp_flags", "syn, ack")).toBeNull();
-    expect(checkValue("path", "tcp_flags", "syn+ack")).not.toBeNull();
-    expect(checkValue("path", "tcp_flags", "SYN")).not.toBeNull();
-    expect(checkValue("set", "tcp_flags", "syn,syn+ack,16-18")).toBeNull();
-    expect(checkValue("set", "tcp_flags", "syn+bad")).not.toBeNull();
-    expect(checkValue("set", "tcp_flags", "256")).not.toBeNull();
+  it("takes the flags of one packet with + in a path query and flag values in a set query", () => {
+    expect(checkIn("path", "tcp_flags", "syn+ack")).toBeNull();
+    expect(checkIn("path", "tcp_flags", "syn + ack")).toBeNull();
+    expect(checkIn("path", "tcp_flags", "syn,ack")).not.toBeNull();
+    expect(checkIn("path", "tcp_flags", "SYN")).not.toBeNull();
+    expect(checkIn("set", "tcp_flags", "syn,syn+ack,16-18")).toBeNull();
+    expect(checkIn("set", "tcp_flags", "syn+bad")).not.toBeNull();
+    expect(checkIn("set", "tcp_flags", "256")).not.toBeNull();
   });
 
   it("takes MAC addresses and an ingress point", () => {
-    expect(checkValue("path", "source.mac", "00:00:5e:00:53:01")).toBeNull();
-    expect(checkValue("path", "source.mac", "00:00:5e:00:53")).not.toBeNull();
-    expect(checkValue("path", "source.mac", "0:00:5e:00:53:01")).not.toBeNull();
-    expect(checkValue("set", "source.mac", "00:00:5e:00:53:01,00:00:5E:00:53:02")).toBeNull();
-    expect(checkValue("path", "ingress", "r1/eth0")).toBeNull();
-    expect(checkValue("path", "ingress", "r1/")).not.toBeNull();
-    expect(checkValue("path", "ingress", "/eth0")).not.toBeNull();
+    expect(checkIn("path", "source.mac", "00:00:5e:00:53:01")).toBeNull();
+    expect(checkIn("path", "source.mac", "00:00:5e:00:53")).not.toBeNull();
+    expect(checkIn("path", "source.mac", "0:00:5e:00:53:01")).not.toBeNull();
+    expect(checkIn("set", "source.mac", "00:00:5e:00:53:01,00:00:5E:00:53:02")).toBeNull();
+    expect(checkIn("path", "ingress", "r1/eth0")).toBeNull();
+    expect(checkIn("path", "ingress", "r1/")).not.toBeNull();
+    expect(checkIn("path", "ingress", "/eth0")).not.toBeNull();
   });
 
   it("names the first stated field with a wrong form", () => {
-    expect(firstError("path", { "source.ip": "192.0.2.10", "destination.port": "99999", dscp: "70" })).toEqual({
+    expect(firstError({ "source.ip": "192.0.2.10", "destination.port": "99999", dscp: "70" })).toEqual({
       field: "destination.port",
-      message: "not 0 to 65535: 99999",
+      message: "not 0 to 65535 or a range a-b: 99999",
     });
-    expect(firstError("path", { "source.ip": "192.0.2.10", "destination.ip": "", dscp: "46" })).toBeNull();
+    expect(firstError({ "source.ip": "192.0.2.10", "destination.ip": "", dscp: "46" })).toBeNull();
+    expect(firstError({ "source.ip": "192.0.2.0/24", "destination.port": "1-1000" })).toBeNull();
+  });
+
+  it("takes a value of either query type in one field", () => {
+    expect(checkValue("source.ip", "192.0.2.10")).toBeNull();
+    expect(checkValue("source.ip", "192.0.2.0/24,198.51.100.7")).toBeNull();
+    expect(checkValue("source.ip", "192.0.2.5/24")).toBe("not an address or a prefix: 192.0.2.5/24");
+    expect(checkValue("destination.port", "45000")).toBeNull();
+    expect(checkValue("destination.port", "1-1000")).toBeNull();
+    expect(checkValue("icmp_type", "echo-request")).toBeNull();
+    expect(checkValue("icmp_type", "0,8")).toBeNull();
+    expect(checkValue("icmp_type", "ping")).toBe("not 0 to 255, echo-request, echo-reply or a range a-b: ping");
+    expect(checkValue("tcp_flags", "syn+ack")).toBeNull();
+    expect(checkValue("tcp_flags", "syn,syn+ack")).toBeNull();
+    expect(checkValue("unstated", "defaults")).toBeNull();
+  });
+
+  it("refuses an ICMP name when another field makes a set query", () => {
+    expect(firstError({ "source.ip": "192.0.2.0/24", icmp_type: "echo-request" })).toEqual({
+      field: "icmp_type",
+      message: "not 0 to 255 or a range a-b: echo-request",
+    });
+    expect(firstError({ "source.ip": "192.0.2.1", icmp_type: "echo-request" })).toBeNull();
+  });
+});
+
+describe("query type", () => {
+  it("is a path query when each stated field has one value", () => {
+    expect(queryMode({})).toBe("path");
+    expect(queryMode({ "source.ip": "192.0.2.10", "destination.ip": "198.51.100.20", "destination.port": "443", "network.transport": "tcp" })).toBe("path");
+    expect(queryMode({ "source.ip": "192.0.2.10/32", "destination.ip": "2001:db8::1/128" })).toBe("path");
+    expect(queryMode({ tcp_flags: "syn+ack", icmp_type: "echo-reply", reply: "false", ingress: "r1/eth0" })).toBe("path");
+  });
+
+  it("is a set query when a field has a prefix, a list or a range", () => {
+    expect(queryMode({ "source.ip": "192.168.2.0/24" })).toBe("set");
+    expect(queryMode({ "source.ip": "192.0.2.10,192.0.2.11" })).toBe("set");
+    expect(queryMode({ "source.port": "1-1000" })).toBe("set");
+    expect(queryMode({ "network.transport": "tcp,udp" })).toBe("set");
+    expect(queryMode({ tcp_flags: "syn,syn+ack" })).toBe("set");
+    expect(queryMode({ tcp_flags: "18" })).toBe("set");
+    expect(queryMode({ "source.mac": "00:00:5e:00:53:01,00:00:5e:00:53:02" })).toBe("set");
+  });
+
+  it("keeps a value with a wrong form out of the choice", () => {
+    expect(queryMode({ "source.ip": "192.0.2.5/24" })).toBe("path");
+    expect(queryMode({ "destination.port": "99999" })).toBe("path");
   });
 });
 
 describe("list of names", () => {
-  it("proposes the names of a field in each mode", () => {
-    expect(valuesOf("path", "network.transport")).toEqual(["tcp", "udp", "icmp", "icmpv6"]);
-    expect(valuesOf("path", "icmp_type")).toEqual(["echo-request", "echo-reply"]);
-    expect(valuesOf("set", "icmp_type")).toEqual([]);
-    expect(valuesOf("path", "reply")).toEqual(["true", "false"]);
-    expect(valuesOf("path", "source.port")).toEqual([]);
+  it("proposes the names of a field", () => {
+    expect(valuesOf("network.transport")).toEqual(["tcp", "udp", "icmp", "icmpv6"]);
+    expect(valuesOf("icmp_type")).toEqual(["echo-request", "echo-reply"]);
+    expect(valuesOf("reply")).toEqual(["true", "false"]);
+    expect(valuesOf("source.port")).toEqual([]);
   });
 
   it("filters with no regard to case, the names that start with the text first", () => {
@@ -202,13 +243,14 @@ describe("list of names", () => {
   });
 
   it("filters by the item that is typed and puts a choice in its place", () => {
-    expect(valueToken("set", "network.transport", "tcp, ud")).toBe("ud");
-    expect(insertValue("set", "network.transport", "tcp, ud", "udp")).toBe("tcp, udp");
-    expect(valueToken("path", "network.transport", "ud")).toBe("ud");
-    expect(insertValue("path", "network.transport", "ud", "udp")).toBe("udp");
-    expect(valueToken("set", "tcp_flags", "fin,syn+a")).toBe("a");
-    expect(insertValue("set", "tcp_flags", "fin,syn+a", "ack")).toBe("fin,syn+ack");
-    expect(insertValue("path", "tcp_flags", "syn,", "ack")).toBe("syn,ack");
+    expect(valueToken("network.transport", "tcp, ud")).toBe("ud");
+    expect(insertValue("network.transport", "tcp, ud", "udp")).toBe("tcp, udp");
+    expect(valueToken("network.transport", "ud")).toBe("ud");
+    expect(insertValue("network.transport", "ud", "udp")).toBe("udp");
+    expect(valueToken("tcp_flags", "fin,syn+a")).toBe("a");
+    expect(insertValue("tcp_flags", "fin,syn+a", "ack")).toBe("fin,syn+ack");
+    expect(insertValue("tcp_flags", "syn+", "ack")).toBe("syn+ack");
+    expect(insertValue("ingress", "r1/e", "r1/eth0")).toBe("r1/eth0");
   });
 });
 
@@ -218,14 +260,14 @@ describe("query of the bar", () => {
     "destination.ip": "198.51.100.20",
     "network.transport": "tcp",
     "destination.port": "443",
-    tcp_flags: "syn, ack",
+    tcp_flags: "syn+ack",
     dscp: "46",
     icmp_type: "",
     reply: "false",
   };
 
   it("gives a path query numbers, a list of TCP flags and a boolean reply", () => {
-    expect(requestBody("path", fields)).toEqual({
+    expect(requestBody(fields)).toEqual({
       "source.ip": "192.0.2.10",
       "destination.ip": "198.51.100.20",
       "network.transport": "tcp",
@@ -234,15 +276,21 @@ describe("query of the bar", () => {
       dscp: 46,
       reply: false,
     });
-    expect(requestBody("path", { icmp_type: "8" })).toEqual({ icmp_type: 8 });
-    expect(requestBody("path", { icmp_type: "echo-reply" })).toEqual({ icmp_type: "echo-reply" });
+    expect(requestBody({ icmp_type: "8" })).toEqual({ icmp_type: 8 });
+    expect(requestBody({ icmp_type: "echo-reply" })).toEqual({ icmp_type: "echo-reply" });
   });
 
   it("gives a set query text and a boolean reply", () => {
-    expect(requestBody("set", { "destination.port": "80,443", reply: "true" })).toEqual({
+    expect(requestBody({ "destination.port": "80,443", reply: "true" })).toEqual({
       mode: "set",
       "destination.port": "80,443",
       reply: true,
+    });
+    expect(requestBody({ "source.ip": "192.168.2.0/24", "source.port": "1-1000", tcp_flags: "syn+ack" })).toEqual({
+      mode: "set",
+      "source.ip": "192.168.2.0/24",
+      "source.port": "1-1000",
+      tcp_flags: "syn+ack",
     });
   });
 
@@ -269,38 +317,11 @@ describe("query of the bar", () => {
     expect(fieldsOf(echo)).toEqual({
       "source.ip": "192.0.2.10",
       "network.transport": "tcp",
-      tcp_flags: "syn,ack",
+      tcp_flags: "syn+ack",
       reply: "false",
     });
+    expect(queryMode(fieldsOf(echo))).toBe("path");
     expect(fieldsOf({ "network.iana_number": 47 })).toEqual({ "network.iana_number": "47" });
-  });
-});
-
-describe("the value of a field after a change of the mode", () => {
-  it("writes the flags of one packet as one flag set and back", () => {
-    expect(modeValue("path", "set", "tcp_flags", "syn,ack")).toBe("syn+ack");
-    expect(modeValue("path", "set", "tcp_flags", "syn, ack")).toBe("syn+ack");
-    expect(modeValue("path", "set", "tcp_flags", "syn")).toBe("syn");
-    expect(modeValue("set", "path", "tcp_flags", "syn+ack")).toBe("syn,ack");
-    expect(modeValue("set", "path", "tcp_flags", "syn")).toBe("syn");
-    const back = modeValue("path", "set", "tcp_flags", "syn,ack") ?? "";
-    expect(checkValue("set", "tcp_flags", back)).toBeNull();
-    expect(modeValue("set", "path", "tcp_flags", back)).toBe("syn,ack");
-  });
-
-  it("gives null for a set value with more than one flag set", () => {
-    expect(modeValue("set", "path", "tcp_flags", "syn,ack")).toBeNull();
-    expect(modeValue("set", "path", "tcp_flags", "syn,syn+ack")).toBeNull();
-    expect(modeValue("set", "path", "tcp_flags", "16-18")).toBe("16-18");
-  });
-
-  it("keeps a value with a wrong form, an empty value and the other fields", () => {
-    expect(modeValue("path", "set", "tcp_flags", "syn+ack")).toBe("syn+ack");
-    expect(modeValue("set", "path", "tcp_flags", "syn+bad")).toBe("syn+bad");
-    expect(modeValue("set", "path", "tcp_flags", "")).toBe("");
-    expect(modeValue("path", "set", "destination.port", "53")).toBe("53");
-    expect(modeValue("set", "path", "source.ip", "192.0.2.0/24")).toBe("192.0.2.0/24");
-    expect(modeValue("path", "path", "tcp_flags", "syn,ack")).toBe("syn,ack");
   });
 });
 
@@ -308,20 +329,18 @@ describe("unstated setting", () => {
   it("is a field of a path query only, with the names all and defaults", () => {
     expect(takes("path", "unstated")).toBe(true);
     expect(takes("set", "unstated")).toBe(false);
-    expect(fieldsOfMode("path")).toContain("unstated");
-    expect(fieldsOfMode("set")).not.toContain("unstated");
-    expect(fieldsOfMode("set").length).toBe(QUERY_FIELDS.length - 1);
+    expect(QUERY_FIELDS.filter((k) => takes("set", k)).length).toBe(QUERY_FIELDS.length - 1);
     expect(kindOf("unstated")).toBe("names");
-    expect(valuesOf("path", "unstated")).toEqual(["all", "defaults"]);
-    expect(formOf("path", "unstated")).toBe("all, defaults");
+    expect(valuesOf("unstated")).toEqual(["all", "defaults"]);
+    expect(formOf("unstated")).toBe("all, defaults");
     expect(labelOf("unstated")).toBe("unstated fields");
-    expect(checkValue("path", "unstated", "defaults")).toBeNull();
-    expect(checkValue("path", "unstated", "some")).toBe("not one of all, defaults: some");
+    expect(checkValue("unstated", "defaults")).toBeNull();
+    expect(checkValue("unstated", "some")).toBe("not one of all, defaults: some");
   });
 
   it("goes into the request, the rsim command, the explain command and the MCP call with defaults", () => {
     const f = { "source.ip": "172.31.10.20", "destination.ip": "10.20.0.53", "network.transport": "udp", unstated: "defaults" };
-    expect(requestBody("path", f)).toEqual({ "source.ip": "172.31.10.20", "destination.ip": "10.20.0.53", "network.transport": "udp", unstated: "defaults" });
+    expect(requestBody(f)).toEqual({ "source.ip": "172.31.10.20", "destination.ip": "10.20.0.53", "network.transport": "udp", unstated: "defaults" });
     expect(rsimCommand("path", "snapshot-2026-11-22-140504", f)).toBe(
       "rsim path store:<data folder> --source.ip 172.31.10.20 --destination.ip 10.20.0.53 --network.transport udp --unstated defaults",
     );
@@ -335,14 +354,14 @@ describe("unstated setting", () => {
   it("changes nothing with all, and a set query leaves it out", () => {
     const base = { "source.ip": "172.31.10.20", "network.transport": "udp" };
     const all = { ...base, unstated: "all" };
-    expect(requestBody("path", all)).toEqual(requestBody("path", base));
+    expect(requestBody(all)).toEqual(requestBody(base));
     expect(rsimCommand("path", "snapshot-2026-11-22-140504", all)).toBe(rsimCommand("path", "snapshot-2026-11-22-140504", base));
     expect(mcpCall("path", "snapshot-2026-11-22-140504", all)).toBe(mcpCall("path", "snapshot-2026-11-22-140504", base));
-    const defaults = { ...base, unstated: "defaults" };
-    expect(requestBody("set", defaults)).toEqual(requestBody("set", base));
-    expect(rsimCommand("set", "snapshot-2026-11-22-140504", defaults)).toBe(rsimCommand("set", "snapshot-2026-11-22-140504", base));
-    expect(mcpCall("set", "snapshot-2026-11-22-140504", defaults)).toBe(mcpCall("set", "snapshot-2026-11-22-140504", base));
-    expect(firstError("set", { unstated: "some" })).toBeNull();
+    const defaults = { ...base, "source.ip": "172.31.10.0/24", unstated: "defaults" };
+    expect(requestBody(defaults)).toEqual(requestBody({ ...base, "source.ip": "172.31.10.0/24" }));
+    expect(rsimCommand("set", "snapshot-2026-11-22-140504", { ...base, unstated: "defaults" })).toBe(rsimCommand("set", "snapshot-2026-11-22-140504", base));
+    expect(mcpCall("set", "snapshot-2026-11-22-140504", { ...base, unstated: "defaults" })).toBe(mcpCall("set", "snapshot-2026-11-22-140504", base));
+    expect(firstError({ "source.ip": "172.31.10.0/24", unstated: "defaults" })).toBeNull();
   });
 
   it("comes back from the echo of a path query", () => {
@@ -356,11 +375,11 @@ describe("unstated button", () => {
     const on = toggleDefaults(base);
     expect(hasDefaults(base)).toBe(false);
     expect(hasDefaults(on)).toBe(true);
-    expect(requestBody("path", on)).toEqual({ ...requestBody("path", base), unstated: "defaults" });
+    expect(requestBody(on)).toEqual({ ...requestBody(base), unstated: "defaults" });
     expect(rsimCommand("path", "snapshot-2026-11-22-140504", on)).toBe(`${rsimCommand("path", "snapshot-2026-11-22-140504", base)} --unstated defaults`);
     const off = toggleDefaults(on);
     expect(hasDefaults(off)).toBe(false);
-    expect(requestBody("path", off)).toEqual(requestBody("path", base));
+    expect(requestBody(off)).toEqual(requestBody(base));
     expect(mcpCall("path", "snapshot-2026-11-22-140504", off)).toBe(mcpCall("path", "snapshot-2026-11-22-140504", base));
   });
 
