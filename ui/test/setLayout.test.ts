@@ -1,66 +1,116 @@
 /// <reference types="node" />
-// The layout of the set ladder on the stored set answer of the CLI tests.
+// The parts of a set answer on the stored set answer of the CLI tests, the
+// ladder of one part, the tunnel of an outer packet, the counts of the
+// result line and the upright lane names.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import type { SetAnswer } from "../src/api/types";
-import { setLadder } from "../src/ladder/setLayout";
+import type { Branch, Header, SetAnswer, TraceStep } from "../src/api/types";
+import { ladder, outcomeCounts, partCounts, upright, type StepRow } from "../src/ladder/layout";
+import { outcomeOf, partAnswer, partFields, partList, tunnelOf } from "../src/ladder/setLayout";
 
 const url = new URL("../../crates/rsim-cli/tests/golden/set-mini-enterprise.json", import.meta.url);
 const a = (JSON.parse(readFileSync(url, "utf8")) as SetAnswer).answer;
 
-describe("the set ladder of mini-enterprise", () => {
-  const l = setLadder(a, "function");
+describe("the parts of mini-enterprise", () => {
+  const parts = partList(a);
 
-  it("heads each part column with the fields in which the parts differ", () => {
-    expect(l.heads).toEqual([
+  it("has one part for each branch, with each field in which it differs from the query", () => {
+    expect(parts.map((p) => [p.branch, p.fields])).toEqual([
       [
-        ["source.port", "0-1023"],
-        ["destination.port", "53"],
+        0,
+        [
+          ["source.port", "0-1023"],
+          ["destination.port", "53"],
+        ],
       ],
       [
-        ["source.port", "1024-65535"],
-        ["destination.port", "53"],
+        1,
+        [
+          ["source.port", "1024-65535"],
+          ["destination.port", "53"],
+        ],
       ],
-      [
-        ["source.port", "0-65535"],
-        ["destination.port", "80"],
-      ],
+      [2, [["destination.port", "80"]]],
     ]);
   });
 
-  it("follows the longest branch", () => {
-    expect(l.rows.length).toBe(21);
-    expect(l.rows[0]!.start).toBe(true);
+  it("gives the outcome of each part: the destination, or the deciding step and the reason", () => {
+    expect(parts.map((p) => [p.kind, p.place, p.at?.step.function ?? null, p.tunnel])).toEqual([
+      ["drop", null, "fra01-ips-01/filter-1b-1a", null],
+      ["deliver", "fra01-dns", null, null],
+      ["drop", null, "fra01-fgt-01/policy", null],
+    ]);
+    expect(parts[0]!.reason).toBe(a.branches[0]!.verdict.reason!.detail);
+    expect(parts[1]!.reason).toBeNull();
   });
 
-  it("ends each part at the function that decides it", () => {
-    const ends = l.rows.flatMap((r, i) =>
-      r.cells.map((c, p) => (c.kind === "end" ? [p, i, c.end] : null)).filter((x) => x !== null),
-    );
-    expect(ends).toEqual([
-      [2, 7, "drop"],
-      [0, 13, "drop"],
-      [1, 20, "deliver"],
+  it("compares each header field over the members, not only the 5 fields of the ladder", () => {
+    const b = a.branches[1]!;
+    const members = b.packets.members.map((m) => ({ ...m, original: { ...m.original, dscp: { known: 46 } } as Header }));
+    expect(partFields(a.input, { members })).toContainEqual(["dscp", "46"]);
+  });
+
+  it("counts only the outcomes that occur", () => {
+    expect(outcomeCounts(partCounts(a.summary))).toEqual([
+      ["deliver", 1],
+      ["drop", 2],
     ]);
   });
+});
 
-  it("has a band before the end and nothing after it", () => {
-    expect(l.rows[6]!.cells.map((c) => c.kind)).toEqual(["band", "band", "band"]);
-    expect(l.rows[8]!.cells.map((c) => c.kind)).toEqual(["band", "band", "none"]);
-    expect(l.rows[14]!.cells.map((c) => c.kind)).toEqual(["none", "band", "none"]);
+describe("the ladder of one part", () => {
+  const one = partAnswer(a, 1);
+
+  it("holds the branch of the part with its index and its reply", () => {
+    expect(one.branches.map((b) => b.index)).toEqual([1]);
+    expect(one.replies.map((r) => r.forward_branch)).toEqual([1]);
   });
 
-  it("counts the parts of each row for the width of the path line", () => {
-    expect([l.rows[0]!.parts, l.rows[8]!.parts, l.rows[14]!.parts]).toEqual([3, 2, 1]);
+  it("prints a range as a value, with no hatch, and the range of the part where the part splits off", () => {
+    const l = ladder(one, "function", true, true);
+    const first = l.rows.find((r): r is StepRow => r.type === "step")!;
+    expect(first.cells[1]).toEqual({ kind: "value", text: "0-65535" });
+    const rows = l.rows.filter((r): r is StepRow => r.type === "step" && r.dir === "forward");
+    expect(rows.some((r) => r.cells[1]!.kind === "changed" && (r.cells[1] as { text: string }).text === "1024-65535")).toBe(true);
+    expect(first.key).toBe(`f.1.${one.branches[0]!.steps[0]!.index}`);
+    const path = ladder(one, "function");
+    const p0 = path.rows.find((r): r is StepRow => r.type === "step")!;
+    expect(p0.cells[1]!.kind).toBe("hatch");
+  });
+});
+
+/** A branch whose packets go into a WireGuard tunnel at step 2 and exit as outer packets. */
+function wireguardBranch(): Branch {
+  const base = a.branches[1]!;
+  const wg = { kind: "wireguard", src: { known: "198.51.100.1" }, dst: { known: "203.0.113.9" }, vni: null, label: null };
+  const withEncap = (ps: TraceStep["input"]) => ({
+    members: ps.members.map((m) => ({ ...m, current: { ...m.current, encap: [wg] } as unknown as Header })),
+  });
+  const steps = base.steps.slice(0, 4).map((s, i) => ({
+    ...s,
+    device: "core1",
+    function: i === 2 ? "core1/wireguard/wg44" : s.function,
+    input: i > 2 ? withEncap(s.input) : s.input,
+    output: i >= 2 ? withEncap(s.output) : s.output,
+  }));
+  return { ...base, steps, verdict: { kind: "exit", destination: null, reason: { code: "exited", detail: "core1 pppoe0" } } };
+}
+
+describe("tunnel of an outer packet", () => {
+  it("names the encapsulation kind and the function that encapsulates", () => {
+    const b = wireguardBranch();
+    expect(tunnelOf(b)).toBe("WireGuard wg44");
+    expect(outcomeOf(b)).toMatchObject({ kind: "exit", place: "core1 pppoe0", tunnel: "WireGuard wg44", reason: null });
   });
 
-  it("ends the parts of a device in the row of the device at the device level", () => {
-    const d = setLadder(a, "device");
-    expect(d.rows.map((r) => r.label)).toEqual(["0-11", "12-14", "15-20"]);
-    expect(d.rows.map((r) => r.cells.map((c) => c.kind))).toEqual([
-      ["band", "band", "end"],
-      ["end", "band", "none"],
-      ["none", "end", "none"],
-    ]);
+  it("is absent for a branch with no encapsulation at its end", () => {
+    expect(tunnelOf(a.branches[1]!)).toBeNull();
+  });
+});
+
+describe("lane names", () => {
+  it("stand upright when a name is wider than its lane", () => {
+    expect(upright(["core1", "unifi-01"], 52, 5)).toBe(false);
+    expect(upright(["dcepp-keller", "core1", "unifi-01"], 52, 5)).toBe(true);
   });
 });

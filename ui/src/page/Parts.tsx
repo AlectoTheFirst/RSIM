@@ -1,5 +1,5 @@
-// The parts of a page: the top bar, the query bar, the result line and the
-// key line.
+// The parts of a page: the top bar, the query bar, the result line, the
+// status line of the Trace view and the key line.
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { TwinRef } from "../api/client";
@@ -187,8 +187,6 @@ const PICKED = new Set<QueryField>(["source.ip", "destination.ip"]);
 
 /** The id of the input of a field of the query bar. */
 const inputId = (k: QueryField) => `q-${k.replace(/\./g, "-")}`;
-
-/** The id of the help line of the query bar. */
 
 /** True for an element whose focus keeps the query bar in its edit state. */
 const edits = (el: EventTarget | null) => el instanceof HTMLElement && el.dataset["edit"] !== undefined;
@@ -481,7 +479,7 @@ export const LEVELS: readonly Level[] = ["device", "function"];
 
 export function LevelControl(props: { level: Level; onLevel: (l: Level) => void }) {
   return (
-    <span class="group" role="group" aria-label="Level">
+    <span class="group" role="group" aria-label="Level" title="keys [ ]">
       <span class="muted">Level</span>
       {(["estate", "site"] as const).map((l) => (
         <button type="button" disabled title="not in this build">
@@ -489,7 +487,7 @@ export function LevelControl(props: { level: Level; onLevel: (l: Level) => void 
         </button>
       ))}
       {LEVELS.map((l) => (
-        <button type="button" aria-pressed={l === props.level} onClick={() => props.onLevel(l)}>
+        <button type="button" aria-pressed={l === props.level} aria-keyshortcuts={l === "device" ? "[" : "]"} onClick={() => props.onLevel(l)}>
           {l}
         </button>
       ))}
@@ -509,6 +507,16 @@ export function ResultLine(props: { children: ComponentChildren; level?: Level; 
         </>
       ) : null}
     </div>
+  );
+}
+
+/** The status line: the note of the last action and the time of the query. */
+export function StatusLine(props: { notice: string | null; timing: string | null }) {
+  return (
+    <footer class="keyline t-index" aria-label="Status" aria-live="polite">
+      {props.notice ? <span>{props.notice}</span> : null}
+      {props.timing ? <span class="timing">{props.timing}</span> : null}
+    </footer>
   );
 }
 
