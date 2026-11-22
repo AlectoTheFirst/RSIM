@@ -78,6 +78,13 @@ The table below lists known patterns. It is not complete. A text that pads, expl
 
 Before a change is done, read each new or changed text of the change against this section. Section 7.1 "Forbidden prose" of `../rsim-project/design/ui-design-language.md` carries the same rule.
 
+## Where to build
+
+- Build and test in CI or in the Kubernetes cluster of the owner, never on the laptop of the owner. This covers each `cargo build`, `cargo test`, `cargo clippy`, `cargo bench`, release build, container build and local server of the workspace, also for one crate.
+- Allowed on the laptop: editing, `cargo fmt`, and `npm --prefix ui run build` and `npm --prefix ui test`.
+- A heavier local run needs the approval of the owner for that task. Do not ask for it: the owner says when a local run is fine.
+- To check a change: push the branch and read the result of CI (`gh pr checks`, `gh run view --log-failed`). To build the images: the build Job of the cluster.
+
 ## Disk space
 
 - Build in the shared folder `target` of this repository. For a build of a worktree or another checkout, set `CARGO_TARGET_DIR` to that folder.
