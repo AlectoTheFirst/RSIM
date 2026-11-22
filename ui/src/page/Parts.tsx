@@ -24,7 +24,7 @@ import { NameList, PickerList, useAsk, useEndpoints, useEntryPoints } from "./Pi
 import { type EntryOption, PICKER_CLOSED, type PickerState, type Suggestion, ingressStage, pickerKey } from "./pick";
 import { type Fields, type Mode, type QueryField } from "./query";
 import { HatchMark } from "./Hatch";
-import { reloadMark, twinOption } from "./url";
+import { isSnapshot, reloadMark, twinOption } from "./url";
 
 export const VIEWS = ["Trace", "Tables", "Coverage", "Inventory", "Tokens"] as const;
 export type View = (typeof VIEWS)[number];
@@ -160,7 +160,7 @@ export function TopBar(props: {
           <option value={t.id}>{t.id}</option>
         ))}
       </select>
-      {/^snap-\d+$/.test(props.twin) ? <span class="t-value">{props.twin}</span> : null}
+      {isSnapshot(props.twin) ? <span class="t-value">{props.twin}</span> : null}
       {props.latest ? (
         <button type="button" title={`newest built run: ${props.latest}`} onClick={() => props.onLatest(props.latest!)}>
           Load latest run

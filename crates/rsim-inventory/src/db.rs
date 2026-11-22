@@ -19,7 +19,7 @@ pub use auth::*;
 
 use crate::secret::Sealed;
 use crate::types::{
-    Action, AuditPage, AuditRecord, Bindings, CaptureBgp, Credential, CredentialKind,
+    Action, AuditPage, AuditRecord, Bindings, CaptureBgp, Collection, Credential, CredentialKind,
     CredentialSource, Device, EdgeDeviceBinding, FabricPortBinding, Group, Ha, Inventory, JumpHost,
     NxosJson, Route, Settings, SshAlgorithms, SshMode, TlsTrust, valid_device_name, valid_name,
 };
@@ -37,6 +37,16 @@ pub const MIGRATIONS: &[(u32, &str, &str)] = &[
         3,
         "managed_credentials",
         include_str!("../migrations/0003_managed_credentials.sql"),
+    ),
+    (
+        4,
+        "collection",
+        include_str!("../migrations/0004_collection.sql"),
+    ),
+    (
+        5,
+        "interval",
+        include_str!("../migrations/0005_interval.sql"),
     ),
 ];
 
@@ -290,6 +300,7 @@ impl Db {
                 fabric_ports: fabric_ports(&tx, None).await?,
                 edge_devices: edge_devices(&tx, None).await?,
             },
+            collection: collection(&tx).await?,
         };
         let sealed = if secrets {
             sealed_secrets(&tx).await?
@@ -451,6 +462,7 @@ pub enum Change {
         account: String,
         edge_device: String,
     },
+    PutCollection(Collection),
 }
 
 struct Audit {
@@ -523,6 +535,7 @@ impl Change {
                 }
                 settings_params(&d.settings).map(|_| ())
             }
+            Change::PutCollection(c) => c.check().map_err(Error::Invalid),
             _ => Ok(()),
         }
     }
@@ -821,12 +834,36 @@ impl Change {
                 .await?;
                 Ok(audit("edge_device_binding", key, Some(json(&old)), None))
             }
+            Change::PutCollection(c) => {
+                let old = collection(tx).await?;
+                if old != *c {
+                    let days = number("history_days", Some(c.history_days))?;
+                    tx.execute("UPDATE collection_settings SET history_days = $1", &[&days])
+                        .await?;
+                }
+                Ok(audit(
+                    "collection",
+                    "collection".to_string(),
+                    Some(json(&old)),
+                    Some(json(c)),
+                ))
+            }
         }
     }
 }
 
+/// The settings of the collector.
+async fn collection(c: &impl GenericClient) -> Result<Collection> {
+    let row = c
+        .query_one("SELECT history_days FROM collection_settings", &[])
+        .await?;
+    Ok(Collection {
+        history_days: count(&row, "history_days").unwrap_or_default(),
+    })
+}
+
 /// The settings columns, in the order of [`settings_params`].
-const SETTINGS: [&str; 15] = [
+const SETTINGS: [&str; 16] = [
     "credential",
     "route",
     "ssh_algorithms",
@@ -842,6 +879,7 @@ const SETTINGS: [&str; 15] = [
     "paged_section_timeout_seconds",
     "retries",
     "ha",
+    "interval_seconds",
 ];
 
 /// The insert of a record with its settings, or the update of all its
@@ -889,6 +927,7 @@ fn settings_params(s: &Settings) -> Result<Vec<Box<dyn ToSql + Sync + Send>>> {
         )?),
         Box::new(number("retries", s.retries)?),
         w(s.ha.map(Ha::word)),
+        Box::new(number("interval_seconds", s.interval_seconds)?),
     ])
 }
 
@@ -921,6 +960,7 @@ fn settings(row: &Row) -> Result<Settings> {
         paged_section_timeout_seconds: count(row, "paged_section_timeout_seconds"),
         retries: count(row, "retries"),
         ha: word(row, "ha", Ha::parse)?,
+        interval_seconds: count(row, "interval_seconds"),
     })
 }
 
@@ -1148,7 +1188,7 @@ mod tests {
         let sql = upsert("devices", &["name", "device_group"]);
         assert!(sql.starts_with("INSERT INTO devices (name, device_group, credential, route,"));
         assert!(sql.contains("VALUES ($1, $2, $3,"));
-        assert!(sql.contains("$17)"));
+        assert!(sql.contains("$18)"));
         assert!(
             sql.contains("ON CONFLICT (name) DO UPDATE SET device_group = EXCLUDED.device_group")
         );

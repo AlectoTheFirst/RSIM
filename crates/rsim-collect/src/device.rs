@@ -1,4 +1,5 @@
 use std::fmt;
+use std::time::Duration;
 
 use crate::path::Route;
 
@@ -57,7 +58,12 @@ pub struct Device {
     pub capture_bgp: CaptureBgp,
     /// The proxy and the jump hosts to the device.
     pub route: Route,
+    /// The time between 2 collections of the device.
+    pub interval: Duration,
 }
+
+/// The time between 2 collections of a device with no setting.
+pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(60);
 
 /// What the collector reads of the BGP of a router.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]

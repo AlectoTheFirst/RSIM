@@ -537,6 +537,42 @@
         "title": "ClaimsOut",
         "type": "object"
       },
+      "Collection": {
+        "additionalProperties": false,
+        "description": "Collector settings",
+        "properties": {
+          "history_days": {
+            "description": "History",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "history_days"
+        ],
+        "title": "Collection",
+        "type": "object"
+      },
+      "CollectionOut": {
+        "description": "Collector settings",
+        "properties": {
+          "collection": {
+            "$ref": "#/components/schemas/Collection"
+          },
+          "version": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "collection"
+        ],
+        "title": "CollectionOut",
+        "type": "object"
+      },
       "CollectorTransport": {
         "description": "Transport",
         "enum": [
@@ -1724,6 +1760,9 @@
           "bindings": {
             "$ref": "#/components/schemas/Bindings"
           },
+          "collection": {
+            "$ref": "#/components/schemas/Collection"
+          },
           "credentials": {
             "items": {
               "$ref": "#/components/schemas/Credential"
@@ -1768,7 +1807,8 @@
           "routes",
           "groups",
           "devices",
-          "bindings"
+          "bindings",
+          "collection"
         ],
         "title": "Inventory",
         "type": "object"
@@ -2933,6 +2973,9 @@
           "ha": {
             "$ref": "#/components/schemas/Resolved8"
           },
+          "interval_seconds": {
+            "$ref": "#/components/schemas/Resolved4"
+          },
           "nxos_json": {
             "$ref": "#/components/schemas/Resolved5"
           },
@@ -2986,7 +3029,8 @@
           "request_timeout_seconds",
           "paged_section_timeout_seconds",
           "retries",
-          "ha"
+          "ha",
+          "interval_seconds"
         ],
         "type": "object"
       },
@@ -3645,6 +3689,15 @@
               {
                 "type": "null"
               }
+            ]
+          },
+          "interval_seconds": {
+            "description": "Collection interval",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
             ]
           },
           "nxos_json": {
@@ -4683,11 +4736,9 @@
             "type": "array"
           },
           "snapshot": {
-            "description": "Cycle",
-            "format": "uint64",
-            "minimum": 0,
+            "description": "Snapshot time",
             "type": [
-              "integer",
+              "string",
               "null"
             ]
           }
@@ -5966,6 +6017,96 @@
           }
         ],
         "summary": "Bind Fabric port"
+      }
+    },
+    "/v1/inventory/collection": {
+      "get": {
+        "operationId": "getCollection",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "Collector settings"
+      },
+      "put": {
+        "operationId": "putCollection",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Collection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WrittenOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Put collector settings"
       }
     },
     "/v1/inventory/credentials": {

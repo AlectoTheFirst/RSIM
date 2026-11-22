@@ -386,7 +386,7 @@ fn run(name: &str, scope: Option<&[&str]>) -> ClaimOut {
     };
     claims::out(
         "bgp-summaries",
-        TwinJson::snapshot(1),
+        TwinJson::snapshot(1_795_356_312_000),
         name,
         if scope.is_some() { "devices" } else { "twin" },
         evidence,

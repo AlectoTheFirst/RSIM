@@ -9,7 +9,10 @@ use std::time::Duration;
 use rsim_collect::fake::FakeTransport;
 use rsim_collect::iosxe::{ARP_VRFS, IosxeSource, arp_vrf_command, sections};
 use rsim_collect::*;
-use rsim_store::{Keys, SectionStatus, Snapshot, Store};
+use rsim_store::{SectionStatus, Snapshot, Store};
+
+#[path = "support/keys.rs"]
+mod keys;
 
 const T0: u64 = 1_700_000_000_000;
 
@@ -27,6 +30,7 @@ fn router() -> Device {
         site: None,
         capture_bgp: Default::default(),
         route: Default::default(),
+        interval: DEFAULT_INTERVAL,
     }
 }
 
@@ -138,7 +142,7 @@ fn env_with(banner: bool) -> Env {
         log: Mutex::new(Vec::new()),
         banner,
     });
-    let store = Store::open(dir.path(), Keys::new([1; 32], [2; 32])).unwrap();
+    let store = Store::open(dir.path(), keys::keys()).unwrap();
     let c = Collector::new(
         store,
         Box::new(vec![router()]),

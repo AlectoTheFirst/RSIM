@@ -16,6 +16,21 @@ use crate::{
     StoreError, TABLES, TableRef, TableSchema,
 };
 
+/// The error of a walk of the parents of a snapshot.
+pub(crate) enum Walk {
+    /// A parent manifest does not exist.
+    Parent(StoreError),
+    Other(StoreError),
+}
+
+impl From<Walk> for StoreError {
+    fn from(w: Walk) -> StoreError {
+        match w {
+            Walk::Parent(e) | Walk::Other(e) => e,
+        }
+    }
+}
+
 /// A snapshot store in a directory.
 #[derive(Debug)]
 pub struct Store {
@@ -127,7 +142,7 @@ fn write_all_once(files: &[(PathBuf, Vec<u8>)]) -> Result<(), StoreError> {
 }
 
 /// Replaces a file atomically.
-fn write_replace(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+pub(crate) fn write_replace(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
     let tmp = write_tmp(path, bytes)?;
     fs::rename(&tmp, path).map_err(|e| StoreError::io(path, e))
 }
@@ -147,14 +162,14 @@ fn write_tmp(path: &Path, bytes: &[u8]) -> Result<PathBuf, StoreError> {
     Ok(tmp)
 }
 
-fn read(path: &Path) -> Result<Vec<u8>, StoreError> {
+pub(crate) fn read(path: &Path) -> Result<Vec<u8>, StoreError> {
     fs::read(path).map_err(|e| match e.kind() {
         std::io::ErrorKind::NotFound => StoreError::NotFound(path.display().to_string()),
         _ => StoreError::io(path, e),
     })
 }
 
-fn cycle_name(cycle: u64) -> String {
+pub(crate) fn cycle_name(cycle: u64) -> String {
     format!("{cycle:020}")
 }
 
@@ -195,18 +210,18 @@ impl Store {
         &self.keys
     }
 
-    fn blob_path(&self, h: &Hash) -> PathBuf {
+    pub(crate) fn blob_path(&self, h: &Hash) -> PathBuf {
         self.dir.join("blobs").join(h.to_string())
     }
 
-    fn table_path(&self, table: &str, cycle: u64) -> PathBuf {
+    pub(crate) fn table_path(&self, table: &str, cycle: u64) -> PathBuf {
         self.dir
             .join("tables")
             .join(table)
             .join(format!("{}.parquet", cycle_name(cycle)))
     }
 
-    fn snapshot_path(&self, cycle: u64) -> PathBuf {
+    pub(crate) fn snapshot_path(&self, cycle: u64) -> PathBuf {
         self.dir.join("snapshots").join(cycle_name(cycle))
     }
 
@@ -245,7 +260,8 @@ impl Store {
         self.head()?.map(|c| self.snapshot(c)).transpose()
     }
 
-    fn snapshot_manifest(&self, cycle: u64) -> Result<SnapshotManifest, StoreError> {
+    /// The manifest of the snapshot of a cycle.
+    pub fn snapshot_manifest(&self, cycle: u64) -> Result<SnapshotManifest, StoreError> {
         let m: SnapshotManifest = serde_json::from_slice(&read(&self.snapshot_path(cycle))?)?;
         if m.cycle != cycle {
             return Err(StoreError::Integrity(format!(
@@ -271,33 +287,18 @@ impl Store {
     /// newest checkpoint, and the newest manifest of each device wins. A
     /// device that a snapshot removes is not in it, and is not in the
     /// snapshots after it until one of them lists the device again. The
-    /// parent of a snapshot has a smaller cycle number, so the walk ends.
+    /// parent of a snapshot has a smaller cycle number, so the walk ends. A
+    /// parent that a prune deletes during the walk starts the walk again.
     pub fn snapshot(&self, cycle: u64) -> Result<Snapshot, StoreError> {
-        let top = self.snapshot_manifest(cycle)?;
-        let mut chain = vec![top.clone()];
-        loop {
-            let last = chain.last().expect("the chain is not empty");
-            if last.checkpoint {
-                break;
+        const WALKS: usize = 3;
+        let mut walk = 1;
+        let (top, names) = loop {
+            match self.chain_names(cycle) {
+                Ok(v) => break v,
+                Err(Walk::Parent(_)) if walk < WALKS => walk += 1,
+                Err(w) => return Err(w.into()),
             }
-            let parent = last.parent.ok_or_else(|| {
-                StoreError::Integrity(format!("snapshot {cycle} has no checkpoint before it"))
-            })?;
-            if parent >= last.cycle {
-                return Err(StoreError::Integrity(format!(
-                    "snapshot {} names the parent {parent}, which is not older",
-                    last.cycle
-                )));
-            }
-            chain.push(self.snapshot_manifest(parent)?);
-        }
-        let mut names: BTreeMap<String, Hash> = BTreeMap::new();
-        for m in chain.iter().rev() {
-            for d in &m.removed {
-                names.remove(d);
-            }
-            names.extend(m.devices.iter().map(|(d, h)| (d.clone(), *h)));
-        }
+        };
         let mut devices = BTreeMap::new();
         for (d, h) in names {
             devices.insert(d, self.device_manifest(&h)?);
@@ -308,12 +309,89 @@ impl Store {
         })
     }
 
+    /// The manifest of a cycle and the device manifest name of each device
+    /// of its snapshot.
+    pub(crate) fn chain_names(
+        &self,
+        cycle: u64,
+    ) -> Result<(SnapshotManifest, BTreeMap<String, Hash>), Walk> {
+        let top = self.snapshot_manifest(cycle).map_err(Walk::Other)?;
+        let mut chain = vec![top.clone()];
+        loop {
+            let last = chain.last().expect("the chain is not empty");
+            if last.checkpoint {
+                break;
+            }
+            let parent = last.parent.ok_or_else(|| {
+                Walk::Other(StoreError::Integrity(format!(
+                    "snapshot {cycle} has no checkpoint before it"
+                )))
+            })?;
+            if parent >= last.cycle {
+                return Err(Walk::Other(StoreError::Integrity(format!(
+                    "snapshot {} names the parent {parent}, which is not older",
+                    last.cycle
+                ))));
+            }
+            chain.push(self.snapshot_manifest(parent).map_err(|e| match e {
+                StoreError::NotFound(_) => Walk::Parent(e),
+                e => Walk::Other(e),
+            })?);
+        }
+        let mut names: BTreeMap<String, Hash> = BTreeMap::new();
+        for m in chain.iter().rev() {
+            for d in &m.removed {
+                names.remove(d);
+            }
+            names.extend(m.devices.iter().map(|(d, h)| (d.clone(), *h)));
+        }
+        Ok((top, names))
+    }
+
+    /// The manifest of the newest published snapshot.
+    pub fn head_manifest(&self) -> Result<Option<SnapshotManifest>, StoreError> {
+        self.head()?.map(|c| self.snapshot_manifest(c)).transpose()
+    }
+
+    /// The cycle of the snapshot of the second `second` since the Unix
+    /// epoch, on the parents of the newest snapshot.
+    pub fn cycle_at(&self, second: u64) -> Result<Option<u64>, StoreError> {
+        let Some(mut m) = self.head_manifest()? else {
+            return Ok(None);
+        };
+        loop {
+            let s = m.time / 1000;
+            if s == second {
+                return Ok(Some(m.cycle));
+            }
+            let Some(parent) = m.parent.filter(|p| s > second && *p < m.cycle) else {
+                return Ok(None);
+            };
+            m = match self.snapshot_manifest(parent) {
+                Ok(m) => m,
+                Err(StoreError::NotFound(_)) => return Ok(None),
+                Err(e) => return Err(e),
+            };
+        }
+    }
+
     /// Starts a cycle at `time`, in milliseconds since the Unix epoch. The
     /// cycle builds on the newest published snapshot. It takes the next
     /// cycle number that no file uses, so files that a stopped cycle left
-    /// are never changed.
+    /// are never changed. The second of `time` is after the second of the
+    /// newest snapshot, so each snapshot has its own second; another time
+    /// fails with [`StoreError::Invalid`].
     pub fn begin(&self, time: u64) -> Result<Cycle<'_>, StoreError> {
         let base = self.latest()?;
+        if let Some(b) = base
+            .as_ref()
+            .filter(|b| time / 1000 <= b.manifest.time / 1000)
+        {
+            return Err(StoreError::Invalid(format!(
+                "time {time} not after the second of the time {} of snapshot {}",
+                b.manifest.time, b.manifest.cycle
+            )));
+        }
         let mut cycle = base.as_ref().map_or(0, |s| s.manifest.cycle + 1);
         while self.snapshot_path(cycle).exists()
             || TABLES

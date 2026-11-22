@@ -8,6 +8,7 @@ import {
   ageText,
   arrange,
   cellState,
+  collectionChecked,
   counts,
   credentialGroups,
   credentialBody,
@@ -39,7 +40,7 @@ import {
   newDeviceChecked,
   newGroupChecked,
   newJumpHostBody,
-  notUsed,
+  usedSetting,
   parseSetting,
   rebase,
   routeBody,
@@ -83,6 +84,7 @@ const INV: Inventory = {
     { name: "x1", group: "g-other", address: "203.0.113.10", site: "s2", settings: { credential: "cred-a" } },
   ],
   bindings: { fabric_ports: [], edge_devices: [] },
+  collection: { history_days: 30 },
 };
 
 const r = <T>(value: T, origin: "device" | "group" | "default") => ({ value, origin });
@@ -104,6 +106,7 @@ function resolved(name: string, group: string, vendor: string, s: Partial<Resolv
     paged_section_timeout_seconds: r(300, "default"),
     retries: r(0, "default"),
     ha: r("none", "default"),
+    interval_seconds: r(60, "default"),
   };
   return { name, group, vendor, address: "192.0.2.99", site: site ?? null, settings: { ...base, ...s } };
 }
@@ -325,27 +328,31 @@ describe("edits of the settings", () => {
     expect(parseSetting(timeout, "0").ok).toBe(false);
     expect(parseSetting(timeout, "1")).toEqual({ ok: true, value: 1 });
     expect(parseSetting(timeout, "86400")).toEqual({ ok: true, value: 86400 });
-    expect(parseSetting(timeout, "86401")).toEqual({ ok: false, problem: { title: "timeout_seconds out of range", detail: "timeout_seconds from 1 to 86400" } });
+    expect(parseSetting(timeout, "86401")).toEqual({ ok: false, problem: { title: "device time limit out of range", detail: "device time limit from 1 to 86400" } });
     expect(parseSetting(timeout, "")).toEqual({ ok: true, value: null });
     expect(parseSetting(timeout, " ")).toEqual({ ok: true, value: null });
-    expect(parseSetting(timeout, "1.5")).toEqual({ ok: false, problem: { title: "timeout_seconds not a whole number", detail: "timeout_seconds from 1 to 86400" } });
+    const interval = field("interval_seconds");
+    expect(parseSetting(interval, "59").ok).toBe(false);
+    expect(parseSetting(interval, "60")).toEqual({ ok: true, value: 60 });
+    expect(parseSetting(interval, "86400")).toEqual({ ok: true, value: 86400 });
+    expect(parseSetting(interval, "86401").ok).toBe(false);
+    expect(parseSetting(timeout, "1.5")).toEqual({ ok: false, problem: { title: "device time limit not a whole number", detail: "device time limit from 1 to 86400" } });
     expect(parseSetting(timeout, "-1").ok).toBe(false);
     expect(parseSetting(field("ssh_channels"), "0").ok).toBe(false);
     expect(parseSetting(field("ssh_channels"), "2147483648").ok).toBe(false);
     expect(parseSetting(field("ssh_mode"), "telnet").ok).toBe(false);
   });
 
-  it("names the settings that the collector of the vendor does not read, and none with no collector", () => {
-    expect(notUsed(field("tls_trust"), VENDORS, "vyos")).toBe("not used over SSH");
-    expect(notUsed(field("ssh_mode"), VENDORS, "unifi")).toBe("not used over HTTPS");
-    expect(notUsed(field("nxos_json"), VENDORS, "vyos")).toBe("not used by vyos");
-    expect(notUsed(field("nxos_json"), VENDORS, "nxos")).toBeNull();
-    expect(notUsed(field("timeout_seconds"), VENDORS, "unifi")).toBeNull();
-    expect(notUsed(field("retries"), VENDORS, "vyos")).toBe("not read by the collector");
-    expect(notUsed(field("request_timeout_seconds"), VENDORS, "unifi")).toBe("not read by the collector");
-    expect(notUsed(field("request_timeout_seconds"), VENDORS, "vyos")).toBe("not used over SSH");
-    expect(notUsed(field("tls_trust"), VENDORS, "othervendor")).toBeNull();
-    expect(notUsed(field("tls_trust"), null, "vyos")).toBeNull();
+  it("hides the settings that the collector of the vendor does not read, and shows each with no collector", () => {
+    expect(usedSetting(field("tls_trust"), VENDORS, "vyos")).toBe(false);
+    expect(usedSetting(field("ssh_mode"), VENDORS, "unifi")).toBe(false);
+    expect(usedSetting(field("nxos_json"), VENDORS, "vyos")).toBe(false);
+    expect(usedSetting(field("nxos_json"), VENDORS, "nxos")).toBe(true);
+    expect(usedSetting(field("timeout_seconds"), VENDORS, "unifi")).toBe(true);
+    expect(usedSetting(field("retries"), VENDORS, "vyos")).toBe(false);
+    expect(usedSetting(field("request_timeout_seconds"), VENDORS, "unifi")).toBe(false);
+    expect(usedSetting(field("tls_trust"), VENDORS, "othervendor")).toBe(true);
+    expect(usedSetting(field("tls_trust"), null, "vyos")).toBe(true);
   });
 
   it("gives the inherited value of an empty setting: the group, else the default", () => {
@@ -487,5 +494,15 @@ describe("the credential form", () => {
     expect(credentialBody(undefined, "e", { ...credentialFields(), source: "env", key: "lower" }).ok).toBe(false);
     const env = credentialBody(managed, "lab", { ...credentialFields(managed), source: "env", key: "LAB" });
     expect(env.ok && env.body).toMatchObject({ source: "env", key: "LAB", kind: null, user: null, secret: null });
+  });
+});
+
+describe("the history of the store", () => {
+  it("takes a whole number of days from 1 to 3650", () => {
+    expect(collectionChecked(" 7 ")).toEqual({ ok: true, body: { history_days: 7 } });
+    expect(collectionChecked("3650").ok).toBe(true);
+    for (const bad of ["0", "3651", "", "7.5", "-1", "x"]) expect(collectionChecked(bad).ok, bad).toBe(false);
+    const out = collectionChecked("0");
+    expect(!out.ok && out.problem.title).toBe("history out of range");
   });
 });

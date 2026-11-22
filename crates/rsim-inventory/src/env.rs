@@ -505,6 +505,7 @@ mod tests {
             groups: r.groups,
             devices: r.devices,
             bindings: Default::default(),
+            collection: Default::default(),
         }
     }
 

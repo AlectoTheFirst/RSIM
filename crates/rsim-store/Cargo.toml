@@ -1,6 +1,6 @@
 [package]
 name = "rsim-store"
-description = "The append-only snapshot store of rsim: format, writer and reader"
+description = "The snapshot store of rsim: format, writer, reader and prune"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

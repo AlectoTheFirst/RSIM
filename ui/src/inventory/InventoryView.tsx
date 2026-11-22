@@ -1,8 +1,10 @@
 // The Inventory view: the device groups with their devices, the devices
 // that the twin sees and the inventory does not have, the credential
-// references, the jump hosts and the routes. Each edit is a write of one
+// references, the jump hosts, the routes and the settings of the collector.
+// Each edit is a write of one
 // record of the inventory, and each delete removes one record.
 import { useEffect, useMemo, useState } from "preact/hooks";
+import { CollectionSettings } from "./Collection";
 import { Credentials } from "./Credentials";
 import { ApiProblem, allRows, getInventory, getResolvedDevices, getVendors, putDevice, putGroup } from "../api/client";
 import { Hatch, HatchMark } from "../page/Hatch";
@@ -316,6 +318,7 @@ export function InventoryView(props: { twin: string }) {
           <JumpHosts inv={inv} adding={adding === "jump host"} onAdding={() => toggleAdd("jump host")} onClose={() => setAdding(null)} writeNew={writeNew} write={write} />
           <Routes inv={inv} adding={adding === "route"} onAdding={() => toggleAdd("route")} onClose={() => setAdding(null)} writeNew={writeNew} write={write} />
         </div>
+        <CollectionSettings inv={inv} write={write} refuse={setProblem} />
         <datalist id={VENDOR_LIST}>
           {(vendors?.vendors ?? []).map((v) => (
             <option value={v.vendor} />

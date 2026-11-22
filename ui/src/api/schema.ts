@@ -298,6 +298,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/inventory/collection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Collector settings */
+        get: operations["getCollection"];
+        /** Put collector settings */
+        put: operations["putCollection"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/inventory/credentials": {
         parameters: {
             query?: never;
@@ -1000,6 +1018,26 @@ export interface components {
             rsim_json: number;
         };
         /**
+         * Collection
+         * @description Collector settings
+         */
+        Collection: {
+            /**
+             * Format: uint32
+             * @description History
+             */
+            history_days: number;
+        };
+        /**
+         * CollectionOut
+         * @description Collector settings
+         */
+        CollectionOut: {
+            collection: components["schemas"]["Collection"];
+            /** Format: uint64 */
+            version: number;
+        };
+        /**
          * @description Transport
          * @enum {string}
          */
@@ -1337,6 +1375,7 @@ export interface components {
          */
         Inventory: {
             bindings: components["schemas"]["Bindings"];
+            collection: components["schemas"]["Collection"];
             credentials: components["schemas"]["Credential"][];
             devices: components["schemas"]["Device"][];
             groups: components["schemas"]["Group"][];
@@ -1700,6 +1739,7 @@ export interface components {
             /** @description Credential */
             credential: components["schemas"]["Resolved"];
             ha: components["schemas"]["Resolved8"];
+            interval_seconds: components["schemas"]["Resolved4"];
             nxos_json: components["schemas"]["Resolved5"];
             paged_section_timeout_seconds: components["schemas"]["Resolved4"];
             request_timeout_seconds: components["schemas"]["Resolved4"];
@@ -1871,6 +1911,11 @@ export interface components {
             /** @description Name */
             credential?: string | null;
             ha?: components["schemas"]["Ha"] | null;
+            /**
+             * Format: uint32
+             * @description Collection interval
+             */
+            interval_seconds?: number | null;
             nxos_json?: components["schemas"]["NxosJson"] | null;
             /**
              * Format: uint32
@@ -2191,11 +2236,8 @@ export interface components {
             id: string;
             /** @description Layers */
             layers: string[];
-            /**
-             * Format: uint64
-             * @description Cycle
-             */
-            snapshot?: number | null;
+            /** @description Snapshot time */
+            snapshot?: string | null;
         };
         /** @description QoS field */
         UniformJson: {
@@ -2951,6 +2993,68 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description Problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getCollection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionOut"];
+                };
+            };
+            /** @description Problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    putCollection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Collection"];
+            };
+        };
         responses: {
             /** @description Success */
             200: {

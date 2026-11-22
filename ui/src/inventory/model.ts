@@ -18,6 +18,7 @@ export type Route = S["Route"];
 export type JumpHost = S["JumpHost"];
 export type ResolvedDevice = S["ResolvedDevice"];
 export type Origin = S["Origin"];
+export type Collection = S["Collection"];
 export type Vendors = S["VendorsOut"];
 export type Transport = S["CollectorTransport"];
 
@@ -437,6 +438,19 @@ export type Checked<T> = { ok: true; body: T } | { ok: false; problem: Problem }
 
 export type SettingKey = keyof Settings & string;
 
+/** The range of the history of the store, in days, of the inventory database. */
+export const HISTORY_DAYS = { min: 1, max: 3650 } as const;
+
+/** The body of a write of the settings of the collector from the text of the history. */
+export function collectionChecked(text: string): Checked<Collection> {
+  const t = text.trim();
+  const detail = `history_days from ${HISTORY_DAYS.min} to ${HISTORY_DAYS.max}`;
+  if (!/^\d+$/.test(t)) return { ok: false, problem: { title: "history_days not a whole number", detail } };
+  const n = Number(t);
+  if (n < HISTORY_DAYS.min || n > HISTORY_DAYS.max) return { ok: false, problem: { title: "history out of range", detail } };
+  return { ok: true, body: { history_days: n } };
+}
+
 /** How a setting is edited and checked, its default, its transport and whether the collector reads it. */
 export interface SettingField {
   key: SettingKey;
@@ -474,6 +488,7 @@ export const SETTING_FIELDS: readonly SettingField[] = [
   { key: "tls_trust", label: "TLS trust", kind: "choice", choices: ["pin", "ca", "none"], fallback: "pin", transport: "https" },
   { key: "tls_ca_file", label: "TLS CA file", kind: "text", fallback: "none", transport: "https" },
   { key: "capture_bgp", label: "BGP sections", kind: "choice", choices: ["off", "sessions", "all"], fallback: "sessions", transport: null },
+  { key: "interval_seconds", label: "interval", kind: "number", min: 60, max: 86400, unit: "s", fallback: "60", transport: null },
   { key: "timeout_seconds", label: "device time limit", kind: "number", min: 1, max: 86400, unit: "s", fallback: "45", transport: null },
   { key: "section_timeout_seconds", label: "section time limit", kind: "number", min: 1, max: 86400, unit: "s", fallback: "20", transport: null },
   { key: "request_timeout_seconds", label: "request time limit", kind: "number", min: 1, max: 86400, unit: "s", fallback: "60", transport: "https", unread: true },
@@ -492,29 +507,25 @@ export function parseSetting(f: SettingField, text: string): { ok: true; value: 
   const t = text.trim();
   if (t === "") return { ok: true, value: null };
   if (f.kind === "number") {
-    const range = `${f.key} from ${f.min} to ${f.max}`;
-    if (!/^\d+$/.test(t)) return { ok: false, problem: { title: `${f.key} not a whole number`, detail: range } };
+    const range = `${f.label} from ${f.min} to ${f.max}`;
+    if (!/^\d+$/.test(t)) return { ok: false, problem: { title: `${f.label} not a whole number`, detail: range } };
     const n = Number(t);
-    if (n < f.min! || n > f.max!) return { ok: false, problem: { title: `${f.key} out of range`, detail: range } };
+    if (n < f.min! || n > f.max!) return { ok: false, problem: { title: `${f.label} out of range`, detail: range } };
     return { ok: true, value: n };
   }
   if (f.kind === "choice" && !f.choices!.includes(t)) {
-    return { ok: false, problem: { title: `${f.key} not known`, detail: `${f.key} is one of ${f.choices!.join(", ")}` } };
+    return { ok: false, problem: { title: `${f.label} not known`, detail: f.choices!.join(", ") } };
   }
   return { ok: true, value: t };
 }
 
-/**
- * Whether the collector reads a setting of a device of the vendor: null
- * when it does or when the vendor has no collector, else the words of the
- * reason.
- */
-export function notUsed(f: SettingField, vendors: Vendors | null, vendor: string): string | null {
+/** Whether the collector reads a setting of a device of the vendor; each setting for a vendor with no collector. */
+export function usedSetting(f: SettingField, vendors: Vendors | null, vendor: string): boolean {
+  if (f.unread) return false;
   const t = transportOf(vendors, vendor);
-  if (t === null) return null;
-  if (f.transport !== null && f.transport !== t) return `not used over ${t.toUpperCase()}`;
-  if (f.vendors && !f.vendors.includes(vendor)) return `not used by ${vendor}`;
-  return f.unread ? "not read by the collector" : null;
+  if (t === null) return true;
+  if (f.transport !== null && f.transport !== t) return false;
+  return !f.vendors || f.vendors.includes(vendor);
 }
 
 /** The value that an empty setting takes: the value of the group, else the default. */

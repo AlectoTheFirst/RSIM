@@ -1,5 +1,5 @@
 // The calls of the UI to the REST API of rsim-api, on the origin of the page.
-import type { Credential, CredentialPut, Device, Group, Inventory, JumpHost, ResolvedDevice, Route, SecretKeyOut, Vendors } from "../inventory/model";
+import type { Collection, Credential, CredentialPut, Device, Group, Inventory, JumpHost, ResolvedDevice, Route, SecretKeyOut, Vendors } from "../inventory/model";
 import type { Me, NewToken, PathAnswer, SetAnswer, SetupState, SourceText, Span, TableOut, TablesOut, TokenIn, TokenInfo, Twin } from "./types";
 
 /** A refused request: the problem object of RFC 9457. */
@@ -59,7 +59,7 @@ export function onReplaced(handler: (() => void) | null): void {
  * and source lines belong to the answer of that snapshot.
  */
 export function onNewestRun(path: string): string | null {
-  const m = /^\/v1\/twins\/snap-\d+(\/.*)?$/.exec(path);
+  const m = /^\/v1\/twins\/snapshot-\d{4}-\d{2}-\d{2}-\d{6}(\/.*)?$/.exec(path);
   if (!m) return null;
   const rest = m[1] ?? "";
   if (/\/(steps|sources)(\/|\?|$)/.test(rest)) return null;
@@ -145,8 +145,8 @@ export interface TwinRef {
   href: string;
   /** For the alias `store`: the newest built snapshot, or null before the first build. */
   held?: string | null;
-  /** For the alias `store`: the cycle of the newest snapshot of the store, or null when not known. */
-  newest_cycle?: number | null;
+  /** For the alias `store`: the newest snapshot of the store, or null when not known. */
+  newest?: string | null;
   /** For the alias `store`: the snapshot before the held snapshot that the server keeps, or null. */
   previous?: string | null;
   /** For the alias `store`: the snapshot whose twin builds now in the background, or null. */
@@ -306,6 +306,7 @@ export const putGroup = (g: Group) => put(`/v1/inventory/groups/${encodeURICompo
 export const putCredential = (c: Credential | CredentialPut) => put(`/v1/inventory/credentials/${encodeURIComponent(c.name)}`, c);
 export const putRoute = (r: Route) => put(`/v1/inventory/routes/${encodeURIComponent(r.name)}`, r);
 export const putJumpHost = (j: JumpHost) => put(`/v1/inventory/jump-hosts/${encodeURIComponent(j.name)}`, j);
+export const putCollection = (c: Collection) => put("/v1/inventory/collection", c);
 
 /** Removes a record of the inventory; the answer is the inventory version. */
 async function del(path: string): Promise<number> {
