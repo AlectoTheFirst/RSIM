@@ -532,7 +532,7 @@ export function TablesView(props: {
     ) : null;
 
   const tools = filterable ? (
-    <div class="bar table-tools">
+    <div class="table-tools">
       <span class="group wrap">
         {st.filters.map((f) => (
           <Chip column={f.column} value={chipValue(f)} onRemove={() => go({ filters: withoutFilter(st.filters, f) })} />
@@ -682,57 +682,59 @@ export function TablesView(props: {
         <TableList catalog={catalog} current={st.table} onSelect={(t) => t !== st.table && go({ table: t, filters: [], sort: [], by: [], hide: [], verb: st.verb === "lpm" ? "show" : st.verb })} />
         <PanelLayout fill panel={panel}>
           <Card label={st.table || "Table"} flush fill foot={foot} class="table-card">
-            {forms.length ? (
-              <div class="table-tabs">
-                <Tabs<Verb> label="Form" tabs={forms.map((v) => ({ id: v, label: FORM_LABELS[v] }))} current={st.verb} onSelect={(v) => go({ verb: v })} />
-                <span class="grow" />
-                <MenuButton
-                  kind="menu"
-                  label="Copy"
-                  buttonClass="ghost"
-                  button={
-                    <span class="with-icon">
-                      <Icon name="copy" />
-                      Copy
-                    </span>
-                  }
-                  align="end"
-                >
-                  {(close) => (
-                    <>
-                      <button
-                        type="button"
-                        class="menu-item"
-                        role="menuitem"
-                        tabIndex={-1}
-                        disabled={!def}
-                        onClick={() => {
-                          close();
-                          copy(tableCommand(cliTopology(twin), st, def), "rsim command");
-                        }}
-                      >
-                        rsim command
-                      </button>
-                      <button
-                        type="button"
-                        class="menu-item"
-                        role="menuitem"
-                        tabIndex={-1}
-                        disabled={!request}
-                        onClick={() => {
-                          close();
-                          if (request) copy(new URL(request, window.location.href).href, "API URL");
-                        }}
-                      >
-                        API URL
-                      </button>
-                    </>
-                  )}
-                </MenuButton>
-              </div>
-            ) : null}
+            <div class="table-bars">
+              {forms.length ? (
+                <div class="table-tabs">
+                  <Tabs<Verb> label="Form" tabs={forms.map((v) => ({ id: v, label: FORM_LABELS[v] }))} current={st.verb} onSelect={(v) => go({ verb: v })} />
+                </div>
+              ) : null}
+              {tools}
+              <span class="grow" />
+              <MenuButton
+                kind="menu"
+                label="Copy"
+                buttonClass="ghost"
+                button={
+                  <span class="with-icon">
+                    <Icon name="copy" />
+                    Copy
+                  </span>
+                }
+                align="end"
+              >
+                {(close) => (
+                  <>
+                    <button
+                      type="button"
+                      class="menu-item"
+                      role="menuitem"
+                      tabIndex={-1}
+                      disabled={!def}
+                      onClick={() => {
+                        close();
+                        copy(tableCommand(cliTopology(twin), st, def), "rsim command");
+                      }}
+                    >
+                      rsim command
+                    </button>
+                    <button
+                      type="button"
+                      class="menu-item"
+                      role="menuitem"
+                      tabIndex={-1}
+                      disabled={!request}
+                      onClick={() => {
+                        close();
+                        if (request) copy(new URL(request, window.location.href).href, "API URL");
+                      }}
+                    >
+                      API URL
+                    </button>
+                  </>
+                )}
+              </MenuButton>
+            </div>
             {params}
-            {tools}
             {grid ? (
               <span class="table-rows" ref={(el) => {
                   rowsRef.current = el?.querySelector<HTMLElement>(".tgrid-rows") ?? null;
