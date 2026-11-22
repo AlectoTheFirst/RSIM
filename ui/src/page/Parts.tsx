@@ -481,11 +481,6 @@ export function LevelControl(props: { level: Level; onLevel: (l: Level) => void 
   return (
     <span class="group" role="group" aria-label="Level">
       <span class="muted">Level</span>
-      {(["estate", "site"] as const).map((l) => (
-        <button type="button" disabled title="not in this build">
-          {l}
-        </button>
-      ))}
       {LEVELS.map((l) => (
         <button type="button" aria-pressed={l === props.level} aria-keyshortcuts={l === "device" ? "[" : "]"} onClick={() => props.onLevel(l)}>
           {l}
