@@ -54,7 +54,7 @@ pub struct Operation {
 pub const OPERATIONS: &[Operation] = &[
     Operation {
         id: "listTopologies",
-        description: "The twins of the server.",
+        description: "Twins",
         effect: Effect::Read,
         tool: None,
         command: None,
@@ -64,7 +64,7 @@ pub const OPERATIONS: &[Operation] = &[
     },
     Operation {
         id: "listDevices",
-        description: "The devices, their functions and the endpoints of a topology.",
+        description: "Devices",
         effect: Effect::Read,
         tool: Some("list_devices"),
         command: Some("devices"),
@@ -74,7 +74,7 @@ pub const OPERATIONS: &[Operation] = &[
     },
     Operation {
         id: "runPathQuery",
-        description: "The answer for one packet: the ingress, each branch with its verdict, its delay and its trace, and the reply of each delivered branch. A field that the query does not state is not known, or takes its default value with unstated defaults; the notes of the answer name each default.",
+        description: "Path query",
         effect: Effect::Read,
         tool: Some("path_query"),
         command: Some("path"),
@@ -84,7 +84,7 @@ pub const OPERATIONS: &[Operation] = &[
     },
     Operation {
         id: "runSetQuery",
-        description: "The answer for a set of packets: the parts of the set with their results, the ingress of each part, each branch with its trace, and the replies. A field that is not given has all values.",
+        description: "Set query",
         effect: Effect::Read,
         tool: Some("set_query"),
         command: Some("set"),
@@ -94,7 +94,7 @@ pub const OPERATIONS: &[Operation] = &[
     },
     Operation {
         id: "getStep",
-        description: "One trace step of a path query or of a set query, with its function, its reason and its source spans. The query runs again.",
+        description: "Trace step",
         effect: Effect::Read,
         tool: Some("explain_step"),
         command: Some("explain"),
@@ -107,7 +107,7 @@ pub const OPERATIONS: &[Operation] = &[
     },
     Operation {
         id: "listTables",
-        description: "The catalog of the tables: each table with its key, its columns with their types and meanings, its verbs, and the data that it needs.",
+        description: "Table catalog",
         effect: Effect::Read,
         tool: Some("list_tables"),
         command: Some("tables"),
@@ -117,7 +117,7 @@ pub const OPERATIONS: &[Operation] = &[
     },
     Operation {
         id: "queryTable",
-        description: "A table of a twin with a verb: show the rows with filters, columns, sort and pages; summarize; unique values; top rows; or the longest prefix match of an address.",
+        description: "Table query",
         effect: Effect::Read,
         tool: Some("table_query"),
         command: Some("<twin> <table>"),
@@ -131,7 +131,7 @@ pub const OPERATIONS: &[Operation] = &[
     },
     Operation {
         id: "listClaims",
-        description: "The catalog of the claims: assessment questions about the network, with their scopes and the data that they read.",
+        description: "Claim catalog",
         effect: Effect::Read,
         tool: Some("list_claims"),
         command: Some("<twin> claim list"),
@@ -141,7 +141,7 @@ pub const OPERATIONS: &[Operation] = &[
     },
     Operation {
         id: "runClaim",
-        description: "A claim on a scope: the whole twin, a set of devices, or the paths of a path query. The result is confirmed, refuted or unknown, with evidence rows; data that is not collected gives unknown.",
+        description: "Claim result",
         effect: Effect::Read,
         tool: Some("run_claim"),
         command: Some("<twin> claim run"),
@@ -151,7 +151,7 @@ pub const OPERATIONS: &[Operation] = &[
     },
     Operation {
         id: "getTopology",
-        description: "The topology of a twin for a drawing: the nodes at the level device or function, and the edges of the layers physical and overlay, or function, with the link facts and the result of the claim link-speed-duplex on each edge.",
+        description: "Topology",
         effect: Effect::Read,
         tool: Some("get_topology"),
         command: Some("<twin> topology"),

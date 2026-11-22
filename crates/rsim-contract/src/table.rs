@@ -11,46 +11,46 @@ use serde_json::Value;
 
 use crate::twin::TwinJson;
 
-/// The type of the values of a column.
+/// Column type
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ColumnType {
     Text,
     Integer,
     Boolean,
-    /// An IPv4 or IPv6 address.
+    /// Address
     Address,
-    /// An address with a prefix length.
+    /// Prefix
     Prefix,
-    /// A list of text values.
+    /// Text list
     List,
 }
 
-/// One column of a table.
+/// Column
 #[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
 pub struct Column {
     pub name: &'static str,
     pub description: &'static str,
     #[serde(rename = "type")]
     pub kind: ColumnType,
-    /// The meaning of the values, for example `device`, `interface`, `vrf`.
+    /// Semantic type
     pub semantic: &'static str,
     pub unit: Option<&'static str>,
-    /// The table and the column that a value refers to.
+    /// Reference
     pub refers_to: Option<(&'static str, &'static str)>,
 }
 
-/// One table of the catalog.
+/// Table
 #[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
 pub struct TableDef {
     pub name: &'static str,
     pub description: &'static str,
-    /// The key columns, which give the default order of the rows.
+    /// Key columns
     pub key: &'static [&'static str],
     pub columns: &'static [Column],
-    /// The verbs of the table.
+    /// Verbs
     pub verbs: &'static [&'static str],
-    /// The data that the table needs, so a client knows why it is empty.
+    /// Needed data
     pub needs: &'static str,
 }
 
@@ -82,7 +82,7 @@ const fn refers(mut c: Column, table: &'static str, column: &'static str) -> Col
 }
 
 const DEVICE: Column = refers(
-    col("device", ColumnType::Text, "device", "The device."),
+    col("device", ColumnType::Text, "device", "Device"),
     "devices",
     "device",
 );
@@ -92,121 +92,71 @@ const BASE_VERBS: &[&str] = &["show", "summarize", "unique", "top"];
 pub const TABLES: &[TableDef] = &[
     TableDef {
         name: "devices",
-        description: "The devices of the twin with their facts: each device with a function and each device of the snapshot, where a UniFi console gives a row for each device record of its `devices` section and a row of its own only when that section gives no device. A fact that is not known is null, and its column `<fact>_reason` gives not_collected (the snapshot has no section or record that gives it) or not_read (no reader gives it from the section, or the value is a placeholder).",
+        description: "Devices",
         key: &["device"],
         columns: &[
-            col("device", ColumnType::Text, "device", "The device."),
-            col(
-                "vendor",
-                ColumnType::Text,
-                "vendor",
-                "The vendor of the device manifest.",
-            ),
-            col(
-                "vendor_reason",
-                ColumnType::Text,
-                "reason",
-                "Why the vendor is not known.",
-            ),
-            col(
-                "platform",
-                ColumnType::Text,
-                "platform",
-                "The model of the device.",
-            ),
+            col("device", ColumnType::Text, "device", "Device"),
+            col("vendor", ColumnType::Text, "vendor", "Vendor"),
+            col("vendor_reason", ColumnType::Text, "reason", "Vendor reason"),
+            col("platform", ColumnType::Text, "platform", "Platform"),
             col(
                 "platform_reason",
                 ColumnType::Text,
                 "reason",
-                "Why the model is not known.",
+                "Platform reason",
             ),
-            col(
-                "os_version",
-                ColumnType::Text,
-                "os_version",
-                "The version of the operating system.",
-            ),
+            col("os_version", ColumnType::Text, "os_version", "OS version"),
             col(
                 "os_version_reason",
                 ColumnType::Text,
                 "reason",
-                "Why the version is not known.",
+                "OS version reason",
             ),
-            col(
-                "serial",
-                ColumnType::Text,
-                "serial",
-                "The serial of the chassis.",
-            ),
-            col(
-                "serial_reason",
-                ColumnType::Text,
-                "reason",
-                "Why the serial is not known.",
-            ),
+            col("serial", ColumnType::Text, "serial", "Serial"),
+            col("serial_reason", ColumnType::Text, "reason", "Serial reason"),
             col(
                 "management_address",
                 ColumnType::Text,
                 "address",
-                "The host name or the address to which the collector connected, or for a UniFi device the address of its record.",
+                "Management address",
             ),
             col(
                 "management_address_reason",
                 ColumnType::Text,
                 "reason",
-                "Why the management address is not known.",
+                "Management address reason",
             ),
-            col(
-                "collected_at",
-                ColumnType::Text,
-                "time",
-                "The time of the device manifest in UTC, as YYYY-MM-DDTHH:MM:SSZ.",
-            ),
+            col("collected_at", ColumnType::Text, "time", "Manifest time"),
             col(
                 "collected_at_reason",
                 ColumnType::Text,
                 "reason",
-                "Why the time is not known.",
+                "Manifest time reason",
             ),
-            col(
-                "store_device",
-                ColumnType::Text,
-                "device",
-                "The device of the store whose manifest gives the facts: the console of a UniFi device, else the device itself; null with no facts.",
-            ),
+            col("store_device", ColumnType::Text, "device", "Store device"),
             col(
                 "provenance",
                 ColumnType::List,
                 "source_span",
-                "The source spans of the facts: file:first-last.",
+                "Source spans",
             ),
         ],
         verbs: BASE_VERBS,
-        needs: "the twin; the facts need a twin of a store snapshot",
+        needs: "the twin and a store snapshot for the facts",
     },
     TableDef {
         name: "functions",
-        description: "The network functions of the twin, with the source lines from which each came.",
+        description: "Network functions",
         key: &["function"],
         columns: &[
-            col(
-                "function",
-                ColumnType::Text,
-                "function",
-                "The function identifier.",
-            ),
+            col("function", ColumnType::Text, "function", "Function"),
             DEVICE,
-            col(
-                "kind",
-                ColumnType::Text,
-                "function_kind",
-                "The function type.",
-            ),
+            col("kind", ColumnType::Text, "function_kind", "Function type"),
             col(
                 "provenance",
                 ColumnType::List,
                 "source_span",
-                "The source spans: file:first-last.",
+                "Source spans",
             ),
         ],
         verbs: BASE_VERBS,
@@ -214,41 +164,26 @@ pub const TABLES: &[TableDef] = &[
     },
     TableDef {
         name: "endpoints",
-        description: "The endpoints of the twin.",
+        description: "Endpoints",
         key: &["endpoint"],
         columns: &[
-            col("endpoint", ColumnType::Text, "endpoint", "The endpoint."),
-            col(
-                "addresses",
-                ColumnType::List,
-                "address",
-                "The addresses of the endpoint.",
-            ),
+            col("endpoint", ColumnType::Text, "endpoint", "Endpoint"),
+            col("addresses", ColumnType::List, "address", "Addresses"),
         ],
         verbs: BASE_VERBS,
         needs: "the twin",
     },
     TableDef {
         name: "attachments",
-        description: "The attachment records: where an address attaches to the network.",
+        description: "Attachment records",
         key: &["address", "device", "interface"],
         columns: &[
-            col("address", ColumnType::Address, "address", "The address."),
+            col("address", ColumnType::Address, "address", "Address"),
             DEVICE,
-            col(
-                "interface",
-                ColumnType::Text,
-                "interface",
-                "The interface of the device.",
-            ),
-            col(
-                "kind",
-                ColumnType::Text,
-                "attachment_kind",
-                "The kind of the record.",
-            ),
+            col("interface", ColumnType::Text, "interface", "Interface"),
+            col("kind", ColumnType::Text, "attachment_kind", "Record kind"),
             refers(
-                col("host", ColumnType::Text, "endpoint", "The host."),
+                col("host", ColumnType::Text, "endpoint", "Host"),
                 "endpoints",
                 "endpoint",
             ),
@@ -258,56 +193,41 @@ pub const TABLES: &[TableDef] = &[
     },
     TableDef {
         name: "edge-interfaces",
-        description: "The edge interfaces with the connected networks behind them.",
+        description: "Edge interfaces",
         key: &["device", "interface"],
         columns: &[
             DEVICE,
-            col("interface", ColumnType::Text, "interface", "The interface."),
-            col(
-                "networks",
-                ColumnType::List,
-                "prefix",
-                "The connected networks.",
-            ),
+            col("interface", ColumnType::Text, "interface", "Interface"),
+            col("networks", ColumnType::List, "prefix", "Connected networks"),
         ],
         verbs: BASE_VERBS,
         needs: "the twin",
     },
     TableDef {
         name: "fib",
-        description: "The forwarding table of each device and VRF that the twin uses. Each row is one prefix.",
+        description: "Forwarding table",
         key: &["device", "vrf", "prefix", "function"],
         columns: &[
             DEVICE,
-            col("vrf", ColumnType::Text, "vrf", "The VRF."),
-            col("prefix", ColumnType::Prefix, "prefix", "The prefix."),
-            col(
-                "kind",
-                ColumnType::Text,
-                "route_kind",
-                "connected, static, local or null.",
-            ),
+            col("vrf", ColumnType::Text, "vrf", "VRF"),
+            col("prefix", ColumnType::Prefix, "prefix", "Prefix"),
+            col("kind", ColumnType::Text, "route_kind", "Route kind"),
             refers(
                 col(
                     "function",
                     ColumnType::Text,
                     "function",
-                    "The route lookup function.",
+                    "Route lookup function",
                 ),
                 "functions",
                 "function",
             ),
-            col(
-                "next_hops",
-                ColumnType::List,
-                "next_hop",
-                "The next hops as <gateway>@<interface>, or the interface of a connected network.",
-            ),
+            col("next_hops", ColumnType::List, "next_hop", "Next hops"),
             col(
                 "provenance",
                 ColumnType::List,
                 "source_span",
-                "The source spans: file:first-last.",
+                "Source spans",
             ),
         ],
         verbs: &["show", "summarize", "unique", "top", "lpm"],
@@ -315,217 +235,117 @@ pub const TABLES: &[TableDef] = &[
     },
     TableDef {
         name: "coverage",
-        description: "The config stanzas that the ingestion does not handle, for each device. Each key goes through the mask of the secrets.",
+        description: "Unhandled config stanzas",
         key: &["device", "path"],
         columns: &[
             DEVICE,
-            col(
-                "path",
-                ColumnType::Text,
-                "config_path",
-                "The path of the unhandled stanzas.",
-            ),
-            col(
-                "stanzas",
-                ColumnType::Integer,
-                "count",
-                "The number of stanzas.",
-            ),
-            col(
-                "lines",
-                ColumnType::Integer,
-                "count",
-                "The number of lines.",
-            ),
+            col("path", ColumnType::Text, "config_path", "Config path"),
+            col("stanzas", ColumnType::Integer, "count", "Stanzas"),
+            col("lines", ColumnType::Integer, "count", "Lines"),
         ],
         verbs: BASE_VERBS,
         needs: "a twin of a store snapshot",
     },
     TableDef {
         name: "neighbours",
-        description: "The LLDP and CDP records of the twin that name a neighbour with no device in the twin: no device has its name or its host name, and its MACs name no device.",
+        description: "External neighbours",
         key: &["device", "port", "neighbour", "protocol"],
         columns: &[
             DEVICE,
-            col("port", ColumnType::Text, "interface", "The local port."),
-            col(
-                "neighbour",
-                ColumnType::Text,
-                "device",
-                "The name of the neighbour.",
-            ),
-            col(
-                "remote_port",
-                ColumnType::Text,
-                "interface",
-                "The port of the neighbour as it sends it.",
-            ),
+            col("port", ColumnType::Text, "interface", "Local port"),
+            col("neighbour", ColumnType::Text, "device", "Neighbour"),
+            col("remote_port", ColumnType::Text, "interface", "Remote port"),
             col(
                 "protocol",
                 ColumnType::Text,
                 "neighbour_protocol",
-                "lldp or cdp.",
+                "Protocol",
             ),
-            col(
-                "provenance",
-                ColumnType::List,
-                "source_span",
-                "The source span of the record: file:first-last.",
-            ),
+            col("provenance", ColumnType::List, "source_span", "Source span"),
         ],
         verbs: BASE_VERBS,
         needs: "a twin of a store snapshot with an LLDP or CDP section",
     },
     TableDef {
         name: "bgp-sessions",
-        description: "The BGP peers of each device: each configured neighbour and listen range after the inheritance, joined with the session rows of the device, and each observed peer with no neighbour.",
+        description: "BGP peers",
         key: &["device", "vrf", "peer"],
         columns: &[
             DEVICE,
-            col("vrf", ColumnType::Text, "vrf", "The VRF of the peer."),
-            col(
-                "peer",
-                ColumnType::Text,
-                "bgp_peer",
-                "The address of the peer, the prefix of a listen range, or the interface of a neighbour with no address.",
-            ),
-            col(
-                "source",
-                ColumnType::Text,
-                "bgp_peer_source",
-                "configured, listen-range, dynamic (an observed peer in one listen range) or observed (no neighbour in the config).",
-            ),
-            col(
-                "range",
-                ColumnType::Prefix,
-                "prefix",
-                "The listen range of a dynamic peer.",
-            ),
+            col("vrf", ColumnType::Text, "vrf", "VRF"),
+            col("peer", ColumnType::Text, "bgp_peer", "Peer"),
+            col("source", ColumnType::Text, "bgp_peer_source", "Peer source"),
+            col("range", ColumnType::Prefix, "prefix", "Listen range"),
             col(
                 "local_address",
                 ColumnType::Address,
                 "address",
-                "The local address of the update-source or local address line.",
+                "Local address",
             ),
             col(
                 "update_source",
                 ColumnType::Text,
                 "interface",
-                "The interface or the address of the update-source or local address line.",
+                "Update source",
             ),
-            col(
-                "local_asn",
-                ColumnType::List,
-                "asn",
-                "The ASes that the device presents to the peer, 2 with dual-as; empty when not known.",
-            ),
+            col("local_asn", ColumnType::List, "asn", "Presented AS"),
             col(
                 "local_asn_reason",
                 ColumnType::Text,
                 "reason",
-                "Why the presented AS is not known.",
+                "Presented AS reason",
             ),
-            col(
-                "peer_asn",
-                ColumnType::Integer,
-                "asn",
-                "The AS of the peer from the config, or from the session rows of an observed peer.",
-            ),
+            col("peer_asn", ColumnType::Integer, "asn", "Peer AS"),
             col(
                 "peer_asn_reason",
                 ColumnType::Text,
                 "reason",
-                "Why the AS of the peer is not known.",
+                "Peer AS reason",
             ),
-            col(
-                "observed_asn",
-                ColumnType::Integer,
-                "asn",
-                "The AS of the peer as the session rows state it.",
-            ),
-            col(
-                "shutdown",
-                ColumnType::Boolean,
-                "admin_state",
-                "True with a shutdown line; null when an inheritance gap can hide one.",
-            ),
+            col("observed_asn", ColumnType::Integer, "asn", "Observed AS"),
+            col("shutdown", ColumnType::Boolean, "admin_state", "Shutdown"),
             col(
                 "families",
                 ColumnType::List,
                 "address_family",
-                "The activated address families, for example ipv4-unicast.",
+                "Address families",
             ),
-            col(
-                "policy_in",
-                ColumnType::Text,
-                "policy",
-                "The inbound policy of IPv4 unicast.",
-            ),
-            col(
-                "policy_out",
-                ColumnType::Text,
-                "policy",
-                "The outbound policy of IPv4 unicast.",
-            ),
-            col(
-                "inherits",
-                ColumnType::List,
-                "bgp_template",
-                "The peer groups, templates and session groups of the inheritance.",
-            ),
-            col(
-                "gaps",
-                ColumnType::List,
-                "reason",
-                "The sources of the inheritance that are not defined or that inherit from themselves.",
-            ),
-            col(
-                "state",
-                ColumnType::List,
-                "bgp_state",
-                "The state word of each session row of the peer.",
-            ),
+            col("policy_in", ColumnType::Text, "policy", "Inbound policy"),
+            col("policy_out", ColumnType::Text, "policy", "Outbound policy"),
+            col("inherits", ColumnType::List, "bgp_template", "Inheritance"),
+            col("gaps", ColumnType::List, "reason", "Inheritance gaps"),
+            col("state", ColumnType::List, "bgp_state", "Session states"),
             col(
                 "established",
                 ColumnType::Boolean,
                 "bgp_state",
-                "True if each session row is established; null with no row.",
+                "Established",
             ),
             col(
                 "prefixes_received",
                 ColumnType::Integer,
                 "count",
-                "The received prefixes of the session rows that state a count.",
+                "Received prefixes",
             ),
             col(
                 "prefixes_sent",
                 ColumnType::Integer,
                 "count",
-                "The sent prefixes of the session rows that state a count.",
+                "Sent prefixes",
             ),
-            col(
-                "router_id",
-                ColumnType::Address,
-                "address",
-                "The router ID of the peer as the device states it.",
-            ),
+            col("router_id", ColumnType::Address, "address", "Router ID"),
             col(
                 "outcome",
                 ColumnType::Text,
                 "section_outcome",
-                "The outcome of the session section: complete, complete-empty, partial, failed or not-captured.",
+                "Section outcome",
             ),
-            col(
-                "in_scope",
-                ColumnType::Boolean,
-                "bgp_scope",
-                "True if the scope of the session section covers each activated address family of the peer in its VRF.",
-            ),
+            col("in_scope", ColumnType::Boolean, "bgp_scope", "In scope"),
             col(
                 "provenance",
                 ColumnType::List,
                 "source_span",
-                "The source spans: file:first-last.",
+                "Source spans",
             ),
         ],
         verbs: BASE_VERBS,
@@ -541,27 +361,23 @@ pub fn table(name: &str) -> Option<&'static TableDef> {
 /// The selection of rows: the filters, the order, the columns and the page.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 pub struct Selection {
-    /// Equality filters: a row matches if the value of the column is one of
-    /// the values. A list value matches if one element is one of the
-    /// values. Different columns are an AND.
+    /// Equality filters
     #[serde(default)]
     pub filters: BTreeMap<String, Vec<String>>,
-    /// Typed filters as `<column>.<op>` with the op `contains`, `prefix`,
-    /// `gt`, `lt` or `in_prefix`.
+    /// Typed filters
     #[serde(default)]
     pub typed: BTreeMap<String, String>,
-    /// The columns of the output. All columns if not given.
+    /// Columns
     pub columns: Option<Vec<String>>,
-    /// The order: column names, `-` before a name for a falling order.
-    /// The key order if not given.
+    /// Sort order
     pub sort: Option<Vec<String>>,
-    /// The number of rows of a page.
+    /// Page size
     pub limit: Option<usize>,
-    /// The cursor of the next page, from the output of the page before.
+    /// Cursor
     pub cursor: Option<String>,
 }
 
-/// The rows of a table.
+/// Table rows
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct TableOut {
     pub rsim_json: u32,
@@ -571,13 +387,13 @@ pub struct TableOut {
     pub table: String,
     pub columns: Vec<String>,
     pub rows: Vec<Vec<Value>>,
-    /// The number of rows that match the filters, on all pages.
+    /// Total rows
     pub total: usize,
-    /// The cursor of the next page, or `null` on the last page.
+    /// Next cursor
     pub next_cursor: Option<String>,
 }
 
-/// The distinct values of columns with their counts.
+/// Distinct values
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct UniqueOut {
     pub rsim_json: u32,
@@ -585,12 +401,12 @@ pub struct UniqueOut {
     pub topology: String,
     pub twin: TwinJson,
     pub table: String,
-    /// The columns, then `count`.
+    /// Columns
     pub columns: Vec<String>,
     pub rows: Vec<Vec<Value>>,
 }
 
-/// The counts of a table and of each column.
+/// Table summary
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SummarizeOut {
     pub rsim_json: u32,
@@ -602,18 +418,17 @@ pub struct SummarizeOut {
     pub columns: Vec<ColumnSummary>,
 }
 
-/// The counts of one column.
+/// Column summary
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ColumnSummary {
     pub column: String,
     pub distinct: usize,
     pub nulls: usize,
-    /// The most frequent values with their counts, at most 5, the most
-    /// frequent first.
+    /// Most frequent values
     pub top: Vec<(Value, usize)>,
 }
 
-/// The table catalog.
+/// Table catalog
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct TablesOut {
     pub rsim_json: u32,

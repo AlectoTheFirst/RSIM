@@ -3,7 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// The code of a query error.
+/// Error code
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
@@ -13,18 +13,15 @@ pub enum ErrorCode {
     NoSuchStep,
     StartRequiresContext,
     ContractViolation,
-    /// The store of a `store:` topology cannot be read.
+    /// Store not readable
     Store,
     UnknownTable,
     InvalidFilter,
-    /// The twin has no text of the source: a hand-built twin of the tests, or a file
-    /// that is not a section of the snapshot of the twin.
+    /// No source text
     NoSourceText,
-    /// The section has no mask of its secrets for its vendor and format, so
-    /// its lines are not given.
+    /// Not masked
     NotMasked,
-    /// The lines are outside every source span of a function of the twin,
-    /// so they are not given.
+    /// Not a source span
     NotASourceSpan,
     Internal,
 }
@@ -49,7 +46,7 @@ impl ErrorCode {
     }
 }
 
-/// A query error: the code and a text for persons.
+/// Query error
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct QueryError {
     pub code: ErrorCode,

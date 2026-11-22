@@ -9,16 +9,16 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// The twin that gave an answer.
+/// Twin
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TwinJson {
-    /// The twin identifier.
+    /// Twin
     pub id: String,
-    /// The identifier of the base: a snapshot, or a hand-built topology of the tests.
+    /// Base
     pub base: String,
-    /// The snapshot cycle of the base, or `null` for a hand-built topology of the tests.
+    /// Cycle
     pub snapshot: Option<u64>,
-    /// The what-if layers on the base, in order. Empty with no scenario.
+    /// Layers
     pub layers: Vec<String>,
 }
 

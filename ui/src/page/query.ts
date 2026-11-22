@@ -56,9 +56,9 @@ export function hasDefaults(f: Fields): boolean {
   return (f.unstated ?? "").trim() === "defaults";
 }
 
-/** The label of the mark of the unstated fields: defaults, or the count of the fields that are not stated. */
-export function unstatedLabel(defaults: boolean, notStated: number): string {
-  return defaults ? "defaults" : `${notStated} not stated`;
+/** The label of the mark of the unstated fields. */
+export function unstatedLabel(defaults: boolean): string {
+  return defaults ? "defaults" : "not stated";
 }
 
 /** The fields of the bar with `unstated` switched between all (no value) and defaults. */

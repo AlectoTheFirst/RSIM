@@ -29,13 +29,13 @@ describe("problems", () => {
   });
 
   it("counts down the wait of a 429", () => {
-    const p = new ApiProblem(429, "too_many_sign_ins", "too many failed sign-ins; wait 30 s", "", 30);
+    const p = new ApiProblem(429, "too_many_sign_ins", "too many failed sign-ins, wait 30 s", "", 30);
     const until = waitUntil(p, 1000)!;
     expect(until).toBe(31000);
     expect(secondsLeft(until, 12500)).toBe(19);
     expect(secondsLeft(until, 40000)).toBe(0);
-    expect(waitDetail(p.detail, 19)).toBe("too many failed sign-ins; wait 19 s");
-    expect(waitDetail("too many requests", 4)).toBe("too many requests; wait 4 s");
+    expect(waitDetail(p.detail, 19)).toBe("too many failed sign-ins, wait 19 s");
+    expect(waitDetail("too many requests", 4)).toBe("too many requests, wait 4 s");
     expect(waitUntil(new ApiProblem(401, "", "x"), 0)).toBeNull();
   });
 });
@@ -113,7 +113,7 @@ describe("the requests", () => {
   });
 
   it("reads the wait of a 429", async () => {
-    answer(429, { code: "too_many_sign_ins", detail: "too many failed sign-ins; wait 30 s" }, { "retry-after": "30" });
+    answer(429, { code: "too_many_sign_ins", detail: "too many failed sign-ins, wait 30 s" }, { "retry-after": "30" });
     await expect(signIn("ada", "x")).rejects.toMatchObject({ status: 429, retryAfter: 30 });
   });
 

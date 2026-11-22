@@ -79,7 +79,7 @@ describe("reload of the store", () => {
     expect(twinState(store(null, 3), "store")).toBe("ready");
     expect(twinState(store("snap-3", 3), "store")).toBe("ready");
     expect(twinState(store(null, null), "snap-3")).toBe("ready");
-    expect(twinStateText("empty")).toEqual({ text: "no snapshot", title: "the store has no snapshot of the collector" });
+    expect(twinStateText("empty")).toEqual({ text: "no snapshot", title: "empty store" });
     expect(twinStateText("none")).toEqual({ text: "no store", title: "rsim-api has no --store" });
     expect(twinStateText("ready")).toBeNull();
   });
