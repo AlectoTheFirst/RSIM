@@ -223,7 +223,7 @@ impl NetFunction for RouteLookup {
             return vec![self.meta.unknown(
                 input.clone(),
                 ReasonCode::UnknownAttribute,
-                "the VRF is not known",
+                "VRF not known",
                 ctx,
                 state,
             )];
@@ -232,7 +232,7 @@ impl NetFunction for RouteLookup {
             return vec![self.meta.unknown(
                 input.clone(),
                 ReasonCode::IncompleteTable,
-                format!("no FIB · VRF {vrf}"),
+                format!("no FIB of VRF {vrf}"),
                 ctx,
                 state,
             )];
@@ -247,7 +247,7 @@ impl NetFunction for RouteLookup {
                 unmatched.clone(),
                 next,
                 ReasonCode::NoRoute,
-                format!("no route in VRF {vrf} · next table"),
+                format!("no route in VRF {vrf}, next table"),
                 ctx.clone(),
                 state,
             ),
@@ -265,7 +265,7 @@ impl NetFunction for RouteLookup {
             self.meta.unknown(
                 uncertain,
                 ReasonCode::UnknownAttribute,
-                "the destination address is not known",
+                "destination address not known",
                 ctx,
                 state,
             ),
@@ -314,7 +314,7 @@ impl RouteLookup {
         let spans = g.spans;
         match g.group.kind {
             RouteKind::Local => {
-                let detail = format!("{what} is an address of {}", self.meta.device);
+                let detail = format!("{what}, address of {}", self.meta.device);
                 if let Some(next) = &self.local {
                     out.push(
                         self.meta
@@ -356,10 +356,10 @@ impl RouteLookup {
         let count = u32::try_from(hops.len()).expect("too many next hops");
         if count == 0 {
             let (code, detail) = match &g.group.unknown {
-                Some((code, why)) => (*code, format!("route {what} in VRF {vrf}: {why}")),
+                Some((code, why)) => (*code, format!("route {what} in VRF {vrf}, {why}")),
                 None => (
                     ReasonCode::IncompleteTable,
-                    format!("route {what} in VRF {vrf} has no next hop"),
+                    format!("route {what} in VRF {vrf}, no next hop"),
                 ),
             };
             out.push(
@@ -503,7 +503,7 @@ impl NextHopResolution {
                         set,
                         ReasonCode::IncompleteTable,
                         format!(
-                            "{addr} is not in the {table} of {} on {iface}; the collected table is incomplete",
+                            "{addr} not in the {table} of {} on {iface}, table incomplete",
                             self.meta.device
                         ),
                         ctx,
@@ -518,7 +518,7 @@ impl NextHopResolution {
                         self.meta.unknown(
                             set,
                             ReasonCode::IncompleteTable,
-                            format!("no egress function · {iface}"),
+                            format!("no egress function of {iface}"),
                             ctx,
                             state,
                         ),
@@ -534,17 +534,15 @@ impl NextHopResolution {
                 };
                 let mut c = ctx.clone();
                 c.neighbour = Attr::Known(one.target.clone());
+                let detail = if self.point_to_point.contains_key(iface) {
+                    format!("next hop of {iface}, {}", one.owner)
+                } else {
+                    format!("{addr}, {} on {iface}", one.owner)
+                };
                 push_nonempty(
                     out,
                     self.meta
-                        .forward(
-                            set,
-                            next,
-                            ReasonCode::Resolved,
-                            format!("{addr} is {} on {iface}", one.owner),
-                            c,
-                            state,
-                        )
+                        .forward(set, next, ReasonCode::Resolved, detail, c, state)
                         .with_spans(one.spans.clone()),
                 );
             }
@@ -558,7 +556,7 @@ impl NextHopResolution {
                             set,
                             ReasonCode::AmbiguousOwner,
                             format!(
-                                "{addr} has {} owners: {} · {iface}",
+                                "{addr} on {iface}, {} owners: {}",
                                 names.len(),
                                 names.join(", ")
                             ),
@@ -603,7 +601,7 @@ impl NetFunction for NextHopResolution {
             return vec![self.meta.unknown(
                 input.clone(),
                 ReasonCode::UnknownAttribute,
-                "the egress interface or the next hop is not known",
+                "egress interface or next hop not known",
                 ctx,
                 state,
             )];
@@ -659,14 +657,14 @@ impl NetFunction for NextHopResolution {
                     );
                 }
                 let dest = single_destination(&part.unmatched)
-                    .map_or_else(|| "the destination".to_string(), |a| a.to_string());
+                    .map_or_else(|| "destination".to_string(), |a| a.to_string());
                 self.resolve(&mut out, dest, &[], iface, part.unmatched, ctx, state);
                 push_nonempty(
                     &mut out,
                     self.meta.unknown(
                         part.uncertain,
                         ReasonCode::UnknownAttribute,
-                        "the destination address is not known",
+                        "destination address not known",
                         ctx,
                         state,
                     ),
@@ -763,10 +761,10 @@ impl NetFunction for PolicyRoute {
                 Decision::Action { action, decided_by } => {
                     let detail = match decided_by.first() {
                         Some(RuleRef::Rule(i)) => format!(
-                            "policy {} rule {} · table {action}",
+                            "policy {} rule {}, table {action}",
                             self.policy, self.rules[*i].name
                         ),
-                        _ => format!("policy {} · no rule · main table", self.policy),
+                        _ => format!("policy {}, no rule, main table", self.policy),
                     };
                     self.meta.forward(
                         set,
@@ -782,14 +780,14 @@ impl NetFunction for PolicyRoute {
                         UnknownCause::Unhandled { rule } => (
                             ReasonCode::UnhandledStanza,
                             format!(
-                                "policy {} rule {} is not handled",
+                                "policy {} rule {} not handled",
                                 self.policy, self.rules[rule].name
                             ),
                         ),
                         UnknownCause::Uncertain { rule } => (
                             ReasonCode::MatchUnknown,
                             format!(
-                                "policy {} rule {} may match",
+                                "policy {} rule {}, match not known",
                                 self.policy, self.rules[rule].name
                             ),
                         ),

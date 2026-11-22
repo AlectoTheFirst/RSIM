@@ -134,21 +134,21 @@ fn a_missing_neighbour_of_an_incomplete_table_names_the_address_the_device_and_t
     };
     assert_eq!(
         reason(&one, NextHop::Connected),
-        "198.51.100.7 is not in the ARP table of r1 on eth1; the collected table is incomplete"
+        "198.51.100.7 not in the ARP table of r1 on eth1, table incomplete"
     );
     assert_eq!(
         reason(&one, NextHop::Gateway(ip("192.0.2.254"))),
-        "192.0.2.254 is not in the ARP table of r1 on eth1; the collected table is incomplete"
+        "192.0.2.254 not in the ARP table of r1 on eth1, table incomplete"
     );
     let v6 = single(&arena, udp("2001:db8::1", 1, "2001:db8::7", 53));
     assert_eq!(
         reason(&v6, NextHop::Connected),
-        "2001:db8::7 is not in the neighbour table of r1 on eth1; the collected table is incomplete"
+        "2001:db8::7 not in the neighbour table of r1 on eth1, table incomplete"
     );
     let two = one.union(&single(&arena, udp("192.0.2.1", 1, "198.51.100.8", 53)));
     assert_eq!(
         reason(&two, NextHop::Connected),
-        "the destination is not in the ARP or neighbour table of r1 on eth1; the collected table is incomplete"
+        "destination not in the ARP or neighbour table of r1 on eth1, table incomplete"
     );
 }
 

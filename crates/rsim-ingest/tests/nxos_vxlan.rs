@@ -344,11 +344,11 @@ fn a_frame_to_a_remote_mac_crosses_the_tunnel_and_the_reply_comes_back() {
     let (verdict, steps) = &branches[0];
     assert_eq!(*verdict, VerdictKind::Deliver, "{steps:#?}");
     for text in [
-        "leaf1/mac 00:00:5e:00:53:12 is on port nve1(192.0.2.2)",
+        "leaf1/mac 00:00:5e:00:53:12 on port nve1(192.0.2.2)",
         "leaf1/vxlan/encap/192.0.2.2 VXLAN VNI 10010 from 192.0.2.1 to 192.0.2.2",
         "leaf1/vxlan/route 192.0.2.2/32 (ospf) in VRF default via 172.16.0.1 on Ethernet1/49",
-        "leaf2/vxlan-decap VXLAN VNI 10010 · bridge domain leaf2/vlan10",
-        "leaf2/mac-tunnel 00:00:5e:00:53:12 is on port Ethernet1/5",
+        "leaf2/vxlan-decap VXLAN VNI 10010, bridge domain leaf2/vlan10",
+        "leaf2/mac-tunnel 00:00:5e:00:53:12 on port Ethernet1/5",
     ] {
         assert!(has(steps, text), "{text}: {steps:#?}");
     }
@@ -454,7 +454,7 @@ fn a_vni_that_is_down_has_no_tunnel() {
     assert!(
         e.notes["leaf1"]
             .iter()
-            .any(|n| n.contains("VNI 10010: the collected state is not up")),
+            .any(|n| n.contains("VNI 10010: collected state not up")),
         "{:?}",
         e.notes["leaf1"]
     );
@@ -475,8 +475,10 @@ fn a_peer_with_a_state_that_is_not_read_makes_the_flood_unknown() {
     let a = run(&t, "198.51.100.11", "198.51.100.12");
     let branches = show(&a);
     assert!(
-        branches.iter().any(|(v, s)| *v == VerdictKind::Unknown
-            && has(s, "the state of the NVE peer 192.0.2.2 is not known")),
+        branches
+            .iter()
+            .any(|(v, s)| *v == VerdictKind::Unknown
+                && has(s, "state of NVE peer 192.0.2.2 not known")),
         "{branches:#?}"
     );
 }
@@ -572,7 +574,7 @@ fn a_switch_with_no_mac_table_section_gives_unknown_for_a_unicast_frame() {
     assert!(!branches.is_empty());
     for (verdict, steps) in &branches {
         assert_eq!(*verdict, VerdictKind::Unknown, "{steps:#?}");
-        assert!(has(steps, "the MAC table is not collected"), "{steps:#?}");
+        assert!(has(steps, "MAC table not collected"), "{steps:#?}");
     }
     // A frame out of the tunnel that the MAC lookup does not find.
     assert_eq!(miss_of(&t, "leaf2/mac-tunnel"), ["leaf2/mac-miss-tunnel"]);
@@ -607,7 +609,7 @@ fn an_empty_mac_table_section_is_an_empty_table() {
     assert!(
         branches
             .iter()
-            .all(|(_, s)| !has(s, "the MAC table is not collected")),
+            .all(|(_, s)| !has(s, "MAC table not collected")),
         "{branches:#?}"
     );
     assert_eq!(miss_of(&t, "leaf2/mac-tunnel"), ["leaf2/flood-tunnel"]);

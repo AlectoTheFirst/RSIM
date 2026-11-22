@@ -157,7 +157,7 @@ impl NetFunction for VxlanEncap {
                 return vec![self.meta.unknown(
                     input.clone(),
                     ReasonCode::UnknownAttribute,
-                    "the peer tunnel end is not known",
+                    "peer tunnel end not known",
                     ctx,
                     state,
                 )];
@@ -167,7 +167,7 @@ impl NetFunction for VxlanEncap {
             return vec![self.meta.unknown(
                 input.clone(),
                 ReasonCode::UnknownAttribute,
-                "the segment of the packets is not known",
+                "segment not known",
                 ctx,
                 state,
             )];
@@ -176,7 +176,7 @@ impl NetFunction for VxlanEncap {
             return vec![self.meta.unknown(
                 input.clone(),
                 ReasonCode::IncompleteTable,
-                format!("no VNI · {segment}"),
+                format!("no VNI of {segment}"),
                 ctx,
                 state,
             )];
@@ -186,7 +186,7 @@ impl NetFunction for VxlanEncap {
                 input.clone(),
                 ReasonCode::IncompleteTable,
                 format!(
-                    "the peer {peer} and the source {} have different address families",
+                    "peer {peer} and source {} in different address families",
                     self.source
                 ),
                 ctx,
@@ -207,7 +207,7 @@ impl NetFunction for VxlanEncap {
                 e.done,
                 &self.next,
                 ReasonCode::Encapsulated,
-                format!("VXLAN VNI {vni} from {} to {peer} · {segment}", self.source),
+                format!("VXLAN VNI {vni} from {} to {peer}, {segment}", self.source),
                 c,
                 state,
             ),
@@ -217,7 +217,7 @@ impl NetFunction for VxlanEncap {
             self.meta.unknown(
                 e.nested,
                 ReasonCode::Nested,
-                "the packets have an encapsulation already",
+                "packets already encapsulated",
                 ctx,
                 state,
             ),
@@ -325,7 +325,7 @@ impl NetFunction for VxlanDecap {
                 part.decapsulate().done,
                 next,
                 ReasonCode::Decapsulated,
-                format!("VXLAN VNI {vni} · {segment}"),
+                format!("VXLAN VNI {vni}, {segment}"),
                 c,
                 state,
             ));
@@ -493,8 +493,11 @@ impl WireguardEncap {
         ctx: &Context,
         state: &FlowState,
     ) {
+        let name = format!("WireGuard {} peer {}", self.interface, peer.name);
         let unknown = |out: &mut Vec<Branch>, set: PacketSet, code: ReasonCode, why: String| {
-            let mut b = self.meta.unknown(set, code, why, ctx, state);
+            let mut b = self
+                .meta
+                .unknown(set, code, format!("{name}, {why}"), ctx, state);
             b.spans = peer.spans.clone();
             push_nonempty(out, b);
         };
@@ -503,16 +506,14 @@ impl WireguardEncap {
                 out,
                 set,
                 ReasonCode::IncompleteTable,
-                format!("WireGuard peer endpoint not known · peer {}", peer.name),
+                "endpoint not known".to_string(),
             );
             return;
         };
         let src = match &peer.source {
             Ok(s) if s.is_ipv6() == dst.is_ipv6() => *s,
             Ok(s) => {
-                let why = format!(
-                    "the source {s} and the endpoint {dst} have different address families"
-                );
+                let why = format!("source {s} and endpoint {dst} in different address families");
                 unknown(out, set, ReasonCode::IncompleteTable, why);
                 return;
             }
@@ -522,16 +523,13 @@ impl WireguardEncap {
             }
         };
         let e = set.encapsulate(&self.outer(src, dst, port));
-        let detail = format!(
-            "WireGuard {} peer {} from {src} to {dst} port {port}",
-            self.interface, peer.name
-        );
+        let detail = format!("{name}, endpoint {dst} port {port}, source {src}");
         match &self.unknown {
             Some(why) => unknown(
                 out,
                 e.done,
                 ReasonCode::UnhandledStanza,
-                format!("{detail} · {why}"),
+                format!("endpoint {dst} port {port}, source {src}, {why}"),
             ),
             None => {
                 let mut c = ctx.clone();
@@ -567,7 +565,7 @@ impl WireguardEncap {
             self.meta.unknown(
                 e.nested,
                 ReasonCode::Nested,
-                "the packets have an encapsulation already",
+                "packets already encapsulated",
                 ctx,
                 state,
             ),
@@ -665,7 +663,7 @@ impl NetFunction for WireguardEncap {
             self.meta.unknown(
                 part.uncertain,
                 ReasonCode::UnknownAttribute,
-                "the destination address is not known",
+                "destination address not known",
                 ctx,
                 state,
             ),

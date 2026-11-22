@@ -114,7 +114,7 @@ impl NetFunction for VrfSelection {
             return vec![self.meta.unknown(
                 input.clone(),
                 ReasonCode::UnknownAttribute,
-                "the ingress interface is not known",
+                "ingress interface not known",
                 ctx,
                 state,
             )];
@@ -128,7 +128,7 @@ impl NetFunction for VrfSelection {
                     input.clone(),
                     &self.next,
                     ReasonCode::Classified,
-                    format!("interface {iface} is in VRF {v}"),
+                    format!("interface {iface} in VRF {v}"),
                     c,
                     state,
                 )]
@@ -136,7 +136,7 @@ impl NetFunction for VrfSelection {
             None => vec![self.meta.unknown(
                 input.clone(),
                 ReasonCode::IncompleteTable,
-                format!("no VRF · interface {iface}"),
+                format!("no VRF for interface {iface}"),
                 ctx,
                 state,
             )],
@@ -205,7 +205,7 @@ impl NetFunction for ZoneLookup {
                         input.clone(),
                         &self.next,
                         ReasonCode::Classified,
-                        format!("interface {i} is in zone {z}"),
+                        format!("interface {i} in zone {z}"),
                         c,
                         state,
                     )]
@@ -214,14 +214,14 @@ impl NetFunction for ZoneLookup {
                     UnzonedInterface::Drop => vec![self.meta.drop(
                         input.clone(),
                         ReasonCode::NotInZone,
-                        format!("interface {i} is in no zone"),
+                        format!("interface {i} in no zone"),
                         ctx,
                         state,
                     )],
                     UnzonedInterface::Unknown => vec![self.meta.unknown(
                         input.clone(),
                         ReasonCode::NotInZone,
-                        format!("no zone, not in vendor profile · interface {i}"),
+                        format!("interface {i} in no zone, not in vendor profile"),
                         ctx,
                         state,
                     )],
@@ -233,7 +233,7 @@ impl NetFunction for ZoneLookup {
                     input.clone(),
                     &self.next,
                     ReasonCode::Classified,
-                    "the interface is not known, so the zone is unknown",
+                    "interface not known, zone not known",
                     c,
                     state,
                 )]
@@ -300,7 +300,7 @@ impl ExitMark {
         match self {
             ExitMark::AccessLink => "access link",
             ExitMark::DefaultRoute { .. } => "default route",
-            ExitMark::Owner => "marked by the owner",
+            ExitMark::Owner => "owner mark",
         }
     }
 
@@ -345,7 +345,7 @@ impl Egress {
                 let facts = l
                     .facts
                     .as_ref()
-                    .map_or(String::new(), |f| format!(" · {}", f.text()));
+                    .map_or(String::new(), |f| format!(", {}", f.text()));
                 let mut b = self.meta.forward(
                     match self.tag {
                         Tag::Keep => input.rewrite(&self.rewrite),
@@ -374,7 +374,7 @@ impl Egress {
                         device: self.meta.device.clone(),
                         interface: self.interface.clone(),
                     };
-                    let detail = format!("exit at {at} · {}", mark.text());
+                    let detail = format!("exit at {at}, {}", mark.text());
                     self.meta.branch(
                         input.clone(),
                         Outcome::Exit(at),
@@ -386,7 +386,7 @@ impl Egress {
                 _ => self.meta.unknown(
                     input.clone(),
                     ReasonCode::NoLink,
-                    format!("no link · interface {}", self.interface),
+                    format!("no link on interface {}", self.interface),
                     ctx,
                     state,
                 ),
@@ -452,7 +452,7 @@ impl NetFunction for Egress {
                 _ => vec![self.meta.unknown(
                     input.clone(),
                     ReasonCode::UnknownAttribute,
-                    "the neighbour is not known",
+                    "neighbour not known",
                     ctx,
                     state,
                 )],
@@ -490,7 +490,7 @@ impl NetFunction for LocalInput {
         let detail = match &self.zone {
             Some(z) => {
                 c.dst_zone = Attr::Known(z.clone());
-                format!("to the device · zone {z}")
+                format!("to the device, zone {z}")
             }
             None => "to the device".to_string(),
         };
@@ -551,7 +551,7 @@ impl NetFunction for DeviceDelivery {
                 self.meta.unknown(
                     set,
                     ReasonCode::UnhandledStanza,
-                    format!("{what} packet reaches {dev}; decapsulation is not modelled"),
+                    format!("{what} packet at {dev}, decapsulation not modelled"),
                     ctx,
                     state,
                 ),
@@ -616,7 +616,7 @@ mod tests {
         assert_eq!(out[1].outcome, Outcome::Unknown);
         assert_eq!(
             out[1].reason.detail,
-            "WireGuard packet reaches r1; decapsulation is not modelled"
+            "WireGuard packet at r1, decapsulation not modelled"
         );
     }
 }

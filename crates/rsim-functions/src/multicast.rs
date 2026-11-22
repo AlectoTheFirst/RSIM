@@ -154,7 +154,7 @@ impl NetFunction for MulticastLookup {
             self.meta.unknown(
                 s.uncertain,
                 ReasonCode::UnknownAttribute,
-                "the destination address is not known",
+                "destination address not known",
                 ctx,
                 state,
             ),
@@ -174,7 +174,7 @@ impl NetFunction for MulticastLookup {
             out.push(self.meta.unknown(
                 rest,
                 ReasonCode::UnknownAttribute,
-                "the VRF is not known",
+                "VRF not known",
                 ctx,
                 state,
             ));
@@ -195,7 +195,7 @@ impl NetFunction for MulticastLookup {
                 self.meta.unknown(
                     sp.uncertain,
                     ReasonCode::MatchUnknown,
-                    format!("the match of {} is not known", r.name()),
+                    format!("match of {} not known", r.name()),
                     ctx,
                     state,
                 ),
@@ -211,7 +211,7 @@ impl NetFunction for MulticastLookup {
             };
             if !rpf_ok {
                 let detail = format!(
-                    "{} in VRF {vrf}: the reverse path check fails, the incoming interface is {}",
+                    "{} in VRF {vrf}, reverse path check fails, incoming interface {}",
                     r.name(),
                     r.iif
                         .as_ref()
@@ -234,7 +234,7 @@ impl NetFunction for MulticastLookup {
                         .drop(
                             m,
                             ReasonCode::NoRoute,
-                            format!("{} in VRF {vrf} has no other outgoing interface", r.name()),
+                            format!("{} in VRF {vrf}, no other outgoing interface", r.name()),
                             ctx,
                             state,
                         )

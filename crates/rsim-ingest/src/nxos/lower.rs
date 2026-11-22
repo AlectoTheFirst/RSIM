@@ -139,13 +139,12 @@ pub fn lower(
         let lower_name = i.name.to_ascii_lowercase();
         if admin.is_none() && !lower_name.starts_with("loopback") && !lower_name.starts_with("mgmt")
         {
-            i.unhandled.push(
-                "no shutdown line and no collected state, so the admin state is not known".into(),
-            );
+            i.unhandled
+                .push("no shutdown line, no collected state, admin state not known".into());
         }
         if i.dynamic_address {
             l.note(format!(
-                "{}: an address that the config does not state is not lowered",
+                "{}: address not in the config, not lowered",
                 i.name
             ));
         }
@@ -301,7 +300,7 @@ pub fn lower(
         let fib = l.fib(v, &active, col, &names, &vips, "snat", &vx);
         tables.insert(VrfId::new(v), fib);
     }
-    l.note("IPv6 is not lowered: each IPv6 packet is unknown at the route lookup".into());
+    l.note("IPv6 not lowered".into());
     let dev = l.dev;
     let bd = move |v: u16| super::layer2::bd_of(dev, v);
     let local = l
@@ -413,7 +412,7 @@ pub fn lower(
                 let s = l.sink(
                     &f,
                     format!(
-                        "{}: an output ACL or a line that is not lowered on the egress of a VXLAN packet",
+                        "{}: output ACL or line not lowered on the egress of a VXLAN packet",
                         i.name
                     ),
                     l.span(i.lines),
@@ -462,7 +461,7 @@ pub fn lower(
             .collect(),
         point_to_point: match (&tunnel, &encap_l3) {
             (super::vxlan::Plan::Exact(t), Some(_)) => {
-                BTreeMap::from([(InterfaceId::new(&t.nve), "the peer tunnel end".to_string())])
+                BTreeMap::from([(InterfaceId::new(&t.nve), "peer tunnel end".to_string())])
             }
             _ => BTreeMap::new(),
         },
@@ -1126,7 +1125,7 @@ impl L<'_> {
             None => RulePredicate::exact(m),
             Some(word) => {
                 self.note(format!(
-                    "{name}: {word} is not lowered, so the packets that the rule can translate are unknown"
+                    "{name}: {word} not lowered, packets the rule can translate unknown"
                 ));
                 let nothing = Match {
                     src_ip: AddrCond::In(Vec::new()),
@@ -1211,7 +1210,7 @@ impl L<'_> {
                             }
                             Some(_) => {
                                 self.note(format!(
-                                    "{name}: pool {p} has more than 1 address, so the address is not known"
+                                    "{name}: pool {p} has more than 1 address, address not known"
                                 ));
                                 None
                             }
@@ -1304,10 +1303,7 @@ impl L<'_> {
                 }
                 let span = vec![self.span(r.lines)];
                 let Ok(p) = r.prefix.parse::<Prefix>() else {
-                    self.note(format!(
-                        "static route {}: the prefix is not valid",
-                        r.prefix
-                    ));
+                    self.note(format!("static route {}: prefix not valid", r.prefix));
                     continue;
                 };
                 if r.interface
@@ -1336,7 +1332,7 @@ impl L<'_> {
                     Some(i) if r.unhandled.is_empty() => vec![hop(self, &i, gw)],
                     _ => {
                         self.note(format!(
-                            "static route {} in VRF {vrf}: the next hop is not known",
+                            "static route {} in VRF {vrf}, next hop not known",
                             r.prefix
                         ));
                         Vec::new()
@@ -1346,7 +1342,7 @@ impl L<'_> {
             }
             if let Some(found) = self.cfg.dynamic_vrfs.get(vrf).cloned() {
                 self.note(format!(
-                    "VRF {vrf}: a dynamic routing protocol and no collected route rows, so each destination outside the connected and local routes is unknown"
+                    "VRF {vrf}: dynamic routing protocol, no collected route rows, each destination outside the connected and local routes unknown"
                 ));
                 let spans: Vec<SourceSpan> = found
                     .iter()
@@ -1385,9 +1381,7 @@ impl L<'_> {
             }
             for (prefix, rows) in by_prefix {
                 let Ok(p) = prefix.parse::<Prefix>() else {
-                    self.note(format!(
-                        "route {prefix} in VRF {vrf}: the prefix is not valid"
-                    ));
+                    self.note(format!("route {prefix} in VRF {vrf}, prefix not valid"));
                     continue;
                 };
                 let spans: Vec<SourceSpan> = rows.iter().map(|r| r.span.clone()).collect();
@@ -1435,16 +1429,14 @@ impl L<'_> {
                             (super::vxlan::Plan::Exact(t), Some(_)) => match t.l3.get(vrf) {
                                 Some(x) if x.vni == *segid => None,
                                 Some(x) => Some(format!(
-                                    "a VXLAN path with VNI {segid}, and the VNI of the VRF is {}",
+                                    "VXLAN path with VNI {segid}, VNI of the VRF {}",
                                     x.vni
                                 )),
                                 None => Some(format!(
-                                    "a VXLAN path with VNI {segid} in a VRF with no layer 3 VNI"
+                                    "VXLAN path with VNI {segid} in a VRF with no layer 3 VNI"
                                 )),
                             },
-                            _ => {
-                                Some("a VXLAN path, and the tunnel end is not lowered".to_string())
-                            }
+                            _ => Some("VXLAN path, tunnel end not lowered".to_string()),
                         });
                 // A route stays in the table with no next hop when one of its
                 // paths cannot be lowered, so its packets are unknown and do
@@ -1455,12 +1447,12 @@ impl L<'_> {
                     .iter()
                     .any(|r| matches!(r.protocol.as_str(), "hsrp" | "vrrp"))
                 {
-                    Some("a route of a gateway group that is not active on this switch")
+                    Some("route of a gateway group not active on this switch")
                 } else {
                     None
                 };
                 if let Some(why) = problem {
-                    self.note(format!("route {prefix} in VRF {vrf}: {why}"));
+                    self.note(format!("route {prefix} in VRF {vrf}, {why}"));
                     t.insert(p, Route::new(kind, Vec::new(), spans));
                     continue;
                 }
@@ -1489,7 +1481,7 @@ impl L<'_> {
                         t.insert(p, Route::new(kind, hops, all));
                     }
                     Err(u) => {
-                        self.note(format!("route {prefix} in VRF {vrf}: {}", u.why));
+                        self.note(format!("route {prefix} in VRF {vrf}, {}", u.why));
                         let mut all = spans;
                         all.extend(u.spans);
                         t.insert(p, Route::unknown(kind, u.reason, all));

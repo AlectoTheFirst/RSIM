@@ -100,9 +100,9 @@ impl NetFunction for SessionLookup {
                 let mut c = ctx.clone();
                 c.session = Attr::Known(m);
                 let mut detail = if s.translated {
-                    format!("{name} packets · session {index}, translated")
+                    format!("session {index}, {name}, translated")
                 } else {
-                    format!("{name} packets · session {index}")
+                    format!("session {index}, {name}")
                 };
                 let matched = match self.states.established {
                     StateAction::Accept => self.meta.forward(
@@ -114,7 +114,7 @@ impl NetFunction for SessionLookup {
                         state,
                     ),
                     StateAction::Continue => {
-                        detail.push_str("; the state policy has no action for established");
+                        detail.push_str(", no state policy action for established");
                         self.meta.forward(
                             split.matched,
                             &self.next,
@@ -125,12 +125,12 @@ impl NetFunction for SessionLookup {
                         )
                     }
                     StateAction::Drop => {
-                        detail.push_str("; the state policy drops established");
+                        detail.push_str(", state policy drops established");
                         self.meta
                             .drop(split.matched, ReasonCode::Denied, detail, &c, state)
                     }
                     StateAction::Unknown => {
-                        detail.push_str("; the state policy action for established is not known");
+                        detail.push_str(", state policy action for established not known");
                         self.meta.unknown(
                             split.matched,
                             ReasonCode::MatchUnknown,
@@ -146,7 +146,7 @@ impl NetFunction for SessionLookup {
                     self.meta.unknown(
                         split.uncertain,
                         ReasonCode::MatchUnknown,
-                        format!("port unknown · session {index}"),
+                        format!("session {index}, port not known"),
                         ctx,
                         state,
                     ),
@@ -156,7 +156,7 @@ impl NetFunction for SessionLookup {
                     self.meta.unknown(
                         split.ambiguous,
                         ReasonCode::MatchUnknown,
-                        format!("the {name} flow has more than one binding · session {index}"),
+                        format!("session {index}, {name} flow with more than one binding"),
                         ctx,
                         state,
                     ),
@@ -173,7 +173,7 @@ impl NetFunction for SessionLookup {
                 rest,
                 &self.next,
                 ReasonCode::Passed,
-                "no session matches; the packets are new",
+                "no session, new",
                 c,
                 state,
             ));
@@ -216,7 +216,7 @@ impl NetFunction for SessionCommit {
                 input.clone(),
                 &self.next,
                 ReasonCode::Passed,
-                "the packets belong to an existing session",
+                "existing session",
                 ctx.clone(),
                 state,
             )];
@@ -231,7 +231,7 @@ impl NetFunction for SessionCommit {
                 input.clone(),
                 &self.next,
                 ReasonCode::Passed,
-                "not translated, so the device keeps no session",
+                "not translated, no session",
                 ctx.clone(),
                 state,
             )];
@@ -251,7 +251,7 @@ impl NetFunction for SessionCommit {
         });
         let mut detail = format!("session {index} created");
         if input.has_unknown_flow_field() {
-            detail.push_str("; a translated field is unknown");
+            detail.push_str(", translated field not known");
         }
         let mut b = self.meta.forward(
             input.clone(),

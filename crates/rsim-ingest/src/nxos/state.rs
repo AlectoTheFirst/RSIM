@@ -180,9 +180,9 @@ pub fn mac_table_collected(sections: &BTreeMap<String, (Vec<u8>, String)>, has_r
 fn top_rows<'a>(v: &'a Value, t: &str, section: &str) -> Result<&'a [Value], String> {
     let m = v
         .as_object()
-        .ok_or_else(|| format!("the {section} section is not a JSON object"))?;
+        .ok_or_else(|| format!("{section} section not a JSON object"))?;
     if !m.is_empty() && !m.contains_key(&format!("TABLE_{t}")) {
-        return Err(format!("the {section} section has no TABLE_{t}"));
+        return Err(format!("no TABLE_{t} in the {section} section"));
     }
     Ok(rows(v, t))
 }
@@ -415,7 +415,7 @@ pub fn read(sections: &BTreeMap<String, (Vec<u8>, String)>, names: &Names) -> St
                     }
                 });
                 let (Some(source), Some(group)) = (source, group) else {
-                    out = Err(format!("row {i} of the multicast routes is not read"));
+                    out = Err(format!("row {i} of the multicast routes not read"));
                     break 'rows;
                 };
                 if let Ok(v) = &mut out {

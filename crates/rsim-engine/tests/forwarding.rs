@@ -182,12 +182,7 @@ fn guest_to_dns_through_firewall_snat_ips_and_acl_and_back() {
     );
     let lookup = step(&rb[0].steps, &f(FGT, "session-lookup"));
     assert_eq!(lookup.reason.code, ReasonCode::SessionMatched);
-    assert!(
-        lookup
-            .reason
-            .detail
-            .starts_with("reply packets · session 0")
-    );
+    assert!(lookup.reason.detail.starts_with("session 0, reply"));
     let pol = step(&rb[0].steps, &f(FGT, "policy"));
     assert_eq!(pol.reason.code, ReasonCode::SessionMatched);
     let end = rb[0].packets.witness().unwrap();

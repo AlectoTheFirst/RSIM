@@ -478,7 +478,7 @@ fn without_sections_the_estate_gives_the_coverage_and_a_twin() {
         );
     }
     assert!(e.notes["edge1"].iter().any(|n| n
-        == "no route table section, so each route lookup is unknown and the static routes of the config are not lowered"));
+        == "no route table section, each route lookup unknown, static routes of the config not lowered"));
     e.builder.build().expect("the twin builds");
 }
 

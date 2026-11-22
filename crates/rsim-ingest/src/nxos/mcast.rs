@@ -77,7 +77,7 @@ impl L<'_> {
                         self,
                         format!("mcast/tenant/{}", r.vrf),
                         format!(
-                            "{o}: the copy of a route of the VRF {} into the tunnel is not lowered",
+                            "{o}: copy of a route of VRF {} into the tunnel not lowered",
                             r.vrf
                         ),
                         r.span.clone(),
@@ -87,8 +87,7 @@ impl L<'_> {
                         Plan::Exact(_) if vpc => sink(
                             self,
                             "mcast/vpc".into(),
-                            "the forwarder of a vPC pair for a multicast flood is not lowered"
-                                .into(),
+                            "vPC forwarder of a multicast flood not lowered".into(),
                             SourceSpan::line(VXLAN_GUIDE, 1),
                         ),
                         Plan::None => sink(
@@ -106,7 +105,7 @@ impl L<'_> {
                     sink(
                         self,
                         format!("mcast/unknown/{o}"),
-                        format!("the outgoing interface {o} is not lowered"),
+                        format!("outgoing interface {o} not lowered"),
                         r.span.clone(),
                     )
                 };

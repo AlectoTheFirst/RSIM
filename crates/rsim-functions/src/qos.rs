@@ -67,7 +67,7 @@ impl NetFunction for QosNotEvaluated {
                 &self.next,
                 ReasonCode::Passed,
                 format!(
-                    "QoS {} is not evaluated · marking and class unknown",
+                    "QoS {} not evaluated, marking and class unknown",
                     self.stanza
                 ),
                 ctx,

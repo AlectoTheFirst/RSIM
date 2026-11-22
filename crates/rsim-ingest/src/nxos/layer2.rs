@@ -139,7 +139,7 @@ impl L<'_> {
                     (s, _, _) if others.contains(&s) => {}
                     (s, _, _) => {
                         g.unknown = Some(format!(
-                            "{what} group {}: the state {s:?}, the virtual address or the virtual MAC is not known",
+                            "{what} group {}: state {s:?}, virtual address or virtual MAC not known",
                             f.group
                         ));
                     }
@@ -267,10 +267,10 @@ impl L<'_> {
             .collect();
 
         if !st.neighbours_collected {
-            self.note("no LLDP or CDP section, so each access port counts as an edge port".into());
+            self.note("no LLDP or CDP section, each access port an edge port".into());
         }
         for line in &cfg.unreadable_vlans {
-            self.note(format!("{line}: the VLAN list is not read"));
+            self.note(format!("{line}: VLAN list not read"));
         }
 
         // The plan of each switch port.
@@ -303,12 +303,12 @@ impl L<'_> {
             let plan = match l2 {
                 None if !relevant => continue,
                 Some(false) => continue,
-                None => Plan::Unknown("the mode of the port is not known".into(), i.lines),
+                None => Plan::Unknown("port mode not known".into(), i.lines),
                 Some(true) if i.vpc.is_some() && !vpc_ok => {
-                    Plan::Unknown("the vPC domain is not known".into(), i.lines)
+                    Plan::Unknown("vPC domain not known".into(), i.lines)
                 }
                 Some(true) if admin.is_none() => {
-                    Plan::Unknown("the admin state of the port is not known".into(), i.lines)
+                    Plan::Unknown("port admin state not known".into(), i.lines)
                 }
                 Some(true) if !i.unhandled.is_empty() => Plan::Unknown(
                     format!("options not lowered: {}", i.unhandled.join(", ")),
@@ -321,7 +321,7 @@ impl L<'_> {
                         || i.vrf.is_some() =>
                 {
                     Plan::Unknown(
-                        "a layer 3 option on a switch port is not lowered".into(),
+                        "layer 3 option on a switch port not lowered".into(),
                         i.lines,
                     )
                 }
@@ -365,12 +365,11 @@ impl L<'_> {
                         used.iter().find(|v| unknown_vlans.contains(v)),
                     ) {
                         (Some(v), _) => {
-                            Plan::Unknown(format!("VLAN {v} is not in the config"), i.lines)
+                            Plan::Unknown(format!("VLAN {v} not in the config"), i.lines)
                         }
-                        (None, Some(v)) => Plan::Unknown(
-                            format!("VLAN {v} has a line that is not lowered"),
-                            i.lines,
-                        ),
+                        (None, Some(v)) => {
+                            Plan::Unknown(format!("VLAN {v} with a line not lowered"), i.lines)
+                        }
                         (None, None) => Plan::Exact {
                             native,
                             qos_in: i.qos_in.clone(),
@@ -404,7 +403,7 @@ impl L<'_> {
                 continue;
             };
             if !vlans.contains(&v) {
-                self.note(format!("{}: VLAN {v} is not in the config", i.name));
+                self.note(format!("{}: VLAN {v} not in the config", i.name));
                 continue;
             }
             match gws.get(&i.name).and_then(|g| g.svi_mac.clone()) {
@@ -412,7 +411,7 @@ impl L<'_> {
                     svis.insert(i.name.clone(), (v, m, span));
                 }
                 None => self.note(format!(
-                    "{}: no collected MAC, so the SVI is not joined to the VLAN",
+                    "{}: no collected MAC, SVI not joined to the VLAN",
                     i.name
                 )),
             }
@@ -652,11 +651,11 @@ impl L<'_> {
                     if !unsure.is_empty() {
                         let why = if st.stp.is_some() {
                             format!(
-                                "{name}: the spanning tree state of the port is not known in VLAN {}",
+                                "{name}: spanning tree state not known in VLAN {}",
                                 unsure.join(", ")
                             )
                         } else {
-                            format!("{name}: the spanning tree state of the port is not collected")
+                            format!("{name}: spanning tree state not collected")
                         };
                         let s = self.sink(&format!("port/{name}/stp"), why, span);
                         self.add(s);
@@ -693,9 +692,7 @@ impl L<'_> {
                 .entry(self.bd(v))
                 .or_default()
                 .push((PortId::new(format!("vlan{v}")), self.id(&f)));
-            self.note(format!(
-                "VLAN {v}: a trunk allows it, and it has no vlan line"
-            ));
+            self.note(format!("VLAN {v}: allowed on a trunk, no vlan line"));
         }
 
         // The ports of the VXLAN tunnel end.
@@ -815,9 +812,7 @@ impl L<'_> {
         }
 
         for v in missing {
-            self.note(format!(
-                "the MAC table has VLAN {v}, which is not in the config"
-            ));
+            self.note(format!("VLAN {v} in the MAC table, not in the config"));
         }
         // A frame from the peer link does not leave on a vPC member port,
         // unless the member port of that vPC is down on the peer: the vPC
@@ -854,7 +849,7 @@ impl L<'_> {
                     let f = "vpc/tunnel";
                     let s = self.sink(
                         f,
-                        "a frame from the peer link into the tunnel is not lowered".into(),
+                        "frame from the peer link into the tunnel not lowered".into(),
                         SourceSpan::line(VPC_GUIDE, 7),
                     );
                     self.add(s);
@@ -867,7 +862,7 @@ impl L<'_> {
                 let f = format!("vpc/unknown/{p}");
                 let s = self.sink(
                     &f,
-                    format!("{p}: the state of its vPC on the peer is not known"),
+                    format!("{p}: vPC state on the peer not known"),
                     SourceSpan::line(VPC_GUIDE, 7),
                 );
                 self.add(s);
@@ -880,7 +875,7 @@ impl L<'_> {
                 let f = format!("vpc/routed/{name}");
                 let s = self.sink(
                     &f,
-                    format!("{name}: a frame from the peer link to layer 3 is not lowered"),
+                    format!("{name}: frame from the peer link to layer 3 not lowered"),
                     SourceSpan::line(VPC_GUIDE, 7),
                 );
                 self.add(s);
@@ -1119,7 +1114,7 @@ impl L<'_> {
                     );
                 }
                 _ => self.note(format!(
-                    "VLAN {v}: the MAC {m:?} is at the far end of more than one port, so it has no entry"
+                    "VLAN {v}: MAC {m:?} at the far end of more than one port, no entry"
                 )),
             }
         }
@@ -1133,7 +1128,7 @@ impl L<'_> {
         let f = &format!("mac-miss{}", flood.strip_prefix("flood").unwrap_or(""));
         let span = SourceSpan::new(self.file_name(), 1, 1);
         let broadcast = FRule::new(
-            "a broadcast frame floods",
+            "broadcast flood",
             RulePredicate::exact(Match {
                 dst_mac: MacCond::In(BTreeSet::from([rsim_functions::layer2::BROADCAST])),
                 ..Match::any()
@@ -1141,7 +1136,7 @@ impl L<'_> {
             RuleAction::Permit,
         );
         let rest = FRule::unhandled(
-            "the MAC table is not collected, so the port of a unicast or multicast frame is not known",
+            "MAC table not collected, port of a unicast or multicast frame not known",
             span.clone(),
         );
         self.add(AclMatch {

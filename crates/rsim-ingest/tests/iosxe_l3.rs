@@ -424,10 +424,7 @@ fn a_vrf_header_of_another_form_makes_its_routes_unknown_in_each_vrf() {
     ));
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(
-        has(
-            &steps,
-            "route 203.0.113.0/24 in VRF default has no next hop"
-        ),
+        has(&steps, "route 203.0.113.0/24 in VRF default, no next hop"),
         "{steps:#?}"
     );
 }
@@ -461,7 +458,7 @@ fn a_packet_follows_a_static_route_and_the_overload_rule_translates_its_source()
         "route 198.51.100.64/26 in VRF default via 198.51.100.5 on GigabitEthernet0/0/4",
         "snat translated to 203.0.113.32",
         "session-commit",
-        "nexthop 198.51.100.5 is 00:00:5e:00:53:05 on GigabitEthernet0/0/4",
+        "nexthop 198.51.100.5, 00:00:5e:00:53:05 on GigabitEthernet0/0/4",
         "out/GigabitEthernet0/0/4 no link",
     ] {
         assert!(has(&steps, text), "{text}: {steps:#?}");
@@ -502,10 +499,10 @@ fn the_reply_of_the_overload_rule_comes_back_through_the_session() {
     assert!(has(&steps, "deliver to server on eth1"));
     let (verdict, steps) = only_reply(&a);
     for text in [
-        "acl-in/GigabitEthernet0/0/4 permitted · ACL edge1:acl:WAN2-IN rule WAN2-IN/40",
-        "session-lookup reply packets · session 0, translated",
+        "acl-in/GigabitEthernet0/0/4 permitted, ACL edge1:acl:WAN2-IN rule WAN2-IN/40",
+        "session-lookup session 0, reply, translated",
         "route 192.0.2.192/27 in VRF default connected on GigabitEthernet0/0/5",
-        "nexthop 192.0.2.200 is 00:00:5e:00:53:c8 on GigabitEthernet0/0/5",
+        "nexthop 192.0.2.200, 00:00:5e:00:53:c8 on GigabitEthernet0/0/5",
         "out/GigabitEthernet0/0/5 no link",
     ] {
         assert!(has(&steps, text), "{text}: {steps:#?}");
@@ -524,10 +521,7 @@ fn the_static_rule_translates_both_ways() {
     assert!(has(&steps, "snat translated to 203.0.113.20"));
     let (_, steps) = only_reply(&a);
     assert!(has(&steps, "rule WAN2-IN/30"), "{steps:#?}");
-    assert!(has(
-        &steps,
-        "session-lookup reply packets · session 0, translated"
-    ));
+    assert!(has(&steps, "session-lookup session 0, reply, translated"));
     assert!(has(&steps, "nexthop 192.0.2.220 is"));
     // Outside to inside: the NAT of the outside destination comes before
     // the route lookup.
@@ -574,7 +568,7 @@ fn the_input_acl_denies_one_flow() {
     assert_eq!(verdict, VerdictKind::Drop, "{steps:#?}");
     assert!(has(
         &steps,
-        "acl-in/GigabitEthernet0/0/4 denied · ACL edge1:acl:WAN2-IN rule WAN2-IN/10"
+        "acl-in/GigabitEthernet0/0/4 denied, ACL edge1:acl:WAN2-IN rule WAN2-IN/10"
     ));
     // Another packet matches no entry and meets the implicit deny.
     let (verdict, steps) = only(&run(
@@ -612,7 +606,7 @@ fn the_extendable_static_rule_makes_only_its_packets_unknown() {
     ));
     assert!(has(&steps, "snat translated to 203.0.113.32"), "{steps:#?}");
     assert!(estate().notes["edge1"].iter().any(|n| n
-        == "static 192.0.2.10 to 198.51.100.2: extendable is not lowered, so the packets that the rule can translate are unknown"));
+        == "static 192.0.2.10 to 198.51.100.2: extendable not lowered, packets the rule can translate unknown"));
 }
 
 #[test]
@@ -655,13 +649,13 @@ fn an_unread_route_line_makes_its_prefix_unknown() {
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(has(
         &steps,
-        "route 198.51.100.192/27 in VRF default has no next hop"
+        "route 198.51.100.192/27 in VRF default, no next hop"
     ));
     let l = rib_line("B        198.51.100.192/27");
     assert_eq!(spans_of(&a, "edge1/route"), [format!("edge1/rib:{l}-{l}")]);
     let notes = &estate().notes["edge1"];
     assert!(notes.contains(&format!(
-        "route 198.51.100.192/27 in VRF default: edge1/rib line {l} is not read: B        198.51.100.192/27 [20/0] via 2001:db8::9, 1d00h"
+        "route 198.51.100.192/27 in VRF default, edge1/rib line {l} not read: B        198.51.100.192/27 [20/0] via 2001:db8::9, 1d00h"
     )));
 }
 
@@ -678,7 +672,7 @@ fn an_unread_line_with_no_prefix_makes_the_vrf_unknown() {
     let (verdict, steps) = only(&a);
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(
-        has(&steps, "route 0.0.0.0/0 in VRF BLUE has no next hop"),
+        has(&steps, "route 0.0.0.0/0 in VRF BLUE, no next hop"),
         "{steps:#?}"
     );
     let l = rib_line("% Route table");
@@ -702,7 +696,7 @@ fn a_next_hop_in_a_vrf_is_unknown_because_its_arp_table_is_not_collected() {
         assert_eq!(verdict, VerdictKind::Unknown);
         assert!(has(&steps, "in VRF MGMT"), "{steps:#?}");
         assert!(
-            has(&steps, "the ARP table of VRF MGMT is not collected"),
+            has(&steps, "ARP table of VRF MGMT not collected"),
             "{steps:#?}"
         );
         assert!(!has(&steps, "edge1/nexthop"));
@@ -738,9 +732,9 @@ fn the_unhandled_lines_of_an_interface_make_its_packets_unknown() {
         "GigabitEthernet0/0/0: options not lowered: zone-member security OUTSIDE, crypto map VPN, ip verify unicast source reachable-via rx",
         "GigabitEthernet0/0/1.100: options not lowered: zone-member security INSIDE, ip nat inside in VRF RED",
         "GigabitEthernet0/0/1.200: options not lowered: ip policy route-map PBR-BLUE",
-        "route 0.0.0.0/0 in VRF RED: a next hop in VRF default is not lowered",
-        "static route 0.0.0.0/0 via 198.51.100.9 in VRF default: the route table has no such static path",
-        "IPv6 is not lowered: each IPv6 packet is unknown at the route lookup",
+        "route 0.0.0.0/0 in VRF RED, next hop in VRF default not lowered",
+        "static route 0.0.0.0/0 via 198.51.100.9 in VRF default, no such static path in the route table",
+        "IPv6 not lowered",
     ] {
         assert!(notes.iter().any(|x| x == n), "{n} is not in {notes:#?}");
     }
@@ -793,7 +787,7 @@ fn the_access_lists_of_the_section_are_a_cross_check() {
         String::from_utf8(sections()["acls"].0.clone()).unwrap() + "    50 permit icmp any any\n";
     let notes = &estate_with(with_section("acls", &acls)).notes["edge1"];
     assert!(notes.iter().any(|n| n
-        == "ACL WAN2-IN: show ip access-lists gives the entries 10 deny, 20 permit, 30 permit, 40 permit, 50 permit, and the config gives 10 deny, 20 permit, 30 permit, 40 permit; the config decides"), "{notes:#?}");
+        == "ACL WAN2-IN: entries 10 deny, 20 permit, 30 permit, 40 permit, 50 permit in show ip access-lists, 10 deny, 20 permit, 30 permit, 40 permit in the config, config used"), "{notes:#?}");
     // The config decides: the entry is not lowered.
     let t = twin_with(with_section("acls", &acls));
     let (verdict, _) = only(&run(
@@ -819,7 +813,7 @@ fn without_sections_each_route_lookup_is_unknown() {
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(has(
         &steps,
-        "route 0.0.0.0/0 in VRF default: vrf route table not collected"
+        "route 0.0.0.0/0 in VRF default, vrf route table not collected"
     ));
     let e = estate_with(BTreeMap::new());
     let doc = iosxe::read_text(CONFIG);
@@ -927,12 +921,12 @@ fn a_failed_or_missing_vrf_of_the_arp_section_keeps_its_next_hops_unknown() {
     for (text, why) in [
         (
             "VRF: MGMT failed\n".to_string(),
-            "the command of the ARP table of VRF MGMT failed",
+            "ARP table command of VRF MGMT failed",
         ),
-        (missing, "the section arp_vrfs has no ARP table of VRF MGMT"),
+        (missing, "no ARP table of VRF MGMT in the section arp_vrfs"),
         (
             "Internet  203.0.113.1  4  0000.5e00.53f1  ARPA  GigabitEthernet0\n".to_string(),
-            "the section arp_vrfs is not read",
+            "section arp_vrfs not read",
         ),
     ] {
         let t = twin_with(with_section("arp_vrfs", &text));
@@ -1124,7 +1118,7 @@ fn a_vrf_with_a_dynamic_protocol_and_no_printed_table_is_unknown_outside_its_rou
     assert!(
         has(
             &steps,
-            "route 0.0.0.0/0 in VRF BLUE: vrf route table not collected"
+            "route 0.0.0.0/0 in VRF BLUE, vrf route table not collected"
         ),
         "{steps:#?}"
     );

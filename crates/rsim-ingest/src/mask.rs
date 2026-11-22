@@ -39,12 +39,9 @@ impl std::fmt::Display for Refusal {
                     Format::Json => "JSON",
                     Format::Text => "text",
                 };
-                write!(
-                    f,
-                    "the vendor {vendor} has no mask of the secrets of a {format} section"
-                )
+                write!(f, "no secret mask of {vendor} for a {format} section")
             }
-            Refusal::Unreadable(e) => write!(f, "the section is not readable: {e}"),
+            Refusal::Unreadable(e) => write!(f, "section not readable: {e}"),
         }
     }
 }

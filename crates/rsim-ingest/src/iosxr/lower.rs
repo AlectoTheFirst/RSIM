@@ -210,7 +210,7 @@ pub(crate) fn place_unreadable(acl: &mut nxos::config::Acl) {
                 destination_port: PortSpec::Any,
                 icmp: None,
                 established: false,
-                unhandled: vec![format!("the entry is not read: {text}")],
+                unhandled: vec![format!("entry not read: {text}")],
                 lines: acl.lines,
             },
         );
@@ -267,7 +267,7 @@ pub fn lower(
         ("hsrp", error(&st.hsrp)),
     ] {
         if let Some(e) = e {
-            l.note(format!("the section {name} is not read: {e}"));
+            l.note(format!("section {name} not read: {e}"));
         }
     }
     let states = st.interfaces.as_ref().and_then(|x| x.as_ref().ok());
@@ -286,7 +286,7 @@ pub fn lower(
         }
         if s.is_some_and(|s| s.admin_down) {
             l.note(format!(
-                "{}: show interfaces gives administratively down, and the config has no shutdown line",
+                "{}: administratively down in show interfaces, no shutdown line in the config",
                 i.name
             ));
         }
@@ -295,7 +295,7 @@ pub fn lower(
         }
         let mut p = port(i);
         if admin.is_none() {
-            p.unhandled.push("the admin state is not known".into());
+            p.unhandled.push("admin state not known".into());
         }
         active.push(Port {
             i: p,
@@ -317,7 +317,7 @@ pub fn lower(
     // The route lookup in the table of each VRF.
     let rib = st.rib.as_ref().and_then(|x| x.as_ref().ok());
     if st.rib.is_none() {
-        l.note("no route table section, so each route lookup is unknown".into());
+        l.note("no route table section, each route lookup unknown".into());
     }
     let mut vrfs: BTreeSet<String> = cfg.vrfs.keys().cloned().collect();
     vrfs.insert(DEFAULT_VRF.to_string());
@@ -327,11 +327,8 @@ pub fn lower(
         vrfs.extend(r.unread.iter().filter_map(|u| u.vrf.clone()));
     }
     let vips = vips(&groups, &active);
-    let other_vrf = |v: &str| {
-        format!(
-            "a next hop in VRF {v} is reached through a label switched path, which is not lowered"
-        )
-    };
+    let other_vrf =
+        |v: &str| format!("next hop in VRF {v} through a label switched path, not lowered");
     let resolver = resolver(rib, &vrfs);
     sum.routes = resolver.clone();
     let hops = Hops {
@@ -348,7 +345,7 @@ pub fn lower(
         let t = fib(&mut l, v, &active, rib, &vips, &hops);
         tables.insert(VrfId::new(v), t);
     }
-    l.note("IPv6 is not lowered: each IPv6 packet is unknown at the route lookup".into());
+    l.note("IPv6 not lowered".into());
     // The next-hop resolution and the egress exist when a route has a next
     // hop.
     let forwards = tables
@@ -397,7 +394,7 @@ fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
             vlan: t.dot1q,
             routed: false,
             untagged: false,
-            reason: format!("{} is not lowered", t.key),
+            reason: format!("{} not lowered", t.key),
             lines: t.lines,
         })
         .collect();
@@ -410,7 +407,7 @@ fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
                 vlan: None,
                 routed: true,
                 untagged: false,
-                reason: format!("the dot1q VLAN of {} is not read", p.i.name),
+                reason: format!("dot1q VLAN of {} not read", p.i.name),
                 lines: p.i.lines,
             }),
     );
@@ -629,15 +626,15 @@ pub(crate) fn group_state(
     spans: &mut Vec<SourceSpan>,
 ) -> GroupState {
     if !unhandled.is_empty() {
-        return GroupState::Unknown(format!("the lines {} are not read", unhandled.join(", ")));
+        return GroupState::Unknown(format!("lines {} not read", unhandled.join(", ")));
     }
     let Some(primary) = primary else {
-        return GroupState::Unknown("the config gives no virtual address".into());
+        return GroupState::Unknown("no virtual address in the config".into());
     };
     let cmd = rules.command;
     let rows = match rows {
         None => return GroupState::Unknown(format!("no {cmd} section")),
-        Some(Err(e)) => return GroupState::Unknown(format!("{cmd} is not read: {e}")),
+        Some(Err(e)) => return GroupState::Unknown(format!("{cmd} not read: {e}")),
         Some(Ok(rows)) => rows,
     };
     let mine: Vec<&HsrpRow> = rows
@@ -646,15 +643,13 @@ pub(crate) fn group_state(
         .filter(|r| !r.address.is_some_and(|a| a.is_ipv6()))
         .collect();
     let [r] = mine.as_slice() else {
-        return GroupState::Unknown(format!("{cmd} has {} IPv4 rows of the group", mine.len()));
+        return GroupState::Unknown(format!("{} IPv4 rows of the group in {cmd}", mine.len()));
     };
     spans.push(r.span.clone());
     if let Some(a) = r.address
         && a != IpAddr::V4(primary)
     {
-        return GroupState::Unknown(format!(
-            "{cmd} gives the address {a}, and the config gives {primary}"
-        ));
+        return GroupState::Unknown(format!("address {a} in {cmd}, {primary} in the config"));
     }
     let word = r.state.to_ascii_lowercase();
     if word == rules.active {
@@ -662,7 +657,7 @@ pub(crate) fn group_state(
     } else if rules.not_active.contains(&word.as_str()) {
         GroupState::NotActive
     } else {
-        GroupState::Unknown(format!("the state {:?} is not known", r.state))
+        GroupState::Unknown(format!("state {:?} not known", r.state))
     }
 }
 
@@ -670,11 +665,11 @@ pub(crate) fn group_state(
 pub(crate) fn group_note(l: &mut L, g: &Group, rules: &GroupRules) {
     match (&g.state, g.vmac) {
         (GroupState::Unknown(why), _) => l.note(format!(
-            "{}: {} group {}: {why}, so the packets to its virtual address and MAC are unknown",
+            "{}: {} group {}: {why}, virtual address and MAC unknown",
             g.interface, g.what, g.group
         )),
         (GroupState::Active, None) => l.note(format!(
-            "{}: {} group {}: {}, so the virtual MAC is not known",
+            "{}: {} group {}: {}, virtual MAC not known",
             g.interface, g.what, g.group, rules.no_vmac
         )),
         _ => {}
@@ -737,7 +732,7 @@ fn hsrp(
         if !active.iter().any(|p| p.i.name == iface) {
             if !cfg.interfaces.iter().any(|i| i.name == iface) {
                 l.note(format!(
-                    "HSRP group {} of {}: the config has no such interface",
+                    "HSRP group {} of {}: no such interface in the config",
                     g.group, g.interface
                 ));
             }
@@ -828,7 +823,7 @@ pub(crate) fn handoffs(
             let span = l.span(mine.first().map_or_else(Default::default, |p| p.i.lines));
             let s = l.sink(
                 &f,
-                format!("{port}: the virtual MAC is not known: {}", blind.join(", ")),
+                format!("{port}: virtual MAC not known: {}", blind.join(", ")),
                 span,
             );
             l.add(s);
@@ -920,7 +915,7 @@ pub(crate) fn handoffs(
                 let what: Vec<&str> = what.into_iter().collect();
                 let mut rule = FRule::new(
                     format!(
-                        "{port}: the virtual MAC of an {} group whose state is not known",
+                        "{port}: virtual MAC of an {} group of unknown state",
                         what.join(" or ")
                     ),
                     RulePredicate::bounded(
@@ -1073,7 +1068,7 @@ fn egress_link(
         Some([]) | None => return none,
         Some(_) => {
             l.note(format!(
-                "{name}: the port {port} has more than one peer, so the egress has no link"
+                "{name}: port {port} has more than one peer, no link"
             ));
             return none;
         }
@@ -1091,11 +1086,11 @@ fn egress_link(
     });
     let (Some(tag), Some(m)) = (tag, src) else {
         let why = if tag.is_none() {
-            "the sub-interface has no dot1q VLAN"
+            "sub-interface with no dot1q VLAN"
         } else {
-            "show interfaces gives no MAC"
+            "no MAC in show interfaces"
         };
-        l.note(format!("{name}: {why}, so the egress has no link"));
+        l.note(format!("{name}: {why}, no link"));
         return none;
     };
     (
@@ -1166,11 +1161,11 @@ fn cross_check(l: &mut L, cfg: &Config, st: &state::State) {
         let s = listed.get(i.name.as_str()).copied();
         match (c, s) {
             (Some(c), None) => l.note(format!(
-                "{}: VRF {c} in the config, and show vrf all detail does not list the interface; the config decides",
+                "{}: VRF {c} in the config, not in show vrf all detail, config used",
                 i.name
             )),
             (c, Some(s)) if c != Some(s) => l.note(format!(
-                "{}: VRF {s} in show vrf all detail, and {} in the config; the config decides",
+                "{}: VRF {s} in show vrf all detail, {} in the config, config used",
                 i.name,
                 c.map_or("the default VRF".to_string(), |c| format!("VRF {c}"))
             )),
@@ -1180,7 +1175,7 @@ fn cross_check(l: &mut L, cfg: &Config, st: &state::State) {
     for (i, v) in &listed {
         if !configured.contains(i) {
             l.note(format!(
-                "{i}: VRF {v} in show vrf all detail, and the config has no such interface"
+                "{i}: VRF {v} in show vrf all detail, no such interface in the config"
             ));
         }
     }
@@ -1260,7 +1255,7 @@ pub(crate) fn fib(
             if !whole.is_empty() {
                 for u in &whole {
                     l.note(format!(
-                        "VRF {vrf}: each route lookup is unknown: {} is not read: {}",
+                        "VRF {vrf}: {} not read: {}, each route lookup unknown",
                         line_of(&u.span),
                         u.text
                     ));
@@ -1271,7 +1266,7 @@ pub(crate) fn fib(
                 );
             } else if !present {
                 l.note(format!(
-                    "VRF {vrf}: the route table section has no route of the VRF, so each route lookup is unknown"
+                    "VRF {vrf}: no route of the VRF in the route table section, each route lookup unknown"
                 ));
                 t.insert(
                     all,
@@ -1400,9 +1395,7 @@ fn routes(
         let spans: Vec<SourceSpan> = paths.iter().map(|p| p.span.clone()).collect();
         let first = primary(paths);
         let Some(head) = first.first() else {
-            notes.push(format!(
-                "route {prefix} in VRF {vrf}: each path is a backup path"
-            ));
+            notes.push(format!("route {prefix} in VRF {vrf}, only backup paths"));
             out.push((*prefix, Route::new(RouteKind::Static, Vec::new(), spans)));
             continue;
         };
@@ -1426,7 +1419,7 @@ fn routes(
         };
         if let Some(v) = first.iter().find_map(|p| p.other_vrf.as_ref()) {
             notes.push(format!(
-                "route {prefix} in VRF {vrf}: {}",
+                "route {prefix} in VRF {vrf}, {}",
                 (to.other_vrf)(v)
             ));
             out.push((*prefix, Route::new(kind, Vec::new(), spans)));
@@ -1452,7 +1445,7 @@ fn routes(
                 out.push((*prefix, Route::new(kind, hops, all)));
             }
             Err(u) => {
-                notes.push(format!("route {prefix} in VRF {vrf}: {}", u.why));
+                notes.push(format!("route {prefix} in VRF {vrf}, {}", u.why));
                 let mut all = spans;
                 all.extend(u.spans);
                 out.push((*prefix, Route::unknown(kind, u.reason, all)));
@@ -1462,7 +1455,7 @@ fn routes(
     for (prefix, lines) in &unread {
         for u in lines {
             notes.push(format!(
-                "route {prefix} in VRF {vrf}: {} is not read: {}",
+                "route {prefix} in VRF {vrf}, {} not read: {}",
                 line_of(&u.span),
                 u.text
             ));

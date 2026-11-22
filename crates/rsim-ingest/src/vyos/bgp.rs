@@ -176,17 +176,14 @@ fn process(b: &Stanza, vrf: &str, read: &mut BTreeSet<u32>, cfg: &mut BgpConfig)
         .find(|c| c.key.bytes().all(|x| x.is_ascii_digit()));
     let asn = match (b.get("system-as"), legacy) {
         (_, Some(l)) => Sourced::new(
-            Err(format!(
-                "the VyOS 1.3 process protocols bgp {} is not read",
-                l.key
-            )),
+            Err(format!("VyOS 1.3 process protocols bgp {} not read", l.key)),
             lines(l),
         ),
         (Some(s), None) => {
             read.insert(s.first_line);
             let t = s.text().unwrap_or_default();
             Sourced::new(
-                parse_asn(t).ok_or_else(|| format!("system-as {t} is not an AS number")),
+                parse_asn(t).ok_or_else(|| format!("system-as {t} not an AS number")),
                 lines(s),
             )
         }

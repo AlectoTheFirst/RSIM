@@ -347,8 +347,7 @@ fn a_client_that_is_a_next_hop_is_not_an_endpoint() {
     via_h1.next_hop = Some("192.0.2.50".into());
     let e = estate_with(|_, b| b, vec![via_h1]);
     assert!(
-        e.notes["site1"]
-            .contains(&"client h1: a next hop of a route, so it is not an endpoint".to_string()),
+        e.notes["site1"].contains(&"client h1: next hop of a route, not an endpoint".to_string()),
         "{:?}",
         e.notes
     );
@@ -397,7 +396,7 @@ interface Ethernet1/1
     };
     let e = estate_more(|_, b| b, Vec::new(), vec![switch]);
     assert!(
-        e.notes["r1"].contains(&"eth0: 2 links claim the port, so it has no link".to_string()),
+        e.notes["r1"].contains(&"eth0: 2 links claim the port, no link".to_string()),
         "{:#?}",
         e.notes
     );

@@ -85,7 +85,7 @@ pub fn ingress_of(p: &Prefix, cands: &[Candidate]) -> Ingress {
             Ingress::NotFound(Reason::new(
                 ReasonCode::AmbiguousOwner,
                 format!(
-                    "no ingress: source {p} has {} ingress candidates: {}",
+                    "no ingress, source {p} has {} ingress candidates: {}",
                     names.len(),
                     names.join(", ")
                 ),

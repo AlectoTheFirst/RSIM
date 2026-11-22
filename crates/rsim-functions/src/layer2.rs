@@ -60,16 +60,16 @@ impl LinkFacts {
             if let (Some(a), Some(b)) = (self.local.speed_mbps, r.speed_mbps)
                 && a != b
             {
-                t.push_str(" · speed mismatch");
+                t.push_str(", speed mismatch");
             }
             if let (Some(a), Some(b)) = (self.local.full_duplex, r.full_duplex)
                 && a != b
             {
-                t.push_str(" · duplex mismatch");
+                t.push_str(", duplex mismatch");
             }
         }
         if self.local.full_duplex == Some(false) {
-            t.push_str(" · half duplex");
+            t.push_str(", half duplex");
         }
         t
     }
@@ -133,7 +133,7 @@ fn with_inner_tag(
     out.push(meta.unknown(
         inner,
         ReasonCode::UnknownAttribute,
-        "the frame has 2 VLAN tags, and the behaviour of the device for 2 tags is not known",
+        "2 VLAN tags, device behaviour not known",
         ctx,
         state,
     ));
@@ -231,7 +231,7 @@ impl NetFunction for HostResolution {
             };
             let (sources, src_none, src_unc) = self.by_address(AddrField::Src, input);
             unknown(src_none, "no MAC of the source address".into(), &mut out);
-            unknown(src_unc, "the source address is not known".into(), &mut out);
+            unknown(src_unc, "source address not known".into(), &mut out);
             for (src_mac, src_spans, set) in sources {
                 let local: TriePrefixTable<()> = {
                     let mut t = TriePrefixTable::new();
@@ -243,14 +243,14 @@ impl NetFunction for HostResolution {
                 let part = set.partition_by_prefix(AddrField::Dst, &local);
                 unknown(
                     part.uncertain,
-                    "the destination address is not known".into(),
+                    "destination address not known".into(),
                     &mut out,
                 );
                 let mut targets: Vec<(Mac, Vec<SourceSpan>, PacketSet, String)> = Vec::new();
                 for (_, _, on_link) in part.matched {
                     let (dst, none, unc) = self.by_address(AddrField::Dst, &on_link);
                     unknown(none, "no MAC of the local destination".into(), &mut out);
-                    unknown(unc, "the destination address is not known".into(), &mut out);
+                    unknown(unc, "destination address not known".into(), &mut out);
                     targets.extend(
                         dst.into_iter()
                             .map(|(m, s, p)| (m, s, p, "the host".to_string())),
@@ -380,7 +380,7 @@ impl NetFunction for PortIngress {
                         set,
                         &self.next,
                         ReasonCode::Classified,
-                        format!("port {} {tag} · bridge domain {bd}", self.port),
+                        format!("port {} {tag}, bridge domain {bd}", self.port),
                         c,
                         state,
                     ),
@@ -398,7 +398,7 @@ impl NetFunction for PortIngress {
                 self.meta.drop(
                     s.matched,
                     ReasonCode::Denied,
-                    format!("the VLAN is not on port {}", self.port),
+                    format!("VLAN not on port {}", self.port),
                     &c,
                     state,
                 ),
@@ -408,7 +408,7 @@ impl NetFunction for PortIngress {
                 self.meta.unknown(
                     s.uncertain,
                     ReasonCode::UnknownAttribute,
-                    "the tag of the frame is not known",
+                    "frame tag not known",
                     &c,
                     state,
                 ),
@@ -420,7 +420,7 @@ impl NetFunction for PortIngress {
                     self.meta.drop(
                         s.unmatched,
                         ReasonCode::Denied,
-                        format!("port {} has no native VLAN", self.port),
+                        format!("no native VLAN on port {}", self.port),
                         &c,
                         state,
                     ),
@@ -466,7 +466,7 @@ impl NetFunction for WirelessAttachment {
                 input.clone(),
                 &self.next,
                 ReasonCode::Classified,
-                format!("{} · bridge domain {}", self.port, self.bridge_domain),
+                format!("{}, bridge domain {}", self.port, self.bridge_domain),
                 c,
                 state,
             )]
@@ -538,7 +538,7 @@ impl NetFunction for MacLookup {
                 return vec![self.meta.unknown(
                     input.clone(),
                     ReasonCode::UnknownAttribute,
-                    "the bridge domain is not known",
+                    "bridge domain not known",
                     ctx,
                     state,
                 )];
@@ -566,7 +566,7 @@ impl NetFunction for MacLookup {
                             s.matched,
                             ReasonCode::Denied,
                             format!(
-                                "{mac:?} is isolated from port {}",
+                                "{mac:?} isolated from port {}",
                                 inport.expect("an isolated port is known")
                             ),
                             ctx,
@@ -576,7 +576,7 @@ impl NetFunction for MacLookup {
                         self.meta.drop(
                             s.matched,
                             ReasonCode::Denied,
-                            format!("{mac:?} is on the ingress port {}", e.port),
+                            format!("{mac:?} on ingress port {}", e.port),
                             ctx,
                             state,
                         )
@@ -585,7 +585,7 @@ impl NetFunction for MacLookup {
                             s.matched,
                             next,
                             ReasonCode::Resolved,
-                            format!("{mac:?} is on port {} · bridge domain {bd}", e.port),
+                            format!("{mac:?} on port {}, bridge domain {bd}", e.port),
                             ctx.clone(),
                             state,
                         )
@@ -593,7 +593,7 @@ impl NetFunction for MacLookup {
                         self.meta.unknown(
                             s.matched,
                             ReasonCode::IncompleteTable,
-                            format!("no egress function · port {}", e.port),
+                            format!("no egress function of port {}", e.port),
                             ctx,
                             state,
                         )
@@ -607,7 +607,7 @@ impl NetFunction for MacLookup {
                     rest,
                     &self.flood,
                     ReasonCode::Classified,
-                    format!("broadcast or unknown MAC · bridge domain {bd}"),
+                    format!("broadcast or unknown MAC, bridge domain {bd}"),
                     ctx.clone(),
                     state,
                 ),
@@ -617,7 +617,7 @@ impl NetFunction for MacLookup {
                 self.meta.unknown(
                     unclear,
                     ReasonCode::UnknownAttribute,
-                    "the destination MAC is not known",
+                    "destination MAC not known",
                     ctx,
                     state,
                 ),
@@ -665,7 +665,7 @@ impl NetFunction for Flood {
                 return vec![self.meta.unknown(
                     input.clone(),
                     ReasonCode::UnknownAttribute,
-                    "the bridge domain is not known",
+                    "bridge domain not known",
                     ctx,
                     state,
                 )];
@@ -683,7 +683,7 @@ impl NetFunction for Flood {
                 return vec![self.meta.drop(
                     input.clone(),
                     ReasonCode::Denied,
-                    format!("no other forwarding port · bridge domain {bd}"),
+                    format!("no other forwarding port, bridge domain {bd}"),
                     ctx,
                     state,
                 )];
@@ -697,7 +697,7 @@ impl NetFunction for Flood {
                         input.clone(),
                         next,
                         ReasonCode::Classified,
-                        format!("flood copy to port {port} · bridge domain {bd}"),
+                        format!("flood copy to port {port}, bridge domain {bd}"),
                         ctx.clone(),
                         state,
                     );
@@ -779,7 +779,7 @@ impl NetFunction for PortEgress {
                 return vec![self.meta.unknown(
                     input.clone(),
                     ReasonCode::UnknownAttribute,
-                    "the bridge domain is not known",
+                    "bridge domain not known",
                     ctx,
                     state,
                 )];
@@ -792,7 +792,7 @@ impl NetFunction for PortEgress {
                 return vec![self.meta.drop(
                     input.clone(),
                     ReasonCode::Denied,
-                    format!("bridge domain {bd} is not on port {}", self.port),
+                    format!("bridge domain {bd} not on port {}", self.port),
                     ctx,
                     state,
                 )];
@@ -811,7 +811,7 @@ impl NetFunction for PortEgress {
                     let facts = p
                         .link
                         .as_ref()
-                        .map_or(String::new(), |l| format!(" · {}", l.text()));
+                        .map_or(String::new(), |l| format!(", {}", l.text()));
                     let mut b = self.meta.forward(
                         set.clone(),
                         &p.target,
@@ -864,7 +864,7 @@ impl NetFunction for PortEgress {
                 self.meta.unknown(
                     rest,
                     ReasonCode::NoLink,
-                    format!("no known host or link · port {}", self.port),
+                    format!("no known host or link on port {}", self.port),
                     ctx,
                     state,
                 ),
@@ -919,7 +919,7 @@ impl NetFunction for Layer3HandOff {
                 self.meta.drop(
                     s.unmatched,
                     ReasonCode::Denied,
-                    "the destination MAC is not a MAC of the router",
+                    "destination MAC not a MAC of the router",
                     ctx,
                     state,
                 ),
@@ -929,7 +929,7 @@ impl NetFunction for Layer3HandOff {
                 self.meta.unknown(
                     s.uncertain,
                     ReasonCode::UnknownAttribute,
-                    "the destination MAC is not known",
+                    "destination MAC not known",
                     ctx,
                     state,
                 ),
@@ -957,7 +957,7 @@ impl NetFunction for Layer3HandOff {
                 self.meta.drop(
                     t.matched,
                     ReasonCode::Denied,
-                    "the router has no interface for the VLAN",
+                    "no router interface for the VLAN",
                     ctx,
                     state,
                 ),
@@ -967,7 +967,7 @@ impl NetFunction for Layer3HandOff {
                 self.meta.unknown(
                     t.uncertain,
                     ReasonCode::UnknownAttribute,
-                    "the tag of the frame is not known",
+                    "frame tag not known",
                     ctx,
                     state,
                 ),
@@ -989,7 +989,7 @@ impl NetFunction for Layer3HandOff {
                     self.meta.drop(
                         t.unmatched,
                         ReasonCode::Denied,
-                        "the router has no interface for untagged frames",
+                        "no router interface for untagged frames",
                         ctx,
                         state,
                     ),

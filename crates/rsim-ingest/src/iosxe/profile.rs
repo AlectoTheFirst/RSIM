@@ -174,7 +174,7 @@ pub const ARP_VRF_FAILED: &str = " failed";
 /// A switch port with a `switchport` line and no `switchport mode` line
 /// negotiates its mode with its neighbour (DTP), so its mode is not known.
 /// Not confirmed against a device.
-pub const MODE_WITHOUT_LINE: &str = "no switchport mode line, so the mode is negotiated";
+pub const MODE_WITHOUT_LINE: &str = "no switchport mode line, mode negotiated";
 
 /// The route codes of `show ip route` of a route that a routing protocol
 /// gave. The codes are case-sensitive: `o` is ODR, a learned route of

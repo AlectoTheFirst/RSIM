@@ -221,14 +221,14 @@ impl<'t> Executor<'t> {
             part.unmatched,
             Ingress::NotFound(Reason::new(
                 ReasonCode::UnknownAttribute,
-                "no ingress: no attachment record and no edge network holds the source address",
+                "no ingress, no attachment record or edge network of the source address",
             )),
         ));
         out.push((
             part.uncertain,
             Ingress::NotFound(Reason::new(
                 ReasonCode::UnknownAttribute,
-                "no ingress: the source address is unknown",
+                "no ingress, source address not known",
             )),
         ));
         Ok(out)
@@ -275,10 +275,10 @@ impl<'t> Executor<'t> {
                     }
                     None => {
                         let detail = if *runs < self.opts.max_runs {
-                            format!("one original request is over the node budget {budget}")
+                            format!("one original request over the node budget {budget}")
                         } else {
                             format!(
-                                "the part is over the node budget {budget}, and the query has {} runs",
+                                "part over the node budget {budget}, {} runs",
                                 self.opts.max_runs
                             )
                         };
@@ -369,13 +369,11 @@ impl<'t> Executor<'t> {
                                 let o = self.try_run(&rs, &ing, f, &q, b.state.clone())?;
                                 ReplyResult::Ran(Box::new(assemble(mode, &rs, vec![o])))
                             }
-                            None => ReplyResult::NotRun(format!(
-                                "{dev}/{iface} delivered the packets and has no ingress function"
-                            )),
+                            None => {
+                                ReplyResult::NotRun(format!("no ingress function at {dev}/{iface}"))
+                            }
                         },
-                        _ => ReplyResult::NotRun(
-                            "the interface that delivered the packets is not known".to_string(),
-                        ),
+                        _ => ReplyResult::NotRun("delivering interface not known".to_string()),
                     }
                 }
                 Destination::Device(d) => {
@@ -475,7 +473,7 @@ impl<'t> Executor<'t> {
                     if visited.contains(&next_key) {
                         terminal(
                             step,
-                            Verdict::Drop(Reason::new(ReasonCode::Loop, format!("loop · {next}"))),
+                            Verdict::Drop(Reason::new(ReasonCode::Loop, format!("loop at {next}"))),
                             b,
                         )
                     } else if depth >= self.opts.max_steps {
@@ -581,7 +579,7 @@ fn assemble(mode: Mode, input: &PacketSet, outs: Vec<RunOut>) -> Answer {
                 }
                 _ => Summary::Same(Verdict::Unknown(Reason::new(
                     ReasonCode::MatchUnknown,
-                    "the result depends on fields that the query does not state",
+                    "result depends on unstated fields",
                 ))),
             };
             vec![Part {

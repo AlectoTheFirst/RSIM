@@ -87,17 +87,17 @@ pub(super) fn plan(cfg: &Config, st: &State, active: &[Interface], l: &mut L<'_>
         .or_else(|| st.interfaces.get(&n.name).and_then(|s| s.admin_up));
     match admin {
         Some(false) => return Plan::None,
-        None => return unknown("the admin state of the NVE interface is not known".into()),
+        None => return unknown("NVE interface admin state not known".into()),
         Some(true) => {}
     }
     if !n.unhandled.is_empty() {
         return unknown(format!("options not lowered: {}", n.unhandled.join(", ")));
     }
     if !n.bgp {
-        return unknown("a tunnel end with no BGP host reachability is not lowered".into());
+        return unknown("tunnel end with no BGP host reachability not lowered".into());
     }
     let Some((src, src_lines)) = &n.source else {
-        return unknown("the NVE interface has no source interface".into());
+        return unknown("NVE interface with no source interface".into());
     };
     let vpc = super::layer2::vpc_ok(cfg, st);
     let source = match source_address(active, src, vpc) {
@@ -116,7 +116,7 @@ pub(super) fn plan(cfg: &Config, st: &State, active: &[Interface], l: &mut L<'_>
             match primary {
                 Some((a, _)) => a,
                 None => {
-                    return unknown(format!("the source interface {src} has no primary address"));
+                    return unknown(format!("source interface {src} with no primary address"));
                 }
             }
         }
@@ -145,10 +145,10 @@ pub(super) fn plan(cfg: &Config, st: &State, active: &[Interface], l: &mut L<'_>
             match vnis.iter().find(|r| r.vni == m.vni) {
                 Some(r) if r.up == Some(true) => vspans.push(r.span.clone()),
                 Some(r) if r.up.is_none() => {
-                    return unknown(format!("the state of VNI {} is not known", m.vni));
+                    return unknown(format!("state of VNI {} not known", m.vni));
                 }
                 Some(_) => {
-                    l.note(format!("VNI {}: the collected state is not up", m.vni));
+                    l.note(format!("VNI {}: collected state not up", m.vni));
                     continue;
                 }
                 None => {
@@ -186,10 +186,10 @@ pub(super) fn plan(cfg: &Config, st: &State, active: &[Interface], l: &mut L<'_>
             match vnis.iter().find(|r| r.vni == m.vni) {
                 Some(r) if r.up == Some(true) => vspans.push(r.span.clone()),
                 Some(r) if r.up.is_none() => {
-                    return unknown(format!("the state of VNI {} is not known", m.vni));
+                    return unknown(format!("state of VNI {} not known", m.vni));
                 }
                 _ => {
-                    l.note(format!("VNI {}: the collected state is not up", m.vni));
+                    l.note(format!("VNI {}: collected state not up", m.vni));
                     continue;
                 }
             }
@@ -219,16 +219,13 @@ pub(super) fn plan(cfg: &Config, st: &State, active: &[Interface], l: &mut L<'_>
         );
     }
     if st.nve_vnis.is_none() {
-        l.note("no NVE VNI section, so each member VNI counts as up".into());
+        l.note("no NVE VNI section, each member VNI up".into());
     }
     let peers = match &st.nve_peers {
-        None => Err("no NVE peer section, so the peers of the flood are not known".to_string()),
+        None => Err("no NVE peer section, flood peers not known".to_string()),
         Some(Err(why)) => Err(why.clone()),
         Some(Ok(ps)) => match ps.iter().find(|p| p.up.is_none()) {
-            Some(p) => Err(format!(
-                "the state of the NVE peer {} is not known",
-                p.address
-            )),
+            Some(p) => Err(format!("state of NVE peer {} not known", p.address)),
             None => Ok(ps
                 .iter()
                 .filter(|p| p.up == Some(true))
@@ -255,7 +252,7 @@ fn source_address(active: &[Interface], src: &str, vpc: bool) -> Result<IpAddr, 
     let i = active
         .iter()
         .find(|i| i.name.eq_ignore_ascii_case(src))
-        .ok_or_else(|| format!("the source interface {src} is not active"))?;
+        .ok_or_else(|| format!("source interface {src} not active"))?;
     let first = |secondary: bool| {
         i.addresses
             .iter()
@@ -266,13 +263,13 @@ fn source_address(active: &[Interface], src: &str, vpc: bool) -> Result<IpAddr, 
     match (first(false), first(true), vpc) {
         (_, Some(s), true) => Ok(s),
         (_, Some(_), false) => Err(format!(
-            "the source interface {src} has a secondary address, and the switch has no lowered vPC domain"
+            "source interface {src} with a secondary address, no lowered vPC domain"
         )),
         (Some(_), None, true) => Err(format!(
-            "the source interface {src} of a vPC switch has no secondary address"
+            "source interface {src} of a vPC switch with no secondary address"
         )),
         (Some(p), None, false) => Ok(p),
-        (None, None, _) => Err(format!("the source interface {src} has no address")),
+        (None, None, _) => Err(format!("source interface {src} with no address")),
     }
 }
 
@@ -474,10 +471,10 @@ impl L<'_> {
                             let why = match rep {
                                 Replication::Ingress => peers.clone().err().unwrap_or_default(),
                                 Replication::Multicast(g) => {
-                                    format!("the multicast group {g} is not read")
+                                    format!("multicast group {g} not read")
                                 }
                                 Replication::Unstated => {
-                                    format!("VNI {}: the replication is not stated", x.vni)
+                                    format!("VNI {}: replication not stated", x.vni)
                                 }
                             };
                             let f = format!("vxlan/flood/vlan{v}");
@@ -520,11 +517,7 @@ impl L<'_> {
             return;
         }
         let f = "vxlan/split-horizon";
-        self.deny(
-            f,
-            "a frame out of the tunnel does not go back into it",
-            t.spans[0].clone(),
-        );
+        self.deny(f, "split horizon of the tunnel", t.spans[0].clone());
         let deny = self.id(f);
         let egress_t: BTreeMap<PortId, FunctionId> = egress
             .iter()

@@ -881,7 +881,7 @@ fn a_standby_hsrp_group_does_not_take_its_virtual_mac() {
     ));
     assert_eq!(verdict, VerdictKind::Drop, "{steps:#?}");
     assert!(
-        says(&steps, "the destination MAC is not a MAC of the router"),
+        says(&steps, "destination MAC not a MAC of the router"),
         "{steps:#?}"
     );
     assert!(!has(&steps, "edge1/in/GigabitEthernet0/0/1.100"));
@@ -896,7 +896,7 @@ fn an_active_group_with_no_virtual_mac_makes_the_port_unknown() {
     ));
     assert!(
         e.notes["edge1"].iter().any(|n| n
-            == "GigabitEthernet0/0/1.100: HSRP group 1: no mac-address line, and show standby brief gives no virtual MAC, so the virtual MAC is not known"),
+            == "GigabitEthernet0/0/1.100: HSRP group 1: no mac-address line, none in show standby brief, virtual MAC not known"),
         "{:#?}",
         e.notes["edge1"]
     );
@@ -909,7 +909,7 @@ fn an_active_group_with_no_virtual_mac_makes_the_port_unknown() {
         "192.0.2.3",
     ));
     assert_eq!(verdict, VerdictKind::Unknown, "{steps:#?}");
-    assert!(says(&steps, "the virtual MAC is not known"), "{steps:#?}");
+    assert!(says(&steps, "virtual MAC not known"), "{steps:#?}");
     assert!(!has(&steps, "edge1/in/GigabitEthernet0/0/1.100"));
 }
 
@@ -922,13 +922,13 @@ fn a_state_that_cannot_be_read_gives_unknown() {
     for (change, why) in [
         (
             &bogus as &dyn Fn(&mut Sections),
-            "the state \"Resign\" is not known",
+            "state \"Resign\" not known",
         ),
         (&without, "no show standby brief section"),
     ] {
         let e = routers_with(change);
         let note = format!(
-            "GigabitEthernet0/0/1.100: HSRP group 2: {why}, so the packets to its virtual address and MAC are unknown"
+            "GigabitEthernet0/0/1.100: HSRP group 2: {why}, virtual address and MAC unknown"
         );
         assert!(e.notes["edge1"].contains(&note), "{:#?}", e.notes["edge1"]);
         let t = twin_of(e);
@@ -977,7 +977,7 @@ fn the_vrrp_master_owns_the_virtual_address_and_the_backup_does_not() {
     ));
     assert!(
         e.notes["edge1"].iter().any(|n| n
-            == "GigabitEthernet0/0/1.200: VRRP group 10: show vrrp brief gives no virtual MAC, so the virtual MAC is not known"),
+            == "GigabitEthernet0/0/1.200: VRRP group 10: none in show vrrp brief, virtual MAC not known"),
         "{:#?}",
         e.notes["edge1"]
     );
@@ -1055,7 +1055,7 @@ fn a_host_on_an_access_port_reaches_the_router_through_the_svi() {
         assert!(has(&steps, f), "{f} not in {steps:#?}");
     }
     // The router is on the far end of the link of the port channel.
-    assert!(says(&steps, "is on port Port-channel1"), "{steps:#?}");
+    assert!(says(&steps, "on port Port-channel1"), "{steps:#?}");
 }
 
 #[test]
@@ -1071,7 +1071,7 @@ fn with_no_mac_table_a_frame_to_a_host_is_unknown() {
     assert_eq!(verdict, VerdictKind::Unknown, "{steps:#?}");
     assert!(has(&steps, "acc1/out/Vlan10"), "{steps:#?}");
     assert!(has(&steps, "acc1/mac-miss"), "{steps:#?}");
-    assert!(says(&steps, "the MAC table is not collected"), "{steps:#?}");
+    assert!(says(&steps, "MAC table not collected"), "{steps:#?}");
 }
 
 #[test]
@@ -1146,7 +1146,7 @@ fn a_switch_port_with_no_mode_line_is_unknown() {
     let e = campus_with(config.as_bytes());
     assert!(
         e.notes["acc1"].iter().any(|n| n
-            == "GigabitEthernet1/0/2: options not lowered: no switchport mode line, so the mode is negotiated"),
+            == "GigabitEthernet1/0/2: options not lowered: no switchport mode line, mode negotiated"),
         "{:#?}",
         e.notes["acc1"]
     );
@@ -1247,11 +1247,11 @@ fn a_sub_interface_with_a_vlan_that_is_not_lowered_makes_its_frames_unknown() {
     for (line, why) in [
         (
             " encapsulation dot1Q 100 native\n",
-            "the native VLAN of GigabitEthernet0/0/1.100 is not lowered",
+            "native VLAN of GigabitEthernet0/0/1.100 not lowered",
         ),
         (
             " encapsulation dot1Q 100 second-dot1q 20\n",
-            "the dot1q VLAN of GigabitEthernet0/0/1.100 is not read",
+            "dot1q VLAN of GigabitEthernet0/0/1.100 not read",
         ),
     ] {
         let t = twin_of(routers_with_config(
@@ -1296,7 +1296,7 @@ fn a_native_sub_interface_makes_the_untagged_frames_unknown() {
     ));
     assert_eq!(verdict, VerdictKind::Drop, "{steps:#?}");
     assert!(
-        says(&steps, "the router has no interface for untagged frames"),
+        says(&steps, "no router interface for untagged frames"),
         "{steps:#?}"
     );
     let t = twin_of(routers_with_config(
@@ -1315,7 +1315,7 @@ fn a_native_sub_interface_makes_the_untagged_frames_unknown() {
     assert!(
         says(
             &steps,
-            "the native VLAN of GigabitEthernet0/0/1.100 is not lowered"
+            "native VLAN of GigabitEthernet0/0/1.100 not lowered"
         ),
         "{steps:#?}"
     );
@@ -1332,7 +1332,7 @@ fn with_no_vtp_mode_line_the_vlans_of_each_switch_port_are_not_known() {
     let e = campus_with(config.as_bytes());
     assert!(
         e.notes["acc1"].iter().any(|n| n
-            == "Port-channel1: options not lowered: no vtp mode line, so the VLANs are not in the running config"),
+            == "Port-channel1: options not lowered: no vtp mode line, VLANs not in the running config"),
         "{:#?}",
         e.notes["acc1"]
     );
@@ -1441,7 +1441,7 @@ fn the_active_group_of_an_svi_takes_its_virtual_mac_and_address() {
     let e = campus_with_group("Resign");
     assert!(
         e.notes["acc1"].iter().any(|n| n
-            == "Vlan10: HSRP group 1: the state \"Resign\" is not known, so the packets to its virtual address and MAC are unknown"),
+            == "Vlan10: HSRP group 1: state \"Resign\" not known, virtual address and MAC unknown"),
         "{:#?}",
         e.notes["acc1"]
     );
@@ -1614,7 +1614,7 @@ fn the_spanning_tree_gives_the_flood_copy_of_each_forwarding_port() {
     // state that is not collected.
     let (next, _, stp) = flood_of(&config, &[]);
     assert!(contains(&next, "acc1/port/Port-channel1/stp"), "{next:?}");
-    assert!(stp.contains("the spanning tree state of the port is not collected"));
+    assert!(stp.contains("spanning tree state not collected"));
     // Forwarding in each VLAN: the copy goes to the egress.
     let (next, _, stp) = flood_of(&config, &[("spanning_tree", ACC1_STP)]);
     assert!(contains(&next, "acc1/port/Port-channel1/out"), "{next:?}");
@@ -1655,7 +1655,7 @@ fn a_port_with_no_known_state_in_a_vlan_of_the_flood_is_unknown() {
     assert!(contains(&next, "acc1/port/Port-channel1/stp"), "{next:?}");
     assert!(contains(&next, "acc1/port/Port-channel1/out"), "{next:?}");
     assert!(
-        stp.contains("Port-channel1: the spanning tree state of the port is not known in VLAN 99"),
+        stp.contains("Port-channel1: spanning tree state not known in VLAN 99"),
         "{stp}"
     );
     // A state word that is not known.
@@ -1673,7 +1673,7 @@ fn a_port_with_no_known_state_in_a_vlan_of_the_flood_is_unknown() {
     assert!(
         notes
             .iter()
-            .any(|n| n.starts_with("the section spanning_tree is not read")),
+            .any(|n| n.starts_with("section spanning_tree not read")),
         "{notes:#?}"
     );
 }
@@ -1713,7 +1713,7 @@ fn show_vlan_brief_gives_the_vlans_of_a_switch_with_no_vtp_mode_line() {
     let e = campus_plus(config.as_bytes(), &[("vlans", &suspended)]);
     assert!(
         e.notes["acc1"].iter().any(|n| n
-            == "VLAN 20: show vlan brief gives the status suspended, so each port that carries it is unknown"),
+            == "VLAN 20: status suspended in show vlan brief, each port that carries it unknown"),
         "{:#?}",
         e.notes["acc1"]
     );
@@ -1794,7 +1794,7 @@ Vl10        1    110 P Active  local           192.0.2.2       192.0.2.126
     let e = campus_plus(&acc1_group_config(), &[("hsrp", brief)]);
     assert!(
         e.notes["acc1"].iter().any(|n| n
-            == "Vlan10: HSRP group 1: no mac-address line, and show standby brief gives no virtual MAC, so the virtual MAC is not known"),
+            == "Vlan10: HSRP group 1: no mac-address line, none in show standby brief, virtual MAC not known"),
         "{:#?}",
         e.notes["acc1"]
     );
@@ -1809,17 +1809,15 @@ fn a_contradiction_of_show_standby_makes_the_group_unknown() {
                 "192.0.2.2, priority 120 (expires in 8.000 sec)",
                 "0000.5e00.53a9",
             ),
-            "show standby gives the state Active and another active router",
+            "state Active and another active router in show standby",
         ),
         (
             standby("Standby", "local", "0000.5e00.53a9"),
-            "show standby gives the state Standby and the router itself as the active router",
+            "state Standby and the router itself as the active router in show standby",
         ),
     ] {
         let e = campus_plus(&acc1_group_config(), &[("hsrp_detail", &text)]);
-        let note = format!(
-            "Vlan10: HSRP group 1: {why}, so the packets to its virtual address and MAC are unknown"
-        );
+        let note = format!("Vlan10: HSRP group 1: {why}, virtual address and MAC unknown");
         assert!(e.notes["acc1"].contains(&note), "{:#?}", e.notes["acc1"]);
     }
     let config = String::from_utf8(acc1_group_config()).unwrap().replace(
@@ -1830,7 +1828,7 @@ fn a_contradiction_of_show_standby_makes_the_group_unknown() {
     let e = campus_plus(config.as_bytes(), &[("hsrp_detail", &text)]);
     assert!(
         e.notes["acc1"].iter().any(|n| n.starts_with(
-            "Vlan10: HSRP group 1: show standby gives the virtual MAC 00:00:5e:00:53:a9, and the config gives 00:00:5e:00:53:aa"
+            "Vlan10: HSRP group 1: virtual MAC 00:00:5e:00:53:a9 in show standby, 00:00:5e:00:53:aa in the config"
         )),
         "{:#?}",
         e.notes["acc1"]
@@ -1936,7 +1934,7 @@ fn a_show_vrrp_that_the_template_cannot_read_leaves_the_brief_form_to_decide() {
     assert!(
         e.notes["edge1"]
             .iter()
-            .any(|n| n.starts_with("the section vrrp_detail is not read")),
+            .any(|n| n.starts_with("section vrrp_detail not read")),
         "{:#?}",
         e.notes["edge1"]
     );

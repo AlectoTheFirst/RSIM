@@ -188,7 +188,7 @@ pub fn inputs(store: &Store, snap: &Snapshot) -> Result<(Vec<Input>, Vec<String>
                     sections,
                 });
             }
-            other => skipped.push(format!("{device}: vendor {other} is not lowered")),
+            other => skipped.push(format!("{device}: vendor {other} not lowered")),
         }
     }
     Ok((out, skipped))
@@ -287,7 +287,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                         e.notes
                             .entry(name)
                             .or_default()
-                            .push(format!("the config is not JSON: {err}"));
+                            .push(format!("config not JSON: {err}"));
                         continue;
                     }
                 };

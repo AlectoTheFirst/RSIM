@@ -442,7 +442,7 @@ fn the_shared_tunnel_end_is_reached_through_either_switch_of_the_pair() {
         "{branches:#?}"
     );
     assert!(
-        has(&branches[1].1, "is on port port-channel1"),
+        has(&branches[1].1, "on port port-channel1"),
         "{branches:#?}"
     );
     let reply = a.reply_of(0).expect("the reply ran");
@@ -467,7 +467,7 @@ fn a_secondary_source_address_with_no_vpc_domain_is_unknown() {
     assert!(
         has(
             &branches[0].1,
-            "has a secondary address, and the switch has no lowered vPC domain"
+            "with a secondary address, no lowered vPC domain"
         ),
         "{branches:#?}"
     );

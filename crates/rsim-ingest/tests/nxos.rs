@@ -302,7 +302,7 @@ fn the_acl_permits_and_the_interface_nat_translates_the_source() {
     ));
     assert!(has(
         &steps,
-        "acl-in/Vlan30 permitted · ACL leaf1:acl:FROM30 rule FROM30/20"
+        "acl-in/Vlan30 permitted, ACL leaf1:acl:FROM30 rule FROM30/20"
     ));
     assert!(has(
         &steps,
@@ -311,7 +311,7 @@ fn the_acl_permits_and_the_interface_nat_translates_the_source() {
     assert!(has(&steps, "snat translated to 198.51.100.1"));
     assert!(has(
         &steps,
-        "nexthop 198.51.100.2 is 00:00:5e:00:53:02 on Ethernet1/2"
+        "nexthop 198.51.100.2, 00:00:5e:00:53:02 on Ethernet1/2"
     ));
     // The switch has no layer 2 link yet, so the egress is unknown.
     assert!(has(&steps, "out/Ethernet1/2 no link"));
@@ -334,7 +334,7 @@ fn the_acl_denies_the_other_packets() {
     for dst in ["203.0.113.50", "192.0.2.129"] {
         let (verdict, steps) = only(&run(&t, "Vlan30", "192.0.2.140", dst, PROTO_TCP, 80));
         assert_eq!(verdict, VerdictKind::Drop);
-        assert!(has(&steps, "denied · ACL leaf1:acl:FROM30 rule FROM30/40"));
+        assert!(has(&steps, "denied, ACL leaf1:acl:FROM30 rule FROM30/40"));
     }
 }
 
@@ -385,14 +385,14 @@ fn what_is_not_lowered_gives_unknown() {
     ));
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(has(&steps, "IPv6 not filtered"));
-    assert!(has(&steps, "route ::/0 in VRF default has no next hop"));
+    assert!(has(&steps, "route ::/0 in VRF default, no next hop"));
     let notes = &estate().notes["leaf1"];
     assert_eq!(
         notes,
         &[
-            "leaf1/vlan10/00:00:5e:00:53:e1: a next hop of a route, so it is not an endpoint",
-            "Ethernet1/9: the vPC domain is not known",
-            "IPv6 is not lowered: each IPv6 packet is unknown at the route lookup",
+            "leaf1/vlan10/00:00:5e:00:53:e1: a next hop of a route, not an endpoint",
+            "Ethernet1/9: vPC domain not known",
+            "IPv6 not lowered",
         ]
     );
 }
@@ -406,7 +406,7 @@ fn without_a_route_table_the_config_routes_decide() {
     for (config, route) in [
         (
             text.as_str(),
-            "route 0.0.0.0/0 in VRF default: vrf route table not collected",
+            "route 0.0.0.0/0 in VRF default, vrf route table not collected",
         ),
         (
             without_protocols.as_str(),
@@ -507,7 +507,7 @@ fn a_deny_of_a_nat_acl_is_exact_only_in_the_last_list_rule() {
     assert!(
         has(
             &steps,
-            "snat not translated · source NAT leaf1:nat:inside rule A/10"
+            "snat not translated, source NAT leaf1:nat:inside rule A/10"
         ),
         "{steps:#?}"
     );
@@ -582,7 +582,7 @@ fn a_qos_policy_forwards_and_a_missing_admin_state_gives_unknown() {
         443,
     ));
     assert_eq!(verdict, VerdictKind::Unknown);
-    assert!(has(&steps, "the admin state is not known"), "{steps:#?}");
+    assert!(has(&steps, "admin state not known"), "{steps:#?}");
 }
 
 #[test]
@@ -630,10 +630,10 @@ fn a_host_reaches_a_host_of_another_vlan_through_the_svis() {
     assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
     for text in [
         "host/Ethernet1/5 from 00:00:5e:00:53:a1 to the gateway 00:00:5e:00:53:30",
-        "mac 00:00:5e:00:53:30 is on port svi/Vlan30",
+        "mac 00:00:5e:00:53:30 on port svi/Vlan30",
         "handoff/Vlan30 untagged to leaf1/in/Vlan30",
         "out/Vlan10 leave on Vlan10 to leaf1/svi/Vlan10/in",
-        "mac 00:00:5e:00:53:a2 is on port Ethernet1/6",
+        "mac 00:00:5e:00:53:a2 on port Ethernet1/6",
         "deliver to leaf1/vlan10/00:00:5e:00:53:a2 on port Ethernet1/6",
     ] {
         assert!(has(&steps, text), "{text}: {steps:#?}");
@@ -645,7 +645,7 @@ fn a_host_reaches_a_host_of_another_vlan_through_the_svis() {
     assert!(has(&steps, "to the gateway 00:00:0c:9f:f0:0a"));
     assert!(has(
         &steps,
-        "acl-in/Vlan10 denied · ACL leaf1:acl:WEB rule WEB/20"
+        "acl-in/Vlan10 denied, ACL leaf1:acl:WEB rule WEB/20"
     ));
 }
 
@@ -658,10 +658,7 @@ fn the_reply_of_a_static_nat_comes_back_through_the_session() {
     assert!(has(&steps, "snat translated to 198.51.100.5"));
     let (verdict, steps) = only_reply(&a);
     assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
-    assert!(has(
-        &steps,
-        "session-lookup reply packets · session 0, translated"
-    ));
+    assert!(has(&steps, "session-lookup session 0, reply, translated"));
     assert!(has(
         &steps,
         "deliver to leaf1/vlan10/00:00:5e:00:53:a3 on port Ethernet1/6"
@@ -681,17 +678,14 @@ fn a_mac_behind_the_trunk_and_a_flood_copy_to_the_trunk_give_unknown() {
     ));
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(
-        has(&steps, "mac 00:00:5e:00:53:b1 is on port port-channel10"),
+        has(&steps, "mac 00:00:5e:00:53:b1 on port port-channel10"),
         "{steps:#?}"
     );
     // A MAC that the table does not have floods. The copy to the trunk is
     // unknown, because the spanning tree state is not collected.
     let a = run(&t, "Vlan30", "192.0.2.130", "192.0.2.12", PROTO_TCP, 443);
     let all: Vec<String> = show(&a).into_iter().flat_map(|b| b.1).collect();
-    assert!(
-        has(&all, "the spanning tree state of the port is not collected"),
-        "{all:#?}"
-    );
+    assert!(has(&all, "spanning tree state not collected"), "{all:#?}");
     assert!(show(&a).iter().all(|b| b.0 != VerdictKind::Deliver));
 }
 
@@ -720,7 +714,7 @@ fn an_hsrp_state_that_is_not_known_gives_unknown() {
     // The virtual MAC is not active, so its MAC table row stays. The row
     // names the supervisor of the switch, which is not a lowered port.
     assert!(
-        has(&steps, "no egress function · port sup-eth1(R)"),
+        has(&steps, "no egress function of port sup-eth1(R)"),
         "{steps:#?}"
     );
     assert!(
@@ -730,7 +724,7 @@ fn an_hsrp_state_that_is_not_known_gives_unknown() {
     assert!(
         notes
             .iter()
-            .any(|n| n.contains("route 192.0.2.1/32 in VRF default: a route of a gateway group")),
+            .any(|n| n.contains("route 192.0.2.1/32 in VRF default, route of a gateway group")),
         "{notes:#?}"
     );
 }
@@ -749,16 +743,13 @@ fn a_packet_to_a_router_behind_a_port_is_not_delivered() {
     assert_eq!(verdict, VerdictKind::Unknown, "{steps:#?}");
     assert!(has(
         &steps,
-        "nexthop 192.0.2.20 is 00:00:5e:00:53:e1 on Vlan10"
+        "nexthop 192.0.2.20, 00:00:5e:00:53:e1 on Vlan10"
     ));
-    assert!(has(&steps, "mac 00:00:5e:00:53:e1 is on port Ethernet1/6"));
+    assert!(has(&steps, "mac 00:00:5e:00:53:e1 on port Ethernet1/6"));
     let notes = &estate().notes["leaf1"];
-    assert!(
-        notes.contains(
-            &"leaf1/vlan10/00:00:5e:00:53:e1: a next hop of a route, so it is not an endpoint"
-                .to_string()
-        )
-    );
+    assert!(notes.contains(
+        &"leaf1/vlan10/00:00:5e:00:53:e1: a next hop of a route, not an endpoint".to_string()
+    ));
 }
 
 #[test]
@@ -805,7 +796,7 @@ fn a_port_with_an_unhandled_line_gives_unknown() {
     ));
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(has(&steps, "port/Ethernet1/9/out"), "{steps:#?}");
-    assert!(has(&steps, "the vPC domain is not known"), "{steps:#?}");
+    assert!(has(&steps, "vPC domain not known"), "{steps:#?}");
 }
 
 #[test]
@@ -825,7 +816,7 @@ fn the_virtual_mac_of_a_standby_group_stays_on_its_port() {
         "{steps:#?}"
     );
     assert!(
-        has(&steps, "mac 00:00:0c:9f:f0:14 is on port port-channel10"),
+        has(&steps, "mac 00:00:0c:9f:f0:14 on port port-channel10"),
         "{steps:#?}"
     );
 }
@@ -847,7 +838,7 @@ fn an_added_trunk_vlan_and_a_member_port_map_to_the_port_channel() {
         443,
     ));
     assert!(
-        has(&steps, "mac 00:00:5e:00:53:b2 is on port port-channel10"),
+        has(&steps, "mac 00:00:5e:00:53:b2 on port port-channel10"),
         "{steps:#?}"
     );
 }
@@ -883,7 +874,7 @@ fn the_collected_mode_decides_a_port_with_no_switchport_line() {
         last.starts_with("leaf1/port/Ethernet1/11/out"),
         "{steps:#?}"
     );
-    assert!(!has(&steps, "the mode of the port is not known"));
+    assert!(!has(&steps, "port mode not known"));
     // Without the collected mode, the port gives Unknown.
     let mut sections = sections();
     let text = String::from_utf8(sections["interfaces"].0.clone()).unwrap();
@@ -909,10 +900,7 @@ fn the_collected_mode_decides_a_port_with_no_switchport_line() {
         443,
     ));
     assert_eq!(verdict, VerdictKind::Unknown);
-    assert!(
-        has(&steps, "the mode of the port is not known"),
-        "{steps:#?}"
-    );
+    assert!(has(&steps, "port mode not known"), "{steps:#?}");
 }
 
 const LEAF2: &str = "hostname leaf2
@@ -1027,7 +1015,7 @@ fn a_host_on_an_access_switch_reaches_a_host_behind_the_svi_of_the_other_switch(
     assert_eq!(verdict, VerdictKind::Deliver, "{steps:#?}");
     for text in [
         "leaf2/host/Ethernet1/3 from 00:00:5e:00:53:c4 to the gateway 00:00:0c:9f:f0:0a",
-        "leaf2/mac 00:00:0c:9f:f0:0a is on port port-channel20",
+        "leaf2/mac 00:00:0c:9f:f0:0a on port port-channel20",
         "leaf2/port/port-channel20/out leave port port-channel20 VLAN 10 to leaf1/port/port-channel10/in",
         "leaf1/handoff/Vlan10 untagged to leaf1/in/Vlan10",
         "deliver to leaf1/vlan30/00:00:5e:00:53:a1 on port Ethernet1/5",
@@ -1041,7 +1029,7 @@ fn a_host_on_an_access_switch_reaches_a_host_behind_the_svi_of_the_other_switch(
     assert!(
         has(
             &steps,
-            "acl-in/Vlan30 denied · ACL leaf1:acl:FROM30 rule FROM30/40"
+            "acl-in/Vlan30 denied, ACL leaf1:acl:FROM30 rule FROM30/40"
         ),
         "{steps:#?}"
     );
@@ -1078,8 +1066,7 @@ fn rows_that_disagree_give_no_link() {
     let notes = &e.notes["leaf1"];
     assert!(
         notes.contains(
-            &"port-channel10: the neighbour does not report the link back, so the port has no link"
-                .to_string()
+            &"port-channel10: link not reported back by the neighbour, no link".to_string()
         ),
         "{notes:#?}"
     );
@@ -1110,7 +1097,7 @@ fn two_mac_tables_that_point_at_each_other_end_the_path() {
     assert!(
         has(
             &steps,
-            "leaf2/mac 00:00:5e:00:53:c9 is on the ingress port port-channel20"
+            "leaf2/mac 00:00:5e:00:53:c9 on ingress port port-channel20"
         ),
         "{steps:#?}"
     );
@@ -1247,7 +1234,8 @@ fn members_that_name_different_peers_give_no_link() {
     ]);
     assert!(
         e.notes["leaf1"].contains(
-            &"port-channel10: the LLDP and CDP rows name more than one neighbour, so the port has no link".to_string()
+            &"port-channel10: more than one neighbour in the LLDP and CDP rows, no link"
+                .to_string()
         ),
         "{:#?}",
         e.notes
@@ -1320,8 +1308,7 @@ fn a_cdp_row_proves_a_link_and_two_claims_give_no_link() {
         },
     ]);
     assert!(
-        e.notes["leaf1"]
-            .contains(&"port-channel10: 2 links claim the port, so it has no link".to_string()),
+        e.notes["leaf1"].contains(&"port-channel10: 2 links claim the port, no link".to_string()),
         "{:#?}",
         e.notes
     );
@@ -1344,10 +1331,7 @@ fn a_trunk_vlan_with_no_vlan_line_floods_to_unknown() {
         collected: collected(),
         sections: sections(),
     }]);
-    assert!(
-        e.notes["leaf1"]
-            .contains(&"VLAN 70: a trunk allows it, and it has no vlan line".to_string())
-    );
+    assert!(e.notes["leaf1"].contains(&"VLAN 70: allowed on a trunk, no vlan line".to_string()));
     let t = e.builder.build().expect("the twin builds");
     // The rest of the trunk stays exact.
     let (_, steps) = only(&run(
@@ -1359,7 +1343,7 @@ fn a_trunk_vlan_with_no_vlan_line_floods_to_unknown() {
         443,
     ));
     assert!(
-        has(&steps, "mac 00:00:5e:00:53:b1 is on port port-channel10"),
+        has(&steps, "mac 00:00:5e:00:53:b1 on port port-channel10"),
         "{steps:#?}"
     );
 }
@@ -1464,7 +1448,7 @@ fn a_vrf_with_bgp_and_no_rows_is_unknown_outside_its_connected_routes() {
         assert!(
             has(
                 &steps,
-                &format!("route {route} in VRF RED: vrf route table not collected")
+                &format!("route {route} in VRF RED, vrf route table not collected")
             ),
             "{steps:#?}"
         );
@@ -1595,7 +1579,7 @@ fn a_next_hop_that_resolves_through_a_gateway_group_route_is_unknown() {
     assert!(
         has(
             &steps,
-            "route 198.51.100.64/26 (bgp) in VRF default: next hop not resolved: 192.0.2.1"
+            "route 198.51.100.64/26 (bgp) in VRF default, next hop not resolved: 192.0.2.1"
         ),
         "{steps:#?}"
     );

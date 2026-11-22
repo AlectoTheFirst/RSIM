@@ -172,7 +172,7 @@ fn a_port_that_two_links_claim_has_no_link() {
     let (p, notes) = peers(&devices);
     assert!(p.is_empty(), "{p:?}");
     assert!(
-        notes.contains(&"p1: 2 links claim the port, so it has no link".to_string()),
+        notes.contains(&"p1: 2 links claim the port, no link".to_string()),
         "{notes:?}"
     );
 }
@@ -196,9 +196,7 @@ fn a_neighbour_that_does_not_report_back_gives_no_link() {
     ]);
     let (p, notes) = peers(&devices);
     assert!(p.is_empty(), "{p:?}");
-    assert!(notes.contains(
-        &"p1: the neighbour does not report the link back, so the port has no link".to_string()
-    ));
+    assert!(notes.contains(&"p1: link not reported back by the neighbour, no link".to_string()));
 }
 
 #[test]
@@ -231,7 +229,7 @@ fn a_host_name_of_more_than_one_device_names_no_neighbour() {
     assert!(
         notes
             .iter()
-            .any(|n| n.contains("the host name rtr1 is on more than one device")),
+            .any(|n| n.contains("host name rtr1 on more than one device")),
         "{notes:?}"
     );
 }
@@ -263,7 +261,7 @@ fn a_mac_on_more_than_one_port_proves_no_link() {
     assert!(
         notes
             .iter()
-            .any(|n| n.contains("is on more than one port, so it proves no link")),
+            .any(|n| n.contains("on more than one port, no link")),
         "{notes:?}"
     );
 }

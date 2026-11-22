@@ -325,7 +325,7 @@ pub fn lower(
         .filter(|d| {
             if d.kind == DeviceKind::Other {
                 l.out.notes.push(format!(
-                    "device {} of type {} is not lowered",
+                    "device {} of type {} not lowered",
                     d.name, d.type_name
                 ));
                 false
@@ -397,7 +397,7 @@ pub fn lower(
                         not_placed(
                             ap,
                             format!(
-                                "SSID {ssid} has {} WLANs on the access point, and its radio {radio} does not tell which",
+                                "SSID {ssid} has {} WLANs on the access point, radio {radio} names none",
                                 ports.len()
                             ),
                             &mut l.out.notes,
@@ -409,10 +409,9 @@ pub fn lower(
             _ => continue,
         };
         let Some(net) = net else {
-            l.out.notes.push(format!(
-                "client {}: the network of its port is not known",
-                c.name
-            ));
+            l.out
+                .notes
+                .push(format!("client {}: network of its port not known", c.name));
             continue;
         };
         if let Some(id) = c.network.as_deref()
@@ -420,10 +419,7 @@ pub fn lower(
         {
             not_placed(
                 &loc.0,
-                format!(
-                    "its network {id} is not the network {} of {}",
-                    net.name, loc.1
-                ),
+                format!("network {id} not the network {} of {}", net.name, loc.1),
                 &mut l.out.notes,
             );
             continue;
@@ -439,7 +435,7 @@ pub fn lower(
     };
     for (c, _, _) in located.iter().filter(|(c, _, _)| is_router(c)) {
         l.out.notes.push(format!(
-            "client {}: a next hop of a route, so it is not an endpoint",
+            "client {}: next hop of a route, not an endpoint",
             c.name
         ));
     }
@@ -490,13 +486,13 @@ pub fn lower(
             let span = l.dev_span(d);
             if p.aggregated {
                 l.out.notes.push(format!(
-                    "{} port {}: link aggregation is not lowered",
+                    "{} port {}: link aggregation not lowered",
                     d.name, p.idx
                 ));
             }
             if p.isolation {
                 l.out.notes.push(format!(
-                    "{} port {}: port isolation is not lowered",
+                    "{} port {}: port isolation not lowered",
                     d.name, p.idx
                 ));
             }
@@ -580,7 +576,7 @@ pub fn lower(
         for (ssid, e) in &ssid_errs {
             l.out
                 .notes
-                .push(format!("{}: {e}, so the SSID is not lowered", d.name));
+                .push(format!("{}: {e}, SSID not lowered", d.name));
             // A flood of each network of the SSID reaches the SSID, where
             // the frame is unknown.
             let pid = PortId::new(format!("wlan/{ssid}"));
@@ -745,10 +741,9 @@ pub fn lower(
         }
         let guest = client_wlan.get(&c.index).is_some_and(|w| w.guest);
         if guest {
-            l.out.notes.push(format!(
-                "{} {}: the guest policy is not lowered",
-                d.name, loc.1
-            ));
+            l.out
+                .notes
+                .push(format!("{} {}: guest policy not lowered", d.name, loc.1));
         }
         let local: Vec<Prefix> = match router.and_then(|r| r.vlans.get(&net.vlan)) {
             Some(addrs) => addrs
@@ -806,7 +801,7 @@ pub fn lower(
         l.out.functions.push(Arc::new(Unplaced {
             meta,
             interface: InterfaceId::new(&interface),
-            detail: format!("client {} is not placed: {why}", c.name),
+            detail: format!("client {} not placed: {why}", c.name),
         }));
         l.out.attachments.push(AttachmentRecord {
             address: ip,

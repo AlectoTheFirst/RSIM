@@ -237,7 +237,7 @@ pub fn spans_of<A>(rules: &[Rule<A>], by: &[RuleRef]) -> Vec<SourceSpan> {
     v
 }
 
-/// The text and spans of an unknown cause: `<fact> · <location>`.
+/// The text and spans of an unknown cause: `<fact>, <location>`.
 pub fn explain<A>(
     rules: &[Rule<A>],
     what: &str,
@@ -262,7 +262,7 @@ pub fn explain<A>(
         }
     };
     (
-        format!("{fact} · {}", describe(rules, what, RuleRef::Rule(rule))),
+        format!("{fact}, {}", describe(rules, what, RuleRef::Rule(rule))),
         rules[rule].spans.clone(),
     )
 }
