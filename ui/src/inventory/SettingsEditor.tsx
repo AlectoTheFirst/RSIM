@@ -105,7 +105,7 @@ export function SettingsEditor(props: {
         const i = inherited(f, props.group);
         const inherit = `${i.from}: ${i.text}`;
         const note = notUsed(f, props.vendors, props.vendor);
-        const common = { id: props.id, k: f.key, label: f.label, draft: props.draft, h: props.h, note };
+        const common = { id: props.id, k: f.key, label: f.label, draft: props.draft, h: props.h, note: note ?? f.unit ?? null };
         return f.kind === "number" || f.kind === "text" ? (
           <TextRow {...common} placeholder={inherit} />
         ) : (
