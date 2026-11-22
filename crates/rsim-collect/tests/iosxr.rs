@@ -9,7 +9,10 @@ use std::time::Duration;
 use rsim_collect::fake::FakeTransport;
 use rsim_collect::iosxr::{IosxrSource, sections};
 use rsim_collect::*;
-use rsim_store::{Keys, SectionStatus, Snapshot, Store};
+use rsim_store::{SectionStatus, Snapshot, Store};
+
+#[path = "support/keys.rs"]
+mod keys;
 
 const T0: u64 = 1_700_000_000_000;
 
@@ -82,7 +85,7 @@ fn env() -> Env {
     let dir = tempfile::tempdir().unwrap();
     let t = Arc::new(FakeTransport::new(Duration::from_millis(1)));
     load(&t);
-    let store = Store::open(dir.path(), Keys::new([1; 32], [2; 32])).unwrap();
+    let store = Store::open(dir.path(), keys::keys()).unwrap();
     let c = Collector::new(
         store,
         Box::new(vec![router()]),

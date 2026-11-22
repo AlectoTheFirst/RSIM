@@ -18,7 +18,10 @@ use rsim_collect::iosxr::IosxrSource;
 use rsim_collect::nxos::{BGP_SESSIONS_DEFAULT, NxosSource};
 use rsim_collect::vyos::VyosSource;
 use rsim_collect::*;
-use rsim_store::{Keys, SectionEntry, SectionStatus, Store};
+use rsim_store::{SectionEntry, SectionStatus, Store};
+
+#[path = "support/keys.rs"]
+mod keys;
 
 const T0: u64 = 1_700_000_000_000;
 
@@ -111,7 +114,7 @@ fn collector(
     capture: CaptureBgp,
     source: Arc<dyn Source>,
 ) -> Collector {
-    let store = Store::open(dir, Keys::new([1; 32], [2; 32])).unwrap();
+    let store = Store::open(dir, keys::keys()).unwrap();
     Collector::new(
         store,
         Box::new(vec![device(vendor, capture)]),
@@ -181,7 +184,7 @@ fn hash(vendor: Vendor, capture: CaptureBgp, section: &str, answer: &str) -> rsi
         Vendor::Unifi => unreachable!(),
     };
     let spec = specs.into_iter().find(|s| s.name == section).unwrap();
-    let keys = Keys::new([1; 32], [2; 32]);
+    let keys = keys::keys();
     rsim_store::change_hash_kept(
         &keys,
         spec.format,

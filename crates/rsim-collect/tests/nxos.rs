@@ -10,9 +10,11 @@ use arrow_array::{Array, BooleanArray, StringArray, UInt64Array};
 use rsim_collect::fake::FakeTransport;
 use rsim_collect::nxos::{NxosSource, sections};
 use rsim_collect::*;
+#[path = "support/keys.rs"]
+mod keys;
+
 use rsim_store::{
-    Keys, LINK_SPEEDS, LINKS, MAC_TABLE, NEIGHBOURS, ROUTES, SectionStatus, Snapshot, Store,
-    TableSchema,
+    LINK_SPEEDS, LINKS, MAC_TABLE, NEIGHBOURS, ROUTES, SectionStatus, Snapshot, Store, TableSchema,
 };
 
 const T0: u64 = 1_700_000_000_000;
@@ -100,7 +102,7 @@ fn env() -> Env {
     let dir = tempfile::tempdir().unwrap();
     let t = Arc::new(FakeTransport::new(Duration::from_millis(1)));
     load(&t);
-    let store = Store::open(dir.path(), Keys::new([1; 32], [2; 32])).unwrap();
+    let store = Store::open(dir.path(), keys::keys()).unwrap();
     let c = Collector::new(
         store,
         Box::new(vec![switch()]),
