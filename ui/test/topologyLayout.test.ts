@@ -4,7 +4,7 @@
 // of the map.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { SIZE } from "../src/theme";
+import { SIZE, TYPE } from "../src/theme";
 import { buildGraph, pairKey, type MapGraph, type TopologyOut } from "../src/topology/graph";
 import { ROW_MAX, layoutMap, type Card, type MapLayout } from "../src/topology/layout";
 import { pathGraphInput, pathsOf, type PathBriefOut } from "../src/topology/paths";
@@ -215,7 +215,8 @@ describe("the window of the map", () => {
   });
 
   it("shows the text of a card only when its name is at least 9px high", () => {
-    expect([showsText(1), showsText(0.75), showsText(0.74)]).toEqual([true, true, false]);
+    const least = SIZE.mapTextMin / TYPE.value.size;
+    expect([showsText(1), showsText(least), showsText(least - 0.01)]).toEqual([true, true, false]);
   });
 
   it("culls the cards and lines outside the window", () => {

@@ -441,10 +441,20 @@ export function InventoryView(props: { twin: string; row: number }) {
   const chars = useMemo(() => columnChars(sections, by), [sections, by]);
 
   if (absent) {
-    return <PageHead title="Inventory" actions={<HatchMark>no inventory database</HatchMark>} />;
+    return (
+      <Card>
+        <HatchMark>no inventory database</HatchMark>
+      </Card>
+    );
   }
   if (!inv) {
-    return <PageHead title="Inventory" actions={loadProblem ? <span title={loadProblem.detail}>{loadProblem.title}</span> : null} />;
+    return loadProblem ? (
+      <Card>
+        <Empty problem>
+          <span title={loadProblem.detail}>{loadProblem.title}</span>
+        </Empty>
+      </Card>
+    ) : null;
   }
 
   const open = (o: Opened) => {
@@ -585,7 +595,6 @@ export function InventoryView(props: { twin: string; row: number }) {
   return (
     <>
       <PageHead
-        title="Inventory"
         tabs={<Tabs label="Inventory parts" tabs={PARTS} current={part} onSelect={setPart} />}
         actions={
           part === "devices" ? (

@@ -6,11 +6,11 @@
 export type Scheme = "light" | "dark" | "darcula" | "mono";
 export type ThemePref = Scheme | "system";
 export type ColourPref = "standard" | "blue-orange";
-export type RowHeight = 28 | 32 | 36;
+export type RowHeight = 24 | 28 | 32;
 
 export const SCHEMES: readonly Scheme[] = ["light", "dark", "darcula", "mono"];
 export const THEMES: readonly ThemePref[] = [...SCHEMES, "system"];
-export const ROW_HEIGHTS: readonly RowHeight[] = [28, 32, 36];
+export const ROW_HEIGHTS: readonly RowHeight[] = [24, 28, 32];
 
 /** The colour tokens of each scheme. */
 export const COLOURS = {
@@ -118,16 +118,15 @@ const MONO = '"JetBrains Mono", ui-monospace, monospace';
 
 /** The type styles: family, size, line height, weight and letter spacing. */
 export const TYPE = {
-  title: { family: SANS, size: 20, line: 28, weight: 600, spacing: "normal" },
-  outcome: { family: SANS, size: 18, line: 24, weight: 600, spacing: "normal" },
-  section: { family: SANS, size: 14, line: 20, weight: 600, spacing: "normal" },
-  wordmark: { family: SANS, size: 12, line: 16, weight: 700, spacing: "0.1em" },
-  body: { family: SANS, size: 13, line: 20, weight: 400, spacing: "normal" },
-  label: { family: SANS, size: 12, line: 20, weight: 400, spacing: "normal" },
-  value: { family: MONO, size: 12, line: 20, weight: 400, spacing: "normal" },
-  "value-changed": { family: MONO, size: 12, line: 20, weight: 600, spacing: "normal" },
-  query: { family: MONO, size: 13, line: 20, weight: 500, spacing: "normal" },
-  index: { family: MONO, size: 11, line: 20, weight: 400, spacing: "normal" },
+  title: { family: SANS, size: 18, line: 24, weight: 600, spacing: "normal" },
+  section: { family: SANS, size: 13, line: 16, weight: 600, spacing: "normal" },
+  wordmark: { family: SANS, size: 11, line: 16, weight: 700, spacing: "0.1em" },
+  body: { family: SANS, size: 12, line: 16, weight: 400, spacing: "normal" },
+  label: { family: SANS, size: 11, line: 16, weight: 400, spacing: "normal" },
+  value: { family: MONO, size: 11, line: 16, weight: 400, spacing: "normal" },
+  "value-changed": { family: MONO, size: 11, line: 16, weight: 600, spacing: "normal" },
+  query: { family: MONO, size: 12, line: 16, weight: 500, spacing: "normal" },
+  index: { family: MONO, size: 10, line: 16, weight: 400, spacing: "normal" },
 } as const;
 
 export type TypeStyle = keyof typeof TYPE;
@@ -138,35 +137,35 @@ export const SIZE = {
   railWidth: 72,
   railItemPad: 10,
   railIcon: 20,
-  topBar: 56,
-  topBarDivider: 24,
-  margin: 24,
-  pageTop: 20,
-  cardGap: 16,
-  cardPad: 16,
+  topBar: 48,
+  topBarDivider: 20,
+  margin: 16,
+  pageTop: 12,
+  cardGap: 12,
+  cardPad: 12,
   cardRadius: 8,
   panel: 352,
-  button: 32,
+  button: 28,
   buttonRadius: 6,
-  buttonPad: 12,
-  input: 36,
-  inputPanel: 32,
+  buttonPad: 10,
+  input: 28,
+  inputPanel: 28,
   inputRadius: 6,
-  inputPad: 10,
+  inputPad: 8,
   buttonGap: 4,
   groupGap: 8,
   icon: 16,
   iconSmall: 12,
   iconStroke: 1.5,
-  chip: 26,
-  chipButton: 20,
-  pill: 20,
-  pillRadius: 10,
+  chip: 22,
+  chipButton: 18,
+  pill: 18,
+  pillRadius: 9,
   pillPad: 8,
   tabLine: 2,
   factGap: 24,
-  account: 28,
-  accountRadius: 14,
+  account: 24,
+  accountRadius: 12,
   hairline: 1,
   hatchPitch: 5,
   hatchLine: 1,
@@ -186,24 +185,24 @@ export const SIZE = {
   // Trace
   lane: 44,
   /** The advance of a character of the type `index`, rounded up. */
-  indexChar: 7,
+  indexChar: 6,
   pathLine: 3,
   endSquare: 9,
   deviceSquare: 12,
   ring: 3.75,
   ringStroke: 2.5,
   queryBarGap: 12,
-  colStep: 36,
-  colFunction: 168,
-  colFunctionMax: 264,
+  colStep: 32,
+  colFunction: 152,
+  colFunctionMax: 248,
   colReason: 200,
-  colRewrite: 176,
-  colSource: 140,
+  colRewrite: 160,
+  colSource: 128,
   /** The advance of a character of the type `value`. */
-  valueChar: 7.2,
-  outcomeMark: 40,
-  outcomeIcon: 20,
-  stripNode: 28,
+  valueChar: 6.6,
+  outcomeIcon: 16,
+  outcomeDir: 48,
+  stripNode: 12,
   stripLine: 2,
   stripLineMin: 24,
   stripGap: 12,
@@ -216,7 +215,7 @@ export const SIZE = {
   codeNumber: 40,
   // Tables
   tablesList: 184,
-  tablesHead: 36,
+  tablesHead: 28,
   tablesPanelList: 240,
   tablesFilterInput: 240,
   // Inventory
@@ -302,7 +301,7 @@ export interface Prefs {
   row: RowHeight;
 }
 
-export const DEFAULT_PREFS: Prefs = { theme: "system", colours: "standard", row: 32 };
+export const DEFAULT_PREFS: Prefs = { theme: "system", colours: "standard", row: 24 };
 
 const STORE_KEY = "rsim.prefs";
 

@@ -1,7 +1,7 @@
 // The ladder of one path: a lane for each device, and a row for each
 // function, or for each device at the level device.
 import type { Verdict } from "../api/types";
-import { Hatch, HatchText } from "../page/Hatch";
+import { HatchText } from "../page/Hatch";
 import { Icon } from "../page/Icon";
 import { SIZE } from "../theme";
 import { LaneNames, Lanes } from "./Lanes";
@@ -37,26 +37,20 @@ export function ladderColumns(lanes: number, fn: number): { columns: string; min
 }
 
 /** The word of an outcome kind: with its colour if the engine knows it, else in a hatch mark. */
-export function OutcomeWord(props: { kind: string; headline?: boolean }) {
+export function OutcomeWord(props: { kind: string }) {
   const { kind } = props;
   const known = outcomeKnown(kind);
-  const word = <span class={`${props.headline ? "t-outcome" : "strong"}${known ? ` c-${kind}` : ""}`}>{verdictWord(kind)}</span>;
+  const word = <span class={`strong${known ? ` c-${kind}` : ""}`}>{verdictWord(kind)}</span>;
   return known ? word : <HatchText>{word}</HatchText>;
 }
 
-/** The symbol of an outcome kind: its icon on its tint, or the hatch for an outcome that the engine does not know. */
+/** The symbol of an outcome kind in its colour, before its word. An outcome that the engine does not know has the hatch of its word and no symbol. */
 export function OutcomeSymbol(props: { kind: string }) {
   const k = props.kind;
-  if (k === "deliver" || k === "drop" || k === "exit") {
-    return (
-      <span class={`outcome-mark mark-${k}`} aria-hidden="true">
-        <Icon name={k} size={SIZE.outcomeIcon} />
-      </span>
-    );
-  }
+  if (k !== "deliver" && k !== "drop" && k !== "exit") return null;
   return (
-    <span class="outcome-mark mark-unknown" aria-hidden="true">
-      <Hatch w={SIZE.outcomeIcon} h={SIZE.outcomeIcon} />
+    <span class={`outcome-mark c-${k}`} aria-hidden="true">
+      <Icon name={k} size={SIZE.outcomeIcon} />
     </span>
   );
 }
@@ -84,7 +78,6 @@ export function BrokenName(props: { name: string; width: number; class?: string 
  */
 export function VerdictText(props: {
   v: Verdict;
-  headline?: boolean;
   at?: DecidingStep | null;
   onStep?: (d: DecidingStep) => void;
   tunnel?: string | null;
@@ -103,7 +96,7 @@ export function VerdictText(props: {
     );
   return (
     <span class="verdict">
-      <OutcomeWord kind={v.kind} headline={props.headline} />
+      <OutcomeWord kind={v.kind} />
       {dest ? (
         <>
           {" to "}

@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { ApiProblem, getCoverage, getUnhandled } from "../api/client";
 import type { TableOut } from "../api/types";
-import { Card, Empty, PageHead, PanelLayout } from "../page/Card";
+import { Card, Empty, PanelLayout } from "../page/Card";
 import { Hatch } from "../page/Hatch";
 import { Panel } from "../page/Panel";
 import { PageButtons } from "../page/Parts";
@@ -245,7 +245,6 @@ export function CoverageView(props: { twin: string; row: RowHeight; search: stri
 
   return (
     <>
-      <PageHead title="Coverage" />
       <PanelLayout
         fill
         panel={

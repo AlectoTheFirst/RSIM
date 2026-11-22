@@ -104,17 +104,48 @@ button.table-name[aria-current="page"] {
   flex-grow: 1;
 }
 
+/* The bars of the table card in one row: the forms, the filters and the menus. */
+.table-bars {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--group-gap);
+  row-gap: var(--button-gap);
+  padding: 0 var(--button-pad);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.table-bars > .grow {
+  flex-grow: 1;
+}
+
 .table-tabs {
   flex: none;
-  padding: 0 var(--button-pad);
+  align-self: stretch;
+  display: flex;
 }
 
 .table-tabs .tabs {
   flex-wrap: wrap;
+  border-bottom: 0;
 }
 
-.table-params,
 .table-tools {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--button-gap) var(--group-gap);
+  padding: var(--button-gap) 0;
+}
+
+.table-tools > .grow {
+  display: none;
+}
+
+.table-params {
   flex: none;
   column-gap: var(--group-gap);
   row-gap: var(--group-gap);
