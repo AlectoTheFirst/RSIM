@@ -312,6 +312,9 @@ pub struct Settings {
     pub retries: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ha: Option<Ha>,
+    /// The time between 2 collections, from 60 to 86400 seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval_seconds: Option<u32>,
 }
 
 /// Device group

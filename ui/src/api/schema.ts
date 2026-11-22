@@ -1700,6 +1700,7 @@ export interface components {
             /** @description Credential */
             credential: components["schemas"]["Resolved"];
             ha: components["schemas"]["Resolved8"];
+            interval_seconds: components["schemas"]["Resolved4"];
             nxos_json: components["schemas"]["Resolved5"];
             paged_section_timeout_seconds: components["schemas"]["Resolved4"];
             request_timeout_seconds: components["schemas"]["Resolved4"];
@@ -1871,6 +1872,11 @@ export interface components {
             /** @description Name */
             credential?: string | null;
             ha?: components["schemas"]["Ha"] | null;
+            /**
+             * Format: uint32
+             * @description The time between 2 collections, from 60 to 86400 seconds.
+             */
+            interval_seconds?: number | null;
             nxos_json?: components["schemas"]["NxosJson"] | null;
             /**
              * Format: uint32

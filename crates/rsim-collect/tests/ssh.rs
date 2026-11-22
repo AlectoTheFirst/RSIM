@@ -274,6 +274,7 @@ fn device(address: &str) -> Device {
         site: None,
         capture_bgp: Default::default(),
         route: Default::default(),
+        interval: rsim_collect::DEFAULT_INTERVAL,
     }
 }
 

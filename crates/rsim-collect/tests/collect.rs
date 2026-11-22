@@ -32,6 +32,7 @@ fn vyos(id: &str) -> Device {
         site: None,
         capture_bgp: Default::default(),
         route: Default::default(),
+        interval: DEFAULT_INTERVAL,
     }
 }
 
@@ -44,6 +45,7 @@ fn site(id: &str) -> Device {
         site: Some("default".into()),
         capture_bgp: Default::default(),
         route: Default::default(),
+        interval: DEFAULT_INTERVAL,
     }
 }
 
@@ -870,11 +872,11 @@ async fn run_collects_at_each_interval_until_it_stops() {
     let interval = Duration::from_millis(300);
     let mut c = Collector::new(
         Store::open(dir.path(), keys()).unwrap(),
-        Box::new(vec![vyos("r1")]),
-        Schedule {
+        Box::new(vec![Device {
             interval,
-            ..Schedule::default()
-        },
+            ..vyos("r1")
+        }]),
+        Schedule::default(),
         Limits::default(),
         Arc::new(TokioClock::new(T0)),
     )
@@ -888,7 +890,7 @@ async fn run_collects_at_each_interval_until_it_stops() {
         }
     };
     let start = std::time::Instant::now();
-    tokio::time::timeout(Duration::from_secs(60), c.run(stop))
+    tokio::time::timeout(Duration::from_secs(60), c.run(stop, |_| {}))
         .await
         .expect("4 cycles run in 60 s")
         .unwrap();
@@ -925,6 +927,83 @@ fn the_timers_of_a_bridge_do_not_change_the_hash_of_the_links() {
     let a = hash(&bridge_links("287.31", "0.00", 1500));
     assert_eq!(a, hash(&bridge_links("12.04", "0.76", 1500)));
     assert_ne!(a, hash(&bridge_links("287.31", "0.00", 9000)));
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_collector_wakes_for_each_device_at_its_own_interval() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = Arc::new(FakeTransport::new(Duration::from_millis(5)));
+    let every = |id: &str, s: u64| Device {
+        interval: Duration::from_secs(s),
+        ..vyos(id)
+    };
+    load(&t, &vyos("r1"));
+    load(&t, &vyos("r2"));
+    let mut c = Collector::new(
+        Store::open(dir.path(), keys()).unwrap(),
+        Box::new(Vec::<Device>::new()),
+        Schedule {
+            spread: false,
+            ..Schedule::default()
+        },
+        Limits::default(),
+        Arc::new(TokioClock::new(T0)),
+    )
+    .unwrap();
+    let configure = |c: &mut Collector, r2: u64| {
+        c.reconfigure(
+            Box::new(vec![every("r1", 60), every("r2", r2)]),
+            vec![Arc::new(VyosSource::new(t.clone()))],
+            Default::default(),
+        )
+    };
+    let both = |cycles: &[(u64, usize)]| -> Vec<u64> {
+        cycles
+            .iter()
+            .filter(|(_, n)| *n == 2)
+            .map(|(s, _)| *s)
+            .collect()
+    };
+    configure(&mut c, 300);
+    let cycles = wake_and_run(&mut c, 600).await;
+    let minutes: Vec<u64> = (0..=10).map(|m| m * 60).collect();
+    let at: Vec<u64> = cycles.iter().map(|(s, _)| *s).collect();
+    assert_eq!(at, minutes, "{cycles:?}");
+    assert_eq!(both(&cycles), [0, 300, 600]);
+
+    // An interval of 120 s for r2 applies from its last collection.
+    configure(&mut c, 120);
+    let cycles = wake_and_run(&mut c, 900).await;
+    assert_eq!(both(&cycles), [720, 840], "{cycles:?}");
+
+    // With no device, the collector wakes after the wake limit.
+    let empty_dir = tempfile::tempdir().unwrap();
+    let empty = Collector::new(
+        Store::open(empty_dir.path(), keys()).unwrap(),
+        Box::new(Vec::<Device>::new()),
+        Schedule::default(),
+        Limits::default(),
+        Arc::new(TokioClock::new(T0)),
+    )
+    .unwrap();
+    assert_eq!(empty.next_wake(T0), T0 + WAKE_LIMIT.as_millis() as u64);
+}
+
+/// Runs a cycle at each wake time of the collector up to the second `until`
+/// after `T0`, and gives the second after `T0` and the due devices of each
+/// cycle.
+async fn wake_and_run(c: &mut Collector, until: u64) -> Vec<(u64, usize)> {
+    let mut cycles = Vec::new();
+    loop {
+        let now = c.now_ms();
+        let wake = c.next_wake(now);
+        if wake > T0 + until * 1000 {
+            return cycles;
+        }
+        tokio::time::advance(Duration::from_millis(wake.saturating_sub(now))).await;
+        let r = c.run_cycle().await.unwrap();
+        cycles.push(((r.time - T0) / 1000, r.due));
+    }
 }
 
 /// The config of r1 with a host name, so each name is a change.

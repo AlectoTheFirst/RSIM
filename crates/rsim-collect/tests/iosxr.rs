@@ -27,6 +27,7 @@ fn router() -> Device {
         site: None,
         capture_bgp: Default::default(),
         route: Default::default(),
+        interval: DEFAULT_INTERVAL,
     }
 }
 

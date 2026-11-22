@@ -26,9 +26,10 @@ pub use db::{
     verify_password,
 };
 pub use resolve::{
-    DEFAULT_PAGED_SECTION_TIMEOUT_SECONDS, DEFAULT_REQUEST_TIMEOUT_SECONDS,
-    DEFAULT_SECTION_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS, Origin, Resolved, ResolvedDevice,
-    ResolvedDevices, ResolvedSettings, resolve_device, resolve_settings,
+    DEFAULT_INTERVAL_SECONDS, DEFAULT_PAGED_SECTION_TIMEOUT_SECONDS,
+    DEFAULT_REQUEST_TIMEOUT_SECONDS, DEFAULT_SECTION_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS,
+    Origin, Resolved, ResolvedDevice, ResolvedDevices, ResolvedSettings, resolve_device,
+    resolve_settings,
 };
 pub use secret::{KEY_VAR, MAX_SECRET, Sealed, SecretInput, SecretKey};
 pub use types::{

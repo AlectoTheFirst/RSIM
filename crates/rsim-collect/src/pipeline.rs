@@ -180,6 +180,10 @@ pub const DEFAULT_HISTORY: Duration = Duration::from_secs(30 * 86_400);
 /// The least time between 2 prunes of the store.
 pub const PRUNE_INTERVAL: Duration = Duration::from_secs(3_600);
 
+/// The longest wait between 2 cycles, and so between 2 reads of the
+/// inventory.
+pub const WAKE_LIMIT: Duration = Duration::from_secs(60);
+
 /// Collects the devices of an inventory into a store.
 pub struct Collector {
     store: Arc<Store>,
@@ -280,6 +284,11 @@ impl Collector {
         self
     }
 
+    /// The time of the clock of the collector.
+    pub fn now_ms(&self) -> u64 {
+        self.clock.now_ms()
+    }
+
     pub fn scheduler(&self) -> &Scheduler {
         &self.scheduler
     }
@@ -288,17 +297,40 @@ impl Collector {
         &self.store
     }
 
-    /// Runs the cycles at the interval of the schedule until `stop` is
-    /// ready. A store error stops the collector.
-    pub async fn run(&mut self, stop: impl Future<Output = ()>) -> Result<(), CollectError> {
+    /// The time of the next cycle: the earliest due time of the devices of
+    /// the inventory, `now` for a device of the store that the inventory
+    /// does not have, and at most [`WAKE_LIMIT`] after `now`.
+    pub fn next_wake(&self, now: u64) -> u64 {
+        let devices = self.inventory.devices();
+        let limit = now.saturating_add(u64::try_from(WAKE_LIMIT.as_millis()).unwrap_or(u64::MAX));
+        if self
+            .state
+            .keys()
+            .any(|d| !devices.iter().any(|x| x.id == *d))
+        {
+            return now;
+        }
+        self.scheduler
+            .next_due(&devices)
+            .map_or(limit, |t| t.min(limit))
+    }
+
+    /// Runs a cycle at each wake time of [`Collector::next_wake`] until
+    /// `stop` is ready, and gives each report to `report`. A store error
+    /// stops the collector.
+    pub async fn run(
+        &mut self,
+        stop: impl Future<Output = ()>,
+        mut report: impl FnMut(&CycleReport),
+    ) -> Result<(), CollectError> {
         tokio::pin!(stop);
-        let mut tick = tokio::time::interval(self.scheduler.schedule().interval);
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
+            let now = self.clock.now_ms();
+            let wait = Duration::from_millis(self.next_wake(now).saturating_sub(now));
             tokio::select! {
                 _ = &mut stop => return Ok(()),
-                _ = tick.tick() => {
-                    self.run_cycle().await?;
+                _ = tokio::time::sleep(wait) => {
+                    report(&self.run_cycle().await?);
                 }
             }
         }
@@ -306,17 +338,13 @@ impl Collector {
 
     /// Collects the due devices and writes one snapshot. The snapshot
     /// removes each device of the store that is not in the inventory. A
-    /// cycle in the second of the newest snapshot, or before it, first
-    /// waits for the next second, so each snapshot has its own second.
+    /// cycle with a due device or a removal in the second of the newest
+    /// snapshot, or before it, first waits for the next second, so each
+    /// snapshot has its own second.
     /// After a written snapshot, and at most once in [`PRUNE_INTERVAL`],
     /// the store deletes the snapshots that are older than the history.
     pub async fn run_cycle(&mut self) -> Result<CycleReport, CollectError> {
         let mut now = self.clock.now_ms();
-        if let Some(newest) = self.newest.filter(|t| t / 1000 >= now / 1000) {
-            let next = (newest / 1000 + 1) * 1000;
-            tokio::time::sleep(Duration::from_millis(next - now)).await;
-            now = self.clock.now_ms().max(next);
-        }
         let devices = self.inventory.devices();
         let inventory_version = self.inventory.version();
         let mut ids = BTreeSet::new();
@@ -327,14 +355,22 @@ impl Collector {
             )));
         }
         let due = self.scheduler.due(now, &devices);
+        if due.is_empty() && self.state.keys().all(|d| ids.contains(d)) {
+            return Ok(CycleReport {
+                time: now,
+                ..CycleReport::default()
+            });
+        }
+        if let Some(newest) = self.newest.filter(|t| t / 1000 >= now / 1000) {
+            let next = (newest / 1000 + 1) * 1000;
+            tokio::time::sleep(Duration::from_millis(next - now)).await;
+            now = self.clock.now_ms().max(next);
+        }
         let mut report = CycleReport {
             time: now,
             due: due.len(),
             ..CycleReport::default()
         };
-        if due.is_empty() && self.state.keys().all(|d| ids.contains(d)) {
-            return Ok(report);
-        }
 
         let cap = self.limits.channel;
         let (job_tx, job_rx) = mpsc::channel::<Due>(cap);
@@ -712,6 +748,7 @@ mod tests {
                         site: None,
                         capture_bgp: Default::default(),
                         route: Default::default(),
+                        interval: crate::DEFAULT_INTERVAL,
                     },
                     forced: false,
                 })
@@ -801,6 +838,7 @@ mod tests {
                     site: None,
                     capture_bgp: Default::default(),
                     route: Default::default(),
+                    interval: crate::DEFAULT_INTERVAL,
                 },
                 forced: false,
             })

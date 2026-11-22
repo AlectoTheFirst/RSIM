@@ -77,9 +77,9 @@ use rsim_collect::ssh::{Algorithms, CommandMode, SshLimits, SshProfile, SshTrans
 use rsim_collect::unifi::UnifiSource;
 use rsim_collect::vyos::VyosSource;
 use rsim_collect::{
-    CaptureBgp, Collector, Credential, CycleReport, Device, InventoryList, Jump, Limits,
-    MemoryCredentials, PinPolicy, Proxy, ProxyLogin, Route, Schedule, Secret, Source, TimeLimits,
-    TokioClock, TrustStore, Vendor,
+    CaptureBgp, Collector, Credential, CycleReport, DEFAULT_INTERVAL, Device, InventoryList, Jump,
+    Limits, MemoryCredentials, PinPolicy, Proxy, ProxyLogin, Route, Schedule, Secret, Source,
+    TimeLimits, TokioClock, TrustStore, Vendor, WAKE_LIMIT,
 };
 use rsim_inventory::env::parse_env;
 use rsim_inventory::{CredentialKind, CredentialSource, Inventory, Sealed, SecretKey};
@@ -248,6 +248,7 @@ fn ssh_devices(
             site: None,
             capture_bgp: capture_bgp(env, prefix, name)?,
             route,
+            interval: DEFAULT_INTERVAL,
         });
         let get = |k: &str| env.get(&format!("{prefix}_{name}_{k}")).map(String::as_str);
         let mode = match get("MODE") {
@@ -459,6 +460,7 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
                     site: Some(site.clone()),
                     capture_bgp: Default::default(),
                     route: route.clone(),
+                    interval: DEFAULT_INTERVAL,
                 });
             }
         }
@@ -850,6 +852,7 @@ fn setup_from_inventory(
                 rsim_inventory::CaptureBgp::All => CaptureBgp::All,
             },
             route,
+            interval: Duration::from_secs(st.interval_seconds.value.into()),
         });
     }
     if s.devices.is_empty() {
@@ -942,6 +945,12 @@ fn print_report(r: &CycleReport) {
     }
     if let Some(e) = &r.prune_error {
         println!("prune error: {e}");
+    }
+}
+
+fn print_prune_error(r: &CycleReport) {
+    if let Some(e) = &r.prune_error {
+        eprintln!("error: prune: {e}");
     }
 }
 
@@ -1139,7 +1148,7 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
             collector.reconfigure(Box::new(devices), sources, times);
             if repeat {
                 collector
-                    .run(stop_signal())
+                    .run(stop_signal(), print_prune_error)
                     .await
                     .map_err(|e| e.to_string())?;
             } else {
@@ -1151,14 +1160,14 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
         Some(db) => {
             let stop = stop_signal();
             tokio::pin!(stop);
-            let mut tick = tokio::time::interval(collector.scheduler().schedule().interval);
-            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             let mut shown = None;
+            let mut wait = Duration::ZERO;
             loop {
                 tokio::select! {
                     _ = &mut stop => break,
-                    _ = tick.tick() => {}
+                    _ = tokio::time::sleep(wait) => {}
                 }
+                wait = WAKE_LIMIT;
                 match configure_from_inventory(&db, &env, key.as_ref(), &trust, &mut collector)
                     .await
                 {
@@ -1181,6 +1190,9 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
                     status(collector.store())?;
                     break;
                 }
+                print_prune_error(&r);
+                let now = collector.now_ms();
+                wait = Duration::from_millis(collector.next_wake(now).saturating_sub(now));
             }
         }
     }
@@ -1336,6 +1348,30 @@ mod tests {
             &edge2.route.proxy,
             Some(Proxy::Http { login: Some(l), .. }) if l.user == "u" && l.password == "v"
         ));
+    }
+
+    #[test]
+    fn a_device_takes_the_interval_of_its_group_or_its_own() {
+        let env =
+            parse_env("VYOS_CORE1_IP=10.0.0.1\nVYOS_EDGE_IP=10.0.0.2\nVYOS_USER=ro\nVYOS_PASS=p\n");
+        let mut inv = imported(&env);
+        let at = |inv: &Inventory| -> Vec<(String, u64)> {
+            let (s, _) = setup_from_inventory(inv, &Secrets::env(&env)).unwrap();
+            let mut v: Vec<(String, u64)> = s
+                .devices
+                .iter()
+                .map(|d| (d.id.clone(), d.interval.as_secs()))
+                .collect();
+            v.sort();
+            v
+        };
+        let both = |a: u64, b: u64| vec![("core1".to_string(), a), ("edge".to_string(), b)];
+        assert_eq!(at(&inv), both(60, 60));
+        inv.groups[0].settings.interval_seconds = Some(300);
+        assert_eq!(at(&inv), both(300, 300));
+        let edge = inv.devices.iter_mut().find(|d| d.name == "edge").unwrap();
+        edge.settings.interval_seconds = Some(3_600);
+        assert_eq!(at(&inv), both(300, 3_600));
     }
 
     #[test]

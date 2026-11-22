@@ -36,6 +36,7 @@ fn device(vendor: Vendor, capture_bgp: CaptureBgp) -> Device {
         site: None,
         capture_bgp,
         route: Default::default(),
+        interval: DEFAULT_INTERVAL,
     }
 }
 

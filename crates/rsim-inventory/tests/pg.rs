@@ -106,6 +106,39 @@ async fn the_history_of_the_store_is_one_setting_with_its_audit() {
 }
 
 #[tokio::test]
+async fn the_interval_of_a_group_and_a_device_resolves_and_keeps_its_range() {
+    let Some(db) = test_database("the_interval_resolves").await else {
+        return;
+    };
+    let mut g = group("core");
+    g.settings.interval_seconds = Some(300);
+    let mut changes = base();
+    changes[5] = Change::PutGroup(g);
+    db.apply("tester", &changes).await.unwrap();
+    let interval = |inv: &rsim_inventory::Inventory| {
+        let s = &inv.resolve().unwrap()[0].settings.interval_seconds;
+        (s.value, s.origin)
+    };
+    assert_eq!(interval(&db.load().await.unwrap()), (300, Origin::Group));
+    let mut d = device("r1", "core");
+    d.settings.interval_seconds = Some(86_400);
+    db.apply("tester", &[Change::PutDevice(d.clone())])
+        .await
+        .unwrap();
+    let inv = db.load().await.unwrap();
+    assert_eq!(interval(&inv), (86_400, Origin::Device));
+    for bad in [59, 86_401] {
+        d.settings.interval_seconds = Some(bad);
+        let e = db
+            .apply("tester", &[Change::PutDevice(d.clone())])
+            .await
+            .unwrap_err();
+        assert!(matches!(e, Error::Invalid(_)), "{bad}: {e:?}");
+    }
+    assert_eq!(db.load().await.unwrap(), inv);
+}
+
+#[tokio::test]
 async fn a_write_increases_the_version_and_records_the_audit() {
     let Some(db) = test_database("a_write_increases_the_version").await else {
         return;

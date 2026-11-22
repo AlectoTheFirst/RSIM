@@ -106,6 +106,7 @@ function resolved(name: string, group: string, vendor: string, s: Partial<Resolv
     paged_section_timeout_seconds: r(300, "default"),
     retries: r(0, "default"),
     ha: r("none", "default"),
+    interval_seconds: r(60, "default"),
   };
   return { name, group, vendor, address: "192.0.2.99", site: site ?? null, settings: { ...base, ...s } };
 }
@@ -330,6 +331,11 @@ describe("edits of the settings", () => {
     expect(parseSetting(timeout, "86401")).toEqual({ ok: false, problem: { title: "timeout_seconds out of range", detail: "timeout_seconds from 1 to 86400" } });
     expect(parseSetting(timeout, "")).toEqual({ ok: true, value: null });
     expect(parseSetting(timeout, " ")).toEqual({ ok: true, value: null });
+    const interval = field("interval_seconds");
+    expect(parseSetting(interval, "59").ok).toBe(false);
+    expect(parseSetting(interval, "60")).toEqual({ ok: true, value: 60 });
+    expect(parseSetting(interval, "86400")).toEqual({ ok: true, value: 86400 });
+    expect(parseSetting(interval, "86401").ok).toBe(false);
     expect(parseSetting(timeout, "1.5")).toEqual({ ok: false, problem: { title: "timeout_seconds not a whole number", detail: "timeout_seconds from 1 to 86400" } });
     expect(parseSetting(timeout, "-1").ok).toBe(false);
     expect(parseSetting(field("ssh_channels"), "0").ok).toBe(false);

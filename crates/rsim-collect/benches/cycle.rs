@@ -41,6 +41,7 @@ fn device(id: &str) -> Device {
         site: None,
         capture_bgp: Default::default(),
         route: Default::default(),
+        interval: Duration::ZERO,
     }
 }
 
@@ -93,9 +94,10 @@ fn cycle_bench(c: &mut Criterion) {
             t.reply(&d.id, &s.command, Ok(fixture(file(s.name))));
         }
     }
-    let store = Store::open(dir.path(), Keys::new([1; 32], [2; 32])).unwrap();
+    let mut key = [[0u8; 32]; 2];
+    key.iter_mut().for_each(|k| getrandom::fill(k).unwrap());
+    let store = Store::open(dir.path(), Keys::new(key[0], key[1])).unwrap();
     let schedule = Schedule {
-        interval: Duration::ZERO,
         full_interval: Duration::from_secs(1 << 30),
         ..Schedule::default()
     };

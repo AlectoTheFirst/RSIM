@@ -2933,6 +2933,9 @@
           "ha": {
             "$ref": "#/components/schemas/Resolved8"
           },
+          "interval_seconds": {
+            "$ref": "#/components/schemas/Resolved4"
+          },
           "nxos_json": {
             "$ref": "#/components/schemas/Resolved5"
           },
@@ -2986,7 +2989,8 @@
           "request_timeout_seconds",
           "paged_section_timeout_seconds",
           "retries",
-          "ha"
+          "ha",
+          "interval_seconds"
         ],
         "type": "object"
       },
@@ -3645,6 +3649,15 @@
               {
                 "type": "null"
               }
+            ]
+          },
+          "interval_seconds": {
+            "description": "The time between 2 collections, from 60 to 86400 seconds.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
             ]
           },
           "nxos_json": {
