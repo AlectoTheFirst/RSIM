@@ -10,6 +10,7 @@ mod demo_enterprise;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use rsim_core::{Header, PROTO_TCP, PROTO_UDP, VerdictKind};
 use rsim_engine::{Answer, Executor, Query, Twin};
@@ -59,9 +60,23 @@ fn the_committed_demo_folder_is_the_output_of_the_generator() {
     );
 }
 
+/// Random bytes of the test process.
+fn random() -> [u8; 32] {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).unwrap();
+    bytes
+}
+
+/// The store keys of the test process, the same for each store of the test.
+fn keys() -> Keys {
+    static KEYS: OnceLock<([u8; 32], [u8; 32])> = OnceLock::new();
+    let (hash, wrap) = *KEYS.get_or_init(|| (random(), random()));
+    Keys::new(hash, wrap)
+}
+
 /// A new store in a temporary folder.
 fn new_store(dir: &Path) -> Store {
-    Store::open(dir.join("store"), Keys::new([3; 32], [4; 32])).unwrap()
+    Store::open(dir.join("store"), keys()).unwrap()
 }
 
 #[tokio::test]
