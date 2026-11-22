@@ -2,19 +2,17 @@
    that the theme module sets. */
 
 @font-face {
-  font-family: "Instrument Sans";
-  src: url("/fonts/InstrumentSans-VariableFont.ttf") format("truetype");
-  font-weight: 400 700;
-  font-stretch: 75% 100%;
+  font-family: "Inter";
+  src: url("/fonts/Inter-Variable.woff2") format("woff2");
+  font-weight: 100 900;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "Martian Mono";
-  src: url("/fonts/MartianMono-VariableFont.ttf") format("truetype");
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Variable.ttf") format("truetype");
   font-weight: 100 800;
-  font-stretch: 75% 112.5%;
   font-style: normal;
   font-display: swap;
 }
@@ -30,21 +28,31 @@ body {
   color: var(--ink);
 }
 
+#app {
+  min-height: 100dvh;
+  background: var(--ground);
+}
+
 body,
 .t-body {
   font-family: var(--body-family);
   font-size: var(--body-size);
   line-height: var(--body-line);
   font-weight: var(--body-weight);
-  font-stretch: var(--body-stretch);
 }
 
-.t-headline {
-  font-family: var(--headline-family);
-  font-size: var(--headline-size);
-  line-height: var(--headline-line);
-  font-weight: var(--headline-weight);
-  font-stretch: var(--headline-stretch);
+.t-title {
+  font-family: var(--title-family);
+  font-size: var(--title-size);
+  line-height: var(--title-line);
+  font-weight: var(--title-weight);
+}
+
+.t-outcome {
+  font-family: var(--outcome-family);
+  font-size: var(--outcome-size);
+  line-height: var(--outcome-line);
+  font-weight: var(--outcome-weight);
 }
 
 .t-wordmark {
@@ -52,7 +60,6 @@ body,
   font-size: var(--wordmark-size);
   line-height: var(--wordmark-line);
   font-weight: var(--wordmark-weight);
-  font-stretch: var(--wordmark-stretch);
   letter-spacing: var(--wordmark-spacing);
 }
 
@@ -61,7 +68,6 @@ body,
   font-size: var(--label-size);
   line-height: var(--label-line);
   font-weight: var(--label-weight);
-  font-stretch: var(--label-stretch);
   color: var(--ink-muted);
 }
 
@@ -70,7 +76,6 @@ body,
   font-size: var(--value-size);
   line-height: var(--value-line);
   font-weight: var(--value-weight);
-  font-stretch: var(--value-stretch);
 }
 
 .t-value-changed {
@@ -78,7 +83,6 @@ body,
   font-size: var(--value-changed-size);
   line-height: var(--value-changed-line);
   font-weight: var(--value-changed-weight);
-  font-stretch: var(--value-changed-stretch);
 }
 
 .t-query {
@@ -86,7 +90,6 @@ body,
   font-size: var(--query-size);
   line-height: var(--query-line);
   font-weight: var(--query-weight);
-  font-stretch: var(--query-stretch);
 }
 
 .t-index {
@@ -94,19 +97,25 @@ body,
   font-size: var(--index-size);
   line-height: var(--index-line);
   font-weight: var(--index-weight);
-  font-stretch: var(--index-stretch);
 }
 
 .muted {
   color: var(--ink-muted);
 }
 
-.strong {
-  font-weight: var(--headline-weight);
+/* A card or a list with no content */
+.empty {
+  display: flex;
+  align-items: center;
+  min-height: var(--row);
+  padding: var(--button-gap) var(--card-pad);
+  font-family: var(--body-family);
+  font-size: var(--body-size);
+  line-height: var(--body-line);
 }
 
-.actions {
-  margin-top: var(--button-pad);
+.strong {
+  font-weight: var(--section-weight);
 }
 
 .ink {
@@ -130,34 +139,100 @@ body,
 }
 .c-parameter {
   color: var(--parameter);
+  font-weight: var(--value-changed-weight);
 }
 
 /* Controls */
 
 button {
   font: inherit;
+  font-weight: var(--weight-control);
   color: var(--ink);
-  background: transparent;
+  background: var(--surface);
   border: var(--hairline) solid var(--control);
   border-radius: var(--button-radius);
   height: var(--button);
   padding: 0 var(--button-pad);
   cursor: pointer;
   white-space: nowrap;
+  transition:
+    background-color var(--motion),
+    border-color var(--motion),
+    box-shadow var(--motion);
+}
+
+button:hover {
+  background: var(--raise);
+}
+
+button:active {
+  background: var(--selected);
 }
 
 button[aria-pressed="true"],
 button[aria-current="page"] {
-  border-color: var(--ink);
+  border-color: var(--action-ink);
+  background: var(--selected);
+  color: var(--action-ink);
 }
 
 button:disabled {
   cursor: default;
   color: var(--ink-muted);
+  background: var(--raise);
   border-color: var(--rule);
 }
 
+/* The primary button of a form. */
+button.primary,
+button[type="submit"] {
+  background: var(--action);
+  border-color: var(--action);
+  color: var(--on-action);
+  font-weight: var(--weight-strong);
+  box-shadow: var(--shadow-card);
+}
+
+button.primary:hover,
+button[type="submit"]:hover {
+  background: var(--action-hover);
+  box-shadow: var(--shadow-panel);
+}
+
+button.primary:disabled,
+button[type="submit"]:disabled {
+  background: var(--raise);
+  border-color: var(--rule);
+  color: var(--ink-muted);
+  box-shadow: none;
+}
+
+/* A button with no border: an add action in a row. */
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--action-ink);
+}
+
+button.ghost:hover {
+  background: var(--action-tint);
+}
+
+/* A button that removes a record. */
+button.danger {
+  border-color: var(--danger-line);
+  color: var(--drop);
+}
+
+button.danger:hover,
+button.danger[aria-pressed="true"] {
+  background: var(--drop-tint);
+  border-color: var(--drop);
+  color: var(--drop);
+}
+
 button.plain {
+  background: transparent;
   border-color: transparent;
   text-align: left;
 }
@@ -165,28 +240,68 @@ button.plain {
 input,
 select {
   color: var(--ink);
-  background: var(--ground);
+  background: var(--surface);
   border: var(--hairline) solid var(--control);
   border-radius: var(--input-radius);
   height: var(--input);
-  padding: 0 var(--button-pad);
+  padding: 0 var(--input-pad);
+  transition: border-color var(--motion);
+}
+
+input:hover,
+select:hover {
+  border-color: var(--ink-muted);
+}
+
+input[aria-invalid="true"] {
+  border-color: var(--drop);
 }
 
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 .ladder-row:focus-visible {
-  outline: var(--focus-ring) solid var(--forward);
+  outline: var(--focus-ring) solid var(--action-ink);
   outline-offset: var(--focus-offset);
 }
 
 .group {
   display: inline-flex;
   align-items: center;
-  gap: var(--button-gap);
+  gap: var(--group-gap);
 }
 
-/* Page structure */
+/* A segmented control: a choice of 2 to 4 values. */
+.seg {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--focus-ring);
+  background: var(--ground);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--button-radius);
+}
+
+.seg > button {
+  height: calc(var(--button) - 2 * var(--focus-ring) - 2 * var(--hairline));
+  border: 0;
+  border-radius: calc(var(--button-radius) - var(--focus-ring));
+  background: transparent;
+  color: var(--ink-muted);
+  font-weight: var(--weight-regular);
+}
+
+.seg > button:hover {
+  color: var(--ink);
+}
+
+.seg > button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: var(--weight-control);
+  box-shadow: var(--shadow-card);
+}
+
+/* Shared parts of the views */
 
 .bar {
   display: flex;
@@ -194,7 +309,8 @@ select:focus-visible,
   align-items: center;
   column-gap: var(--fact-gap);
   row-gap: var(--button-gap);
-  padding: var(--button-gap) var(--margin);
+  padding: var(--group-gap) var(--card-pad);
+  background: var(--surface);
   border-bottom: var(--hairline) solid var(--rule);
 }
 
@@ -207,146 +323,6 @@ select:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: var(--mark-gap);
-}
-
-/* A group at the end of a bar, which stays at the right on a line of its own. */
-.bar .end {
-  margin-left: auto;
-}
-
-.account {
-  position: relative;
-}
-
-.account > button {
-  width: var(--account);
-  height: var(--account);
-  padding: 0;
-  border-radius: var(--account-radius);
-  font-size: var(--index-size);
-  font-weight: var(--headline-weight);
-}
-
-.menu {
-  position: absolute;
-  right: 0;
-  top: calc(var(--account) + var(--button-gap));
-  z-index: 1;
-  width: var(--menu);
-  background: var(--raise);
-  border: var(--hairline) solid var(--rule);
-  border-radius: var(--button-radius);
-  padding: var(--button-pad) var(--margin);
-  display: grid;
-  gap: var(--button-pad);
-}
-
-.menu .settings {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  align-items: center;
-  gap: var(--button-gap) var(--button-pad);
-}
-
-.menu hr {
-  width: 100%;
-  border: 0;
-  border-top: var(--hairline) solid var(--rule);
-  margin: 0;
-}
-
-.bar.top {
-  padding: var(--top-bar-pad) var(--margin);
-  column-gap: var(--top-bar-gap);
-  row-gap: var(--top-bar-pad);
-}
-
-/* The twin of the top bar: a value that a click changes. */
-select.twin {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  height: auto;
-  cursor: pointer;
-}
-
-.bar.query {
-  padding: var(--query-bar-pad) var(--margin);
-  column-gap: var(--query-bar-gap);
-  row-gap: var(--line-gap);
-}
-
-/* A field of the query bar: its name, then its value, which edits in place. */
-.qfield {
-  white-space: nowrap;
-  cursor: text;
-}
-
-.autosize {
-  display: inline-grid;
-  vertical-align: baseline;
-  min-width: calc((var(--chars, 8) + 1) * 1ch);
-  margin-left: var(--button-gap);
-  cursor: text;
-}
-
-.autosize:focus-within {
-  outline: var(--focus-ring) solid var(--forward);
-  outline-offset: var(--focus-offset);
-}
-
-.autosize::after,
-.autosize input {
-  grid-area: 1 / 1;
-  font: inherit;
-  font-stretch: inherit;
-  letter-spacing: inherit;
-}
-
-.autosize::after {
-  content: attr(data-value) " ";
-  visibility: hidden;
-  white-space: pre;
-}
-
-.autosize input {
-  width: 100%;
-  min-width: 0;
-  height: auto;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--ink);
-}
-
-.autosize input:focus-visible {
-  outline: none;
-}
-
-/* An empty field: a hairline to click on, or its hint in the label style. */
-.autosize.empty {
-  border-bottom: var(--hairline) solid var(--rule);
-}
-
-.autosize.empty::after,
-.autosize input::placeholder {
-  font-family: var(--label-family);
-  font-size: var(--label-size);
-  font-weight: var(--label-weight);
-  font-stretch: var(--label-stretch);
-}
-
-.autosize input::placeholder {
-  color: var(--ink-muted);
-}
-
-.bar.result {
-  padding: var(--result-pad) var(--margin);
-  column-gap: var(--fact-gap);
-  row-gap: var(--line-gap);
-  border-bottom: 0;
 }
 
 /* A hatch mark in a line of text: a square of hatch and its text in a
@@ -372,271 +348,6 @@ button.mark {
   stroke-width: var(--hatch-line);
 }
 
-.body {
-  overflow-x: auto;
-  padding: 0 var(--margin);
-}
-
-.note {
-  padding: var(--button-pad) 0;
-}
-
-.keyline {
-  display: flex;
-  flex-wrap: wrap;
-  column-gap: var(--fact-gap);
-  row-gap: var(--button-gap);
-  padding: var(--result-pad) var(--margin);
-  color: var(--ink-muted);
-}
-
-/* The ladder */
-
-/* The ladder is one grid; each row takes its columns, so that the reason
-   column has the width of the longest reason where the page has room. */
-.ladder {
-  display: grid;
-  grid-template-columns: var(--ladder-columns);
-}
-
-.ladder-row {
-  display: grid;
-  grid-template-columns: subgrid;
-  grid-column: 1 / -1;
-  min-height: var(--row);
-  align-items: stretch;
-  position: relative;
-}
-
-.ladder-row > * {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: var(--row);
-}
-
-/* A reason and a value of a cell wrap; no text is cut. */
-.ladder-row > .reason,
-.ladder-row > .cell.t-value,
-.ladder-row > .cell.t-value-changed {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  text-overflow: clip;
-}
-
-.ladder-row.step {
-  cursor: pointer;
-}
-
-.ladder-row.step:hover,
-.ladder-row.selected,
-.ladder-detail {
-  background: var(--raise);
-}
-
-.ladder-row.selected::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: var(--selected-bar);
-  background: var(--forward);
-}
-
-.ladder-head {
-  border-bottom: var(--hairline) solid var(--rule);
-  align-items: end;
-  padding-bottom: var(--button-gap);
-}
-
-.ladder-head > * {
-  line-height: var(--label-line);
-}
-
-.ladder-reply {
-  border-top: var(--hairline) solid var(--rule);
-  margin-top: var(--line-gap);
-  padding-top: var(--button-gap);
-}
-
-.ladder-section {
-  border-top: var(--hairline) solid var(--rule);
-  border-bottom: var(--hairline) solid var(--rule);
-}
-
-.ladder-section .title {
-  grid-column: 3 / -1;
-  contain: inline-size;
-}
-
-.title {
-  font-weight: var(--value-changed-weight);
-}
-
-/* The step number aligns right and runs into the margin when it is long. */
-.ladder-row > .ix {
-  display: flex;
-  justify-content: flex-end;
-  overflow: visible;
-  padding-right: var(--button-pad);
-  color: var(--ink-muted);
-}
-
-.lanes {
-  position: relative;
-  overflow: visible !important;
-}
-
-.lanes svg {
-  position: absolute;
-  left: 0;
-  top: 0;
-  overflow: visible;
-}
-
-.lane-guide {
-  stroke: var(--guide);
-  stroke-width: var(--hairline);
-}
-
-.path-forward {
-  fill: var(--forward);
-  stroke: var(--forward);
-}
-.path-reply {
-  fill: var(--reply);
-  stroke: var(--reply);
-}
-.ring {
-  fill: var(--ground);
-  stroke-width: var(--ring-stroke);
-}
-.end-deliver {
-  fill: var(--deliver);
-}
-.end-drop {
-  fill: var(--drop);
-}
-.end-exit {
-  fill: var(--ink);
-}
-.end-unknown {
-  fill: none;
-  stroke: var(--ink-muted);
-  stroke-width: var(--hairline);
-  stroke-dasharray: var(--dash) var(--dash);
-}
-
-/* The lane names: one for each lane, centred over it. */
-.lane-names {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: var(--lane);
-  color: var(--ink-muted);
-}
-
-.lane-names > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: center;
-  padding: 0 var(--hairline);
-}
-
-/* A lane name with no site group shows whole and can run over the
-   lanes next to it. */
-.lane-names > .lane-name.whole {
-  overflow: visible;
-  text-overflow: clip;
-}
-
-/* Upright lane names, when a name is wider than its lane: each reads from
-   the bottom up over its lane. */
-.lane-names.upright > .lane-name {
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  justify-self: center;
-  text-align: start;
-  overflow: visible;
-  padding: var(--hairline) 0;
-}
-
-/* The site header over a group of lanes of one site, with a hairline
-   below it. */
-.lane-names > .lane-site {
-  grid-row: 1;
-  margin: 0 var(--mark-gap);
-  border-bottom: var(--hairline) solid var(--rule);
-}
-
-/* A header cell: the value starts after the cell padding, and the hairline
-   of a value that stays runs at the start of the value. */
-.cell {
-  position: relative;
-  padding-left: var(--cell-pad);
-}
-
-.cell.same::before {
-  content: "";
-  position: absolute;
-  left: calc(var(--cell-pad) + var(--button-gap));
-  top: 0;
-  bottom: 0;
-  width: var(--hairline);
-  background: var(--rule);
-}
-
-.cell.hatched,
-.rib.hatched {
-  display: flex;
-  align-items: center;
-}
-
-.rib.hatched {
-  padding: var(--rib-pad-y) var(--rib-pad-x);
-}
-
-.cell.num {
-  text-align: right;
-  padding-left: 0;
-  padding-right: var(--button-pad);
-}
-
-.cell.num.same::before {
-  left: auto;
-  right: calc(var(--button-pad) + var(--button-gap));
-}
-
-/* The opened row */
-
-.ladder-detail {
-  display: grid;
-  grid-template-columns: subgrid;
-  grid-column: 1 / -1;
-  border-bottom: var(--hairline) solid var(--rule);
-  position: relative;
-}
-
-.ladder-detail .lanes svg {
-  height: 100%;
-}
-
-/* The opened row: source, parameters, QoS. It does not widen the columns. */
-.detail {
-  grid-column: 3 / -1;
-  contain: inline-size;
-  display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 4fr) minmax(0, 4fr);
-  gap: var(--detail-gap);
-  padding: var(--button-pad) var(--margin) var(--result-pad) 0;
-  white-space: normal;
-}
-
-.detail .head {
-  margin-bottom: var(--button-gap);
-}
-
 .facts {
   display: grid;
   grid-template-columns: var(--fact-label) 1fr;
@@ -648,106 +359,7 @@ button.mark {
   overflow-wrap: anywhere;
 }
 
-.code {
-  display: grid;
-  grid-template-columns: var(--code-number) 1fr;
-  column-gap: var(--cell-pad);
-}
-
-.code > :nth-child(odd) {
-  text-align: right;
-}
-
-.code .ln {
-  color: var(--ink-muted);
-}
-
-.code .tx {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.code .note {
-  grid-column: 1 / -1;
-  text-align: left;
-}
-
-.code + .code,
-.code + .span-label,
-.span-label + .code {
-  margin-top: var(--button-gap);
-}
-
-.span-label {
-  display: block;
-  height: auto;
-  padding: 0;
-}
-
-/* The parts of a set query: one row for each part, a click selects it. */
-.parts {
-  display: grid;
-  grid-template-columns: var(--col-step) minmax(0, max-content) minmax(0, 1fr);
-  margin-bottom: var(--line-gap);
-}
-
-.parts-head,
-.part-row {
-  display: grid;
-  grid-template-columns: subgrid;
-  grid-column: 1 / -1;
-  column-gap: var(--fact-gap);
-  position: relative;
-}
-
-.parts-head {
-  border-bottom: var(--hairline) solid var(--rule);
-  line-height: var(--label-line);
-  padding-bottom: var(--button-gap);
-}
-
-.part-row {
-  cursor: pointer;
-  line-height: var(--row);
-  border-bottom: var(--hairline) solid var(--rule);
-}
-
-.part-row:hover,
-.part-row.selected {
-  background: var(--raise);
-}
-
-.part-row.selected::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: var(--selected-bar);
-  background: var(--forward);
-}
-
-.part-row > .ix {
-  display: flex;
-  justify-content: flex-end;
-  color: var(--ink-muted);
-}
-
-/* A value of a part wraps; no value is cut. */
-.part-fields {
-  display: flex;
-  flex-wrap: wrap;
-  column-gap: var(--fact-gap);
-  min-width: 0;
-}
-
-.part-field,
-.part-outcome {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-/* A hatch mark in a fact of the opened row wraps its text. */
+/* A hatch mark in a fact list wraps its text. */
 .facts .mark {
   height: auto;
   min-height: calc(var(--hatch-mark) + 2 * var(--hairline));
@@ -763,84 +375,702 @@ button.mark {
   align-self: center;
 }
 
-/* A line that says why a path has no reply. */
-.ladder-section .title.muted {
-  font-weight: var(--body-weight);
-}
-
 /* A button that reads as a word of a line: the step of a verdict. */
 button.link {
   height: auto;
   padding: 0;
   border: 0;
   border-radius: 0;
-  color: var(--ink);
+  background: transparent;
+  color: var(--action-ink);
   text-decoration: underline;
   text-decoration-color: var(--control);
 }
 
-/* The endpoint picker: a list under an address field of the query bar. */
-.qfield {
-  position: relative;
+/* The frame: the rail, the top bar and the content */
+
+.frame {
+  display: grid;
+  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+  height: 100dvh;
 }
 
-.picker {
+.frame-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  background: var(--rail);
+  padding-bottom: var(--top-bar-pad);
+  overflow-y: auto;
+}
+
+.rail-mark {
+  flex: none;
+  height: var(--top-bar);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--rail-ink);
+}
+
+.rail-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--button-gap);
+  padding: var(--rail-item-pad) 0;
+  color: var(--rail-muted);
+  text-decoration: none;
+  font-family: var(--label-family);
+  font-size: var(--label-size);
+  line-height: var(--label-line);
+  font-weight: var(--weight-control);
+  position: relative;
+  transition: color var(--motion), background-color var(--motion);
+}
+
+.rail-item:hover {
+  color: var(--rail-ink);
+}
+
+.rail-item[aria-current="page"] {
+  color: var(--rail-ink);
+  background: var(--rail-current);
+}
+
+.rail-item[aria-current="page"]::before {
+  content: "";
   position: absolute;
   left: 0;
-  top: 100%;
-  z-index: 1;
-  min-width: var(--menu);
-  margin-top: var(--button-gap);
-  background: var(--raise);
-  border: var(--hairline) solid var(--rule);
-  border-radius: var(--button-radius);
-  padding: var(--button-gap) 0;
-  display: grid;
-  grid-template-columns: repeat(3, max-content);
-  white-space: nowrap;
-  cursor: default;
+  top: 0;
+  bottom: 0;
+  width: var(--selected-bar);
+  background: var(--rail-ink);
 }
 
-.picker .option {
+.rail-item:focus-visible {
+  outline: var(--focus-ring) solid var(--rail-ink);
+  outline-offset: calc(-1 * var(--focus-ring));
+}
+
+.rail-space {
+  flex-grow: 1;
+}
+
+.topbar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--group-gap) var(--top-bar-gap);
+  min-height: var(--top-bar);
+  padding: var(--group-gap) var(--margin);
+  background: var(--surface);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.topbar-end {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--group-gap);
+}
+
+.topbar-divider {
+  width: var(--hairline);
+  height: var(--top-bar-divider);
+  background: var(--rule);
+}
+
+.cycle {
+  white-space: nowrap;
+  margin-right: var(--group-gap);
+}
+
+/* The snapshot selector: its label, the time of the run, its state and the menu mark. */
+button.selector {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--group-gap);
+  height: var(--input);
+}
+
+button.selector .icon,
+button.account .icon {
+  color: var(--ink-muted);
+}
+
+button.account {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--group-gap);
+  height: auto;
+  padding: var(--button-gap);
+  border-color: transparent;
+  background: transparent;
+  font-weight: var(--weight-regular);
+}
+
+button.account:hover {
+  background: var(--raise);
+}
+
+.account-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--account);
+  height: var(--account);
+  border-radius: var(--account-radius);
+  background: var(--action);
+  color: var(--on-action);
+  font-size: var(--index-size);
+  font-weight: var(--weight-strong);
+}
+
+.account-name {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: var(--label-size);
+  gap: var(--hairline);
+}
+
+.account-name > .t-label {
+  line-height: var(--label-size);
+}
+
+.content {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding: var(--page-top) var(--margin) var(--margin) var(--margin);
+}
+
+/* A page: its head, then its cards. A page with `fill` takes the height of the content. */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+  min-width: 0;
+}
+
+.page.fill {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--group-gap) var(--fact-gap);
+  min-height: var(--button);
+}
+
+.page-head > h1 {
+  margin: 0;
+}
+
+.page-actions {
+  margin-left: auto;
+}
+
+/* Cards */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--surface);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-card);
+}
+
+.card.fill {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--group-gap) var(--button-pad);
+  padding: var(--button-pad) var(--card-pad);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.card-head > h2 {
+  margin: 0;
+}
+
+.card-body {
+  padding: var(--card-pad);
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.card.flush > .card-body {
+  padding: 0;
+}
+
+.card.fill > .card-body {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.card > .card-body:first-child {
+  border-top-left-radius: var(--card-radius);
+  border-top-right-radius: var(--card-radius);
+}
+
+.card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  padding: var(--button-pad) var(--card-pad);
+  background: var(--raise);
+  border-top: var(--hairline) solid var(--rule);
+  border-bottom-left-radius: var(--card-radius);
+  border-bottom-right-radius: var(--card-radius);
+}
+
+.t-section {
+  font-family: var(--section-family);
+  font-size: var(--section-size);
+  line-height: var(--section-line);
+  font-weight: var(--section-weight);
+}
+
+/* The content and the panel at its right */
+
+.with-panel {
   display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: subgrid;
-  column-gap: var(--cell-pad);
-  padding: 0 var(--cell-pad);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--card-gap);
+  align-items: start;
+}
+
+.with-panel.open {
+  grid-template-columns: minmax(0, 1fr) var(--panel);
+}
+
+.with-panel.fill {
+  flex: 1 1 0;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.with-panel-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+  min-width: 0;
+  min-height: 0;
+}
+
+.panel {
+  position: sticky;
+  top: var(--page-top);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - var(--top-bar) - var(--page-top) - var(--margin));
+  min-width: 0;
+  background: var(--surface);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-panel);
+  animation: appear var(--motion);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--group-gap);
+  padding: var(--group-gap) var(--group-gap) var(--group-gap) var(--card-pad);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.panel-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.panel-buttons {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+}
+
+.panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--card-pad);
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+}
+
+.panel-foot {
+  display: flex;
+  flex-wrap: wrap;
+  padding: var(--button-pad) var(--card-pad);
+  background: var(--raise);
+  border-top: var(--hairline) solid var(--rule);
+  border-bottom-left-radius: var(--card-radius);
+  border-bottom-right-radius: var(--card-radius);
+}
+
+.panel input,
+.panel select {
+  height: var(--input-panel);
+}
+
+/* A button with an icon and no word */
+
+button.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--button);
+  height: var(--button);
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-muted);
+}
+
+button.icon:hover {
+  background: var(--raise);
+  color: var(--ink);
+}
+
+button.icon.small {
+  width: var(--chip-button);
+  height: var(--chip-button);
+  border-radius: calc(var(--chip-button) / 2);
+}
+
+.icon {
+  flex: none;
+}
+
+/* Overlays: a menu and a group of controls below their button */
+
+.menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.overlay {
+  position: absolute;
+  top: calc(100% + var(--button-gap));
+  z-index: 3;
+  min-width: var(--menu-min);
+  max-width: calc(100vw - 2 * var(--margin));
+  max-height: calc(100dvh - var(--top-bar));
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding: var(--button-gap);
+  background: var(--surface);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-menu);
+  animation: appear var(--motion);
+}
+
+.overlay.at-start {
+  left: 0;
+}
+
+.overlay.at-end {
+  right: 0;
+}
+
+button.menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+  font-weight: var(--weight-regular);
   border-left: var(--selected-bar) solid transparent;
+  border-radius: var(--button-radius);
+}
+
+button.menu-item:hover {
+  background: var(--raise);
+}
+
+button.menu-item[aria-checked="true"] {
+  background: var(--selected);
+  border-left-color: var(--action-ink);
+}
+
+button.menu-item:focus-visible {
+  outline-offset: calc(-1 * var(--focus-ring));
+}
+
+.prefs {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  align-items: center;
+  gap: var(--group-gap) var(--button-pad);
+  padding: var(--button-pad);
+}
+
+/* Tabs */
+
+.tabs {
+  display: flex;
+  align-self: stretch;
+  gap: var(--button-gap);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+button.tab {
+  height: var(--button);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font-weight: var(--weight-regular);
+}
+
+button.tab:hover {
+  color: var(--ink);
+  background: transparent;
+}
+
+button.tab[aria-selected="true"] {
+  color: var(--ink);
+  font-weight: var(--weight-strong);
+  box-shadow: inset 0 calc(-1 * var(--tab-line)) 0 var(--action-ink);
+}
+
+/* Pills and chips */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mark-gap);
+  height: var(--pill);
+  padding: 0 var(--pill-pad);
+  border-radius: var(--pill-radius);
+  font-family: var(--label-family);
+  font-size: var(--label-size);
+  font-weight: var(--weight-control);
+  white-space: nowrap;
+}
+
+.pill-deliver {
+  background: var(--deliver-tint);
+  color: var(--deliver);
+}
+.pill-drop {
+  background: var(--drop-tint);
+  color: var(--drop);
+}
+.pill-exit {
+  background: var(--ink-tint);
+  color: var(--ink);
+}
+.pill-forward {
+  background: var(--forward-tint);
+  color: var(--forward);
+}
+.pill-reply {
+  background: var(--reply-tint);
+  color: var(--reply);
+}
+.pill-parameter {
+  background: var(--parameter-tint);
+  color: var(--parameter);
+}
+.pill-action {
+  background: var(--action-tint);
+  color: var(--action-ink);
+}
+.pill-muted {
+  background: var(--ground);
+  color: var(--ink-muted);
+}
+.pill-unknown {
+  border: var(--hairline) dashed var(--ink-muted);
+  color: var(--ink);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mark-gap);
+  height: var(--chip);
+  padding: 0 var(--button-gap) 0 var(--cell-pad);
+  border: var(--hairline) solid var(--rule);
+  border-radius: calc(var(--chip) / 2);
+  background: var(--ground);
+  white-space: nowrap;
+}
+
+.chip-value {
+  font-weight: var(--weight-control);
+}
+
+/* A hatch mark in a line of text: a hatch square of 12px before its text. */
+.hatch-text {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--group-gap);
+}
+
+/* The toast: the note of the last action */
+
+.toast-place {
+  position: fixed;
+  right: var(--margin);
+  bottom: var(--margin);
+  z-index: 4;
+  pointer-events: none;
+}
+
+.toast {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--group-gap) var(--button-pad);
+  background: var(--rail);
+  color: var(--rail-ink);
+  border-radius: var(--button-radius);
+  box-shadow: var(--shadow-menu);
+  animation: appear var(--motion);
+}
+
+/* A list with virtual rows */
+
+.vrows {
+  overflow: auto;
+  min-height: 0;
+}
+
+.vrows:focus-visible {
+  outline: var(--focus-ring) solid var(--action-ink);
+  outline-offset: calc(-1 * var(--focus-ring));
+}
+
+.vrows-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--raise);
+}
+
+.vrow {
+  position: relative;
   cursor: pointer;
 }
 
-.picker .option[aria-selected="true"] {
-  border-left-color: var(--forward);
-  background: var(--ground);
+.vrow:hover {
+  background: var(--raise);
 }
 
-/* The list of the names of a field, and the list of the fields that a
-   query can add, with the label of each field. */
-.picker.one {
-  grid-template-columns: max-content;
+.vrow.current,
+.vrow.current:hover {
+  background: var(--selected);
 }
 
-.picker.two {
-  grid-template-columns: max-content minmax(0, max-content);
-  max-width: calc(100vw - 2 * var(--margin));
+.vrow.current::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--selected-bar);
+  background: var(--action-ink);
 }
 
-.picker.two .option > span:last-child {
-  white-space: normal;
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
-/* The button "Add field" at the end of the fields of the query bar. */
-.qadd {
-  position: relative;
+@media (prefers-reduced-motion: reduce) {
+  .panel,
+  .overlay,
+  .toast {
+    animation: none;
+  }
 }
 
-/* A field whose value has a wrong form. */
-.autosize.invalid input {
-  color: var(--drop);
+/* An icon before the word of a button. */
+.with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mark-gap);
 }
 
-.autosize.invalid.empty {
-  border-bottom-color: var(--drop);
+.with-icon > .icon {
+  color: var(--ink-muted);
+}
+
+button.primary .with-icon > .icon {
+  color: inherit;
+}
+
+/* A list of values or source lines with virtual rows */
+
+.row-list {
+  align-self: stretch;
+  max-height: var(--tables-panel-list);
+  background: var(--raise);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--button-radius);
+}
+
+.row-list .vrow {
+  height: var(--value-line);
+  line-height: var(--value-line);
+  padding: 0 var(--input-pad);
+  white-space: pre;
+}
+
+.row-code .vrow {
+  display: grid;
+  grid-template-columns: var(--code-number) minmax(max-content, 1fr);
+  padding-left: 0;
+}
+
+.row-code .ln {
+  padding-right: var(--group-gap);
+  text-align: right;
+  color: var(--ink-muted);
+}
+
+.row-code .marked {
+  background: var(--forward-tint);
+}
+
+.row-code .ln.marked {
+  color: var(--forward);
+  box-shadow: inset var(--focus-ring) 0 0 var(--forward);
 }

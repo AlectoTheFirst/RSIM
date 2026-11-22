@@ -1,104 +1,153 @@
 /* The styles of the setup page, the sign-in page and the Tokens view. Each
    colour, font and size is a custom property of the theme. */
 
-.auth-page .t-value,
-.auth-page input.t-value {
-  font-stretch: var(--value-stretch);
-}
-
-.auth-form {
-  display: grid;
-  grid-template-columns: var(--fact-label) var(--auth-input);
-  align-items: center;
-  gap: var(--button-gap) var(--button-pad);
-  padding: var(--line-gap) 0 var(--margin) 0;
-}
-
-.auth-form input[type="text"],
-.auth-form input[type="password"] {
-  width: var(--auth-input);
-  box-sizing: border-box;
-}
-
-.auth-form .label {
-  color: var(--ink-muted);
-  font-size: var(--label-size);
-}
-
-.auth-form .span2 {
-  grid-column: 1 / -1;
-}
-
-.auth-form .scopes {
+/* The sign-in page and the setup page: one card on the page ground. */
+.auth-ground {
+  min-height: 100dvh;
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--button-gap) var(--fact-gap);
-}
-
-.auth-form .scopes label {
-  display: inline-flex;
   align-items: center;
-  gap: var(--button-gap);
+  justify-content: center;
+  padding: var(--margin);
+  background: var(--ground);
 }
 
-.auth-page input[type="checkbox"] {
-  height: auto;
-  padding: 0;
+.auth-card {
+  width: var(--auth-card);
+  max-width: 100%;
+}
+
+.auth-card > .card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--button-pad);
+}
+
+.auth-card h1 {
   margin: 0;
 }
 
-.auth-sec {
-  font-family: var(--section-family);
-  font-size: var(--section-size);
-  line-height: var(--section-line);
-  font-weight: var(--section-weight);
-  margin: var(--fact-gap) 0 var(--line-gap) 0;
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-pad);
 }
 
-.auth-sec .muted {
-  font-family: var(--body-family);
-  font-size: var(--body-size);
-  font-weight: var(--body-weight);
+.auth-form input {
+  width: 100%;
 }
 
-.tok-new {
+/* A field: its name above the input, and the message of a refusal below it. */
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--button-gap);
+}
+
+.auth-field > label {
+  font-weight: var(--weight-control);
+}
+
+.auth-message {
+  color: var(--drop);
+  font-family: var(--label-family);
+  font-size: var(--label-size);
+  line-height: var(--label-line);
+  overflow-wrap: anywhere;
+}
+
+.auth-form button[type="submit"] {
+  width: 100%;
+}
+
+/* The Tokens view */
+
+.token-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-pad);
+}
+
+.token-form #token-name {
+  width: var(--token-scopes);
+  max-width: 100%;
+}
+
+.token-days {
+  width: var(--token-days);
+}
+
+.token-form .scopes {
   display: flex;
   flex-wrap: wrap;
+  gap: var(--button-gap) var(--fact-gap);
+  min-height: var(--input);
   align-items: center;
-  gap: var(--button-gap) var(--button-pad);
 }
 
-.tok-new .t-value {
-  max-width: var(--token-text);
+.token-form .scopes label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mark-gap);
+}
+
+.token-form input[type="checkbox"] {
+  height: auto;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--action);
+}
+
+.token-form input[type="checkbox"]:focus-visible {
+  outline: var(--focus-ring) solid var(--action-ink);
+  outline-offset: var(--focus-offset);
+}
+
+.token-text {
+  display: block;
   overflow-wrap: anywhere;
   user-select: all;
 }
 
-.tok {
-  width: max-content;
-  min-width: 100%;
-  padding-bottom: var(--margin);
+.token-card {
+  min-height: calc(var(--row) * 6);
 }
 
-.tok-t {
+.token-box {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.token-row {
   display: grid;
   grid-template-columns:
     var(--token-name) var(--token-scopes) var(--token-time) var(--token-time) var(--token-time)
-    var(--token-state) 1fr;
-  min-height: var(--row);
+    var(--token-state) minmax(max-content, 1fr);
   align-items: center;
-  border-top: var(--hairline) solid var(--rule);
+  width: max-content;
+  min-width: 100%;
+  min-height: var(--row);
+  padding: var(--button-gap) 0;
+  border-bottom: var(--hairline) solid var(--rule);
 }
 
-.tok-t > * {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding-right: var(--result-pad);
+.token-row > * {
+  padding: 0 var(--cell-pad);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.tok-t.tok-head {
-  color: var(--ink-muted);
-  font-size: var(--label-size);
-  border-top: 0;
+.token-row:hover {
+  background: var(--raise);
+}
+
+.token-row.token-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: var(--button);
+  padding: 0;
+  background: var(--raise);
+  font-weight: var(--weight-control);
 }

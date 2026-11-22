@@ -1,12 +1,9 @@
-// The parts of a page: the top bar, the query bar, the result line, the
-// status line of the Trace view and the key line.
-import type { ComponentChildren } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
-import type { TwinRef } from "../api/client";
-import type { Me, Twin } from "../api/types";
-import { howText, initials } from "../auth/model";
+// The query card of the Trace view, the values of the Level control and the
+// page buttons of a table.
+import { type ComponentChildren, Fragment } from "preact";
+import { useEffect, useState } from "preact/hooks";
 import type { Level } from "../ladder/layout";
-import { type ColourPref, type Prefs, ROW_HEIGHTS, type RowHeight, type ThemePref } from "../theme";
+import { SIZE } from "../theme";
 import {
   BASE_FIELDS,
   FIELD_CHARS,
@@ -20,193 +17,45 @@ import {
   valueToken,
   valuesOf,
 } from "./fields";
-import { NameList, PickerList, useAsk, useEndpoints, useEntryPoints } from "./Picker";
-import { type EntryOption, PICKER_CLOSED, type PickerState, type Suggestion, ingressStage, pickerKey } from "./pick";
-import { type Fields, type QueryField } from "./query";
-import { HatchMark } from "./Hatch";
-import { isSnapshot, reloadMark, twinOption } from "./url";
-
-export const VIEWS = ["Trace", "Tables", "Coverage", "Inventory", "Tokens"] as const;
-export type View = (typeof VIEWS)[number];
-
-/** The views of the top bar. The view Tokens opens from the account menu. */
-export const NAV_VIEWS: readonly View[] = ["Trace", "Tables", "Coverage", "Inventory"];
-
-/** The user of a page of a server with no sign-in. */
-const LOCAL_USER = { name: "Local user", initials: "LU", how: "no sign-in on a loopback address" };
-
-function Choice<T extends string | number>(props: {
-  value: T;
-  options: readonly T[];
-  label?: (v: T) => string;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <span class="group">
-      {props.options.map((o) => (
-        <button type="button" aria-pressed={o === props.value} onClick={() => props.onChange(o)}>
-          {props.label ? props.label(o) : String(o)}
-        </button>
-      ))}
-    </span>
-  );
-}
-
-function AccountMenu(props: { prefs: Prefs; onPrefs: (p: Prefs) => void; user: Me | null; onTokens?: () => void; onSignOut?: () => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent | KeyboardEvent) => {
-      if (e instanceof KeyboardEvent ? e.key === "Escape" : !ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", close);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", close);
-    };
-  }, [open]);
-  const p = props.prefs;
-  const u = props.user;
-  const USER = u ? { name: u.name, initials: initials(u.name), how: howText(u.role, u.via) } : LOCAL_USER;
-  return (
-    <span class="account" ref={ref}>
-      <button
-        type="button"
-        aria-label={`Account of ${USER.name}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-      >
-        {USER.initials}
-      </button>
-      {open ? (
-        <div class="menu" role="menu">
-          <div>
-            <span class="strong">{USER.name}</span>
-            <br />
-            <span class="muted">{USER.how}</span>
-          </div>
-          <hr />
-          <div class="settings">
-            <span class="t-label">Theme</span>
-            <Choice<ThemePref> value={p.theme} options={["dark", "light", "system"]} onChange={(theme) => props.onPrefs({ ...p, theme })} />
-            <span class="t-label" title="colours of Deliver and Drop">Colours</span>
-            <Choice<ColourPref>
-              value={p.colours}
-              options={["standard", "blue-orange"]}
-              label={(c) => (c === "standard" ? "standard" : "blue and orange")}
-              onChange={(colours) => props.onPrefs({ ...p, colours })}
-            />
-            <span class="t-label">Row height</span>
-            <Choice<RowHeight> value={p.row} options={ROW_HEIGHTS} onChange={(row) => props.onPrefs({ ...p, row })} />
-          </div>
-          {u ? (
-            <>
-              <hr />
-              <span class="group">
-                {props.onTokens ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpen(false);
-                      props.onTokens?.();
-                    }}
-                  >
-                    My API tokens
-                  </button>
-                ) : null}
-                {props.onSignOut ? (
-                  <button type="button" onClick={props.onSignOut}>
-                    Sign out
-                  </button>
-                ) : null}
-              </span>
-            </>
-          ) : null}
-        </div>
-      ) : null}
-    </span>
-  );
-}
-
-export function TopBar(props: {
-  twins: TwinRef[];
-  twin: string;
-  info: Twin | null;
-  /** The newest built run of the store when the page shows an older run, or null. */
-  latest: string | null;
-  onLatest: (run: string) => void;
-  onTwin: (id: string) => void;
-  view: View;
-  onView: (v: View) => void;
-  prefs: Prefs;
-  onPrefs: (p: Prefs) => void;
-  /** The signed-in user, or null on a server with no sign-in. */
-  user?: Me | null;
-  onSignOut?: () => void;
-  /** The label of a twin that cannot answer, with its cause as the title, or null. */
-  state?: { text: string; title: string } | null;
-}) {
-  const info = props.info;
-  const user = props.user ?? null;
-  const reload = reloadMark(props.twins);
-  return (
-    <header class="bar top">
-      <span class="t-wordmark">RSIM</span>
-      <select class="t-value twin" aria-label="Twin" value={twinOption(props.twins.map((t) => t.id), props.twin)} onChange={(e) => props.onTwin(e.currentTarget.value)}>
-        {props.twins.map((t) => (
-          <option value={t.id}>{t.id}</option>
-        ))}
-      </select>
-      {isSnapshot(props.twin) ? <span class="t-value">{props.twin}</span> : null}
-      {props.latest ? (
-        <button type="button" title={`newest built run: ${props.latest}`} onClick={() => props.onLatest(props.latest!)}>
-          Load latest run
-        </button>
-      ) : null}
-      {info?.layers.length ? <span class="muted">{info.layers.length} what-if layers</span> : null}
-      {props.state ? <HatchMark title={props.state.title}>{props.state.text}</HatchMark> : null}
-      {reload ? <HatchMark title={reload.title}>{reload.text}</HatchMark> : null}
-      <span class="grow" />
-      <nav class="group" aria-label="Views">
-        {NAV_VIEWS.map((v) => (
-          <button type="button" aria-current={v === props.view ? "page" : undefined} onClick={() => props.onView(v)}>
-            {v}
-          </button>
-        ))}
-      </nav>
-      <AccountMenu prefs={props.prefs} onPrefs={props.onPrefs} user={user} onTokens={user ? () => props.onView("Tokens") : undefined} onSignOut={props.onSignOut} />
-    </header>
-  );
-}
+import { Hatch } from "./Hatch";
+import { Icon } from "./Icon";
+import { OptionList, useAsk, useEndpoints, useEntryList } from "./Picker";
+import { PICKER_CLOSED, type PickerState, ingressStage, pickerKey } from "./pick";
+import { type Fields, type QueryField, swapped } from "./query";
 
 /** The fields whose value the endpoint picker proposes. */
 const PICKED = new Set<QueryField>(["source.ip", "destination.ip"]);
 
-/** The id of the input of a field of the query bar. */
+/** The id of the input of a field of the query card. */
 const inputId = (k: QueryField) => `q-${k.replace(/\./g, "-")}`;
 
-/** True for an element whose focus keeps the query bar in its edit state. */
-const edits = (el: EventTarget | null) => el instanceof HTMLElement && el.dataset["edit"] !== undefined;
+/** The pages of a picker: one more each time its list shows its last row while the API has more. */
+function usePages(reset: unknown): [number, (more: boolean, held: number) => void] {
+  const [pages, setPages] = useState(1);
+  useEffect(() => setPages(1), [reset]);
+  const more = (more: boolean, held: number) => {
+    if (more && held === pages) setPages(pages + 1);
+  };
+  return [pages, more];
+}
 
 /**
- * One field of the query bar: its name and its value, which a click edits
- * in place. The input takes the width of its text. An address field
- * proposes the endpoints of the twin while it is edited, a field with
- * names proposes its names while it has the focus, and the ingress field
- * proposes the devices of the twin, with `found` first, then the entry
- * interfaces of the chosen device.
+ * One field of the query card: its name above its input, and the message
+ * of a wrong value below it. A base field that the query does not state
+ * has the hatch mark "not stated". An address field proposes the endpoints
+ * of the twin while it is edited, a field with names proposes its names
+ * while it has the focus, and the ingress field proposes the devices of
+ * the twin, with `found` first, then the entry interfaces of the chosen
+ * device.
  */
 function QueryValue(props: {
   twin: string;
   name: QueryField;
   value: string;
   found?: string | null;
-  invalid: boolean;
-  /** The title of the field: the message of a wrong value, else its form. */
-  hint: string;
+  /** The message of a wrong value, or null. */
+  error: string | null;
+  row: number;
   onInput: (v: string) => void;
   onRun: () => void;
   onBlur: () => void;
@@ -218,138 +67,185 @@ function QueryValue(props: {
   const picks = endpoints || entry || names.length > 0;
   const [edited, setEdited] = useState(false);
   const [state, setState] = useState<PickerState>(PICKER_CLOSED);
-  const found = useEndpoints(props.twin, props.value, endpoints && edited);
-  const entries = useEntryPoints(props.twin, props.value, entry && state.open, entry ? (props.found ?? null) : null);
+  const [pages, onMore] = usePages(`${props.twin} ${props.value}`);
+  const found = useEndpoints(props.twin, props.value, endpoints && edited, pages);
+  const entries = useEntryList(props.twin, props.value, entry && state.open, entry ? (props.found ?? null) : null, pages);
   const named = names.length ? filterValues(names, valueToken(props.name, props.value)) : [];
-  const count = endpoints ? found.length : entry ? entries.length : named.length;
+  const count = endpoints ? found.list.length : entry ? entries.list.length : named.length;
   const open = state.open && count > 0;
   const id = `pick-${props.name.replace(/\./g, "-")}`;
   useEffect(() => {
     setState((s) => (s.active >= count ? { ...s, active: count - 1 } : s));
   }, [count]);
-  const chooseEndpoint = (sg: Suggestion) => {
-    props.onInput(sg.address);
-    setEdited(false);
-    setState(PICKER_CLOSED);
-  };
-  const chooseName = (n: string) => {
-    props.onInput(insertValue(props.name, props.value, n));
-    setState(PICKER_CLOSED);
-  };
-  // A device keeps the list open on its interfaces; an interface or the found entry point closes it.
-  const chooseEntry = (o: EntryOption) => {
-    props.onInput(o.value);
-    setState(o.done ? PICKER_CLOSED : { open: true, active: -1 });
-  };
   const choose = (i: number) => {
-    if (endpoints) chooseEndpoint(found[i]!);
-    else if (entry) chooseEntry(entries[i]!);
-    else chooseName(named[i]!);
+    if (endpoints) {
+      props.onInput(found.list[i]!.address);
+      setEdited(false);
+      setState(PICKER_CLOSED);
+    } else if (entry) {
+      // A device keeps the list open on its interfaces; an interface or the found entry point closes it.
+      const o = entries.list[i]!;
+      props.onInput(o.value);
+      setState(o.done ? PICKER_CLOSED : { open: true, active: -1 });
+    } else {
+      props.onInput(insertValue(props.name, props.value, named[i]!));
+      setState(PICKER_CLOSED);
+    }
   };
   const stage = entry ? ingressStage(props.value) : null;
-  const classes = ["autosize", "t-query", props.value ? "" : "empty", props.invalid ? "invalid" : ""].filter(Boolean).join(" ");
+  const base = BASE_FIELDS.has(props.name);
+  const unstated = base && props.value.trim() === "";
+  const box = ["qinput", unstated ? "unstated" : "", props.error ? "invalid" : ""].filter(Boolean).join(" ");
+  const errorId = `${inputId(props.name)}-error`;
+  let list: ComponentChildren = null;
+  if (open && endpoints) {
+    list = (
+      <OptionList
+        id={id}
+        label="Endpoints"
+        count={count}
+        active={state.active}
+        estimate={props.row}
+        columns="three"
+        onChoose={choose}
+        onMore={() => onMore(found.more, found.pages)}
+        option={(i) => {
+          const s = found.list[i]!;
+          return (
+            <>
+              <span class="t-value">{s.name}</span>
+              <span class="t-value">{s.address}</span>
+              <span class="pick-places">
+                {s.places.map((p) => (
+                  <span class="t-value muted">{p}</span>
+                ))}
+              </span>
+            </>
+          );
+        }}
+      />
+    );
+  } else if (open && entry) {
+    list = (
+      <OptionList
+        id={id}
+        label={stage?.stage === "interface" ? `Entry interfaces of ${stage.device}` : "Devices"}
+        count={count}
+        active={state.active}
+        estimate={props.row}
+        columns="two"
+        onChoose={choose}
+        onMore={() => onMore(entries.more, entries.pages)}
+        option={(i) => {
+          const o = entries.list[i]!;
+          return (
+            <>
+              <span class="t-value">{o.name}</span>
+              <span class="muted">{o.detail}</span>
+            </>
+          );
+        }}
+      />
+    );
+  } else if (open) {
+    list = (
+      <OptionList
+        id={id}
+        label={`Values of ${props.name}`}
+        count={count}
+        active={state.active}
+        estimate={props.row}
+        columns="one"
+        onChoose={choose}
+        option={(i) => <span class="t-value">{named[i]}</span>}
+      />
+    );
+  }
   return (
-    <label class="qfield" title={props.hint}>
-      <span class="muted">{props.name} </span>
-      <span class={classes} data-value={props.value} style={{ "--chars": String(FIELD_CHARS[props.name] ?? 8) }}>
-        <input
-          ref={props.inputRef}
-          id={inputId(props.name)}
-          data-edit=""
-          class="t-query"
-          size={1}
-          value={props.value}
-          spellcheck={false}
-          autocomplete="off"
-          aria-invalid={props.invalid || undefined}
-          role={picks ? "combobox" : undefined}
-          aria-autocomplete={picks ? "list" : undefined}
-          aria-expanded={picks ? open : undefined}
-          aria-controls={picks && open ? id : undefined}
-          aria-activedescendant={open && state.active >= 0 ? `${id}-${state.active}` : undefined}
-          onInput={(e) => {
-            props.onInput(e.currentTarget.value);
-            if (picks) {
-              setEdited(true);
-              setState({ open: true, active: -1 });
-            }
-          }}
-          onFocus={() => {
-            if (names.length || entry) setState({ open: true, active: -1 });
-          }}
-          onClick={() => {
-            if (entry && !state.open) setState({ open: true, active: -1 });
-          }}
-          onBlur={() => {
-            setState(PICKER_CLOSED);
-            props.onBlur();
-          }}
-          onKeyDown={(e) => {
-            if (picks) {
-              const r = pickerKey(state, e.key, count);
-              if (r.handled) {
-                e.preventDefault();
-                setState(r.state);
-                if (r.action === "choose") choose(state.active);
-                return;
+    <div class="qfield">
+      <label class="t-label" for={inputId(props.name)}>
+        {props.name}
+      </label>
+      <span class={box}>
+        {unstated ? <Hatch w={SIZE.hatchSquare} h={SIZE.hatchSquare} /> : null}
+        <span class="autosize t-query" data-value={props.value || (unstated ? "not stated" : "")} style={{ "--chars": String(FIELD_CHARS[props.name] ?? 8) }}>
+          <input
+            ref={props.inputRef}
+            id={inputId(props.name)}
+            class="t-query"
+            size={1}
+            value={props.value}
+            placeholder={unstated ? "not stated" : undefined}
+            title={formOf(props.name)}
+            spellcheck={false}
+            autocomplete="off"
+            aria-invalid={props.error ? true : undefined}
+            aria-describedby={props.error ? errorId : undefined}
+            role={picks ? "combobox" : undefined}
+            aria-autocomplete={picks ? "list" : undefined}
+            aria-expanded={picks ? open : undefined}
+            aria-controls={picks && open ? id : undefined}
+            aria-activedescendant={open && state.active >= 0 ? `${id}-${state.active}` : undefined}
+            onInput={(e) => {
+              props.onInput(e.currentTarget.value);
+              if (picks) {
+                setEdited(true);
+                setState({ open: true, active: -1 });
               }
-            }
-            if (e.key === "Enter") {
-              e.preventDefault();
+            }}
+            onFocus={() => {
+              if (names.length || entry) setState({ open: true, active: -1 });
+            }}
+            onClick={() => {
+              if (entry && !state.open) setState({ open: true, active: -1 });
+            }}
+            onBlur={() => {
               setState(PICKER_CLOSED);
-              props.onRun();
-            }
-          }}
-        />
+              props.onBlur();
+            }}
+            onKeyDown={(e) => {
+              if (picks) {
+                const r = pickerKey(state, e.key, count);
+                if (r.handled) {
+                  e.preventDefault();
+                  setState(r.state);
+                  if (r.action === "choose") choose(state.active);
+                  return;
+                }
+              }
+              if (e.key === "Enter") {
+                e.preventDefault();
+                setState(PICKER_CLOSED);
+                props.onRun();
+              }
+            }}
+          />
+        </span>
       </span>
-      {open && endpoints ? <PickerList id={id} list={found} active={state.active} onChoose={chooseEndpoint} /> : null}
-      {open && entry ? (
-        <NameList
-          id={id}
-          label={stage?.stage === "interface" ? `Entry interfaces of ${stage.device}` : "Devices"}
-          names={entries.map((o) => o.name)}
-          detail={(n) => entries.find((o) => o.name === n)?.detail ?? ""}
-          active={state.active}
-          onChoose={(n) => choose(entries.findIndex((o) => o.name === n))}
-        />
+      {props.error ? (
+        <span class="qerror t-label" id={errorId}>
+          {props.error}
+        </span>
       ) : null}
-      {open && !endpoints && !entry ? (
-        <NameList id={id} label={`Values of ${props.name}`} names={named} active={state.active} onChoose={chooseName} />
-      ) : null}
-    </label>
+      {list}
+    </div>
   );
 }
 
 /** The button "Add field" and its list of the fields that do not show. */
-function AddField(props: {
-  fields: readonly QueryField[];
-  onAdd: (k: QueryField) => void;
-}) {
+function AddField(props: { fields: readonly QueryField[]; row: number; onAdd: (k: QueryField) => void }) {
   const [state, setState] = useState<PickerState>(PICKER_CLOSED);
   const open = state.open && props.fields.length > 0;
   const id = "pick-field";
-  const ref = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setState(PICKER_CLOSED);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
-  const choose = (k: QueryField) => {
+  const choose = (i: number) => {
     setState(PICKER_CLOSED);
-    props.onAdd(k);
+    props.onAdd(props.fields[i]!);
   };
   return (
-    <span class="qadd" ref={ref}>
+    <span class="qadd">
       <button
         type="button"
-        data-edit=""
-        // A press keeps the focus in the field that has it, so that the query bar stays open.
-        onMouseDown={(e) => {
-          if (document.activeElement && edits(document.activeElement)) e.preventDefault();
-        }}
+        class="ghost"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? id : undefined}
@@ -361,39 +257,57 @@ function AddField(props: {
           if (!r.handled) return;
           e.preventDefault();
           setState(r.state);
-          if (r.action === "choose") choose(props.fields[state.active]!);
+          if (r.action === "choose") choose(state.active);
         }}
       >
-        Add field
+        <span class="with-icon">
+          <Icon name="add" />
+          Add field
+        </span>
       </button>
       {open ? (
-        <NameList
+        <OptionList
           id={id}
-          label="Fields of the query"
-          names={props.fields}
-          detail={(k) => labelOf(k as QueryField)}
+          label="Fields"
+          count={props.fields.length}
           active={state.active}
-          onChoose={(k) => choose(k as QueryField)}
+          estimate={props.row}
+          columns="two"
+          onChoose={choose}
+          option={(i) => {
+            const k = props.fields[i]!;
+            return (
+              <>
+                <span class="t-value">{k}</span>
+                <span class="muted">{labelOf(k)}</span>
+              </>
+            );
+          }}
         />
       ) : null}
     </span>
   );
 }
 
+/**
+ * The query card: each field of the query as an input below its name, the
+ * button "Swap source and destination" between the source and the
+ * destination fields, "Add field" and "Run".
+ */
 export function QueryBar(props: {
   twin: string;
   fields: Fields;
   /** The entry point that the shown answer found, or null. */
   found: string | null;
-  /** A count that shows the ingress field and opens its list each time it changes while the bar shows. */
+  /** A count that shows the ingress field and opens its list each time it changes while the card shows. */
   askIngress: number;
-  /** Whether an answer shows. */
-  answered: boolean;
+  /** The row height of the preferences, in px. */
+  row: number;
   onField: (k: QueryField, v: string) => void;
+  onFields: (f: Fields) => void;
   onRun: () => void;
   firstInput: { current: HTMLInputElement | null };
 }) {
-  const [editing, setEditing] = useState(false);
   const [added, setAdded] = useState<ReadonlySet<QueryField>>(new Set());
   const [checked, setChecked] = useState<ReadonlySet<QueryField>>(new Set());
   const [focusNext, setFocusNext] = useState<QueryField | null>(null);
@@ -406,19 +320,15 @@ export function QueryBar(props: {
     document.getElementById(inputId(focusNext))?.focus();
     setFocusNext(null);
   }, [focusNext]);
-  // A base field shows when it has a value or the bar is being edited; with
-  // no stated field, each base field of a query shows so that a click can
-  // edit it. Each other field shows when it has a value or is added.
   const value = (k: QueryField) => props.fields[k] ?? "";
-  // `unstated` is the button of the mark of the fields that are not stated.
+  // `unstated` takes its value from the echo of an answer only.
   const ofMode = QUERY_FIELDS.filter((k) => k !== "unstated");
-  const none = ofMode.every((k) => value(k).trim() === "");
-  const shown = ofMode.filter((k) => value(k) !== "" || added.has(k) || (BASE_FIELDS.has(k) && (editing || none)));
+  const shown = ofMode.filter((k) => BASE_FIELDS.has(k) || value(k) !== "" || added.has(k));
   const hidden = ofMode.filter((k) => !shown.includes(k));
   const errorOf = (k: QueryField) => (checked.has(k) ? checkValue(k, value(k)) : null);
   const mark = (k: QueryField) => setChecked((c) => (c.has(k) ? c : new Set(c).add(k)));
   // A value with a wrong form stops the run: its field gets the focus and
-  // its title gives the message.
+  // its message shows below it.
   const run = () => {
     const bad = firstError(props.fields);
     if (bad) {
@@ -430,100 +340,69 @@ export function QueryBar(props: {
   };
   return (
     <form
-      class="bar query"
+      class="query"
       aria-label="Query"
       onSubmit={(e) => {
         e.preventDefault();
         run();
       }}
-      onFocusIn={(e) => setEditing(edits(e.target))}
-      onFocusOut={(e) => {
-        const next = e.relatedTarget as Node | null;
-        if (!next || !e.currentTarget.contains(next) || !edits(next)) {
-          setEditing(false);
-        }
-      }}
     >
       {shown.map((k, i) => (
-        <QueryValue
-          key={k}
-          twin={props.twin}
-          name={k}
-          value={value(k)}
-          found={k === "ingress" ? props.found : null}
-          invalid={errorOf(k) !== null}
-          hint={errorOf(k) ?? formOf(k)}
-          onInput={(v) => props.onField(k, v)}
-          onRun={run}
-          onBlur={() => {
-            if (value(k).trim() !== "") mark(k);
-          }}
-          inputRef={i === 0 ? props.firstInput : undefined}
-        />
+        <Fragment key={k}>
+          {k === "destination.ip" ? (
+            <button type="button" class="icon swap" aria-label="Swap source and destination" onClick={() => props.onFields(swapped(props.fields))}>
+              <Icon name="swap" />
+            </button>
+          ) : null}
+          <QueryValue
+            twin={props.twin}
+            name={k}
+            value={value(k)}
+            found={k === "ingress" ? props.found : null}
+            error={errorOf(k)}
+            row={props.row}
+            onInput={(v) => props.onField(k, v)}
+            onRun={run}
+            onBlur={() => {
+              if (value(k).trim() !== "") mark(k);
+            }}
+            inputRef={i === 0 ? props.firstInput : undefined}
+          />
+        </Fragment>
       ))}
-      <button type="submit">Run</button>
       {hidden.length ? (
         <AddField
           fields={hidden}
+          row={props.row}
           onAdd={(k) => {
             setAdded((a) => new Set(a).add(k));
             setFocusNext(k);
           }}
         />
       ) : null}
+      <span class="grow" />
+      <button type="submit">Run</button>
     </form>
   );
 }
 
 export const LEVELS: readonly Level[] = ["device", "function"];
 
-export function LevelControl(props: { level: Level; onLevel: (l: Level) => void }) {
+/** The buttons of the pages of a table. The button "First page" shows when `onFirst` is given. */
+export function PageButtons(props: { onFirst?: () => void; onPrevious: () => void; onNext: () => void; first?: boolean; previous: boolean; next: boolean }) {
   return (
-    <span class="group" role="group" aria-label="Level">
-      <span class="muted">Level</span>
-      {LEVELS.map((l) => (
-        <button type="button" aria-pressed={l === props.level} aria-keyshortcuts={l === "device" ? "[" : "]"} onClick={() => props.onLevel(l)}>
-          {l}
+    <span class="group" role="group" aria-label="Pages">
+      {props.onFirst ? (
+        <button type="button" disabled={!props.first} onClick={props.onFirst}>
+          First page
         </button>
-      ))}
-    </span>
-  );
-}
-
-/** The result line. The Level control shows on the views that have levels. */
-export function ResultLine(props: { children: ComponentChildren; level?: Level; onLevel?: (l: Level) => void }) {
-  return (
-    <div class="bar result" aria-live="polite">
-      {props.children}
-      {props.level && props.onLevel ? (
-        <>
-          <span class="grow" />
-          <LevelControl level={props.level} onLevel={props.onLevel} />
-        </>
       ) : null}
-    </div>
-  );
-}
-
-/** The status line: the note of the last action and the time of the query. */
-export function StatusLine(props: { notice: string | null; timing: string | null }) {
-  return (
-    <footer class="keyline t-index" aria-label="Status" aria-live="polite">
-      {props.notice ? <span>{props.notice}</span> : null}
-      {props.timing ? <span class="timing">{props.timing}</span> : null}
-    </footer>
-  );
-}
-
-export function KeyLine(props: { keys: [string, string][]; timing?: string | null }) {
-  return (
-    <footer class="keyline t-index" aria-label="Keys">
-      {props.keys.map(([k, what]) => (
-        <span>
-          {k} {what}
-        </span>
-      ))}
-      {props.timing ? <span class="timing">{props.timing}</span> : null}
-    </footer>
+      <button type="button" disabled={!props.previous} onClick={props.onPrevious}>
+        Previous page
+      </button>
+      <button type="button" disabled={!props.next} onClick={props.onNext}>
+        Next page
+      </button>
+    </span>
   );
 }

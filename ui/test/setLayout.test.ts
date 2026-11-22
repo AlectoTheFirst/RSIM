@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Branch, Header, SetAnswer, TraceStep } from "../src/api/types";
-import { ladder, outcomeCounts, partCounts, upright, type StepRow } from "../src/ladder/layout";
+import { ladder, upright } from "../src/ladder/layout";
 import { outcomeOf, partAnswer, partFields, partList, tunnelOf } from "../src/ladder/setLayout";
 
 const url = new URL("../../crates/rsim-cli/tests/golden/set-mini-enterprise.json", import.meta.url);
@@ -49,13 +49,6 @@ describe("the parts of mini-enterprise", () => {
     const members = b.packets.members.map((m) => ({ ...m, original: { ...m.original, dscp: { known: 46 } } as Header }));
     expect(partFields(a.input, { members })).toContainEqual(["dscp", "46"]);
   });
-
-  it("counts only the outcomes that occur", () => {
-    expect(outcomeCounts(partCounts(a.summary))).toEqual([
-      ["deliver", 1],
-      ["drop", 2],
-    ]);
-  });
 });
 
 describe("the ladder of one part", () => {
@@ -66,16 +59,14 @@ describe("the ladder of one part", () => {
     expect(one.replies.map((r) => r.forward_branch)).toEqual([1]);
   });
 
-  it("prints a range as a value, with no hatch, and the range of the part where the part splits off", () => {
-    const l = ladder(one, "function", true, true);
-    const first = l.rows.find((r): r is StepRow => r.type === "step")!;
-    expect(first.cells[1]).toEqual({ kind: "value", text: "0-65535" });
-    const rows = l.rows.filter((r): r is StepRow => r.type === "step" && r.dir === "forward");
-    expect(rows.some((r) => r.cells[1]!.kind === "changed" && (r.cells[1] as { text: string }).text === "1024-65535")).toBe(true);
-    expect(first.key).toBe(`f.1.${one.branches[0]!.steps[0]!.index}`);
-    const path = ladder(one, "function");
-    const p0 = path.rows.find((r): r is StepRow => r.type === "step")!;
-    expect(p0.cells[1]!.kind).toBe("hatch");
+  it("prints a range as a value, with no hatch, at the function where the part splits off", () => {
+    const l = ladder(one, "function", { replyOf: null, branch: 1 }, true);
+    expect(l.rows[0]!.key).toBe(`f.1.${one.branches[0]!.steps[0]!.index}`);
+    const split = l.rows.flatMap((r) => r.rewrites).find((w) => w.field === "source.port");
+    expect(split?.after).toEqual({ known: true, text: "1024-65535" });
+    const path = ladder(one, "function", { replyOf: null, branch: 1 });
+    const p = path.rows.flatMap((r) => r.rewrites).find((w) => w.field === "source.port");
+    expect(p?.after.known).toBe(false);
   });
 });
 
@@ -111,6 +102,6 @@ describe("tunnel of an outer packet", () => {
 describe("lane names", () => {
   it("stand upright when a name is wider than its lane", () => {
     expect(upright(["core1", "unifi-01"], 52, 5)).toBe(false);
-    expect(upright(["dcepp-keller", "core1", "unifi-01"], 52, 5)).toBe(true);
+    expect(upright(["edge-sw-0012", "core1", "unifi-01"], 52, 5)).toBe(true);
   });
 });

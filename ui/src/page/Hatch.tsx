@@ -33,7 +33,17 @@ export function Hatch(props: { w: number; h: number; title?: string }) {
   );
 }
 
-/** A hatch mark in a line of text: a hatch square and its text, with an optional `title`. */
+/** A hatch mark in a line of text: a hatch square of 12px before its text, with an optional `title`. */
+export function HatchText(props: { children: preact.ComponentChildren; title?: string }) {
+  return (
+    <span class="hatch-text" title={props.title}>
+      <Hatch w={SIZE.hatchSquare} h={SIZE.hatchSquare} />
+      <span>{props.children}</span>
+    </span>
+  );
+}
+
+/** A hatch mark in the head of a card: a hatch square and its text in a dashed border, with an optional `title`. */
 export function HatchMark(props: { children: preact.ComponentChildren; title?: string }) {
   const s = SIZE.hatchMark - 2 * SIZE.hairline;
   return (

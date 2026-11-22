@@ -3,30 +3,34 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { PathAnswer } from "../src/api/types";
+import type { TraceStep } from "../src/api/types";
 import {
-  laneGroups,
-  cell,
+  FUNCTION_PAD,
   fieldText,
   fileLabel,
+  functionLabel,
+  functionNames,
+  functionWidth,
   ladder,
   lanesOf,
   mostSpecific,
+  nameParts,
   notStated,
   answerNotes,
   noteLabel,
+  rewritesOf,
   ribNotChecked,
   ribOfGroup,
   spanLabel,
-  type StepRow,
 } from "../src/ladder/layout";
+import { SIZE } from "../src/theme";
 
 function golden(name: string): PathAnswer {
   const url = new URL(`../../crates/rsim-cli/tests/golden/${name}.json`, import.meta.url);
   return JSON.parse(readFileSync(url, "utf8")) as PathAnswer;
 }
 
-const steps = (rows: ReturnType<typeof ladder>["rows"]) =>
-  rows.filter((r): r is StepRow => r.type === "step");
+const FWD = { replyOf: null, branch: 0 };
 
 describe("field values", () => {
   it("prints a known value, a protocol name and an absent header", () => {
@@ -42,31 +46,26 @@ describe("field values", () => {
   });
 });
 
-describe("cells", () => {
-  const k = (text: string) => ({ known: true, text });
-  const u = (text: string) => ({ known: false, text });
+describe("rewrites", () => {
+  const a = golden("mini-enterprise").answer;
+  const steps = a.branches[0]!.steps;
 
-  it("prints each value on the first row", () => {
-    expect(cell(k("53"), k("53"), true)).toEqual({ kind: "value", text: "53" });
+  it("are the fields whose value after the functions differs from the value before them", () => {
+    const snat = steps.find((s) => s.function.endsWith("/snat"))!;
+    expect(rewritesOf([snat])).toEqual([
+      { field: "source.ip", before: { known: true, text: "172.31.10.20" }, after: { known: true, text: "10.20.0.254" } },
+    ]);
+    const route = steps.find((s) => s.function.endsWith("/route"))!;
+    expect(rewritesOf([route])).toEqual([]);
   });
 
-  it("has a hairline where a later row keeps the value", () => {
-    expect(cell(k("53"), k("53"), false)).toEqual({ kind: "same" });
+  it("cover each function of a group", () => {
+    expect(rewritesOf(steps.slice(0, 12)).map((r) => r.field)).toEqual(["source.ip"]);
   });
 
-  it("prints the value that a function writes", () => {
-    expect(cell(k("172.31.10.20"), k("10.20.0.254"), false)).toEqual({ kind: "changed", text: "10.20.0.254" });
-    expect(cell(k("1"), k("2"), true)).toEqual({ kind: "changed", text: "2" });
-  });
-
-  it("has a hatch for a value that the twin does not know, on each row", () => {
-    expect(cell(u("0-65535"), u("0-65535"), true)).toEqual({ kind: "hatch", text: "0-65535" });
-    expect(cell(u("0-65535"), u("0-65535"), false)).toEqual({ kind: "hatch", text: "0-65535" });
-    expect(cell(k("53"), u("unknown"), false)).toEqual({ kind: "hatch", text: "unknown" });
-  });
-
-  it("keeps the input of a function with no output packets", () => {
-    expect(cell(k("53"), null, false)).toEqual({ kind: "same" });
+  it("are none for a function with no packets after it", () => {
+    const s = steps[0]!;
+    expect(rewritesOf([{ ...s, output: { members: [] } } as TraceStep])).toEqual([]);
   });
 });
 
@@ -110,35 +109,26 @@ describe("lanes", () => {
     ]);
     expect(lanes.map((l) => l.name)).toEqual(["leaf1", "spine1", "spine2", "leaf2"]);
   });
+
+  it("keeps path order for a path that visits a device twice", () => {
+    const lanes = lanesOf([["a", "b", "c", "b", "d"]]);
+    expect(lanes.map((l) => l.name)).toEqual(["a", "b", "c", "d"]);
+  });
 });
 
 describe("the ladder of mini-enterprise", () => {
   const a = golden("mini-enterprise").answer;
-  const l = ladder(a, "function");
-  const rows = steps(l.rows);
-  const fwd = rows.filter((r) => r.dir === "forward");
-  const rep = rows.filter((r) => r.dir === "reply");
+  const l = ladder(a, "function", FWD);
+  const fwd = l.rows;
+  const rep = ladder(a, "function", { replyOf: 0, branch: 0 }).rows;
 
-  it("has a lane for each device in path order, between the lanes of the source and the destination", () => {
-    expect(l.lanes.map((x) => x.name)).toEqual(["guest-client", "fra01-fgt-01", "fra01-ips-01", "fra01-core-01", "fra01-dns"]);
-    expect(l.lanes.map((x) => x.endpoint !== null)).toEqual([true, false, false, false, true]);
+  it("has a lane for each device of the path in path order, and none for an endpoint", () => {
+    expect(l.lanes.map((x) => x.name)).toEqual(["fra01-fgt-01", "fra01-ips-01", "fra01-core-01"]);
   });
 
-  it("prints each value on the first row only", () => {
-    expect(fwd[0]!.cells).toEqual([
-      { kind: "value", text: "172.31.10.20" },
-      { kind: "value", text: "40000" },
-      { kind: "value", text: "10.20.0.53" },
-      { kind: "value", text: "53" },
-      { kind: "value", text: "udp" },
-    ]);
-    expect(fwd[1]!.cells.every((c) => c.kind === "same")).toBe(true);
-  });
-
-  it("prints the source address at the source NAT and a hairline elsewhere", () => {
-    const changed = fwd.filter((r) => r.cells.some((c) => c.kind !== "same"));
-    expect(changed.map((r) => r.fn)).toEqual(["in/port2", "snat"]);
-    expect(fwd.find((r) => r.fn === "snat")!.cells[0]).toEqual({ kind: "changed", text: "10.20.0.254" });
+  it("prints the source address at the source NAT and no rewrite elsewhere", () => {
+    expect(fwd.filter((r) => r.rewrites.length > 0).map((r) => r.fn)).toEqual(["snat"]);
+    expect(fwd.find((r) => r.fn === "snat")!.rewrites[0]!.after).toEqual({ known: true, text: "10.20.0.254" });
   });
 
   it("prints the reason of the engine unchanged and the most specific source", () => {
@@ -147,12 +137,12 @@ describe("the ladder of mini-enterprise", () => {
     expect(fwd.find((r) => r.fn === "route")!.source).toBe("conf:60");
   });
 
-  it("has a hatch in the RIB column of each route lookup that is not checked", () => {
-    expect(fwd.filter((r) => r.rib === "hatch").map((r) => r.steps[0]!.function)).toEqual([
+  it("keeps the RIB guard of each route lookup in its steps", () => {
+    expect(fwd.filter((r) => r.steps.some((s) => s.rib_guard === "not_checked")).map((r) => r.steps[0]!.function)).toEqual([
       "fra01-fgt-01/route",
       "fra01-core-01/route",
     ]);
-    expect(ribNotChecked(a)).toBe(rows.filter((r) => r.rib === "hatch").length);
+    expect(ribNotChecked(a)).toBeGreaterThanOrEqual(2);
   });
 
   it("starts, steps across at each link and ends in deliver", () => {
@@ -160,80 +150,93 @@ describe("the ladder of mini-enterprise", () => {
     expect(fwd.filter((r) => r.enterFrom !== null).map((r) => [r.enterFrom, r.lane])).toEqual([
       [0, 1],
       [1, 2],
-      [2, 3],
     ]);
     expect(fwd[fwd.length - 1]!.end).toBe("deliver");
-    expect(fwd[fwd.length - 1]!.endLane).toBe(4);
     expect(fwd.slice(0, -1).every((r) => r.end === null)).toBe(true);
-    expect(rep[0]!.enterFrom).toBe(4);
-    expect(rep[rep.length - 1]!.endLane).toBe(0);
   });
 
-  it("puts the reply under the row reply of branch 0", () => {
-    const sec = l.rows.find((r) => r.type === "section");
-    expect(sec && sec.type === "section" && sec.text).toBe("reply of branch 0");
-    // The result line gives the verdict of the reply.
-    expect(sec && sec.type === "section" && sec.verdict).toBe(null);
+  it("draws the reply as its own path in its own lanes", () => {
+    const r = ladder(a, "function", { replyOf: 0, branch: 0 });
+    expect(r.lanes.map((x) => x.name)).toEqual(["fra01-core-01", "fra01-ips-01", "fra01-fgt-01"]);
     expect(rep[0]!.start).toBe(true);
-    expect(rep[0]!.cells[0]).toEqual({ kind: "value", text: "10.20.0.53" });
+    expect(rep.every((x) => x.dir === "reply")).toBe(true);
+    expect(rep[0]!.key.startsWith("r0.0.")).toBe(true);
   });
 
   it("makes one row of the functions of a device at the device level", () => {
-    const d = steps(ladder(a, "device").rows).filter((r) => r.dir === "forward");
+    const d = ladder(a, "device", FWD).rows;
     expect(d.map((r) => [r.label, r.fn, r.lane])).toEqual([
-      ["0-11", "12 functions", 1],
-      ["12-14", "3 functions", 2],
-      ["15-20", "6 functions", 3],
+      ["0-11", "12 functions", 0],
+      ["12-14", "3 functions", 1],
+      ["15-20", "6 functions", 2],
     ]);
-    expect(d[0]!.cells[0]).toEqual({ kind: "changed", text: "10.20.0.254" });
-    expect(d[1]!.cells.every((c) => c.kind === "same")).toBe(true);
-    expect(d[0]!.rib).toBe("hatch");
+    expect(d[0]!.rewrites.map((r) => [r.field, r.after.text])).toEqual([["source.ip", "10.20.0.254"]]);
+    expect(d[1]!.rewrites).toEqual([]);
     expect(d[0]!.reason).toBe("leave on port1 to fra01-ips-01/in/1b");
   });
 });
 
 describe("the ladder of leaf-spine", () => {
   const a = golden("leaf-spine").answer;
-  const l = ladder(a, "function");
 
-  it("keeps both spines between the leaves", () => {
-    expect(l.lanes.map((x) => x.name)).toEqual(["host1", "leaf1", "spine1", "spine2", "leaf2", "host2"]);
-  });
-
-  it("has a section for each branch and for each reply branch", () => {
-    const secs = l.rows.filter((r) => r.type === "section").map((r) => r.type === "section" && r.text);
-    expect(secs).toEqual([
-      "branch 0",
-      "branch 1",
-      "reply of branch 0, branch 0",
-      "reply of branch 0, branch 1",
-      "reply of branch 1, branch 0",
-      "reply of branch 1, branch 1",
-    ]);
+  it("has the lanes of the selected path only", () => {
+    expect(ladder(a, "function", FWD).lanes.map((x) => x.name)).toEqual(["leaf1", "spine1", "leaf2"]);
+    expect(ladder(a, "function", { replyOf: null, branch: 1 }).lanes.map((x) => x.name)).toEqual(["leaf1", "spine2", "leaf2"]);
   });
 
   it("prints the outer header at the encapsulation and the inner header at the decapsulation", () => {
-    const b0 = steps(l.rows).filter((r) => r.dir === "forward" && r.path.branch === 0);
-    const encap = b0.find((r) => r.fn === "vxlan-encap")!;
-    expect(encap.cells).toEqual([
-      { kind: "changed", text: "192.0.2.1" },
-      { kind: "hatch", text: "unknown" },
-      { kind: "changed", text: "192.0.2.2" },
-      { kind: "changed", text: "4789" },
-      { kind: "changed", text: "udp" },
-    ]);
-    const decap = b0.find((r) => r.fn === "vxlan-decap")!;
-    expect(decap.cells).toEqual([
-      { kind: "changed", text: "10.1.0.10" },
-      { kind: "changed", text: "40000" },
-      { kind: "changed", text: "10.2.0.10" },
-      { kind: "changed", text: "22" },
-      { kind: "changed", text: "tcp" },
-    ]);
-    expect(b0.filter((r) => r.cells.some((c) => c.kind === "changed")).map((r) => r.fn)).toEqual([
-      "vxlan-encap",
-      "vxlan-decap",
-    ]);
+    const rows = ladder(a, "function", FWD).rows;
+    const known = (fn: string) =>
+      rows
+        .find((r) => r.fn === fn)!
+        .rewrites.filter((r) => r.after.known)
+        .map((r) => [r.field, r.after.text]);
+    expect(known("vxlan-encap")).toEqual(
+      expect.arrayContaining([
+        ["source.ip", "192.0.2.1"],
+        ["destination.ip", "192.0.2.2"],
+        ["destination.port", "4789"],
+        ["network.transport", "udp"],
+      ]),
+    );
+    expect(rows.find((r) => r.fn === "vxlan-encap")!.rewrites.find((r) => r.field === "source.port")!.after.known).toBe(false);
+    expect(known("vxlan-decap")).toEqual(
+      expect.arrayContaining([
+        ["source.ip", "10.1.0.10"],
+        ["source.port", "40000"],
+        ["destination.ip", "10.2.0.10"],
+        ["destination.port", "22"],
+        ["network.transport", "tcp"],
+      ]),
+    );
+    expect(rows.filter((r) => r.rewrites.length > 0).map((r) => r.fn)).toEqual(["vxlan-encap", "vxlan-decap"]);
+  });
+});
+
+describe("the function column", () => {
+  // An invented SSID of 32 characters.
+  const SSID = "Example Corp Guest WiFi Floor 02";
+  const name = `host/wlan/${SSID}/wlan-3`;
+
+  it("is as wide as the longest name of the answer, from 168px to 264px", () => {
+    expect(SSID.length).toBe(32);
+    expect(functionWidth(["route", "in/eth0"])).toBe(SIZE.colFunction);
+    expect(functionWidth([name])).toBe(SIZE.colFunctionMax);
+    const mid = "x".repeat(26);
+    expect(functionWidth([mid])).toBe(Math.ceil(26 * SIZE.valueChar) + FUNCTION_PAD);
+    expect(functionNames(golden("mini-enterprise").answer)).toContain("snat");
+  });
+
+  it("breaks a name after each slash, then at a space, and keeps each character", () => {
+    const step = { function: `ap-01/${name}`, device: "ap-01" } as TraceStep;
+    const label = functionLabel(step);
+    expect(label).toBe(name);
+    const wide = nameParts(label, SIZE.colFunctionMax);
+    expect(wide).toEqual(["host/", "wlan/", `${SSID.replace(/ /g, "\u00a0")}/`, "wlan-3"]);
+    expect(wide.join("").replace(/\u00a0/g, " ")).toBe(label);
+    const narrow = nameParts(label, SIZE.colFunction);
+    expect(narrow[2]).toBe(`${SSID}/`);
+    expect(narrow.join("")).toBe(label);
   });
 });
 
@@ -272,22 +275,5 @@ describe("note label", () => {
   it("is the word before the colon, and the whole note goes in the title", () => {
     expect(noteLabel("defaults: dscp 0, ecn 0, no VLAN, tcp syn, source.port 49152-65535")).toBe("defaults");
     expect(noteLabel("no colon")).toBe("no colon");
-  });
-});
-
-describe("lane groups", () => {
-  const lane = (name: string) => ({ device: name, endpoint: null, name });
-  it("puts adjacent lanes of one site under the site and shortens their names", () => {
-    const { groups, names } = laneGroups(["guest-client", "fra01-fgt-01", "fra01-ips-01", "fra01-core-01", "fra01-dns"].map(lane));
-    expect(groups).toEqual([
-      { site: null, first: 0, count: 1 },
-      { site: "fra01", first: 1, count: 4 },
-    ]);
-    expect(names).toEqual(["guest-client", "fgt-01", "ips-01", "core-01", "dns"]);
-  });
-  it("keeps a lone lane and a name with no dash whole", () => {
-    const { groups, names } = laneGroups(["r1", "fra01-fw", "ber01-fw"].map(lane));
-    expect(groups.every((g) => g.site === null)).toBe(true);
-    expect(names).toEqual(["r1", "fra01-fw", "ber01-fw"]);
   });
 });

@@ -1,4 +1,4 @@
-// The tables Routes and Jump hosts of the Inventory view, each with its add
+// The cards Routes and Jump hosts of the part Routes of the Inventory view, each with its add
 // row, the edit of a row and the delete of a row.
 import { useState } from "preact/hooks";
 import { deleteJumpHost, deleteRoute, putJumpHost, putRoute } from "../api/client";
@@ -17,7 +17,8 @@ import {
   routeCredentials,
   routeFields,
 } from "./model";
-import { DeleteButton, HatchCell, type Write, type WriteNew, addKeys } from "./parts";
+import { Card, Empty } from "../page/Card";
+import { DeleteButton, Names, type Write, type WriteNew, addKeys } from "./parts";
 
 /** The proxy, the jump hosts in order and the proxy login of a route in an add row or an edit. */
 function RouteEdit(props: { inv: Inventory; f: RouteFields; onChange: (f: RouteFields) => void; keys: (e: KeyboardEvent) => void; autoFocus?: boolean }) {
@@ -98,7 +99,7 @@ function RouteRow(props: { inv: Inventory; r: Route; editing: boolean; onEdit: (
                 ))
               : "direct"}
           </span>
-          <span class="t-value">{routeCredentials(inv, r).join(", ")}</span>
+          <Names names={routeCredentials(inv, r)} />
         </>
       )}
       <span class="group">
@@ -135,40 +136,40 @@ export function Routes(props: { inv: Inventory; adding: boolean; onAdding: () =>
     });
   const keys = addKeys(add, props.onClose);
   return (
-    <div>
-      <div class="inv-sec">
-        Routes
-      </div>
-      {inv.routes.length || props.adding ? (
-        <div class="inv-t route inv-head" role="row">
-          <span>name</span>
-          <span>hops</span>
-          <span>credential</span>
-          <span />
-        </div>
-      ) : (
-        <div class="inv-empty" role="row">
-          <HatchCell>no route</HatchCell>
-        </div>
-      )}
-      {inv.routes.map((r) => (
-        <RouteRow key={r.name} inv={inv} r={r} editing={editing === r.name} onEdit={(on) => setEditing(on ? r.name : null)} write={props.write} />
-      ))}
-      {props.adding ? (
-        <div class="inv-t route" role="row" aria-label="New route">
-          <span class="edit">
-            <input class="t-value" aria-label="name" value={f.name} spellcheck={false} autoFocus onInput={(e) => setF({ ...f, name: e.currentTarget.value })} onKeyDown={keys} />
-          </span>
-          <RouteEdit inv={inv} f={f} onChange={(x) => setF({ ...f, ...x, jumps: [...x.jumps] })} keys={keys} />
-          <span />
-        </div>
-      ) : null}
-      <div class="actions">
+    <Card
+      title="Routes"
+      flush
+      foot={
         <button type="button" aria-pressed={props.adding} onClick={() => (props.adding ? add() : props.onAdding())}>
           Add route
         </button>
+      }
+    >
+      <div class="inv-table route" role="table" aria-label="Routes">
+        {inv.routes.length || props.adding ? (
+          <div class="inv-t route inv-head" role="row">
+            <span>name</span>
+            <span>hops</span>
+            <span>credential</span>
+            <span />
+          </div>
+        ) : (
+          <Empty role="row">no route</Empty>
+        )}
+        {inv.routes.map((r) => (
+          <RouteRow key={r.name} inv={inv} r={r} editing={editing === r.name} onEdit={(on) => setEditing(on ? r.name : null)} write={props.write} />
+        ))}
+        {props.adding ? (
+          <div class="inv-t route" role="row" aria-label="New route">
+            <span class="edit">
+              <input class="t-value" aria-label="name" value={f.name} spellcheck={false} autoFocus onInput={(e) => setF({ ...f, name: e.currentTarget.value })} onKeyDown={keys} />
+            </span>
+            <RouteEdit inv={inv} f={f} onChange={(x) => setF({ ...f, ...x, jumps: [...x.jumps] })} keys={keys} />
+            <span />
+          </div>
+        ) : null}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -229,7 +230,7 @@ function JumpHostRow(props: { inv: Inventory; j: JumpHost; editing: boolean; onE
           <span>{j.ssh_algorithms}</span>
         </>
       )}
-      <span class="t-value">{routes.join(", ")}</span>
+      <Names names={routes} />
       <span class="group">
         <button
           type="button"
@@ -264,42 +265,42 @@ export function JumpHosts(props: { inv: Inventory; adding: boolean; onAdding: ()
     });
   const keys = addKeys(add, props.onClose);
   return (
-    <div>
-      <div class="inv-sec">
-        Jump hosts
-      </div>
-      {inv.jump_hosts.length || props.adding ? (
-        <div class="inv-t jump inv-head" role="row">
-          <span>name</span>
-          <span>address</span>
-          <span>credential</span>
-          <span>SSH algorithms</span>
-          <span>routes</span>
-          <span />
-        </div>
-      ) : (
-        <div class="inv-empty" role="row">
-          <HatchCell>no jump host</HatchCell>
-        </div>
-      )}
-      {inv.jump_hosts.map((j) => (
-        <JumpHostRow key={j.name} inv={inv} j={j} editing={editing === j.name} onEdit={(on) => setEditing(on ? j.name : null)} write={props.write} />
-      ))}
-      {props.adding ? (
-        <div class="inv-t jump" role="row" aria-label="New jump host">
-          <span class="edit">
-            <input class="t-value" aria-label="name" value={f.name} spellcheck={false} autoFocus onInput={(e) => setF({ ...f, name: e.currentTarget.value })} onKeyDown={keys} />
-          </span>
-          <JumpHostEdit inv={inv} f={f} onChange={(x) => setF({ ...f, ...x })} keys={keys} />
-          <span />
-          <span />
-        </div>
-      ) : null}
-      <div class="actions">
+    <Card
+      title="Jump hosts"
+      flush
+      foot={
         <button type="button" aria-pressed={props.adding} onClick={() => (props.adding ? add() : props.onAdding())}>
           Add jump host
         </button>
+      }
+    >
+      <div class="inv-table jump" role="table" aria-label="Jump hosts">
+        {inv.jump_hosts.length || props.adding ? (
+          <div class="inv-t jump inv-head" role="row">
+            <span>name</span>
+            <span>address</span>
+            <span>credential</span>
+            <span>SSH algorithms</span>
+            <span>routes</span>
+            <span />
+          </div>
+        ) : (
+          <Empty role="row">no jump host</Empty>
+        )}
+        {inv.jump_hosts.map((j) => (
+          <JumpHostRow key={j.name} inv={inv} j={j} editing={editing === j.name} onEdit={(on) => setEditing(on ? j.name : null)} write={props.write} />
+        ))}
+        {props.adding ? (
+          <div class="inv-t jump" role="row" aria-label="New jump host">
+            <span class="edit">
+              <input class="t-value" aria-label="name" value={f.name} spellcheck={false} autoFocus onInput={(e) => setF({ ...f, name: e.currentTarget.value })} onKeyDown={keys} />
+            </span>
+            <JumpHostEdit inv={inv} f={f} onChange={(x) => setF({ ...f, ...x })} keys={keys} />
+            <span />
+            <span />
+          </div>
+        ) : null}
       </div>
-    </div>
+    </Card>
   );
 }

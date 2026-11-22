@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { SetAnswer, TraceStep } from "../src/api/types";
 import { serverTiming, sourceUrl } from "../src/api/client";
-import { delayShown, detailSources, headerQosShown, isRowSpan, outcomeKnown, partCounts, qosShown, rateShown } from "../src/ladder/layout";
+import { delayShown, detailSources, headerQosShown, isRowSpan, markedLines, openSpan, outcomeKnown, partCounts, qosShown, rateShown } from "../src/ladder/layout";
 
 describe("server timing", () => {
   it("reads the engine time and a cache hit of the Server-Timing header", () => {
@@ -116,6 +116,22 @@ describe("source spans of the opened row", () => {
       [60, 70],
       [80, 99],
     ]);
+  });
+
+  it("opens the smallest span of the file that holds the most specific span, and marks the lines of the most specific span", () => {
+    const s = detailSources([step([[1, 50], [60, 70], [5, 6], [3, 9]])]);
+    const open = openSpan(s)!;
+    expect([open.span.first_line, open.span.last_line]).toEqual([3, 9]);
+    expect(markedLines(open.span, s[0]!.span)).toEqual([5, 6]);
+    expect(markedLines({ file: "leaf1.conf", first_line: 60, last_line: 70 }, s[0]!.span)).toBeNull();
+    expect(markedLines({ file: "other.conf", first_line: 1, last_line: 9 }, s[0]!.span)).toBeNull();
+  });
+
+  it("opens the most specific span when no span holds it, and no span for row spans only", () => {
+    const s = detailSources([step([[10, 12], [20, 40]])]);
+    expect(openSpan(s)!.span.first_line).toBe(10);
+    const rows = { device: "site1", provenance: [{ file: "site1/devices@b156ff45a077#row", first_line: 3, last_line: 3 }] } as unknown as TraceStep;
+    expect(openSpan(detailSources([rows]))).toBeNull();
   });
 
   it("asks the API for the lines of a span with the file in percent encoding", () => {

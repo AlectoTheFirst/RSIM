@@ -6,7 +6,7 @@ import { useEffect, useState } from "preact/hooks";
 import { App } from "../App";
 import { ApiProblem, getMe, getSetup, onUnauthorized, setUp, signIn, signOut } from "../api/client";
 import type { Me } from "../api/types";
-import { ResultLine } from "../page/Parts";
+import { Card } from "../page/Card";
 import { problemText, secondsLeft, waitDetail, waitUntil } from "./model";
 import "./auth.css";
 
@@ -56,23 +56,61 @@ function useProblem(): [string | null, boolean, (e: unknown) => void, () => void
   return [text, left > 0, set, () => setProblem(null)];
 }
 
-function Frame(props: { headline: string; problem: string | null; children?: ComponentChildren }) {
+/** A field of a sign-in form: its name above the input, and the message of a refusal below it. */
+function Field(props: {
+  id: string;
+  name: string;
+  type: "text" | "password";
+  value: string;
+  onInput: (v: string) => void;
+  autoComplete: string;
+  autoFocus?: boolean;
+  title?: string;
+  message?: string | null;
+}) {
+  const msg = props.message ? `${props.id}-message` : undefined;
+  const attrs = {
+    id: props.id,
+    autoComplete: props.autoComplete,
+    autoFocus: props.autoFocus,
+    required: true,
+    spellcheck: false,
+    title: props.title,
+    "aria-invalid": props.message ? true : undefined,
+    "aria-describedby": msg,
+    value: props.value,
+    onInput: (e: { currentTarget: HTMLInputElement }) => props.onInput(e.currentTarget.value),
+  };
   return (
-    <>
-      <header class="bar top">
-        <span class="t-wordmark">RSIM</span>
-      </header>
-      <ResultLine>
-        <span class="t-headline">{props.headline}</span>
-        {props.problem ? <span>{props.problem}</span> : null}
-      </ResultLine>
-      <main class="body auth-page">{props.children}</main>
-    </>
+    <div class="auth-field">
+      <label class="t-label" for={props.id}>
+        {props.name}
+      </label>
+      {props.type === "password" ? <input type="password" {...attrs} /> : <input type="text" class="t-query" {...attrs} />}
+      {props.message ? (
+        <span id={msg} class="auth-message" role="alert">
+          {props.message}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
-const NAME_HINT = "lower-case letters, digits, . _ @ -, at most 64";
-const PASSWORD_HINT = "12 to 1024 characters";
+/** The ground of a page with no frame, and its one card with the wordmark and the title. */
+function AuthCard(props: { title: string; children?: ComponentChildren }) {
+  return (
+    <main class="auth-ground">
+      <Card label={props.title} class="auth-card">
+        <span class="t-wordmark">RSIM</span>
+        <h1 class="t-title">{props.title}</h1>
+        {props.children}
+      </Card>
+    </main>
+  );
+}
+
+const NAME_RULE = "lower-case letters, digits, . _ @ -, at most 64";
+const PASSWORD_RULE = "12 to 1024 characters";
 
 function SignInPage(props: { onIn: (u: Me) => void }) {
   const [name, setName] = useState("");
@@ -92,23 +130,15 @@ function SignInPage(props: { onIn: (u: Me) => void }) {
       .finally(() => setBusy(false));
   };
   return (
-    <Frame headline="Sign in" problem={problem}>
+    <AuthCard title="Sign in">
       <form class="auth-form" aria-label="Sign in" onSubmit={submit}>
-        <label class="label" for="signin-name">
-          name
-        </label>
-        <input id="signin-name" type="text" class="t-value" autoComplete="username" autoFocus required spellcheck={false} value={name} onInput={(e) => setName(e.currentTarget.value)} />
-        <label class="label" for="signin-password">
-          password
-        </label>
-        <input id="signin-password" type="password" autoComplete="current-password" required value={password} onInput={(e) => setPassword(e.currentTarget.value)} />
-        <span class="span2">
-          <button type="submit" disabled={busy || waiting}>
-            Sign in
-          </button>
-        </span>
+        <Field id="signin-name" name="name" type="text" autoComplete="username" autoFocus value={name} onInput={setName} />
+        <Field id="signin-password" name="password" type="password" autoComplete="current-password" value={password} onInput={setPassword} message={problem} />
+        <button type="submit" disabled={busy || waiting}>
+          Sign in
+        </button>
       </form>
-    </Frame>
+    </AuthCard>
   );
 }
 
@@ -116,16 +146,18 @@ function SetupPage(props: { onIn: (u: Me) => void; onDone: () => void }) {
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [again, setAgain] = useState("");
+  const [differ, setDiffer] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, waiting, setProblem, clear] = useProblem();
   const submit = (e: Event) => {
     e.preventDefault();
+    clear();
     if (password !== again) {
-      setProblem(new Error("passwords differ"));
+      setDiffer(true);
       return;
     }
+    setDiffer(false);
     setBusy(true);
-    clear();
     setUp(name.trim(), password)
       .then(props.onIn)
       .catch((x: unknown) => {
@@ -135,30 +167,27 @@ function SetupPage(props: { onIn: (u: Me) => void; onDone: () => void }) {
       .finally(() => setBusy(false));
   };
   return (
-    <Frame headline="First admin" problem={problem}>
+    <AuthCard title="First admin">
       <form class="auth-form" aria-label="First admin" onSubmit={submit}>
-        <label class="label" for="setup-name">
-          name
-        </label>
-        <input id="setup-name" type="text" class="t-value" autoComplete="username" autoFocus required spellcheck={false} title={NAME_HINT} value={name} onInput={(e) => setName(e.currentTarget.value)} />
-        <label class="label" for="setup-password">
-          password
-        </label>
-        <input id="setup-password" type="password" autoComplete="new-password" required title={PASSWORD_HINT} value={password} onInput={(e) => setPassword(e.currentTarget.value)} />
-        <label class="label" for="setup-again">
-          password again
-        </label>
-        <input id="setup-again" type="password" autoComplete="new-password" required value={again} onInput={(e) => setAgain(e.currentTarget.value)} />
-        <span class="span2 muted">
-          name: {NAME_HINT}; password: {PASSWORD_HINT}
-        </span>
-        <span class="span2">
-          <button type="submit" disabled={busy || waiting}>
-            Make admin
-          </button>
-        </span>
+        <Field id="setup-name" name="name" type="text" autoComplete="username" autoFocus title={NAME_RULE} value={name} onInput={setName} />
+        <Field id="setup-password" name="password" type="password" autoComplete="new-password" title={PASSWORD_RULE} value={password} onInput={setPassword} />
+        <Field
+          id="setup-again"
+          name="password again"
+          type="password"
+          autoComplete="new-password"
+          value={again}
+          onInput={(v) => {
+            setAgain(v);
+            setDiffer(false);
+          }}
+          message={differ ? "passwords differ" : problem}
+        />
+        <button type="submit" disabled={busy || waiting}>
+          Make admin
+        </button>
       </form>
-    </Frame>
+    </AuthCard>
   );
 }
 
@@ -177,15 +206,17 @@ export function Root() {
 
   switch (phase.kind) {
     case "loading":
-      return (
-        <header class="bar top">
-          <span class="t-wordmark">RSIM</span>
-        </header>
-      );
+      return <main class="auth-ground" />;
     case "off":
       return <App />;
     case "failed":
-      return <Frame headline="Sign in" problem={phase.text} />;
+      return (
+        <AuthCard title="Sign in">
+          <span class="auth-message" role="alert">
+            {phase.text}
+          </span>
+        </AuthCard>
+      );
     case "setup":
       return <SetupPage onIn={(user) => setPhase({ kind: "in", user })} onDone={reread} />;
     case "signin":

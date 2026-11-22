@@ -1,48 +1,63 @@
-// The Tables view: one table of the twin with its filters, its order, its
-// pages and its verbs, and the row that opens in place.
+// The Tables view: the table list, the table card with the forms of the
+// table, its filters, its order, its columns and its pages, and the row
+// panel of the selected row.
 import type { JSX } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { ApiProblem, getTable } from "../api/client";
+import { ApiProblem, getSourceLines, getTable } from "../api/client";
 import type { Column, SummarizeOut, TableDef, TableOut, UniqueOut } from "../api/types";
-import { HatchMark } from "../page/Hatch";
+import { Card, PageHead, PanelLayout } from "../page/Card";
+import { Icon } from "../page/Icon";
+import { MenuButton } from "../page/Menu";
+import { PageButtons } from "../page/Parts";
+import { Chip } from "../page/Pill";
+import { Tabs } from "../page/Tabs";
+import { toast } from "../page/notes";
 import { endpointAddresses } from "../page/pick";
-import { KeyLine, ResultLine } from "../page/Parts";
 import { cliTopology } from "../page/query";
-import type { RowHeight } from "../theme";
-import { Grid, type GridColumn, PageButtons } from "./Grid";
+import { type RowHeight, SIZE } from "../theme";
+import { RowPanel } from "./RowPanel";
+import { Table, type TableColumn } from "./Table";
 import {
   type CellText,
-  keyForElement,
-  keyPlace,
-  limitOptions,
+  FORM_LABELS,
   type Pages,
   type TablesState,
-  VERBS,
   type Verb,
   alignsRight,
   apiUrl,
+  cellLabel,
   cellText,
+  chipValue,
   columnWidths,
   defaultBy,
   deviceFunctions,
   filterCellText,
-  filterCells,
-  filterWords,
+  filterColumns,
+  formsOf,
   hiddenSelection,
+  isFunctionColumn,
+  keyForElement,
+  keyPlace,
+  limitOptions,
   nextPage,
   nextSort,
   pageWords,
   prefixColumn,
   previousPage,
   readState,
-  isReasonOf,
   reasonColumns,
-  SPAN_SEMANTIC,
+  repeats,
+  rowTitle,
+  rowsForm,
   setColumnFilters,
-  shownColumns,
+  sortBy,
   sortOf,
+  stepRow,
   syncPages,
   tableCommand,
+  toggleHidden,
+  visibleColumns,
+  withoutFilter,
   writeState,
 } from "./model";
 
@@ -51,7 +66,7 @@ type Body =
   | { verb: "summarize"; out: SummarizeOut }
   | { verb: "unique"; out: UniqueOut };
 
-/** The rows of the verb `describe`: the columns of the catalog entry. */
+/** The rows of the form Columns: the columns of the catalog entry. */
 function describeRows(def: TableDef): unknown[][] {
   return def.columns.map((c) => [
     c.name,
@@ -77,124 +92,101 @@ function summaryRows(out: SummarizeOut, def: TableDef | null): unknown[][] {
   ]);
 }
 
-function FilterCell(props: { col: Column | undefined; name: string; text: string; onApply: (t: string) => void; first: boolean; inputRef: { current: HTMLInputElement | null } }) {
-  const [v, setV] = useState(props.text);
-  useEffect(() => setV(props.text), [props.text]);
+/** The table list: a search field and the name of each table. */
+function TableList(props: { catalog: TableDef[] | null; current: string; onSelect: (name: string) => void }) {
+  const [text, setText] = useState("");
+  const t = text.trim().toLowerCase();
+  const tables = (props.catalog ?? []).filter((d) => !t || d.name.toLowerCase().includes(t));
   return (
-    <span class="cell filter" role="cell">
-      <input
-        ref={props.first ? props.inputRef : undefined}
-        class="t-value"
-        aria-label={`filter of ${props.name}`}
-        title="Filter values"
-        value={v}
-        spellcheck={false}
-        autocomplete="off"
-        onInput={(e) => setV(e.currentTarget.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") props.onApply(v);
-        }}
-        onBlur={() => {
-          if (v !== props.text) props.onApply(v);
-        }}
-      />
-    </span>
+    <Card label="Tables" class="table-list">
+      <label class="table-search">
+        <Icon name="search" />
+        <input
+          type="search"
+          aria-label="Find a table"
+          placeholder="Find a table"
+          value={text}
+          spellcheck={false}
+          autocomplete="off"
+          onInput={(e) => setText(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && tables[0]) props.onSelect(tables[0].name);
+          }}
+        />
+      </label>
+      <nav class="table-names t-value" aria-label="Tables">
+        {tables.map((d) => (
+          <button
+            type="button"
+            class="table-name"
+            aria-current={d.name === props.current ? "page" : undefined}
+            title={d.description}
+            onClick={() => props.onSelect(d.name)}
+          >
+            {d.name}
+          </button>
+        ))}
+      </nav>
+    </Card>
   );
 }
 
-function Detail(props: {
+/** The editor of the filters of one column: the column and the text of its filters. */
+function FilterEditor(props: {
   columns: string[];
-  defs: (Column | undefined)[];
-  row: readonly unknown[];
-  cell: (j: number) => CellText;
-  onRefer: (table: string, column: string, value: string) => void;
-  onCopy: () => void;
-  /** The addresses of an endpoint row, which the Trace view can take as its source or destination. */
-  addresses?: string[];
-  onUse?: (field: "source.ip" | "destination.ip", address: string) => void;
-  /** Opens the functions table of the device of a device row. */
-  onFunctions?: () => void;
+  column: string;
+  text: (column: string) => string;
+  onApply: (column: string, text: string) => void;
+  onCancel: () => void;
 }) {
-  const { columns, defs, row } = props;
-  const addresses = props.addresses ?? [];
-  const one = addresses.length === 1;
-  const spans = columns.flatMap((_, j) => (defs[j]?.semantic === SPAN_SEMANTIC && Array.isArray(row[j]) ? (row[j] as string[]) : []));
-  const refers = columns
-    .map((c, j) => ({ c, d: defs[j], v: row[j] }))
-    .filter((x) => x.d?.refers_to && typeof x.v === "string" && x.v !== "");
+  const [column, setColumn] = useState(props.column);
+  const [value, setValue] = useState(() => props.text(props.column));
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => input.current?.focus(), []);
+  const keys = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      props.onCancel();
+    }
+  };
   return (
-    <>
-      <div>
-        <div class="t-label">row</div>
-        <div class="facts">
-          {columns.map((c, j) => {
-            if (defs[j]?.semantic === SPAN_SEMANTIC || isReasonOf(columns, c)) return null;
-            const t = props.cell(j);
-            const v = row[j];
-            return (
-              <>
-                <span class="t-label">{c}</span>
-                {!t.known ? (
-                  <span>
-                    <HatchMark>
-                      <span class="t-value">not known: {t.why}</span>
-                    </HatchMark>
-                  </span>
-                ) : Array.isArray(v) ? (
-                  <div>
-                    {v.map((x) => (
-                      <div class="t-value">{typeof x === "string" ? x : JSON.stringify(x)}</div>
-                    ))}
-                  </div>
-                ) : (
-                  <span class="t-value">{t.text}</span>
-                )}
-              </>
-            );
-          })}
-        </div>
-      </div>
-      <div>
-        <div class="t-label">source lines</div>
-        {spans.length ? (
-          <>
-            <div>
-              {spans.map((l) => (
-                <div class="t-value">{l}</div>
-              ))}
-            </div>
-            <div class="muted">no source text</div>
-          </>
-        ) : (
-          <div class="muted">no source lines</div>
-        )}
-        <div class="group actions wrap">
-          {props.onFunctions ? (
-            <button type="button" onClick={props.onFunctions}>
-              View functions
-            </button>
-          ) : null}
-          {refers.map((x) => (
-            <button type="button" onClick={() => props.onRefer(x.d!.refers_to![0], x.d!.refers_to![1], x.v as string)}>
-              Show {x.v as string} in {x.d!.refers_to![0]}
-            </button>
-          ))}
-          {props.onUse
-            ? addresses.flatMap((a) => [
-                <button type="button" onClick={() => props.onUse!("source.ip", a)}>
-                  {one ? "Use as source" : `Use ${a} as source`}
-                </button>,
-                <button type="button" onClick={() => props.onUse!("destination.ip", a)}>
-                  {one ? "Use as destination" : `Use ${a} as destination`}
-                </button>,
-              ])
-            : null}
-          <button type="button" onClick={props.onCopy}>
-            Copy row as JSON
-          </button>
-        </div>
-      </div>
-    </>
+    <span class="filter-edit group" role="group" aria-label="Filter" onKeyDown={keys}>
+      <select
+        class="t-value"
+        aria-label="Filter column"
+        value={column}
+        onChange={(e) => {
+          const c = e.currentTarget.value;
+          setColumn(c);
+          setValue(props.text(c));
+        }}
+      >
+        {props.columns.map((c) => (
+          <option value={c}>{c}</option>
+        ))}
+      </select>
+      <input
+        ref={input}
+        class="t-value"
+        aria-label="Filter values"
+        value={value}
+        spellcheck={false}
+        autocomplete="off"
+        onInput={(e) => setValue(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            props.onApply(column, value);
+          }
+        }}
+      />
+      <button type="button" class="primary" onClick={() => props.onApply(column, value)}>
+        Apply
+      </button>
+      <button type="button" onClick={props.onCancel}>
+        Cancel
+      </button>
+    </span>
   );
 }
 
@@ -217,9 +209,11 @@ export function TablesView(props: {
   const [problem, setProblem] = useState<string | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState({ by: "", count: "", address: "" });
-  const firstFilter = useRef<HTMLInputElement | null>(null);
+  // The column of the open filter editor, and the control that opened it.
+  const [editing, setEditing] = useState<string | null>(null);
+  const editOpener = useRef<HTMLElement | null>(null);
+  const rowsRef = useRef<HTMLElement | null>(null);
 
   const request = def ? apiUrl(twin, st, def) : null;
 
@@ -250,7 +244,7 @@ export function TablesView(props: {
         if (!live) return;
         setAnswer(null);
         setProblem(e instanceof ApiProblem ? `request refused: ${e.detail}` : String(e));
-      })
+      });
     return () => {
       live = false;
     };
@@ -270,19 +264,21 @@ export function TablesView(props: {
     navigate(writeState(s, base));
   }
 
+  const openTable = (table: string, filters: TablesState["filters"] = []) =>
+    go({ table, verb: "show", filters, sort: [], by: [], hide: [] });
+
   function copy(text: string, what: string) {
     navigator.clipboard
       .writeText(text)
-      .then(() => setNotice(`${what} copied`))
-      .catch(() => setNotice(`${what} not copied`));
+      .then(() => toast(`${what} copied`))
+      .catch(() => toast(`${what} not copied`));
   }
 
-  // The grid of the body: its columns, rows and cells.
+  // The grid of the form: its columns, rows and cells.
   const grid = useMemo(() => {
     if (st.verb === "describe") {
       if (!def) return null;
-      const rows = describeRows(def);
-      return { columns: DESCRIBE_COLUMNS, defs: [] as (Column | undefined)[], rows, hairlines: false };
+      return { columns: DESCRIBE_COLUMNS, defs: [] as (Column | undefined)[], rows: describeRows(def), hairlines: false };
     }
     if (!body) return null;
     if (body.verb === "summarize") {
@@ -299,56 +295,99 @@ export function TablesView(props: {
     const k = reasons[j]!;
     return cellText(r[j], grid!.defs[j], k >= 0 ? r[k] : undefined);
   };
-  const unknownCells = useMemo(() => {
-    if (!grid) return 0;
-    let n = 0;
-    for (let i = 0; i < grid.rows.length; i++) for (let j = 0; j < grid.columns.length; j++) if (!cellOf(i, j).known) n += 1;
-    return n;
-  }, [grid]);
+  const labelOf = (i: number, j: number): string => cellLabel(cellOf(i, j), grid!.defs[j], grid!.rows[i]![j]);
 
-  const tableOut = body && (body.verb === "show" || body.verb === "top" || body.verb === "lpm") ? body.out : null;
-  const shown = useMemo(() => (grid ? shownColumns(grid.columns, grid.defs, tableOut !== null) : []), [grid, tableOut]);
+  const tableOut = body && rowsForm(body.verb) ? (body.out as TableOut) : null;
+  const tableColumns = tableOut !== null;
+  const shown = useMemo(
+    () => (grid ? (tableColumns ? visibleColumns(grid.columns, st.hide) : grid.columns.map((_, j) => j)) : []),
+    [grid, tableColumns, st.hide.join(",")],
+  );
   const shownRows = useMemo(() => (grid ? grid.rows.map((r) => shown.map((j) => r[j])) : []), [grid, shown]);
-  const widths = useMemo(() => (grid ? columnWidths(grid.columns, grid.rows, 4, 48, (i, j) => cellOf(i, j).known) : []), [grid]);
+  const same = useMemo(() => (grid?.hairlines ? repeats(shownRows) : null), [grid, shownRows]);
+  const widths = useMemo(
+    () => (grid ? columnWidths(grid.columns, grid.rows, 4, 48, (i, j) => cellOf(i, j).known, labelOf) : []),
+    [grid],
+  );
   const sortable = st.verb === "show";
-  const gridColumns: GridColumn[] = grid
+  const filterable = st.verb !== "describe" && !!def;
+  const names = filterColumns(def);
+
+  function startFilter(column: string) {
+    editOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setEditing(column);
+  }
+  function endFilter() {
+    setEditing(null);
+    const to = editOpener.current;
+    if (to && to.isConnected) to.focus();
+  }
+
+  const columns: TableColumn[] = grid
     ? shown.map((j) => {
         const name = grid.columns[j]!;
         const d = grid.defs[j];
         const s = sortable ? sortOf(st.sort, name) : null;
         const right = d ? alignsRight(d) : name === "distinct" || name === "nulls" || name === "count";
-        const head = sortable ? (
-          <button
-            type="button"
-            class="plain head"
-            title={d?.description}
-            onClick={(e) => go({ sort: nextSort(st.sort, name, e.shiftKey) })}
-          >
-            {name}
-            {s ? <span class="t-index">{` ${s.dir === "up" ? "rising" : "falling"}${st.sort.length > 1 ? ` ${s.n}` : ""}`}</span> : null}
-          </button>
-        ) : undefined;
-        return { name, width: widths[j]! + (s ? 9 : 0), right, head, title: d?.description };
+        const fn = isFunctionColumn(d);
+        const extra = tableColumns && d ? " + var(--chip-button) + var(--button-gap)" : "";
+        const ch = `calc(${widths[j]! + (s ? 10 : 0)}ch + 2 * var(--cell-pad)${extra})`;
+        const track = fn ? `min(${ch}, var(--col-function-max))` : ch;
+        const menu =
+          tableColumns && d ? (
+            <MenuButton kind="menu" label={`Column menu of ${name}`} button={<Icon name="column-menu" size={SIZE.iconSmall} />} buttonLabel={`Column menu of ${name}`} buttonClass="icon small" align="start">
+              {(close) => (
+                <>
+                  {sortable ? (
+                    <>
+                      <button type="button" class="menu-item" role="menuitem" tabIndex={-1} onClick={() => (close(), go({ sort: sortBy(st.sort, name, "up") }))}>
+                        Sort rising
+                      </button>
+                      <button type="button" class="menu-item" role="menuitem" tabIndex={-1} onClick={() => (close(), go({ sort: sortBy(st.sort, name, "down") }))}>
+                        Sort falling
+                      </button>
+                      {s ? (
+                        <button type="button" class="menu-item" role="menuitem" tabIndex={-1} onClick={() => (close(), go({ sort: sortBy(st.sort, name, null) }))}>
+                          Remove from sort
+                        </button>
+                      ) : null}
+                    </>
+                  ) : null}
+                  {names.includes(name) ? (
+                    <button type="button" class="menu-item" role="menuitem" tabIndex={-1} onClick={() => (close(), startFilter(name))}>
+                      Filter
+                    </button>
+                  ) : null}
+                  <button type="button" class="menu-item" role="menuitem" tabIndex={-1} onClick={() => (close(), go({ hide: toggleHidden(st.hide, name) }, true))}>
+                    Hide
+                  </button>
+                </>
+              )}
+            </MenuButton>
+          ) : null;
+        const head = (
+          <>
+            {sortable ? (
+              <button type="button" class="plain head" title={d?.description} onClick={(e) => go({ sort: nextSort(st.sort, name, e.shiftKey) })}>
+                {name}
+                {s ? <span class="sort-word t-index">{`${s.dir === "up" ? "rising" : "falling"}${st.sort.length > 1 ? ` ${s.n}` : ""}`}</span> : null}
+              </button>
+            ) : (
+              <span class="head" title={d?.description}>
+                {name}
+              </span>
+            )}
+            {menu}
+          </>
+        );
+        return { name, track, right, functionName: fn, head };
       })
     : [];
 
-  const filterable = grid && (st.verb === "show" || st.verb === "top" || st.verb === "lpm");
-  const filters = filterable
-    ? filterCells(grid.columns, grid.defs, shown).map(({ name, col, first }) => (
-        <FilterCell
-          col={col}
-          name={name}
-          text={filterCellText(name, st.filters)}
-          first={first}
-          inputRef={firstFilter}
-          onApply={(t) => go({ filters: setColumnFilters(st.filters, name, t) })}
-        />
-      ))
-    : null;
-
-  const hidden = grid ? hiddenSelection(grid.columns, shown, st.filters, st.sort) : { filters: [], sort: [] };
-
+  const hidden = grid && tableColumns ? hiddenSelection(grid.columns, shown, [], st.sort) : { filters: [], sort: [] };
   const next = body?.verb === "show" ? (body.out.next_cursor ?? null) : null;
+  const count = grid?.rows.length ?? 0;
+  const opened = open && tableOut && selected !== null && selected < count ? selected : null;
 
   const goNext = () => {
     if (!next || !tableOut) return;
@@ -365,27 +404,19 @@ export function TablesView(props: {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
       const t = e.target as HTMLElement | null;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const place = keyPlace(t);
-      if (keyForElement(place, e.key)) {
-        if (place === "text" && e.key === "Escape") t?.blur();
-        return;
-      }
-      const n = grid?.rows.length ?? 0;
+      if (keyForElement(keyPlace(t), e.key)) return;
       switch (e.key) {
         case "j":
-          if (n) setSelected((s) => (s === null ? 0 : Math.min(n - 1, s + 1)));
+          if (count) setSelected((s) => (s === null ? 0 : Math.min(count - 1, s + 1)));
           break;
         case "k":
-          if (n) setSelected((s) => (s === null ? 0 : Math.max(0, s - 1)));
+          if (count) setSelected((s) => (s === null ? 0 : Math.max(0, s - 1)));
           break;
         case "Enter":
-          if (selected === null) return;
+          if (selected === null || !tableOut) return;
           setOpen(!open);
-          break;
-        case "Escape":
-          setOpen(false);
           break;
         case "n":
           goNext();
@@ -394,7 +425,8 @@ export function TablesView(props: {
           goPrevious();
           break;
         case "/":
-          firstFilter.current?.focus();
+          if (!filterable || !names.length) return;
+          startFilter(editing ?? names[0]!);
           break;
         case "y":
           copy(tableCommand(cliTopology(twin), st, def), "rsim command");
@@ -408,25 +440,17 @@ export function TablesView(props: {
     return () => document.removeEventListener("keydown", onKey);
   });
 
-  const select = (i: number) => {
-    if (i === selected) setOpen(!open);
-    else {
-      setSelected(i);
-      setOpen(true);
-    }
-  };
-
   const runParams = (e: Event) => {
     e.preventDefault();
     const by = draft.by
       .split(",")
       .map((x) => x.trim())
       .filter(Boolean);
-    const count = Number(draft.count);
-    go({ by, count: Number.isInteger(count) && count > 0 ? count : 5, address: draft.address.trim() });
+    const n = Number(draft.count);
+    go({ by, count: Number.isInteger(n) && n > 0 ? n : 5, address: draft.address.trim() });
   };
 
-  const verbs: Verb[] = def ? VERBS.filter((v) => v === "describe" || def.verbs.includes(v)) : [];
+  const forms: Verb[] = formsOf(def);
 
   let facts: JSX.Element;
   if (!catalog) facts = <span class="muted">loading catalog</span>;
@@ -434,7 +458,7 @@ export function TablesView(props: {
   else if (busy) facts = <span class="muted">running</span>;
   else if (problem) facts = <span>{problem}</span>;
   else {
-    const parts: JSX.Element[] = [<span class="t-headline">{def.name}</span>];
+    const parts: JSX.Element[] = [];
     if (st.verb === "describe") {
       parts.push(<span>{def.description}</span>);
       parts.push(
@@ -446,10 +470,8 @@ export function TablesView(props: {
       parts.push(<span class="muted">needs {def.needs}</span>);
     } else if (st.verb === "lpm" && !st.address) {
       parts.push(<span class="muted">no address</span>);
-      parts.push(<span class="muted">longest prefix match on {prefixColumn(def)}</span>);
     } else if (body?.verb === "show") {
       parts.push(<span>{pageWords(pages, body.out.rows.length, body.out.total)}</span>);
-      if (body.out.total === 0) parts.push(<span class="muted">needs {def.needs}</span>);
     } else if (body?.verb === "summarize") {
       parts.push(<span>{body.out.total} rows</span>);
     } else if (body?.verb === "unique") {
@@ -457,58 +479,12 @@ export function TablesView(props: {
     } else if (body) {
       parts.push(<span>{body.out.rows.length} rows</span>);
     }
-    if (st.verb !== "show" && st.verb !== "describe" && st.filters.length && !filterable) {
-      parts.push(
-        <span>
-          <span class="t-label">filters </span>
-          <span class="t-value">{filterWords(st.filters)}</span>
-        </span>,
-      );
-    }
-    if (filterable && hidden.filters.length) {
-      parts.push(
-        <span>
-          <span class="t-label">hidden filters </span>
-          <span class="t-value">{filterWords(hidden.filters)}</span>{" "}
-          <button type="button" class="plain" onClick={() => go({ filters: st.filters.filter((f) => !hidden.filters.includes(f)) })}>
-            Clear
-          </button>
-        </span>,
-      );
-    }
-    if (sortable && hidden.sort.length) {
-      parts.push(
-        <span>
-          <span class="t-label">hidden order </span>
-          <span class="t-value">{hidden.sort.join(",")}</span>{" "}
-          <button type="button" class="plain" onClick={() => go({ sort: st.sort.filter((x) => !hidden.sort.includes(x)) })}>
-            Clear
-          </button>
-        </span>,
-      );
-    }
-    if (unknownCells) parts.push(<HatchMark>{unknownCells} cells not known</HatchMark>);
     facts = <>{parts}</>;
   }
 
-  return (
-    <>
-      <form class="bar" aria-label="Table" onSubmit={runParams}>
-        <label class="field">
-          <span class="t-label">table</span>
-          <select class="t-value" value={st.table} onChange={(e) => go({ table: e.currentTarget.value, filters: [], sort: [], by: [], verb: st.verb === "lpm" ? "show" : st.verb })}>
-            {(catalog ?? []).map((t) => (
-              <option value={t.name}>{t.name}</option>
-            ))}
-          </select>
-        </label>
-        <span class="group" role="group" aria-label="Verb">
-          {verbs.map((v) => (
-            <button type="button" aria-pressed={v === st.verb} onClick={() => go({ verb: v })}>
-              {v}
-            </button>
-          ))}
-        </span>
+  const params =
+    st.verb === "unique" || st.verb === "top" || st.verb === "lpm" ? (
+      <form class="bar table-params" aria-label="Parameters" onSubmit={runParams}>
         {st.verb === "unique" || st.verb === "top" ? (
           <label class="field">
             <span class="t-label">{st.verb === "unique" ? "columns" : "column"}</span>
@@ -534,107 +510,237 @@ export function TablesView(props: {
           </>
         ) : null}
         {st.verb === "lpm" ? (
-          <label class="field">
-            <span class="t-label">address</span>
-            <input
-              class="t-query"
-              value={draft.address}
-              spellcheck={false}
-              autocomplete="off"
-              onInput={(e) => setDraft({ ...draft, address: e.currentTarget.value })}
-            />
-          </label>
+          <>
+            <label class="field">
+              <span class="t-label">address</span>
+              <input
+                class="t-query"
+                value={draft.address}
+                spellcheck={false}
+                autocomplete="off"
+                onInput={(e) => setDraft({ ...draft, address: e.currentTarget.value })}
+              />
+            </label>
+            <span class="field">
+              <span class="t-label">column</span>
+              <span class="t-value">{prefixColumn(def)}</span>
+            </span>
+          </>
         ) : null}
-        {st.verb === "unique" || st.verb === "top" || st.verb === "lpm" ? <button type="submit">Run</button> : null}
-        <span class="grow" />
-        {st.verb === "show" ? (
-          <label class="field">
-            <span class="t-label">rows per page</span>
-            <select class="t-value" value={String(st.limit)} onChange={(e) => go({ limit: Number(e.currentTarget.value) })}>
-              {limitOptions(st.limit).map((l) => (
-                <option value={String(l)}>{l}</option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        <span class="group">
-          <button type="button" disabled={!def} onClick={() => copy(tableCommand(cliTopology(twin), st, def), "rsim command")}>
-            Copy as rsim command
+        <button type="submit">Run</button>
+      </form>
+    ) : null;
+
+  const tools = filterable ? (
+    <div class="bar table-tools">
+      <span class="group wrap">
+        {st.filters.map((f) => (
+          <Chip column={f.column} value={chipValue(f)} onRemove={() => go({ filters: withoutFilter(st.filters, f) })} />
+        ))}
+        {editing !== null ? (
+          <FilterEditor
+            columns={names}
+            column={editing}
+            text={(c) => filterCellText(c, st.filters)}
+            onApply={(c, t) => {
+              endFilter();
+              go({ filters: setColumnFilters(st.filters, c, t) });
+            }}
+            onCancel={endFilter}
+          />
+        ) : (
+          <button type="button" class="ghost" disabled={!names.length} onClick={() => startFilter(names[0]!)}>
+            <span class="with-icon">
+              <Icon name="add" />
+              Add filter
+            </span>
           </button>
-          <button
-            type="button"
-            disabled={!request}
-            onClick={() => request && copy(new URL(request, window.location.href).href, "API URL")}
-          >
-            Copy API URL
+        )}
+      </span>
+      <span class="grow" />
+      {hidden.sort.length ? (
+        <span class="field">
+          <span class="t-label">hidden order</span>
+          <span class="t-value">{hidden.sort.join(",")}</span>
+          <button type="button" class="ghost" onClick={() => go({ sort: st.sort.filter((x) => !hidden.sort.includes(x)) })}>
+            Clear
           </button>
         </span>
-      </form>
-      <ResultLine>
-        {facts}
-        {st.verb === "show" && body?.verb === "show" ? (
-          <PageButtons
-            onFirst={goFirst}
-            onPrevious={goPrevious}
-            onNext={goNext}
-            first={st.cursor !== null}
-            previous={pages.back.length > 0}
-            next={next !== null}
-          />
-        ) : null}
-      </ResultLine>
-      <main class="body grid-body">
-        {grid ? (
-          <Grid
-            label={st.table}
-            columns={gridColumns}
-            rows={shownRows}
-            cell={(i, k) => cellOf(i, shown[k]!)}
-            h={props.row}
-            selected={selected}
-            open={open}
-            onSelect={select}
-            filters={filters}
-            hairlines={grid.hairlines}
-            detail={
-              tableOut
-                ? (i) => (
-                    <Detail
-                      columns={grid.columns}
-                      defs={grid.defs}
-                      row={grid.rows[i]!}
-                      cell={(j) => cellOf(i, j)}
-                      addresses={st.table === "endpoints" ? endpointAddresses(grid.columns, grid.rows[i]!) : []}
-                      onUse={props.onUseAddress}
-                      onFunctions={(() => {
-                        const f = st.table === "devices" ? deviceFunctions(grid.columns, grid.rows[i]!) : null;
-                        return f ? () => go({ table: "functions", verb: "show", filters: f, sort: [], by: [] }) : undefined;
-                      })()}
-                      onRefer={(table, column, value) =>
-                        go({ table, verb: "show", filters: [{ column, op: "=", value }], sort: [], by: [] })
-                      }
-                      onCopy={() => {
-                        const o: Record<string, unknown> = {};
-                        grid.columns.forEach((c, j) => (o[c] = grid.rows[i]![j]));
-                        copy(JSON.stringify(o), "row");
-                      }}
-                    />
-                  )
-                : undefined
-            }
-          />
-        ) : null}
-      </main>
-      <KeyLine
-        keys={[
-          ["j k", "row"],
-          ["enter", "open"],
-          ["/", "filter"],
-          ["n p", "page"],
-          ["y", "copy"],
-          ...(notice ? ([["", notice]] as [string, string][]) : []),
-        ]}
+      ) : null}
+      {tableColumns && grid ? (
+        <MenuButton kind="menu" label="Show columns" button="Show columns" align="end">
+          {() =>
+            visibleColumns(grid.columns, []).map((j) => {
+              const name = grid.columns[j]!;
+              const on = !st.hide.includes(name);
+              return (
+                <button
+                  type="button"
+                  class="menu-item"
+                  role="menuitemcheckbox"
+                  aria-checked={on}
+                  tabIndex={-1}
+                  onClick={() => go({ hide: toggleHidden(st.hide, name) }, true)}
+                >
+                  {name}
+                </button>
+              );
+            })
+          }
+        </MenuButton>
+      ) : null}
+    </div>
+  ) : null;
+
+  const foot = (
+    <>
+      <span class="table-facts">{facts}</span>
+      <span class="grow" />
+      {st.verb === "show" ? (
+        <label class="field">
+          <span class="t-label">rows per page</span>
+          <select class="t-value" value={String(st.limit)} onChange={(e) => go({ limit: Number(e.currentTarget.value) })}>
+            {limitOptions(st.limit).map((l) => (
+              <option value={String(l)}>{l}</option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {st.verb === "show" && body?.verb === "show" ? (
+        <PageButtons onFirst={goFirst} onPrevious={goPrevious} onNext={goNext} first={st.cursor !== null} previous={pages.back.length > 0} next={next !== null} />
+      ) : null}
+    </>
+  );
+
+  let panel: JSX.Element | null = null;
+  if (opened !== null && grid && tableOut) {
+    const row = grid.rows[opened]!;
+    const device = st.table === "devices" ? deviceFunctions(grid.columns, row) : null;
+    const addresses = st.table === "endpoints" ? endpointAddresses(grid.columns, row) : [];
+    const one = addresses.length === 1;
+    const refers = grid.columns
+      .map((c, j) => ({ c, d: grid.defs[j], v: row[j] }))
+      .filter((x) => x.d?.refers_to && typeof x.v === "string" && x.v !== "");
+    const prev = stepRow(opened, -1, count);
+    const after = stepRow(opened, 1, count);
+    panel = (
+      <RowPanel
+        title={rowTitle(def, grid.columns, row)}
+        columns={grid.columns}
+        defs={grid.defs}
+        row={row}
+        cell={(j) => cellOf(opened, j)}
+        onClose={() => setOpen(false)}
+        onPrevious={prev === null ? null : () => setSelected(prev)}
+        onNext={after === null ? null : () => setSelected(after)}
+        load={(s) => getSourceLines(twin, s)}
+        returnFocus={rowsRef}
+        actions={
+          <>
+            {device ? (
+              <button type="button" onClick={() => openTable("functions", device)}>
+                View functions
+              </button>
+            ) : null}
+            {refers.map((x) => (
+              <button type="button" onClick={() => openTable(x.d!.refers_to![0], [{ column: x.d!.refers_to![1], op: "=", value: x.v as string }])}>
+                Show {x.v as string} in {x.d!.refers_to![0]}
+              </button>
+            ))}
+            {props.onUseAddress
+              ? addresses.flatMap((a) => [
+                  <button type="button" onClick={() => props.onUseAddress!("source.ip", a)}>
+                    {one ? "Use as source" : `Use ${a} as source`}
+                  </button>,
+                  <button type="button" onClick={() => props.onUseAddress!("destination.ip", a)}>
+                    {one ? "Use as destination" : `Use ${a} as destination`}
+                  </button>,
+                ])
+              : null}
+            <button
+              type="button"
+              onClick={() => {
+                const o: Record<string, unknown> = {};
+                grid.columns.forEach((c, j) => (o[c] = row[j]));
+                copy(JSON.stringify(o), "row");
+              }}
+            >
+              <span class="with-icon">
+                <Icon name="copy" />
+                Copy row as JSON
+              </span>
+            </button>
+          </>
+        }
       />
+    );
+  }
+
+  return (
+    <>
+      <PageHead
+        title="Tables"
+        actions={
+          <>
+            <button type="button" disabled={!def} onClick={() => copy(tableCommand(cliTopology(twin), st, def), "rsim command")}>
+              <span class="with-icon">
+                <Icon name="copy" />
+                Copy as rsim command
+              </span>
+            </button>
+            <button type="button" disabled={!request} onClick={() => request && copy(new URL(request, window.location.href).href, "API URL")}>
+              <span class="with-icon">
+                <Icon name="copy" />
+                Copy API URL
+              </span>
+            </button>
+          </>
+        }
+      />
+      <div class="tables-layout">
+        <TableList catalog={catalog} current={st.table} onSelect={(t) => t !== st.table && go({ table: t, filters: [], sort: [], by: [], hide: [], verb: st.verb === "lpm" ? "show" : st.verb })} />
+        <PanelLayout fill panel={panel}>
+          <Card label={st.table || "Table"} flush fill foot={foot} class="table-card">
+            {forms.length ? (
+              <div class="table-tabs">
+                <Tabs<Verb> label="Form" tabs={forms.map((v) => ({ id: v, label: FORM_LABELS[v] }))} current={st.verb} onSelect={(v) => go({ verb: v })} />
+              </div>
+            ) : null}
+            {params}
+            {tools}
+            {grid ? (
+              <span class="table-rows" ref={(el) => {
+                  rowsRef.current = el?.querySelector<HTMLElement>(".tgrid-rows") ?? null;
+                }}>
+                <Table
+                  id="table-row"
+                  label={st.table}
+                  columns={columns}
+                  count={count}
+                  cell={(i, k) => {
+                    const j = shown[k]!;
+                    const text = labelOf(i, j);
+                    return { c: cellOf(i, j), text, title: text !== cellOf(i, j).text ? cellOf(i, j).text : undefined };
+                  }}
+                  same={(i, k) => !!same && k < same[i]!}
+                  rowHeight={props.row}
+                  current={selected}
+                  onCurrent={setSelected}
+                  onActivate={
+                    tableOut
+                      ? (i) => {
+                          setSelected(i);
+                          setOpen(true);
+                        }
+                      : undefined
+                  }
+                  resetKey={grid}
+                />
+              </span>
+            ) : null}
+          </Card>
+        </PanelLayout>
+      </div>
     </>
   );
 }

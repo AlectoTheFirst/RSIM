@@ -1,256 +1,330 @@
-/* The styles of the Inventory page: the device table with its group rows,
-   the opened device and group rows with their fields, the band of the
-   devices that the twin sees, and the tables Credentials, Jump hosts and
-   Routes. Each colour, font and size is a custom
-   property of the theme. */
+/* The styles of the Inventory view: the device list with its group rows,
+   the list of the devices that the twin sees, the fields of the panels,
+   and the tables of the credentials, the routes and the jump hosts. Each
+   colour, font and size is a custom property of the theme. */
 
-.inv-page .t-value,
-.inv-page input.t-value {
-  font-stretch: var(--value-stretch);
+.inv-grow {
+  flex-grow: 1;
 }
 
-.inv {
+/* The filter field of the card Devices. */
+.inv-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--group-gap);
+  width: var(--inv-filter);
+  max-width: 100%;
+  height: var(--input-panel);
+  padding: 0 var(--input-pad);
+  background: var(--surface);
+  border: var(--hairline) solid var(--control);
+  border-radius: var(--input-radius);
+  color: var(--ink-muted);
+}
+
+.inv-filter:focus-within {
+  outline: var(--focus-ring) solid var(--action-ink);
+  outline-offset: var(--focus-offset);
+}
+
+.inv-filter > input {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  outline: none;
+}
+
+.inv-filter > input::placeholder,
+.inv-settings input::placeholder {
+  color: var(--ink-muted);
+}
+
+/* The device list: a grid row for each group and each device. */
+.inv-devices {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.inv-list {
+  flex: 1 1 0;
+}
+
+.inv-list > .vrow,
+.inv-list > .vrows-head,
+.inv-seen-list > .vrow,
+.inv-seen-list > .vrows-head {
   width: max-content;
   min-width: 100%;
-  padding-bottom: var(--margin);
 }
 
 .inv-row {
   display: grid;
   grid-template-columns:
-    var(--inv-mark) var(--inv-device) var(--inv-address) var(--inv-vendor) var(--inv-site)
-    var(--inv-location) var(--inv-credential) var(--inv-route) var(--inv-ssh)
-    var(--inv-trust) var(--inv-cycle) minmax(var(--inv-serial), 1fr);
-  min-height: var(--row);
+    var(--inv-mark)
+    calc(var(--inv-w-device) * 1ch + var(--cell-pad))
+    calc(var(--inv-w-address) * 1ch + var(--cell-pad))
+    calc(var(--inv-w-vendor) * 1ch + var(--cell-pad))
+    calc(var(--inv-w-site) * 1ch + var(--cell-pad))
+    calc(var(--inv-w-credential) * 1ch + var(--cell-pad))
+    calc(var(--inv-w-route) * 1ch + var(--cell-pad))
+    calc(var(--inv-w-ssh) * 1ch + var(--cell-pad))
+    calc(var(--inv-w-trust) * 1ch + var(--cell-pad))
+    var(--inv-cycle)
+    minmax(var(--inv-serial), 1fr)
+    var(--inv-group-action);
   align-items: center;
-}
-
-.inv-row > * {
+  box-sizing: border-box;
+  height: var(--row);
+  font-family: var(--value-family);
+  font-size: var(--value-size);
+  line-height: var(--value-line);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.inv-head {
-  color: var(--ink-muted);
-  font-size: var(--label-size);
-  padding-bottom: var(--button-gap);
-}
-
-.inv-group {
-  border-top: var(--hairline) solid var(--rule);
-  background: var(--raise);
-  font-weight: var(--headline-weight);
-}
-
-.inv-group .muted {
-  font-weight: var(--body-weight);
-}
-
-.inv-group .span2 {
-  grid-column: 2 / 4;
-}
-
-.inv-device,
-.inv-open {
-  cursor: pointer;
-}
-
-.inv-device:hover,
-.inv-device.opened,
-.inv-detail {
-  background: var(--raise);
-}
-
-.inv-device.opened,
-.inv-open.opened {
-  box-shadow: inset var(--selected-bar) 0 0 var(--forward);
-}
-
-.inv-device:focus-visible,
-.inv-open:focus-visible {
-  outline: var(--focus-ring) solid var(--forward);
-  outline-offset: calc(-1 * var(--focus-ring));
-}
-
-/* A setting that the device inherits from the group row above. */
-.inv .same {
-  position: relative;
-  overflow: visible;
-}
-
-.inv .same::before {
-  content: "";
-  position: absolute;
-  left: var(--button-gap);
-  top: calc(-1 * var(--cell-pad));
-  bottom: calc(-1 * var(--cell-pad));
-  width: var(--hairline);
-  background: var(--rule);
-}
-
-.inv-page .hc {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--mark-gap);
-}
-
-.inv-page .hc > svg {
-  flex-shrink: 0;
-}
-
-.inv-detail {
-  display: grid;
-  grid-template-columns: var(--inv-mark) 1fr;
   border-bottom: var(--hairline) solid var(--rule);
 }
 
-.inv-detail > .cols {
-  grid-column: 2;
-  display: grid;
-  grid-template-columns: repeat(3, max-content);
-  gap: var(--inv-detail-gap);
-  padding: var(--button-pad) var(--margin) var(--inv-detail-bottom) 0;
+.inv-row > * {
+  padding-right: var(--cell-pad);
 }
 
-.inv-detail .head {
+.inv-row .t-label,
+.inv-row .hatch-text {
+  font-family: var(--label-family);
+  font-size: var(--label-size);
+}
+
+.inv-head {
+  height: var(--row);
   color: var(--ink-muted);
-  margin-bottom: var(--button-gap);
+  font-weight: var(--weight-control);
+  background: var(--raise);
 }
 
-.inv-detail .span2 {
-  grid-column: span 2;
+.inv-head > span {
+  font-family: var(--label-family);
+  font-size: var(--label-size);
 }
 
-/* The fields of an edit: the name, the value or the inherited value, and the collectors that do not read it. */
-.inv-settings {
-  display: grid;
-  grid-template-columns: var(--inv-setting-label) var(--inv-setting-input) auto;
-  gap: var(--button-gap) var(--cell-pad);
-  align-items: center;
+.inv-group {
+  background: var(--ground);
 }
 
-.inv-settings > input,
-.inv-settings > select {
-  width: 100%;
+.inv-group .strong {
+  font-weight: var(--weight-strong);
 }
 
-.inv-settings > span {
-  white-space: nowrap;
+.inv-group .t-label {
+  font-weight: var(--weight-regular);
 }
 
-.inv-page input::placeholder {
-  color: var(--ink-muted);
+.vrow:hover > .inv-group {
+  background: var(--raise);
 }
 
-.kv {
-  display: grid;
-  grid-template-columns: var(--inv-kv-label) 1fr;
-  gap: var(--button-gap) var(--cell-pad);
-  align-items: center;
+.vrow.current > .inv-group {
+  background: var(--selected);
 }
 
-.inv input,
-.inv select,
-.inv-tables input,
-.inv-tables select {
-  height: var(--input);
-  padding: 0 var(--input-pad);
-  font: inherit;
-  max-width: 100%;
+.inv-action {
+  justify-self: end;
 }
 
-.inv input.param,
-.inv-tables input.param {
-  color: var(--parameter);
+/* The action of a group row stays at the right edge of the list. */
+.inv-group > .inv-action {
+  position: sticky;
+  right: 0;
+  justify-self: stretch;
+  display: flex;
+  justify-content: flex-end;
+  padding-left: var(--button-gap);
+  background: inherit;
 }
 
-.inv input.site {
-  width: var(--inv-site-input);
+.inv-action > button {
+  font-family: var(--body-family);
+  font-size: var(--body-size);
 }
 
-.inv input.location {
-  width: var(--inv-location-input);
+.inv-action > button {
+  height: calc(var(--row) - 2 * var(--button-gap));
 }
 
-.inv .edit > input,
-.inv .edit > select,
-.inv-tables .edit > input,
-.inv-tables .edit > select {
-  width: calc(100% - var(--button-gap));
-}
-
-.inv .edit,
-.inv-tables .edit {
-  overflow: visible;
-}
-
-.inv-band-mark {
+/* A setting that the device takes from the group row above it: a hairline through the cell. */
+.inv-row .same {
   align-self: stretch;
   position: relative;
 }
 
-.inv-band-mark > svg {
+.inv-row .same::before {
+  content: "";
   position: absolute;
+  left: var(--button-gap);
   top: 0;
-  left: 0;
+  bottom: calc(-1 * var(--hairline));
+  width: var(--hairline);
+  background: var(--rule);
 }
 
-.inv-group .span-all {
-  grid-column: 2 / -1;
+/* The devices that the twin sees and the inventory does not have. */
+.inv-seen {
+  display: flex;
+  flex-direction: column;
+  height: calc((var(--inv-seen-rows) + 1) * var(--row) + var(--hairline));
 }
 
-.inv-band .text {
-  grid-column: 5 / 11;
+.inv-seen-list {
+  flex: 1 1 0;
 }
 
-/* The row of a table with no record: a hatch and the words. */
-.inv-empty {
+.inv-row.seen {
+  grid-template-columns:
+    var(--inv-mark)
+    calc(var(--inv-w-neighbour) * 1ch + var(--cell-pad))
+    var(--inv-seen-protocol)
+    calc(var(--inv-w-neighbour-device) * 1ch + var(--cell-pad))
+    calc(var(--inv-w-port) * 1ch + var(--cell-pad))
+    minmax(var(--inv-seen-action), 1fr);
+}
+
+/* The fields of a panel. */
+.inv-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--button-pad);
+}
+
+.inv-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--button-gap);
+  min-width: 0;
+}
+
+.inv-field > input,
+.inv-field > select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.inv-part {
+  display: flex;
+  flex-direction: column;
+  gap: var(--group-gap);
+}
+
+.inv-facts {
+  display: grid;
+  grid-template-columns: var(--inv-setting-label) minmax(0, 1fr);
+  gap: var(--button-gap) var(--button-pad);
+  align-items: center;
+}
+
+.inv-facts > .t-value {
+  overflow-wrap: anywhere;
+}
+
+/* The settings: the name and the origin above the control. */
+.inv-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--button-pad);
+}
+
+.inv-setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: var(--button-gap) var(--group-gap);
+  align-items: center;
+}
+
+.inv-setting > select,
+.inv-setting > .inv-control {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
+}
+
+.inv-control {
   display: flex;
   align-items: center;
-  min-height: var(--row);
-  border-bottom: var(--hairline) solid var(--rule);
+  gap: var(--group-gap);
+  min-width: 0;
 }
 
-/* The panel of a new device or a new group, over its buttons. */
-.inv-form {
-  border-top: var(--hairline) solid var(--rule);
-  margin-top: var(--line-gap);
+.inv-control > input {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
-.inv-sec {
-  font-family: var(--section-family);
-  font-size: var(--section-size);
-  line-height: var(--section-line);
-  font-weight: var(--section-weight);
-  margin: var(--fact-gap) 0 var(--line-gap) 0;
+.inv-control > input.inv-number {
+  flex: 0 1 var(--inv-number);
 }
 
-.inv-sec .muted {
-  font-family: var(--body-family);
-  font-size: var(--body-size);
-  font-weight: var(--body-weight);
+.inv-collection {
+  width: var(--inv-filter);
+}
+
+.inv-setting .param,
+.inv-collection .param,
+.inv-t input.param {
+  color: var(--parameter);
+  border-color: var(--parameter);
+  font-weight: var(--value-changed-weight);
+}
+
+/* The tables Credentials, Routes and Jump hosts: each row on the columns of its table. */
+.inv-table {
+  display: grid;
+}
+
+.inv-table.cred,
+.inv-table.route {
+  grid-template-columns: max-content max-content minmax(var(--inv-serial), 1fr) max-content;
+}
+
+.inv-table.jump {
+  grid-template-columns: max-content max-content max-content max-content minmax(var(--inv-serial), 1fr) max-content;
+}
+
+/* The list of the groups or the routes that use a record wraps. */
+.inv-t > .inv-uses {
+  white-space: normal;
+  padding-block: var(--button-gap);
+}
+
+.inv-name {
+  white-space: nowrap;
 }
 
 .inv-t {
+  grid-column: 1 / -1;
   display: grid;
+  grid-template-columns: subgrid;
   min-height: var(--row);
   align-items: center;
+  padding: 0 var(--card-pad);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.inv-t:last-child {
+  border-bottom: 0;
 }
 
 .inv-t > * {
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   padding-right: var(--result-pad);
 }
 
 .inv-t.inv-head {
-  border-bottom: var(--hairline) solid var(--rule);
-}
-
-.inv-t.cred {
-  grid-template-columns: var(--cred-name) var(--cred-secret) 1fr var(--inv-actions);
+  color: var(--ink-muted);
+  font-family: var(--label-family);
+  font-size: var(--label-size);
+  font-weight: var(--weight-control);
+  background: var(--raise);
 }
 
 .inv-t.cred .cred-edit {
@@ -259,22 +333,33 @@
   flex-wrap: wrap;
   gap: var(--button-gap) var(--cell-pad);
   align-items: flex-start;
+  padding-block: var(--button-gap);
 }
 
 .inv-t.cred .cred-key {
   flex-basis: 100%;
   font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: var(--hairline) solid var(--control);
+  border-radius: var(--input-radius);
+  padding: var(--button-gap) var(--input-pad);
 }
 
-.inv-t.route {
-  grid-template-columns: var(--route-name) var(--route-hops) var(--route-credential) minmax(var(--inv-actions), 1fr);
+.inv-t input,
+.inv-t select {
+  height: var(--input-panel);
+  max-width: 100%;
 }
 
-.inv-t.jump {
-  grid-template-columns: var(--jump-name) var(--jump-address) var(--jump-credential) var(--jump-ssh) 1fr var(--inv-actions);
-}
-
-.inv-tables .group {
+.inv-t .edit {
   overflow: visible;
+}
+
+.inv-t > .group:last-child {
   justify-self: end;
+}
+
+.inv-table > .empty {
+  grid-column: 1 / -1;
 }

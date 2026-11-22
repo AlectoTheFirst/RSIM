@@ -1,0 +1,670 @@
+/* The styles of the Trace view: the query card, the outcome card with the
+   path strip, the lists of the paths and the parts, the ladder and the
+   step panel. Each colour, font and size is a custom property of the
+   theme. */
+
+/* The query card: each field is its name above its input. The lists of
+   the pickers show over the cards below it. */
+
+.query-card > .card-body {
+  overflow: visible;
+}
+
+.query {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--query-bar-gap);
+}
+
+.query .grow {
+  flex-grow: 1;
+}
+
+.query > button,
+.query > .qadd {
+  margin-top: calc(var(--label-line) + var(--button-gap));
+}
+
+.query > button[type="submit"],
+.query > button.swap {
+  height: var(--input);
+}
+
+.query > button[type="submit"] {
+  padding: 0 calc(2 * var(--button-pad));
+}
+
+button.icon.swap {
+  width: var(--input);
+  border-color: var(--control);
+  background: var(--surface);
+}
+
+.qadd > button {
+  height: var(--input);
+}
+
+.qfield {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--button-gap);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.qinput {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--group-gap);
+  height: var(--input);
+  max-width: 100%;
+  padding: 0 var(--input-pad);
+  background: var(--surface);
+  border: var(--hairline) solid var(--control);
+  border-radius: var(--input-radius);
+  cursor: text;
+  transition: border-color var(--motion);
+}
+
+.qinput:hover {
+  border-color: var(--ink-muted);
+}
+
+.qinput:focus-within {
+  outline: var(--focus-ring) solid var(--action-ink);
+  outline-offset: var(--focus-offset);
+}
+
+/* A base field that the query does not state. */
+.qinput.unstated {
+  border-style: dashed;
+  border-color: var(--ink-muted);
+}
+
+.qinput.invalid {
+  border-color: var(--drop);
+}
+
+.qerror {
+  color: var(--drop);
+  max-width: var(--menu);
+  overflow-wrap: anywhere;
+}
+
+/* The input takes the width of its text, at least the width of a normal value. */
+.autosize {
+  display: inline-grid;
+  min-width: calc((var(--chars, 8) + 1) * 1ch);
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.autosize::after,
+.autosize input {
+  grid-area: 1 / 1;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.autosize::after {
+  content: attr(data-value) " ";
+  visibility: hidden;
+  white-space: pre;
+}
+
+.autosize input {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+}
+
+.autosize input:focus-visible {
+  outline: none;
+}
+
+.autosize input::placeholder {
+  color: var(--ink-muted);
+  font-family: var(--label-family);
+  font-size: var(--label-size);
+  font-weight: var(--label-weight);
+}
+
+/* The picker: a list with virtual rows under a field of the query card. */
+
+.qadd {
+  position: relative;
+}
+
+.pick {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  z-index: 3;
+  width: max-content;
+  min-width: var(--menu);
+  max-width: calc(100vw - 2 * var(--margin));
+  max-height: var(--picker-list);
+  overflow: auto;
+  margin-top: var(--button-gap);
+  padding: var(--button-gap) 0;
+  background: var(--surface);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-menu);
+  cursor: default;
+  animation: appear var(--motion);
+}
+
+.pick-option {
+  display: grid;
+  column-gap: var(--cell-pad);
+  align-items: baseline;
+  padding: var(--button-gap) var(--cell-pad);
+  border-left: var(--selected-bar) solid transparent;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.pick-option.one {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pick-option.two {
+  grid-template-columns: var(--pick-name) minmax(0, 1fr);
+}
+
+.pick-option.three {
+  grid-template-columns: var(--pick-name) var(--pick-address) minmax(0, 1fr);
+}
+
+.pick-option:hover {
+  background: var(--raise);
+}
+
+.pick-option[aria-selected="true"] {
+  border-left-color: var(--action-ink);
+  background: var(--selected);
+}
+
+.pick-places {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The outcome card */
+
+.outcome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--button-pad) var(--card-pad);
+}
+
+.outcome-main {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--line-gap);
+}
+
+.outcome-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--group-gap) var(--button-pad);
+  min-width: 0;
+}
+
+.outcome-controls {
+  flex: none;
+}
+
+.verdict {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.outcome-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--outcome-mark);
+  height: var(--outcome-mark);
+  border-radius: calc(var(--outcome-mark) / 2);
+}
+
+.mark-deliver {
+  background: var(--deliver-tint);
+  color: var(--deliver);
+}
+
+.mark-drop {
+  background: var(--drop-tint);
+  color: var(--drop);
+}
+
+.mark-exit {
+  background: var(--ink-tint);
+  color: var(--ink);
+}
+
+.mark-unknown {
+  border: var(--hairline) dashed var(--ink-muted);
+}
+
+/* An outcome with the number of its paths: a click filters the list. */
+button.tally {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mark-gap);
+  height: var(--pill);
+  padding: 0 var(--pill-pad);
+  border-color: var(--rule);
+  border-radius: var(--pill-radius);
+  font-weight: var(--weight-regular);
+}
+
+button.tally .hatch-text {
+  gap: var(--mark-gap);
+}
+
+/* The path strip */
+
+.strip {
+  display: flex;
+  align-items: center;
+  margin-top: var(--card-pad);
+  padding-top: var(--card-pad);
+  border-top: var(--hairline) solid var(--rule);
+  overflow-x: auto;
+}
+
+.strip-node {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--group-gap);
+}
+
+.strip-name {
+  display: inline-flex;
+  flex-direction: column;
+}
+
+.strip-name > .t-index {
+  line-height: var(--label-size);
+}
+
+.strip-dot {
+  flex: none;
+  width: var(--strip-node);
+  height: var(--strip-node);
+  border-radius: calc(var(--strip-node) / 2);
+  border: var(--strip-line) solid var(--forward);
+  background: var(--surface);
+}
+
+.strip-dot.dot-reply {
+  border-color: var(--reply);
+}
+
+.strip-dot.dot-deliver {
+  border-color: var(--deliver);
+  background: var(--deliver-tint);
+}
+
+.strip-line {
+  flex: 1 1 var(--strip-line-min);
+  min-width: var(--strip-line-min);
+  height: var(--strip-line);
+  margin: 0 var(--strip-gap);
+  background: var(--forward);
+}
+
+.strip-line.line-reply {
+  background: var(--reply);
+}
+
+.strip-end {
+  flex: none;
+  display: inline-flex;
+  width: var(--end-square);
+  height: var(--end-square);
+}
+
+.strip-end.end-deliver {
+  background: var(--deliver);
+}
+
+.strip-end.end-drop {
+  background: var(--drop);
+}
+
+.strip-end.end-exit {
+  background: var(--ink);
+}
+
+.strip-end.end-unknown {
+  outline: var(--hairline) dashed var(--ink-muted);
+}
+
+/* The lists of the paths and the parts */
+
+.trace-list {
+  max-height: var(--list-max);
+}
+
+.list-row {
+  display: grid;
+  grid-template-columns: var(--col-step) minmax(0, 2fr) minmax(0, 3fr);
+  column-gap: var(--fact-gap);
+  align-items: baseline;
+  min-height: var(--row);
+  padding: calc((var(--row) - var(--body-line)) / 2) var(--card-pad) calc((var(--row) - var(--body-line)) / 2) 0;
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.list-head {
+  align-items: center;
+  height: var(--button);
+  min-height: 0;
+  padding-block: 0;
+  font-weight: var(--weight-control);
+}
+
+.list-row > .ix {
+  text-align: right;
+  color: var(--ink-muted);
+}
+
+.list-devices,
+.list-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--group-gap);
+  min-width: 0;
+}
+
+.list-field,
+.list-outcome {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hop {
+  display: inline-block;
+  width: var(--group-gap);
+  height: var(--strip-line);
+  background: var(--forward);
+}
+
+.hops-reply .hop {
+  background: var(--reply);
+}
+
+/* The ladder: one grid; each row takes its columns. The function column
+   and the source column are in the value font. */
+
+.ladder {
+  display: grid;
+  grid-template-columns: var(--ladder-columns);
+}
+
+.ladder-row {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  min-height: var(--row);
+  align-items: stretch;
+  position: relative;
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.ladder-row > * {
+  min-width: 0;
+  line-height: var(--body-line);
+  padding-block: calc((var(--row) - var(--body-line)) / 2);
+}
+
+/* A name, a reason, a rewrite and a source wrap; no text is cut. */
+.ladder-row > .fn,
+.ladder-row > .reason,
+.ladder-row > .src,
+.rewrites {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ladder-row > .fn,
+.ladder-row > .reason {
+  padding-right: var(--button-pad);
+}
+
+.rewrites {
+  display: flex;
+  flex-direction: column;
+  padding-right: var(--button-pad);
+}
+
+.rewrite .hatch-text {
+  display: inline-flex;
+  gap: var(--mark-gap);
+}
+
+.ladder-row.step {
+  cursor: pointer;
+}
+
+.ladder-row.step:hover {
+  background: var(--raise);
+}
+
+.ladder-row.selected,
+.ladder-row.selected:hover {
+  background: var(--selected);
+}
+
+.ladder-row.selected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--selected-bar);
+  background: var(--action-ink);
+}
+
+.ladder-row.step:focus-visible {
+  outline: var(--focus-ring) solid var(--action-ink);
+  outline-offset: calc(-1 * var(--focus-ring));
+}
+
+.ladder-head {
+  background: var(--raise);
+  align-items: end;
+  font-weight: var(--weight-control);
+}
+
+.ladder-head > * {
+  line-height: var(--label-line);
+  padding-block: var(--button-gap);
+}
+
+/* The step number aligns right. */
+.ladder-row > .ix {
+  text-align: right;
+  padding-right: var(--button-pad);
+  color: var(--ink-muted);
+}
+
+.lanes,
+.ladder-row > .lanes {
+  position: relative;
+  padding: 0;
+}
+
+.lanes svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+}
+
+.lane-guide {
+  stroke: var(--rule);
+  stroke-width: var(--hairline);
+}
+
+.path-forward {
+  fill: var(--forward);
+  stroke: var(--forward);
+}
+.path-reply {
+  fill: var(--reply);
+  stroke: var(--reply);
+}
+.ring {
+  fill: var(--surface);
+  stroke-width: var(--ring-stroke);
+}
+.ladder-row.selected .ring {
+  fill: var(--selected);
+}
+.end-deliver {
+  fill: var(--deliver);
+}
+.end-drop {
+  fill: var(--drop);
+}
+.end-exit {
+  fill: var(--ink);
+}
+.end-ground {
+  fill: var(--surface);
+}
+.end-unknown {
+  fill: none;
+  stroke: var(--ink-muted);
+  stroke-width: var(--hairline);
+  stroke-dasharray: var(--dash) var(--dash);
+}
+
+/* The lane names: one for each lane, centred over it. */
+.lane-names {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: var(--lane);
+  align-items: end;
+  height: 100%;
+  color: var(--ink-muted);
+  font-weight: var(--weight-regular);
+}
+
+.lane-names > span {
+  white-space: nowrap;
+  text-align: center;
+  overflow: visible;
+}
+
+/* Upright lane names, when a name is wider than its lane: each reads from
+   the bottom up over its lane. */
+.lane-names.upright > .lane-name {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  justify-self: center;
+  text-align: start;
+  padding: var(--hairline) 0;
+}
+
+/* The step panel */
+
+.step-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--group-gap);
+  min-width: 0;
+}
+
+.step-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.step-no {
+  padding: 0 var(--mark-gap);
+  background: var(--ground);
+  border-radius: var(--button-gap);
+  color: var(--ink-muted);
+}
+
+.step-reason {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.step-part {
+  display: flex;
+  flex-direction: column;
+  gap: var(--line-gap);
+  min-width: 0;
+}
+
+.step-part > h3 {
+  margin: 0;
+}
+
+.step-part .file {
+  overflow-wrap: anywhere;
+}
+
+.rewrite-table {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) minmax(0, 1fr);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--input-radius);
+  overflow: hidden;
+}
+
+.rewrite-table > * {
+  padding: var(--button-gap) var(--cell-pad);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.rewrite-table > [role="columnheader"] {
+  background: var(--raise);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.code-note {
+  overflow-wrap: anywhere;
+}
+
+.span-label {
+  display: block;
+  height: auto;
+  padding: 0;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+button.span-label {
+  color: var(--action-ink);
+}
+
+.ladder-head > .lanes {
+  padding: var(--group-gap) 0 var(--button-gap);
+}

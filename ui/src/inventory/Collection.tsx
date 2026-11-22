@@ -1,10 +1,10 @@
-// The settings of the collector: the history of the snapshot store. A change
-// commits on Enter or when the focus leaves the field, and Escape cancels.
+// The part Collection: the history of the snapshot store. A change commits
+// on Enter or when the focus leaves the field, and Escape cancels.
 import { useEffect, useState } from "preact/hooks";
 import { putCollection } from "../api/client";
+import { Card } from "../page/Card";
 import { type Inventory, collectionChecked } from "./model";
 import { type Refuse, type Write, addKeys } from "./parts";
-import { TextRow } from "./SettingsEditor";
 
 export function CollectionSettings(props: { inv: Inventory; write: Write; refuse: Refuse }) {
   const stored = String(props.inv.collection.history_days);
@@ -18,18 +18,23 @@ export function CollectionSettings(props: { inv: Inventory; write: Write; refuse
   };
   const keys = addKeys(commit, () => setText(stored));
   return (
-    <>
-      <div class="inv-sec">Collection</div>
-      <div class="inv-settings">
-        <TextRow
-          id="collection"
-          k="history_days"
-          label="history"
-          note="days"
-          draft={{ history_days: text }}
-          h={{ onInput: (_, v) => setText(v), onPick: () => {}, keys: () => keys, onBlur: commit }}
-        />
-      </div>
-    </>
+    <Card title="Collection">
+      <label class="inv-field inv-collection" for="collection-history_days">
+        <span class="t-label muted">history</span>
+        <span class="inv-control">
+          <input
+            id="collection-history_days"
+            class={`t-value inv-number${text.trim() !== stored ? " param" : ""}`}
+            value={text}
+            spellcheck={false}
+            autoComplete="off"
+            onInput={(e) => setText(e.currentTarget.value)}
+            onKeyDown={keys}
+            onBlur={commit}
+          />
+          <span class="t-label muted">days</span>
+        </span>
+      </label>
+    </Card>
   );
 }

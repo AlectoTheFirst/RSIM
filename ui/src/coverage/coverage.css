@@ -1,0 +1,95 @@
+/* The styles of the Coverage view. Each colour, font and size is a custom
+   property of the theme. */
+
+.cov-place {
+  margin-right: auto;
+}
+
+/* The report: a box that fills the card, with the rows of the devices. */
+.cov-table {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cov-list {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.cov-list .vrows-head,
+.cov-list .vrow {
+  width: max-content;
+  min-width: 100%;
+}
+
+.cov-row {
+  display: grid;
+  grid-template-columns: var(--cov-columns);
+  align-items: center;
+  height: var(--row);
+  border-bottom: var(--hairline) solid var(--rule);
+  white-space: nowrap;
+}
+
+.cov-row > * {
+  padding: 0 var(--cell-pad);
+}
+
+.cov-head {
+  font-weight: var(--weight-control);
+}
+
+.cov-row .num,
+.cov-path .num {
+  display: inline-flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--mark-gap);
+}
+
+.cov-row .unhandled,
+.cov-path .unhandled {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mark-gap);
+}
+
+.cov-row .hatch,
+.cov-path .hatch {
+  flex: none;
+}
+
+/* The panel of a device: the unhandled paths fill its body. */
+.cov-panel .panel-body {
+  flex: 1 1 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.cov-paths {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.cov-path {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--cov-path-count) var(--cov-path-count);
+  align-items: center;
+  min-height: var(--button);
+  padding: var(--button-gap) var(--card-pad);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.cov-path > * {
+  min-width: 0;
+}
+
+.cov-path .unhandled > span {
+  overflow-wrap: anywhere;
+}
+
+.cov-path.t-label {
+  font-weight: var(--weight-control);
+}

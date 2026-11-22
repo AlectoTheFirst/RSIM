@@ -1,26 +1,26 @@
-// The parts that the sections of the Inventory view share: the hatch cell,
-// the keys of an add row or an edit, the delete button with its confirm
+// The parts that the sections of the Inventory view share: the keys of an add row or an edit, the delete button with its confirm
 // state and the draft of an edit of one record.
-import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { ApiProblem } from "../api/client";
-import { Hatch } from "../page/Hatch";
-import { SIZE } from "../theme";
 import { type Draft, type Problem, rebase } from "./model";
 
 /** A write, then the inventory again; a refused write shows the title of its problem. */
 export type Write = (run: () => Promise<number>) => Promise<boolean>;
 /** The write of a new record, refused when its name is in use. */
 export type WriteNew = (records: readonly { name: string }[], name: string, run: () => Promise<number>) => Promise<boolean>;
-/** Shows the problem of a check before a write in the result line. */
+/** Shows the problem of a check before a write. */
 export type Refuse = (p: Problem) => void;
 
-/** A hatch square of a cell and its words. */
-export function HatchCell(props: { children: ComponentChildren; title?: string }) {
+/** A list of names, each kept on one line, with a comma between 2 names. */
+export function Names(props: { names: readonly string[] }) {
   return (
-    <span class="hc" title={props.title}>
-      <Hatch w={SIZE.invHatch} h={SIZE.invHatch} />
-      <span>{props.children}</span>
+    <span class="t-value inv-uses">
+      {props.names.map((n, i) => (
+        <>
+          <span class="inv-name">{n}</span>
+          {i < props.names.length - 1 ? ", " : ""}
+        </>
+      ))}
     </span>
   );
 }
@@ -44,23 +44,20 @@ export function addKeys(add: () => void, cancel: () => void) {
   };
 }
 
-/** Runs `add` each time the count `submit` changes after the first render. */
-export function useSubmit(submit: number, add: () => void) {
-  const first = useRef(submit);
-  useEffect(() => {
-    if (submit !== first.current) add();
-  }, [submit]);
-}
-
 /**
- * The button that removes a record: the first press names the record, the
- * second press removes it, and Escape or a move of the focus cancels.
+ * The button that removes a record: the first press arms it, the second
+ * press removes the record, and Escape or a move of the focus cancels. With
+ * `named`, the button names the record before the first press:
+ * "Delete core-01", then "Confirm delete core-01"; else "Delete", then
+ * "Delete core-01".
  */
-export function DeleteButton(props: { name: string; onDelete: () => Promise<boolean> }) {
+export function DeleteButton(props: { name: string; named?: boolean; onDelete: () => Promise<boolean> }) {
   const [armed, setArmed] = useState(false);
+  const text = props.named ? (armed ? `Confirm delete ${props.name}` : `Delete ${props.name}`) : armed ? `Delete ${props.name}` : "Delete";
   return (
     <button
       type="button"
+      class="danger"
       aria-pressed={armed}
       onClick={(e) => {
         e.stopPropagation();
@@ -81,7 +78,7 @@ export function DeleteButton(props: { name: string; onDelete: () => Promise<bool
       }}
       onBlur={() => setArmed(false)}
     >
-      {armed ? `Delete ${props.name}` : "Delete"}
+      {text}
     </button>
   );
 }
@@ -89,9 +86,9 @@ export function DeleteButton(props: { name: string; onDelete: () => Promise<bool
 /**
  * The draft of an edit of a stored record. When the stored record changes,
  * each text that the edit has not changed takes the stored text, and each
- * changed text stays.
+ * changed text stays. `reset` sets each text to the stored text.
  */
-export function useDraft(stored: Draft): [Draft, (k: string, v: string) => Draft, (k: string) => void] {
+export function useDraft(stored: Draft): [Draft, (k: string, v: string) => Draft, (k: string) => void, () => void] {
   const [draft, setDraft] = useState(stored);
   const before = useRef(stored);
   const key = JSON.stringify(stored);
@@ -107,5 +104,6 @@ export function useDraft(stored: Draft): [Draft, (k: string, v: string) => Draft
     return next;
   };
   const revert = (k: string) => setDraft((d) => ({ ...d, [k]: before.current[k] ?? "" }));
-  return [draft, set, revert];
+  const reset = () => setDraft(before.current);
+  return [draft, set, revert, reset];
 }

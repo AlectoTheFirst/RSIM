@@ -1,6 +1,11 @@
 // The calls of the UI to the REST API of rsim-api, on the origin of the page.
 import type { Collection, Credential, CredentialPut, Device, Group, Inventory, JumpHost, ResolvedDevice, Route, SecretKeyOut, Vendors } from "../inventory/model";
-import type { Me, NewToken, PathAnswer, SetAnswer, SetupState, SourceText, Span, TableOut, TablesOut, TokenIn, TokenInfo, Twin } from "./types";
+import type { Me, NewToken, PathAnswer, SetAnswer, SetupState, SourceText, Span, TableOut, TablesOut, TokenIn, TokenInfo, Twin, UniqueOut } from "./types";
+import type { components } from "./schema";
+
+type TopologyOut = components["schemas"]["TopologyOut"];
+type PathBrief = components["schemas"]["PathBriefOut"];
+type SetBrief = components["schemas"]["SetBriefOut"];
 
 /** A refused request: the problem object of RFC 9457. */
 export class ApiProblem extends Error {
@@ -275,6 +280,33 @@ export async function tableRows(twin: string, table: string, params: Record<stri
   return getJson(`/v1/twins/${encodeURIComponent(twin)}/tables/${encodeURIComponent(table)}/rows?${q}`);
 }
 
+/** The distinct values of columns of a table with their counts, with the filters as query parameters. */
+export async function tableUnique(twin: string, table: string, params: Record<string, string>): Promise<UniqueOut> {
+  const q = new URLSearchParams(params).toString();
+  return getJson(`/v1/twins/${encodeURIComponent(twin)}/tables/${encodeURIComponent(table)}/unique?${q}`);
+}
+
+/** The topology of a twin, with the parameters `layer`, `device`, `around` and `hops`. */
+export async function getTopology(twin: string, params: Record<string, string>): Promise<TopologyOut> {
+  const q = new URLSearchParams(params).toString();
+  return getJson(`/v1/twins/${encodeURIComponent(twin)}/topology${q ? `?${q}` : ""}`);
+}
+
+/** The URL of the topology of a twin in a file form, with the parameter `format`. */
+export function topologyFileUrl(twin: string, params: Record<string, string>): string {
+  return `/v1/twins/${encodeURIComponent(twin)}/topology?${new URLSearchParams(params).toString()}`;
+}
+
+/** The drawing of the paths of a query answer. */
+export async function getPathDrawing(twin: string, qid: string): Promise<TopologyOut> {
+  return getJson(`/v1/twins/${encodeURIComponent(twin)}/queries/${encodeURIComponent(qid)}/topology`);
+}
+
+/** The brief form `steps` of a query answer: the branches with their steps and verdicts. */
+export async function getQuerySteps(twin: string, qid: string): Promise<PathBrief | SetBrief> {
+  return getJson(`/v1/twins/${encodeURIComponent(twin)}/queries/${encodeURIComponent(qid)}?form=steps`);
+}
+
 /** The whole inventory as stored. */
 export async function getInventory(): Promise<Inventory> {
   return getJson("/v1/inventory");
@@ -320,13 +352,13 @@ export const deleteCredential = (name: string) => del(`/v1/inventory/credentials
 export const deleteRoute = (name: string) => del(`/v1/inventory/routes/${encodeURIComponent(name)}`);
 export const deleteJumpHost = (name: string) => del(`/v1/inventory/jump-hosts/${encodeURIComponent(name)}`);
 
-/** All rows of a table of a twin, page after page. */
-export async function allRows(twin: string, table: string): Promise<{ columns: string[]; rows: unknown[][] }> {
+/** All rows of a table of a twin with the filter parameters `params`, page after page. */
+export async function allRows(twin: string, table: string, filter: Record<string, string> = {}): Promise<{ columns: string[]; rows: unknown[][] }> {
   const rows: unknown[][] = [];
   let columns: string[] = [];
   let cursor: string | null = null;
   do {
-    const params: Record<string, string> = { limit: "1000" };
+    const params: Record<string, string> = { ...filter, limit: "1000" };
     if (cursor) params["cursor"] = cursor;
     const page = await tableRows(twin, table, params);
     columns = page.columns;
