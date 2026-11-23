@@ -202,7 +202,7 @@ fn edge(b: &mut TwinBuilder, e: &Edge, far: &Edge, private_tunnel: TunnelState, 
                 link: (*link).to_string(),
                 far_link: format!("{}:{link}", far.name),
                 state: *state,
-                next: d.id(&encap(*link)),
+                next: d.id(&encap(link)),
                 spans: vec![d.span(23 + i as u32, 23 + i as u32)],
             })
             .collect(),
@@ -210,7 +210,7 @@ fn edge(b: &mut TwinBuilder, e: &Edge, far: &Edge, private_tunnel: TunnelState, 
     });
     for (i, (link, source, gateway, peer, _)) in links.iter().enumerate() {
         b.add(VcmpEncap {
-            meta: d.meta(&encap(*link), 30 + i as u32, 30 + i as u32),
+            meta: d.meta(&encap(link), 30 + i as u32, 30 + i as u32),
             source: ip(source),
             peer: ip(peer),
             segments: [(VrfId::new(SEGMENT), 0)].into_iter().collect(),
