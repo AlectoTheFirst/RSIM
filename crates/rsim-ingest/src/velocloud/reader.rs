@@ -1435,7 +1435,7 @@ fn sessions(root: J<'_>, edges: &[Edge]) -> Vec<BgpSession> {
         };
         let asn = r.v.get("neighborAS").and_then(asn_of);
         let state = r.text("state");
-        match found.entry((edge.clone(), neighbour, segment)) {
+        match found.entry((edge.clone(), neighbour, segment.clone())) {
             Entry::Vacant(v) => {
                 v.insert(BgpSession {
                     edge,
