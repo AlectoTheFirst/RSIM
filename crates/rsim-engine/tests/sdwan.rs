@@ -1,10 +1,11 @@
 //! The SD-WAN overlay: the candidate tunnels of a branch to a hub over 2
 //! transport networks, the VCMP encapsulation, a transport ACL on the outer
-//! header, the tunnel states, a steering rule, and the reply.
+//! header, the tunnel states, a steering rule, the reply, the firewall of an
+//! edge, and the business policy with a direct exit and a backhaul.
 
 use rsim_core::{
-    AlternativeKind, Destination, Encap, EndpointId, FieldValue, Header, PROTO_UDP, ReasonCode,
-    Verdict,
+    AlternativeKind, Destination, DeviceId, Encap, EndpointId, ExitPoint, FieldValue, Header,
+    InterfaceId, PROTO_UDP, ReasonCode, Verdict,
 };
 use rsim_engine::{Answer, Executor, Query, Twin};
 use rsim_functions::TunnelState;
@@ -24,6 +25,13 @@ fn run(twin: &Twin, h: &Header) -> Answer {
 
 fn deliver(e: &str) -> Verdict {
     Verdict::Deliver(Destination::Endpoint(EndpointId::new(e)))
+}
+
+fn exit(device: &str, interface: &str) -> Verdict {
+    Verdict::Exit(ExitPoint {
+        device: DeviceId::new(device),
+        interface: InterfaceId::new(interface),
+    })
 }
 
 fn code(v: &Verdict) -> Option<ReasonCode> {
@@ -204,4 +212,65 @@ fn a_steering_rule_with_no_tunnel_up_on_its_link_drops() {
     let web = run(&twin, &web());
     assert_eq!(web.branches().len(), 1);
     assert_eq!(web.verdict(), Some(&deliver("host9")));
+}
+
+#[test]
+fn the_firewall_of_the_branch_drops_before_the_overlay() {
+    let twin = twin(SdwanOpts {
+        firewall: true,
+        ..SdwanOpts::default()
+    });
+    let a = run(&twin, &tcp("10.1.0.10", 40000, "10.9.0.10", 23));
+    let b = a.branches();
+    assert_eq!(b.len(), 1);
+    assert_eq!(code(b[0].verdict), Some(ReasonCode::Denied));
+    assert_eq!(
+        b[0].steps.last().unwrap().function.as_str(),
+        "branch1/firewall"
+    );
+    // A packet that the firewall permits has both candidates.
+    let web = run(&twin, &web());
+    assert_eq!(web.branches().len(), 2);
+    assert_eq!(web.verdict(), Some(&deliver("host9")));
+}
+
+#[test]
+fn the_business_policy_sends_internet_packets_direct() {
+    let twin = twin(SdwanOpts::default());
+    let a = run(&twin, &tcp("10.1.0.10", 40000, "192.0.2.80", 443));
+    let b = a.branches();
+    assert_eq!(b.len(), 1);
+    assert_eq!(b[0].verdict, &exit("internet", "eth0"));
+    let f = functions(&a, 0);
+    let at = |name: &str| {
+        f.iter()
+            .position(|x| x == name)
+            .unwrap_or_else(|| panic!("{name} is not in {f:?}"))
+    };
+    assert!(at("branch1/policy/segment0") < at("branch1/direct"));
+    assert!(at("branch1/direct") < at("internet/route"));
+    assert!(!f.contains(&SELECT.to_string()), "{f:?}");
+    let w = b[0].packets.witness().unwrap().current;
+    assert!(w.encap.is_empty() && w.inner.is_none());
+}
+
+#[test]
+fn the_business_policy_backhauls_dns_packets_to_the_hub() {
+    let twin = twin(SdwanOpts::default());
+    let a = run(&twin, &udp("10.1.0.10", 40000, "192.0.2.53", 53));
+    let b = a.branches();
+    assert_eq!(b.len(), 2);
+    for (i, transport) in ["internet", "mpls"].iter().enumerate() {
+        assert_eq!(b[i].verdict, &exit("hub1", "eth8"));
+        let f = functions(&a, i);
+        let at = |name: &str| {
+            f.iter()
+                .position(|x| x == name)
+                .unwrap_or_else(|| panic!("{name} is not in {f:?}"))
+        };
+        assert!(at("branch1/policy/segment0") < at(SELECT));
+        assert!(at(SELECT) < at(&format!("{transport}/route")));
+        assert!(at("hub1/vcmp/decap") < at("hub1/out/eth8"));
+    }
+    assert_eq!(a.verdict(), Some(&exit("hub1", "eth8")));
 }

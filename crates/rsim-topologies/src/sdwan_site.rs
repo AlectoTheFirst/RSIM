@@ -1,15 +1,17 @@
 //! An SD-WAN overlay: a branch edge and a hub edge over 2 transport
 //! networks.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rsim_core::{
-    FieldValue, InterfaceId, Match, NextHop, PROTO_UDP, PortCond, RulePredicate, ValueCond, VrfId,
+    FieldValue, InterfaceId, Match, NextHop, ObjectId, PROTO_TCP, PROTO_UDP, PortCond,
+    RulePredicate, ValueCond, VrfId,
 };
 use rsim_engine::TwinBuilder;
 use rsim_functions::{
-    EgressMode, Fib, OverlaySelect, OverlayTunnel, Route, RouteKind, RouteLookup, RouteNextHop,
-    RouteProtocol, Rule, RuleAction, TunnelState, VCMP_PORT, VcmpDecap, VcmpEncap,
+    EgressMode, ExitMark, Fib, OverlaySelect, OverlayTunnel, PolicyRoute, Route, RouteKind,
+    RouteLookup, RouteNextHop, RouteProtocol, Rule, RuleAction, TunnelState, VCMP_PORT, VcmpDecap,
+    VcmpEncap, VrfSelection,
 };
 
 use crate::builders::*;
@@ -20,6 +22,11 @@ const SEGMENT: &str = "segment0";
 const UNDERLAY: &str = "default";
 const PUBLIC: &str = "wan1";
 const PRIVATE: &str = "wan2";
+/// The interface of the hub and of the transport `internet` to the
+/// internet, which is outside the twin.
+const HUB_EXIT: &str = "eth8";
+const INTERNET_EXIT: &str = "eth0";
+const INTERNET_GATEWAY: &str = "192.0.2.254";
 
 /// The options of [`sdwan_site`].
 #[derive(Clone, Copy, Debug)]
@@ -30,6 +37,9 @@ pub struct SdwanOpts {
     pub private_tunnel: TunnelState,
     /// `branch1` pins the DNS packets to its private link.
     pub pin_dns: bool,
+    /// Each edge has a firewall for the packets from its LAN: it denies
+    /// Telnet and permits each other packet.
+    pub firewall: bool,
 }
 
 impl Default for SdwanOpts {
@@ -38,6 +48,7 @@ impl Default for SdwanOpts {
             internet_denies_vcmp: false,
             private_tunnel: TunnelState::Up,
             pin_dns: false,
+            firewall: false,
         }
     }
 }
@@ -54,6 +65,10 @@ struct Edge {
     private_gateway: &'static str,
     /// The interface of each transport toward this edge.
     transport_interface: &'static str,
+    /// The gateway of the default route of the edge on its interface to
+    /// the internet. With none, the default route goes to the business
+    /// policy.
+    breakout: Option<&'static str>,
 }
 
 const BRANCH: Edge = Edge {
@@ -65,6 +80,7 @@ const BRANCH: Edge = Edge {
     private: "172.16.1.1",
     private_gateway: "172.16.1.254",
     transport_interface: "eth1",
+    breakout: None,
 };
 
 const HUB: Edge = Edge {
@@ -76,6 +92,7 @@ const HUB: Edge = Edge {
     private: "172.16.9.1",
     private_gateway: "172.16.9.254",
     transport_interface: "eth2",
+    breakout: Some("10.9.8.254"),
 };
 
 /// A branch edge `branch1` and a hub edge `hub1` with one segment, the VRF
@@ -84,16 +101,23 @@ const HUB: Edge = Edge {
 /// transport `mpls`. Each edge has 2 tunnels to the other edge: wan1 to
 /// wan1 and wan2 to wan2. A transport is a router with a host route to the
 /// address of each link.
+///
+/// The default route of `branch1` goes to its business policy: the rule
+/// `backhaul-dns` sends the DNS packets to `hub1`, and each other packet
+/// leaves direct on wan1. The default route of `hub1` leaves on eth8, and
+/// the default route of `internet` leaves on eth0. Both interfaces are
+/// edges of the twin.
 pub fn sdwan_site(opts: SdwanOpts) -> TwinBuilder {
     let mut b = TwinBuilder::new();
-    edge(&mut b, &BRANCH, &HUB, opts.private_tunnel, opts.pin_dns);
-    edge(&mut b, &HUB, &BRANCH, TunnelState::Up, false);
+    edge(&mut b, &BRANCH, &HUB, opts.private_tunnel, &opts);
+    edge(&mut b, &HUB, &BRANCH, TunnelState::Up, &opts);
     transport(
         &mut b,
         "internet",
         PUBLIC,
         [BRANCH.public, HUB.public],
         opts.internet_denies_vcmp,
+        Some(INTERNET_GATEWAY),
     );
     transport(
         &mut b,
@@ -101,16 +125,42 @@ pub fn sdwan_site(opts: SdwanOpts) -> TwinBuilder {
         PRIVATE,
         [BRANCH.private, HUB.private],
         false,
+        None,
     );
     b
 }
 
-fn edge(b: &mut TwinBuilder, e: &Edge, far: &Edge, private_tunnel: TunnelState, pin_dns: bool) {
+fn edge(b: &mut TwinBuilder, e: &Edge, far: &Edge, private_tunnel: TunnelState, opts: &SdwanOpts) {
     let d = Dev::new(e.name, generic_router());
+    let pin_dns = opts.pin_dns && e.breakout.is_none();
     b.add(d.ingress("eth9", "vrf", 1));
-    b.add(d.ingress(PUBLIC, "vrf", 2));
-    b.add(d.ingress(PRIVATE, "vrf", 3));
-    b.add(d.vrf(&[("eth9", SEGMENT)], "route", 5));
+    b.add(d.ingress(PUBLIC, "vrf-wan", 2));
+    b.add(d.ingress(PRIVATE, "vrf-wan", 3));
+    let first = if opts.firewall { "firewall" } else { "route" };
+    b.add(d.vrf(&[("eth9", SEGMENT)], first, 5));
+    b.add(VrfSelection {
+        meta: d.meta("vrf-wan", 6, 6),
+        by_interface: BTreeMap::new(),
+        default_vrf: Some(VrfId::new(UNDERLAY)),
+        next: d.id("route"),
+    });
+    if opts.firewall {
+        let telnet = Match {
+            protocol: ValueCond::one(PROTO_TCP),
+            dst_port: PortCond::one(23),
+            ..Match::any()
+        };
+        b.add(d.acl(
+            "firewall",
+            "firewall",
+            vec![
+                rule("deny-telnet", telnet, RuleAction::Deny, d.span(8, 8)),
+                rule("allow-any", Match::any(), RuleAction::Permit, d.span(9, 9)),
+            ],
+            "route",
+            7,
+        ));
+    }
 
     let select = format!("sdwan/select/0/{}", far.name);
     let nh = |iface: &str, next: &str| RouteNextHop {
@@ -134,6 +184,18 @@ fn edge(b: &mut TwinBuilder, e: &Edge, far: &Edge, private_tunnel: TunnelState, 
             vec![nh("overlay", &select)],
             vec![d.span(12, 12)],
         ),
+    );
+    let default_hop = match e.breakout {
+        Some(gateway) => RouteNextHop {
+            interface: InterfaceId::new(HUB_EXIT),
+            gateway: Some(ip(gateway)),
+            next: d.id("nexthop"),
+        },
+        None => nh("policy", "policy/segment0"),
+    };
+    segment.insert(
+        pfx("0.0.0.0/0"),
+        Route::new(RouteKind::Static, vec![default_hop], vec![d.span(15, 15)]),
     );
     let mut underlay = Fib::new();
     for (i, a) in [e.public, e.private].into_iter().enumerate() {
@@ -223,6 +285,42 @@ fn edge(b: &mut TwinBuilder, e: &Edge, far: &Edge, private_tunnel: TunnelState, 
             next: d.id("nexthop"),
         });
     }
+    if e.breakout.is_none() {
+        let dns = Match {
+            protocol: ValueCond::one(PROTO_UDP),
+            dst_port: PortCond::one(53),
+            ..Match::any()
+        };
+        b.add(PolicyRoute::new(
+            d.meta("policy/segment0", 24, 26),
+            ObjectId::new("business-policy"),
+            vec![(
+                None,
+                Rule::new("backhaul-dns", RulePredicate::exact(dns), d.id(&select))
+                    .with_span(d.span(25, 25)),
+            )],
+            d.id("direct"),
+        ));
+        let mut direct = Fib::new();
+        direct.insert(
+            pfx("0.0.0.0/0"),
+            Route::new(
+                RouteKind::Static,
+                vec![RouteNextHop {
+                    interface: InterfaceId::new(PUBLIC),
+                    gateway: Some(ip(e.public_gateway)),
+                    next: d.id("nexthop"),
+                }],
+                vec![d.span(27, 27)],
+            ),
+        );
+        b.add(RouteLookup {
+            meta: d.meta("direct", 27, 27),
+            tables: [(VrfId::new(SEGMENT), direct)].into_iter().collect(),
+            fallback: None,
+            local: None,
+        });
+    }
     b.add(VcmpDecap {
         meta: d.meta("vcmp/decap", 35, 35),
         segments: [(0, (VrfId::new(SEGMENT), d.id("route")))]
@@ -232,15 +330,20 @@ fn edge(b: &mut TwinBuilder, e: &Edge, far: &Edge, private_tunnel: TunnelState, 
     });
 
     let host_addr = format!("10.{}.0.10", e.lan);
-    b.add(d.nexthop(
-        &[
-            (host_addr.as_str(), "eth9", Target::Endpoint(e.host)),
-            (e.public_gateway, PUBLIC, Target::Link("internet")),
-            (e.private_gateway, PRIVATE, Target::Link("mpls")),
-        ],
-        &["eth9", PUBLIC, PRIVATE],
-        40,
-    ));
+    let mut neighbours = vec![
+        (host_addr.as_str(), "eth9", Target::Endpoint(e.host)),
+        (e.public_gateway, PUBLIC, Target::Link("internet")),
+        (e.private_gateway, PRIVATE, Target::Link("mpls")),
+    ];
+    let mut interfaces = vec!["eth9", PUBLIC, PRIVATE];
+    if let Some(gateway) = e.breakout {
+        neighbours.push((gateway, HUB_EXIT, Target::Link("isp")));
+        interfaces.push(HUB_EXIT);
+        let mut exit = d.egress(HUB_EXIT, EgressMode::Routed, None, 55);
+        exit.exit = Some(ExitMark::Owner);
+        b.add(exit);
+    }
+    b.add(d.nexthop(&neighbours, &interfaces, 40));
     b.add(d.egress("eth9", EgressMode::Routed, None, 50));
     for (i, (link, transport)) in [(PUBLIC, "internet"), (PRIVATE, "mpls")]
         .into_iter()
@@ -259,13 +362,16 @@ fn edge(b: &mut TwinBuilder, e: &Edge, far: &Edge, private_tunnel: TunnelState, 
 }
 
 /// A transport network as one router. `addresses` are the addresses of the
-/// link `link` of the branch and of the hub.
+/// link `link` of the branch and of the hub. With `exit`, the router has a
+/// default route to that gateway on an interface that is an edge of the
+/// twin.
 fn transport(
     b: &mut TwinBuilder,
     name: &'static str,
     link: &str,
     addresses: [&'static str; 2],
     denies_vcmp: bool,
+    exit: Option<&'static str>,
 ) {
     let d = Dev::new(name, generic_router());
     let edges = [&BRANCH, &HUB];
@@ -296,7 +402,8 @@ fn transport(
         .iter()
         .map(|e| [(e.transport_interface, None, "nexthop")])
         .collect();
-    let routes: Vec<(&str, RouteKind, &[(&str, Option<&str>, &str)])> = prefixes
+    let exit_hop = exit.map(|gateway| [(INTERNET_EXIT, Some(gateway), "nexthop")]);
+    let mut routes: Vec<(&str, RouteKind, &[(&str, Option<&str>, &str)])> = prefixes
         .iter()
         .zip(&hops)
         .map(|(p, h)| {
@@ -307,13 +414,23 @@ fn transport(
             )
         })
         .collect();
+    if let Some(h) = &exit_hop {
+        routes.push(("0.0.0.0/0", RouteKind::Static, &h[..]));
+    }
     b.add(d.routes(UNDERLAY, &routes, 10));
-    let entries: Vec<(&str, &str, Target)> = edges
+    let mut entries: Vec<(&str, &str, Target)> = edges
         .iter()
         .zip(addresses)
         .map(|(e, a)| (a, e.transport_interface, Target::Link(e.name)))
         .collect();
-    let egress: Vec<&str> = edges.iter().map(|e| e.transport_interface).collect();
+    let mut egress: Vec<&str> = edges.iter().map(|e| e.transport_interface).collect();
+    if let Some(gateway) = exit {
+        entries.push((gateway, INTERNET_EXIT, Target::Link("isp")));
+        egress.push(INTERNET_EXIT);
+        let mut out = d.egress(INTERNET_EXIT, EgressMode::Routed, None, 35);
+        out.exit = Some(ExitMark::Owner);
+        b.add(out);
+    }
     b.add(d.nexthop(&entries, &egress, 20));
     for (i, e) in edges.iter().enumerate() {
         let peer = format!("{}/in/{link}", e.name);
