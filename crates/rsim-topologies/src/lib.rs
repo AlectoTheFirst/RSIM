@@ -18,6 +18,7 @@ mod mini_enterprise;
 mod profiles;
 mod routing_loop;
 mod scale;
+mod sdwan_site;
 
 pub use builders::*;
 pub use chain::chain;
@@ -31,6 +32,7 @@ pub use mini_enterprise::{MiniOpts, mini_enterprise};
 pub use profiles::*;
 pub use routing_loop::routing_loop;
 pub use scale::*;
+pub use sdwan_site::{SdwanOpts, sdwan_site};
 
 use rsim_engine::{Twin, TwinBuilder};
 
