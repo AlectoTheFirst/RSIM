@@ -24,6 +24,7 @@ Complete:
 
 - the snapshot store `rsim-store` and the collector `rsim-collect` with the SSH and HTTPS transports
 - the collection and the ingestion of VyOS, UniFi, NX-OS, IOS-XR and IOS-XE, with one link join for all vendors
+- the collection and the ingestion of VeloCloud SD-WAN
 - EVPN, VXLAN and the anycast gateway on NX-OS
 - the Rust TextFSM engine `rsim-textfsm`
 - the BGP sessions, the BGP neighbour config and the claims `bgp-peers-up` and `bgp-peers-agree`

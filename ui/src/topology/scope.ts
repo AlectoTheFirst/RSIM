@@ -4,7 +4,7 @@
 // neighbours of each expanded device. A scope of more than 300 devices does
 // not draw.
 import { ApiProblem, allRows, getQuerySteps, getTopology, tableRows, tableUnique } from "../api/client";
-import { type OutsideNeighbour, type TopologyOut, countsOf, natural, neighboursOf } from "./graph";
+import { type OutsideNeighbour, type TopologyOut, countsOf, isTwinDevice, natural, neighboursOf } from "./graph";
 import { type MapPath, pathDevices, pathsOf } from "./paths";
 import { pickerLimit } from "../page/pick";
 
@@ -139,7 +139,7 @@ export function scopeApi(twin: string): ScopeApi {
 
 /** The devices of a topology answer, with no tunnel peer. */
 function deviceNames(t: TopologyOut): string[] {
-  return t.nodes.filter((n) => n.kind === "device").map((n) => n.device ?? n.id);
+  return t.nodes.filter(isTwinDevice).map((n) => n.device ?? n.id);
 }
 
 export type ScopeResult =
@@ -186,7 +186,7 @@ async function addNeighbours(api: ScopeApi, devices: readonly string[], all: Set
     );
     for (const v of views) {
       if ("refused" in v) return v.refused;
-      for (const n of v.nodes) if (n.kind === "device") all.add(n.device ?? n.id);
+      for (const n of v.nodes) if (isTwinDevice(n)) all.add(n.device ?? n.id);
     }
     if (all.size > MAX_DRAWN) return all.size;
   }

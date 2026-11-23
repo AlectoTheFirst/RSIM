@@ -207,13 +207,18 @@ fn link_up(state: Option<&str>) -> Option<bool> {
     }
 }
 
-/// True if 2 WAN links can form a tunnel: 2 public links, or 2 private
-/// links of the same private network.
-fn pairable(a: &WanLink, b: &WanLink) -> bool {
+/// The transport network of 2 WAN links that can form a tunnel: `public`
+/// for 2 public links, or the name of the private network of 2 private
+/// links of the same private network; none for each other pair.
+fn pairable(a: &WanLink, b: &WanLink) -> Option<String> {
     match (&a.kind, &b.kind) {
-        (LinkKind::Public { .. }, LinkKind::Public { .. }) => true,
-        (LinkKind::Private { network: Some(x) }, LinkKind::Private { network: Some(y) }) => x == y,
-        _ => false,
+        (LinkKind::Public { .. }, LinkKind::Public { .. }) => Some("public".to_string()),
+        (LinkKind::Private { network: Some(x) }, LinkKind::Private { network: Some(y) })
+            if x == y =>
+        {
+            Some(x.clone())
+        }
+        _ => None,
     }
 }
 
@@ -381,6 +386,10 @@ pub fn predicate(m: &RuleMatch) -> RulePredicate {
     };
     RulePredicate::bounded(definite, upper)
 }
+
+/// The state of each tunnel to a far end, the number of its live paths
+/// and the spans of the state.
+type States = (Vec<TunnelState>, Option<u32>, Vec<SourceSpan>);
 
 /// A route of one prefix of a segment, with its place in the route order.
 struct Candidate {
@@ -1317,8 +1326,8 @@ impl<'a> L<'a> {
     /// The state of each tunnel to a far end: down when a link is down, and
     /// up when the paths of the peer that are up are the tunnels whose links
     /// are up. The links of a tunnel are up (`Some(true)`), down or not
-    /// known.
-    fn states(&self, far: &str, links: &[Option<bool>]) -> (Vec<TunnelState>, Vec<SourceSpan>) {
+    /// known. The live paths are the stable and unstable paths of the peer.
+    fn states(&self, far: &str, links: &[Option<bool>]) -> States {
         let Peers::Read(rows) = &self.e.peers else {
             let st = links
                 .iter()
@@ -1327,10 +1336,10 @@ impl<'a> L<'a> {
                     _ => TunnelState::NotCollected,
                 })
                 .collect();
-            return (st, Vec::new());
+            return (st, None, Vec::new());
         };
         let Some(row) = rows.iter().find(|r| r.logical_id.as_deref() == Some(far)) else {
-            return (vec![TunnelState::Down; links.len()], Vec::new());
+            return (vec![TunnelState::Down; links.len()], None, Vec::new());
         };
         let live = match (row.paths.stable, row.paths.unstable) {
             (None, None) => None,
@@ -1348,7 +1357,8 @@ impl<'a> L<'a> {
                 _ => TunnelState::NotCollected,
             })
             .collect();
-        (st, vec![row.span.clone()])
+        let paths = live.and_then(|n| u32::try_from(n).ok());
+        (st, paths, vec![row.span.clone()])
     }
 
     /// The tunnels from the WAN links of the edge to the WAN links of a far
@@ -1359,14 +1369,14 @@ impl<'a> L<'a> {
             return;
         };
         let wan = self.wan.clone();
-        let mut pairs: Vec<(&WanLink, &WanLink, IpAddr)> = Vec::new();
+        let mut pairs: Vec<(&WanLink, &WanLink, IpAddr, String)> = Vec::new();
         for l in wan.iter().copied() {
             for fl in fe.links.iter().filter(|f| f.ambiguous.is_none()) {
-                if !pairable(l, fl) {
+                let Some(transport) = pairable(l, fl) else {
                     continue;
-                }
+                };
                 match (link_address(l), link_address(fl)) {
-                    (Some(_), Some(peer)) => pairs.push((l, fl, peer)),
+                    (Some(_), Some(peer)) => pairs.push((l, fl, peer, transport)),
                     _ => self.note(format!(
                         "tunnel {}~{far}:{}: address not known",
                         l.logical_id, fl.logical_id
@@ -1376,16 +1386,16 @@ impl<'a> L<'a> {
         }
         let links: Vec<Option<bool>> = pairs
             .iter()
-            .map(
-                |(l, fl, _)| match (link_up(l.state.as_deref()), link_up(fl.state.as_deref())) {
+            .map(|(l, fl, _, _)| {
+                match (link_up(l.state.as_deref()), link_up(fl.state.as_deref())) {
                     (Some(false), _) | (_, Some(false)) => Some(false),
                     (Some(true), Some(true)) => Some(true),
                     _ => None,
-                },
-            )
+                }
+            })
             .collect();
-        let (states, peer_spans) = self.states(far, &links);
-        for ((l, fl, peer), state) in pairs.into_iter().zip(states) {
+        let (states, paths, peer_spans) = self.states(far, &links);
+        for ((l, fl, peer, transport), state) in pairs.into_iter().zip(states) {
             let far_link = format!("{far}:{}", fl.logical_id);
             let name = format!("vcmp/{}~{far_link}", l.logical_id);
             self.encaps
@@ -1396,7 +1406,9 @@ impl<'a> L<'a> {
             out.push(OverlayTunnel {
                 link: l.logical_id.clone(),
                 far_link,
+                transport,
                 state,
+                paths,
                 next: self.id(&name),
                 spans,
             });
@@ -1420,7 +1432,7 @@ impl<'a> L<'a> {
             };
             let links: Vec<Option<bool>> =
                 public.iter().map(|l| link_up(l.state.as_deref())).collect();
-            let (states, peer_spans) = self.states(&g.id, &links);
+            let (states, paths, peer_spans) = self.states(&g.id, &links);
             for (l, state) in public.iter().zip(states) {
                 let far_link = format!("gateway/{}", g.id);
                 let name = format!("vcmp/{}~{far_link}", l.logical_id);
@@ -1435,7 +1447,9 @@ impl<'a> L<'a> {
                 out.push(OverlayTunnel {
                     link: l.logical_id.clone(),
                     far_link,
+                    transport: "public".to_string(),
                     state,
+                    paths,
                     next: self.id(&name),
                     spans,
                 });
@@ -1522,6 +1536,7 @@ impl<'a> L<'a> {
         self.add(OverlaySelect {
             meta,
             far: far.name().to_string(),
+            segment: s.id,
             tunnels,
             steering,
             mandatory: BTreeSet::new(),

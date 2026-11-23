@@ -64,7 +64,13 @@ pub struct OverlayTunnel {
     pub link: String,
     /// The WAN link of the far end.
     pub far_link: String,
+    /// The transport network of the 2 links: `public` or the name of a
+    /// private network.
+    pub transport: String,
     pub state: TunnelState,
+    /// The number of stable and unstable paths to the far end in the
+    /// collected state, when the state gives it.
+    pub paths: Option<u32>,
     /// The encapsulation of the tunnel.
     pub next: FunctionId,
     pub spans: Vec<SourceSpan>,
@@ -86,6 +92,8 @@ pub struct OverlaySelect {
     pub meta: Meta,
     /// The far edge or gateway of the tunnels.
     pub far: String,
+    /// The segment of the packets.
+    pub segment: u32,
     pub tunnels: Vec<OverlayTunnel>,
     /// The steering rules, in rule order. The action of a rule is the set
     /// of the local links to which it pins its packets; an empty set keeps

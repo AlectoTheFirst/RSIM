@@ -351,6 +351,46 @@ pub const TABLES: &[TableDef] = &[
         verbs: BASE_VERBS,
         needs: "a twin of a store snapshot with a BGP config or a BGP session section",
     },
+    TableDef {
+        name: "sdwan-paths",
+        description: "SD-WAN paths",
+        key: &["function", "tunnel"],
+        columns: &[
+            DEVICE,
+            refers(
+                col("function", ColumnType::Text, "function", "Tunnel selection"),
+                "functions",
+                "function",
+            ),
+            col("segment", ColumnType::Integer, "segment", "Segment"),
+            col("tunnel", ColumnType::Text, "tunnel", "Tunnel"),
+            col("interface", ColumnType::Text, "interface", "WAN interface"),
+            col("transport", ColumnType::Text, "transport", "Transport"),
+            col("peer", ColumnType::Address, "address", "Peer address"),
+            refers(
+                col("far", ColumnType::Text, "device", "Far device"),
+                "devices",
+                "device",
+            ),
+            col(
+                "far_interface",
+                ColumnType::Text,
+                "interface",
+                "Far interface",
+            ),
+            col("state", ColumnType::Text, "tunnel_state", "State"),
+            col("state_reason", ColumnType::Text, "reason", "State reason"),
+            col("paths", ColumnType::Integer, "count", "Live paths"),
+            col(
+                "provenance",
+                ColumnType::List,
+                "source_span",
+                "Source spans",
+            ),
+        ],
+        verbs: BASE_VERBS,
+        needs: "the twin",
+    },
 ];
 
 /// The table of a name.

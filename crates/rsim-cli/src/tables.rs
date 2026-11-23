@@ -2,15 +2,16 @@
 //! built once for each twin and table, and the table commands.
 
 use std::any::Any;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
+use std::net::IpAddr;
 use std::sync::OnceLock;
 
 use rsim_contract::table::{
     self, Selection, SummarizeOut, TableDef, TableOut, TablesOut, UniqueOut,
 };
-use rsim_core::SourceSpan;
-use rsim_functions::RouteLookup;
+use rsim_core::{FunctionId, SourceSpan};
+use rsim_functions::{OverlaySelect, RouteLookup, TunnelState, VcmpEncap};
 use rsim_ingest::facts::{DeviceFacts, Reason};
 use rsim_ingest::links::{AsnValue, BgpPeerFact, PeerSource};
 use serde_json::{Value, json};
@@ -187,6 +188,11 @@ fn build(t: &Loaded, def: &'static TableDef) -> Frame {
                 }
             }
         }
+        "sdwan-paths" => {
+            for row in sdwan_rows(t) {
+                b.push_values(&row);
+            }
+        }
         _ => {}
     }
     b.finish(&key_text)
@@ -240,6 +246,66 @@ pub fn utc_time(ms: u64) -> String {
         rest % 3_600 / 60,
         rest % 60
     )
+}
+
+/// The rows of the tunnels of each tunnel selection of an SD-WAN: the
+/// encapsulation of the tunnel gives the WAN interface and the peer
+/// address, the one device of the twin with the tunnel end of the peer is
+/// the far device, and its VCMP encapsulation from the peer address gives
+/// the far interface.
+fn sdwan_rows(t: &Loaded) -> Vec<Vec<Value>> {
+    let mut encaps: BTreeMap<&FunctionId, &VcmpEncap> = BTreeMap::new();
+    let mut sources: BTreeMap<(String, IpAddr), String> = BTreeMap::new();
+    let mut selects: Vec<(String, String, &OverlaySelect)> = Vec::new();
+    for f in t.functions() {
+        let any: &dyn Any = f.as_ref();
+        let device = f.device().map(ToString::to_string).unwrap_or_default();
+        if let Some(v) = any.downcast_ref::<VcmpEncap>() {
+            encaps.insert(f.id(), v);
+            sources
+                .entry((device, v.source))
+                .or_insert_with(|| v.interface.to_string());
+        } else if let Some(s) = any.downcast_ref::<OverlaySelect>() {
+            selects.push((device, f.id().to_string(), s));
+        }
+    }
+    let ends = crate::topology::vcmp_ends(t);
+    let mut rows = Vec::new();
+    for (device, id, s) in selects {
+        for tunnel in &s.tunnels {
+            let encap = encaps.get(&tunnel.next).copied();
+            let far = encap.and_then(|v| {
+                match crate::topology::vcmp_far(&ends, &device, v.peer).as_slice() {
+                    [one] => Some(one.clone()),
+                    _ => None,
+                }
+            });
+            let far_interface = far
+                .as_ref()
+                .zip(encap)
+                .and_then(|(d, v)| sources.get(&(d.clone(), v.peer)).cloned());
+            let (state, reason) = match tunnel.state {
+                TunnelState::Up | TunnelState::Down => (json!(snake(&tunnel.state)), Value::Null),
+                TunnelState::NotCollected => (Value::Null, json!(snake(&tunnel.state))),
+            };
+            rows.push(vec![
+                json!(device),
+                json!(id),
+                json!(s.segment),
+                json!(tunnel.label()),
+                encap.map_or(Value::Null, |v| json!(v.interface.to_string())),
+                json!(tunnel.transport),
+                encap.map_or(Value::Null, |v| json!(v.peer.to_string())),
+                far.map_or(Value::Null, Value::from),
+                far_interface.map_or(Value::Null, Value::from),
+                state,
+                reason,
+                tunnel.paths.map_or(Value::Null, |n| json!(n)),
+                json!(spans(&tunnel.spans)),
+            ]);
+        }
+    }
+    rows
 }
 
 /// The row of a BGP peer fact.
@@ -426,7 +492,102 @@ pub fn summarize(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use rsim_contract::table::Selection;
+    use rsim_contract::twin::TwinJson;
+    use serde_json::{Value, json};
+
     use super::utc_time;
+    use crate::commands::Loaded;
+
+    fn loaded(twin: rsim_engine::Twin, name: &str) -> Loaded {
+        Loaded {
+            twin,
+            identity: TwinJson::builtin(name).unwrap(),
+            coverage: BTreeMap::new(),
+            bgp: BTreeMap::new(),
+            facts: BTreeMap::new(),
+            seen: Vec::new(),
+            tables: Default::default(),
+            source: None,
+        }
+    }
+
+    fn sdwan_paths(t: &Loaded) -> Vec<Vec<Value>> {
+        super::show("sdwan", t, "sdwan-paths", &Selection::default())
+            .unwrap()
+            .rows
+    }
+
+    #[test]
+    fn each_tunnel_of_a_tunnel_selection_is_a_row_with_its_far_end_and_its_state() {
+        let twin = rsim_topologies::sdwan_site(rsim_topologies::SdwanOpts {
+            private_tunnel: rsim_functions::TunnelState::Down,
+            ..Default::default()
+        })
+        .build()
+        .expect("the twin builds");
+        let rows = sdwan_paths(&loaded(twin, "sdwan"));
+        let row = |device: &str,
+                   far: &str,
+                   link: &str,
+                   transport: &str,
+                   peer: &str,
+                   state: Option<&str>| {
+            let line = if link == "wan1" { 23 } else { 24 };
+            json!([
+                device,
+                format!("{device}/sdwan/select/0/{far}"),
+                0,
+                format!("{link}~{far}:{link}"),
+                link,
+                transport,
+                peer,
+                far,
+                link,
+                state,
+                null,
+                null,
+                [format!("{device}.conf:{line}-{line}")],
+            ])
+        };
+        let want = vec![
+            row(
+                "branch1",
+                "hub1",
+                "wan1",
+                "public",
+                "203.0.113.1",
+                Some("up"),
+            ),
+            row(
+                "branch1",
+                "hub1",
+                "wan2",
+                "mpls",
+                "172.16.9.1",
+                Some("down"),
+            ),
+            row(
+                "hub1",
+                "branch1",
+                "wan1",
+                "public",
+                "198.51.100.1",
+                Some("up"),
+            ),
+            row("hub1", "branch1", "wan2", "mpls", "172.16.1.1", Some("up")),
+        ];
+        let got: Vec<Value> = rows.into_iter().map(Value::from).collect();
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn a_twin_with_no_sdwan_has_no_sdwan_path() {
+        let twin = rsim_topologies::builtin("leaf-spine").unwrap();
+        assert!(sdwan_paths(&loaded(twin, "leaf-spine")).is_empty());
+    }
 
     #[test]
     fn a_time_prints_as_its_utc_date_and_time() {
