@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rsim_core::{FunctionId, Mac, SourceSpan};
-use rsim_ingest::links::{Neighbour, PortVlans, Summary, join};
+use rsim_ingest::links::{AddressPeer, Neighbour, PortAddress, PortVlans, Summary, join};
 
 fn mac(s: &str) -> Mac {
     s.parse().unwrap()
@@ -362,4 +362,165 @@ fn a_named_neighbour_with_no_device_is_seen_by_its_section() {
         .collect();
     assert_eq!(seen, [("a", "p1", "x", "lldp"), ("a", "p2", "y", "cdp")]);
     assert_eq!(j.seen[0].remote_port.as_deref(), Some("e1"));
+}
+
+/// A switch `sw` with the edge access port `p1` in VLAN 10, an ARP row of
+/// `addr` with the MAC `00:00:5e:00:53:40`, and the MAC table row of that
+/// MAC on `p1`.
+fn arp_switch(addr: &str) -> Summary {
+    let mut s = device("sw", &[("p1", "00:00:5e:00:53:01")], &[], false);
+    s.ports.insert(
+        "p1".to_string(),
+        Some(PortVlans {
+            native: Some(10),
+            edge: true,
+            ..PortVlans::default()
+        }),
+    );
+    let m = mac("00:00:5e:00:53:40");
+    s.arp
+        .push((10, addr.parse().unwrap(), m, SourceSpan::line("sw/arp", 1)));
+    s.macs
+        .insert((10, m), ("p1".to_string(), SourceSpan::line("sw/macs", 1)));
+    s
+}
+
+/// A device with no MAC whose ports the join links by address: the port
+/// `port` with the address `addr` in the VRF `vrf`.
+fn by_address(name: &str, port: &str, addr: &str, vrf: Option<&str>) -> Summary {
+    let mut s = Summary {
+        by_address: true,
+        ..Summary::default()
+    };
+    s.entries.insert(
+        port.to_string(),
+        FunctionId::new(format!("{name}/in/{port}")),
+    );
+    s.port_addresses.push(PortAddress {
+        port: port.to_string(),
+        address: addr.parse().unwrap(),
+        vlan: None,
+        vrf: vrf.map(str::to_string),
+        spans: vec![SourceSpan::line(format!("{name}/config"), 1)],
+    });
+    s
+}
+
+/// A router `name` with the routed port `eth1` and its address `addr` in
+/// the VRF `vrf`.
+fn router(name: &str, addr: &str, vrf: Option<&str>) -> Summary {
+    let mut s = device(name, &[("eth1", "00:00:5e:00:53:21")], &[], false);
+    s.ports.clear();
+    s.port_addresses.push(PortAddress {
+        port: "eth1".to_string(),
+        address: addr.parse().unwrap(),
+        vlan: None,
+        vrf: vrf.map(str::to_string),
+        spans: vec![SourceSpan::line(format!("{name}/config"), 2)],
+    });
+    s
+}
+
+/// The address `addr` as the gateway of the port `wan` of `edge`, in the
+/// VRF `vrf`.
+fn gateway(edge: &mut Summary, addr: &str, vrf: Option<&str>) {
+    edge.address_peers.push(AddressPeer {
+        port: "wan".to_string(),
+        address: addr.parse().unwrap(),
+        vrf: vrf.map(str::to_string),
+        spans: vec![SourceSpan::line("edge/config", 3)],
+    });
+}
+
+#[test]
+fn an_address_of_one_port_gives_a_link() {
+    let mut edge = by_address("edge", "lan", "192.0.2.40", Some("corp"));
+    edge.entries
+        .insert("wan".to_string(), FunctionId::new("edge/in/wan"));
+    gateway(&mut edge, "198.51.100.1", None);
+    let devices = BTreeMap::from([
+        ("edge".to_string(), edge),
+        ("r".to_string(), router("r", "198.51.100.1", None)),
+        ("sw".to_string(), arp_switch("192.0.2.40")),
+    ]);
+    let (links, notes) = peers(&devices);
+    assert_eq!(links["sw:p1"], ["edge/in/lan"], "{notes:?}");
+    assert_eq!(links["edge:lan"], ["sw/in/p1"]);
+    assert_eq!(links["edge:wan"], ["r/in/eth1"]);
+    assert_eq!(links["r:eth1"], ["edge/in/wan"]);
+}
+
+#[test]
+fn an_address_of_2_ports_gives_no_link_and_a_note() {
+    let mut edge = by_address("edge", "wan", "198.51.100.10", None);
+    gateway(&mut edge, "198.51.100.1", None);
+    let devices = BTreeMap::from([
+        ("edge".to_string(), edge),
+        ("r1".to_string(), router("r1", "198.51.100.1", None)),
+        ("r2".to_string(), router("r2", "198.51.100.1", None)),
+    ]);
+    let (links, notes) = peers(&devices);
+    assert!(links.is_empty(), "{links:?}");
+    assert!(
+        notes.contains(&"wan: 198.51.100.1 is on more than one port, no link".to_string()),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn a_shared_public_address_gives_no_link() {
+    let mut e1 = by_address("e1", "lan", "192.0.2.41", None);
+    e1.shared_addresses.insert("203.0.113.5".parse().unwrap());
+    let mut e2 = by_address("e2", "lan", "192.0.2.42", None);
+    e2.shared_addresses.insert("203.0.113.5".parse().unwrap());
+    let devices = BTreeMap::from([
+        ("e1".to_string(), e1),
+        ("e2".to_string(), e2),
+        ("sw".to_string(), arp_switch("203.0.113.5")),
+    ]);
+    let (links, notes) = peers(&devices);
+    assert!(links.is_empty(), "{links:?}");
+    assert!(
+        notes.contains(&"ARP row 203.0.113.5 is a shared address, no link".to_string()),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn an_address_of_a_device_linked_by_address_is_no_endpoint() {
+    let devices = BTreeMap::from([
+        (
+            "edge".to_string(),
+            by_address("edge", "lan", "192.0.2.40", None),
+        ),
+        ("sw".to_string(), arp_switch("192.0.2.40")),
+    ]);
+    let j = join(&devices, &BTreeSet::new(), &BTreeSet::new());
+    assert!(
+        j.devices.get("sw").is_none_or(|x| x.endpoints.is_empty()),
+        "an endpoint is placed"
+    );
+    let notes: Vec<&String> = j.notes.values().flatten().collect();
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.ends_with("an address of a device of the twin, not an endpoint")),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn an_address_in_another_vrf_gives_no_link() {
+    let mut edge = by_address("edge", "wan", "198.51.100.10", Some("blue"));
+    gateway(&mut edge, "198.51.100.1", Some("blue"));
+    let devices = BTreeMap::from([
+        ("edge".to_string(), edge),
+        ("r".to_string(), router("r", "198.51.100.1", Some("red"))),
+    ]);
+    let (links, notes) = peers(&devices);
+    assert!(links.is_empty(), "{links:?}");
+    assert!(
+        notes.contains(&"wan: 198.51.100.1 is in another VRF, no link".to_string()),
+        "{notes:?}"
+    );
 }

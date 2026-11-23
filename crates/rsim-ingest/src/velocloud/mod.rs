@@ -3,6 +3,7 @@
 
 pub mod coverage;
 pub mod effective;
+pub mod join;
 pub mod json;
 pub mod lower;
 pub mod mask;
@@ -11,6 +12,7 @@ pub mod reader;
 pub mod routes;
 pub mod rules;
 
+pub use join::summaries;
 pub use json::Parsed;
 pub use lower::{HubChoice, Lowered, lower};
 pub use profile::profile;

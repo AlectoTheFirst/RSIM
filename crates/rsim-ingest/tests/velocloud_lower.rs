@@ -1,14 +1,16 @@
 //! The lowering of the VeloCloud edges of an enterprise on synthetic
 //! sections: the tunnels of a path and the results of their candidates, the
 //! firewall, the business policy, the route order, the LAN BGP of a
-//! segment, the link steering, the hub of a cluster, 2 enterprises and the
-//! determinism of the twin.
+//! segment, the link steering, the hub of a cluster, 2 enterprises, the
+//! determinism of the twin, and the links of the join to a switch on the LAN
+//! side and to a router on the WAN side.
 
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
 use rsim_core::{AlternativeKind, ExitPoint, Header, PROTO_TCP, ReasonCode, Verdict, VerdictKind};
 use rsim_engine::{Answer, Executor, Query, Twin};
+use rsim_ingest::collected::{Collected, LinkRow, MacRow, NeighbourRow, row_span};
 use rsim_ingest::estate::{Estate, Input, assemble};
 use serde_json::{Value, json};
 
@@ -575,4 +577,191 @@ fn each_edge_has_its_coverage_and_the_same_sections_give_the_same_twin() {
             assert_eq!(functions(&a, i), functions(&b, i));
         }
     }
+}
+
+const SWITCH: &str = "sw1";
+
+fn arp_row(iface: &str, ip: &str, mac: &str, i: u64) -> NeighbourRow {
+    NeighbourRow {
+        interface: iface.into(),
+        ip: ip.into(),
+        mac: Some(mac.into()),
+        state: None,
+        span: row_span(SWITCH, "neighbours", "b2", i),
+    }
+}
+
+fn mac_row(vlan: u64, mac: &str, port: &str, i: u64) -> MacRow {
+    MacRow {
+        vlan,
+        mac: mac.into(),
+        port: Some(port.into()),
+        kind: Some("dynamic".into()),
+        span: row_span(SWITCH, "mac_table", "b3", i),
+    }
+}
+
+fn link_row(device: &str, iface: &str, mac: &str) -> LinkRow {
+    LinkRow {
+        interface: iface.into(),
+        mac: Some(mac.into()),
+        parent: None,
+        vlan: None,
+        span: row_span(device, "links", "b4", 0),
+    }
+}
+
+/// An NX-OS switch with the host 192.0.2.130 on the access port
+/// Ethernet1/5 in VLAN 30, the branch address 192.0.2.40 on the access port
+/// Ethernet1/6 in VLAN 10, and a route to the LAN of the hub through the
+/// branch.
+fn switch() -> Input {
+    let config = "hostname sw1
+feature interface-vlan
+vlan 10,30
+interface Vlan10
+  no shutdown
+  ip address 192.0.2.2/26
+interface Vlan30
+  no shutdown
+  ip address 192.0.2.129/26
+interface Ethernet1/5
+  switchport
+  switchport access vlan 30
+  no shutdown
+interface Ethernet1/6
+  switchport
+  switchport access vlan 10
+  no shutdown
+ip route 10.20.0.0/16 192.0.2.40
+";
+    let interfaces = json!({"TABLE_interface": {"ROW_interface": [
+        {"interface": "Ethernet1/5", "admin_state": "up", "state": "up"},
+        {"interface": "Ethernet1/6", "admin_state": "up", "state": "up"},
+        {"interface": "Vlan10", "svi_admin_state": "up", "svi_line_proto": "up"},
+        {"interface": "Vlan30", "svi_admin_state": "up", "svi_line_proto": "up"}
+    ]}});
+    Input::Nxos {
+        name: SWITCH.into(),
+        config: config.as_bytes().to_vec(),
+        file: format!("{SWITCH}/config"),
+        collected: Collected {
+            neighbours: vec![
+                arp_row("Vlan10", "192.0.2.40", "00:00:5e:00:53:40", 0),
+                arp_row("Vlan30", "192.0.2.130", "00:00:5e:00:53:a1", 1),
+            ],
+            macs: vec![
+                mac_row(10, "00:00:5e:00:53:40", "Eth1/6", 0),
+                mac_row(30, "00:00:5e:00:53:a1", "Eth1/5", 1),
+            ],
+            links: vec![
+                link_row(SWITCH, "Vlan10", "00:00:5e:00:53:10"),
+                link_row(SWITCH, "Vlan30", "00:00:5e:00:53:30"),
+            ],
+            ..Collected::default()
+        },
+        sections: BTreeMap::from([(
+            "interfaces".to_string(),
+            (
+                serde_json::to_vec(&interfaces).unwrap(),
+                format!("{SWITCH}/interfaces"),
+            ),
+        )]),
+    }
+}
+
+/// The router r1 of the VyOS fixture, with the collected MAC of eth1,
+/// 203.0.113.129/25.
+fn router() -> Input {
+    Input::Vyos {
+        name: "r1".into(),
+        config: include_bytes!("fixtures/vyos/r1-config.json").to_vec(),
+        file: "r1/config".into(),
+        collected: Collected {
+            links: vec![link_row("r1", "eth1", "00:00:5e:00:53:21")],
+            ..Collected::default()
+        },
+    }
+}
+
+/// The position of the step of the function `name` in a path.
+fn position(f: &[String], name: &str) -> usize {
+    f.iter()
+        .position(|x| x == name)
+        .unwrap_or_else(|| panic!("{name} is not in {f:?}"))
+}
+
+#[test]
+fn a_host_behind_an_estate_switch_reaches_a_host_behind_the_hub_through_the_branch_lan() {
+    let mut m = base();
+    open_firewall(&mut m);
+    no_lan_bgp(&mut m);
+    let lan = &mut branch_module(&mut m, 0)["lan"]["networks"][0];
+    lan["cidrIp"] = json!("192.0.2.40");
+    lan["cidrPrefix"] = json!(26);
+    sync_state(&mut m);
+    let e = assemble(vec![input(STORE, &m), switch()]);
+    let notes = e.notes.clone();
+    let t = e.builder.build().expect("the twin builds");
+    let h = Header::request(ip("192.0.2.130"), ip("10.20.20.10"), PROTO_TCP)
+        .with_src_port(40000)
+        .with_dst_port(443);
+    let a = Executor::new(&t)
+        .run(&Query::path(&t, &h).without_reply())
+        .expect("the query runs");
+    let b = a.branches();
+    assert_eq!(b.len(), 2, "{notes:#?}");
+    for (i, branch) in b.iter().enumerate() {
+        let f = functions(&a, i);
+        let port = position(&f, &format!("{SWITCH}/port/Ethernet1/6/out"));
+        let lan = position(&f, &format!("{BR}/in/users"));
+        assert!(port < lan, "{f:?}");
+        assert!(lan < position(&f, SELECT), "{f:?}");
+        assert!(position(&f, SELECT) < position(&f, &format!("{HUB}/vcmp/decap")));
+        let step = branch
+            .steps
+            .iter()
+            .find(|s| s.function.as_str() == SELECT)
+            .unwrap();
+        let alt = step.alternative.as_ref().expect("a candidate");
+        assert_eq!(alt.kind, AlternativeKind::Candidate);
+        assert_eq!((alt.index, alt.count), (i as u32, 2));
+    }
+    assert!(
+        notes[SWITCH]
+            .iter()
+            .any(|n| n.ends_with("an address of a device of the twin, not an endpoint")),
+        "{notes:#?}"
+    );
+}
+
+#[test]
+fn the_outer_packet_of_a_tunnel_goes_through_the_estate_router_of_the_wan_gateway() {
+    let mut m = base();
+    open_firewall(&mut m);
+    no_lan_bgp(&mut m);
+    branch_module(&mut m, 0)["routedInterfaces"][0]["addressing"] = json!({
+        "type": "STATIC", "cidrIp": "203.0.113.130", "cidrPrefix": 25, "gateway": "203.0.113.129"
+    });
+    m.get_mut("edges").unwrap()[0]["links"][0]["ipAddress"] = json!("203.0.113.130");
+    sync_state(&mut m);
+    let e = assemble(vec![input(STORE, &m), router()]);
+    let notes = e.notes.clone();
+    let t = e.builder.build().expect("the twin builds");
+    let a = run(&t, "10.20.20.10");
+    let b = a.branches();
+    assert_eq!(b.len(), 2, "{notes:#?}");
+    let wan = format!("{BR}/out/GE1");
+    let i = (0..b.len())
+        .find(|i| functions(&a, *i).contains(&wan))
+        .unwrap_or_else(|| panic!("no path leaves on GE1: {notes:#?}"));
+    let f = functions(&a, i);
+    let handoff = position(&f, "r1/handoff/eth1");
+    assert!(position(&f, &wan) < handoff, "{f:?}");
+    assert!(handoff < position(&f, "r1/in/eth1"), "{f:?}");
+    assert!(
+        !f.iter()
+            .any(|x| x.starts_with(&format!("{STORE}/transport/"))),
+        "{f:?}"
+    );
 }

@@ -600,6 +600,12 @@ pub(crate) fn routed_summary(
     }
     if let Some(Ok(rib)) = &st.rib {
         sum.next_hops = rib.paths.iter().filter_map(|p| p.gateway).collect();
+        for p in &rib.paths {
+            if let Some(g) = p.gateway {
+                let vrf = p.other_vrf.as_ref().unwrap_or(&p.vrf);
+                sum.next_hop_vrfs.entry(g).or_default().insert(vrf.clone());
+            }
+        }
     }
     let vlan_of: BTreeMap<&str, u16> = active
         .iter()

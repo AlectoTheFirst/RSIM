@@ -7,7 +7,9 @@
 //! edge, and the default route goes to the business policy of the segment.
 //! A tunnel puts the packets into VCMP on a WAN link, and the outer packets
 //! go through the transport network of the link to the far edge, where the
-//! decapsulation gives them to the route lookup of their segment.
+//! decapsulation gives them to the route lookup of their segment. A LAN or
+//! WAN port with a link of the join leaves to the device of the estate at
+//! the far end of the link.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,7 +18,7 @@ use std::sync::Arc;
 
 use rsim_core::{
     AddrCond, FieldValue, FunctionId, InterfaceId, Match, NetFunction, NextHop, ObjectId, PortCond,
-    Prefix, ReasonCode, RulePredicate, SourceSpan, TriePrefixTable, ValueCond, VrfId,
+    Prefix, ReasonCode, Rewrite, RulePredicate, SourceSpan, TriePrefixTable, ValueCond, VrfId,
 };
 use rsim_engine::EdgeInterface;
 use rsim_functions::{
@@ -26,6 +28,8 @@ use rsim_functions::{
     RuleAction, SessionBypass, SessionCommit, SessionLookup, SourceNat, StateActions,
     TransportLookup, TunnelState, VCMP_PORT, VcmpDecap, VcmpEncap, VendorProfile, VrfSelection,
 };
+
+use crate::links::External;
 
 use super::reader::{
     Edge, EdgeSegment, Enterprise, HubRef, Interface, InterfaceKind, LinkKind, Peers, StaticRoute,
@@ -163,14 +167,14 @@ fn vrf_of(s: &EdgeSegment) -> VrfId {
 }
 
 /// The interface of a WAN link: its interface, else its logicalId.
-fn wan_iface(l: &WanLink) -> String {
+pub(super) fn wan_iface(l: &WanLink) -> String {
     l.interface.clone().unwrap_or_else(|| l.logical_id.clone())
 }
 
 /// The WAN links of an edge that the lowering uses, one for each WAN
 /// interface, and the links with one listing group that it leaves out,
 /// each with the reason.
-fn usable_links(e: &Edge) -> (Vec<&WanLink>, Vec<(&WanLink, String)>) {
+pub(super) fn usable_links(e: &Edge) -> (Vec<&WanLink>, Vec<(&WanLink, String)>) {
     let mut seen = BTreeSet::new();
     let mut used = Vec::new();
     let mut left = Vec::new();
@@ -389,6 +393,8 @@ struct L<'a> {
     e: &'a Edge,
     profile: &'a VendorProfile,
     hubs: HubChoice,
+    /// The links of the ports of the edge from the join.
+    ext: &'a External,
     functions: Vec<Arc<dyn NetFunction>>,
     edges: Vec<EdgeInterface>,
     notes: Vec<String>,
@@ -467,6 +473,39 @@ impl<'a> L<'a> {
         }
     }
 
+    /// The link of a port from the join: the far end of its one peer.
+    fn link(&self, port: &str) -> Option<Link> {
+        match self.ext.peers.get(port).map(Vec::as_slice) {
+            Some([p]) => Some(Link {
+                peer: Some(p.target.clone()),
+                delay_ns: None,
+                provenance: p.provenance.clone(),
+                facts: None,
+            }),
+            _ => None,
+        }
+    }
+
+    /// The device at the far end of the link of a port from the join.
+    fn far_device(&self, port: &str) -> Option<String> {
+        match self.ext.peers.get(port).map(Vec::as_slice) {
+            Some([p]) => Some(p.far.0.clone()),
+            _ => None,
+        }
+    }
+
+    /// The rewrite of a packet that leaves on a port with a link: the MAC of
+    /// the far end as the destination MAC, when the join gives it.
+    fn far_rewrite(&self, port: &str) -> Rewrite {
+        match self.ext.far_macs.get(port) {
+            Some(m) if self.link(port).is_some() => Rewrite {
+                dst_mac: Some(FieldValue::Known(*m)),
+                ..Rewrite::default()
+            },
+            _ => Rewrite::default(),
+        }
+    }
+
     fn lower(&mut self) {
         let e = self.e;
         let (used, left) = usable_links(e);
@@ -501,7 +540,9 @@ impl<'a> L<'a> {
                 interface: InterfaceId::new(&i.name),
                 next: self.id(&format!("vrf/{}", s.id)),
             });
-            if let Some((a, len)) = i.address {
+            if let Some((a, len)) = i.address
+                && self.link(&i.name).is_none()
+            {
                 self.edges.push(EdgeInterface {
                     device: e.device.as_str().into(),
                     interface: InterfaceId::new(&i.name),
@@ -570,11 +611,12 @@ impl<'a> L<'a> {
         }
         for (i, _) in &lan {
             let meta = self.meta(&format!("out/{}", i.name), vec![i.span.clone()]);
+            let link = self.link(&i.name);
             self.add(Egress {
                 meta,
                 interface: InterfaceId::new(&i.name),
                 mode: EgressMode::Routed,
-                link: None,
+                link,
                 rewrite: Default::default(),
                 tag: Default::default(),
                 exit: None,
@@ -1614,11 +1656,12 @@ impl<'a> L<'a> {
         let mut p2p = BTreeMap::new();
         for l in self.wan.clone() {
             let iface = wan_iface(l);
-            let owner = l
-                .isp
-                .clone()
-                .or_else(|| l.name.clone())
-                .unwrap_or_else(|| "provider".to_string());
+            let owner = self.far_device(&iface).unwrap_or_else(|| {
+                l.isp
+                    .clone()
+                    .or_else(|| l.name.clone())
+                    .unwrap_or_else(|| "provider".to_string())
+            });
             egress.insert(InterfaceId::new(&iface), self.id(&format!("exit/{iface}")));
             p2p.insert(InterfaceId::new(&iface), owner);
         }
@@ -1632,14 +1675,17 @@ impl<'a> L<'a> {
         for l in self.wan.clone() {
             let iface = wan_iface(l);
             let meta = self.meta(&format!("exit/{iface}"), l.spans.clone());
+            let link = self.link(&iface);
+            let exit = link.is_none().then_some(ExitMark::AccessLink);
+            let rewrite = self.far_rewrite(&iface);
             self.add(Egress {
                 meta,
                 interface: InterfaceId::new(&iface),
                 mode: EgressMode::Routed,
-                link: None,
-                rewrite: Default::default(),
+                link,
+                rewrite,
                 tag: Default::default(),
-                exit: Some(ExitMark::AccessLink),
+                exit,
             });
         }
     }
@@ -1670,18 +1716,37 @@ impl<'a> L<'a> {
                 );
             }
             let transport = self.transport(l);
-            let owner = transport.clone().unwrap_or_else(|| "provider".to_string());
+            let far = self.far_device(&iface);
+            let owner = far
+                .clone()
+                .or_else(|| transport.clone())
+                .unwrap_or_else(|| "provider".to_string());
             egress.insert(InterfaceId::new(&iface), self.id(&format!("out/{iface}")));
             p2p.insert(InterfaceId::new(&iface), owner);
             let port = format!("{}:{}", e.logical_id, l.logical_id);
-            let link = transport.as_ref().map(|t| Link {
-                peer: Some(FunctionId::new(format!("{t}/in/{port}"))),
-                delay_ns: None,
-                provenance: l.spans.clone(),
-                facts: None,
+            let link = self.link(&iface).or_else(|| {
+                transport.as_ref().map(|t| Link {
+                    peer: Some(FunctionId::new(format!("{t}/in/{port}"))),
+                    delay_ns: None,
+                    provenance: l.spans.clone(),
+                    facts: None,
+                })
             });
-            match &transport {
-                Some(t) => self.members.push((
+            match (&transport, &far) {
+                // A WAN link with a link of the join is no member of its
+                // transport network, and its address there has an unknown
+                // route.
+                (Some(t), Some(d)) => {
+                    if let Some(a) = link_address(l) {
+                        self.left_out.push((
+                            t.clone(),
+                            a,
+                            format!("link {} of {} links to {d}", l.logical_id, e.logical_id),
+                            l.spans.clone(),
+                        ));
+                    }
+                }
+                (Some(t), None) => self.members.push((
                     t.clone(),
                     Member {
                         edge: e.device.clone(),
@@ -1691,18 +1756,20 @@ impl<'a> L<'a> {
                         spans: l.spans.clone(),
                     },
                 )),
-                None => self.note(format!(
+                (None, Some(_)) => {}
+                (None, None) => self.note(format!(
                     "link {}: no transport network for its kind",
                     l.logical_id
                 )),
             }
             let meta = self.meta(&format!("out/{iface}"), l.spans.clone());
+            let rewrite = self.far_rewrite(&iface);
             self.add(Egress {
                 meta,
                 interface: InterfaceId::new(&iface),
                 mode: EgressMode::Routed,
                 link,
-                rewrite: Default::default(),
+                rewrite,
                 tag: Default::default(),
                 exit: None,
             });
@@ -1897,16 +1964,24 @@ fn winner(p: Prefix, cs: &[Candidate]) -> Route {
 
 /// Lowers the edges of an enterprise and the transport networks between
 /// their WAN links. `hubs` gives the hub of a cluster whose hub is not
-/// collected.
-pub fn lower(ent: &Enterprise, profile: &VendorProfile, hubs: HubChoice) -> Lowered {
+/// collected, and `links` the links of the ports of each edge from the
+/// join.
+pub fn lower(
+    ent: &Enterprise,
+    profile: &VendorProfile,
+    hubs: HubChoice,
+    links: &BTreeMap<String, External>,
+) -> Lowered {
     let mut out = Lowered::default();
     let mut transports: BTreeMap<String, Transport> = BTreeMap::new();
+    let none = External::default();
     for e in &ent.edges {
         let mut l = L {
             ent,
             e,
             profile,
             hubs,
+            ext: links.get(&e.device).unwrap_or(&none),
             functions: Vec::new(),
             edges: Vec::new(),
             notes: e.notes.clone(),
