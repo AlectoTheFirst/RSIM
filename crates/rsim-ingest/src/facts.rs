@@ -319,7 +319,7 @@ pub fn device(
         "velocloud" => {
             let rows = ["edges", "edges_v2"]
                 .iter()
-                .filter_map(|s| get(*s).map(|(b, f)| velocloud_edges(name, b, f)))
+                .filter_map(|s| get(s).map(|(b, f)| velocloud_edges(name, b, f)))
                 .find(|r| !r.is_empty());
             if let Some(rows) = rows {
                 return rows
