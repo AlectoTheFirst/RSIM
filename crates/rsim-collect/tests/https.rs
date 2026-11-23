@@ -2,24 +2,27 @@
 
 #![cfg(feature = "https")]
 
+use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::future::join_all;
 use http_body_util::{BodyExt, Full};
 use hyper::service::service_fn;
-use hyper::{Request, Response, StatusCode, header};
+use hyper::{Method, Request, Response, StatusCode, header};
 use hyper_util::rt::TokioIo;
 use rsim_collect::https::{
-    ClientCert, HttpsLimits, HttpsProfile, HttpsTransport, TlsTrust, certificate_pin,
+    ApiServer, ClientCert, HttpsLimits, HttpsProfile, HttpsTransport, TlsTrust, certificate_pin,
 };
 use rsim_collect::{
-    Algorithms, Credential, Device, Https, Jump, MemoryCredentials, PinKind, PinPolicy, Proxy,
-    Secret, TransportError, TrustStore, Vendor,
+    Algorithms, Credential, Device, HttpReply, Https, Jump, MemoryCredentials, PinKind, PinPolicy,
+    Proxy, Secret, TokioClock, TransportError, TrustStore, Vendor,
 };
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+use serde_json::json;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
@@ -31,11 +34,40 @@ struct State {
     connections: AtomicUsize,
     logins: AtomicUsize,
     token: Mutex<Option<String>>,
+    authorization: Mutex<Option<String>>,
+    posts: Mutex<Vec<(String, Bytes)>>,
+    starts: Mutex<Vec<(String, Instant)>>,
+    in_flight: AtomicUsize,
+    peak: AtomicUsize,
+    /// The 429 replies of the paths `/limited/..`, each with its
+    /// `Retry-After` value or with none.
+    limits: Mutex<VecDeque<Option<String>>>,
 }
 
 impl State {
     fn expire(&self) {
         *self.token.lock().unwrap() = None;
+    }
+
+    /// The start times of the requests to the paths with the prefix.
+    fn starts(&self, prefix: &str) -> Vec<Instant> {
+        let mut out: Vec<Instant> = self
+            .starts
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(p, _)| p.starts_with(prefix))
+            .map(|(_, t)| *t)
+            .collect();
+        out.sort();
+        out
+    }
+
+    fn limit(&self, retry_after: Option<&str>) {
+        self.limits
+            .lock()
+            .unwrap()
+            .push_back(retry_after.map(str::to_string));
     }
 }
 
@@ -46,10 +78,41 @@ fn reply(status: StatusCode, body: impl Into<Bytes>) -> Response<Full<Bytes>> {
         .unwrap()
 }
 
+fn too_many(retry_after: Option<String>) -> Response<Full<Bytes>> {
+    let mut b = Response::builder().status(StatusCode::TOO_MANY_REQUESTS);
+    if let Some(v) = retry_after {
+        b = b.header(header::RETRY_AFTER, v);
+    }
+    b.body(Full::new(Bytes::from_static(b"{\"error\":\"rate\"}")))
+        .unwrap()
+}
+
 async fn handle(state: Arc<State>, req: Request<hyper::body::Incoming>) -> Response<Full<Bytes>> {
+    let n = state.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+    state.peak.fetch_max(n, Ordering::SeqCst);
+    let r = respond(state.clone(), req).await;
+    state.in_flight.fetch_sub(1, Ordering::SeqCst);
+    r
+}
+
+async fn respond(state: Arc<State>, req: Request<hyper::body::Incoming>) -> Response<Full<Bytes>> {
     let path = req.uri().path().to_string();
+    let method = req.method().clone();
     let headers = req.headers().clone();
     let body = req.into_body().collect().await.unwrap().to_bytes();
+    if path != "/api/auth/login" {
+        state
+            .starts
+            .lock()
+            .unwrap()
+            .push((path.clone(), Instant::now()));
+    }
+    let authorization = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let api_token = authorization.as_deref() == Some("Token tok-velo");
+    *state.authorization.lock().unwrap() = authorization;
     if path == "/api/auth/login" {
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         if v["username"] != "collector" || v["password"] != "s3cret" {
@@ -74,14 +137,44 @@ async fn handle(state: Arc<State>, req: Request<hyper::body::Incoming>) -> Respo
         let csrf = headers.get("x-csrf-token").and_then(|v| v.to_str().ok());
         cookie == Some(&format!("TOKEN={t}")) && csrf == Some(&format!("csrf-{t}"))
     });
-    if !api_key && !session {
+    if !api_key && !session && !api_token {
         return reply(StatusCode::UNAUTHORIZED, "{}");
+    }
+    if method == Method::POST {
+        state
+            .posts
+            .lock()
+            .unwrap()
+            .push((path.clone(), body.clone()));
+    }
+    if path.starts_with("/limited/") {
+        let next = state.limits.lock().unwrap().pop_front();
+        if let Some(retry_after) = next {
+            return too_many(retry_after);
+        }
+    }
+    if path.starts_with("/always-429/") {
+        return too_many(Some("0".into()));
+    }
+    if path.starts_with("/slow/") {
+        tokio::time::sleep(Duration::from_millis(1200)).await;
     }
     match path.as_str() {
         "/big" => reply(StatusCode::OK, vec![b'x'; 5000]),
         "/missing" => reply(StatusCode::NOT_FOUND, "{}"),
+        "/forbidden" => reply(StatusCode::FORBIDDEN, forbidden_body()),
+        "/unimplemented" => reply(StatusCode::NOT_IMPLEMENTED, unimplemented_body()),
+        _ if method == Method::POST => reply(StatusCode::OK, body),
         _ => reply(StatusCode::OK, format!("{{\"path\":\"{path}\"}}")),
     }
+}
+
+fn forbidden_body() -> String {
+    format!("{{\"error\":\"denied\"}}\n{}", "y".repeat(300))
+}
+
+fn unimplemented_body() -> String {
+    format!("{{\"error\":\"not implemented\"}}\r\n{}", "z".repeat(300))
 }
 
 struct Fixture {
@@ -564,4 +657,345 @@ async fn each_site_of_a_console_keeps_its_tls_mode() {
     );
     assert!(t.get(&device(&f.address, "default"), "/a").await.is_ok());
     assert!(t.get(&device(&f.address, "branch"), "/a").await.is_err());
+}
+
+/// The read paths of the POST tests.
+const READS: &[&str] = &[
+    "/portal/rest/edge/getEdgeConfigurationStack",
+    "/unimplemented",
+];
+
+/// 2026-11-23 08:00:00 UTC in milliseconds since the Unix epoch.
+const CLOCK_MS: u64 = 1_795_420_800_000;
+
+fn token() -> Secret {
+    Secret::Token("tok-velo".into())
+}
+
+/// The credentials `lab` and `lab2`, each with the API token.
+fn token_credentials() -> Arc<MemoryCredentials> {
+    let mut c = MemoryCredentials::new();
+    for name in ["lab", "lab2"] {
+        c.insert(
+            name,
+            Credential {
+                user: String::new(),
+                secret: token(),
+            },
+        );
+    }
+    Arc::new(c)
+}
+
+/// A transport with the address of the fixture as an API server.
+fn api(f: &Fixture, concurrency: usize, limits: HttpsLimits) -> HttpsTransport {
+    HttpsTransport::new(token_credentials(), pinned(f), limits)
+        .with_api_server(&f.address, ApiServer { concurrency })
+}
+
+fn retries(n: u32) -> HttpsLimits {
+    HttpsLimits {
+        retries: n,
+        ..HttpsLimits::default()
+    }
+}
+
+/// Asserts that 2 request starts in a row are at least `interval` apart,
+/// less 50 ms for the latency of the test server.
+fn assert_pace(starts: &[Instant], interval: Duration) {
+    for w in starts.windows(2) {
+        let gap = w[1] - w[0];
+        assert!(gap + Duration::from_millis(50) >= interval, "{gap:?}");
+    }
+}
+
+/// The time between the 2 requests to the paths with the prefix.
+fn retry_gap(state: &State, prefix: &str) -> Duration {
+    let s = state.starts(prefix);
+    assert_eq!(s.len(), 2, "{s:?}");
+    s[1] - s[0]
+}
+
+#[tokio::test]
+async fn an_api_token_goes_in_the_authorization_header() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let d = device(&f.address, "default");
+    let t = HttpsTransport::new(credentials(token()), pinned(&f), HttpsLimits::default());
+    let out = t.get_status(&d, "/a").await.unwrap();
+    assert_eq!(out, HttpReply::Body(b"{\"path\":\"/a\"}".to_vec()));
+    assert_eq!(
+        f.state.authorization.lock().unwrap().as_deref(),
+        Some("Token tok-velo")
+    );
+    assert_eq!(f.state.logins.load(Ordering::SeqCst), 0);
+    assert_eq!(format!("{:?}", token()), "Token(..)");
+
+    let t = HttpsTransport::new(
+        credentials(Secret::Token("tok-other".into())),
+        pinned(&f),
+        HttpsLimits::default(),
+    );
+    let out = t.get_status(&d, "/a").await.unwrap();
+    assert_eq!(
+        out,
+        HttpReply::Status {
+            status: 401,
+            text: "{}".into()
+        }
+    );
+}
+
+#[tokio::test]
+async fn a_post_read_sends_its_exact_body() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let t = api(&f, 4, HttpsLimits::default());
+    let d = device(&f.address, "default");
+    let request = json!({"enterpriseId": 1, "edgeId": 7, "with": ["modules"]});
+    let out = t.post_read(&d, READS, READS[0], &request).await.unwrap();
+    let sent = request.to_string();
+    assert_eq!(out, HttpReply::Body(sent.clone().into_bytes()));
+    let posts = f.state.posts.lock().unwrap().clone();
+    assert_eq!(posts, [(READS[0].to_string(), Bytes::from(sent))]);
+}
+
+#[tokio::test]
+async fn a_post_path_outside_the_read_paths_is_never_sent() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let t = api(&f, 4, HttpsLimits::default());
+    let d = device(&f.address, "default");
+    let path = "/portal/rest/enterprise/deleteEnterprise";
+    let e = t
+        .post_read(&d, READS, path, &json!({"id": 1}))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&e, TransportError::Command(m) if m.contains("not a read path")),
+        "{e}"
+    );
+    assert_eq!(f.state.connections.load(Ordering::SeqCst), 0);
+    assert!(f.state.starts.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_429_waits_for_retry_after_in_seconds() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let t = api(&f, 4, retries(1));
+    f.state.limit(Some("1"));
+    let out = t
+        .get_status(&device(&f.address, "default"), "/limited/a")
+        .await
+        .unwrap();
+    assert!(matches!(out, HttpReply::Body(_)), "{out:?}");
+    let gap = retry_gap(&f.state, "/limited/");
+    assert!(
+        gap >= Duration::from_millis(990) && gap < Duration::from_secs(3),
+        "{gap:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_429_waits_until_the_http_date_of_retry_after() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let t = api(&f, 4, retries(1)).with_clock(Arc::new(TokioClock::new(CLOCK_MS)));
+    f.state.limit(Some("Mon, 23 Nov 2026 08:00:02 GMT"));
+    let out = t
+        .get_status(&device(&f.address, "default"), "/limited/a")
+        .await
+        .unwrap();
+    assert!(matches!(out, HttpReply::Body(_)), "{out:?}");
+    let gap = retry_gap(&f.state, "/limited/");
+    assert!(
+        gap >= Duration::from_millis(1500) && gap < Duration::from_secs(4),
+        "{gap:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_429_with_no_retry_after_waits_5_s() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let t = api(&f, 4, retries(1));
+    f.state.limit(None);
+    let out = t
+        .get_status(&device(&f.address, "default"), "/limited/a")
+        .await
+        .unwrap();
+    assert!(matches!(out, HttpReply::Body(_)), "{out:?}");
+    let gap = retry_gap(&f.state, "/limited/");
+    assert!(
+        gap >= Duration::from_millis(4990) && gap < Duration::from_secs(7),
+        "{gap:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_retries_of_a_429_end_after_3() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let d = device(&f.address, "default");
+    let rate = HttpReply::Status {
+        status: 429,
+        text: "{\"error\":\"rate\"}".into(),
+    };
+    let t = api(&f, 4, retries(3));
+    assert_eq!(t.get_status(&d, "/always-429/a").await.unwrap(), rate);
+    assert_eq!(f.state.starts("/always-429/a").len(), 4);
+
+    let t = api(&f, 4, HttpsLimits::default());
+    assert_eq!(t.get_status(&d, "/always-429/b").await.unwrap(), rate);
+    assert_eq!(f.state.starts("/always-429/b").len(), 1);
+
+    let t = api(&f, 4, HttpsLimits::default()).with_retries("console/default", 1);
+    assert_eq!(t.get_status(&d, "/always-429/c").await.unwrap(), rate);
+    assert_eq!(f.state.starts("/always-429/c").len(), 2);
+}
+
+#[tokio::test]
+async fn a_429_holds_the_requests_of_4_workers() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let t = api(&f, 4, retries(1));
+    let d = device(&f.address, "default");
+    f.state.limit(Some("1"));
+    let paths: Vec<String> = (0..4).map(|i| format!("/limited/{i}")).collect();
+    let outs = join_all(paths.iter().map(|p| t.get_status(&d, p))).await;
+    assert!(
+        outs.iter().all(|o| matches!(o, Ok(HttpReply::Body(_)))),
+        "{outs:?}"
+    );
+    let s = f.state.starts("/limited/");
+    assert_eq!(s.len(), 5, "{s:?}");
+    for later in &s[1..] {
+        let gap = *later - s[0];
+        assert!(gap >= Duration::from_millis(990), "{gap:?}");
+    }
+}
+
+#[tokio::test]
+async fn four_requests_start_in_each_second_at_concurrency_4() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let t = api(&f, 4, HttpsLimits::default());
+    let d = device(&f.address, "default");
+    let paths: Vec<String> = (0..8).map(|i| format!("/p{i}")).collect();
+    let outs = join_all(paths.iter().map(|p| t.get_status(&d, p))).await;
+    assert!(outs.iter().all(Result::is_ok), "{outs:?}");
+    let s = f.state.starts("/p");
+    assert_eq!(s.len(), 8);
+    assert_pace(&s, Duration::from_millis(250));
+    let span = s[7] - s[0];
+    assert!(span < Duration::from_millis(2750), "{span:?}");
+}
+
+#[tokio::test]
+async fn two_devices_of_one_api_server_share_its_pace() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let t = api(&f, 4, HttpsLimits::default());
+    let one = device(&f.address, "e1");
+    let mut two = device(&f.address, "e2");
+    two.credential = "lab2".into();
+    let reads: Vec<(&Device, String)> = (0..8)
+        .map(|i| (if i < 4 { &one } else { &two }, format!("/p{i}")))
+        .collect();
+    let outs = join_all(reads.iter().map(|(d, p)| t.get_status(d, p))).await;
+    assert!(outs.iter().all(Result::is_ok), "{outs:?}");
+    let s = f.state.starts("/p");
+    assert_eq!(s.len(), 8);
+    assert_pace(&s, Duration::from_millis(250));
+    let span = s[7] - s[0];
+    assert!(span < Duration::from_millis(2750), "{span:?}");
+}
+
+#[tokio::test]
+async fn the_parallel_requests_to_an_api_server_stop_at_its_concurrency() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let t = api(&f, 4, HttpsLimits::default());
+    let d = device(&f.address, "default");
+    let paths: Vec<String> = (0..8).map(|i| format!("/slow/{i}")).collect();
+    let outs = join_all(paths.iter().map(|p| t.get_status(&d, p))).await;
+    assert!(outs.iter().all(Result::is_ok), "{outs:?}");
+    assert_eq!(f.state.peak.load(Ordering::SeqCst), 4);
+    let n = f.state.connections.load(Ordering::SeqCst);
+    assert!((1..=4).contains(&n), "{n} connections");
+}
+
+#[tokio::test]
+async fn a_403_and_a_501_reach_the_source_with_200_characters_of_the_body() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let t = api(&f, 4, HttpsLimits::default());
+    let d = device(&f.address, "default");
+    let cut =
+        |body: String| -> String { body.replace(['\r', '\n'], " ").chars().take(200).collect() };
+    let out = t.get_status(&d, "/forbidden").await.unwrap();
+    assert_eq!(
+        out,
+        HttpReply::Status {
+            status: 403,
+            text: cut(forbidden_body())
+        }
+    );
+    let out = t
+        .post_read(&d, READS, "/unimplemented", &json!({}))
+        .await
+        .unwrap();
+    assert_eq!(
+        out,
+        HttpReply::Status {
+            status: 501,
+            text: cut(unimplemented_body())
+        }
+    );
+    let HttpReply::Status { text, .. } = out else {
+        panic!("a 501 is a status");
+    };
+    assert_eq!(text.chars().count(), 200);
+    assert!(!text.contains(['\r', '\n']));
+    assert_eq!(
+        t.get(&d, "/forbidden").await.unwrap_err(),
+        TransportError::Command("HTTP 403 Forbidden for /forbidden".into())
+    );
+}
+
+#[tokio::test]
+async fn a_jump_host_with_no_pin_is_refused_on_the_route_of_an_api_server() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let b = route::bastion("hop", route::hop_pass()).await;
+    let trust = Arc::new(TrustStore::memory(PinPolicy::AcceptNew));
+    let mut d = device(&f.address, "default");
+    d.route.jumps = vec![Jump {
+        address: b.address().into(),
+        credential: "hop".into(),
+        algorithms: Algorithms::Modern,
+    }];
+    let t = HttpsTransport::new(jump_credentials(), trust.clone(), HttpsLimits::default())
+        .with_api_server(&f.address, ApiServer { concurrency: 4 });
+    let Err(TransportError::Connect(e)) = t.get_status(&d, "/a").await else {
+        panic!("a jump host with no pin is refused");
+    };
+    assert!(e.contains("has no pin"), "{e}");
+    assert_eq!(trust.to_text(), "");
+    assert!(b.log().is_empty());
+
+    let t = HttpsTransport::new(jump_credentials(), trust.clone(), HttpsLimits::default());
+    assert!(t.get_status(&d, "/a").await.is_ok());
+    assert_eq!(
+        trust.get(PinKind::Ssh, b.address()),
+        Some(b.host_key.clone())
+    );
+}
+
+#[tokio::test]
+async fn public_roots_reject_a_certificate_of_a_private_ca() {
+    let ca = Ca::new();
+    let (address, _) = serve_ca(&ca, None).await;
+    let t = HttpsTransport::new(
+        credentials(token()),
+        Arc::new(TrustStore::memory(PinPolicy::AcceptNew)),
+        HttpsLimits::default(),
+    )
+    .with_default_profile(HttpsProfile {
+        trust: TlsTrust::PublicRoots,
+        client: None,
+    });
+    let Err(TransportError::Connect(e)) = t.get_status(&device(&address, "default"), "/a").await
+    else {
+        panic!("a certificate of a private CA is rejected");
+    };
+    assert!(e.contains("TLS"), "{e}");
 }

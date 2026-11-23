@@ -1,12 +1,14 @@
-//! The HTTPS transport for UniFi OS consoles. It reaches each console
-//! directly, through a proxy, or through a chain of SSH jump hosts. It
-//! checks the certificate of each console against a pin, a CA bundle, or
-//! not at all, keeps the login session of each console, and reuses the
-//! connections.
+//! The HTTPS transport for UniFi OS consoles and API servers. It reaches
+//! each console directly, through a proxy, or through a chain of SSH jump
+//! hosts. It checks the certificate of each console against a pin, a CA
+//! bundle, the public roots of `webpki-roots`, or not at all, keeps the
+//! login session of each console, and reuses the connections. The devices
+//! of one API server share its pace, its connection limit and its wait
+//! after a 429.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
@@ -19,14 +21,24 @@ use rustls::crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signat
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, RootCertStore, SignatureScheme};
+use tokio::sync::Semaphore;
+use tokio::time::Instant;
 use tokio_rustls::TlsConnector;
 
 use crate::path::Route;
+use crate::transport::read_path;
 use crate::trust::{
     Credential, Credentials, PinKind, Secret, TrustStore, host_port, plain_address,
 };
 use crate::tunnel::{HopLimits, Tunnel, stream};
-use crate::{BoxFuture, Device, Https, TransportError};
+use crate::{BoxFuture, Clock, Device, HttpReply, Https, TokioClock, TransportError, error_text};
+
+/// The wait after a 429 with no `Retry-After` value that the transport
+/// reads.
+pub const DEFAULT_RETRY_WAIT: Duration = Duration::from_secs(5);
+
+/// The longest wait after a 429.
+pub const MAX_RETRY_WAIT: Duration = Duration::from_secs(86_400);
 
 /// How the transport checks the certificate of a console. The modes do not
 /// mix: a pin is not a fallback of a CA bundle, and the mode with no check
@@ -40,6 +52,9 @@ pub enum TlsTrust {
     /// The certificate must chain to a CA of the bundle, in PEM, and name
     /// the host of the console.
     CaBundle(String),
+    /// The certificate must chain to a public root of `webpki-roots` and
+    /// name the host of the console.
+    PublicRoots,
     /// The certificate is not checked. The handshake signatures are still
     /// checked with the key of the certificate.
     NoVerify,
@@ -78,9 +93,14 @@ pub struct HttpsLimits {
     pub keepalive: Duration,
     /// The largest response body. A larger body is an error.
     pub max_body: usize,
-    /// The largest number of connections to one console. A request waits
-    /// for a free connection.
+    /// The largest number of connections to one console that is not an API
+    /// server. A request waits for a free connection.
     pub max_connections: usize,
+    /// The time for one request and its response body.
+    pub request_timeout: Duration,
+    /// The retries of a read with a status that goes to the source after a
+    /// 429, for a device with no retries of its own.
+    pub retries: u32,
 }
 
 impl Default for HttpsLimits {
@@ -91,8 +111,111 @@ impl Default for HttpsLimits {
             keepalive: Duration::from_secs(30),
             max_body: 256 << 20,
             max_connections: 4,
+            request_timeout: Duration::from_secs(60),
+            retries: 0,
         }
     }
+}
+
+/// An HTTPS server that serves more than one device, such as an SD-WAN
+/// orchestrator. All devices with its address share its pace and its
+/// connection limit, and a jump host on the route to it needs a pinned
+/// host key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApiServer {
+    /// The largest number of requests in flight, and of request starts in
+    /// one second.
+    pub concurrency: usize,
+}
+
+/// The state that the consoles of one address share.
+struct Server {
+    /// The connection limit of an API server.
+    permits: Option<Arc<Semaphore>>,
+    /// The least time between 2 request starts of an API server.
+    interval: Option<Duration>,
+    /// The earliest start of the next request.
+    next: Mutex<Instant>,
+    /// The end of the wait after a 429.
+    hold: Mutex<Option<Instant>>,
+}
+
+impl Server {
+    fn new(api: Option<ApiServer>) -> Server {
+        let concurrency = api.map(|a| a.concurrency.max(1));
+        Server {
+            permits: concurrency.map(|c| Arc::new(Semaphore::new(c))),
+            interval: concurrency
+                .map(|c| Duration::from_secs(1) / u32::try_from(c).unwrap_or(u32::MAX)),
+            next: Mutex::new(Instant::now()),
+            hold: Mutex::new(None),
+        }
+    }
+
+    fn held(&self) -> Option<Instant> {
+        let hold = *self.hold.lock().expect("the lock is not poisoned");
+        hold.filter(|h| *h > Instant::now())
+    }
+
+    /// Waits for the end of the wait after a 429, then for the start time
+    /// of the request. The start time is reserved under the lock, and the
+    /// wait for it is outside the lock.
+    async fn ready(&self) {
+        loop {
+            if let Some(h) = self.held() {
+                tokio::time::sleep_until(h).await;
+                continue;
+            }
+            let Some(interval) = self.interval else {
+                return;
+            };
+            let start = {
+                let mut next = self.next.lock().expect("the lock is not poisoned");
+                let start = (*next).max(Instant::now());
+                *next = start + interval;
+                start
+            };
+            tokio::time::sleep_until(start).await;
+            if self.held().is_none() {
+                return;
+            }
+        }
+    }
+
+    /// Holds each request until `wait` from now.
+    fn hold_for(&self, wait: Duration) {
+        let until = Instant::now() + wait;
+        let mut hold = self.hold.lock().expect("the lock is not poisoned");
+        if (*hold).is_none_or(|h| h < until) {
+            *hold = Some(until);
+        }
+    }
+}
+
+/// The wait that the headers of a 429 give: `Retry-After` in seconds or as
+/// an HTTP date against `now_ms`, else [`DEFAULT_RETRY_WAIT`], and at most
+/// [`MAX_RETRY_WAIT`].
+fn retry_wait(headers: &header::HeaderMap, now_ms: u64) -> Duration {
+    let value = headers
+        .get(header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim);
+    let wait = match value {
+        None => DEFAULT_RETRY_WAIT,
+        Some(v) => {
+            if let Ok(seconds) = v.parse::<u64>() {
+                Duration::from_secs(seconds)
+            } else if let Ok(at) = httpdate::parse_http_date(v) {
+                let at_ms = at
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+                Duration::from_millis(at_ms.saturating_sub(now_ms))
+            } else {
+                DEFAULT_RETRY_WAIT
+            }
+        }
+    };
+    wait.min(MAX_RETRY_WAIT)
 }
 
 /// The SHA-256 of a DER certificate in lower-case hex: the form of a TLS pin.
@@ -254,6 +377,13 @@ fn tls_config(
                 .map_err(|e| e.to_string())?;
             builder.with_webpki_verifier(verifier)
         }
+        TlsTrust::PublicRoots => {
+            let roots: RootCertStore = webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect();
+            let verifier = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider)
+                .build()
+                .map_err(|e| e.to_string())?;
+            builder.with_webpki_verifier(verifier)
+        }
     };
     match &profile.client {
         None => Ok(builder.with_no_client_auth()),
@@ -287,7 +417,11 @@ struct Console {
     tls: TlsConnector,
     session: tokio::sync::Mutex<Session>,
     idle: Mutex<Vec<SendRequest<Full<Bytes>>>>,
-    permits: Arc<tokio::sync::Semaphore>,
+    max_idle: usize,
+    permits: Arc<Semaphore>,
+    server: Arc<Server>,
+    /// True if each jump host of the route needs a pinned host key.
+    pinned_jumps: bool,
 }
 
 /// A console is one address with one credential, one route and one TLS
@@ -299,8 +433,12 @@ pub struct HttpsTransport {
     credentials: Arc<dyn Credentials>,
     trust: Arc<TrustStore>,
     limits: HttpsLimits,
+    clock: Arc<dyn Clock>,
     default_profile: HttpsProfile,
     profiles: HashMap<String, HttpsProfile>,
+    retries: HashMap<String, u32>,
+    api_servers: HashMap<String, ApiServer>,
+    servers: Mutex<HashMap<String, Arc<Server>>>,
     consoles: Mutex<HashMap<ConsoleKey, Arc<Console>>>,
 }
 
@@ -314,10 +452,45 @@ impl HttpsTransport {
             credentials,
             trust,
             limits,
+            clock: Arc::new(TokioClock::system()),
             default_profile: HttpsProfile::default(),
             profiles: HashMap::new(),
+            retries: HashMap::new(),
+            api_servers: HashMap::new(),
+            servers: Mutex::new(HashMap::new()),
             consoles: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Sets the clock that reads the HTTP date of `Retry-After`.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> HttpsTransport {
+        self.clock = clock;
+        self
+    }
+
+    /// Sets the retries after a 429 of a device.
+    pub fn with_retries(mut self, device: &str, retries: u32) -> HttpsTransport {
+        self.retries.insert(device.to_string(), retries);
+        self
+    }
+
+    /// Makes the server at `address` an API server, which the devices with
+    /// that address share.
+    pub fn with_api_server(mut self, address: &str, server: ApiServer) -> HttpsTransport {
+        let address = plain_address(address, "https").unwrap_or(address);
+        self.api_servers.insert(address.to_string(), server);
+        self
+    }
+
+    /// The shared state of the consoles of an address.
+    fn server(&self, address: &str) -> Arc<Server> {
+        let api = self.api_servers.get(address).copied();
+        self.servers
+            .lock()
+            .expect("the lock is not poisoned")
+            .entry(address.to_string())
+            .or_insert_with(|| Arc::new(Server::new(api)))
+            .clone()
     }
 
     /// Sets the profile of the consoles with no profile of their own.
@@ -359,6 +532,15 @@ impl HttpsTransport {
         let pin = route.pin_name(route.jumps.len(), address);
         let config = tls_config(profile, &self.trust, pin)
             .map_err(|e| connect(format!("console {}: {e}", device.address)))?;
+        let api = self.api_servers.get(address);
+        let max_idle = api
+            .map_or(self.limits.max_connections, |a| a.concurrency)
+            .max(1);
+        let server = self.server(address);
+        let permits = server
+            .permits
+            .clone()
+            .unwrap_or_else(|| Arc::new(Semaphore::new(max_idle)));
         let console = Arc::new(Console {
             host,
             port,
@@ -368,9 +550,10 @@ impl HttpsTransport {
             tls: TlsConnector::from(Arc::new(config)),
             session: tokio::sync::Mutex::new(Session::default()),
             idle: Mutex::new(Vec::new()),
-            permits: Arc::new(tokio::sync::Semaphore::new(
-                self.limits.max_connections.max(1),
-            )),
+            max_idle,
+            permits,
+            server,
+            pinned_jumps: api.is_some(),
         });
         Ok(self
             .consoles
@@ -471,6 +654,7 @@ impl HttpsTransport {
             &self.trust,
             limits,
             true,
+            console.pinned_jumps,
         )
         .await
         .map_err(TransportError::Connect)?;
@@ -479,6 +663,8 @@ impl HttpsTransport {
         Ok(Some(t))
     }
 
+    /// Sends a request on a free connection after the wait of the server,
+    /// and reads the response within the request timeout.
     async fn send(
         &self,
         console: &Console,
@@ -490,27 +676,34 @@ impl HttpsTransport {
             .acquire()
             .await
             .expect("the semaphore is not closed");
+        console.server.ready().await;
         let (mut sender, reused) = self.sender(console, false).await?;
         let retry = reused.then(|| clone_request(&request));
-        let response = match sender.send_request(request).await {
-            Ok(r) => r,
-            Err(_) if retry.is_some() => {
-                (sender, _) = self.sender(console, true).await?;
-                sender
-                    .send_request(retry.expect("the retry request is set"))
-                    .await
-                    .map_err(|e| failed(e.to_string()))?
-            }
-            Err(e) => return Err(failed(e.to_string())),
+        let exchange = async {
+            let response = match sender.send_request(request).await {
+                Ok(r) => r,
+                Err(_) if retry.is_some() => {
+                    (sender, _) = self.sender(console, true).await?;
+                    sender
+                        .send_request(retry.expect("the retry request is set"))
+                        .await
+                        .map_err(|e| failed(e.to_string()))?
+                }
+                Err(e) => return Err(failed(e.to_string())),
+            };
+            let (parts, body) = response.into_parts();
+            let body = Limited::new(body, self.limits.max_body)
+                .collect()
+                .await
+                .map_err(|e| failed(format!("the body does not read: {e}")))?
+                .to_bytes();
+            Ok::<_, TransportError>((parts, body))
         };
-        let (parts, body) = response.into_parts();
-        let body = Limited::new(body, self.limits.max_body)
-            .collect()
+        let (parts, body) = tokio::time::timeout(self.limits.request_timeout, exchange)
             .await
-            .map_err(|e| failed(format!("the body does not read: {e}")))?
-            .to_bytes();
+            .map_err(|_| TransportError::Timeout)??;
         let mut idle = console.idle.lock().expect("the lock is not poisoned");
-        if !sender.is_closed() && idle.len() < self.limits.max_connections {
+        if !sender.is_closed() && idle.len() < console.max_idle {
             idle.push(sender);
         }
         Ok((parts.status, parts.headers, body))
@@ -562,6 +755,7 @@ impl HttpsTransport {
             Secret::ApiKey(key) => {
                 vec![(header::HeaderName::from_static("x-api-key"), key.clone())]
             }
+            Secret::Token(token) => vec![(header::AUTHORIZATION, format!("Token {token}"))],
             Secret::Password(password) => {
                 let body = serde_json::json!({
                     "username": console.credential.user,
@@ -593,6 +787,54 @@ impl HttpsTransport {
         session.headers = headers;
         session.generation += 1;
         Ok((session.headers.clone(), session.generation))
+    }
+
+    /// A read whose status from 400 to 599 goes to the source. A 401 with
+    /// a password gives one new login. A 429 holds each request to the
+    /// server for the wait of `Retry-After`, and the read tries again while
+    /// the device has retries.
+    async fn read(
+        &self,
+        device: &Device,
+        method: Method,
+        path: &str,
+        body: Bytes,
+    ) -> Result<HttpReply, TransportError> {
+        let console = self.console(device)?;
+        let mut retries = self
+            .retries
+            .get(&device.id)
+            .copied()
+            .unwrap_or(self.limits.retries);
+        let (mut headers, mut generation) = self.login(&console, None).await?;
+        let mut login_again = matches!(console.credential.secret, Secret::Password(_));
+        loop {
+            let req = Self::request(&console, method.clone(), path, &headers, body.clone())?;
+            let (status, reply_headers, reply) = self.send(&console, req).await?;
+            if status.is_success() {
+                return Ok(HttpReply::Body(reply.to_vec()));
+            }
+            if status == StatusCode::UNAUTHORIZED && login_again {
+                login_again = false;
+                (headers, generation) = self.login(&console, Some(generation)).await?;
+                continue;
+            }
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                let wait = retry_wait(&reply_headers, self.clock.now_ms());
+                console.server.hold_for(wait);
+                if retries > 0 {
+                    retries -= 1;
+                    continue;
+                }
+            }
+            if status.is_client_error() || status.is_server_error() {
+                return Ok(HttpReply::Status {
+                    status: status.as_u16(),
+                    text: error_text(&reply),
+                });
+            }
+            return Err(TransportError::Command(format!("HTTP {status} for {path}")));
+        }
     }
 }
 
@@ -661,6 +903,28 @@ impl Https for HttpsTransport {
             Err(TransportError::Command(format!(
                 "HTTP 401 for {path} after a new login"
             )))
+        })
+    }
+
+    fn get_status<'a>(
+        &'a self,
+        device: &'a Device,
+        path: &'a str,
+    ) -> BoxFuture<'a, Result<HttpReply, TransportError>> {
+        Box::pin(self.read(device, Method::GET, path, Bytes::new()))
+    }
+
+    fn post_read<'a>(
+        &'a self,
+        device: &'a Device,
+        allowed: &'static [&'static str],
+        path: &'a str,
+        body: &'a serde_json::Value,
+    ) -> BoxFuture<'a, Result<HttpReply, TransportError>> {
+        Box::pin(async move {
+            read_path(allowed, path)?;
+            let body = Bytes::from(body.to_string());
+            self.read(device, Method::POST, path, body).await
         })
     }
 }

@@ -87,10 +87,12 @@ pub(crate) struct HopLimits {
 }
 
 /// The SSH client of one hop. It accepts the host key only if the trust
-/// store accepts it for the pin name of the hop.
+/// store accepts it for the pin name of the hop. With `pinned`, the key
+/// must be the pin, whatever the policy of the store.
 pub(crate) struct Client {
     trust: Arc<TrustStore>,
     pin: String,
+    pinned: bool,
     rejected: Arc<Mutex<Option<String>>>,
 }
 
@@ -110,7 +112,13 @@ impl client::Handler for Client {
             return Ok(false);
         };
         let text: Vec<&str> = text.split_whitespace().take(2).collect();
-        match self.trust.check(PinKind::Ssh, &self.pin, &text.join(" ")) {
+        let key = text.join(" ");
+        let checked = if self.pinned {
+            self.trust.check_pinned(PinKind::Ssh, &self.pin, &key)
+        } else {
+            self.trust.check(PinKind::Ssh, &self.pin, &key)
+        };
+        match checked {
             Ok(()) => Ok(true),
             Err(e) => {
                 *self.rejected.lock().expect("the lock is not poisoned") = Some(e);
@@ -126,6 +134,9 @@ pub(crate) struct Hop<'a> {
     pub role: &'static str,
     pub address: &'a str,
     pub pin: String,
+    /// True if the host key must be the pin, whatever the policy of the
+    /// trust store.
+    pub pinned: bool,
     pub credential: Credential,
     pub algorithms: Algorithms,
     /// True for the last SSH hop of the route, which gets the keepalive.
@@ -182,6 +193,7 @@ where
         let handler = Client {
             trust: trust.clone(),
             pin: hop.pin.clone(),
+            pinned: hop.pinned,
             rejected: rejected.clone(),
         };
         let connect = client::connect_stream(config.clone(), stream, handler);
@@ -260,6 +272,7 @@ async fn authenticate(
         }
         Secret::Agent { socket } => agent(handle, &user, socket.clone(), name).await,
         Secret::ApiKey(_) => Err(format!("{name}: an API key is not an SSH credential")),
+        Secret::Token(_) => Err(format!("{name}: an API token is not an SSH credential")),
     }
 }
 
@@ -344,13 +357,16 @@ pub(crate) struct Tunnel {
 impl Tunnel {
     /// Logs in to each jump host of the route in order, each through the
     /// jump host before it. `last` is true if no SSH hop comes after the
-    /// tunnel, and the last jump host then gets the keepalive.
+    /// tunnel, and the last jump host then gets the keepalive. With
+    /// `pinned`, the host key of each jump host must be its pin, whatever
+    /// the policy of the trust store.
     pub async fn connect(
         route: &Route,
         credentials: &dyn Credentials,
         trust: &Arc<TrustStore>,
         limits: HopLimits,
         last: bool,
+        pinned: bool,
     ) -> Result<Tunnel, String> {
         let mut tunnel = Tunnel { hops: Vec::new() };
         for (i, jump) in route.jumps.iter().enumerate() {
@@ -365,6 +381,7 @@ impl Tunnel {
                 role: "bastion",
                 address,
                 pin: route.pin_name(i, address),
+                pinned,
                 credential,
                 algorithms: jump.algorithms,
                 last: last && i + 1 == route.jumps.len(),

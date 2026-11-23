@@ -6,7 +6,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use crate::{BoxFuture, Device, Https, Ssh, TransportError};
+use crate::transport::read_path;
+use crate::{BoxFuture, Device, HttpReply, Https, Ssh, TransportError};
 
 type Replies = HashMap<(String, String), Result<Vec<u8>, TransportError>>;
 
@@ -105,5 +106,30 @@ impl Https for FakeTransport {
         path: &'a str,
     ) -> BoxFuture<'a, Result<Vec<u8>, TransportError>> {
         Box::pin(self.call(device, path))
+    }
+
+    /// The reply of the command `path` as a body.
+    fn get_status<'a>(
+        &'a self,
+        device: &'a Device,
+        path: &'a str,
+    ) -> BoxFuture<'a, Result<HttpReply, TransportError>> {
+        Box::pin(async move { self.call(device, path).await.map(HttpReply::Body) })
+    }
+
+    /// The reply of the command `POST <path> <body>` as a body.
+    fn post_read<'a>(
+        &'a self,
+        device: &'a Device,
+        allowed: &'static [&'static str],
+        path: &'a str,
+        body: &'a serde_json::Value,
+    ) -> BoxFuture<'a, Result<HttpReply, TransportError>> {
+        Box::pin(async move {
+            read_path(allowed, path)?;
+            self.call(device, &format!("POST {path} {body}"))
+                .await
+                .map(HttpReply::Body)
+        })
     }
 }
