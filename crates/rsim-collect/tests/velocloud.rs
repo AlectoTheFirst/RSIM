@@ -1297,7 +1297,7 @@ async fn a_503_on_the_profiles_keeps_the_last_good_snapshot_of_the_whole_device(
     );
     tokio::time::advance(MINUTE).await;
     let r = e.c.run_cycle().await.unwrap();
-    assert_eq!(r.failed, [d.clone()]);
+    assert_eq!(r.failed, std::slice::from_ref(&d));
     let after = e.c.store().latest().unwrap().unwrap().devices[&d].clone();
     for s in &before.sections {
         let a = after.section(&s.name).unwrap();
