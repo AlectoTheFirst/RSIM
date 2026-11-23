@@ -1458,8 +1458,8 @@ async fn the_secrets_are_replaced_before_the_store() {
         ("edge_modules", &["fake-snmp-community"][..]),
     ] {
         let text = e.bytes(&d, section);
-        for s in secrets {
-            assert!(!text.contains(s), "{section}: {s}");
+        for (i, s) in secrets.iter().enumerate() {
+            assert!(!text.contains(s), "{section}: secret {i}");
         }
     }
     let edges = e.json(&d, "edges");
