@@ -492,6 +492,16 @@ fn underlay(
         .map(move |(p, d)| (format!("underlay:{p}>{d}:{tag}"), p, d, over.clone()))
 }
 
+/// A tunnel of a branch with no decapsulation yet.
+struct OpenTunnel {
+    /// The device that encapsulated the packets.
+    start: String,
+    /// The hops of the outer packet since the encapsulation.
+    hops: Vec<(String, String)>,
+    /// The node of the WireGuard peer, or none for another tunnel.
+    far: Option<String>,
+}
+
 /// Adds the edges of a tunnel from `start`: the overlay edge to `end` when
 /// the tunnel end is known, and the underlay edges of its hops.
 fn close(
@@ -538,10 +548,7 @@ pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
         };
     for b in a.branches() {
         let mut prev: Option<String> = None;
-        // The device that encapsulated the packets, the hops of the outer
-        // packet since then, and the node of a WireGuard peer, inside a
-        // tunnel.
-        let mut tunnel: Option<(String, Vec<(String, String)>, Option<String>)> = None;
+        let mut tunnel: Option<OpenTunnel> = None;
         for s in &b.steps {
             let Some(d) = s.device.as_ref().map(ToString::to_string) else {
                 continue;
@@ -551,7 +558,7 @@ pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
                 && *p != d
             {
                 match &mut tunnel {
-                    Some((_, hops, _)) => hops.push((p.clone(), d.clone())),
+                    Some(o) => o.hops.push((p.clone(), d.clone())),
                     None => add(
                         format!("physical:{p}>{d}"),
                         "physical",
@@ -564,8 +571,8 @@ pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
             }
             let forwards = matches!(s.outcome, rsim_core::Outcome::Forward(_));
             if s.kind == FunctionKind::Encapsulation && forwards {
-                if let Some((start, hops, far)) = tunnel.take() {
-                    close(&mut add, &start, far.as_deref(), hops, b.index);
+                if let Some(o) = tunnel.take() {
+                    close(&mut add, &o.start, o.far.as_deref(), o.hops, b.index);
                 }
                 let far = wireguard_step(t, &ends, s).map(|(far, node)| {
                     if let Some(n) = node {
@@ -573,18 +580,22 @@ pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
                     }
                     far
                 });
-                tunnel = Some((d.clone(), Vec::new(), far));
+                tunnel = Some(OpenTunnel {
+                    start: d.clone(),
+                    hops: Vec::new(),
+                    far,
+                });
             }
             if s.kind == FunctionKind::Decapsulation
                 && forwards
-                && let Some((start, hops, _)) = tunnel.take()
+                && let Some(o) = tunnel.take()
             {
-                close(&mut add, &start, Some(&d), hops, b.index);
+                close(&mut add, &o.start, Some(&d), o.hops, b.index);
             }
             prev = Some(d);
         }
-        if let Some((start, hops, far)) = tunnel {
-            close(&mut add, &start, far.as_deref(), hops, b.index);
+        if let Some(o) = tunnel {
+            close(&mut add, &o.start, o.far.as_deref(), o.hops, b.index);
         }
     }
     let mut nodes: Vec<TopoNode> = used
