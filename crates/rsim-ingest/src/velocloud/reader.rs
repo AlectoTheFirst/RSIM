@@ -70,6 +70,10 @@ pub struct HubRef {
     /// The edges that the reference names: the edge, else the members of
     /// the cluster, sorted. Empty for a reference that names neither.
     pub edges: Vec<String>,
+    /// The number of clusters, else of edges, with the name of a reference
+    /// that resolves by its name, when it is more than 1. The reference
+    /// then names no edge.
+    pub shared_name: Option<usize>,
     pub span: SourceSpan,
 }
 
@@ -93,37 +97,54 @@ impl Hubs {
         .collect()
     }
 
-    /// The cluster of a reference: by its logicalId, else by its name with
-    /// the spaces at its ends removed.
-    fn cluster(&self, j: J<'_>) -> Option<&Cluster> {
-        for k in Hubs::keys(j) {
-            if let Some(c) = self.clusters.iter().find(|c| c.id == k) {
-                return Some(c);
-            }
-        }
-        let name = trimmed(j.str("name"))?;
+    /// The clusters with a name.
+    fn named(&self, name: &str) -> Vec<&Cluster> {
         self.clusters
             .iter()
-            .find(|c| c.name.as_deref() == Some(name.as_str()))
+            .filter(|c| c.name.as_deref() == Some(name))
+            .collect()
     }
 
-    /// A hub reference with the edges that it names.
+    /// The cluster of a reference: by its logicalId, else the one cluster
+    /// with its name with the spaces at its ends removed. The second value
+    /// is the number of clusters with the name when it is more than 1.
+    fn cluster(&self, j: J<'_>) -> (Option<&Cluster>, Option<usize>) {
+        for k in Hubs::keys(j) {
+            if let Some(c) = self.clusters.iter().find(|c| c.id == k) {
+                return (Some(c), None);
+            }
+        }
+        match trimmed(j.str("name")) {
+            Some(name) => one(self.named(&name)),
+            None => (None, None),
+        }
+    }
+
+    /// A hub reference with the edges that it names: the edge of a key,
+    /// else the members of the cluster, else the one edge with its name.
     pub fn hub_ref(&self, j: J<'_>, role: HubRole) -> HubRef {
         let keys = Hubs::keys(j);
-        let cluster = self.cluster(j);
+        let (cluster, shared_clusters) = self.cluster(j);
         let name = trimmed(j.str("name"));
-        let edges = if let Some(k) = keys.iter().find(|k| self.names.contains_key(*k)) {
-            vec![k.clone()]
-        } else if let Some(c) = cluster {
-            c.members.clone()
-        } else {
-            self.names
-                .iter()
-                .find(|(_, n)| n.as_deref().map(str::trim) == name.as_deref())
-                .filter(|_| name.is_some())
-                .map(|(id, _)| vec![id.clone()])
-                .unwrap_or_default()
-        };
+        let (edges, shared_name) =
+            if let Some(k) = keys.iter().find(|k| self.names.contains_key(*k)) {
+                (vec![k.clone()], None)
+            } else if let Some(c) = cluster {
+                (c.members.clone(), None)
+            } else if shared_clusters.is_some() {
+                (Vec::new(), shared_clusters)
+            } else if let Some(n) = name.as_deref() {
+                let ids: Vec<&String> = self
+                    .names
+                    .iter()
+                    .filter(|(_, e)| e.as_deref().map(str::trim) == Some(n))
+                    .map(|(id, _)| id)
+                    .collect();
+                let (id, shared) = one(ids);
+                (id.into_iter().cloned().collect(), shared)
+            } else {
+                (Vec::new(), None)
+            };
         HubRef {
             id: ref_id(j),
             name,
@@ -131,8 +152,17 @@ impl Hubs {
             role,
             cluster: cluster.map(|c| c.id.clone()),
             edges,
+            shared_name,
             span: j.span(),
         }
+    }
+}
+
+/// The one item of a list, and the length of a list of more than 1.
+fn one<T>(items: Vec<T>) -> (Option<T>, Option<usize>) {
+    match items.len() {
+        0 | 1 => (items.into_iter().next(), None),
+        n => (None, Some(n)),
     }
 }
 
@@ -282,12 +312,13 @@ pub struct StaticRoute {
 
 impl StaticRoute {
     /// The class of the route in the route order: a route with Preferred on
-    /// is a preferred local static route; each other is the last resort.
+    /// is a preferred local static route, a route with Preferred off is the
+    /// last resort, and a route with no `preferred` is `NotKnown`.
     pub fn class(&self) -> RouteClass {
-        if self.preferred == Some(true) {
-            RouteClass::LocalStaticPreferred
-        } else {
-            RouteClass::LocalStatic
+        match self.preferred {
+            Some(true) => RouteClass::LocalStaticPreferred,
+            Some(false) => RouteClass::LocalStatic,
+            None => RouteClass::NotKnown,
         }
     }
 }
@@ -397,14 +428,24 @@ pub struct Edge {
     pub notes: Vec<String>,
 }
 
+/// The segment of an observed BGP session.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SessionSegment {
+    Global,
+    Segment(u32),
+    /// More than one segment of the edge has a configured neighbour with
+    /// the address: the segments, sorted.
+    NotKnown(Vec<u32>),
+}
+
 /// An observed BGP session of `bgp_sessions`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BgpSession {
     pub edge: String,
     pub neighbour: IpAddr,
     /// The segment of the configured neighbour with the same address on the
-    /// edge. `None` is the Global Segment.
-    pub segment: Option<u32>,
+    /// edge, else the Global Segment.
+    pub segment: SessionSegment,
     pub asn: Option<u32>,
     /// The state. Rows of one session with different states give `None`.
     pub state: Option<String>,
@@ -701,7 +742,7 @@ fn segments(pres: &[Pre<'_>], notes: &mut Vec<String>) -> Vec<Segment> {
 
 /// The hub clusters: the `memberCluster` and the `dataCenterEdges` rows with
 /// a `clusterLogicalId` of the `controlPlane` modules, and the edges whose
-/// `ha.data.clusterName` is the name of a cluster.
+/// `ha.data.clusterName` is the name of exactly 1 cluster.
 fn hubs(pres: &[Pre<'_>]) -> Hubs {
     let names: BTreeMap<String, Option<String>> = pres
         .iter()
@@ -757,10 +798,10 @@ fn hubs(pres: &[Pre<'_>]) -> Hubs {
         let Some(name) = name else {
             continue;
         };
-        if let Some((_, (_, members))) = found
-            .iter_mut()
-            .find(|(_, (n, _))| n.as_deref() == Some(name.as_str()))
-        {
+        let mut named = found
+            .values_mut()
+            .filter(|(n, _)| n.as_deref() == Some(name.as_str()));
+        if let (Some((_, members)), None) = (named.next(), named.next()) {
             members.insert(e.id.clone());
         }
     }
@@ -864,6 +905,35 @@ fn edge(e: &Pre<'_>, ctx: &Ctx<'_>, peers: Peers) -> Edge {
     let links = links(row, e.state, e.wan, &interfaces, ctx.carriers, &mut notes);
     let all: Vec<u32> = segments.iter().map(|s| s.id).collect();
     let state = e.state;
+    let ha = ha(row, state);
+    if let Some(name) = ha.cluster_name.as_deref() {
+        let n = ctx.hubs.named(name).len();
+        if n > 1 {
+            notes.push(format!("cluster name {name}: {n} clusters"));
+        }
+    }
+    let business = business(&e.qos, ctx.groups, ctx.hubs);
+    let mut refs: Vec<&HubRef> = segments.iter().flat_map(|s| &s.hubs).collect();
+    if let Policy::Read(b) = &business {
+        refs.extend(
+            b.segments
+                .iter()
+                .flat_map(|s| &s.rules)
+                .flat_map(|r| &r.action.routes)
+                .flat_map(|r| &r.backhaul),
+        );
+    }
+    for r in refs {
+        if let Some(n) = r.shared_name {
+            let note = format!(
+                "hub reference {}: {n} hubs with the name",
+                r.name.as_deref().unwrap_or_default()
+            );
+            if !notes.contains(&note) {
+                notes.push(note);
+            }
+        }
+    }
     Edge {
         logical_id: e.id.clone(),
         device: device_name(ctx.store_device, &e.id),
@@ -874,7 +944,7 @@ fn edge(e: &Pre<'_>, ctx: &Ctx<'_>, peers: Peers) -> Edge {
         software_version: row.text("softwareVersion"),
         state: state.and_then(|s| s.text("edgeState")),
         hub: ctx.hub_ids.contains(&e.id),
-        ha: ha(row, state),
+        ha,
         cluster: ctx
             .hubs
             .clusters
@@ -888,7 +958,7 @@ fn edge(e: &Pre<'_>, ctx: &Ctx<'_>, peers: Peers) -> Edge {
         peers,
         modules: e.modules.clone(),
         firewall: firewall(&e.firewall, ctx.groups),
-        business: business(&e.qos, ctx.groups, ctx.hubs),
+        business,
         settings_unknown: e.settings.profile_unknown.clone(),
         span: row.span(),
         notes,
@@ -1327,10 +1397,11 @@ fn peers(j: J<'_>) -> Peers {
 }
 
 /// The observed sessions: one for each edge, neighbour address and
-/// segment. The segment is the segment of the configured neighbour with the
-/// address on the edge, else the Global Segment.
+/// segment. The segment is the one segment of the edge with a configured
+/// neighbour of the address; with none, the Global Segment; with more than
+/// one, not known.
 fn sessions(root: J<'_>, edges: &[Edge]) -> Vec<BgpSession> {
-    let mut found: BTreeMap<(String, IpAddr, Option<u32>), BgpSession> = BTreeMap::new();
+    let mut found: BTreeMap<(String, IpAddr, SessionSegment), BgpSession> = BTreeMap::new();
     for r in root.rows() {
         let Some(edge) = r.obj("edge").and_then(ref_id) else {
             continue;
@@ -1338,18 +1409,30 @@ fn sessions(root: J<'_>, edges: &[Edge]) -> Vec<BgpSession> {
         let Some(neighbour) = r.str("neighborIp").and_then(address) else {
             continue;
         };
-        let segment = edges
+        let matching: Vec<&EdgeSegment> = edges
             .iter()
             .find(|e| e.logical_id == edge)
-            .and_then(|e| {
-                e.segments.iter().find(|s| {
-                    s.bgp
-                        .as_ref()
-                        .is_some_and(|b| b.neighbours.iter().any(|n| n.address == neighbour))
-                })
+            .map(|e| {
+                e.segments
+                    .iter()
+                    .filter(|s| {
+                        s.bgp
+                            .as_ref()
+                            .is_some_and(|b| b.neighbours.iter().any(|n| n.address == neighbour))
+                    })
+                    .collect()
             })
-            .filter(|s| !s.global)
-            .map(|s| s.id);
+            .unwrap_or_default();
+        let segment = match matching.as_slice() {
+            [] => SessionSegment::Global,
+            [s] if s.global => SessionSegment::Global,
+            [s] => SessionSegment::Segment(s.id),
+            more => {
+                let mut ids: Vec<u32> = more.iter().map(|s| s.id).collect();
+                ids.sort_unstable();
+                SessionSegment::NotKnown(ids)
+            }
+        };
         let asn = r.v.get("neighborAS").and_then(asn_of);
         let state = r.text("state");
         match found.entry((edge.clone(), neighbour, segment)) {

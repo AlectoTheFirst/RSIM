@@ -2,6 +2,7 @@
 //! the hub references, the WAN links, the rule reader, the overlay rows,
 //! the route order, the BGP sessions, the facts, the coverage and the mask.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
@@ -10,9 +11,9 @@ use rsim_ingest::coverage::State;
 use rsim_ingest::facts::{Fact, Reason, Sections, device};
 use rsim_ingest::mask::section_lines;
 use rsim_ingest::velocloud::reader::{
-    Enterprise, HubRole, InterfaceKind, KindSource, LinkKind, Modules, Peers,
+    Enterprise, HubRole, InterfaceKind, KindSource, LinkKind, Modules, Peers, SessionSegment,
 };
-use rsim_ingest::velocloud::routes::{Counts, ExitKind, RouteClass, order_key};
+use rsim_ingest::velocloud::routes::{Counts, DynamicKind, ExitKind, RouteClass, order};
 use rsim_ingest::velocloud::rules::{
     AddrEntry, AddrMatch, Business, Firewall, FirewallAction, IpVersion, LinkPolicy, Match,
     ObjectGroups, Policy, PortMatch, PortRange, RoutePolicy, Rule, Target, Word, read_match,
@@ -214,6 +215,74 @@ fn a_cluster_name_with_no_named_cluster_names_no_hub() {
     assert!(hub.hub);
     let br = e.edge("e-br").unwrap();
     assert!(br.segments[0].hubs[0].edges.is_empty());
+}
+
+/// The backhaul hubs of the rule `rule-backup` of `e-br`.
+fn backhaul(e: &Enterprise) -> Vec<(Option<String>, Vec<String>, Option<usize>)> {
+    let rules = &business_of(&e.edge("e-br").unwrap().business).segments[0].rules;
+    rules[3].action.routes[1]
+        .backhaul
+        .iter()
+        .map(|h| (h.name.clone(), h.edges.clone(), h.shared_name))
+        .collect()
+}
+
+#[test]
+fn a_hub_name_of_more_than_one_edge_or_cluster_names_no_hub() {
+    let mut m = base();
+    m.get_mut("edges").unwrap()[0]["name"] = json!("hub-1");
+    let edges = m["edges"].clone();
+    m.insert("edge_state".into(), edges);
+    let e = ent(&m);
+    assert_eq!(
+        backhaul(&e),
+        [
+            (
+                Some("DC-CLUSTER".to_string()),
+                vec!["e-hub".to_string()],
+                None
+            ),
+            (Some("hub-1".to_string()), Vec::new(), Some(2)),
+        ]
+    );
+    let br = e.edge("e-br").unwrap();
+    assert!(
+        br.notes
+            .iter()
+            .any(|n| n == "hub reference hub-1: 2 hubs with the name"),
+        "{:?}",
+        br.notes
+    );
+
+    let mut m = base();
+    m.get_mut("edge_modules").unwrap()["e-br"]["controlPlane"]["data"]["segments"][0]["vpn"]
+        ["dataCenterEdges"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"clusterLogicalId": "cl-dc2", "clusterName": "DC-CLUSTER"}));
+    let e = ent(&m);
+    assert_eq!(e.clusters.len(), 2);
+    assert_eq!(e.clusters[0].members, ["e-hub"]);
+    assert!(e.clusters[1].members.is_empty());
+    assert_eq!(
+        backhaul(&e),
+        [
+            (Some("DC-CLUSTER".to_string()), Vec::new(), Some(2)),
+            (Some("hub-1".to_string()), vec!["e-hub".to_string()], None),
+        ]
+    );
+    let vpn = &e.edge("e-br").unwrap().segments[0].hubs[0];
+    assert_eq!(vpn.cluster.as_deref(), Some("cl-dc"));
+    assert_eq!(vpn.edges, ["e-hub"]);
+    let hub = e.edge("e-hub").unwrap();
+    assert_eq!(hub.cluster.as_deref(), Some("cl-dc"));
+    assert!(
+        hub.notes
+            .iter()
+            .any(|n| n == "cluster name DC-CLUSTER: 2 clusters"),
+        "{:?}",
+        hub.notes
+    );
 }
 
 #[test]
@@ -663,53 +732,77 @@ fn the_route_order_puts_the_longest_prefix_first_and_a_static_route_with_preferr
     assert_eq!(statics[1].class(), RouteClass::LocalStatic);
     assert_eq!(statics[2].interface.as_deref(), Some("GE3:10"));
     let rows = &e.overlay.as_ref().unwrap().rows;
-    assert_eq!(
-        rows[0].class("e-br"),
-        RouteClass::Dynamic {
-            remote: true,
-            preference: 20
-        }
-    );
+    let overlay = RouteClass::Dynamic {
+        kind: DynamicKind::Overlay {
+            preferred_cost: None,
+        },
+        preference: None,
+    };
+    assert_eq!(rows[0].class("e-br"), overlay);
+    assert_eq!(rows[0].class("e-hub"), RouteClass::NotKnown);
     assert_eq!(rows[1].class("e-br"), RouteClass::LocalConnected);
     assert_eq!(rows[1].class("e-hub"), RouteClass::RemoteConnected);
-    assert!(RouteClass::RemoteStatic < RouteClass::LocalStatic);
-    assert!(
-        RouteClass::Dynamic {
-            remote: true,
-            preference: i64::MAX
-        } < RouteClass::LocalStatic
+    assert_eq!(rows[2].class("e-br"), RouteClass::NotKnown);
+    assert_eq!(rows[2].class("e-hub"), RouteClass::RemoteStatic);
+    let less = Some(Ordering::Less);
+    assert_eq!(
+        RouteClass::RemoteStatic.order(RouteClass::LocalStatic),
+        less
     );
-    assert!(RouteClass::LocalStaticPreferred < RouteClass::RemoteConnected);
-    assert!(
-        RouteClass::Dynamic {
-            remote: false,
-            preference: 200
-        } < RouteClass::Dynamic {
-            remote: true,
-            preference: 10
-        }
+    assert_eq!(overlay.order(RouteClass::LocalStatic), less);
+    assert_eq!(
+        RouteClass::LocalStaticPreferred.order(RouteClass::RemoteConnected),
+        less
     );
+    assert_eq!(RouteClass::NotKnown.order(RouteClass::LocalStatic), None);
+    assert_eq!(overlay.order(overlay), None);
     let mut routes = [
         (statics[1].prefix, statics[1].class()),
         (rows[0].prefix, rows[0].class("e-br")),
         (statics[0].prefix, statics[0].class()),
     ];
-    routes.sort_by_key(|(p, c)| order_key(*p, *c));
-    let order: Vec<String> = routes.iter().map(|(p, _)| p.to_string()).collect();
-    assert_eq!(order, ["10.20.20.0/24", "10.50.0.0/16", "10.60.0.0/16"]);
+    routes.sort_by(|a, b| order(*a, *b).unwrap());
+    let got: Vec<String> = routes.iter().map(|(p, _)| p.to_string()).collect();
+    assert_eq!(got, ["10.20.20.0/24", "10.50.0.0/16", "10.60.0.0/16"]);
+    assert_eq!(
+        order(
+            (pfx("10.0.0.0/24"), RouteClass::NotKnown),
+            (pfx("10.0.0.0/16"), RouteClass::LocalConnected)
+        ),
+        less
+    );
+}
+
+#[test]
+fn a_site_route_wins_over_an_overlay_route_and_a_preferred_cost_over_a_site_external_route() {
+    let dynamic = |kind, preference| RouteClass::Dynamic { kind, preference };
+    let site = |p| dynamic(DynamicKind::Site, Some(p));
+    let external = |p| dynamic(DynamicKind::SiteExternal, Some(p));
+    let overlay = |preferred_cost, p| dynamic(DynamicKind::Overlay { preferred_cost }, Some(p));
+    let less = Some(Ordering::Less);
+    let greater = Some(Ordering::Greater);
+    assert_eq!(site(200).order(overlay(Some(true), 10)), less);
+    assert_eq!(overlay(None, 10).order(site(200)), greater);
+    assert_eq!(overlay(Some(true), 200).order(external(10)), less);
+    assert_eq!(external(10).order(overlay(Some(true), 200)), greater);
+    assert_eq!(overlay(None, 10).order(external(200)), None);
+    assert_eq!(external(200).order(overlay(None, 10)), None);
+    assert_eq!(overlay(Some(false), 10).order(external(200)), less);
+    assert_eq!(site(20).order(site(10)), greater);
+    assert_eq!(site(10).order(dynamic(DynamicKind::Site, None)), None);
 }
 
 #[test]
 fn a_bgp_session_takes_the_segment_of_its_configured_neighbour() {
     let e = ent(&base());
     let s = e.sessions.as_ref().unwrap();
-    let got: Vec<(&str, IpAddr, Option<u32>, Option<&str>, Option<u32>)> = s
+    let got: Vec<_> = s
         .iter()
         .map(|x| {
             (
                 x.edge.as_str(),
                 x.neighbour,
-                x.segment,
+                &x.segment,
                 x.state.as_deref(),
                 x.asn,
             )
@@ -721,11 +814,36 @@ fn a_bgp_session_takes_the_segment_of_its_configured_neighbour() {
             (
                 "e-br",
                 ip("10.9.9.2"),
-                Some(1),
+                &SessionSegment::Segment(1),
                 Some("ESTABLISHED"),
-                Some(65000)
+                Some(65000_u32)
             ),
-            ("e-br", ip("10.9.9.99"), None, Some("IDLE"), None),
+            (
+                "e-br",
+                ip("10.9.9.99"),
+                &SessionSegment::Global,
+                Some("IDLE"),
+                None
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_bgp_session_whose_address_is_a_neighbour_in_2_segments_has_no_known_segment() {
+    let mut m = base();
+    m.get_mut("profiles").unwrap()[0]["modules"][0]["data"]["segments"][0]["bgp"]["neighbors"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"neighborIp": "10.9.9.2", "neighborAS": "65000"}));
+    let e = ent(&m);
+    let s = e.sessions.as_ref().unwrap();
+    let got: Vec<_> = s.iter().map(|x| (x.neighbour, &x.segment)).collect();
+    assert_eq!(
+        got,
+        [
+            (ip("10.9.9.2"), &SessionSegment::NotKnown(vec![0, 1])),
+            (ip("10.9.9.99"), &SessionSegment::Global),
         ]
     );
 }
@@ -808,6 +926,19 @@ fn each_stanza_is_classified_and_the_same_sections_give_the_same_result() {
     assert!(cov.lines[&State::Irrelevant] > 0);
     assert_eq!(coverage::classify(&parsed(&m)), cov);
     assert_eq!(ent(&m), ent(&m));
+}
+
+#[test]
+fn a_key_of_an_unhandled_stanza_goes_through_the_mask() {
+    let mut m = base();
+    m.get_mut("bgp_sessions").unwrap()[0]["https://u:FAKEPW@192.0.2.5/x"] = json!(1);
+    let cov = coverage::classify(&parsed(&m));
+    let keys: Vec<&str> = cov.unhandled.keys().map(String::as_str).collect();
+    assert!(
+        keys.contains(&"bgp_sessions/*/https://<secret>@192.0.2.5/x"),
+        "{keys:?}"
+    );
+    assert!(keys.iter().all(|k| !k.contains("FAKE")), "{keys:?}");
 }
 
 #[test]

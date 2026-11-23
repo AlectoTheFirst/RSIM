@@ -6,7 +6,7 @@
 //! exit of a router, a filtered or unreachable exit and an eligible exit
 //! give no row and are counted.
 
-use std::cmp::Reverse;
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
@@ -182,11 +182,23 @@ pub fn overlay(root: J<'_>, edges: &BTreeMap<u64, String>, segments: &[Segment])
     t
 }
 
+/// The kind of a dynamic route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DynamicKind {
+    /// A route of the site: OSPF intra area or inter area, or BGP that is
+    /// not an uplink route.
+    Site,
+    /// A route of the site: OSPF external type 1 or type 2, or uplink BGP.
+    SiteExternal,
+    /// A route of another edge through the overlay, with whether its cost
+    /// is a preferred cost.
+    Overlay { preferred_cost: Option<bool> },
+}
+
 /// The class of a route of one prefix length on an edge, in order: the
-/// first class wins. A dynamic route of the site wins over an overlay
-/// dynamic route, and a lower preference wins. A static route with
-/// Preferred off is the last resort.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+/// first class wins. A static route with Preferred off is the last resort.
+/// `NotKnown` is a route whose place in the order is not known.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RouteClass {
     LocalConnected,
     LocalStaticPreferred,
@@ -196,35 +208,111 @@ pub enum RouteClass {
     RemoteStatic,
     GatewaySecureStatic,
     GatewayStatic,
-    Dynamic { remote: bool, preference: i64 },
+    Dynamic {
+        kind: DynamicKind,
+        preference: Option<i64>,
+    },
     LocalStatic,
+    NotKnown,
 }
 
-/// The sort key of a route: the longest prefix first, then the class.
-pub fn order_key(prefix: Prefix, class: RouteClass) -> (Reverse<u8>, RouteClass) {
-    (Reverse(prefix.len()), class)
+impl RouteClass {
+    fn rank(self) -> Option<u8> {
+        Some(match self {
+            RouteClass::LocalConnected => 0,
+            RouteClass::LocalStaticPreferred => 1,
+            RouteClass::LocalNsdStatic => 2,
+            RouteClass::RemoteNsdStatic => 3,
+            RouteClass::RemoteConnected => 4,
+            RouteClass::RemoteStatic => 5,
+            RouteClass::GatewaySecureStatic => 6,
+            RouteClass::GatewayStatic => 7,
+            RouteClass::Dynamic { .. } => 8,
+            RouteClass::LocalStatic => 9,
+            RouteClass::NotKnown => return None,
+        })
+    }
+
+    /// The order of 2 classes: `Less` when `self` wins. A site route wins
+    /// over an overlay route, an overlay route with a preferred cost wins
+    /// over a site external route, and else the lower preference wins.
+    /// `None` when the order is not known.
+    pub fn order(self, other: RouteClass) -> Option<Ordering> {
+        use DynamicKind::{Overlay, Site, SiteExternal};
+        match (self, other) {
+            (
+                RouteClass::Dynamic {
+                    kind: a,
+                    preference: pa,
+                },
+                RouteClass::Dynamic {
+                    kind: b,
+                    preference: pb,
+                },
+            ) => match (a, b) {
+                (Site, Overlay { .. }) => Some(Ordering::Less),
+                (Overlay { .. }, Site) => Some(Ordering::Greater),
+                (
+                    Overlay {
+                        preferred_cost: Some(true),
+                    },
+                    SiteExternal,
+                ) => Some(Ordering::Less),
+                (
+                    SiteExternal,
+                    Overlay {
+                        preferred_cost: Some(true),
+                    },
+                ) => Some(Ordering::Greater),
+                (
+                    Overlay {
+                        preferred_cost: None,
+                    },
+                    SiteExternal,
+                )
+                | (
+                    SiteExternal,
+                    Overlay {
+                        preferred_cost: None,
+                    },
+                ) => None,
+                _ => Some(pa?.cmp(&pb?)),
+            },
+            _ => Some(self.rank()?.cmp(&other.rank()?)),
+        }
+    }
+}
+
+/// The order of 2 routes of an edge: the longest prefix first, then the
+/// class. `None` when the order is not known.
+pub fn order(a: (Prefix, RouteClass), b: (Prefix, RouteClass)) -> Option<Ordering> {
+    match b.0.len().cmp(&a.0.len()) {
+        Ordering::Equal => a.1.order(b.1),
+        o => Some(o),
+    }
 }
 
 impl OverlayRow {
     /// The class of the row on the edge `local`: a row of another edge is a
-    /// remote route. A learned row is a dynamic route with its cost as its
-    /// preference; a row with no cost and a row of another kind are the
-    /// last dynamic routes.
+    /// remote route. A learned row of another edge is an overlay dynamic
+    /// route with no known preference. A static row of the edge, whose
+    /// Preferred the row does not give, a learned row of the edge and a row
+    /// of another kind are `NotKnown`.
     pub fn class(&self, local: &str) -> RouteClass {
         let remote = self.edge != local;
         match (&self.kind, remote) {
             (ExitKind::Connected, false) => RouteClass::LocalConnected,
             (ExitKind::Connected, true) => RouteClass::RemoteConnected,
-            (ExitKind::Static, false) => RouteClass::LocalStatic,
             (ExitKind::Static, true) => RouteClass::RemoteStatic,
-            (ExitKind::Learned, _) => RouteClass::Dynamic {
-                remote,
-                preference: self.cost.unwrap_or(i64::MAX),
+            (ExitKind::Learned, true) => RouteClass::Dynamic {
+                kind: DynamicKind::Overlay {
+                    preferred_cost: None,
+                },
+                preference: None,
             },
-            (ExitKind::Other(_), _) => RouteClass::Dynamic {
-                remote,
-                preference: i64::MAX,
-            },
+            (ExitKind::Static | ExitKind::Learned, false) | (ExitKind::Other(_), _) => {
+                RouteClass::NotKnown
+            }
         }
     }
 }

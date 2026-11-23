@@ -802,13 +802,13 @@ pub fn business(e: &Effective<'_>, groups: &ObjectGroups, hubs: &Hubs) -> Policy
             .segments()
             .iter()
             .map(|s| {
-                let mut rules = read_rules(s.rules("rules"), "rule", false, groups, &action);
+                let mut rules = read_rules(s.rules("rules"), "rule", false, groups, action);
                 rules.extend(read_rules(
                     s.rules("defaults"),
                     "default",
                     true,
                     groups,
-                    &action,
+                    action,
                 ));
                 RuleSet {
                     segment: s.segment_id(),
