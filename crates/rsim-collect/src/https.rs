@@ -7,7 +7,7 @@
 //! after a 429.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
@@ -21,7 +21,7 @@ use rustls::crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signat
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, RootCertStore, SignatureScheme};
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
 use tokio_rustls::TlsConnector;
 
@@ -123,15 +123,23 @@ impl Default for HttpsLimits {
 /// host key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ApiServer {
-    /// The largest number of requests in flight, and of request starts in
-    /// one second.
+    /// The largest number of requests in flight, of open connections, and
+    /// of request starts in one second.
     pub concurrency: usize,
 }
 
+/// The idle connections of a console.
+type Pool = Mutex<Vec<SendRequest<Full<Bytes>>>>;
+
 /// The state that the consoles of one address share.
 struct Server {
-    /// The connection limit of an API server.
+    /// The limit of requests in flight to an API server.
     permits: Option<Arc<Semaphore>>,
+    /// The connection limit of an API server. Each open connection holds a
+    /// permit until it closes.
+    connections: Option<Arc<Semaphore>>,
+    /// The idle connections of the consoles of the address.
+    pools: Mutex<Vec<Weak<Pool>>>,
     /// The least time between 2 request starts of an API server.
     interval: Option<Duration>,
     /// The earliest start of the next request.
@@ -145,11 +153,52 @@ impl Server {
         let concurrency = api.map(|a| a.concurrency.max(1));
         Server {
             permits: concurrency.map(|c| Arc::new(Semaphore::new(c))),
+            connections: concurrency.map(|c| Arc::new(Semaphore::new(c))),
+            pools: Mutex::new(Vec::new()),
             interval: concurrency
                 .map(|c| Duration::from_secs(1) / u32::try_from(c).unwrap_or(u32::MAX)),
             next: Mutex::new(Instant::now()),
             hold: Mutex::new(None),
         }
+    }
+
+    /// Adds the idle connections of a console to the connections that
+    /// [`Server::connection`] can close.
+    fn add_pool(&self, pool: &Arc<Pool>) {
+        let mut pools = self.pools.lock().expect("the lock is not poisoned");
+        pools.retain(|p| p.strong_count() > 0);
+        pools.push(Arc::downgrade(pool));
+    }
+
+    /// Closes one idle connection of a console of the address, if a console
+    /// has one.
+    fn close_idle(&self) {
+        let pools = self.pools.lock().expect("the lock is not poisoned");
+        for pool in pools.iter().filter_map(Weak::upgrade) {
+            let idle = pool.lock().expect("the lock is not poisoned").pop();
+            if idle.is_some() {
+                return;
+            }
+        }
+    }
+
+    /// The permit of a new connection to an API server, or `None` for a
+    /// server that is not an API server. With no free permit, it closes an
+    /// idle connection of a console of the address and waits for a
+    /// connection to close.
+    async fn connection(&self) -> Option<OwnedSemaphorePermit> {
+        let limit = self.connections.as_ref()?;
+        if let Ok(permit) = limit.clone().try_acquire_owned() {
+            return Some(permit);
+        }
+        self.close_idle();
+        Some(
+            limit
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("the semaphore is not closed"),
+        )
     }
 
     fn held(&self) -> Option<Instant> {
@@ -416,7 +465,7 @@ struct Console {
     credential: Credential,
     tls: TlsConnector,
     session: tokio::sync::Mutex<Session>,
-    idle: Mutex<Vec<SendRequest<Full<Bytes>>>>,
+    idle: Arc<Pool>,
     max_idle: usize,
     permits: Arc<Semaphore>,
     server: Arc<Server>,
@@ -541,6 +590,8 @@ impl HttpsTransport {
             .permits
             .clone()
             .unwrap_or_else(|| Arc::new(Semaphore::new(max_idle)));
+        let idle = Arc::new(Mutex::new(Vec::new()));
+        server.add_pool(&idle);
         let console = Arc::new(Console {
             host,
             port,
@@ -549,7 +600,7 @@ impl HttpsTransport {
             credential,
             tls: TlsConnector::from(Arc::new(config)),
             session: tokio::sync::Mutex::new(Session::default()),
-            idle: Mutex::new(Vec::new()),
+            idle,
             max_idle,
             permits,
             server,
@@ -581,6 +632,7 @@ impl HttpsTransport {
             }
         }
         let connect = |e: String| TransportError::Connect(e);
+        let permit = console.server.connection().await;
         let tunnel = self.tunnel(console).await?;
         let open = async {
             let tcp = stream(
@@ -608,24 +660,32 @@ impl HttpsTransport {
             let (sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tls))
                 .await
                 .map_err(|e| connect(e.to_string()))?;
-            tokio::spawn(conn);
-            Ok((sender, false))
+            Ok((sender, conn))
         };
         let r = tokio::time::timeout(self.limits.connect_timeout, open)
             .await
             .map_err(|_| TransportError::Timeout)
             .and_then(|r| r);
-        if r.is_err()
-            && let Some(t) = tunnel
-        {
-            let mut g = console.tunnel.lock().await;
-            if g.as_ref().is_some_and(|c| Arc::ptr_eq(c, &t)) {
-                *g = None;
+        match r {
+            Ok((sender, conn)) => {
+                tokio::spawn(async move {
+                    let _permit = permit;
+                    conn.await
+                });
+                Ok((sender, false))
             }
-            drop(g);
-            t.close().await;
+            Err(e) => {
+                if let Some(t) = tunnel {
+                    let mut g = console.tunnel.lock().await;
+                    if g.as_ref().is_some_and(|c| Arc::ptr_eq(c, &t)) {
+                        *g = None;
+                    }
+                    drop(g);
+                    t.close().await;
+                }
+                Err(e)
+            }
         }
-        r
     }
 
     /// The logged-in jump hosts of a console, or `None` for a route with no
@@ -926,5 +986,141 @@ impl Https for HttpsTransport {
             let body = Bytes::from(body.to_string());
             self.read(device, Method::POST, path, body).await
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_util::future::join_all;
+
+    use super::*;
+    use crate::{DEFAULT_INTERVAL, MemoryCredentials, PinPolicy, Vendor};
+
+    /// 2026-11-23 08:00:00 UTC in milliseconds since the Unix epoch.
+    const CLOCK_MS: u64 = 1_795_420_800_000;
+
+    fn api_server() -> Arc<Server> {
+        Arc::new(Server::new(Some(ApiServer { concurrency: 4 })))
+    }
+
+    /// The time from `t0` at which `ready` returns, for each server in
+    /// order.
+    async fn starts(servers: Vec<Arc<Server>>, t0: Instant) -> Vec<Duration> {
+        join_all(servers.iter().map(|s| async move {
+            s.ready().await;
+            Instant::now() - t0
+        }))
+        .await
+    }
+
+    fn ms(values: &[u64]) -> Vec<Duration> {
+        values.iter().map(|v| Duration::from_millis(*v)).collect()
+    }
+
+    fn retry_after(value: &str) -> header::HeaderMap {
+        let mut h = header::HeaderMap::new();
+        h.insert(
+            header::RETRY_AFTER,
+            header::HeaderValue::from_str(value).unwrap(),
+        );
+        h
+    }
+
+    fn device(id: &str, credential: &str) -> Device {
+        Device {
+            id: id.into(),
+            vendor: Vendor::Unifi,
+            address: "192.0.2.10".into(),
+            credential: credential.into(),
+            site: None,
+            capture_bgp: Default::default(),
+            route: Default::default(),
+            interval: DEFAULT_INTERVAL,
+        }
+    }
+
+    #[test]
+    fn retry_after_gives_the_wait_of_a_429() {
+        let wait = |value| retry_wait(&retry_after(value), CLOCK_MS);
+        assert_eq!(wait("7"), Duration::from_secs(7));
+        assert_eq!(
+            wait("Mon, 23 Nov 2026 08:00:02 GMT"),
+            Duration::from_secs(2)
+        );
+        assert_eq!(wait("Mon, 23 Nov 2026 07:59:00 GMT"), Duration::ZERO);
+        assert_eq!(wait("soon"), DEFAULT_RETRY_WAIT);
+        assert_eq!(wait("31536000"), MAX_RETRY_WAIT);
+        assert_eq!(
+            retry_wait(&header::HeaderMap::new(), CLOCK_MS),
+            DEFAULT_RETRY_WAIT
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn concurrency_4_starts_a_request_each_250_ms() {
+        let t0 = Instant::now();
+        let server = api_server();
+        assert_eq!(
+            starts(vec![server; 8], t0).await,
+            ms(&[0, 250, 500, 750, 1000, 1250, 1500, 1750])
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn two_devices_of_one_api_server_share_its_pace() {
+        let t0 = Instant::now();
+        let mut c = MemoryCredentials::new();
+        for name in ["lab", "lab2"] {
+            c.insert(
+                name,
+                Credential {
+                    user: String::new(),
+                    secret: Secret::Token("tok-velo".into()),
+                },
+            );
+        }
+        let t = HttpsTransport::new(
+            Arc::new(c),
+            Arc::new(TrustStore::memory(PinPolicy::Strict)),
+            HttpsLimits::default(),
+        )
+        .with_api_server("192.0.2.10", ApiServer { concurrency: 4 });
+        let one = t.console(&device("velocloud/e1", "lab")).unwrap();
+        let two = t.console(&device("velocloud/e2", "lab2")).unwrap();
+        assert!(!Arc::ptr_eq(&one, &two));
+        assert!(Arc::ptr_eq(&one.server, &two.server));
+        let servers: Vec<Arc<Server>> = (0..8)
+            .map(|i| (if i % 2 == 0 { &one } else { &two }).server.clone())
+            .collect();
+        assert_eq!(
+            starts(servers, t0).await,
+            ms(&[0, 250, 500, 750, 1000, 1250, 1500, 1750])
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_429_with_no_retry_after_holds_4_workers_for_5_s() {
+        let t0 = Instant::now();
+        let server = api_server();
+        server.hold_for(retry_wait(&header::HeaderMap::new(), CLOCK_MS));
+        assert_eq!(
+            starts(vec![server; 4], t0).await,
+            ms(&[5000, 5250, 5500, 5750])
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_429_holds_a_request_that_waits_for_its_start() {
+        let t0 = Instant::now();
+        let server = api_server();
+        server.ready().await;
+        let s = server.clone();
+        let waiting = tokio::spawn(async move {
+            s.ready().await;
+            Instant::now() - t0
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        server.hold_for(Duration::from_secs(1));
+        assert_eq!(waiting.await.unwrap(), Duration::from_millis(1100));
     }
 }

@@ -39,6 +39,9 @@ struct State {
     starts: Mutex<Vec<(String, Instant)>>,
     in_flight: AtomicUsize,
     peak: AtomicUsize,
+    /// The open connections after the TLS handshake, and their peak.
+    open: AtomicUsize,
+    open_peak: AtomicUsize,
     /// The 429 replies of the paths `/limited/..`, each with its
     /// `Retry-After` value or with none.
     limits: Mutex<VecDeque<Option<String>>>,
@@ -222,13 +225,19 @@ async fn serve_config(config: rustls::ServerConfig) -> (String, Arc<State>) {
                 let Ok(tls) = acceptor.accept(tcp).await else {
                     return;
                 };
-                let service = service_fn(move |req| {
+                let open = st.open.fetch_add(1, Ordering::SeqCst) + 1;
+                st.open_peak.fetch_max(open, Ordering::SeqCst);
+                let service = service_fn({
                     let st = st.clone();
-                    async move { Ok::<_, Infallible>(handle(st, req).await) }
+                    move |req| {
+                        let st = st.clone();
+                        async move { Ok::<_, Infallible>(handle(st, req).await) }
+                    }
                 });
                 let _ = hyper::server::conn::http1::Builder::new()
                     .serve_connection(TokioIo::new(tls), service)
                     .await;
+                st.open.fetch_sub(1, Ordering::SeqCst);
             });
         }
     });
@@ -709,6 +718,18 @@ fn assert_pace(starts: &[Instant], interval: Duration) {
     }
 }
 
+/// Asserts that the first and the last of 8 request starts are 7 intervals
+/// of 250 ms apart, with 50 ms for the latency of the test server and 1 s
+/// for the load of the test machine.
+fn assert_span(starts: &[Instant]) {
+    let span = starts[7] - starts[0];
+    assert!(
+        span + Duration::from_millis(50) >= Duration::from_millis(1750)
+            && span < Duration::from_millis(2750),
+        "{span:?}"
+    );
+}
+
 /// The time between the 2 requests to the paths with the prefix.
 fn retry_gap(state: &State, prefix: &str) -> Duration {
     let s = state.starts(prefix);
@@ -811,23 +832,6 @@ async fn a_429_waits_until_the_http_date_of_retry_after() {
 }
 
 #[tokio::test]
-async fn a_429_with_no_retry_after_waits_5_s() {
-    let f = serve(rustls::DEFAULT_VERSIONS).await;
-    let t = api(&f, 4, retries(1));
-    f.state.limit(None);
-    let out = t
-        .get_status(&device(&f.address, "default"), "/limited/a")
-        .await
-        .unwrap();
-    assert!(matches!(out, HttpReply::Body(_)), "{out:?}");
-    let gap = retry_gap(&f.state, "/limited/");
-    assert!(
-        gap >= Duration::from_millis(4990) && gap < Duration::from_secs(7),
-        "{gap:?}"
-    );
-}
-
-#[tokio::test]
 async fn the_retries_of_a_429_end_after_3() {
     let f = serve(rustls::DEFAULT_VERSIONS).await;
     let d = device(&f.address, "default");
@@ -879,8 +883,7 @@ async fn four_requests_start_in_each_second_at_concurrency_4() {
     let s = f.state.starts("/p");
     assert_eq!(s.len(), 8);
     assert_pace(&s, Duration::from_millis(250));
-    let span = s[7] - s[0];
-    assert!(span < Duration::from_millis(2750), "{span:?}");
+    assert_span(&s);
 }
 
 #[tokio::test]
@@ -898,8 +901,7 @@ async fn two_devices_of_one_api_server_share_its_pace() {
     let s = f.state.starts("/p");
     assert_eq!(s.len(), 8);
     assert_pace(&s, Duration::from_millis(250));
-    let span = s[7] - s[0];
-    assert!(span < Duration::from_millis(2750), "{span:?}");
+    assert_span(&s);
 }
 
 #[tokio::test]
@@ -913,6 +915,25 @@ async fn the_parallel_requests_to_an_api_server_stop_at_its_concurrency() {
     assert_eq!(f.state.peak.load(Ordering::SeqCst), 4);
     let n = f.state.connections.load(Ordering::SeqCst);
     assert!((1..=4).contains(&n), "{n} connections");
+}
+
+#[tokio::test]
+async fn two_devices_of_one_api_server_share_its_connection_limit() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let t = api(&f, 4, HttpsLimits::default());
+    let one = device(&f.address, "e1");
+    let mut two = device(&f.address, "e2");
+    two.credential = "lab2".into();
+    let reads: Vec<(&Device, String)> = (0..8)
+        .map(|i| (if i < 4 { &one } else { &two }, format!("/slow/{i}")))
+        .collect();
+    let outs = join_all(reads.iter().map(|(d, p)| t.get_status(d, p))).await;
+    assert!(outs.iter().all(Result::is_ok), "{outs:?}");
+    assert_eq!(f.state.peak.load(Ordering::SeqCst), 4);
+    let open = f.state.open_peak.load(Ordering::SeqCst);
+    assert!((1..=4).contains(&open), "{open} open connections");
+    let n = f.state.connections.load(Ordering::SeqCst);
+    assert!(n >= 5, "{n} connections");
 }
 
 #[tokio::test]
