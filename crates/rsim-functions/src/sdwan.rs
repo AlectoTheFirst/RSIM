@@ -13,6 +13,7 @@ use rsim_core::{
 
 use crate::common::{Meta, push_nonempty};
 use crate::forwarding::meta_methods;
+use crate::routing::RouteLookup;
 use crate::rules::{Decision, Rule, RuleBody, RuleRef, UnknownCause, evaluate};
 
 /// The UDP port of VCMP.
@@ -484,5 +485,76 @@ impl NetFunction for VcmpDecap {
         };
         push_nonempty(&mut out, other);
         out
+    }
+}
+
+/// The route lookup of a transport network outside the twin, for example
+/// the internet or the private network of a carrier. Each branch to an
+/// egress interface has the assumption that the network carries the VCMP
+/// packets between the ingress and the egress interface.
+#[derive(Clone, Debug)]
+pub struct TransportLookup {
+    pub lookup: RouteLookup,
+}
+
+impl NetFunction for TransportLookup {
+    fn id(&self) -> &FunctionId {
+        self.lookup.id()
+    }
+    fn kind(&self) -> FunctionKind {
+        self.lookup.kind()
+    }
+    fn device(&self) -> Option<&rsim_core::DeviceId> {
+        self.lookup.device()
+    }
+    fn provenance(&self) -> &[SourceSpan] {
+        self.lookup.provenance()
+    }
+    fn each_span(&self, f: &mut dyn FnMut(&SourceSpan)) {
+        self.lookup.each_span(f);
+    }
+    fn qos_reads(&self) -> Vec<HeaderField> {
+        self.lookup.qos_reads()
+    }
+    fn qos_writes(&self) -> Vec<HeaderField> {
+        self.lookup.qos_writes()
+    }
+    fn requires(&self) -> Vec<ContextAttr> {
+        self.lookup.requires()
+    }
+    fn provides(&self) -> Vec<ContextAttr> {
+        self.lookup.provides()
+    }
+    fn reads(&self) -> Vec<Dependency> {
+        self.lookup.reads()
+    }
+    fn successors(&self) -> Vec<FunctionId> {
+        self.lookup.successors()
+    }
+    fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
+        let from = ctx
+            .ingress_interface
+            .known()
+            .map_or_else(|| "a link".to_string(), ToString::to_string);
+        self.lookup
+            .apply(input, ctx, state)
+            .into_iter()
+            .map(|b| {
+                let to = match (&b.outcome, b.ctx.egress_interface.known()) {
+                    (Outcome::Forward(_), Some(i)) => Some(i.to_string()),
+                    _ => None,
+                };
+                match to {
+                    Some(to) => {
+                        let text = format!(
+                            "{} carries UDP {VCMP_PORT} from {from} to {to}",
+                            self.lookup.meta.device
+                        );
+                        b.with_assumption(text)
+                    }
+                    None => b,
+                }
+            })
+            .collect()
     }
 }
