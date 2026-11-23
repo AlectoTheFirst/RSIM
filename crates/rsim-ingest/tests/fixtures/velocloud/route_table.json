@@ -1,0 +1,140 @@
+{
+  "profiles": [
+    77
+  ],
+  "subnets": [
+    {
+      "subnet": "10.20.20.0/24:1",
+      "ipVersion": 4,
+      "learnedRoute": {
+        "cidrIp": "10.20.20.0",
+        "cidrPrefix": 24,
+        "segmentId": 1,
+        "logicalId": "r-1"
+      },
+      "preferredExits": [
+        {
+          "type": "LEARNED",
+          "exitType": "EDGE",
+          "entity": "HUB",
+          "protocol": "BGP",
+          "routeType": "E",
+          "segmentId": 1,
+          "edgeId": 2,
+          "edgeLogicalId": "e-hub",
+          "interface": "GE3",
+          "neighborIp": "10.9.8.2",
+          "cost": 20
+        }
+      ],
+      "eligableExits": [
+        {
+          "type": "CONNECTED",
+          "exitType": "ROUTER",
+          "learnedBy": "10.9.8.2",
+          "cost": 5
+        },
+        {
+          "type": "LEARNED",
+          "exitType": "EDGE",
+          "edgeLogicalId": "e-br",
+          "segmentId": 1,
+          "cost": 30
+        }
+      ]
+    },
+    {
+      "subnet": "10.10.10.0/24:1",
+      "ipVersion": 4,
+      "learnedRoute": {
+        "cidrIp": "10.10.10.0",
+        "cidrPrefix": 24,
+        "logicalId": "r-2"
+      },
+      "preferredExits": [
+        {
+          "type": "CONNECTED",
+          "exitType": "EDGE",
+          "entity": "EDGE",
+          "segmentId": 1,
+          "edgeId": 1,
+          "interface": "users",
+          "cost": 0
+        }
+      ],
+      "eligableExits": []
+    },
+    {
+      "subnet": "10.30.30.0/24:9",
+      "ipVersion": 4,
+      "learnedRoute": {
+        "cidrIp": "10.30.30.0",
+        "cidrPrefix": 24,
+        "logicalId": "r-3"
+      },
+      "preferredExits": [
+        {
+          "type": "STATIC",
+          "exitType": "EDGE",
+          "edgeId": 1,
+          "nextHopIp": "10.9.9.2"
+        }
+      ],
+      "eligableExits": []
+    },
+    {
+      "subnet": "10.40.40.0/24",
+      "ipVersion": 4,
+      "learnedRoute": {
+        "cidrIp": "10.40.40.0",
+        "cidrPrefix": 24,
+        "segmentId": 1
+      },
+      "preferredExits": [
+        {
+          "type": "CONNECTED",
+          "exitType": "EDGE",
+          "edgeLogicalId": "e-hub"
+        }
+      ],
+      "eligableExits": []
+    },
+    {
+      "subnet": "2001:db8::/32:1",
+      "ipVersion": 6,
+      "learnedRoute": {
+        "cidrIp": "2001:db8::",
+        "cidrPrefix": 32,
+        "segmentId": 1
+      },
+      "preferredExits": [
+        {
+          "type": "CONNECTED",
+          "exitType": "EDGE",
+          "edgeLogicalId": "e-br",
+          "segmentId": 1
+        }
+      ],
+      "eligableExits": []
+    },
+    {
+      "subnet": "10.50.50.0/24:1",
+      "ipVersion": 4,
+      "preferredExits": [
+        {
+          "type": "LEARNED",
+          "exitType": "EDGE",
+          "edgeLogicalId": "e-hub",
+          "state": "UNREACHABLE"
+        },
+        {
+          "type": "LEARNED",
+          "exitType": "EDGE",
+          "edgeLogicalId": "e-br",
+          "filtered": 1
+        }
+      ],
+      "eligableExits": []
+    }
+  ]
+}

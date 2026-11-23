@@ -1,0 +1,21 @@
+[
+  {
+    "edge": {
+      "_href": "/api/sdwan/v2/enterprises/ent-1/edges/e-br"
+    },
+    "neighborIp": "10.9.9.2",
+    "neighborAS": 65000,
+    "state": "ESTABLISHED",
+    "pfxRcvd": 12,
+    "upDownTime": "01:02:03",
+    "timestamp": "2026-11-02T08:00:00.000Z"
+  },
+  {
+    "edge": {
+      "_href": "/api/sdwan/v2/enterprises/ent-1/edges/e-br",
+      "logicalId": "e-br"
+    },
+    "neighborIp": "10.9.9.99",
+    "state": "IDLE"
+  }
+]

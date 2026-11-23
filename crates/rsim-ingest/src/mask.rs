@@ -17,7 +17,7 @@
 use rsim_store::Format;
 use serde_json::Value;
 
-use crate::{iosxe, iosxr, nxos, unifi, vyos};
+use crate::{iosxe, iosxr, nxos, unifi, velocloud, vyos};
 
 /// The text that takes the place of a masked key or value.
 pub const MASKED: &str = "<secret>";
@@ -230,6 +230,7 @@ pub fn section_lines(
     match (vendor, format) {
         ("vyos", Format::Json) => json_lines(bytes, &vyos::mask::MASK),
         ("unifi", Format::Json) => json_lines(bytes, &unifi::mask::MASK),
+        ("velocloud", Format::Json) => json_lines(bytes, &velocloud::mask::MASK),
         ("nxos", Format::Json) => json_lines(bytes, &nxos::JSON_MASK),
         ("nxos", Format::Text) => text_lines(bytes, nxos::mask),
         ("iosxr", Format::Text) if iosxr::SECTIONS.contains(&section) => {
@@ -632,7 +633,7 @@ mod tests {
             "ssh://git@192.0.2.10/repo",
             "a@example.com",
         ]);
-        for vendor in ["vyos", "unifi", "nxos"] {
+        for vendor in ["vyos", "unifi", "nxos", "velocloud"] {
             check::masked(vendor, Format::Json, bytes.as_bytes(), &["ghp_"], &kept);
         }
     }
@@ -861,6 +862,7 @@ mod tests {
         for (vendor, format) in [
             ("vyos", Format::Text),
             ("unifi", Format::Text),
+            ("velocloud", Format::Text),
             ("iosxr", Format::Json),
             ("iosxe", Format::Json),
             ("fortios", Format::Text),

@@ -1,0 +1,16 @@
+{
+  "enterprises": [
+    {
+      "id": 1,
+      "logicalId": "ent-1",
+      "name": "Example One",
+      "edgeCount": 2
+    },
+    {
+      "id": 2.0,
+      "logicalId": "ent-2",
+      "name": "Example Two",
+      "edgeCount": 0
+    }
+  ]
+}

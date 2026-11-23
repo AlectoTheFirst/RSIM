@@ -1,0 +1,291 @@
+{
+  "e-br": {
+    "WAN": {
+      "version": "2",
+      "schemaVersion": "3.2.0",
+      "type": "WAN",
+      "data": {
+        "links": [
+          {
+            "logicalId": "l-br-mpls",
+            "internalId": "int-l-br-mpls",
+            "name": "OurNet GE1",
+            "mode": "PRIVATE",
+            "type": "WIRED",
+            "isp": "OurNet",
+            "upstreamMbps": 100,
+            "downstreamMbps": 200,
+            "MTU": 1500,
+            "nextHopIpAddress": "172.16.1.1",
+            "vlanId": 0,
+            "interfaces": [
+              "GE1"
+            ],
+            "privateNetwork": "MPLS-A"
+          },
+          {
+            "logicalId": "l-br-dia",
+            "internalId": "int-l-br-dia",
+            "name": "ThirdParty ISP GE2",
+            "mode": "PUBLIC",
+            "type": "WIRED",
+            "isp": "ThirdParty ISP",
+            "upstreamMbps": 100,
+            "downstreamMbps": 200,
+            "MTU": 1500,
+            "nextHopIpAddress": "198.51.100.1",
+            "vlanId": 0,
+            "interfaces": [
+              "GE2"
+            ]
+          }
+        ],
+        "networks": []
+      }
+    },
+    "controlPlane": {
+      "version": "0",
+      "type": "controlPlane",
+      "data": {
+        "gatewaySegmentDetailList": [
+          {
+            "segment": {
+              "segmentId": 1,
+              "name": "corp",
+              "type": "REGULAR"
+            },
+            "gatewayDetailList": [
+              {
+                "name": "gw-1",
+                "ipAddress": "192.0.2.10",
+                "logicalId": "gatewayg-1",
+                "roles": [
+                  {
+                    "role": "VPN_TUNNEL"
+                  },
+                  {
+                    "role": "primary"
+                  }
+                ]
+              },
+              {
+                "name": "gw-dns",
+                "ipAddress": "192.0.2.20",
+                "logicalId": "gatewayg-2",
+                "roles": [
+                  {
+                    "role": "DNS"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "gatewayDetailList": [
+          {
+            "name": "gw-1",
+            "ipAddress": "192.0.2.10",
+            "logicalId": "gatewayg-1",
+            "roles": [
+              {
+                "role": "VPN_TUNNEL"
+              },
+              {
+                "role": "primary"
+              }
+            ]
+          }
+        ],
+        "segments": [
+          {
+            "segment": {
+              "segmentId": 1,
+              "name": "corp",
+              "type": "REGULAR"
+            },
+            "vpn": {
+              "dataCenterEdges": [
+                {
+                  "logicalId": "e-hub",
+                  "clusterLogicalId": "cl-dc",
+                  "clusterName": " DC-CLUSTER",
+                  "name": "hub-1",
+                  "type": "edgeHubCluster"
+                }
+              ]
+            }
+          }
+        ],
+        "routingConfiguration": {
+          "edge": {
+            "ospf": {
+              "advertiseExternal": true
+            },
+            "bgp": {
+              "advertiseStatic": true
+            }
+          },
+          "hub": {
+            "ospf": {
+              "advertiseInterArea": true
+            },
+            "bgp": {
+              "advertiseConnected": true
+            }
+          },
+          "preferenceBuckets": [
+            {
+              "entity": "HUB",
+              "exitType": "EDGE",
+              "protocol": "BGP"
+            }
+          ]
+        }
+      }
+    },
+    "_freshness": {
+      "observed_at_ms": 1793606400000,
+      "stale": false
+    }
+  },
+  "e-hub": {
+    "WAN": {
+      "version": "2",
+      "schemaVersion": "3.2.0",
+      "type": "WAN",
+      "data": {
+        "links": [
+          {
+            "logicalId": "l-hub-mpls",
+            "internalId": "int-l-hub-mpls",
+            "name": "OurNet GE1",
+            "mode": "PRIVATE",
+            "type": "WIRED",
+            "isp": "OurNet",
+            "upstreamMbps": 100,
+            "downstreamMbps": 200,
+            "MTU": 1500,
+            "nextHopIpAddress": null,
+            "vlanId": 0,
+            "interfaces": [
+              "GE1"
+            ],
+            "privateNetwork": "MPLS-A"
+          },
+          {
+            "logicalId": "l-hub-dia",
+            "internalId": "int-l-hub-dia",
+            "name": "DC ISP GE2",
+            "mode": "PUBLIC",
+            "type": "WIRELESS",
+            "isp": "DC ISP",
+            "upstreamMbps": 100,
+            "downstreamMbps": 200,
+            "MTU": 1500,
+            "nextHopIpAddress": null,
+            "vlanId": 0,
+            "interfaces": [
+              "GE2"
+            ]
+          }
+        ],
+        "networks": []
+      }
+    },
+    "controlPlane": {
+      "version": "0",
+      "type": "controlPlane",
+      "data": {
+        "gatewaySegmentDetailList": [
+          {
+            "segment": {
+              "segmentId": 1,
+              "name": "corp",
+              "type": "REGULAR"
+            },
+            "gatewayDetailList": [
+              {
+                "name": "gw-1",
+                "ipAddress": "192.0.2.10",
+                "logicalId": "gatewayg-1",
+                "roles": [
+                  {
+                    "role": "VPN_TUNNEL"
+                  },
+                  {
+                    "role": "primary"
+                  }
+                ]
+              },
+              {
+                "name": "gw-dns",
+                "ipAddress": "192.0.2.20",
+                "logicalId": "gatewayg-2",
+                "roles": [
+                  {
+                    "role": "DNS"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "gatewayDetailList": [
+          {
+            "name": "gw-1",
+            "ipAddress": "192.0.2.10",
+            "logicalId": "gatewayg-1",
+            "roles": [
+              {
+                "role": "VPN_TUNNEL"
+              },
+              {
+                "role": "primary"
+              }
+            ]
+          }
+        ],
+        "segments": [],
+        "routingConfiguration": {
+          "edge": {
+            "ospf": {
+              "advertiseExternal": true
+            },
+            "bgp": {
+              "advertiseStatic": true
+            }
+          },
+          "hub": {
+            "ospf": {
+              "advertiseInterArea": true
+            },
+            "bgp": {
+              "advertiseConnected": true
+            }
+          },
+          "preferenceBuckets": [
+            {
+              "entity": "HUB",
+              "exitType": "EDGE",
+              "protocol": "BGP"
+            }
+          ]
+        },
+        "memberCluster": {
+          "clusterLogicalId": "cl-dc",
+          "clusterName": " DC-CLUSTER",
+          "members": [
+            {
+              "edgeLogicalId": "e-hub",
+              "edgeId": 2
+            }
+          ]
+        }
+      }
+    },
+    "_freshness": {
+      "observed_at_ms": 1793606400000,
+      "stale": true
+    }
+  }
+}
