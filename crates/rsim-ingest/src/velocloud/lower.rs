@@ -23,8 +23,8 @@ use rsim_functions::{
     AclMatch, DestinationNat, DeviceDelivery, Egress, EgressMode, ExitMark, Fib, Ingress, Link,
     Meta, NatAction, NextHopResolution, OverlaySelect, OverlayTunnel, PolicyRoute, PortTranslation,
     QosNotEvaluated, Route, RouteKind, RouteLookup, RouteNextHop, RouteProtocol, Rule as FRule,
-    RuleAction, SessionCommit, SessionLookup, SourceNat, StateActions, TransportLookup,
-    TunnelState, VCMP_PORT, VcmpDecap, VcmpEncap, VendorProfile, VrfSelection,
+    RuleAction, SessionBypass, SessionCommit, SessionLookup, SourceNat, StateActions,
+    TransportLookup, TunnelState, VCMP_PORT, VcmpDecap, VcmpEncap, VendorProfile, VrfSelection,
 };
 
 use super::reader::{
@@ -43,6 +43,14 @@ pub const UNDERLAY: &str = "wan";
 
 /// The VRF of each transport network.
 const TRANSPORT_VRF: &str = "default";
+
+/// The reason of the static, overlay and default routes of a segment with
+/// a LAN BGP neighbour.
+const LAN_LEARNED: &str = "lan learned routes not collected";
+
+/// The business rules of a segment and the reason of the profile rules
+/// that are not read.
+type RuleSet<'a> = (&'a [Rule<BusinessAction>], Option<String>);
 
 /// The action when the hub of a branch in a cluster is not collected.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -78,12 +86,14 @@ struct Member {
     spans: Vec<SourceSpan>,
 }
 
-/// A transport network: the WAN links of its edges and the gateways that
-/// the tunnels of the edges reach through it.
+/// A transport network: the WAN links of its edges, the gateways that the
+/// tunnels of the edges reach through it, and the addresses of the WAN
+/// links that the lowering leaves out, with the reason of each.
 #[derive(Default)]
 struct Transport {
     members: Vec<Member>,
     gateways: BTreeMap<String, (IpAddr, SourceSpan)>,
+    left_out: Vec<(IpAddr, String, Vec<SourceSpan>)>,
 }
 
 /// A far end of the tunnels of a segment.
@@ -109,6 +119,31 @@ impl Far {
     }
 }
 
+/// The traffic of a tunnel selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Traffic {
+    /// The packets of an overlay route, steered by the edge-to-edge route
+    /// actions.
+    Overlay,
+    /// The internet packets of the business policy, steered by the
+    /// edge-to-cloud route actions.
+    Internet,
+}
+
+impl Traffic {
+    fn target(self) -> Target {
+        match self {
+            Traffic::Overlay => Target::Edge,
+            Traffic::Internet => Target::Cloud,
+        }
+    }
+}
+
+/// The role of an edge in the text of a reason.
+fn role(e: &Edge) -> &'static str {
+    if e.hub { "hub" } else { "branch" }
+}
+
 /// The default routes of IPv4 and IPv6.
 fn defaults() -> [Prefix; 2] {
     [
@@ -130,6 +165,26 @@ fn vrf_of(s: &EdgeSegment) -> VrfId {
 /// The interface of a WAN link: its interface, else its logicalId.
 fn wan_iface(l: &WanLink) -> String {
     l.interface.clone().unwrap_or_else(|| l.logical_id.clone())
+}
+
+/// The WAN links of an edge that the lowering uses, one for each WAN
+/// interface, and the links with one listing group that it leaves out,
+/// each with the reason.
+fn usable_links(e: &Edge) -> (Vec<&WanLink>, Vec<(&WanLink, String)>) {
+    let mut seen = BTreeSet::new();
+    let mut used = Vec::new();
+    let mut left = Vec::new();
+    for l in e.links.iter().filter(|l| l.ambiguous.is_none()) {
+        let i = wan_iface(l);
+        if e.interfaces.iter().any(|x| !x.wan && x.name == i) {
+            left.push((l, format!("interface {i} is a LAN interface")));
+        } else if !seen.insert(i.clone()) {
+            left.push((l, format!("interface {i} of another link")));
+        } else {
+            used.push(l);
+        }
+    }
+    (used, left)
 }
 
 /// The address of a WAN link in the transport network: the listing
@@ -158,8 +213,53 @@ fn pairable(a: &WanLink, b: &WanLink) -> bool {
 }
 
 /// The function id of the tunnel selection of a segment to a far end.
-fn select_id(segment: u32, far: &Far) -> String {
-    format!("sdwan/select/{segment}/{}", far.name())
+fn select_id(segment: u32, far: &Far, traffic: Traffic) -> String {
+    match (traffic, far) {
+        (Traffic::Internet, Far::Edge(_) | Far::Cluster { .. }) => {
+            format!("sdwan/select/{segment}/{}/backhaul", far.name())
+        }
+        _ => format!("sdwan/select/{segment}/{}", far.name()),
+    }
+}
+
+/// The text of a `linkPolicy` value that the lowering does not read.
+fn link_policy_text(w: &Word<LinkPolicy>) -> String {
+    match w {
+        Word::Known(k) => {
+            let k = format!("{k:?}").to_lowercase();
+            format!("linkPolicy {k} not lowered")
+        }
+        Word::Other(t) => format!("linkPolicy {t} not known"),
+        Word::NotStated => "linkPolicy not stated".to_string(),
+    }
+}
+
+/// The QoS values of a business rule and the DSCP tags of its route action
+/// `a`, as the text of a stanza. `None` when the rule has none.
+fn qos_text(r: &Rule<BusinessAction>, a: Option<&RouteAction>) -> Option<String> {
+    let tag = |w: &Word<u8>, side: &str| match w {
+        Word::Known(v) => Some(format!("{side} DSCP {v}")),
+        Word::Other(t) => Some(format!("{side} DSCP {t}")),
+        Word::NotStated => None,
+    };
+    let q = r.action.qos.as_ref();
+    let parts: Vec<String> = [
+        q.and_then(|q| q.class.as_ref())
+            .map(|c| format!("service class {c}")),
+        q.and_then(|q| q.priority_tx.as_ref())
+            .map(|p| format!("priority {p}")),
+        q.and_then(|q| q.cap_tx)
+            .map(|c| format!("rate limit {c} %")),
+        a.and_then(|a| tag(&a.outer_dscp, "outer")),
+        a.and_then(|a| tag(&a.inner_dscp, "inner")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if q.is_none() && parts.is_empty() {
+        return None;
+    }
+    Some(parts.join(", "))
 }
 
 /// A match that no packet meets.
@@ -294,7 +394,7 @@ struct L<'a> {
     notes: Vec<String>,
     /// The WAN links with a known interface, one for each interface.
     wan: Vec<&'a WanLink>,
-    selects: BTreeSet<(u32, Far)>,
+    selects: BTreeSet<(u32, Far, Traffic)>,
     /// The direct exits of each segment: all public links, or one link.
     directs: BTreeSet<(u32, Option<String>)>,
     /// The tunnel ends: the local link and the address of the far link, by
@@ -304,6 +404,9 @@ struct L<'a> {
     serial: usize,
     members: Vec<(String, Member)>,
     gateways: Vec<(String, String, IpAddr, SourceSpan)>,
+    /// The transport network, the address and the reason of each WAN link
+    /// that the lowering leaves out.
+    left_out: Vec<(String, IpAddr, String, Vec<SourceSpan>)>,
 }
 
 impl<'a> L<'a> {
@@ -366,27 +469,18 @@ impl<'a> L<'a> {
 
     fn lower(&mut self) {
         let e = self.e;
-        let mut seen = BTreeSet::new();
-        for l in &e.links {
-            if l.ambiguous.is_some() {
-                continue;
-            }
-            let i = wan_iface(l);
-            if e.interfaces.iter().any(|x| !x.wan && x.name == i) {
-                self.note(format!(
-                    "link {}: interface {i} is a LAN interface",
-                    l.logical_id
+        let (used, left) = usable_links(e);
+        self.wan = used;
+        for (l, why) in left {
+            self.note(format!("link {}: {why}", l.logical_id));
+            if let (Some(t), Some(a)) = (self.transport(l), link_address(l)) {
+                self.left_out.push((
+                    t,
+                    a,
+                    format!("link {} of {} left out, {why}", l.logical_id, e.logical_id),
+                    l.spans.clone(),
                 ));
-                continue;
             }
-            if !seen.insert(i.clone()) {
-                self.note(format!(
-                    "link {}: interface {i} of another link",
-                    l.logical_id
-                ));
-                continue;
-            }
-            self.wan.push(l);
         }
 
         // The LAN interfaces with their segments.
@@ -466,6 +560,14 @@ impl<'a> L<'a> {
             egress,
             point_to_point: BTreeMap::new(),
         });
+        if self.stateful() {
+            let meta = self.meta("commit/lan", self.span());
+            self.add(SessionCommit {
+                meta,
+                next: self.id("nexthop"),
+                keep_untranslated: true,
+            });
+        }
         for (i, _) in &lan {
             let meta = self.meta(&format!("out/{}", i.name), vec![i.span.clone()]);
             self.add(Egress {
@@ -484,9 +586,9 @@ impl<'a> L<'a> {
         }
         self.wan_side();
         let selects = std::mem::take(&mut self.selects);
-        for (sid, far) in &selects {
+        for (sid, far, traffic) in &selects {
             if let Some(s) = self.segment(*sid) {
-                self.select(s, far);
+                self.select(s, far, *traffic);
             }
         }
         self.encaps();
@@ -508,7 +610,9 @@ impl<'a> L<'a> {
             default_vrf: None,
             next: self.id(&format!("session/{sid}")),
         });
+        let stateful = self.stateful();
         let after_session = match &firewall {
+            Some(_) if stateful => format!("bypass/{sid}"),
             Some(_) => format!("firewall/{sid}"),
             None => "route".to_string(),
         };
@@ -521,6 +625,14 @@ impl<'a> L<'a> {
         let Some(rules) = firewall else {
             return;
         };
+        if stateful {
+            let meta = self.meta(&format!("bypass/{sid}"), self.span());
+            self.add(SessionBypass {
+                meta,
+                established: self.id("route"),
+                next: self.id(&format!("firewall/{sid}")),
+            });
+        }
         let meta = self.meta(&format!("firewall/{sid}"), self.span());
         self.add(AclMatch {
             meta,
@@ -529,6 +641,16 @@ impl<'a> L<'a> {
             default: self.profile.acl_default,
             next: self.id("route"),
         });
+    }
+
+    /// The function after a route to a LAN interface: the session commit of
+    /// a stateful firewall, else the next hop.
+    fn lan_next(&self) -> &'static str {
+        if self.stateful() {
+            "commit/lan"
+        } else {
+            "nexthop"
+        }
     }
 
     /// True if the firewall of the edge, or of one of its segments, is
@@ -614,7 +736,7 @@ impl<'a> L<'a> {
         match (iface, st.gateway) {
             (Some(i), g) => Route::new(
                 RouteKind::Static,
-                vec![self.nh(&i.name, g, "nexthop")],
+                vec![self.nh(&i.name, g, self.lan_next())],
                 spans,
             ),
             (None, Some(g)) => Route::unknown(
@@ -632,10 +754,13 @@ impl<'a> L<'a> {
 
     /// The route table of a segment: one winner for each prefix by the route
     /// order, the addresses of the edge, and the default route to the
-    /// business policy.
+    /// business policy. In a segment with a LAN BGP neighbour, whose
+    /// learned routes are not collected, only the connected and the local
+    /// routes give an answer.
     fn fib(&mut self, s: &EdgeSegment, ifs: &[&Interface]) -> Fib {
         let e = self.e;
         let ent = self.ent;
+        let lan = s.bgp.as_ref().is_some_and(|b| !b.neighbours.is_empty());
         let mut cands: BTreeMap<Prefix, Vec<Candidate>> = BTreeMap::new();
         for i in ifs {
             if let Some((a, len)) = i.address {
@@ -646,16 +771,26 @@ impl<'a> L<'a> {
                         class: RouteClass::LocalConnected,
                         route: Route::new(
                             RouteKind::Connected,
-                            vec![self.nh(&i.name, None, "nexthop")],
+                            vec![self.nh(&i.name, None, self.lan_next())],
                             vec![i.span.clone()],
                         ),
                     });
             }
         }
         for st in &s.statics {
+            let route = if lan {
+                Route::unknown_with(
+                    RouteKind::Static,
+                    ReasonCode::NotCollected,
+                    LAN_LEARNED,
+                    vec![st.span.clone()],
+                )
+            } else {
+                self.static_route(st, ifs)
+            };
             cands.entry(st.prefix).or_default().push(Candidate {
                 class: st.class(),
-                route: self.static_route(st, ifs),
+                route,
             });
         }
         let mut own = 0;
@@ -665,21 +800,34 @@ impl<'a> L<'a> {
                     own += 1;
                     continue;
                 }
-                let route = if ent.edge(&row.edge).is_some() {
-                    let far = Far::Edge(row.edge.clone());
-                    let next = select_id(s.id, &far);
-                    self.selects.insert((s.id, far));
-                    Route::new(
-                        RouteKind::Learned(RouteProtocol::Overlay),
-                        vec![self.nh("overlay", None, &next)],
-                        vec![row.span.clone()],
-                    )
-                } else {
-                    Route::unknown(
-                        RouteKind::Learned(RouteProtocol::Overlay),
+                let kind = RouteKind::Learned(RouteProtocol::Overlay);
+                let spans = vec![row.span.clone()];
+                let route = match ent.edge(&row.edge) {
+                    None => Route::unknown(
+                        kind,
                         format!("edge {} not in the enterprise", row.edge),
-                        vec![row.span.clone()],
-                    )
+                        spans,
+                    ),
+                    Some(_) if lan => {
+                        Route::unknown_with(kind, ReasonCode::NotCollected, LAN_LEARNED, spans)
+                    }
+                    Some(fe) if fe.hub == e.hub => Route::unknown_with(
+                        kind,
+                        ReasonCode::NotCollected,
+                        format!(
+                            "path from {} {} to {} {} not collected",
+                            role(e),
+                            e.logical_id,
+                            role(fe),
+                            fe.logical_id
+                        ),
+                        spans,
+                    ),
+                    Some(_) => {
+                        let far = Far::Edge(row.edge.clone());
+                        let next = self.use_select(s, far, Traffic::Overlay);
+                        Route::new(kind, vec![self.nh("overlay", None, &next)], spans)
+                    }
                 };
                 cands.entry(row.prefix).or_default().push(Candidate {
                     class: row.class(&e.logical_id),
@@ -701,7 +849,14 @@ impl<'a> L<'a> {
             if cands.contains_key(&p) {
                 continue;
             }
-            let route = if ent.overlay.is_none() {
+            let route = if lan {
+                Route::unknown_with(
+                    RouteKind::Static,
+                    ReasonCode::NotCollected,
+                    LAN_LEARNED,
+                    self.span(),
+                )
+            } else if ent.overlay.is_none() {
                 Route::unknown_with(
                     RouteKind::Static,
                     ReasonCode::NotCollected,
@@ -830,16 +985,14 @@ impl<'a> L<'a> {
             .find(|a| a.target == Target::Cloud)
             .ok_or_else(|| "no route action for internet traffic".to_string())?;
         let next = match &a.route_policy {
-            Word::Known(RoutePolicy::Direct) => self.direct(s, a),
+            Word::Known(RoutePolicy::Direct) => self.direct(s, r, a),
             Word::Known(RoutePolicy::Gateway) => {
                 let any = self.e.gateways.iter().any(|g| g.segments.contains(&s.id));
                 if !any {
                     return Err("no gateway of the segment".to_string());
                 }
-                let far = Far::Gateways;
-                let id = select_id(s.id, &far);
-                self.selects.insert((s.id, far));
-                self.id(&id)
+                let entry = self.use_select(s, Far::Gateways, Traffic::Internet);
+                self.id(&entry)
             }
             Word::Known(RoutePolicy::Backhaul) => {
                 let first = a
@@ -852,21 +1005,12 @@ impl<'a> L<'a> {
             Word::NotStated => return Err("route policy not stated".to_string()),
             Word::Other(t) => return Err(format!("route policy {t} not known")),
         };
-        let Some(q) = &r.action.qos else {
+        let Some(text) = qos_text(r, Some(a)) else {
             return Ok(next);
         };
         self.serial += 1;
         let name = format!("policy/{}/qos/{}", s.id, self.serial);
         let meta = self.meta(&name, vec![r.span.clone()]);
-        let text = [
-            q.class.as_ref().map(|c| format!("service class {c}")),
-            q.priority_tx.as_ref().map(|p| format!("priority {p}")),
-            q.cap_tx.map(|c| format!("rate limit {c} %")),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(", ");
         let stanza = if text.is_empty() {
             format!("{}:business:{}:{}", self.e.device, s.id, r.id)
         } else {
@@ -906,9 +1050,26 @@ impl<'a> L<'a> {
         (!found.is_empty()).then_some(found)
     }
 
-    /// The direct exit of a segment.
-    fn direct(&mut self, s: &EdgeSegment, a: &RouteAction) -> FunctionId {
-        let link = self.pinned_links(a).and_then(|p| p.into_iter().next());
+    /// The direct exit of a segment for the route action `a` of the
+    /// business rule `r`.
+    fn direct(&mut self, s: &EdgeSegment, r: &Rule<BusinessAction>, a: &RouteAction) -> FunctionId {
+        let link = match &a.link_policy {
+            Word::Known(LinkPolicy::Fixed) => match self.pinned_links(a) {
+                Some(p) => p.into_iter().next(),
+                None => {
+                    return self.unknown_target(
+                        s,
+                        ReasonCode::IncompleteTable,
+                        format!("business rule {}: linkPolicy fixed names no WAN link", r.id),
+                    );
+                }
+            },
+            Word::Known(LinkPolicy::Auto) => None,
+            w => {
+                self.note(format!("business rule {}: {}", r.id, link_policy_text(w)));
+                None
+            }
+        };
         let name = match &link {
             Some(l) => format!("direct/{}/{l}", s.id),
             None => format!("direct/{}", s.id),
@@ -922,6 +1083,16 @@ impl<'a> L<'a> {
     fn hub_target(&mut self, s: &EdgeSegment, r: &HubRef) -> Result<FunctionId, String> {
         let e = self.e;
         let label = r.name.clone().or_else(|| r.id.clone()).unwrap_or_default();
+        if e.hub {
+            return Ok(self.unknown_target(
+                s,
+                ReasonCode::NotCollected,
+                format!(
+                    "path from hub {} to hub {label} not collected",
+                    e.logical_id
+                ),
+            ));
+        }
         let far = match r.edges.as_slice() {
             [] => return Err(format!("hub {label} names no edge")),
             [one] if *one == e.logical_id => return Err("backhaul to the edge itself".into()),
@@ -977,9 +1148,75 @@ impl<'a> L<'a> {
                 }
             }
         };
-        let id = select_id(s.id, &far);
-        self.selects.insert((s.id, far));
-        Ok(self.id(&id))
+        let entry = self.use_select(s, far, Traffic::Internet);
+        Ok(self.id(&entry))
+    }
+
+    /// The first function of the tunnel selection of a segment to a far
+    /// end: the QoS stanza of the business rules for overlay traffic, the
+    /// session commit of a stateful firewall, or the selection.
+    fn select_entry(&self, s: &EdgeSegment, far: &Far, traffic: Traffic) -> String {
+        let id = select_id(s.id, far, traffic);
+        if traffic == Traffic::Overlay && self.overlay_qos(s).is_some() {
+            format!("{id}/qos")
+        } else if self.stateful() {
+            format!("{id}/commit")
+        } else {
+            id
+        }
+    }
+
+    /// Adds the tunnel selection of a segment to a far end, and gives the
+    /// name of its first function.
+    fn use_select(&mut self, s: &EdgeSegment, far: Far, traffic: Traffic) -> String {
+        let entry = self.select_entry(s, &far, traffic);
+        self.selects.insert((s.id, far, traffic));
+        entry
+    }
+
+    /// The business rules of a segment, or the reason of a business policy
+    /// that is not read.
+    fn business_rules(&self, s: &EdgeSegment) -> Result<RuleSet<'a>, String> {
+        let e = self.e;
+        match &e.business {
+            Policy::NotRead(r) => Err(r.clone()),
+            Policy::Read(b) => Ok(match b.segments.iter().find(|x| x.segment == Some(s.id)) {
+                Some(x) => (
+                    x.rules.as_slice(),
+                    x.unknown_tail.clone().or_else(|| b.unknown_tail.clone()),
+                ),
+                None => (&[][..], b.unknown_tail.clone()),
+            }),
+        }
+    }
+
+    /// The QoS stanza of the overlay traffic of a segment: the QoS values
+    /// and the edge-to-edge DSCP tags of each business rule that has them,
+    /// with their spans. `None` when no rule has them.
+    fn overlay_qos(&self, s: &EdgeSegment) -> Option<(String, Vec<SourceSpan>)> {
+        let e = self.e;
+        let (rules, tail) = match self.business_rules(s) {
+            Err(r) => return Some((format!("business policy, {r}"), vec![e.span.clone()])),
+            Ok(x) => x,
+        };
+        let mut parts = Vec::new();
+        let mut spans = Vec::new();
+        for r in rules {
+            let a = r.action.routes.iter().find(|a| a.target == Target::Edge);
+            if let Some(t) = qos_text(r, a) {
+                parts.push(if t.is_empty() {
+                    r.id.clone()
+                } else {
+                    format!("{} {t}", r.id)
+                });
+                spans.push(r.span.clone());
+            }
+        }
+        if let Some(t) = tail {
+            parts.push(format!("profile rules, {t}"));
+            spans.push(e.span.clone());
+        }
+        (!parts.is_empty()).then(|| (parts.join("; "), spans))
     }
 
     /// The state of each tunnel to a far end: down when a link is down, and
@@ -1111,67 +1348,69 @@ impl<'a> L<'a> {
         }
     }
 
-    /// The steering rules of the tunnels to a far end: the business rules of
-    /// the segment in order, each with the links that it pins with the link
-    /// policy `fixed`, else with each link. With no pinned link, the
-    /// selection has no steering rule.
-    fn steering(
-        &self,
-        s: &EdgeSegment,
-        far: &Far,
-        tunnels: &[OverlayTunnel],
-    ) -> Vec<FRule<BTreeSet<String>>> {
+    /// The steering rules of a tunnel selection: the business rules of the
+    /// segment in order, each with the links that the route action of the
+    /// traffic pins with the link policy `fixed`, else with an empty link
+    /// set, which keeps each tunnel. A `linkPolicy` value that the lowering
+    /// does not read is in the name of its rule. With no such value and no
+    /// pinned link, the selection has no steering rule.
+    fn steering(&mut self, s: &EdgeSegment, traffic: Traffic) -> Vec<FRule<BTreeSet<String>>> {
         let e = self.e;
-        let (rules, tail): (&[Rule<BusinessAction>], Option<String>) = match &e.business {
-            Policy::NotRead(r) => {
+        let (rules, tail) = match self.business_rules(s) {
+            Err(r) => {
                 return vec![FRule::unhandled(
                     format!("business policy, {r}"),
                     e.span.clone(),
                 )];
             }
-            Policy::Read(b) => match b.segments.iter().find(|x| x.segment == Some(s.id)) {
-                Some(x) => (
-                    x.rules.as_slice(),
-                    x.unknown_tail.clone().or_else(|| b.unknown_tail.clone()),
-                ),
-                None => (&[], b.unknown_tail.clone()),
-            },
+            Ok(x) => x,
         };
-        let targets = if *far == Far::Gateways {
-            [Target::Cloud, Target::Edge]
-        } else {
-            [Target::Edge, Target::Cloud]
-        };
-        let all: BTreeSet<String> = tunnels.iter().map(|t| t.link.clone()).collect();
-        let mut pinned = false;
+        let mut steer = false;
         let mut out = Vec::new();
         for r in rules {
-            let action = targets
+            let action = r
+                .action
+                .routes
                 .iter()
-                .find_map(|t| r.action.routes.iter().find(|a| a.target == *t));
-            let links = match action.and_then(|a| self.pinned_links(a)) {
-                Some(l) => {
-                    pinned = true;
-                    l
-                }
-                None => all.clone(),
+                .find(|a| a.target == traffic.target());
+            let (name, links) = match action {
+                None => (r.id.clone(), BTreeSet::new()),
+                Some(a) => match &a.link_policy {
+                    Word::Known(LinkPolicy::Auto) => (r.id.clone(), BTreeSet::new()),
+                    Word::Known(LinkPolicy::Fixed) => match self.pinned_links(a) {
+                        Some(l) => (r.id.clone(), l),
+                        None => {
+                            let text = format!("{}: linkPolicy fixed names no WAN link", r.id);
+                            self.note(format!("business rule {text}"));
+                            steer = true;
+                            out.push(FRule::unhandled(text, r.span.clone()));
+                            continue;
+                        }
+                    },
+                    w => {
+                        let text = format!("{}: {}", r.id, link_policy_text(w));
+                        self.note(format!("business rule {text}"));
+                        (text, BTreeSet::new())
+                    }
+                },
             };
-            out.push(
-                FRule::new(r.id.clone(), predicate(&r.matches), links).with_span(r.span.clone()),
-            );
+            steer |= !links.is_empty() || name != r.id;
+            out.push(FRule::new(name, predicate(&r.matches), links).with_span(r.span.clone()));
         }
         if let Some(t) = tail {
-            pinned = true;
+            steer = true;
             out.push(FRule::unhandled(
                 format!("profile rules, {t}"),
                 e.span.clone(),
             ));
         }
-        if pinned { out } else { Vec::new() }
+        if steer { out } else { Vec::new() }
     }
 
-    /// The tunnel selection of a segment to a far end.
-    fn select(&mut self, s: &EdgeSegment, far: &Far) {
+    /// The tunnel selection of a segment to a far end, after the session
+    /// commit of a stateful firewall and, for overlay traffic, after the
+    /// QoS stanza of the business rules.
+    fn select(&mut self, s: &EdgeSegment, far: &Far, traffic: Traffic) {
         let mut tunnels = Vec::new();
         match far {
             Far::Edge(x) => self.edge_tunnels(x, &mut tunnels),
@@ -1182,14 +1421,38 @@ impl<'a> L<'a> {
             }
             Far::Gateways => self.gateway_tunnels(s, &mut tunnels),
         }
-        let steering = self.steering(s, far, &tunnels);
-        let meta = self.meta(&select_id(s.id, far), self.span());
+        let steering = self.steering(s, traffic);
+        let id = select_id(s.id, far, traffic);
+        let meta = self.meta(&id, self.span());
         self.add(OverlaySelect {
             meta,
             far: far.name().to_string(),
             tunnels,
             steering,
+            mandatory: BTreeSet::new(),
         });
+        let mut next = self.id(&id);
+        if self.stateful() {
+            let name = format!("{id}/commit");
+            let meta = self.meta(&name, self.span());
+            self.add(SessionCommit {
+                meta,
+                next,
+                keep_untranslated: true,
+            });
+            next = self.id(&name);
+        }
+        if traffic == Traffic::Overlay
+            && let Some((text, spans)) = self.overlay_qos(s)
+        {
+            let name = format!("{id}/qos");
+            let meta = self.meta(&name, spans);
+            self.add(QosNotEvaluated {
+                meta,
+                stanza: ObjectId::new(format!("{}:business:{}: {text}", self.e.device, s.id)),
+                next,
+            });
+        }
     }
 
     /// The VCMP encapsulation of each tunnel.
@@ -1248,22 +1511,45 @@ impl<'a> L<'a> {
                     None => matches!(l.kind, LinkKind::Public { .. }),
                 })
                 .collect();
+            let spans: Vec<SourceSpan> = links.iter().flat_map(|l| l.spans.clone()).collect();
+            let mut up = Vec::new();
+            let mut not_known = None;
+            for l in &links {
+                match link_up(l.state.as_deref()) {
+                    Some(true) => up.push(*l),
+                    Some(false) if link.is_some() => {
+                        not_known = Some(format!(
+                            "WAN link {} of the rule is down, steering mode not collected",
+                            l.logical_id
+                        ));
+                    }
+                    Some(false) => {}
+                    None => {
+                        not_known =
+                            Some(format!("state of WAN link {} not collected", l.logical_id));
+                    }
+                }
+            }
             let mut fib = Fib::new();
             for (p, v4) in defaults().into_iter().zip([true, false]) {
-                let hops: Vec<RouteNextHop> = links
+                let hops: Vec<RouteNextHop> = up
                     .iter()
                     .filter(|l| l.gateway.map_or(v4, |g| g.is_ipv4() == v4))
                     .map(|l| self.nh(&wan_iface(l), l.gateway, "snat"))
                     .collect();
-                let spans: Vec<SourceSpan> = links.iter().flat_map(|l| l.spans.clone()).collect();
-                let route = if hops.is_empty() {
-                    Route::unknown(
+                let route = match &not_known {
+                    Some(why) => Route::unknown_with(
                         RouteKind::Static,
-                        "no WAN link for direct traffic",
+                        ReasonCode::NotCollected,
+                        why.clone(),
+                        spans.clone(),
+                    ),
+                    None if hops.is_empty() => Route::unknown(
+                        RouteKind::Static,
+                        "no WAN link for direct traffic is up",
                         self.span(),
-                    )
-                } else {
-                    Route::new(RouteKind::Static, hops, spans)
+                    ),
+                    None => Route::new(RouteKind::Static, hops, spans.clone()),
                 };
                 fib.insert(p, route);
             }
@@ -1631,6 +1917,7 @@ pub fn lower(ent: &Enterprise, profile: &VendorProfile, hubs: HubChoice) -> Lowe
             serial: 0,
             members: Vec::new(),
             gateways: Vec::new(),
+            left_out: Vec::new(),
         };
         l.lower();
         out.functions.extend(l.functions);
@@ -1645,6 +1932,13 @@ pub fn lower(ent: &Enterprise, profile: &VendorProfile, hubs: HubChoice) -> Lowe
                 .gateways
                 .entry(id)
                 .or_insert((addr, span));
+        }
+        for (t, addr, why, spans) in l.left_out {
+            transports
+                .entry(t)
+                .or_default()
+                .left_out
+                .push((addr, why, spans));
         }
         out.notes.insert(e.device.clone(), l.notes);
     }
@@ -1701,8 +1995,9 @@ fn reachable(functions: Vec<Arc<dyn NetFunction>>) -> Vec<Arc<dyn NetFunction>> 
 type HostEnd = (String, Option<IpAddr>, Vec<SourceSpan>);
 
 /// The functions of a transport network: an ingress and an egress for each
-/// WAN link, a host route to each link address, and a host route to each
-/// gateway with an egress that leaves the twin.
+/// WAN link, a host route to each link address, a host route to each
+/// gateway with an egress that leaves the twin, and an unknown host route
+/// to the address of each WAN link that the lowering leaves out.
 fn transport(
     name: &str,
     t: &Transport,
@@ -1771,8 +2066,25 @@ fn transport(
             .or_default()
             .push((port, Some(*addr), vec![span.clone()]));
     }
+    let mut left: BTreeMap<Prefix, (String, Vec<SourceSpan>)> = BTreeMap::new();
+    for (a, why, spans) in &t.left_out {
+        let entry = left.entry(Prefix::host(*a)).or_default();
+        if entry.0.is_empty() {
+            entry.0.clone_from(why);
+        }
+        entry.1.extend(spans.iter().cloned());
+    }
     let mut fib = Fib::new();
-    for (p, ends) in &hosts {
+    for (p, (why, spans)) in &left {
+        if hosts.contains_key(p) {
+            notes.push(format!("{}: address of a link left out", p.addr()));
+        }
+        fib.insert(
+            *p,
+            Route::unknown(RouteKind::Connected, why.clone(), spans.clone()),
+        );
+    }
+    for (p, ends) in hosts.iter().filter(|(p, _)| !left.contains_key(*p)) {
         let spans: Vec<SourceSpan> = ends.iter().flat_map(|e| e.2.clone()).collect();
         let route = match ends.as_slice() {
             [(port, gateway, _)] => Route::new(

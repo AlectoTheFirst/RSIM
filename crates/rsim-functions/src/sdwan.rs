@@ -87,15 +87,20 @@ pub struct OverlaySelect {
     /// The far edge or gateway of the tunnels.
     pub far: String,
     pub tunnels: Vec<OverlayTunnel>,
-    /// The rules that pin their packets to local links, in rule order. The
-    /// action of a rule is the set of the links. The packets of a rule
-    /// with no tunnel up on its links are dropped.
+    /// The steering rules, in rule order. The action of a rule is the set
+    /// of the local links to which it pins its packets; an empty set keeps
+    /// each tunnel.
     pub steering: Vec<Rule<BTreeSet<String>>>,
+    /// The names of the steering rules with Mandatory steering. The
+    /// packets of such a rule with no tunnel up on its links are dropped;
+    /// the packets of another rule with no tunnel up on its links are
+    /// unknown.
+    pub mandatory: BTreeSet<String>,
 }
 
 impl OverlaySelect {
     /// The branches of the packets `set`, which the steering rule `rule`
-    /// pins to `links`. With no rule, `links` is empty and each tunnel is
+    /// pins to `links`. With no rule or an empty `links`, each tunnel is
     /// kept.
     fn select(
         &self,
@@ -106,10 +111,12 @@ impl OverlaySelect {
         state: &FlowState,
         out: &mut Vec<Branch>,
     ) {
+        let pinned = rule.is_some() && !links.is_empty();
+        let mandatory = rule.is_some_and(|r| self.mandatory.contains(r));
         let kept: Vec<&OverlayTunnel> = self
             .tunnels
             .iter()
-            .filter(|t| rule.is_none() || links.contains(&t.link))
+            .filter(|t| !pinned || links.contains(&t.link))
             .collect();
         let by = match rule {
             Some(r) => format!("steering rule {r}"),
@@ -130,10 +137,20 @@ impl OverlaySelect {
             .filter(|t| t.state == TunnelState::Up)
             .collect();
         match up.as_slice() {
-            [] if rule.is_some() => out.push(self.meta.drop(
+            [] if pinned && mandatory => out.push(self.meta.drop(
                 set,
                 ReasonCode::NoNeighbour,
                 format!("no tunnel to {} is up on the links of {by}", self.far),
+                ctx,
+                state,
+            )),
+            [] if pinned => out.push(self.meta.unknown(
+                set,
+                ReasonCode::NotCollected,
+                format!(
+                    "no tunnel to {} is up on the links of {by}, steering mode not collected",
+                    self.far
+                ),
                 ctx,
                 state,
             )),

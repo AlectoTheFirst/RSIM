@@ -41,7 +41,7 @@ pub use rules::{Rule, RuleBody};
 pub use sdwan::{
     OverlaySelect, OverlayTunnel, TransportLookup, TunnelState, VCMP_PORT, VcmpDecap, VcmpEncap,
 };
-pub use session::{SessionCommit, SessionLookup, StateAction, StateActions};
+pub use session::{SessionBypass, SessionCommit, SessionLookup, StateAction, StateActions};
 pub use tunnel::{
     OuterFields, Segment, TunnelPeer, Unmatched, VxlanDecap, VxlanEncap, WireguardEncap,
     WireguardPeer, WireguardSettings,

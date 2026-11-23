@@ -265,3 +265,54 @@ impl NetFunction for SessionCommit {
         vec![b]
     }
 }
+
+/// Sends the packets of a session to `established` and the other packets
+/// to `next`, for example past the rules of a stateful firewall.
+#[derive(Clone, Debug)]
+pub struct SessionBypass {
+    pub meta: Meta,
+    /// The function of the packets of a session.
+    pub established: FunctionId,
+    pub next: FunctionId,
+}
+
+impl NetFunction for SessionBypass {
+    meta_methods!(FunctionKind::FirewallSession);
+
+    fn requires(&self) -> Vec<ContextAttr> {
+        vec![ContextAttr::Session]
+    }
+    fn provides(&self) -> Vec<ContextAttr> {
+        Vec::new()
+    }
+    fn reads(&self) -> Vec<Dependency> {
+        Vec::new()
+    }
+    fn successors(&self) -> Vec<FunctionId> {
+        vec![self.established.clone(), self.next.clone()]
+    }
+    fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
+        match &ctx.session {
+            Attr::Known(
+                SessionMatch::Forward { index, .. } | SessionMatch::Reply { index, .. },
+            ) => {
+                vec![self.meta.forward(
+                    input.clone(),
+                    &self.established,
+                    ReasonCode::SessionMatched,
+                    format!("session {index} passes"),
+                    ctx.clone(),
+                    state,
+                )]
+            }
+            _ => vec![self.meta.forward(
+                input.clone(),
+                &self.next,
+                ReasonCode::Passed,
+                "no session",
+                ctx.clone(),
+                state,
+            )],
+        }
+    }
+}

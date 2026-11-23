@@ -1,12 +1,13 @@
 //! The lowering of the VeloCloud edges of an enterprise on synthetic
-//! sections: the tunnels of a path, the firewall, the business policy, the
-//! route order, the link steering, the hub of a cluster, 2 enterprises and
-//! the determinism of the twin.
+//! sections: the tunnels of a path and the results of their candidates, the
+//! firewall, the business policy, the route order, the LAN BGP of a
+//! segment, the link steering, the hub of a cluster, 2 enterprises and the
+//! determinism of the twin.
 
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
-use rsim_core::{AlternativeKind, ExitPoint, Header, PROTO_TCP, ReasonCode, Verdict};
+use rsim_core::{AlternativeKind, ExitPoint, Header, PROTO_TCP, ReasonCode, Verdict, VerdictKind};
 use rsim_engine::{Answer, Executor, Query, Twin};
 use rsim_ingest::estate::{Estate, Input, assemble};
 use serde_json::{Value, json};
@@ -15,6 +16,7 @@ const STORE: &str = "vco-orch1-ent-1";
 const BR: &str = "vco-orch1-ent-1/edge/e-br";
 const HUB: &str = "vco-orch1-ent-1/edge/e-hub";
 const SELECT: &str = "vco-orch1-ent-1/edge/e-br/sdwan/select/1/e-hub";
+const BACKHAUL: &str = "vco-orch1-ent-1/edge/e-br/sdwan/select/1/e-hub/backhaul";
 
 const SECTIONS: &[&str] = &[
     "aggregates",
@@ -92,6 +94,39 @@ fn open_firewall(m: &mut BTreeMap<String, Value>) {
     sync_state(m);
 }
 
+/// The segment `corp` of each edge has no LAN BGP neighbour.
+fn no_lan_bgp(m: &mut BTreeMap<String, Value>) {
+    for e in m.get_mut("edges").unwrap().as_array_mut().unwrap() {
+        e["configuration"]["enterprise"]["modules"][0]["edgeSpecificData"]["segments"][0]["bgp"]
+            ["neighbors"] = json!([]);
+    }
+    sync_state(m);
+}
+
+/// The hub edge `e-hub2`, with no WAN link and no LAN, is the second
+/// member of the cluster `cl-dc` of `e-hub`.
+fn second_hub(m: &mut BTreeMap<String, Value>) {
+    let edges = m.get_mut("edges").unwrap().as_array_mut().unwrap();
+    let mut hub = edges[1].clone();
+    hub["_href"] = json!("/api/sdwan/v2/enterprises/ent-1/edges/e-hub2");
+    hub["id"] = json!(3);
+    hub["logicalId"] = json!("e-hub2");
+    hub["name"] = json!("hub-2");
+    hub["serialNumber"] = json!("S-e-hub2");
+    hub["links"] = json!([]);
+    hub["configuration"]["enterprise"]["modules"][0]["edgeSpecificData"] = json!({});
+    edges.push(hub);
+    sync_state(m);
+    m.get_mut("edge_modules").unwrap()["e-br"]["controlPlane"]["data"]["segments"][0]["vpn"]
+        ["dataCenterEdges"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "logicalId": "e-hub2", "clusterLogicalId": "cl-dc", "clusterName": " DC-CLUSTER",
+            "name": "hub-2", "type": "edgeHubCluster"
+        }));
+}
+
 /// The business rules of the branch edge in the segment `corp`.
 fn edge_rules(m: &mut BTreeMap<String, Value>, rules: Value) {
     branch_module(m, 1)["segments"][0]["rules"] = rules;
@@ -144,10 +179,18 @@ fn code(v: &Verdict) -> Option<ReasonCode> {
     }
 }
 
+fn detail(v: &Verdict) -> &str {
+    match v {
+        Verdict::Drop(r) | Verdict::Unknown(r) => &r.detail,
+        Verdict::Deliver(_) | Verdict::Exit(_) => "",
+    }
+}
+
 #[test]
 fn a_path_to_a_host_behind_the_hub_has_one_candidate_for_each_tunnel_that_is_up() {
     let mut m = base();
     open_firewall(&mut m);
+    no_lan_bgp(&mut m);
     let t = twin(&m);
     let a = run(&t, "10.20.20.10");
     let b = a.branches();
@@ -160,7 +203,8 @@ fn a_path_to_a_host_behind_the_hub_has_one_candidate_for_each_tunnel_that_is_up(
                 .unwrap_or_else(|| panic!("{name} is not in {f:?}"))
         };
         let route = format!("{STORE}/transport/{transport}/route");
-        assert!(at(&format!("{BR}/firewall/1")) < at(SELECT));
+        assert!(at(&format!("{BR}/firewall/1")) < at(&format!("{SELECT}/qos")));
+        assert!(at(&format!("{SELECT}/qos")) < at(SELECT));
         assert!(at(SELECT) < at(&route));
         assert!(at(&route) < at(&format!("{HUB}/vcmp/decap")));
         has(&f, &format!("{HUB}/route"));
@@ -179,13 +223,78 @@ fn a_path_to_a_host_behind_the_hub_has_one_candidate_for_each_tunnel_that_is_up(
             .unwrap();
         let text = carried.assumption.as_deref().unwrap_or_default();
         assert!(text.contains("carries UDP 2426"), "{text}");
+        assert!(
+            matches!(b[i].verdict, Verdict::Unknown(_)),
+            "{:?}",
+            b[i].verdict
+        );
+        assert_eq!(code(b[i].verdict), Some(ReasonCode::IncompleteTable));
+        assert_eq!(
+            f.last().map(String::as_str),
+            Some(&*format!("{HUB}/nexthop"))
+        );
     }
+    let summary = a.single_summary().expect("one part");
+    assert_eq!(summary.kind(), Some(VerdictKind::Unknown));
+}
+
+#[test]
+fn candidates_with_the_same_result_give_that_result() {
+    let mut m = base();
+    open_firewall(&mut m);
+    no_lan_bgp(&mut m);
+    let t = twin(&m);
+    let a = run(&t, "10.20.20.1");
+    assert_eq!(a.branches().len(), 2);
+    let v = a.verdict().expect("one result");
+    assert!(matches!(v, Verdict::Deliver(_)), "{v:?}");
+}
+
+#[test]
+fn candidates_with_different_results_are_unknown() {
+    let mut m = base();
+    open_firewall(&mut m);
+    no_lan_bgp(&mut m);
+    m.get_mut("edges").unwrap()[1]["links"][1]["ipAddress"] = json!("198.51.100.2");
+    sync_state(&mut m);
+    let t = twin(&m);
+    let a = run(&t, "10.20.20.1");
+    let b = a.branches();
+    assert_eq!(b.len(), 2);
+    let kinds: Vec<VerdictKind> = b.iter().map(|x| x.verdict.kind()).collect();
+    assert!(kinds.contains(&VerdictKind::Deliver), "{kinds:?}");
+    assert!(kinds.contains(&VerdictKind::Unknown), "{kinds:?}");
+    let v = a.verdict().expect("one result");
+    assert!(matches!(v, Verdict::Unknown(_)), "{v:?}");
+    assert_eq!(code(v), Some(ReasonCode::SelectionNotCollected));
+}
+
+#[test]
+fn a_segment_with_a_lan_bgp_neighbour_answers_only_for_its_connected_routes() {
+    let mut m = base();
+    open_firewall(&mut m);
+    let t = twin(&m);
+    for dst in ["10.20.20.10", "10.50.1.1", "198.51.100.200"] {
+        let a = run(&t, dst);
+        let v = a.verdict().expect("one result");
+        assert!(matches!(v, Verdict::Unknown(_)), "{dst}: {v:?}");
+        assert_eq!(code(v), Some(ReasonCode::NotCollected), "{dst}");
+        assert!(
+            detail(v).ends_with("lan learned routes not collected"),
+            "{dst}: {v:?}"
+        );
+        let f = functions(&a, 0);
+        assert_eq!(f.last().map(String::as_str), Some(&*format!("{BR}/route")));
+    }
+    let a = run(&t, "10.9.9.50");
+    has(&functions(&a, 0), &format!("{BR}/nexthop"));
 }
 
 #[test]
 fn a_tunnel_that_is_down_is_no_candidate() {
     let mut m = base();
     open_firewall(&mut m);
+    no_lan_bgp(&mut m);
     link_state(&mut m, 1, "DISCONNECTED", 1, 1);
     let t = twin(&m);
     let a = run(&t, "10.20.20.10");
@@ -239,6 +348,7 @@ fn a_packet_that_reaches_the_firewall_default_is_unknown() {
 fn the_business_policy_sends_the_packets_of_a_backhaul_rule_to_the_hub() {
     let mut m = base();
     open_firewall(&mut m);
+    no_lan_bgp(&mut m);
     edge_rules(
         &mut m,
         json!([{
@@ -262,8 +372,8 @@ fn the_business_policy_sends_the_packets_of_a_backhaul_rule_to_the_hub() {
                 .position(|x| x == name)
                 .unwrap_or_else(|| panic!("{name} is not in {f:?}"))
         };
-        assert!(at(&format!("{BR}/policy/1")) < at(SELECT));
-        assert!(at(SELECT) < at(&format!("{HUB}/vcmp/decap")));
+        assert!(at(&format!("{BR}/policy/1")) < at(BACKHAUL));
+        assert!(at(BACKHAUL) < at(&format!("{HUB}/vcmp/decap")));
         assert!(at(&format!("{HUB}/vcmp/decap")) < at(&format!("{HUB}/policy/1")));
     }
 }
@@ -272,6 +382,7 @@ fn the_business_policy_sends_the_packets_of_a_backhaul_rule_to_the_hub() {
 fn a_direct_rule_leaves_the_twin_at_the_wan_interface() {
     let mut m = base();
     open_firewall(&mut m);
+    no_lan_bgp(&mut m);
     edge_rules(
         &mut m,
         json!([{
@@ -316,6 +427,7 @@ fn a_direct_rule_leaves_the_twin_at_the_wan_interface() {
 fn the_route_order_of_2_prefixes_of_the_administration_guide() {
     let mut m = base();
     open_firewall(&mut m);
+    no_lan_bgp(&mut m);
     let subnets = m.get_mut("route_table").unwrap()["subnets"]
         .as_array_mut()
         .unwrap();
@@ -338,9 +450,10 @@ fn the_route_order_of_2_prefixes_of_the_administration_guide() {
 }
 
 #[test]
-fn mandatory_steering_to_a_link_that_is_down_drops_the_packets() {
+fn a_pinned_link_that_is_down_makes_the_packets_unknown() {
     let mut m = base();
     open_firewall(&mut m);
+    no_lan_bgp(&mut m);
     edge_rules(
         &mut m,
         json!([{
@@ -353,19 +466,18 @@ fn mandatory_steering_to_a_link_that_is_down_drops_the_packets() {
     let t = twin(&m);
     let a = run(&t, "10.20.20.10");
     let v = a.verdict().expect("one result");
-    assert!(matches!(v, Verdict::Drop(_)), "{v:?}");
-    assert_eq!(code(v), Some(ReasonCode::NoNeighbour));
+    assert!(matches!(v, Verdict::Unknown(_)), "{v:?}");
+    assert_eq!(code(v), Some(ReasonCode::NotCollected));
+    assert!(detail(v).contains("steering rule rule-pin"), "{v:?}");
     let f = functions(&a, 0);
     assert_eq!(f.last().map(String::as_str), Some(SELECT));
 }
 
-#[test]
-fn a_hub_of_a_cluster_with_no_sdwan_peers_data_is_unknown() {
-    let mut m = base();
-    open_firewall(&mut m);
-    m.remove("sdwan_peers");
+/// The business rules of the branch edge send the packets to
+/// 198.51.100.200 to the cluster `DC-CLUSTER`.
+fn backhaul_to_the_cluster(m: &mut BTreeMap<String, Value>) {
     edge_rules(
-        &mut m,
+        m,
         json!([{
             "name": "backhaul", "ruleLogicalId": "rule-bh",
             "match": {"dip": "198.51.100.200"},
@@ -375,19 +487,52 @@ fn a_hub_of_a_cluster_with_no_sdwan_peers_data_is_unknown() {
             }}
         }]),
     );
+}
+
+#[test]
+fn a_hub_of_a_cluster_with_no_sdwan_peers_data_is_unknown() {
+    let mut m = base();
+    open_firewall(&mut m);
+    no_lan_bgp(&mut m);
+    second_hub(&mut m);
+    m.remove("sdwan_peers");
+    backhaul_to_the_cluster(&mut m);
     let t = twin(&m);
     let a = run(&t, "198.51.100.200");
     let v = a.verdict().expect("one result");
     assert!(matches!(v, Verdict::Unknown(_)), "{v:?}");
     assert_eq!(code(v), Some(ReasonCode::NotCollected));
+    assert!(
+        detail(v).ends_with("hub of cluster cl-dc not collected"),
+        "{v:?}"
+    );
     let f = functions(&a, 0);
-    assert_eq!(f.last().map(String::as_str), Some(SELECT));
+    let last = f.last().map(String::as_str).unwrap_or_default();
+    assert!(last.starts_with(&format!("{BR}/unknown/1/")), "{f:?}");
+}
+
+#[test]
+fn the_hub_of_a_cluster_with_a_path_in_sdwan_peers_is_the_far_end() {
+    let mut m = base();
+    open_firewall(&mut m);
+    no_lan_bgp(&mut m);
+    second_hub(&mut m);
+    backhaul_to_the_cluster(&mut m);
+    let t = twin(&m);
+    let a = run(&t, "198.51.100.200");
+    assert_eq!(a.branches().len(), 2);
+    for i in 0..2 {
+        let f = functions(&a, i);
+        has(&f, BACKHAUL);
+        has(&f, &format!("{HUB}/vcmp/decap"));
+    }
 }
 
 #[test]
 fn the_edges_and_the_transports_of_2_enterprises_stay_apart() {
     let mut m = base();
     open_firewall(&mut m);
+    no_lan_bgp(&mut m);
     let e = assemble(vec![input(STORE, &m), input("vco-orch1-ent-2", &m)]);
     let t = e.builder.build().expect("the twin builds");
     let h = Header::request(ip("10.10.10.20"), ip("10.20.20.10"), PROTO_TCP)
