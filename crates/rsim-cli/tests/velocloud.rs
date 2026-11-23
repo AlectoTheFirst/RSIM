@@ -10,6 +10,7 @@ use rsim_contract::table::{Selection, TableOut};
 use rsim_contract::twin::TwinJson;
 use rsim_core::{Header, PROTO_TCP};
 use rsim_engine::{Executor, Query};
+use rsim_ingest::collected::{Collected, LinkRow, row_span};
 use rsim_ingest::estate::{Input, assemble};
 use rsim_ingest::facts::{self, Sections};
 use serde_json::{Value, json};
@@ -18,6 +19,7 @@ const STORE: &str = "vco-orch1-ent-1";
 const BR: &str = "vco-orch1-ent-1/edge/e-br";
 const HUB: &str = "vco-orch1-ent-1/edge/e-hub";
 const SELECT: &str = "vco-orch1-ent-1/edge/e-br/sdwan/select/1/e-hub";
+const HUB_SELECT: &str = "vco-orch1-ent-1/edge/e-hub/sdwan/select/1/e-br";
 const PUBLIC: &str = "vco-orch1-ent-1/transport/public";
 const PRIVATE: &str = "vco-orch1-ent-1/transport/private/MPLS-A";
 
@@ -75,13 +77,27 @@ fn sections(m: &BTreeMap<String, Value>) -> Sections {
         .collect()
 }
 
+/// Gives `edge_state` the content of `edges`.
+fn sync_state(m: &mut BTreeMap<String, Value>) {
+    let edges = m["edges"].clone();
+    m.insert("edge_state".into(), edges);
+}
+
 /// The twin of the sections, with the facts of the enterprise device.
 fn loaded(m: &BTreeMap<String, Value>) -> Loaded {
+    loaded_with(m, Vec::new())
+}
+
+/// The twin of the sections and of the devices `estate`, with the facts of
+/// the enterprise device.
+fn loaded_with(m: &BTreeMap<String, Value>, estate: Vec<Input>) -> Loaded {
     let s = sections(m);
-    let estate = assemble(vec![Input::Velocloud {
+    let mut inputs = vec![Input::Velocloud {
         name: STORE.to_string(),
         sections: s.clone(),
-    }]);
+    }];
+    inputs.extend(estate);
+    let estate = assemble(inputs);
     let facts = facts::device(STORE, "velocloud", 1_700_000_000_000, None, &s)
         .into_iter()
         .collect();
@@ -111,35 +127,79 @@ fn cell<'a>(out: &TableOut, row: &'a [Value], column: &str) -> &'a Value {
     &row[i]
 }
 
+/// The values of `columns` of each row of the tunnel selection `select`.
+fn select_rows(out: &TableOut, select: &str, columns: &[&str]) -> Vec<Value> {
+    out.rows
+        .iter()
+        .filter(|r| cell(out, r, "function") == select)
+        .map(|r| json!(columns.iter().map(|c| cell(out, r, c)).collect::<Vec<_>>()))
+        .collect()
+}
+
+/// The source spans of the WAN link of a listing row: the listing row, the
+/// row of the WAN module and the row of `edge_state`.
+fn link_spans(edges: (u32, u32), module: (u32, u32)) -> [String; 3] {
+    [
+        format!("{STORE}/edges@b1:{}-{}", edges.0, edges.1),
+        format!("{STORE}/edge_modules@b1:{}-{}", module.0, module.1),
+        format!("{STORE}/edge_state@b1:{}-{}", edges.0, edges.1),
+    ]
+}
+
+/// The state, the reason and the far end paths of the tunnels of the
+/// branch to the hub.
+fn states(m: &BTreeMap<String, Value>) -> Vec<Value> {
+    let out = table(&loaded(m), "sdwan-paths");
+    select_rows(&out, SELECT, &["state", "state_reason", "far_paths"])
+}
+
+/// The router r1 with the address 203.0.113.129/25 on eth1.
+fn router() -> Input {
+    Input::Vyos {
+        name: "r1".into(),
+        config: include_bytes!("../../rsim-ingest/tests/fixtures/vyos/r1-config.json").to_vec(),
+        file: "r1/config".into(),
+        collected: Collected {
+            links: vec![LinkRow {
+                interface: "eth1".into(),
+                mac: Some("00:00:5e:00:53:21".into()),
+                parent: None,
+                vlan: None,
+                span: row_span("r1", "links", "b4", 0),
+            }],
+            ..Collected::default()
+        },
+    }
+}
+
 #[test]
 fn each_tunnel_of_the_branch_to_the_hub_is_a_row_with_its_transport_and_its_state() {
     let t = loaded(&base());
     let out = table(&t, "sdwan-paths");
-    let rows: Vec<&Vec<Value>> = out
-        .rows
-        .iter()
-        .filter(|r| cell(&out, r, "function") == SELECT)
-        .collect();
-    let got: Vec<Vec<&Value>> = rows
-        .iter()
-        .map(|r| {
-            [
-                "device",
-                "segment",
-                "tunnel",
-                "interface",
-                "transport",
-                "peer",
-                "far",
-                "state",
-                "state_reason",
-                "paths",
-            ]
-            .iter()
-            .map(|c| cell(&out, r, c))
-            .collect()
-        })
-        .collect();
+    let got = select_rows(
+        &out,
+        SELECT,
+        &[
+            "device",
+            "segment",
+            "tunnel",
+            "interface",
+            "transport",
+            "peer",
+            "far",
+            "far_interface",
+            "state",
+            "state_reason",
+            "far_paths",
+            "provenance",
+        ],
+    );
+    let peer = format!("{STORE}/sdwan_peers@b1:3-18");
+    let spans = |near: [String; 3], far: [String; 3]| {
+        let mut v: Vec<String> = near.into_iter().chain(far).collect();
+        v.push(peer.clone());
+        v
+    };
     let want = [
         json!([
             BR,
@@ -149,9 +209,14 @@ fn each_tunnel_of_the_branch_to_the_hub_is_a_row_with_its_transport_and_its_stat
             "public",
             "203.0.113.2",
             HUB,
+            "GE2",
             "up",
             null,
-            2
+            2,
+            spans(
+                link_spans((253, 268), (23, 38)),
+                link_spans((426, 441), (172, 187))
+            )
         ]),
         json!([
             BR,
@@ -161,22 +226,63 @@ fn each_tunnel_of_the_branch_to_the_hub_is_a_row_with_its_transport_and_its_stat
             "MPLS-A",
             "172.16.9.2",
             HUB,
+            "GE1",
             "up",
             null,
-            2
+            2,
+            spans(
+                link_spans((237, 252), (6, 22)),
+                link_spans((410, 425), (155, 171))
+            )
         ]),
     ];
-    let got: Vec<Value> = got.into_iter().map(|r| json!(r)).collect();
     assert_eq!(got, want);
-    for r in &rows {
-        let spans = cell(&out, r, "provenance").as_array().unwrap();
-        assert!(!spans.is_empty());
+    let hub = select_rows(&out, HUB_SELECT, &["state", "state_reason", "far_paths"]);
+    assert_eq!(hub.len(), 2);
+    for r in &hub {
+        assert_eq!(r, &json!([null, "not_collected", null]));
     }
     for r in &out.rows {
         let state = cell(&out, r, "state");
         let reason = cell(&out, r, "state_reason");
         assert!(state.is_null() != reason.is_null(), "{r:?}");
     }
+}
+
+#[test]
+fn a_path_count_of_the_hub_that_differs_from_the_links_that_are_up_makes_each_state_not_known() {
+    let mut m = base();
+    m.get_mut("sdwan_peers").unwrap()["e-br"][0]["pathStatusCount"]["stable"] = json!(1);
+    let want = json!([null, "paths_differ", 1]);
+    assert_eq!(states(&m), [want.clone(), want]);
+}
+
+#[test]
+fn a_link_state_that_is_not_known_makes_each_state_not_known() {
+    let mut m = base();
+    m.get_mut("edges").unwrap()[0]["links"][1]["state"] = json!("WAITING");
+    sync_state(&mut m);
+    let want = json!([null, "link_state_not_known", 2]);
+    assert_eq!(states(&m), [want.clone(), want]);
+}
+
+#[test]
+fn a_hub_with_no_peer_row_has_each_tunnel_down_with_no_path() {
+    let mut m = base();
+    m.get_mut("sdwan_peers").unwrap()["e-br"]
+        .as_array_mut()
+        .unwrap()
+        .remove(0);
+    let want = json!(["down", null, 0]);
+    assert_eq!(states(&m), [want.clone(), want]);
+}
+
+#[test]
+fn peers_that_are_not_collected_make_each_state_not_known() {
+    let mut m = base();
+    m.remove("sdwan_peers");
+    let want = json!([null, "not_collected", null]);
+    assert_eq!(states(&m), [want.clone(), want]);
 }
 
 #[test]
@@ -249,7 +355,7 @@ fn a_transport_network_is_a_network_node_with_a_link_to_each_wan_interface() {
         .iter()
         .find(|e| e.id == format!("overlay:{BR}>{HUB}"))
         .expect("the overlay edge of the branch to the hub");
-    let facts: Vec<(&str, &str, &str)> = tunnel.facts["tunnels"]
+    let facts: Vec<(&str, &str, &str, &Value)> = tunnel.facts["tunnels"]
         .as_array()
         .unwrap()
         .iter()
@@ -258,11 +364,44 @@ fn a_transport_network_is_a_network_node_with_a_link_to_each_wan_interface() {
                 x["interface"].as_str().unwrap(),
                 x["peer"].as_str().unwrap(),
                 x["state"].as_str().unwrap(),
+                &x["segments"],
             )
         })
         .collect();
-    assert!(facts.contains(&("GE2", "203.0.113.2", "up")), "{facts:?}");
-    assert!(facts.contains(&("GE1", "172.16.9.2", "up")), "{facts:?}");
+    let segments = json!([0, 1]);
+    assert!(
+        facts.contains(&("GE2", "203.0.113.2", "up", &segments)),
+        "{facts:?}"
+    );
+    assert!(
+        facts.contains(&("GE1", "172.16.9.2", "up", &segments)),
+        "{facts:?}"
+    );
+}
+
+#[test]
+fn a_wan_interface_with_a_link_of_the_join_has_a_physical_edge_to_the_estate_device() {
+    let mut m = base();
+    m.get_mut("edges").unwrap()[0]["configuration"]["enterprise"]["modules"][0]["edgeSpecificData"]
+        ["routedInterfaces"][0]["addressing"] = json!({
+        "type": "STATIC", "cidrIp": "203.0.113.130", "cidrPrefix": 25, "gateway": "203.0.113.129"
+    });
+    m.get_mut("edges").unwrap()[0]["links"][0]["ipAddress"] = json!("203.0.113.130");
+    sync_state(&mut m);
+    let t = loaded_with(&m, vec![router()]);
+    let out = rsim_cli::topology::topology("velocloud", &t, &TopologyViewArgs::default()).unwrap();
+    let physical: Vec<(&str, &str)> = out
+        .edges
+        .iter()
+        .filter(|e| e.layer == "physical")
+        .map(|e| (e.from.as_str(), e.to.as_str()))
+        .collect();
+    let has =
+        |a: &'static str, b: &'static str| physical.contains(&(a, b)) || physical.contains(&(b, a));
+    assert!(has(BR, "r1"), "{physical:?}");
+    assert!(!has(BR, PRIVATE), "{physical:?}");
+    assert!(has(BR, PUBLIC), "{physical:?}");
+    assert!(has(HUB, PRIVATE), "{physical:?}");
 }
 
 #[test]

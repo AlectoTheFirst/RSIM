@@ -39,7 +39,8 @@ pub use routing::{
 };
 pub use rules::{Rule, RuleBody};
 pub use sdwan::{
-    OverlaySelect, OverlayTunnel, TransportLookup, TunnelState, VCMP_PORT, VcmpDecap, VcmpEncap,
+    OverlaySelect, OverlayTunnel, StateReason, TransportLookup, TunnelState, VCMP_PORT, VcmpDecap,
+    VcmpEncap,
 };
 pub use session::{SessionBypass, SessionCommit, SessionLookup, StateAction, StateActions};
 pub use tunnel::{

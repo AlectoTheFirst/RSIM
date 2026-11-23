@@ -26,7 +26,7 @@ use rsim_functions::{
     AclMatch, DestinationNat, DeviceDelivery, Egress, EgressMode, ExitMark, Fib, Ingress, Link,
     Meta, NatAction, NextHopResolution, OverlaySelect, OverlayTunnel, PolicyRoute, PortTranslation,
     QosNotEvaluated, Route, RouteKind, RouteLookup, RouteNextHop, RouteProtocol, Rule as FRule,
-    RuleAction, SessionBypass, SessionCommit, SessionLookup, SourceNat, StateActions,
+    RuleAction, SessionBypass, SessionCommit, SessionLookup, SourceNat, StateActions, StateReason,
     TransportLookup, TunnelState, VCMP_PORT, VcmpDecap, VcmpEncap, VendorProfile, VrfSelection,
 };
 
@@ -387,9 +387,14 @@ pub fn predicate(m: &RuleMatch) -> RulePredicate {
     RulePredicate::bounded(definite, upper)
 }
 
-/// The state of each tunnel to a far end, the number of its live paths
-/// and the spans of the state.
-type States = (Vec<TunnelState>, Option<u32>, Vec<SourceSpan>);
+/// The state of each tunnel to a far end with the reason of a state that
+/// is not known, the number of the live paths of the far end and the spans
+/// of the state.
+type States = (
+    Vec<(TunnelState, Option<StateReason>)>,
+    Option<u32>,
+    Vec<SourceSpan>,
+);
 
 /// A route of one prefix of a segment, with its place in the route order.
 struct Candidate {
@@ -1323,23 +1328,28 @@ impl<'a> L<'a> {
         (!parts.is_empty()).then(|| (parts.join("; "), spans))
     }
 
-    /// The state of each tunnel to a far end: down when a link is down, and
-    /// up when the paths of the peer that are up are the tunnels whose links
-    /// are up. The links of a tunnel are up (`Some(true)`), down or not
-    /// known. The live paths are the stable and unstable paths of the peer.
+    /// The state of each tunnel to a far end: down when a link is down or
+    /// the collected peers have no row of the far end, and up when the paths
+    /// of the peer that are up are the tunnels whose links are up. The links
+    /// of a tunnel are up (`Some(true)`), down or not known. The live paths
+    /// are the stable and unstable paths of the peer, 0 with no row.
     fn states(&self, far: &str, links: &[Option<bool>]) -> States {
         let Peers::Read(rows) = &self.e.peers else {
             let st = links
                 .iter()
                 .map(|p| match p {
-                    Some(false) => TunnelState::Down,
-                    _ => TunnelState::NotCollected,
+                    Some(false) => (TunnelState::Down, None),
+                    _ => (TunnelState::NotCollected, Some(StateReason::NotCollected)),
                 })
                 .collect();
             return (st, None, Vec::new());
         };
         let Some(row) = rows.iter().find(|r| r.logical_id.as_deref() == Some(far)) else {
-            return (vec![TunnelState::Down; links.len()], None, Vec::new());
+            return (
+                vec![(TunnelState::Down, None); links.len()],
+                Some(0),
+                Vec::new(),
+            );
         };
         let live = match (row.paths.stable, row.paths.unstable) {
             (None, None) => None,
@@ -1350,11 +1360,21 @@ impl<'a> L<'a> {
         let st = links
             .iter()
             .map(|p| match (live, p) {
-                (_, Some(false)) | (Some(0), _) => TunnelState::Down,
-                (Some(n), Some(true)) if known && usize::try_from(n).ok() == Some(up) => {
-                    TunnelState::Up
-                }
-                _ => TunnelState::NotCollected,
+                (_, Some(false)) | (Some(0), _) => (TunnelState::Down, None),
+                (_, None) => (
+                    TunnelState::NotCollected,
+                    Some(StateReason::LinkStateNotKnown),
+                ),
+                (None, _) => (
+                    TunnelState::NotCollected,
+                    Some(StateReason::PathsNotCollected),
+                ),
+                _ if !known => (
+                    TunnelState::NotCollected,
+                    Some(StateReason::LinkStateNotKnown),
+                ),
+                (Some(n), _) if usize::try_from(n).ok() == Some(up) => (TunnelState::Up, None),
+                _ => (TunnelState::NotCollected, Some(StateReason::PathsDiffer)),
             })
             .collect();
         let paths = live.and_then(|n| u32::try_from(n).ok());
@@ -1395,7 +1415,7 @@ impl<'a> L<'a> {
             })
             .collect();
         let (states, paths, peer_spans) = self.states(far, &links);
-        for ((l, fl, peer, transport), state) in pairs.into_iter().zip(states) {
+        for ((l, fl, peer, transport), (state, state_reason)) in pairs.into_iter().zip(states) {
             let far_link = format!("{far}:{}", fl.logical_id);
             let name = format!("vcmp/{}~{far_link}", l.logical_id);
             self.encaps
@@ -1408,7 +1428,8 @@ impl<'a> L<'a> {
                 far_link,
                 transport,
                 state,
-                paths,
+                state_reason,
+                far_paths: paths,
                 next: self.id(&name),
                 spans,
             });
@@ -1433,7 +1454,7 @@ impl<'a> L<'a> {
             let links: Vec<Option<bool>> =
                 public.iter().map(|l| link_up(l.state.as_deref())).collect();
             let (states, paths, peer_spans) = self.states(&g.id, &links);
-            for (l, state) in public.iter().zip(states) {
+            for (l, (state, state_reason)) in public.iter().zip(states) {
                 let far_link = format!("gateway/{}", g.id);
                 let name = format!("vcmp/{}~{far_link}", l.logical_id);
                 self.encaps
@@ -1449,7 +1470,8 @@ impl<'a> L<'a> {
                     far_link,
                     transport: "public".to_string(),
                     state,
-                    paths,
+                    state_reason,
+                    far_paths: paths,
                     next: self.id(&name),
                     spans,
                 });

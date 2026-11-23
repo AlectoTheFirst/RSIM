@@ -286,7 +286,13 @@ fn sdwan_rows(t: &Loaded) -> Vec<Vec<Value>> {
                 .and_then(|(d, v)| sources.get(&(d.clone(), v.peer)).cloned());
             let (state, reason) = match tunnel.state {
                 TunnelState::Up | TunnelState::Down => (json!(snake(&tunnel.state)), Value::Null),
-                TunnelState::NotCollected => (Value::Null, json!(snake(&tunnel.state))),
+                TunnelState::NotCollected => (
+                    Value::Null,
+                    json!(match tunnel.state_reason {
+                        Some(r) => snake(&r),
+                        None => snake(&tunnel.state),
+                    }),
+                ),
             };
             rows.push(vec![
                 json!(device),
@@ -300,7 +306,7 @@ fn sdwan_rows(t: &Loaded) -> Vec<Vec<Value>> {
                 far_interface.map_or(Value::Null, Value::from),
                 state,
                 reason,
-                tunnel.paths.map_or(Value::Null, |n| json!(n)),
+                tunnel.far_paths.map_or(Value::Null, |n| json!(n)),
                 json!(spans(&tunnel.spans)),
             ]);
         }

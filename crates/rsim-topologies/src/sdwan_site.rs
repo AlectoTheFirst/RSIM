@@ -10,8 +10,8 @@ use rsim_core::{
 use rsim_engine::TwinBuilder;
 use rsim_functions::{
     EgressMode, ExitMark, Fib, OverlaySelect, OverlayTunnel, PolicyRoute, Route, RouteKind,
-    RouteLookup, RouteNextHop, RouteProtocol, Rule, RuleAction, TunnelState, VCMP_PORT, VcmpDecap,
-    VcmpEncap, VrfSelection,
+    RouteLookup, RouteNextHop, RouteProtocol, Rule, RuleAction, StateReason, TunnelState,
+    VCMP_PORT, VcmpDecap, VcmpEncap, VrfSelection,
 };
 
 use crate::builders::*;
@@ -272,7 +272,9 @@ fn edge(b: &mut TwinBuilder, e: &Edge, far: &Edge, private_tunnel: TunnelState, 
                 far_link: format!("{}:{link}", far.name),
                 transport: transport_of(link).to_string(),
                 state: *state,
-                paths: None,
+                state_reason: (*state == TunnelState::NotCollected)
+                    .then_some(StateReason::NotCollected),
+                far_paths: None,
                 next: d.id(&encap(link)),
                 spans: vec![d.span(23 + i as u32, 23 + i as u32)],
             })

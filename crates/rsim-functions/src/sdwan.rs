@@ -57,6 +57,20 @@ pub enum TunnelState {
     NotCollected,
 }
 
+/// The reason of a tunnel state that is not known.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum StateReason {
+    /// The SD-WAN peers of the device are not collected.
+    NotCollected,
+    /// The state of a WAN link of the tunnels to the far end is not known.
+    LinkStateNotKnown,
+    /// The peer row of the far end has no path count.
+    PathsNotCollected,
+    /// The live paths of the far end differ from the tunnels whose links
+    /// are up.
+    PathsDiffer,
+}
+
 /// One tunnel to a far end: a pair of WAN links.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OverlayTunnel {
@@ -68,9 +82,11 @@ pub struct OverlayTunnel {
     /// private network.
     pub transport: String,
     pub state: TunnelState,
-    /// The number of stable and unstable paths to the far end in the
-    /// collected state, when the state gives it.
-    pub paths: Option<u32>,
+    /// The reason of the state `NotCollected`.
+    pub state_reason: Option<StateReason>,
+    /// The number of stable and unstable paths of the far end of the tunnel
+    /// in the collected state, when the state gives it.
+    pub far_paths: Option<u32>,
     /// The encapsulation of the tunnel.
     pub next: FunctionId,
     pub spans: Vec<SourceSpan>,

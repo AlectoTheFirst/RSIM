@@ -380,7 +380,7 @@ pub const TABLES: &[TableDef] = &[
             ),
             col("state", ColumnType::Text, "tunnel_state", "State"),
             col("state_reason", ColumnType::Text, "reason", "State reason"),
-            col("paths", ColumnType::Integer, "count", "Live paths"),
+            col("far_paths", ColumnType::Integer, "count", "Far end paths"),
             col(
                 "provenance",
                 ColumnType::List,
