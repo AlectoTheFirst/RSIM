@@ -12,7 +12,7 @@ import { Rail } from "./page/Rail";
 import { ToastHost } from "./page/Toast";
 import { toast } from "./page/notes";
 import { TopBar } from "./page/TopBar";
-import { functionsSearch, isSnapshot, newerRun, pinnedRun, queryOf, twinState, twinStateText, viewOf, viewSearch, withTwin } from "./page/url";
+import { functionsSearch, isSnapshot, newerRun, pinnedRun, queryOf, topologySearch, twinState, twinStateText, viewOf, viewSearch, withTwin } from "./page/url";
 import { type Fields, fieldsOf, requestBody } from "./page/query";
 import { TablesView } from "./tables/TablesView";
 import { TopologyView } from "./topology/TopologyView";
@@ -96,7 +96,6 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
 
   useEffect(() => {
     applyTheme(prefs);
-    savePrefs(prefs);
     if (prefs.theme !== "system") return;
     const mq = window.matchMedia("(prefers-color-scheme: light)");
     const on = () => applyTheme(prefs);
@@ -331,6 +330,7 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
         timing={timing}
         row={prefs.row}
         onRun={() => void run()}
+        onTopology={(qid) => navigate(topologySearch(twin, qid))}
         copy={copy}
         sourceLines={sourceLines}
       />
@@ -353,7 +353,10 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
           onLatest={loadLatest}
           onTwin={onTwin}
           prefs={prefs}
-          onPrefs={setPrefs}
+          onPrefs={(p) => {
+            savePrefs(p);
+            setPrefs(p);
+          }}
           user={user}
           onTokens={() => navigate(viewSearch("Tokens", twin, search))}
           onSignOut={props.onSignOut}

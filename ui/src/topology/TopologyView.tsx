@@ -1,10 +1,12 @@
 // The Topology view: the map of one scope with the paths of the query on
-// it, its controls, and the panel of the selected card.
+// it, the chips of the query and the scope, its controls, and the panel of
+// the selected card.
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { ApiProblem, getInventory, getPathDrawing, tableRows, topologyFileUrl } from "../api/client";
+import { ApiProblem, getInventory, getPathDrawing, getQuerySteps, tableRows, topologyFileUrl } from "../api/client";
 import { Card, Empty, PageHead, PanelLayout } from "../page/Card";
 import { Icon } from "../page/Icon";
 import { MenuButton } from "../page/Menu";
+import { Chip } from "../page/Pill";
 import { Segmented } from "../page/Segmented";
 import { toast } from "../page/notes";
 import { DeviceField, SiteField } from "./DeviceField";
@@ -13,8 +15,8 @@ import { LAYERS, type Layer, type MapGraph, buildGraph } from "./graph";
 import { type MapLayout, layoutMap } from "./layout";
 import { type CentreOn, MapCanvas } from "./MapCanvas";
 import { MapPanel } from "./MapPanel";
-import { type MapPath, overlayOf, pathGraphInput, pathMarks } from "./paths";
-import { HOPS, type Hops, type Scope, resolveScope, scopeApi, scopeExtras, scopeOf, scopeSearch, sitesOf } from "./scope";
+import { type MapPath, overlayOf, pathGraphInput, pathMarks, pathsOf, queryText, withPeers } from "./paths";
+import { type Scope, collapseScope, expandScope, resolveScope, scopeApi, scopeExtras, scopeOf, scopeSearch, sitesOf, withoutQuery } from "./scope";
 import { type MapIndex, indexLayout } from "./view";
 
 export interface TopologyProps {
@@ -74,10 +76,9 @@ export function TopologyView(props: TopologyProps) {
   const scope = useMemo(() => scopeOf(props.search), [props.search]);
   const scopeKey = JSON.stringify(scope);
   const [inventory, setInventory] = useState<{ name: string; site?: string | null }[] | null | undefined>(undefined);
-  const [paths, setPaths] = useState<{ key: string; list: MapPath[] } | null>(null);
+  const [paths, setPaths] = useState<{ key: string; list: MapPath[]; text: string; overlay: Map<number, string[]> } | null>(null);
   const [shown, setShown] = useState<Shown | null>(null);
   const [layer, setLayer] = useState<Layer>("physical");
-  const [overlay, setOverlay] = useState<{ key: string; map: Map<number, string[]> } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [centre, setCentre] = useState<CentreOn | null>(null);
   const [ports, setPorts] = useState(true);
@@ -106,14 +107,13 @@ export function TopologyView(props: TopologyProps) {
       return;
     }
     let live = true;
-    scopeApi(twin)
-      .paths(qid)
-      .then((list) => {
-        if (live) setPaths({ key: pathKey, list });
+    Promise.all([getQuerySteps(twin, qid), getPathDrawing(twin, qid)])
+      .then(([steps, drawing]) => {
+        if (live) setPaths({ key: pathKey, list: withPeers(pathsOf(steps), drawing), text: queryText(steps), overlay: overlayOf(drawing) });
       })
       .catch((e: unknown) => {
         if (!live) return;
-        setPaths({ key: pathKey, list: [] });
+        setPaths({ key: pathKey, list: [], text: "", overlay: new Map() });
         toast(problemText(e));
       });
     return () => {
@@ -121,7 +121,8 @@ export function TopologyView(props: TopologyProps) {
     };
   }, [pathKey]);
 
-  const pathList = paths && paths.key === pathKey ? paths.list : null;
+  const pathsNow = paths && paths.key === pathKey ? paths : null;
+  const pathList = pathsNow ? pathsNow.list : null;
   const waiting = !twin || (qid !== null && pathList === null) || (scope.kind === "site" && inventory === undefined);
 
   useEffect(() => {
@@ -156,39 +157,34 @@ export function TopologyView(props: TopologyProps) {
     if (selected !== null && drawn && !drawn.graph.node.has(selected)) setSelected(null);
   }, [drawn]);
 
-  useEffect(() => {
-    if (shownLayer !== "overlay" || !twin || !qid || !pathList || pathList.length === 0 || overlay?.key === pathKey) return;
-    let live = true;
-    getPathDrawing(twin, qid)
-      .then((d) => {
-        if (live) setOverlay({ key: pathKey, map: overlayOf(d) });
-      })
-      .catch((e: unknown) => {
-        if (live) toast(problemText(e));
-      });
-    return () => {
-      live = false;
-    };
-  }, [shownLayer, pathKey, pathList]);
-
   const marks = useMemo(
-    () => (drawn ? pathMarks(drawn.graph, pathList ?? [], null, shownLayer, overlay?.key === pathKey ? overlay.map : null) : null),
-    [drawn, pathList, shownLayer, overlay, pathKey],
+    () => (drawn ? pathMarks(drawn.graph, pathList ?? [], null, shownLayer, pathsNow?.overlay ?? null) : null),
+    [drawn, pathsNow, shownLayer],
   );
 
   const setScope = (s: Scope) => props.navigate(scopeSearch(props.search, s));
   const sites = useMemo(() => (inventory ? sitesOf(inventory) : []), [inventory]);
-  const site = scope.kind === "site" ? scope.site : "";
-  const device = scope.kind === "device" ? scope.device : "";
+  const wide: Scope = qid ? { kind: "paths", expand: [] } : { kind: "twin" };
   const onDevice = (name: string) => {
-    if (name === "") setScope({ kind: "twin" });
-    else setScope({ kind: "device", device: name, hops: scope.kind === "device" ? scope.hops : 1 });
+    if (name !== "") setScope({ kind: "device", device: name, expand: [] });
   };
-  const deviceField = <DeviceField twin={twin} device={device} onDevice={onDevice} autoFocus={current?.state === "too-many"} />;
+  const deviceField = <DeviceField twin={twin} device="" onDevice={onDevice} autoFocus={current?.state === "too-many"} />;
+
+  const chips = (
+    <>
+      {qid && pathsNow?.text ? <Chip column="trace" value={pathsNow.text} onRemove={() => props.navigate(withoutQuery(props.search))} /> : null}
+      {scope.kind === "device" ? <Chip column="device" value={scope.device} onRemove={() => setScope(wide)} /> : null}
+      {scope.kind === "site" ? <Chip column="site" value={scope.site} onRemove={() => setScope(wide)} /> : null}
+      {scope.kind === "device" || scope.kind === "paths"
+        ? scope.expand.map((d) => <Chip column="neighbours" value={d} onRemove={() => setScope(collapseScope(scope, d))} />)
+        : null}
+    </>
+  );
 
   const controls = (
     <span class="map-controls">
-      {sites.length > 0 ? <SiteField sites={sites} site={site} onSite={(v) => setScope(v ? { kind: "site", site: v } : { kind: "twin" })} /> : null}
+      {chips}
+      {sites.length > 0 ? <SiteField sites={sites} site="" onSite={(v) => v && setScope({ kind: "site", site: v })} /> : null}
       {drawn && drawn.layers.length > 1 ? (
         <span class="map-field">
           <span class="t-label">Layer</span>
@@ -196,12 +192,6 @@ export function TopologyView(props: TopologyProps) {
         </span>
       ) : null}
       {current?.state !== "too-many" ? deviceField : null}
-      {scope.kind === "device" ? (
-        <span class="map-field">
-          <span class="t-label">Hops</span>
-          <Segmented<Hops> label="Hops" value={scope.hops} options={HOPS} onChange={(h) => setScope({ ...scope, hops: h })} />
-        </span>
-      ) : null}
       <label class="map-check">
         <input type="checkbox" checked={ports} onChange={() => setPorts(!ports)} />
         Port names
@@ -296,6 +286,10 @@ export function TopologyView(props: TopologyProps) {
         }}
         onFunctions={props.onFunctions}
         onEntryPoint={props.onEntryPoint}
+        onExpand={(d) => {
+          const next = expandScope(scope, d);
+          return next ? () => setScope(next) : null;
+        }}
       />
     ) : null;
 

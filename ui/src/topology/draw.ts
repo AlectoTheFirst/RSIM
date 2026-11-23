@@ -239,7 +239,6 @@ export const EXPORTS = [
 /** The query parameters of the export of the scope of the map in a file form. */
 export function exportParams(scope: Scope, devices: readonly string[], format: string): Record<string, string> {
   if (scope.kind === "twin") return { format };
-  if (scope.kind === "device") return { around: scope.device, hops: String(scope.hops), format };
   return { device: [...devices].sort(natural).join(","), format };
 }
 

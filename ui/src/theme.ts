@@ -258,7 +258,8 @@ export const SIZE = {
   mapDrag: 4,
   mapPanelList: 240,
   mapFactLabel: 112,
-  mapLine: 2,
+  mapLine: 1,
+  mapPathLine: 2,
   mapDash: 6,
   mapDeviceField: 200,
   mapHalo: 3,
@@ -303,7 +304,9 @@ export interface Prefs {
 
 export const DEFAULT_PREFS: Prefs = { theme: "system", colours: "standard", row: 24 };
 
-const STORE_KEY = "rsim.prefs";
+const STORE_KEY = "rsim.prefs.v2";
+/** The key of the preferences that the page saved at each load: its theme and colours stay, and its row height is the default. */
+const OLD_KEY = "rsim.prefs";
 
 /** The preferences of the store, each value that the store does not hold as its default. */
 export function prefsOf(p: Partial<Prefs>): Prefs {
@@ -316,7 +319,10 @@ export function prefsOf(p: Partial<Prefs>): Prefs {
 
 export function loadPrefs(): Prefs {
   try {
-    return prefsOf(JSON.parse(localStorage.getItem(STORE_KEY) ?? "{}") as Partial<Prefs>);
+    const saved = localStorage.getItem(STORE_KEY);
+    if (saved !== null) return prefsOf(JSON.parse(saved) as Partial<Prefs>);
+    const old = JSON.parse(localStorage.getItem(OLD_KEY) ?? "{}") as Partial<Prefs>;
+    return prefsOf({ theme: old.theme, colours: old.colours });
   } catch {
     return DEFAULT_PREFS;
   }

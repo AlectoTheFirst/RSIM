@@ -1,7 +1,8 @@
-// The layout of the map: a rank for each device and each neighbour outside
-// the twin from the link graph, rows of at most 32 cards, the endpoint cards
-// in a stack below their device, and each line as horizontal and vertical
-// segments from the border of one card to the border of the other.
+// The layout of the map: a rank for each device, each neighbour outside the
+// twin and each tunnel peer from the link graph and the tunnels to the
+// peers, rows of at most 32 cards, the endpoint cards in a stack below their
+// device, and each line as horizontal and vertical segments from the border
+// of one card to the border of the other.
 import { SIZE } from "../theme";
 import { type Layer, type MapGraph, type MapNode, type Pair, natural } from "./graph";
 
@@ -70,6 +71,9 @@ const TRACKS_X = Math.max(0, Math.floor(GAP_X / 8 / TRACK));
 
 const isStack = (n: MapNode) => n.kind === "endpoint" || n.kind === "endpoints";
 
+/** Whether a pair places its cards: a physical pair, or a pair with a tunnel peer card. */
+const places = (p: Pair) => p.layer === "physical" || p.a.startsWith("p:") || p.b.startsWith("p:");
+
 /** The offset of track `i` from the middle, in the order 0, +1, -1, +2, -2, with `n` tracks on each side. */
 function track(i: number, n: number): number {
   const k = i % (2 * n + 1);
@@ -84,7 +88,7 @@ export function ranksOf(g: MapGraph): { rank: Map<string, number>; ranks: number
   for (const n of ranked) adj.set(n.id, []);
   const sources = new Set<string>();
   for (const p of g.pairs) {
-    if (p.layer !== "physical") continue;
+    if (!places(p)) continue;
     const a = g.node.get(p.a)!;
     const b = g.node.get(p.b)!;
     if (isStack(a)) sources.add(p.b);
@@ -150,7 +154,7 @@ function orderRanks(g: MapGraph, rank: Map<string, number>, ranks: number): stri
   }
   const adj = new Map<string, string[]>();
   for (const p of g.pairs) {
-    if (p.layer !== "physical" || !rank.has(p.a) || !rank.has(p.b)) continue;
+    if (!places(p) || !rank.has(p.a) || !rank.has(p.b)) continue;
     (adj.get(p.a) ?? adj.set(p.a, []).get(p.a)!).push(p.b);
     (adj.get(p.b) ?? adj.set(p.b, []).get(p.b)!).push(p.a);
   }

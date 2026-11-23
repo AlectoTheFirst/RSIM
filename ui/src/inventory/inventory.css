@@ -162,7 +162,7 @@
 .inv-row .same::before {
   content: "";
   position: absolute;
-  left: var(--button-gap);
+  left: 0;
   top: 0;
   bottom: calc(-1 * var(--hairline));
   width: var(--hairline);

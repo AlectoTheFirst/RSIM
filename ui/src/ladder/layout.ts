@@ -438,10 +438,22 @@ export function pathRows(b: Branch, path: PathRef, level: Level, lanes: readonly
  * order, and a row for each function or each device.
  */
 export function ladder(a: Answer, level: Level, path: PathRef, set = false): Ladder {
-  const b = branchOf(a, path);
-  if (!b) return { lanes: [], rows: [] };
-  const lanes = lanesOf([devicesOf(b)]);
-  return { lanes, rows: pathRows(b, path, level, lanes, set) };
+  return ladderOf(a, level, [path], set);
+}
+
+/**
+ * The ladder of paths one after the other, such as a forward path and its
+ * reply: one lane for each device of the paths in path order, and the rows
+ * of each path in the order of the paths.
+ */
+export function ladderOf(a: Answer, level: Level, paths: readonly PathRef[], set = false): Ladder {
+  const found = paths.flatMap((p) => {
+    const b = branchOf(a, p);
+    return b ? [{ b, p }] : [];
+  });
+  if (found.length === 0) return { lanes: [], rows: [] };
+  const lanes = lanesOf(found.map((x) => devicesOf(x.b)));
+  return { lanes, rows: found.flatMap((x) => pathRows(x.b, x.p, level, lanes, set)) };
 }
 
 /** The number of route lookups of the answer that no collected RIB checks. */

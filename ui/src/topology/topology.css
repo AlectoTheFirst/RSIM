@@ -112,7 +112,11 @@
 
 .map-line.path {
   stroke: var(--forward);
-  stroke-width: var(--path-line);
+  stroke-width: var(--map-path-line);
+}
+
+.map-line.under {
+  stroke: var(--rule);
 }
 
 .map-line.active {
@@ -264,6 +268,17 @@
   margin: 0;
 }
 
+.map-section.fill {
+  flex: 1 1 auto;
+  min-height: var(--map-panel-list);
+}
+
+.map-section.fill > .map-list {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 0;
+}
+
 .map-list {
   max-height: var(--map-panel-list);
   border: var(--hairline) solid var(--rule);
@@ -282,6 +297,26 @@
 .map-row > * {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.map-row.map-endpoint {
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  grid-template-areas:
+    "host host host"
+    "address . interface";
+  row-gap: 0;
+}
+
+.map-row.map-endpoint > :nth-child(1) {
+  grid-area: host;
+}
+
+.map-row.map-endpoint > :nth-child(2) {
+  grid-area: address;
+}
+
+.map-row.map-endpoint > :nth-child(3) {
+  grid-area: interface;
 }
 
 .map-row.head {

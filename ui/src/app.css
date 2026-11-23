@@ -805,6 +805,10 @@ button.menu-item {
   border-radius: var(--button-radius);
 }
 
+button.menu-item.run-option {
+  gap: var(--button-gap);
+}
+
 button.menu-item:hover {
   background: var(--raise);
 }

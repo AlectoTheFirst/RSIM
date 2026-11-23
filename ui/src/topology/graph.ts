@@ -10,11 +10,11 @@ export type TopoNode = components["schemas"]["TopoNode"];
 export type Layer = "physical" | "overlay";
 export const LAYERS: readonly Layer[] = ["physical", "overlay"];
 
-/** The kind of a card: a device of the twin, an endpoint of a path, the other endpoints of a device, a neighbour outside the twin. */
-export type NodeKind = "device" | "endpoint" | "endpoints" | "outside";
+/** The kind of a card: a device of the twin, an endpoint of a path, the other endpoints of a device, a neighbour outside the twin, a tunnel peer outside the twin. */
+export type NodeKind = "device" | "endpoint" | "endpoints" | "outside" | "peer";
 
 export interface MapNode {
-  /** `d:<device>`, `e:<device>:<label>`, `g:<device>` or `o:<neighbour>`. */
+  /** `d:<device>`, `e:<device>:<label>`, `g:<device>`, `o:<neighbour>` or `p:<node of the API>`. */
   id: string;
   kind: NodeKind;
   /** The name on the card: the device, the endpoint, the neighbour; empty for `endpoints`. */
@@ -48,8 +48,12 @@ export interface LinkFact {
 
 export interface Tunnel {
   encap: string;
+  /** The name of a WireGuard peer, else empty. */
+  name: string;
   source: string;
   peer: string;
+  /** The UDP port of a WireGuard endpoint, else null. */
+  port: number | null;
   peerFrom: string;
   vnis: number[];
 }
@@ -76,7 +80,7 @@ export interface Pair {
 }
 
 export interface MapGraph {
-  /** The nodes in the order: devices, outside, endpoint cards. */
+  /** The nodes in the order: devices, tunnel peers, outside, endpoint cards. */
   nodes: MapNode[];
   pairs: Pair[];
   node: Map<string, MapNode>;
@@ -89,6 +93,13 @@ export const deviceId = (d: string) => `d:${d}`;
 export const groupId = (d: string) => `g:${d}`;
 export const endpointId = (d: string, label: string) => `e:${d}:${label}`;
 export const outsideId = (n: string) => `o:${n}`;
+export const peerId = (n: string) => `p:${n}`;
+
+/** The card id of a node of the API: `p:<id>` for a node of the kind `peer`, else the device card. */
+export function apiNodeId(nodes: readonly { id: string; kind: string }[]): (id: string) => string {
+  const peers = new Set(nodes.filter((n) => n.kind === "peer").map((n) => n.id));
+  return (id) => (peers.has(id) ? peerId(id) : deviceId(id));
+}
 
 export function pairKey(layer: Layer, x: string, y: string): string {
   const [a, b] = x <= y ? [x, y] : [y, x];
@@ -138,8 +149,10 @@ interface RawLink {
 
 interface RawTunnel {
   encap?: string;
-  source?: string;
-  peer?: string;
+  name?: string | null;
+  source?: string | null;
+  peer?: string | null;
+  port?: number | null;
   peer_from?: string;
   vnis?: number[];
 }
@@ -203,8 +216,10 @@ function tunnelsOf(facts: unknown): Tunnel[] {
   const raw = (facts as { tunnels?: RawTunnel[] } | null)?.tunnels ?? [];
   return raw.map((t) => ({
     encap: t.encap ?? "",
+    name: t.name ?? "",
     source: t.source ?? "",
     peer: t.peer ?? "",
+    port: t.port ?? null,
     peerFrom: t.peer_from ?? "",
     vnis: t.vnis ?? [],
   }));
@@ -253,6 +268,13 @@ export interface PathEndpoint {
   port: string | null;
 }
 
+/** The exit of a path: the device, the egress port and the tunnel peer of the outer packet, a node of the API. */
+export interface PathExit {
+  device: string;
+  port: string | null;
+  peer: string | null;
+}
+
 export interface GraphInput {
   topology: TopologyOut;
   /** The endpoints of each device (attachment records), for the `endpoints` cards. */
@@ -263,6 +285,8 @@ export interface GraphInput {
   pathEndpoints?: readonly PathEndpoint[];
   /** The hops of the paths of the query between 2 devices. */
   pathHops?: readonly (readonly [string, string])[];
+  /** The exits of the paths of the query into a tunnel to a peer. */
+  pathExits?: readonly PathExit[];
 }
 
 /** The map graph of a topology answer at the device level. */
@@ -281,6 +305,11 @@ export function buildGraph(input: GraphInput): MapGraph {
   for (const d of devices) {
     add({ id: deviceId(d.name), kind: "device", label: d.name, device: d.name, count: null, functions: d.functions, hatch: false });
   }
+  const idOf = apiNodeId(input.topology.nodes);
+  const peers = input.topology.nodes.filter((n) => n.kind === "peer").sort((x, y) => natural(x.label, y.label) || natural(x.id, y.id));
+  for (const n of peers) {
+    add({ id: peerId(n.id), kind: "peer", label: n.label, device: null, count: null, functions: null, hatch: true });
+  }
   const pair = new Map<string, Pair>();
   const pairOf = (layer: Layer, x: string, y: string): Pair => {
     const key = pairKey(layer, x, y);
@@ -294,11 +323,12 @@ export function buildGraph(input: GraphInput): MapGraph {
   };
   for (const e of input.topology.edges) {
     if (e.layer !== "physical" && e.layer !== "overlay") continue;
-    const x = deviceId(e.from);
-    const y = deviceId(e.to);
+    const x = idOf(e.from);
+    const y = idOf(e.to);
     if (!node.has(x) || !node.has(y) || x === y) continue;
     const p = pairOf(e.layer, x, y);
     p.edges.push(e.id);
+    if (x.startsWith("p:") || y.startsWith("p:")) p.dashed = true;
     if (e.layer === "physical") {
       const [da, db] = p.a === x ? [e.from, e.to] : [e.to, e.from];
       p.links.push(...linksOfEdge(e.facts, da, db));
@@ -329,6 +359,17 @@ export function buildGraph(input: GraphInput): MapGraph {
     if (dx === dy || !node.has(dx) || !node.has(dy)) continue;
     const key = pairKey("physical", dx, dy);
     if (!pair.has(key)) pairOf("physical", dx, dy).hop = true;
+  }
+  for (const x of input.pathExits ?? []) {
+    const d = deviceId(x.device);
+    if (x.peer === null || !node.has(d) || !node.has(peerId(x.peer))) continue;
+    const p = pairOf("physical", d, peerId(x.peer));
+    p.dashed = true;
+    const port = x.port === null ? null : basePort(x.port);
+    if (p.links.some((l) => (p.a === d ? l.a.port : l.b.port) === port)) continue;
+    const dev = portEnd(x.port);
+    const far = portEnd(null);
+    p.links.push(p.a === d ? { a: dev, b: far, subjects: [] } : { a: far, b: dev, subjects: [] });
   }
   const ends = [...(input.pathEndpoints ?? [])]
     .filter((e) => node.has(deviceId(e.device)))

@@ -4,8 +4,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Answer, Branch, PathAnswer } from "../src/api/types";
-import { autoStep, decidingStep, ingressHint, ladder, rowKeyOfStep } from "../src/ladder/layout";
-import { replyState } from "../src/ladder/paths";
+import { autoStep, decidingStep, ingressHint, ladder, ladderOf, rowKeyOfStep } from "../src/ladder/layout";
+import { forwardPaths, replyPaths, replyState } from "../src/ladder/paths";
 import { keyForElement, keyPlace } from "../src/tables/model";
 import {
   type EndpointRow,
@@ -235,5 +235,21 @@ describe("endpoint row of the Tables view", () => {
       "2001:db8::11",
     ]);
     expect(endpointAddresses(["endpoint"], ["web-01"])).toEqual([]);
+  });
+});
+
+describe("the ladder of a path and its reply", () => {
+  it("puts the forward rows and then the reply rows on the lanes of both paths", () => {
+    const a = golden("mini-enterprise").answer;
+    const fwd = forwardPaths(a)[0]!.ref;
+    const rep = replyPaths(a, fwd.branch)[0]!.ref;
+    const f = ladder(a, "function", fwd);
+    const r = ladder(a, "function", rep);
+    const both = ladderOf(a, "function", [fwd, rep]);
+    expect(both.rows.map((x) => [x.key, x.dir])).toEqual([...f.rows, ...r.rows].map((x) => [x.key, x.dir]));
+    expect(new Set(both.rows.map((x) => x.key)).size).toBe(both.rows.length);
+    const names = both.lanes.map((l) => l.device);
+    for (const l of [...f.lanes, ...r.lanes]) expect(names).toContain(l.device);
+    expect(both.rows.filter((x) => x.start)).toHaveLength(2);
   });
 });
