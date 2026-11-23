@@ -10,7 +10,8 @@ use rsim_contract::topology::{TopoEdge, TopoNode, TopologyOut};
 use rsim_core::FunctionKind;
 use rsim_engine::Answer;
 use rsim_functions::{
-    Egress, LinkFacts, PortEgress, TunnelPeer, VxlanEncap, WireguardEncap, WireguardPeer,
+    Egress, LinkFacts, OverlaySelect, PortEgress, TunnelPeer, TunnelState, VCMP_PORT, VcmpEncap,
+    VxlanEncap, WireguardEncap, WireguardPeer,
 };
 use serde_json::{Value, json};
 
@@ -166,12 +167,20 @@ fn wireguard_far(
 /// device whose tunnel end is the peer, and from each device with a
 /// WireGuard interface to each peer: the device of the twin whose WireGuard
 /// source address is the endpoint of the peer, else a node `peer` outside
-/// the twin. The nodes of the peers outside the twin come with the edges.
+/// the twin. A VCMP tunnel goes to the device whose WAN link has the peer
+/// address, else to a node `peer`, and has the state of its tunnel in the
+/// selection of the overlay. The nodes of the peers outside the twin come
+/// with the edges.
 fn overlay(t: &Loaded) -> (Vec<TopoEdge>, BTreeMap<String, TopoNode>) {
     let mut ends: BTreeMap<std::net::IpAddr, BTreeSet<String>> = BTreeMap::new();
     let mut encaps = Vec::new();
     let wg_ends = wireguard_ends(t);
     let mut wgs: Vec<(String, String, &WireguardEncap)> = Vec::new();
+    let mut vcmps: Vec<(String, String, &VcmpEncap)> = Vec::new();
+    // The devices of the address of each WAN link with a VCMP tunnel.
+    let mut vcmp_ends: BTreeMap<std::net::IpAddr, BTreeSet<String>> = BTreeMap::new();
+    // The state of the tunnel of each VCMP encapsulation.
+    let mut vcmp_states: BTreeMap<String, TunnelState> = BTreeMap::new();
     // The gateways of the route next hops that go to each function: the
     // peers of an encapsulation that takes its peer from the next hop.
     let mut gateways: BTreeMap<String, BTreeSet<std::net::IpAddr>> = BTreeMap::new();
@@ -187,6 +196,17 @@ fn overlay(t: &Loaded) -> (Vec<TopoEdge>, BTreeMap<String, TopoNode>) {
             && let Some(d) = f.device()
         {
             wgs.push((d.to_string(), f.id().to_string(), w));
+        }
+        if let Some(v) = any.downcast_ref::<VcmpEncap>()
+            && let Some(d) = f.device()
+        {
+            vcmp_ends.entry(v.source).or_default().insert(d.to_string());
+            vcmps.push((d.to_string(), f.id().to_string(), v));
+        }
+        if let Some(s) = any.downcast_ref::<OverlaySelect>() {
+            for tunnel in &s.tunnels {
+                vcmp_states.insert(tunnel.next.to_string(), tunnel.state);
+            }
         }
         if let Some(rl) = any.downcast_ref::<rsim_functions::RouteLookup>() {
             for fib in rl.tables.values() {
@@ -273,6 +293,48 @@ fn overlay(t: &Loaded) -> (Vec<TopoEdge>, BTreeMap<String, TopoNode>) {
                     }),
                 );
             }
+        }
+    }
+    for (d, encap, v) in &vcmps {
+        let far: Vec<String> = vcmp_ends
+            .get(&v.peer)
+            .into_iter()
+            .flatten()
+            .filter(|x| *x != d)
+            .cloned()
+            .collect();
+        let targets = if far.is_empty() {
+            let id = format!("peer:{}", v.peer);
+            peers.entry(id.clone()).or_insert_with(|| TopoNode {
+                id: id.clone(),
+                kind: "peer".into(),
+                label: v.peer.to_string(),
+                device: None,
+                functions: None,
+            });
+            vec![id]
+        } else {
+            far
+        };
+        let segments: BTreeSet<u32> = v.segments.values().copied().collect();
+        for to in targets {
+            let id = format!("overlay:{d}>{to}");
+            out.entry(id.clone())
+                .or_insert_with(|| edge(id.clone(), "overlay", d.clone(), to.clone()));
+            tunnels.entry(id).or_default().insert(
+                (encap.clone(), v.peer.to_string()),
+                json!({
+                    "encap": encap,
+                    "peer_from": "fixed",
+                    "source": v.source.to_string(),
+                    "peer": v.peer.to_string(),
+                    "port": VCMP_PORT,
+                    "interface": v.interface.to_string(),
+                    "state": vcmp_states.get(encap).map(snake),
+                    "segments": segments,
+                    "vnis": [],
+                }),
+            );
         }
     }
     for (id, x) in &mut out {
@@ -720,6 +782,127 @@ mod tests {
             .unwrap();
         assert_eq!(remote.facts["tunnels"][0]["name"], "remote");
         assert_eq!(remote.facts["tunnels"][0]["port"], 51820);
+    }
+
+    fn loaded(twin: rsim_engine::Twin, name: &str) -> Loaded {
+        Loaded {
+            twin,
+            identity: TwinJson::builtin(name).unwrap(),
+            coverage: BTreeMap::new(),
+            bgp: BTreeMap::new(),
+            facts: BTreeMap::new(),
+            seen: Vec::new(),
+            tables: Default::default(),
+            source: None,
+        }
+    }
+
+    fn sdwan(opts: rsim_topologies::SdwanOpts) -> Loaded {
+        let twin = rsim_topologies::sdwan_site(opts)
+            .build()
+            .expect("the twin builds");
+        loaded(twin, "sdwan")
+    }
+
+    #[test]
+    fn a_vcmp_tunnel_is_an_overlay_edge_with_its_link_and_its_state() {
+        let t = sdwan(rsim_topologies::SdwanOpts {
+            private_tunnel: rsim_functions::TunnelState::Down,
+            ..Default::default()
+        });
+        let out = super::topology("sdwan", &t, &TopologyViewArgs::default()).unwrap();
+        assert!(out.nodes.iter().all(|n| n.kind == "device"));
+        let overlay: Vec<(&str, &str)> = out
+            .edges
+            .iter()
+            .filter(|e| e.layer == "overlay")
+            .map(|e| (e.from.as_str(), e.to.as_str()))
+            .collect();
+        assert_eq!(overlay, [("branch1", "hub1"), ("hub1", "branch1")]);
+        let edge = out
+            .edges
+            .iter()
+            .find(|e| e.id == "overlay:branch1>hub1")
+            .unwrap();
+        let tunnels = edge.facts["tunnels"].as_array().unwrap();
+        let facts: Vec<(&str, &str, &str, &str)> = tunnels
+            .iter()
+            .map(|x| {
+                (
+                    x["interface"].as_str().unwrap(),
+                    x["source"].as_str().unwrap(),
+                    x["peer"].as_str().unwrap(),
+                    x["state"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            facts,
+            [
+                ("wan1", "198.51.100.1", "203.0.113.1", "up"),
+                ("wan2", "172.16.1.1", "172.16.9.1", "down"),
+            ]
+        );
+        assert_eq!(tunnels[0]["port"], 2426);
+        assert_eq!(tunnels[0]["segments"], serde_json::json!([0]));
+        let physical: Vec<(&str, &str)> = out
+            .edges
+            .iter()
+            .filter(|e| e.layer == "physical")
+            .map(|e| (e.from.as_str(), e.to.as_str()))
+            .collect();
+        for pair in [
+            ("branch1", "internet"),
+            ("branch1", "mpls"),
+            ("hub1", "internet"),
+            ("hub1", "mpls"),
+        ] {
+            assert!(
+                physical.contains(&pair) || physical.contains(&(pair.1, pair.0)),
+                "{pair:?} is not in {physical:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_drawing_of_a_path_has_the_tunnel_and_its_underlay_hops() {
+        let t = sdwan(rsim_topologies::SdwanOpts::default());
+        let h = rsim_topologies::tcp("10.1.0.10", 40000, "10.9.0.10", 443);
+        let a = rsim_engine::Executor::new(&t.twin)
+            .run(&rsim_engine::Query::path(&t.twin, &h))
+            .expect("the query runs");
+        let out = super::drawing("sdwan", &t, &a);
+        let tunnel = out
+            .edges
+            .iter()
+            .find(|e| e.id == "overlay:branch1>hub1")
+            .expect("the overlay edge");
+        assert_eq!(tunnel.layer, "overlay");
+        assert_eq!(tunnel.branches, [0, 1]);
+        let underlay: Vec<(&str, &str, &[usize], Option<&str>)> = out
+            .edges
+            .iter()
+            .filter(|e| e.layer == "underlay")
+            .map(|e| {
+                (
+                    e.from.as_str(),
+                    e.to.as_str(),
+                    e.branches.as_slice(),
+                    e.overlay.as_deref(),
+                )
+            })
+            .collect();
+        let over = Some("overlay:branch1>hub1");
+        for hop in [
+            ("branch1", "internet", &[0usize][..], over),
+            ("internet", "hub1", &[0usize][..], over),
+            ("branch1", "mpls", &[1usize][..], over),
+            ("mpls", "hub1", &[1usize][..], over),
+        ] {
+            assert!(underlay.contains(&hop), "{hop:?} is not in {underlay:?}");
+        }
+        assert_eq!(underlay.len(), 4);
+        assert!(out.edges.iter().all(|e| e.layer != "physical"));
     }
 
     #[test]
