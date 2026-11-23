@@ -125,7 +125,8 @@ pub struct Summary {
 pub struct PortAddress {
     pub port: String,
     pub address: IpAddr,
-    /// The VLAN of a subinterface, `None` for the untagged interface.
+    /// The VLAN of a subinterface or an SVI, `None` for the untagged
+    /// interface.
     pub vlan: Option<u16>,
     /// The VRF of the address, `None` for the default VRF.
     pub vrf: Option<String>,

@@ -2,8 +2,9 @@
 //! sections: the tunnels of a path and the results of their candidates, the
 //! firewall, the business policy, the route order, the LAN BGP of a
 //! segment, the link steering, the hub of a cluster, 2 enterprises, the
-//! determinism of the twin, and the links of the join to a switch on the LAN
-//! side and to a router on the WAN side.
+//! determinism of the twin, the links of the join to a switch on the LAN
+//! side and to a router on the WAN side, and a WAN gateway on an SVI with no
+//! link.
 
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -759,6 +760,43 @@ fn the_outer_packet_of_a_tunnel_goes_through_the_estate_router_of_the_wan_gatewa
     let handoff = position(&f, "r1/handoff/eth1");
     assert!(position(&f, &wan) < handoff, "{f:?}");
     assert!(handoff < position(&f, "r1/in/eth1"), "{f:?}");
+    assert!(
+        !f.iter()
+            .any(|x| x.starts_with(&format!("{STORE}/transport/"))),
+        "{f:?}"
+    );
+}
+
+#[test]
+fn the_outer_packet_of_a_tunnel_to_a_wan_gateway_on_an_svi_is_unknown() {
+    let mut m = base();
+    open_firewall(&mut m);
+    no_lan_bgp(&mut m);
+    branch_module(&mut m, 0)["routedInterfaces"][0]["addressing"] = json!({
+        "type": "STATIC", "cidrIp": "192.0.2.3", "cidrPrefix": 26, "gateway": "192.0.2.2"
+    });
+    m.get_mut("edges").unwrap()[0]["links"][0]["ipAddress"] = json!("192.0.2.3");
+    sync_state(&mut m);
+    let e = assemble(vec![input(STORE, &m), switch()]);
+    let notes = e.notes.clone();
+    assert!(
+        notes[BR].contains(&format!("GE1: 192.0.2.2 on VLAN 10 of {SWITCH}, no link")),
+        "{notes:#?}"
+    );
+    let t = e.builder.build().expect("the twin builds");
+    let a = run(&t, "10.20.20.10");
+    let b = a.branches();
+    let unknown = format!("{BR}/wan/unknown/GE1");
+    let i = (0..b.len())
+        .find(|i| functions(&a, *i).contains(&unknown))
+        .unwrap_or_else(|| panic!("no path reaches {unknown}: {notes:#?}"));
+    assert_eq!(code(b[i].verdict), Some(ReasonCode::NotCollected));
+    assert!(
+        detail(b[i].verdict).contains("gateway 192.0.2.2"),
+        "{:?}",
+        b[i].verdict
+    );
+    let f = functions(&a, i);
     assert!(
         !f.iter()
             .any(|x| x.starts_with(&format!("{STORE}/transport/"))),

@@ -9,7 +9,8 @@
 //! go through the transport network of the link to the far edge, where the
 //! decapsulation gives them to the route lookup of their segment. A LAN or
 //! WAN port with a link of the join leaves to the device of the estate at
-//! the far end of the link.
+//! the far end of the link. The outer packets of a WAN link with no link of
+//! the join whose gateway is an address of the twin are unknown.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -395,6 +396,8 @@ struct L<'a> {
     hubs: HubChoice,
     /// The links of the ports of the edge from the join.
     ext: &'a External,
+    /// The addresses of the devices of the twin.
+    twin: &'a BTreeSet<IpAddr>,
     functions: Vec<Arc<dyn NetFunction>>,
     edges: Vec<EdgeInterface>,
     notes: Vec<String>,
@@ -492,6 +495,56 @@ impl<'a> L<'a> {
             Some([p]) => Some(p.far.0.clone()),
             _ => None,
         }
+    }
+
+    /// The gateway of a WAN link with no link of the join whose gateway is an
+    /// address of a device of the twin, with the reason of the unknown
+    /// packets.
+    fn refused(&self, l: &WanLink) -> Option<(IpAddr, String)> {
+        let g = l.gateway.filter(|g| self.twin.contains(g))?;
+        if self.link(&wan_iface(l)).is_some() {
+            return None;
+        }
+        Some((
+            g,
+            format!(
+                "gateway {g} of link {} is an address of the twin with no link",
+                l.logical_id
+            ),
+        ))
+    }
+
+    /// A function that makes each packet to the WAN interface `iface`
+    /// unknown, in the underlay and in each segment.
+    fn refused_target(&mut self, iface: &str, why: &str, spans: &[SourceSpan]) -> FunctionId {
+        let name = format!("wan/unknown/{iface}");
+        let fib = || {
+            let mut fib = Fib::new();
+            for p in defaults() {
+                fib.insert(
+                    p,
+                    Route::unknown_with(
+                        RouteKind::Static,
+                        ReasonCode::NotCollected,
+                        why.to_string(),
+                        spans.to_vec(),
+                    ),
+                );
+            }
+            fib
+        };
+        let tables = std::iter::once(VrfId::new(UNDERLAY))
+            .chain(self.e.segments.iter().map(vrf_of))
+            .map(|v| (v, fib()))
+            .collect();
+        let meta = self.meta(&name, spans.to_vec());
+        self.add(RouteLookup {
+            meta,
+            tables,
+            fallback: None,
+            local: None,
+        });
+        self.id(&name)
     }
 
     /// The rewrite of a packet that leaves on a port with a link: the MAC of
@@ -1656,13 +1709,22 @@ impl<'a> L<'a> {
         let mut p2p = BTreeMap::new();
         for l in self.wan.clone() {
             let iface = wan_iface(l);
-            let owner = self.far_device(&iface).unwrap_or_else(|| {
-                l.isp
-                    .clone()
-                    .or_else(|| l.name.clone())
-                    .unwrap_or_else(|| "provider".to_string())
-            });
-            egress.insert(InterfaceId::new(&iface), self.id(&format!("exit/{iface}")));
+            let (target, owner) = match self.refused(l) {
+                Some((g, _)) => (
+                    self.id(&format!("wan/unknown/{iface}")),
+                    format!("gateway {g}"),
+                ),
+                None => (
+                    self.id(&format!("exit/{iface}")),
+                    self.far_device(&iface).unwrap_or_else(|| {
+                        l.isp
+                            .clone()
+                            .or_else(|| l.name.clone())
+                            .unwrap_or_else(|| "provider".to_string())
+                    }),
+                ),
+            };
+            egress.insert(InterfaceId::new(&iface), target);
             p2p.insert(InterfaceId::new(&iface), owner);
         }
         self.add(NextHopResolution {
@@ -1716,6 +1778,18 @@ impl<'a> L<'a> {
                 );
             }
             let transport = self.transport(l);
+            // A gateway of the twin with no link of the join: the outer
+            // packets are unknown, and the address of the link has an
+            // unknown route in its transport network.
+            if let Some((g, why)) = self.refused(l) {
+                let target = self.refused_target(&iface, &why, &l.spans);
+                egress.insert(InterfaceId::new(&iface), target);
+                p2p.insert(InterfaceId::new(&iface), format!("gateway {g}"));
+                if let (Some(t), Some(a)) = (transport, link_address(l)) {
+                    self.left_out.push((t, a, why, l.spans.clone()));
+                }
+                continue;
+            }
             let far = self.far_device(&iface);
             let owner = far
                 .clone()
@@ -1964,13 +2038,14 @@ fn winner(p: Prefix, cs: &[Candidate]) -> Route {
 
 /// Lowers the edges of an enterprise and the transport networks between
 /// their WAN links. `hubs` gives the hub of a cluster whose hub is not
-/// collected, and `links` the links of the ports of each edge from the
-/// join.
+/// collected, `links` the links of the ports of each edge from the join,
+/// and `twin` the addresses of the devices of the twin.
 pub fn lower(
     ent: &Enterprise,
     profile: &VendorProfile,
     hubs: HubChoice,
     links: &BTreeMap<String, External>,
+    twin: &BTreeSet<IpAddr>,
 ) -> Lowered {
     let mut out = Lowered::default();
     let mut transports: BTreeMap<String, Transport> = BTreeMap::new();
@@ -1982,6 +2057,7 @@ pub fn lower(
             profile,
             hubs,
             ext: links.get(&e.device).unwrap_or(&none),
+            twin,
             functions: Vec::new(),
             edges: Vec::new(),
             notes: e.notes.clone(),

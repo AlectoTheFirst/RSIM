@@ -524,3 +524,49 @@ fn an_address_in_another_vrf_gives_no_link() {
         "{notes:?}"
     );
 }
+
+/// A switch `name` with the SVI of VLAN 10 and its address `addr`.
+fn svi(name: &str, addr: &str) -> Summary {
+    let mut s = device(name, &[], &[], false);
+    s.port_addresses.push(PortAddress {
+        port: "Vlan10".to_string(),
+        address: addr.parse().unwrap(),
+        vlan: Some(10),
+        vrf: None,
+        spans: vec![SourceSpan::line(format!("{name}/config"), 4)],
+    });
+    s
+}
+
+#[test]
+fn a_gateway_on_an_svi_gives_no_link_and_a_note() {
+    let mut edge = by_address("edge", "wan", "198.51.100.10", None);
+    gateway(&mut edge, "198.51.100.1", None);
+    let devices = BTreeMap::from([
+        ("edge".to_string(), edge),
+        ("sw".to_string(), svi("sw", "198.51.100.1")),
+    ]);
+    let (links, notes) = peers(&devices);
+    assert!(links.is_empty(), "{links:?}");
+    assert!(
+        notes.contains(&"wan: 198.51.100.1 on VLAN 10 of sw, no link".to_string()),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn a_gateway_on_an_svi_and_on_a_routed_port_gives_no_link() {
+    let mut edge = by_address("edge", "wan", "198.51.100.10", None);
+    gateway(&mut edge, "198.51.100.1", None);
+    let devices = BTreeMap::from([
+        ("edge".to_string(), edge),
+        ("r".to_string(), router("r", "198.51.100.1", None)),
+        ("sw".to_string(), svi("sw", "198.51.100.1")),
+    ]);
+    let (links, notes) = peers(&devices);
+    assert!(links.is_empty(), "{links:?}");
+    assert!(
+        notes.contains(&"wan: 198.51.100.1 is on more than one port, no link".to_string()),
+        "{notes:?}"
+    );
+}

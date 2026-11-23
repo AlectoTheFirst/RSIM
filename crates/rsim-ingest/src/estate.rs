@@ -812,6 +812,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
             &vc_profile,
             velocloud::HubChoice::None,
             &joined.devices,
+            &twin_addresses,
         );
         for (d, notes) in low.notes {
             e.notes.entry(d).or_default().extend(notes);
@@ -916,10 +917,12 @@ fn hop_vrfs(rows: &[collected::RouteRow]) -> BTreeMap<IpAddr, BTreeSet<String>> 
 }
 
 /// The layer 3 address of each port of a summary with its VRF: the
-/// addresses of `l3`, and the addresses of each other port that ends a
-/// link. The VRF of an address is the one VRF of the interfaces with the
-/// address, and none for the default VRF or for an address of more than
-/// one VRF.
+/// addresses of `l3`, the addresses of each other port that ends a link,
+/// and the host addresses of the VLANs, which hold the SVI addresses and
+/// the active virtual addresses, at the port `Vlan<n>` with their VLAN. The
+/// VRF of an address is the one VRF of the interfaces with the address,
+/// and of a VLAN host the VRF of its SVI; none for the default VRF or for
+/// an address of more than one VRF.
 fn port_addresses(sum: &Summary, interfaces: &InterfaceAddresses) -> Vec<PortAddress> {
     let vrf_of = |a: IpAddr| -> Option<String> {
         let vrfs: BTreeSet<&String> = interfaces
@@ -962,6 +965,26 @@ fn port_addresses(sum: &Summary, interfaces: &InterfaceAddresses) -> Vec<PortAdd
                 vlan: None,
                 vrf: vrf_of(*a),
                 spans: spans.clone(),
+            });
+        }
+    }
+    let svi_vrfs = vlan_vrfs(interfaces);
+    for (n, v) in &sum.vlans {
+        let port = format!("Vlan{n}");
+        for (p, host) in v.hosts.entries() {
+            if p.len() != if p.addr().is_ipv4() { 32 } else { 128 } {
+                continue;
+            }
+            let a = p.addr();
+            if out.iter().any(|x| x.port == port && x.address == a) {
+                continue;
+            }
+            out.push(PortAddress {
+                port: port.clone(),
+                address: a,
+                vlan: Some(*n),
+                vrf: svi_vrfs.get(n).cloned(),
+                spans: host.spans.clone(),
             });
         }
     }
