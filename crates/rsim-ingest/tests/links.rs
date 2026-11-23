@@ -408,7 +408,7 @@ fn by_address(name: &str, port: &str, addr: &str, vrf: Option<&str>) -> Summary 
 
 /// A router `name` with the routed port `eth1` and its address `addr` in
 /// the VRF `vrf`.
-fn router(name: &str, addr: &str, vrf: Option<&str>) -> Summary {
+fn addressed_router(name: &str, addr: &str, vrf: Option<&str>) -> Summary {
     let mut s = device(name, &[("eth1", "00:00:5e:00:53:21")], &[], false);
     s.ports.clear();
     s.port_addresses.push(PortAddress {
@@ -440,7 +440,7 @@ fn an_address_of_one_port_gives_a_link() {
     gateway(&mut edge, "198.51.100.1", None);
     let devices = BTreeMap::from([
         ("edge".to_string(), edge),
-        ("r".to_string(), router("r", "198.51.100.1", None)),
+        ("r".to_string(), addressed_router("r", "198.51.100.1", None)),
         ("sw".to_string(), arp_switch("192.0.2.40")),
     ]);
     let (links, notes) = peers(&devices);
@@ -456,8 +456,14 @@ fn an_address_of_2_ports_gives_no_link_and_a_note() {
     gateway(&mut edge, "198.51.100.1", None);
     let devices = BTreeMap::from([
         ("edge".to_string(), edge),
-        ("r1".to_string(), router("r1", "198.51.100.1", None)),
-        ("r2".to_string(), router("r2", "198.51.100.1", None)),
+        (
+            "r1".to_string(),
+            addressed_router("r1", "198.51.100.1", None),
+        ),
+        (
+            "r2".to_string(),
+            addressed_router("r2", "198.51.100.1", None),
+        ),
     ]);
     let (links, notes) = peers(&devices);
     assert!(links.is_empty(), "{links:?}");
@@ -515,7 +521,10 @@ fn an_address_in_another_vrf_gives_no_link() {
     gateway(&mut edge, "198.51.100.1", Some("blue"));
     let devices = BTreeMap::from([
         ("edge".to_string(), edge),
-        ("r".to_string(), router("r", "198.51.100.1", Some("red"))),
+        (
+            "r".to_string(),
+            addressed_router("r", "198.51.100.1", Some("red")),
+        ),
     ]);
     let (links, notes) = peers(&devices);
     assert!(links.is_empty(), "{links:?}");
@@ -560,7 +569,7 @@ fn a_gateway_on_an_svi_and_on_a_routed_port_gives_no_link() {
     gateway(&mut edge, "198.51.100.1", None);
     let devices = BTreeMap::from([
         ("edge".to_string(), edge),
-        ("r".to_string(), router("r", "198.51.100.1", None)),
+        ("r".to_string(), addressed_router("r", "198.51.100.1", None)),
         ("sw".to_string(), svi("sw", "198.51.100.1")),
     ]);
     let (links, notes) = peers(&devices);
