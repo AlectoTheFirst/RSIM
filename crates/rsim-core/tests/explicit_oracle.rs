@@ -609,7 +609,9 @@ fn member_contains(m: &Member, p: &PacketPair) -> bool {
 
 /// True if the encapsulation of a member holds the encapsulation of `h`.
 fn encap_holds(d: &Option<rsim_core::EncapDesc>, h: &Header) -> bool {
-    use rsim_core::bits::{ENCAP_GRE, ENCAP_MPLS, ENCAP_VXLAN, ENCAP_WIREGUARD, ip_bits};
+    use rsim_core::bits::{
+        ENCAP_GRE, ENCAP_MPLS, ENCAP_VCMP, ENCAP_VXLAN, ENCAP_WIREGUARD, ip_bits,
+    };
     let r = |v: &Values, x: u128| matches!(v, Values::Ranges(rs) if rs.iter().any(|&(lo, hi)| lo <= x && x <= hi));
     match (d, h.encap.first()) {
         (None, None) => true,
@@ -627,6 +629,13 @@ fn encap_holds(d: &Option<rsim_core::EncapDesc>, h: &Header) -> bool {
                 Encap::Wireguard { src, dst } => {
                     (ENCAP_WIREGUARD, ip_bits(*src), ip_bits(*dst), 0, 0)
                 }
+                Encap::Vcmp { src, dst, segment } => (
+                    ENCAP_VCMP,
+                    ip_bits(*src),
+                    ip_bits(*dst),
+                    u128::from(*segment),
+                    0,
+                ),
             };
             d.kind == kind
                 && r(&d.src, src)
@@ -682,7 +691,7 @@ prop_compose! {
         v6 in prop::bool::weighted(0.2),
         src in 0..VTEPS.len(),
         dst in 0..VTEPS.len(),
-        kind in 0u8..4,
+        kind in 0u8..5,
         sport in unknown_or(prop_oneof![Just(49152u16), Just(50000)]),
         vni in prop_oneof![Just(10u32), Just(20)],
         dscp in prop_oneof![Just(0u8), Just(46)],
@@ -708,6 +717,7 @@ prop_compose! {
             0 => Encap::Vxlan { src: s, dst: d, vni },
             1 => Encap::Gre { src: s, dst: d },
             3 => Encap::Wireguard { src: s, dst: d },
+            4 => Encap::Vcmp { src: s, dst: d, segment: vni },
             _ => {
                 h.mpls_tc = FieldValue::Known(5);
                 Encap::Mpls { label: 100 + vni, traffic_class: FieldValue::Known(5) }

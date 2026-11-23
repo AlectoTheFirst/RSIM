@@ -39,11 +39,12 @@ impl Values {
 /// The encapsulation of a member.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EncapDesc {
-    /// One of [`bits::ENCAP_GRE`], [`bits::ENCAP_VXLAN`], [`bits::ENCAP_MPLS`]
-    /// and [`bits::ENCAP_WIREGUARD`].
+    /// One of [`bits::ENCAP_GRE`], [`bits::ENCAP_VXLAN`], [`bits::ENCAP_MPLS`],
+    /// [`bits::ENCAP_WIREGUARD`] and [`bits::ENCAP_VCMP`].
     pub kind: u128,
     pub src: Values,
     pub dst: Values,
+    /// The network identifier of VXLAN or the segment of VCMP.
     pub vni: Values,
     pub label: Values,
 }

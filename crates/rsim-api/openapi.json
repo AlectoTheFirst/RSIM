@@ -28,6 +28,13 @@
           "key": {
             "type": "string"
           },
+          "kind": {
+            "description": "Alternative kind",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "label": {
             "type": "string"
           }
@@ -1073,6 +1080,17 @@
                 "type": "null"
               }
             ]
+          },
+          "segment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Field_uint32"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Segment"
           },
           "src": {
             "anyOf": [
@@ -4625,6 +4643,13 @@
               {
                 "type": "null"
               }
+            ]
+          },
+          "assumption": {
+            "description": "Assumption",
+            "type": [
+              "string",
+              "null"
             ]
           },
           "delay": {

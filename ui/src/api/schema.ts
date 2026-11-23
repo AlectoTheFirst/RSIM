@@ -866,6 +866,8 @@ export interface components {
             /** Format: uint32 */
             index: number;
             key: string;
+            /** @description Alternative kind */
+            kind?: string | null;
             label: string;
         };
         /** @description Brief answer */
@@ -1208,6 +1210,8 @@ export interface components {
             dst?: components["schemas"]["Field_string"] | null;
             kind: string;
             label?: components["schemas"]["Field_uint32"] | null;
+            /** @description Segment */
+            segment?: components["schemas"]["Field_uint32"] | null;
             src?: components["schemas"]["Field_string"] | null;
             vni?: components["schemas"]["Field_uint32"] | null;
         };
@@ -2207,6 +2211,8 @@ export interface components {
         };
         TraceStepJson: {
             alternative?: components["schemas"]["AlternativeJson"] | null;
+            /** @description Assumption */
+            assumption?: string | null;
             delay: components["schemas"]["DelayJson"];
             device?: string | null;
             flood_copy?: components["schemas"]["FloodCopyJson"] | null;

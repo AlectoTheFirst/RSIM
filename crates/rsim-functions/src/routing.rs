@@ -4,10 +4,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
 use rsim_core::{
-    AddrCond, AddrField, Alternative, Attr, Branch, Context, ContextAttr, Dependency, Destination,
-    FieldValue, FlowState, FunctionId, FunctionKind, InterfaceId, Mac, Match, NeighbourTarget,
-    NetFunction, NextHop, ObjectId, Outcome, PacketSet, Prefix, PrefixTable, Reason, ReasonCode,
-    Rewrite, RulePredicate, SourceSpan, Tri, TriePrefixTable, VrfId,
+    AddrCond, AddrField, Alternative, AlternativeKind, Attr, Branch, Context, ContextAttr,
+    Dependency, Destination, FieldValue, FlowState, FunctionId, FunctionKind, InterfaceId, Mac,
+    Match, NeighbourTarget, NetFunction, NextHop, ObjectId, Outcome, PacketSet, Prefix,
+    PrefixTable, Reason, ReasonCode, Rewrite, RulePredicate, SourceSpan, Tri, TriePrefixTable,
+    VrfId,
 };
 
 use crate::common::{Meta, push_nonempty};
@@ -24,6 +25,8 @@ pub enum RouteProtocol {
     Isis,
     Eigrp,
     Rip,
+    /// A route of another device that the overlay of an SD-WAN gave.
+    Overlay,
     Other,
 }
 
@@ -36,6 +39,7 @@ impl RouteProtocol {
             RouteProtocol::Isis => "isis",
             RouteProtocol::Eigrp => "eigrp",
             RouteProtocol::Rip => "rip",
+            RouteProtocol::Overlay => "overlay",
             RouteProtocol::Other => "other",
         }
     }
@@ -407,6 +411,7 @@ impl RouteLookup {
                 .with_spans(spans.clone());
             if count > 1 {
                 b = b.with_alternative(Alternative {
+                    kind: AlternativeKind::Choice,
                     choice: self.meta.id.clone(),
                     key: key.clone(),
                     index: u32::try_from(i).expect("too many next hops"),

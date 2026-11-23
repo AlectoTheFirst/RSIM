@@ -41,6 +41,7 @@ pub enum FunctionKind {
     WirelessAttachment,
     Layer3HandOff,
     // Tunnels.
+    TunnelSelection,
     Encapsulation,
     Decapsulation,
     // Multicast.

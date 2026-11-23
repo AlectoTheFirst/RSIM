@@ -83,6 +83,9 @@ pub enum ReasonCode {
     IncompleteTable,
     /// A table that the answer needs was not collected.
     NotCollected,
+    /// The candidates of a selection that is not collected end with
+    /// different results.
+    SelectionNotCollected,
     /// The set of a part of the query was over the node budget, and the
     /// part has one original request.
     SetBudget,

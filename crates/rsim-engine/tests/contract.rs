@@ -4,10 +4,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use rsim_core::{
-    Alternative, Attr, Branch, Context, Delay, EndpointId, FieldValue, FlagsCond, FlowState,
-    Header, InterfaceId, Match, NetFunction, NextHop, Outcome, PROTO_ICMP, PacketSet, Prefix,
-    PrefixTable, Reason, ReasonCode, Rewrite, SetArena, SourceSpan, TriePrefixTable, ValueCond,
-    Verdict, ZoneId,
+    Alternative, AlternativeKind, Attr, Branch, Context, Delay, EndpointId, FieldValue, FlagsCond,
+    FlowState, Header, InterfaceId, Match, NetFunction, NextHop, Outcome, PROTO_ICMP, PacketSet,
+    Prefix, PrefixTable, Reason, ReasonCode, Rewrite, SetArena, SourceSpan, TriePrefixTable,
+    ValueCond, Verdict, ZoneId,
 };
 use rsim_engine::{Executor, Query, Summary, check_contract, check_partition};
 use rsim_functions::{
@@ -33,6 +33,7 @@ fn branch(p: PacketSet) -> Branch {
 
 fn alt(b: Branch, i: u32) -> Branch {
     b.with_alternative(Alternative {
+        kind: AlternativeKind::Choice,
         choice: fid("f"),
         key: "k".into(),
         index: i,

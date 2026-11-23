@@ -66,13 +66,13 @@ export function fieldName(key: string): string {
   return key === "network.iana_number" ? "network.transport" : key;
 }
 
-/** The text of the encapsulation of a header: the kind and the VNI or label of each level, or absent. */
+/** The text of the encapsulation of a header: the kind and the VNI, label or segment of each level, or absent. */
 function encapText(h: Header): Shown {
   const list = h.encap ?? [];
   if (list.length === 0) return { known: true, text: "absent" };
   let known = true;
   const parts = list.map((e) => {
-    const id = e.vni ?? e.label;
+    const id = e.vni ?? e.label ?? e.segment;
     if (id === null || id === undefined) return e.kind;
     const t = fieldText(id as FieldValue, null);
     if (!t.known) known = false;

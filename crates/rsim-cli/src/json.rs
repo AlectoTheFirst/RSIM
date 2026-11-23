@@ -4,9 +4,9 @@
 use std::fmt::Debug;
 
 use rsim_core::{
-    Alternative, Attr, Delay, DelayGap, Destination, EncapDesc, FieldValue, FloodCopy, HeaderDesc,
-    HeaderField, Outcome, PacketSet, QosView, RateCondition, Reason, ReasonCode, SourceSpan,
-    TraceStep, Uniform, Values, Verdict, VerdictKind, bits,
+    Alternative, AlternativeKind, Attr, Delay, DelayGap, Destination, EncapDesc, FieldValue,
+    FloodCopy, HeaderDesc, HeaderField, Outcome, PacketSet, QosView, RateCondition, Reason,
+    ReasonCode, SourceSpan, TraceStep, Uniform, Values, Verdict, VerdictKind, bits,
 };
 use rsim_engine::{Answer, BranchView, Ingress, IngressBasis, Mode, ReplyResult, Summary};
 
@@ -250,6 +250,7 @@ pub fn trace_step_json(index: usize, s: &TraceStep) -> TraceStepJson {
         qos: QosJson::new(&s.qos),
         rate_condition: s.rate_condition.as_ref().map(RateConditionJson::new),
         rib_guard: snake(&s.rib_guard),
+        assumption: s.assumption.clone(),
     }
 }
 
@@ -303,6 +304,10 @@ impl FromEngine<Alternative> for AlternativeJson {
             index: a.index,
             count: a.count,
             label: a.label.clone(),
+            kind: match a.kind {
+                AlternativeKind::Choice => None,
+                AlternativeKind::Candidate => Some("candidate".into()),
+            },
         }
     }
 }
@@ -513,6 +518,7 @@ impl FromEngine<EncapDesc> for EncapJson {
                 dst: Some(addr(&e.dst)),
                 vni: None,
                 label: None,
+                segment: None,
             },
             bits::ENCAP_VXLAN => EncapJson {
                 kind: "vxlan".into(),
@@ -520,6 +526,7 @@ impl FromEngine<EncapDesc> for EncapJson {
                 dst: Some(addr(&e.dst)),
                 vni: Some(num(&e.vni)),
                 label: None,
+                segment: None,
             },
             bits::ENCAP_WIREGUARD => EncapJson {
                 kind: "wireguard".into(),
@@ -527,6 +534,15 @@ impl FromEngine<EncapDesc> for EncapJson {
                 dst: Some(addr(&e.dst)),
                 vni: None,
                 label: None,
+                segment: None,
+            },
+            bits::ENCAP_VCMP => EncapJson {
+                kind: "vcmp".into(),
+                src: Some(addr(&e.src)),
+                dst: Some(addr(&e.dst)),
+                vni: None,
+                label: None,
+                segment: Some(num(&e.vni)),
             },
             _ => EncapJson {
                 kind: "mpls".into(),
@@ -534,6 +550,7 @@ impl FromEngine<EncapDesc> for EncapJson {
                 dst: None,
                 vni: None,
                 label: Some(num(&e.label)),
+                segment: None,
             },
         }
     }

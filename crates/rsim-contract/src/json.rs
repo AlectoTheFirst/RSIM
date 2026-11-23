@@ -246,6 +246,9 @@ pub struct TraceStepJson {
     pub qos: QosJson,
     pub rate_condition: Option<RateConditionJson>,
     pub rib_guard: String,
+    /// Assumption
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assumption: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -270,6 +273,9 @@ pub struct AlternativeJson {
     pub index: u32,
     pub count: u32,
     pub label: String,
+    /// Alternative kind
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -439,6 +445,9 @@ pub struct EncapJson {
     pub dst: Option<FieldJson<String>>,
     pub vni: Option<FieldJson<u32>>,
     pub label: Option<FieldJson<u32>>,
+    /// Segment
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segment: Option<FieldJson<u32>>,
 }
 
 /// The JSON text of a value: compact on one line, or indented.
