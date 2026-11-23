@@ -96,7 +96,6 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
 
   useEffect(() => {
     applyTheme(prefs);
-    savePrefs(prefs);
     if (prefs.theme !== "system") return;
     const mq = window.matchMedia("(prefers-color-scheme: light)");
     const on = () => applyTheme(prefs);
@@ -354,7 +353,10 @@ export function App(props: { user?: Me | null; onSignOut?: () => void } = {}) {
           onLatest={loadLatest}
           onTwin={onTwin}
           prefs={prefs}
-          onPrefs={setPrefs}
+          onPrefs={(p) => {
+            savePrefs(p);
+            setPrefs(p);
+          }}
           user={user}
           onTokens={() => navigate(viewSearch("Tokens", twin, search))}
           onSignOut={props.onSignOut}

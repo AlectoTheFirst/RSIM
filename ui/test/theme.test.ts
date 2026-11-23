@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { COLOURS, type ColourToken, DEFAULT_PREFS, SCHEMES, SIZE, type Scheme, prefsOf, properties } from "../src/theme";
+import { describe, expect, it, vi } from "vitest";
+import { COLOURS, type ColourToken, DEFAULT_PREFS, SCHEMES, SIZE, type Scheme, loadPrefs, prefsOf, properties, savePrefs } from "../src/theme";
 
 const channel = (c: number) => {
   const s = c / 255;
@@ -89,5 +89,27 @@ describe("the stored preferences", () => {
   it("gives the default for a value that is not a preference", () => {
     expect(prefsOf({ theme: "sepia" as never, row: 18 as never, colours: "red" as never })).toEqual(DEFAULT_PREFS);
     expect(prefsOf({})).toEqual(DEFAULT_PREFS);
+  });
+});
+
+describe("the store of the preferences", () => {
+  function fakeStore(init: Record<string, string>) {
+    const m = new Map(Object.entries(init));
+    vi.stubGlobal("localStorage", { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) });
+    return m;
+  }
+
+  it("keeps the theme and the colours of the old store and gives the default row height", () => {
+    fakeStore({ "rsim.prefs": JSON.stringify({ theme: "darcula", colours: "blue-orange", row: 32 }) });
+    expect(loadPrefs()).toEqual({ theme: "darcula", colours: "blue-orange", row: DEFAULT_PREFS.row });
+    vi.unstubAllGlobals();
+  });
+
+  it("reads back a saved row height", () => {
+    const m = fakeStore({ "rsim.prefs": JSON.stringify({ row: 24 }) });
+    savePrefs({ ...DEFAULT_PREFS, row: 32 });
+    expect(m.get("rsim.prefs.v2")).toBeDefined();
+    expect(loadPrefs().row).toBe(32);
+    vi.unstubAllGlobals();
   });
 });

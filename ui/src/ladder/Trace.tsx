@@ -27,6 +27,7 @@ import {
   functionWidth,
   ingressHint,
   ladder,
+  ladderOf,
   noIngress,
   noteLabel,
   rowKeyOfStep,
@@ -44,7 +45,9 @@ export interface TraceResult {
   out: PathAnswer | SetAnswer;
 }
 
-const DIRS: readonly Dir[] = ["forward", "reply"];
+/** The rows of the ladder: the forward path, the reply, or both one after the other. */
+type Shown = Dir | "both";
+const SHOWN: readonly Shown[] = ["forward", "reply", "both"];
 
 /** Whether the query of an answer asks for the reply. */
 const asksReply = (out: PathAnswer | SetAnswer) => (out.query as { reply?: boolean | null }).reply !== false;
@@ -197,7 +200,7 @@ export function TraceView(props: {
 }) {
   const { result, fields, twin, copy } = props;
   const [level, setLevel] = useState<Level>("function");
-  const [dir, setDir] = useState<Dir>("forward");
+  const [dir, setDir] = useState<Shown>("forward");
   const [fwdSel, setFwdSel] = useState<PathRef | null>(null);
   const [repSel, setRepSel] = useState<PathRef | null>(null);
   const [filter, setFilter] = useState<{ forward: string | null; reply: string | null }>({ forward: null, reply: null });
@@ -238,12 +241,17 @@ export function TraceView(props: {
   const repList = useMemo(() => withKind(repAll, filter.reply), [repAll, filter.reply]);
   const rep = selectedPath(repList, repSel);
   const hasReply = repAll.length > 0;
-  const d: Dir = dir === "reply" && hasReply ? "reply" : "forward";
+  const view: Shown = dir !== "forward" && hasReply ? dir : "forward";
+  const d: Dir = view === "reply" ? "reply" : "forward";
   const path = d === "forward" ? fwd : rep;
   const list = d === "forward" ? fwdList : repList;
   const all = d === "forward" ? fwdAll : repAll;
+  const both = view === "both" && rep !== null;
 
-  const model = useMemo(() => (shown && path ? ladder(shown, level, path, setMode) : null), [shown, level, path?.branch, path?.replyOf, setMode]);
+  const model = useMemo(
+    () => (shown && path ? (both && fwd && rep ? ladderOf(shown, level, [fwd, rep], setMode) : ladder(shown, level, path, setMode)) : null),
+    [shown, level, path?.branch, path?.replyOf, both, rep?.branch, rep?.replyOf, setMode],
+  );
   const fnWidth = useMemo(() => (answer ? functionWidth(functionNames(answer)) : SIZE.colFunction), [answer]);
   const sites = useInventorySites();
   const pathDevices = useMemo(() => (path ? (list.find((p) => p.ref.branch === path.branch && p.ref.replyOf === path.replyOf)?.devices ?? []) : []), [list, path?.branch, path?.replyOf]);
@@ -259,11 +267,12 @@ export function TraceView(props: {
   /** Selects the deciding step of a path and opens its panel. */
   function openStep(s: DecidingStep) {
     if (!shown) return;
+    const keep = dir === "both";
     if (s.path.replyOf === null) {
-      setDir("forward");
+      if (!keep) setDir("forward");
       setFwdSel(s.path);
     } else {
-      setDir("reply");
+      if (!keep) setDir("reply");
       setRepSel(s.path);
     }
     const key = rowKeyOfStep(ladder(shown, level, s.path, setMode).rows, s.path, s.step.index);
@@ -305,15 +314,15 @@ export function TraceView(props: {
     resetRow();
   }
 
-  function setDirection(x: Dir) {
-    if (x === d) return;
+  function setDirection(x: Shown) {
+    if (x === view) return;
     setDir(x);
     resetRow();
   }
 
   function setKind(which: Dir, k: string | null) {
     setFilter((f) => ({ ...f, [which]: k }));
-    if (which !== d) setDir(which);
+    if (which !== d && view !== "both") setDir(which);
     resetRow();
   }
 
@@ -506,7 +515,7 @@ export function TraceView(props: {
           {answer && !props.busy && !props.problem ? (
             <span class="group outcome-controls">
               {props.timing ? <span class="t-index muted">{props.timing}</span> : null}
-              {hasReply ? <Segmented<Dir> label="Direction" value={d} options={DIRS} onChange={setDirection} /> : null}
+              {hasReply ? <Segmented<Shown> label="Direction" value={view} options={SHOWN} onChange={setDirection} /> : null}
               <Segmented<Level> label="Level" value={level} options={LEVELS} onChange={setLevel} />
               {result ? (
                 <button type="button" onClick={() => props.onTopology(result.qid)}>
