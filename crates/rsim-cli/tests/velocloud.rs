@@ -387,6 +387,8 @@ fn a_wan_interface_with_a_link_of_the_join_has_a_physical_edge_to_the_estate_dev
         "type": "STATIC", "cidrIp": "203.0.113.130", "cidrPrefix": 25, "gateway": "203.0.113.129"
     });
     m.get_mut("edges").unwrap()[0]["links"][0]["ipAddress"] = json!("203.0.113.130");
+    m.get_mut("edge_modules").unwrap()["e-br"]["WAN"]["data"]["links"][0]["nextHopIpAddress"] =
+        json!("203.0.113.129");
     sync_state(&mut m);
     let t = loaded_with(&m, vec![router()]);
     let out = rsim_cli::topology::topology("velocloud", &t, &TopologyViewArgs::default()).unwrap();
