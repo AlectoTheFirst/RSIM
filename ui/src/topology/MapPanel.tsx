@@ -135,7 +135,7 @@ function Endpoints(props: { twin: string; device: string }) {
 
   const rows = page.device === props.device ? page.rows : [];
   return (
-    <section class="map-section">
+    <section class="map-section fill">
       <h3 class="t-section">Endpoints</h3>
       <VirtualRows
         id="map-endpoints"
@@ -149,7 +149,7 @@ function Endpoints(props: { twin: string; device: string }) {
         onEnd={page.cursor && !page.busy ? () => load(page.device, page.cursor, page.rows) : undefined}
         headHeight={SIZE.button}
         head={
-          <div class="map-row head">
+          <div class="map-row map-endpoint head">
             <span class="t-label">host</span>
             <span class="t-label">address</span>
             <span class="t-label">interface</span>
@@ -158,8 +158,10 @@ function Endpoints(props: { twin: string; device: string }) {
         row={(i) => {
           const r = rows[i]!;
           return (
-            <div class="map-row">
-              <Value v={r.host} />
+            <div class="map-row map-endpoint">
+              <span class="map-host">
+                <Value v={r.host} />
+              </span>
               <Value v={r.address} />
               <Value v={r.interface} />
             </div>
@@ -180,15 +182,23 @@ export function MapPanel(props: {
   onShow: (id: string) => void;
   onFunctions: (device: string) => void;
   onEntryPoint: (ingress: string) => void;
+  /** The action that adds the neighbours of a device to the scope, or null when the scope has them. */
+  onExpand: (device: string) => (() => void) | null;
   returnFocus?: { current: HTMLElement | null };
 }) {
   const n = props.graph.node.get(props.id);
   if (!n) return null;
   const device = n.device;
   const hasEndpoints = device !== null && (props.graph.node.get(groupId(device))?.count ?? 0) > 0;
+  const expand = n.kind === "device" && device !== null ? props.onExpand(device) : null;
   const deviceFoot =
     device !== null ? (
       <>
+        {expand ? (
+          <button type="button" onClick={expand}>
+            Show neighbours
+          </button>
+        ) : null}
         <button type="button" onClick={() => props.onFunctions(device)}>
           View functions
         </button>

@@ -167,8 +167,8 @@ describe("the requests", () => {
 
   it("exports the scope of the map", () => {
     expect(exportParams({ kind: "twin" }, [], "graphml")).toEqual({ format: "graphml" });
-    expect(exportParams({ kind: "device", device: "core-01", hops: 2 }, [], "d2")).toEqual({ around: "core-01", hops: "2", format: "d2" });
-    expect(exportParams({ kind: "paths" }, ["leaf-10", "leaf-2"], "mermaid")).toEqual({ device: "leaf-2,leaf-10", format: "mermaid" });
+    expect(exportParams({ kind: "device", device: "core-01", expand: [] }, ["core-01", "acc-01"], "d2")).toEqual({ device: "acc-01,core-01", format: "d2" });
+    expect(exportParams({ kind: "paths", expand: [] }, ["leaf-10", "leaf-2"], "mermaid")).toEqual({ device: "leaf-2,leaf-10", format: "mermaid" });
   });
 });
 

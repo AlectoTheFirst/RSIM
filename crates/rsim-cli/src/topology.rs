@@ -9,7 +9,9 @@ use rsim_contract::claim;
 use rsim_contract::topology::{TopoEdge, TopoNode, TopologyOut};
 use rsim_core::FunctionKind;
 use rsim_engine::Answer;
-use rsim_functions::{Egress, LinkFacts, PortEgress, TunnelPeer, VxlanEncap};
+use rsim_functions::{
+    Egress, LinkFacts, PortEgress, TunnelPeer, VxlanEncap, WireguardEncap, WireguardPeer,
+};
 use serde_json::{Value, json};
 
 use crate::claims::speed_duplex;
@@ -135,11 +137,41 @@ fn physical(t: &Loaded, want_claim: bool) -> Vec<TopoEdge> {
         .collect()
 }
 
+/// The node of a WireGuard peer outside the twin: `peer:<endpoint address>`,
+/// or `peer:<device>/<interface>/<peer>` for a peer with no endpoint.
+fn peer_node_id(device: &str, w: &WireguardEncap, p: &WireguardPeer) -> String {
+    match p.endpoint {
+        Some((a, _)) => format!("peer:{a}"),
+        None => format!("peer:{device}/{}/{}", w.interface, p.name),
+    }
+}
+
+/// The devices of the twin whose WireGuard source address is the endpoint
+/// of a peer, other than `device`.
+fn wireguard_far(
+    ends: &BTreeMap<std::net::IpAddr, BTreeSet<String>>,
+    device: &str,
+    p: &WireguardPeer,
+) -> Vec<String> {
+    p.endpoint
+        .and_then(|(a, _)| ends.get(&a))
+        .into_iter()
+        .flatten()
+        .filter(|d| *d != device)
+        .cloned()
+        .collect()
+}
+
 /// The tunnel edges: from each device with a VXLAN encapsulation to each
-/// device whose tunnel end is the peer.
-fn overlay(t: &Loaded) -> Vec<TopoEdge> {
+/// device whose tunnel end is the peer, and from each device with a
+/// WireGuard interface to each peer: the device of the twin whose WireGuard
+/// source address is the endpoint of the peer, else a node `peer` outside
+/// the twin. The nodes of the peers outside the twin come with the edges.
+fn overlay(t: &Loaded) -> (Vec<TopoEdge>, BTreeMap<String, TopoNode>) {
     let mut ends: BTreeMap<std::net::IpAddr, BTreeSet<String>> = BTreeMap::new();
     let mut encaps = Vec::new();
+    let wg_ends = wireguard_ends(t);
+    let mut wgs: Vec<(String, String, &WireguardEncap)> = Vec::new();
     // The gateways of the route next hops that go to each function: the
     // peers of an encapsulation that takes its peer from the next hop.
     let mut gateways: BTreeMap<String, BTreeSet<std::net::IpAddr>> = BTreeMap::new();
@@ -150,6 +182,11 @@ fn overlay(t: &Loaded) -> Vec<TopoEdge> {
         {
             ends.entry(e.source).or_default().insert(d.to_string());
             encaps.push((d.to_string(), f.id().to_string(), e));
+        }
+        if let Some(w) = any.downcast_ref::<WireguardEncap>()
+            && let Some(d) = f.device()
+        {
+            wgs.push((d.to_string(), f.id().to_string(), w));
         }
         if let Some(rl) = any.downcast_ref::<rsim_functions::RouteLookup>() {
             for fib in rl.tables.values() {
@@ -202,6 +239,42 @@ fn overlay(t: &Loaded) -> Vec<TopoEdge> {
             );
         }
     }
+    let mut peers: BTreeMap<String, TopoNode> = BTreeMap::new();
+    for (d, encap, w) in &wgs {
+        for p in w.peers() {
+            let far = wireguard_far(&wg_ends, d, p);
+            let targets = if far.is_empty() {
+                let id = peer_node_id(d, w, p);
+                peers.entry(id.clone()).or_insert_with(|| TopoNode {
+                    id: id.clone(),
+                    kind: "peer".into(),
+                    label: p.name.clone(),
+                    device: None,
+                    functions: None,
+                });
+                vec![id]
+            } else {
+                far
+            };
+            for to in targets {
+                let id = format!("overlay:{d}>{to}");
+                out.entry(id.clone())
+                    .or_insert_with(|| edge(id.clone(), "overlay", d.clone(), to.clone()));
+                tunnels.entry(id).or_default().insert(
+                    (encap.clone(), p.name.clone()),
+                    json!({
+                        "encap": encap,
+                        "peer_from": "fixed",
+                        "name": p.name,
+                        "source": p.source.as_ref().ok().map(ToString::to_string),
+                        "peer": p.endpoint.map(|(a, _)| a.to_string()),
+                        "port": p.endpoint.map(|(_, port)| port),
+                        "vnis": [],
+                    }),
+                );
+            }
+        }
+    }
     for (id, x) in &mut out {
         let list: Vec<serde_json::Value> = tunnels
             .remove(id)
@@ -209,7 +282,55 @@ fn overlay(t: &Loaded) -> Vec<TopoEdge> {
             .unwrap_or_default();
         x.facts = json!({ "tunnels": list });
     }
-    out.into_values().collect()
+    (out.into_values().collect(), peers)
+}
+
+/// The WireGuard peer of an encapsulation step: the peer of the function
+/// whose spans are the deciding spans of the step, and the node of the
+/// peer, a device of the twin or a node `peer`.
+fn wireguard_step(
+    t: &Loaded,
+    ends: &BTreeMap<std::net::IpAddr, BTreeSet<String>>,
+    s: &rsim_core::TraceStep,
+) -> Option<(String, Option<TopoNode>)> {
+    let f = t.function(&s.function)?;
+    let any: &dyn Any = f.as_ref();
+    let w = any.downcast_ref::<WireguardEncap>()?;
+    let d = f.device()?.to_string();
+    let p = w
+        .peers()
+        .iter()
+        .find(|p| !p.spans.is_empty() && p.spans.iter().all(|x| s.provenance.contains(x)))?;
+    if let Some(far) = wireguard_far(ends, &d, p).into_iter().next() {
+        return Some((far, None));
+    }
+    let id = peer_node_id(&d, w, p);
+    let node = TopoNode {
+        id: id.clone(),
+        kind: "peer".into(),
+        label: p.name.clone(),
+        device: None,
+        functions: None,
+    };
+    Some((id, Some(node)))
+}
+
+/// The source address of each WireGuard peer of the twin, with its devices.
+fn wireguard_ends(t: &Loaded) -> BTreeMap<std::net::IpAddr, BTreeSet<String>> {
+    let mut ends: BTreeMap<std::net::IpAddr, BTreeSet<String>> = BTreeMap::new();
+    for f in t.functions() {
+        let any: &dyn Any = f.as_ref();
+        if let Some(w) = any.downcast_ref::<WireguardEncap>()
+            && let Some(d) = f.device()
+        {
+            for p in w.peers() {
+                if let Ok(s) = p.source {
+                    ends.entry(s).or_default().insert(d.to_string());
+                }
+            }
+        }
+    }
+    ends
 }
 
 /// The topology of a twin.
@@ -284,13 +405,25 @@ pub fn topology(
         keep = keep.intersection(&seen).cloned().collect();
     }
     let (nodes, mut edges): (Vec<TopoNode>, Vec<TopoEdge>) = if level == "device" {
-        let nodes = keep.iter().map(|d| devices[d].clone()).collect();
+        let mut nodes: Vec<TopoNode> = keep.iter().map(|d| devices[d].clone()).collect();
         let mut e = Vec::new();
         if layers.iter().any(|l| l == "physical") {
             e.extend(phys);
         }
         if layers.iter().any(|l| l == "overlay") {
-            e.extend(overlay(t));
+            let (tunnels, peers) = overlay(t);
+            let shown: BTreeSet<&str> = tunnels
+                .iter()
+                .filter(|x| keep.contains(&x.from))
+                .map(|x| x.to.as_str())
+                .collect();
+            nodes.extend(
+                peers
+                    .values()
+                    .filter(|p| shown.contains(p.id.as_str()))
+                    .cloned(),
+            );
+            e.extend(tunnels);
         }
         (nodes, e)
     } else {
@@ -359,16 +492,37 @@ fn underlay(
         .map(move |(p, d)| (format!("underlay:{p}>{d}:{tag}"), p, d, over.clone()))
 }
 
+/// Adds the edges of a tunnel from `start`: the overlay edge to `end` when
+/// the tunnel end is known, and the underlay edges of its hops.
+fn close(
+    add: &mut impl FnMut(String, &str, &str, &str, usize, Option<String>),
+    start: &str,
+    end: Option<&str>,
+    hops: Vec<(String, String)>,
+    b: usize,
+) {
+    if let Some(e) = end {
+        add(format!("overlay:{start}>{e}"), "overlay", start, e, b, None);
+    }
+    for (id, p, x, over) in underlay(start, end, hops) {
+        add(id, "underlay", &p, &x, b, over);
+    }
+}
+
 /// The drawing of the paths of an answer at the device level. A hop
 /// between 2 devices is a `physical` edge; inside a tunnel it is an
 /// `underlay` edge that names its `overlay` edge, from the device that
 /// encapsulates to the device that decapsulates. The id of an underlay
-/// edge holds both tunnel ends; a tunnel with no decapsulation in the
-/// branch gives underlay edges with only the start device and no overlay
-/// edge.
+/// edge holds both tunnel ends. A WireGuard tunnel with no decapsulation in
+/// the branch ends at its peer: the device of the twin whose WireGuard
+/// source address is the endpoint, else a node `peer`. Another tunnel with
+/// no decapsulation in the branch gives underlay edges with only the start
+/// device and no overlay edge.
 pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
     let devices = device_nodes(t);
+    let ends = wireguard_ends(t);
     let mut used: BTreeSet<String> = BTreeSet::new();
+    let mut peers: BTreeMap<String, TopoNode> = BTreeMap::new();
     let mut edges: BTreeMap<String, TopoEdge> = BTreeMap::new();
     let mut add =
         |id: String, layer: &str, from: &str, to: &str, b: usize, over: Option<String>| {
@@ -384,9 +538,10 @@ pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
         };
     for b in a.branches() {
         let mut prev: Option<String> = None;
-        // The device that encapsulated the packets and the hops of the
-        // outer packet since then, inside a tunnel.
-        let mut tunnel: Option<(String, Vec<(String, String)>)> = None;
+        // The device that encapsulated the packets, the hops of the outer
+        // packet since then, and the node of a WireGuard peer, inside a
+        // tunnel.
+        let mut tunnel: Option<(String, Vec<(String, String)>, Option<String>)> = None;
         for s in &b.steps {
             let Some(d) = s.device.as_ref().map(ToString::to_string) else {
                 continue;
@@ -396,7 +551,7 @@ pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
                 && *p != d
             {
                 match &mut tunnel {
-                    Some((_, hops)) => hops.push((p.clone(), d.clone())),
+                    Some((_, hops, _)) => hops.push((p.clone(), d.clone())),
                     None => add(
                         format!("physical:{p}>{d}"),
                         "physical",
@@ -409,41 +564,38 @@ pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
             }
             let forwards = matches!(s.outcome, rsim_core::Outcome::Forward(_));
             if s.kind == FunctionKind::Encapsulation && forwards {
-                if let Some((start, hops)) = tunnel.take() {
-                    for (id, p, x, over) in underlay(&start, None, hops) {
-                        add(id, "underlay", &p, &x, b.index, over);
-                    }
+                if let Some((start, hops, far)) = tunnel.take() {
+                    close(&mut add, &start, far.as_deref(), hops, b.index);
                 }
-                tunnel = Some((d.clone(), Vec::new()));
+                let far = wireguard_step(t, &ends, s).map(|(far, node)| {
+                    if let Some(n) = node {
+                        peers.entry(n.id.clone()).or_insert(n);
+                    }
+                    far
+                });
+                tunnel = Some((d.clone(), Vec::new(), far));
             }
             if s.kind == FunctionKind::Decapsulation
                 && forwards
-                && let Some((start, hops)) = tunnel.take()
+                && let Some((start, hops, _)) = tunnel.take()
             {
-                add(
-                    format!("overlay:{start}>{d}"),
-                    "overlay",
-                    &start,
-                    &d,
-                    b.index,
-                    None,
-                );
-                for (id, p, x, over) in underlay(&start, Some(&d), hops) {
-                    add(id, "underlay", &p, &x, b.index, over);
-                }
+                close(&mut add, &start, Some(&d), hops, b.index);
             }
             prev = Some(d);
         }
-        if let Some((start, hops)) = tunnel {
-            for (id, p, x, over) in underlay(&start, None, hops) {
-                add(id, "underlay", &p, &x, b.index, over);
-            }
+        if let Some((start, hops, far)) = tunnel {
+            close(&mut add, &start, far.as_deref(), hops, b.index);
         }
     }
-    let nodes = used
+    let mut nodes: Vec<TopoNode> = used
         .iter()
         .filter_map(|d| devices.get(d).cloned())
         .collect();
+    for (id, n) in peers {
+        if edges.values().any(|e| e.to == id) {
+            nodes.push(n);
+        }
+    }
     let mut layers: Vec<String> = edges.values().map(|e| e.layer.clone()).collect();
     layers.sort();
     layers.dedup();
@@ -456,5 +608,116 @@ pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
         layers,
         nodes,
         edges: edges.into_values().collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use rsim_contract::args::TopologyViewArgs;
+    use rsim_contract::twin::TwinJson;
+    use rsim_core::{Attr, InterfaceId, VrfId};
+    use rsim_engine::TwinBuilder;
+    use rsim_functions::{DeviceDelivery, Meta, WireguardEncap, WireguardPeer, WireguardSettings};
+
+    use crate::commands::Loaded;
+
+    fn peer(name: &str, endpoint: &str, source: &str) -> WireguardPeer {
+        WireguardPeer {
+            name: name.into(),
+            allowed: vec!["0.0.0.0/0".parse().unwrap()],
+            endpoint: Some((endpoint.parse().unwrap(), 51820)),
+            source: Ok(source.parse().unwrap()),
+            source_interface: None,
+            spans: Vec::new(),
+        }
+    }
+
+    fn router(b: &mut TwinBuilder, d: &str, peers: Vec<WireguardPeer>) {
+        let profile = rsim_topologies::generic_router();
+        let next = format!("{d}/route");
+        b.add(DeviceDelivery {
+            meta: Meta::new(next.as_str(), d, &profile),
+        });
+        b.add_arc(Arc::new(WireguardEncap::new(
+            Meta::new(format!("{d}/wireguard/wg0").as_str(), d, &profile),
+            InterfaceId::new("wg0"),
+            peers,
+            WireguardSettings {
+                listen_port: Some(51820),
+                unknown: None,
+                src_zone: Attr::Unset,
+                underlay: VrfId::new("default"),
+                next: next.as_str().into(),
+            },
+        )));
+    }
+
+    fn twin() -> Loaded {
+        let mut b = TwinBuilder::new();
+        router(
+            &mut b,
+            "r1",
+            vec![
+                peer("remote", "203.0.113.5", "198.51.100.1"),
+                peer("r2", "198.51.100.2", "198.51.100.1"),
+            ],
+        );
+        router(
+            &mut b,
+            "r2",
+            vec![peer("r1", "198.51.100.1", "198.51.100.2")],
+        );
+        Loaded {
+            twin: b.build().expect("the twin builds"),
+            identity: TwinJson::builtin("vpn").unwrap(),
+            coverage: BTreeMap::new(),
+            bgp: BTreeMap::new(),
+            facts: BTreeMap::new(),
+            seen: Vec::new(),
+            tables: Default::default(),
+            source: None,
+        }
+    }
+
+    #[test]
+    fn a_wireguard_peer_is_a_device_of_the_twin_or_a_peer_node_outside_it() {
+        let out = super::topology("vpn", &twin(), &TopologyViewArgs::default()).unwrap();
+        let peers: Vec<(&str, &str)> = out
+            .nodes
+            .iter()
+            .filter(|n| n.kind == "peer")
+            .map(|n| (n.id.as_str(), n.label.as_str()))
+            .collect();
+        assert_eq!(peers, [("peer:203.0.113.5", "remote")]);
+        let tunnels: Vec<(&str, &str)> = out
+            .edges
+            .iter()
+            .filter(|e| e.layer == "overlay")
+            .map(|e| (e.from.as_str(), e.to.as_str()))
+            .collect();
+        assert_eq!(
+            tunnels,
+            [("r1", "peer:203.0.113.5"), ("r1", "r2"), ("r2", "r1")]
+        );
+        let remote = out
+            .edges
+            .iter()
+            .find(|e| e.to == "peer:203.0.113.5")
+            .unwrap();
+        assert_eq!(remote.facts["tunnels"][0]["name"], "remote");
+        assert_eq!(remote.facts["tunnels"][0]["port"], 51820);
+    }
+
+    #[test]
+    fn a_view_of_one_device_has_only_the_peers_of_its_tunnels() {
+        let args = TopologyViewArgs {
+            devices: Some(vec!["r2".into()]),
+            ..Default::default()
+        };
+        let out = super::topology("vpn", &twin(), &args).unwrap();
+        assert!(out.nodes.iter().all(|n| n.kind == "device"));
     }
 }

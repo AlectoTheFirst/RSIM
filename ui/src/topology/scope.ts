@@ -1,6 +1,7 @@
 // The scope of the map and its requests: the twin, a site of the inventory,
 // the paths of the query with the neighbours of their devices, or one device
-// with its neighbours up to 3 hops. A scope of more than 300 devices does
+// with its neighbours. The scopes of the paths and of a device add the
+// neighbours of each expanded device. A scope of more than 300 devices does
 // not draw.
 import { ApiProblem, allRows, getQuerySteps, getTopology, tableRows, tableUnique } from "../api/client";
 import { type OutsideNeighbour, type TopologyOut, countsOf, natural, neighboursOf } from "./graph";
@@ -10,31 +11,29 @@ import { pickerLimit } from "../page/pick";
 /** The most devices of a scope that the map draws. */
 export const MAX_DRAWN = 300;
 
-export const HOPS = [1, 2, 3] as const;
-export type Hops = (typeof HOPS)[number];
-
 export type Scope =
   | { kind: "twin" }
   | { kind: "site"; site: string }
-  | { kind: "paths" }
-  | { kind: "device"; device: string; hops: Hops };
+  | { kind: "paths"; expand: string[] }
+  | { kind: "device"; device: string; expand: string[] };
 
-/** The URL parameters of the scope: `device` with `hops`, else `site`. */
-export const SCOPE_PARAMS = ["device", "hops", "site"] as const;
+/** The URL parameters of the scope: `device`, else `site`, and `expand`. */
+export const SCOPE_PARAMS = ["device", "site", "expand"] as const;
 
-function hopsOf(v: string | null): Hops {
-  const n = Number(v);
-  return n === 2 || n === 3 ? n : 1;
+/** The devices of `expand`, each once, by name. */
+function expandOf(v: string | null): string[] {
+  return [...new Set((v ?? "").split(",").filter((d) => d !== ""))].sort(natural);
 }
 
 /** The scope of a URL: the device of `device`, else the site of `site`, else the paths of the query `q`, else the twin. */
 export function scopeOf(search: string): Scope {
   const u = new URLSearchParams(search);
+  const expand = expandOf(u.get("expand"));
   const device = u.get("device");
-  if (device) return { kind: "device", device, hops: hopsOf(u.get("hops")) };
+  if (device) return { kind: "device", device, expand: expand.filter((d) => d !== device) };
   const site = u.get("site");
   if (site) return { kind: "site", site };
-  if (u.get("q")) return { kind: "paths" };
+  if (u.get("q")) return { kind: "paths", expand };
   return { kind: "twin" };
 }
 
@@ -42,14 +41,33 @@ export function scopeOf(search: string): Scope {
 export function scopeSearch(search: string, scope: Scope): string {
   const u = new URLSearchParams(search);
   for (const k of SCOPE_PARAMS) u.delete(k);
-  if (scope.kind === "device") {
-    u.set("device", scope.device);
-    if (scope.hops !== 1) u.set("hops", String(scope.hops));
-  } else if (scope.kind === "site") {
-    u.set("site", scope.site);
-  }
+  if (scope.kind === "device") u.set("device", scope.device);
+  else if (scope.kind === "site") u.set("site", scope.site);
+  if ((scope.kind === "device" || scope.kind === "paths") && scope.expand.length > 0) u.set("expand", [...scope.expand].sort(natural).join(","));
   const q = u.toString();
   return q ? `?${q}` : "";
+}
+
+/** The URL with no query: the scope of the paths becomes the twin, and the other scopes stay. */
+export function withoutQuery(search: string): string {
+  const u = new URLSearchParams(search);
+  u.delete("q");
+  if (!u.get("device")) u.delete("expand");
+  const q = u.toString();
+  return q ? `?${q}` : "";
+}
+
+/** The scope with the neighbours of a device added, or null for a scope that has all neighbours. */
+export function expandScope(scope: Scope, device: string): Scope | null {
+  if (scope.kind !== "device" && scope.kind !== "paths") return null;
+  if (scope.kind === "device" && scope.device === device) return null;
+  if (scope.expand.includes(device)) return null;
+  return { ...scope, expand: [...scope.expand, device].sort(natural) };
+}
+
+/** The scope with the neighbours of an expanded device removed. */
+export function collapseScope(scope: Scope, device: string): Scope {
+  return scope.kind === "device" || scope.kind === "paths" ? { ...scope, expand: scope.expand.filter((d) => d !== device) } : scope;
 }
 
 /** The sites of the inventory devices, each once, by name. */
@@ -119,6 +137,11 @@ export function scopeApi(twin: string): ScopeApi {
   };
 }
 
+/** The devices of a topology answer, with no tunnel peer. */
+function deviceNames(t: TopologyOut): string[] {
+  return t.nodes.filter((n) => n.kind === "device").map((n) => n.device ?? n.id);
+}
+
 export type ScopeResult =
   | {
       state: "draw";
@@ -144,6 +167,33 @@ export function tooManyNodes(e: unknown): number | null | undefined {
 const PARALLEL = 4;
 
 /**
+ * Adds the devices of `around` with 1 hop of each device to `all`,
+ * `PARALLEL` reads at a time. The result is true, or the number of devices
+ * of a refused read or of `all` when it has more than 300; null when the
+ * API does not give the number.
+ */
+async function addNeighbours(api: ScopeApi, devices: readonly string[], all: Set<string>): Promise<true | number | null> {
+  for (let i = 0; i < devices.length; i += PARALLEL) {
+    const batch = devices.slice(i, i + PARALLEL);
+    const views = await Promise.all(
+      batch.map((d) =>
+        api.topology({ around: d, hops: "1", layer: "physical" }).catch((e: unknown) => {
+          const n = tooManyNodes(e);
+          if (n === undefined) throw e;
+          return { refused: n };
+        }),
+      ),
+    );
+    for (const v of views) {
+      if ("refused" in v) return v.refused;
+      for (const n of v.nodes) if (n.kind === "device") all.add(n.device ?? n.id);
+    }
+    if (all.size > MAX_DRAWN) return all.size;
+  }
+  return true;
+}
+
+/**
  * Reads a scope: the number of its devices with no read of the whole
  * topology, then the topology of those devices when there are at most 300.
  * `inventory` gives the site of each device of the store; `paths` gives the
@@ -159,7 +209,7 @@ export async function resolveScope(
     if (devices.length === 0) return { state: "none" };
     if (devices.length > MAX_DRAWN) return { state: "too-many", count: devices.length };
     const topology = await api.topology({ device: devices.join(",") });
-    return { state: "draw", topology, devices: topology.nodes.map((n) => n.device ?? n.id), neighbours: true };
+    return { state: "draw", topology, devices: deviceNames(topology), neighbours: true };
   };
   switch (scope.kind) {
     case "twin": {
@@ -167,7 +217,7 @@ export async function resolveScope(
       if (total === 0) return { state: "none" };
       if (total > MAX_DRAWN) return { state: "too-many", count: total };
       const topology = await api.topology({});
-      return { state: "draw", topology, devices: topology.nodes.map((n) => n.device ?? n.id), neighbours: true };
+      return { state: "draw", topology, devices: deviceNames(topology), neighbours: true };
     }
     case "site": {
       const names = (inventory ?? []).filter((d) => d.site === scope.site).map((d) => d.name);
@@ -182,42 +232,17 @@ export async function resolveScope(
       return byList([...all].sort(natural));
     }
     case "device": {
-      let topology: TopologyOut;
-      try {
-        topology = await api.topology({ around: scope.device, hops: String(scope.hops) });
-      } catch (e) {
-        const n = tooManyNodes(e);
-        if (n === undefined) throw e;
-        return { state: "too-many", count: n };
-      }
-      if (topology.nodes.length > MAX_DRAWN) return { state: "too-many", count: topology.nodes.length };
-      return { state: "draw", topology, devices: topology.nodes.map((n) => n.device ?? n.id), neighbours: true };
+      const all = new Set([scope.device]);
+      const fits = await addNeighbours(api, [scope.device, ...scope.expand], all);
+      if (fits !== true) return { state: "too-many", count: fits };
+      return byList([...all].sort(natural));
     }
     case "paths": {
       const own = pathDevices(paths ?? []);
       if (own.length === 0) return { state: "none" };
       if (own.length > MAX_DRAWN) return { state: "too-many", count: own.length };
       const all = new Set(own);
-      let fits = true;
-      for (let i = 0; i < own.length && fits; i += PARALLEL) {
-        const batch = own.slice(i, i + PARALLEL);
-        const views = await Promise.all(
-          batch.map((d) =>
-            api.topology({ around: d, hops: "1", layer: "physical" }).catch((e: unknown) => {
-              if (tooManyNodes(e) === undefined) throw e;
-              return null;
-            }),
-          ),
-        );
-        for (const v of views) {
-          if (v === null) {
-            fits = false;
-            break;
-          }
-          for (const n of v.nodes) all.add(n.device ?? n.id);
-        }
-        if (all.size > MAX_DRAWN) fits = false;
-      }
+      const fits = (await addNeighbours(api, [...own, ...scope.expand.filter((d) => !own.includes(d))], all)) === true;
       const r = await byList(fits ? [...all] : own);
       return r.state === "draw" ? { ...r, neighbours: fits } : r;
     }

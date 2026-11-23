@@ -55,6 +55,32 @@ export function ofStore(twins: readonly TwinRef[], twin: string): boolean {
   return !!s && (s.held === twin || s.previous === twin || s.newest === twin);
 }
 
+/** An option of the snapshot selector. */
+export interface RunOption {
+  id: string;
+  /** The time of the snapshot in ms since the epoch, or null for a twin that is not a snapshot. */
+  time: number | null;
+  state: "newest" | "older" | null;
+}
+
+/**
+ * The options of the snapshot selector and the chosen option: the held
+ * snapshot and the previous snapshot of the store, then each twin that is
+ * not the store. The alias `store` is an option only before its first build.
+ */
+export function runOptions(twins: readonly TwinRef[], twin: string): { options: RunOption[]; chosen: string } {
+  const options: RunOption[] = [];
+  const s = twins.find((t) => t.id === "store");
+  if (s) {
+    if (s.held) options.push({ id: s.held, time: snapshotTime(s.held), state: "newest" });
+    else options.push({ id: "store", time: null, state: null });
+    if (s.previous && s.previous !== s.held) options.push({ id: s.previous, time: snapshotTime(s.previous), state: "older" });
+  }
+  for (const t of twins) if (t.id !== "store") options.push({ id: t.id, time: snapshotTime(t.id), state: null });
+  const chosen = twin === "store" && s?.held ? s.held : twin;
+  return { options, chosen };
+}
+
 /** The time of the last cycle of the store: the time of its newest snapshot, or null. */
 export function lastCycle(twins: readonly TwinRef[]): number | null {
   return snapshotTime(twins.find((t) => t.id === "store")?.newest ?? null);

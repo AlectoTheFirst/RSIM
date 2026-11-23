@@ -190,6 +190,8 @@ export function TraceView(props: {
   /** The row height of the preferences, in px. */
   row: number;
   onRun: () => void;
+  /** Opens the Topology view with the paths of the answer. */
+  onTopology: (qid: string) => void;
   copy: (text: string, what: string) => void;
   sourceLines?: (span: Span) => Promise<SourceText>;
 }) {
@@ -506,6 +508,11 @@ export function TraceView(props: {
               {props.timing ? <span class="t-index muted">{props.timing}</span> : null}
               {hasReply ? <Segmented<Dir> label="Direction" value={d} options={DIRS} onChange={setDirection} /> : null}
               <Segmented<Level> label="Level" value={level} options={LEVELS} onChange={setLevel} />
+              {result ? (
+                <button type="button" onClick={() => props.onTopology(result.qid)}>
+                  Show in topology
+                </button>
+              ) : null}
             </span>
           ) : null}
         </div>

@@ -1,7 +1,7 @@
 // The paths of a query answer on the map: the devices, hops and endpoints
 // of each branch, and the marks of all paths or of the selected path.
 import type { components } from "../api/schema";
-import { type Layer, type MapGraph, type PathEndpoint, deviceId, endpointId, pairKey } from "./graph";
+import { type Layer, type MapGraph, type PathEndpoint, type PathExit, apiNodeId, deviceId, endpointId, pairKey, peerId, portOf } from "./graph";
 
 export type PathBriefOut = components["schemas"]["PathBriefOut"];
 export type SetBriefOut = components["schemas"]["SetBriefOut"];
@@ -20,6 +20,8 @@ export interface MapPath {
   source: PathEndpoint | null;
   /** The destination endpoint of a delivery to an endpoint. */
   destination: PathEndpoint | null;
+  /** The exit of a path that leaves the twin, with the tunnel peer of the outer packet from the path drawing. */
+  exit: PathExit | null;
 }
 
 function outcomeOf(kind: string): PathOutcome {
@@ -54,7 +56,28 @@ export function pathsOf(out: PathBriefOut | SetBriefOut): MapPath[] {
     const dest = b.verdict.destination;
     const label = outcome === "deliver" && dest && !dest.device ? (dest.endpoint ?? destinationLabel) : null;
     const destination = label !== null && last !== null ? { label, device: last, port: null } : null;
-    return { index: b.index, devices, hops, outcome, source, destination };
+    const end = b.steps[b.steps.length - 1];
+    const exit = outcome === "exit" && last !== null && end ? { device: last, port: portOf(end.function, last), peer: null } : null;
+    return { index: b.index, devices, hops, outcome, source, destination, exit };
+  });
+}
+
+/** The query of a brief answer as the text of its chip: the source, the destination, the protocol and the destination port. */
+export function queryText(out: PathBriefOut | SetBriefOut): string {
+  const q = out.query as Record<string, unknown>;
+  const parts = [text(q["source.ip"]), "to", text(q["destination.ip"]), text(q["network.transport"]), text(q["destination.port"])];
+  return parts.filter((x): x is string => x !== null).join(" ");
+}
+
+type Drawing = { nodes: readonly { id: string; kind: string }[]; edges: readonly { layer: string; from: string; to: string; branches: number[] }[] };
+
+/** The paths with the tunnel peer of each exit: the peer node of the overlay edge of the branch from the exit device in the path drawing. */
+export function withPeers(paths: readonly MapPath[], drawing: Drawing): MapPath[] {
+  const peers = new Set(drawing.nodes.filter((n) => n.kind === "peer").map((n) => n.id));
+  return paths.map((p) => {
+    if (!p.exit) return p;
+    const e = drawing.edges.find((x) => x.layer === "overlay" && x.from === p.exit!.device && peers.has(x.to) && x.branches.includes(p.index));
+    return e ? { ...p, exit: { ...p.exit, peer: e.to } } : p;
   });
 }
 
@@ -74,13 +97,15 @@ export function pathDevices(paths: readonly MapPath[]): string[] {
 }
 
 /** The endpoint cards and the hops of the paths, for `buildGraph`. */
-export function pathGraphInput(paths: readonly MapPath[]): { pathEndpoints: PathEndpoint[]; pathHops: [string, string][] } {
+export function pathGraphInput(paths: readonly MapPath[]): { pathEndpoints: PathEndpoint[]; pathHops: [string, string][]; pathExits: PathExit[] } {
   const pathEndpoints: PathEndpoint[] = [];
+  const pathExits: PathExit[] = [];
   const pathHops: [string, string][] = [];
   const seenHop = new Set<string>();
   for (const p of paths) {
     if (p.source) pathEndpoints.push(p.source);
     if (p.destination) pathEndpoints.push(p.destination);
+    if (p.exit?.peer) pathExits.push(p.exit);
     for (const [x, y] of p.hops) {
       const k = x <= y ? `${x}\u0000${y}` : `${y}\u0000${x}`;
       if (seenHop.has(k)) continue;
@@ -88,15 +113,16 @@ export function pathGraphInput(paths: readonly MapPath[]): { pathEndpoints: Path
       pathHops.push([x, y]);
     }
   }
-  return { pathEndpoints, pathHops };
+  return { pathEndpoints, pathHops, pathExits };
 }
 
 /** The overlay pairs of each branch, from the path drawing of the API (`/queries/{qid}/topology`). */
-export function overlayOf(drawing: { edges: readonly { layer: string; from: string; to: string; branches: number[] }[] }): Map<number, string[]> {
+export function overlayOf(drawing: Drawing): Map<number, string[]> {
   const out = new Map<number, string[]>();
+  const idOf = apiNodeId(drawing.nodes);
   for (const e of drawing.edges) {
     if (e.layer !== "overlay") continue;
-    const key = pairKey("overlay", deviceId(e.from), deviceId(e.to));
+    const key = pairKey("overlay", idOf(e.from), idOf(e.to));
     for (const b of e.branches) {
       const l = out.get(b);
       if (l) {
@@ -141,7 +167,18 @@ export function pathMarks(
         if (g.pair.has(k)) pairs.add(k);
       }
     } else {
-      for (const k of overlay?.get(p.index) ?? []) if (g.pair.has(k)) pairs.add(k);
+      for (const k of overlay?.get(p.index) ?? []) {
+        if (!g.pair.has(k)) continue;
+        pairs.add(k);
+        const q = g.pair.get(k)!;
+        for (const id of [q.a, q.b]) if (id.startsWith("p:")) cards.add(id);
+      }
+    }
+    const peer = p.exit?.peer ? peerId(p.exit.peer) : null;
+    if (peer !== null && g.node.has(peer)) {
+      cards.add(peer);
+      const k = pairKey("physical", deviceId(p.exit!.device), peer);
+      if (layer === "physical" && g.pair.has(k)) pairs.add(k);
     }
     for (const e of [p.source, p.destination]) {
       if (!e) continue;
@@ -153,7 +190,11 @@ export function pathMarks(
         if (g.pair.has(k)) pairs.add(k);
       }
     }
-    const endCard = p.destination ? endpointId(p.destination.device, p.destination.label) : deviceId(p.devices[p.devices.length - 1] ?? "");
+    const endCard = p.destination
+      ? endpointId(p.destination.device, p.destination.label)
+      : peer !== null && g.node.has(peer)
+        ? peer
+        : deviceId(p.devices[p.devices.length - 1] ?? "");
     if (g.node.has(endCard)) {
       const had = ends.get(endCard);
       ends.set(endCard, had === undefined || had === p.outcome ? p.outcome : "unknown");

@@ -5,13 +5,13 @@ import type { TwinRef } from "../api/client";
 import type { Me, Twin } from "../api/types";
 import { initials } from "../auth/model";
 import { type ColourPref, type Prefs, ROW_HEIGHTS, type RowHeight, SIZE, THEMES, type ThemePref } from "../theme";
-import { ageText, lastCycle, ofStore, runState, runTime, utcText } from "./frame";
+import { ageText, lastCycle, ofStore, runOptions, runState, runTime, utcText } from "./frame";
 import { HatchMark } from "./Hatch";
 import { Icon } from "./Icon";
 import { MenuButton } from "./Menu";
 import { Pill } from "./Pill";
 import { Segmented } from "./Segmented";
-import { reloadMark, twinOption } from "./url";
+import { reloadMark } from "./url";
 
 /** The current time in ms, read again each second. */
 function useNow(on: boolean): number {
@@ -25,8 +25,7 @@ function useNow(on: boolean): number {
 }
 
 function SnapshotSelector(props: { twins: TwinRef[]; twin: string; info: Twin | null; onTwin: (id: string) => void }) {
-  const ids = props.twins.map((t) => t.id);
-  const chosen = twinOption(ids, props.twin);
+  const { options, chosen } = runOptions(props.twins, props.twin);
   const time = runTime(props.twin, props.info?.id === props.twin ? props.info.snapshot : null);
   const state = runState(props.twins, props.twin);
   const run = ofStore(props.twins, props.twin);
@@ -48,19 +47,21 @@ function SnapshotSelector(props: { twins: TwinRef[]; twin: string; info: Twin | 
       }
     >
       {(close) =>
-        ids.map((id) => (
+        options.map((o) => (
           <button
             type="button"
-            class="menu-item t-value"
+            class="menu-item t-value run-option"
             role="menuitemradio"
-            aria-checked={id === chosen}
+            aria-checked={o.id === chosen}
+            title={o.time !== null ? o.id : undefined}
             tabIndex={-1}
             onClick={() => {
               close();
-              if (id !== chosen) props.onTwin(id);
+              if (o.id !== chosen) props.onTwin(o.id);
             }}
           >
-            {id}
+            <span>{o.time !== null ? utcText(o.time) : o.id}</span>
+            {o.state === "newest" ? <Pill tone="deliver">newest</Pill> : o.state === "older" ? <Pill tone="parameter">older</Pill> : null}
           </button>
         ))
       }

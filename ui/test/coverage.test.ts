@@ -16,7 +16,7 @@ import {
   stepRow,
   writeCoverage,
 } from "../src/coverage/model";
-import { newerRun, pinnedRun, reloadMark, twinOption, twinState, twinStateText, viewOf, viewSearch, withTwin } from "../src/page/url";
+import { newerRun, pinnedRun, reloadMark, twinState, twinStateText, viewOf, viewSearch, withTwin } from "../src/page/url";
 import { answerOf, nextPage, pageWords, previousPage, syncPages } from "../src/tables/model";
 
 const COLUMNS = ["device", "handled", "irrelevant", "unhandled", "unhandled_paths", "unhandled_stanzas"];
@@ -198,16 +198,5 @@ describe("unhandled paths of a device", () => {
     const s = pathsStep(start, { kind: "go", to: p2 });
     expect(pathsStep(s, { kind: "done", at: start.want, out: page(0, 200, 450, "o200") })).toBe(s);
     expect(pathsStep(s, { kind: "failed", at: start.want, problem: "x" })).toBe(s);
-  });
-});
-
-describe("twin selector", () => {
-  it("shows the store for its snapshot name and for its alias", () => {
-    const ids = ["builtin.leaf-spine", "builtin.mini-enterprise", "store"];
-    expect(twinOption(ids, "snapshot-2026-11-22-140512")).toBe("store");
-    expect(twinOption(ids, "store")).toBe("store");
-    expect(twinOption(ids, "builtin.leaf-spine")).toBe("builtin.leaf-spine");
-    expect(twinOption(["builtin.leaf-spine"], "snapshot-2026-11-22-140512")).toBe("snapshot-2026-11-22-140512");
-    expect(twinOption([...ids, "snapshot-2026-11-22-140512"], "snapshot-2026-11-22-140512")).toBe("snapshot-2026-11-22-140512");
   });
 });

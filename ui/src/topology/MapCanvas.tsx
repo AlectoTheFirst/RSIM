@@ -212,7 +212,10 @@ function MapLayers(props: {
 }) {
   const { view, w, h, layer, marks, graph } = props;
   const z = view.zoom;
-  const { cards, lines } = cull(props.index, windowOf(view, w, h), layer);
+  const win = windowOf(view, w, h);
+  const { cards, lines } = cull(props.index, win, layer);
+  // The physical links below the tunnels of the overlay layer.
+  const under = layer === "overlay" ? cull(props.index, win, "physical").lines : [];
   const active = activeLines(graph, [props.selected, props.hover], layer);
   const text = showsText(z);
 
@@ -253,6 +256,9 @@ function MapLayers(props: {
       </defs>
       <g transform={`translate(${-view.x * z} ${-view.y * z}) scale(${z})`}>
         <g class="map-lines">
+          {under.map((l) => (
+            <path key={l.key} class={`map-line under${l.pair.dashed ? " dashed" : ""}`} d={pathData(l.pts)} />
+          ))}
           {plain.map((l) => lineEl(l, ""))}
           {onPath.map((l) => lineEl(l, ""))}
           {lit.map((l) => lineEl(l, "active"))}

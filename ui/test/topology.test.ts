@@ -5,8 +5,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ApiProblem } from "../src/api/client";
 import { buildGraph, countsOf, deviceId, endpointId, groupId, linkCount, linksOfEdge, natural, neighboursOf, outsideId, pairKey, portOf, speedText, speedsOf, type TopologyOut } from "../src/topology/graph";
-import { overlayOf, pathDevices, pathGraphInput, pathMarks, pathsOf, type PathBriefOut } from "../src/topology/paths";
-import { MAX_DRAWN, type ScopeApi, resolveScope, scopeOf, scopeSearch, siteOptions, sitesOf, tooManyNodes } from "../src/topology/scope";
+import { overlayOf, pathDevices, pathGraphInput, pathMarks, pathsOf, queryText, withPeers, type PathBriefOut } from "../src/topology/paths";
+import { MAX_DRAWN, type Scope, type ScopeApi, collapseScope, expandScope, resolveScope, scopeOf, scopeSearch, siteOptions, sitesOf, tooManyNodes, withoutQuery } from "../src/topology/scope";
 import { activeLines, deviceFacts, entryPoint, linksOf } from "../src/topology/select";
 import { site } from "./topologyEstates";
 
@@ -202,18 +202,91 @@ describe("the facts of a device", () => {
   });
 });
 
+describe("a path into a WireGuard tunnel to a peer outside the twin", () => {
+  const twinJson = { id: "builtin.vpn", base: "builtin.vpn", snapshot: null, layers: [] };
+  const peerNode = { id: "peer:203.0.113.5", kind: "peer", label: "remote", device: null, functions: null };
+  const r1 = { id: "r1", kind: "device", label: "r1", device: "r1", functions: 12 };
+  const tunnel = {
+    id: "overlay:r1>peer:203.0.113.5",
+    layer: "overlay",
+    from: "r1",
+    to: "peer:203.0.113.5",
+    facts: { tunnels: [{ encap: "r1/wireguard/wg0", peer_from: "fixed", name: "remote", source: "198.51.100.1", peer: "203.0.113.5", port: 51820, vnis: [] }] },
+    provenance: [],
+    claims: {},
+    branches: [0],
+    overlay: null,
+  };
+  const topo = { rsim_json: 2, kind: "topology", topology: "vpn", twin: twinJson, level: "device", layers: ["physical", "overlay"], nodes: [r1, peerNode], edges: [tunnel] } as unknown as TopologyOut;
+  const brief = {
+    query: { "source.ip": "192.0.2.10", "destination.ip": "198.51.100.53", "network.transport": "udp", "destination.port": 53 },
+    answer: {
+      ingress: [{ found: true, device: "r1", interface: "eth1", function: "r1/in/eth1" }],
+      branches: [
+        {
+          index: 0,
+          verdict: { kind: "exit", destination: null, reason: { code: "exited", detail: "r1 pppoe0" } },
+          steps: [
+            { index: 0, function: "r1/in/eth1", device: "r1", outcome: "forward", reason: { code: "passed", detail: "" } },
+            { index: 1, function: "r1/wireguard/wg0", device: "r1", outcome: "forward", reason: { code: "encapsulated", detail: "" } },
+            { index: 2, function: "r1/out/pppoe0", device: "r1", outcome: "exit", reason: { code: "exited", detail: "" } },
+          ],
+        },
+      ],
+    },
+  } as unknown as PathBriefOut;
+  const drawing = { nodes: [r1, peerNode], edges: [tunnel] };
+  const paths = withPeers(pathsOf(brief), drawing);
+  const g = buildGraph({ topology: topo, ...pathGraphInput(paths) });
+
+  it("gives the exit port, the tunnel peer and the text of the query", () => {
+    expect(paths[0]!.exit).toEqual({ device: "r1", port: "pppoe0", peer: "peer:203.0.113.5" });
+    expect(queryText(brief)).toBe("192.0.2.10 to 198.51.100.53 udp 53");
+  });
+
+  it("draws the peer as a hatched card with the tunnel and the exit link from its port", () => {
+    expect(g.node.get("p:peer:203.0.113.5")).toMatchObject({ kind: "peer", label: "remote", hatch: true });
+    const t = g.pair.get(pairKey("overlay", "d:r1", "p:peer:203.0.113.5"))!;
+    expect([t.dashed, t.tunnels[0]!.name, t.tunnels[0]!.port]).toEqual([true, "remote", 51820]);
+    const x = g.pair.get(pairKey("physical", "d:r1", "p:peer:203.0.113.5"))!;
+    expect([x.dashed, x.links.map((l) => (x.a === "d:r1" ? l.a.port : l.b.port))]).toEqual([true, ["pppoe0"]]);
+  });
+
+  it("marks the exit link in the layer physical and the tunnel in the layer overlay, with the peer as the end", () => {
+    const phys = pathMarks(g, paths, null);
+    expect([...phys.pairs].sort()).toEqual([pairKey("physical", "d:r1", "p:peer:203.0.113.5"), pairKey("physical", "d:r1", "e:r1:192.0.2.10")].sort());
+    expect(phys.ends.get("p:peer:203.0.113.5")).toBe("exit");
+    const over = pathMarks(g, paths, null, "overlay", overlayOf(drawing));
+    expect(over.pairs.has(pairKey("overlay", "d:r1", "p:peer:203.0.113.5"))).toBe(true);
+  });
+});
+
 describe("the scope of the map", () => {
   it("reads the scope from the URL: the device, else the site, else the query, else the twin", () => {
-    expect(scopeOf("?view=topology&device=core-01&hops=3&site=fra01")).toEqual({ kind: "device", device: "core-01", hops: 3 });
-    expect(scopeOf("?device=core-01&hops=9")).toEqual({ kind: "device", device: "core-01", hops: 1 });
-    expect(scopeOf("?site=fra01&q=qabc")).toEqual({ kind: "site", site: "fra01" });
-    expect(scopeOf("?q=qabc")).toEqual({ kind: "paths" });
-    expect(scopeOf("?view=topology")).toEqual({ kind: "twin" });
+    expect(scopeOf("?view=topology&device=core-01&site=fra01")).toEqual({ kind: "device", device: "core-01", expand: [] });
+    expect(scopeOf("?device=core-01&expand=acc-10,core-01,acc-2,acc-2")).toEqual({ kind: "device", device: "core-01", expand: ["acc-2", "acc-10"] });
+    expect(scopeOf("?site=fra01&q=qabc&expand=acc-01")).toEqual({ kind: "site", site: "fra01" });
+    expect(scopeOf("?q=qabc&expand=acc-01")).toEqual({ kind: "paths", expand: ["acc-01"] });
+    expect(scopeOf("?view=topology&expand=acc-01")).toEqual({ kind: "twin" });
   });
 
   it("writes the scope into the URL and keeps the other parameters", () => {
-    expect(scopeSearch("?view=topology&q=qabc&site=fra01", { kind: "device", device: "core-01", hops: 2 })).toBe("?view=topology&q=qabc&device=core-01&hops=2");
-    expect(scopeSearch("?view=topology&device=core-01&hops=2", { kind: "paths" })).toBe("?view=topology");
+    expect(scopeSearch("?view=topology&q=qabc&site=fra01", { kind: "device", device: "core-01", expand: ["acc-10", "acc-2"] })).toBe(
+      "?view=topology&q=qabc&device=core-01&expand=acc-2%2Cacc-10",
+    );
+    expect(scopeSearch("?view=topology&device=core-01&expand=acc-01", { kind: "paths", expand: [] })).toBe("?view=topology");
+    expect(scopeSearch("?q=qabc&device=core-01", { kind: "site", site: "fra01" })).toBe("?q=qabc&site=fra01");
+  });
+
+  it("adds and removes the neighbours of a device, and removes the query", () => {
+    const d: Scope = { kind: "device", device: "core-01", expand: [] };
+    expect(expandScope(d, "acc-01")).toEqual({ kind: "device", device: "core-01", expand: ["acc-01"] });
+    expect(expandScope(d, "core-01")).toBeNull();
+    expect(expandScope({ kind: "paths", expand: ["acc-01"] }, "acc-01")).toBeNull();
+    expect(expandScope({ kind: "twin" }, "acc-01")).toBeNull();
+    expect(collapseScope({ kind: "paths", expand: ["acc-01", "acc-02"] }, "acc-01")).toEqual({ kind: "paths", expand: ["acc-02"] });
+    expect(withoutQuery("?view=topology&q=qabc&expand=acc-01")).toBe("?view=topology");
+    expect(withoutQuery("?view=topology&q=qabc&device=core-01&expand=acc-01")).toBe("?view=topology&device=core-01&expand=acc-01");
   });
 
   it("lists the sites of the inventory once each", () => {
@@ -282,20 +355,23 @@ describe("the reads of a scope", () => {
     expect(api.calls).toEqual([]);
   });
 
-  it("draws a device with its neighbours up to the hops, and counts a view that the API refuses", async () => {
-    const r = await resolveScope({ kind: "device", device: "core-01", hops: 1 }, fakeApi(site()), null, null);
+  it("draws a device with its neighbours and the neighbours of each expanded device, and counts a view that the API refuses", async () => {
+    const r = await resolveScope({ kind: "device", device: "core-01", expand: [] }, fakeApi(site()), null, null);
     expect(r.state === "draw" && [...r.devices].sort()).toEqual(["acc-01", "acc-02", "core-01", "core-02", "edge-01"]);
-    const refused = await resolveScope({ kind: "device", device: "core-01", hops: 3 }, fakeApi(site(), { refuseAround: "core-01" }), null, null);
+    const refused = await resolveScope({ kind: "device", device: "core-01", expand: [] }, fakeApi(site(), { refuseAround: "core-01" }), null, null);
     expect(refused).toEqual({ state: "too-many", count: 2400 });
+    const wide = await resolveScope({ kind: "device", device: "acc-01", expand: [] }, fakeApi(site()), null, null);
+    const more = await resolveScope({ kind: "device", device: "acc-01", expand: ["core-01"] }, fakeApi(site()), null, null);
+    expect(wide.state === "draw" && more.state === "draw" && more.devices.length > wide.devices.length).toBe(true);
   });
 
   it("draws the paths with the neighbours of their devices, and the paths alone when the neighbours make more than 300", async () => {
     const paths = pathsOf(steps);
-    const r = await resolveScope({ kind: "paths" }, fakeApi(topology), null, paths);
+    const r = await resolveScope({ kind: "paths", expand: [] }, fakeApi(topology), null, paths);
     expect(r.state === "draw" && [r.devices.length, r.neighbours]).toEqual([6, true]);
-    const alone = await resolveScope({ kind: "paths" }, fakeApi(topology, { refuseAround: "spine1" }), null, paths);
+    const alone = await resolveScope({ kind: "paths", expand: [] }, fakeApi(topology, { refuseAround: "spine1" }), null, paths);
     expect(alone.state === "draw" && [[...alone.devices].sort(), alone.neighbours]).toEqual([["leaf1", "leaf2", "spine1", "spine2"], false]);
-    expect(await resolveScope({ kind: "paths" }, fakeApi(topology), null, [])).toEqual({ state: "none" });
+    expect(await resolveScope({ kind: "paths", expand: [] }, fakeApi(topology), null, [])).toEqual({ state: "none" });
   });
 });
 

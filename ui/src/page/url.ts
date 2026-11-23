@@ -20,6 +20,11 @@ export function queryOf(search: string): string | null {
   return new URLSearchParams(search).get("q");
 }
 
+/** The URL of the Topology view with the paths of the query `qid`. */
+export function topologySearch(twin: string, qid: string): string {
+  return `?${new URLSearchParams({ view: "topology", twin, q: qid }).toString()}`;
+}
+
 /** The URL of the Tables view on the table `functions` of a device. */
 export function functionsSearch(twin: string, device: string): string {
   const u = new URLSearchParams({ view: "tables", twin, table: "functions", "f.device": device });
@@ -28,15 +33,14 @@ export function functionsSearch(twin: string, device: string): string {
 
 /**
  * The URL of a view of a twin, with the table of the Tables view kept, and
- * for the Trace view and the Topology view the query `qid` of the shown
- * answer.
+ * for the Trace view the query `qid` of the shown answer.
  */
 export function viewSearch(view: View, twin: string, from = "", qid: string | null = null): string {
   const u = new URLSearchParams();
   const p = PARAM[view];
   if (p) u.set("view", p);
   if (twin) u.set("twin", twin);
-  if ((view === "Trace" || view === "Topology") && twin && qid) u.set("q", qid);
+  if (view === "Trace" && twin && qid) u.set("q", qid);
   const table = new URLSearchParams(from).get("table");
   if (view === "Tables" && table && viewOf(from) === "Tables") u.set("table", table);
   const q = u.toString();
@@ -104,14 +108,4 @@ export function pinnedRun(twins: readonly TwinRef[], twin: string): string {
 export function newerRun(twins: readonly TwinRef[], twin: string): string | null {
   const held = twins.find((t) => t.id === "store")?.held ?? null;
   return isSnapshot(twin) && isSnapshot(held) && held > twin ? held : null;
-}
-
-/**
- * The option of the twin selector for a twin: the twin itself, or `store`
- * for a snapshot name when the list names the store `store`.
- */
-export function twinOption(ids: readonly string[], twin: string): string {
-  if (ids.includes(twin)) return twin;
-  if (isSnapshot(twin) && ids.includes("store")) return "store";
-  return twin;
 }

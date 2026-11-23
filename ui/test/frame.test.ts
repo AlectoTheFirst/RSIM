@@ -2,9 +2,9 @@
 // the toast and the window of the virtual rows.
 import { afterEach, describe, expect, it } from "vitest";
 import type { TwinRef } from "../src/api/client";
-import { RAIL_BOTTOM, RAIL_TOP, ageText, lastCycle, menuMove, ofStore, runState, runTime, snapshotTime, utcText } from "../src/page/frame";
+import { RAIL_BOTTOM, RAIL_TOP, ageText, lastCycle, menuMove, ofStore, runOptions, runState, runTime, snapshotTime, utcText } from "../src/page/frame";
 import { dismiss, subscribe, toast, type ToastNote } from "../src/page/notes";
-import { functionsSearch, queryOf, viewOf, viewSearch } from "../src/page/url";
+import { functionsSearch, queryOf, topologySearch, viewOf, viewSearch } from "../src/page/url";
 import { indexAt, measuredWindow, moveCurrent, offsetsOf, rowWindow, scrollForOffsets } from "../src/page/virtual";
 
 const store = (over: Partial<TwinRef> = {}): TwinRef => ({ id: "store", href: "/v1/twins/store", ...over });
@@ -15,9 +15,14 @@ describe("the views of the rail", () => {
     expect(RAIL_BOTTOM).toEqual(["Inventory"]);
   });
 
-  it("reads and writes the view topology with the query of the page", () => {
+  it("keeps the query for the view Trace only", () => {
+    expect(viewSearch("Trace", "t1", "", "qabc")).toBe("?twin=t1&q=qabc");
+    expect(viewSearch("Topology", "t1", "", "qabc")).toBe("?view=topology&twin=t1");
+  });
+
+  it("reads and writes the view topology with the query of Show in topology", () => {
     expect(viewOf("?view=topology&twin=t1")).toBe("Topology");
-    expect(viewSearch("Topology", "t1", "", "qabc")).toBe("?view=topology&twin=t1&q=qabc");
+    expect(topologySearch("t1", "qabc")).toBe("?view=topology&twin=t1&q=qabc");
     expect(viewSearch("Topology", "t1")).toBe("?view=topology&twin=t1");
     expect(queryOf("?view=topology&twin=t1&q=qabc")).toBe("qabc");
     expect(queryOf("?view=topology")).toBeNull();
@@ -53,6 +58,22 @@ describe("the run of the top bar", () => {
     expect(runState(twins, "snapshot-2026-11-02-080000")).toBe("older");
     expect(runState(twins, "builtin.leaf-spine")).toBeNull();
     expect(runState([store()], "store")).toBeNull();
+  });
+
+  it("offers the held and the previous snapshot of the store and the other twins", () => {
+    const twins = [store({ held: "snapshot-2026-11-02-090000", previous: "snapshot-2026-11-02-080000" }), { id: "builtin.leaf-spine", href: "" }];
+    const { options, chosen } = runOptions(twins, "store");
+    expect(options).toEqual([
+      { id: "snapshot-2026-11-02-090000", time: Date.UTC(2026, 10, 2, 9, 0, 0), state: "newest" },
+      { id: "snapshot-2026-11-02-080000", time: Date.UTC(2026, 10, 2, 8, 0, 0), state: "older" },
+      { id: "builtin.leaf-spine", time: null, state: null },
+    ]);
+    expect(chosen).toBe("snapshot-2026-11-02-090000");
+    expect(runOptions(twins, "snapshot-2026-11-02-080000").chosen).toBe("snapshot-2026-11-02-080000");
+  });
+
+  it("offers the alias store before the first build", () => {
+    expect(runOptions([store()], "store")).toEqual({ options: [{ id: "store", time: null, state: null }], chosen: "store" });
   });
 
   it("names a run of the store a snapshot", () => {
