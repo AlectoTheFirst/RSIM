@@ -685,6 +685,12 @@ fn router() -> Input {
     }
 }
 
+/// The next hop of the link `l-br-mpls` in the WAN module of the branch.
+fn wan_next_hop(m: &mut BTreeMap<String, Value>, gateway: &str) {
+    m.get_mut("edge_modules").unwrap()["e-br"]["WAN"]["data"]["links"][0]["nextHopIpAddress"] =
+        json!(gateway);
+}
+
 /// The position of the step of the function `name` in a path.
 fn position(f: &[String], name: &str) -> usize {
     f.iter()
@@ -745,6 +751,7 @@ fn the_outer_packet_of_a_tunnel_goes_through_the_estate_router_of_the_wan_gatewa
         "type": "STATIC", "cidrIp": "203.0.113.130", "cidrPrefix": 25, "gateway": "203.0.113.129"
     });
     m.get_mut("edges").unwrap()[0]["links"][0]["ipAddress"] = json!("203.0.113.130");
+    wan_next_hop(&mut m, "203.0.113.129");
     sync_state(&mut m);
     let e = assemble(vec![input(STORE, &m), router()]);
     let notes = e.notes.clone();
@@ -776,6 +783,7 @@ fn the_outer_packet_of_a_tunnel_to_a_wan_gateway_on_an_svi_is_unknown() {
         "type": "STATIC", "cidrIp": "192.0.2.3", "cidrPrefix": 26, "gateway": "192.0.2.2"
     });
     m.get_mut("edges").unwrap()[0]["links"][0]["ipAddress"] = json!("192.0.2.3");
+    wan_next_hop(&mut m, "192.0.2.2");
     sync_state(&mut m);
     let e = assemble(vec![input(STORE, &m), switch()]);
     let notes = e.notes.clone();
