@@ -39,7 +39,7 @@ export function partFields(query: PacketSet, part: PacketSet): [string, string][
 }
 
 /** The names of the encapsulation kinds. */
-const ENCAP_NAMES: Record<string, string> = { wireguard: "WireGuard", vxlan: "VXLAN", gre: "GRE", mpls: "MPLS" };
+const ENCAP_NAMES: Record<string, string> = { wireguard: "WireGuard", vxlan: "VXLAN", gre: "GRE", mpls: "MPLS", vcmp: "VCMP" };
 
 function encapOf(h: Header): Header["encap"] {
   return h.encap ?? [];

@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use rsim_core::{
-    Context, Delay, Destination, DeviceId, FlowState, FunctionId, InterfaceId, PacketSet, Reason,
-    SourceSpan, TraceStep, Verdict, VerdictKind,
+    AlternativeKind, Context, Delay, Destination, DeviceId, FlowState, FunctionId, InterfaceId,
+    PacketSet, Reason, ReasonCode, SourceSpan, TraceStep, Verdict, VerdictKind,
 };
 
 /// The result of a query over all of its paths for one part of the packets.
@@ -301,6 +301,25 @@ pub fn combine_paths(paths: &[Summary]) -> Summary {
     }
 }
 
+/// Combines the results of the candidates of the selection of `choice`,
+/// which is not collected: the common result, or the common kind of
+/// result. Candidates with different kinds of result give `Unknown`.
+pub fn combine_candidates(choice: &FunctionId, paths: &[Summary]) -> Summary {
+    let Some(first) = paths.first() else {
+        unreachable!("a selection has at least one candidate")
+    };
+    if paths.iter().all(|p| p == first) {
+        return first.clone();
+    }
+    match first.kind() {
+        Some(k) if paths.iter().all(|p| p.kind() == Some(k)) => Summary::SameKind(k),
+        _ => Summary::Same(Verdict::Unknown(Reason::new(
+            ReasonCode::SelectionNotCollected,
+            format!("the candidates of {choice} end differently"),
+        ))),
+    }
+}
+
 /// Combines the results of the copies of a flood: delivered if a minimum of
 /// one copy delivers. If not, an exit if a minimum of one copy leaves the
 /// twin. If not, the result depends on the path if a minimum of one copy
@@ -342,7 +361,7 @@ pub fn aggregate(nodes: &[ExecNode]) -> Result<Vec<Part>, String> {
 
 /// The parts of one alternative or one copy, combined with the parts of the
 /// others by intersection.
-fn refine(groups: Vec<Vec<Part>>, combine: fn(&[Summary]) -> Summary) -> Vec<Part> {
+fn refine(groups: Vec<Vec<Part>>, combine: &dyn Fn(&[Summary]) -> Summary) -> Vec<Part> {
     let mut acc: Vec<(PacketSet, Vec<Summary>)> = Vec::new();
     for (i, g) in groups.into_iter().enumerate() {
         if i == 0 {
@@ -386,10 +405,13 @@ pub fn merge(parts: Vec<Part>) -> Vec<Part> {
     out
 }
 
+/// The parts of each alternative or copy of one decision point, by index.
+type Groups = BTreeMap<u32, Vec<Part>>;
+
 fn aggregate_node(node: &ExecNode, done: &[Option<Vec<Part>>]) -> Result<Vec<Part>, String> {
     let mut plain = Vec::new();
-    let mut choices: BTreeMap<(FunctionId, String), BTreeMap<u32, Vec<Part>>> = BTreeMap::new();
-    let mut floods: BTreeMap<(FunctionId, String), BTreeMap<u32, Vec<Part>>> = BTreeMap::new();
+    let mut choices: BTreeMap<(FunctionId, String), (AlternativeKind, Groups)> = BTreeMap::new();
+    let mut floods: BTreeMap<(FunctionId, String), Groups> = BTreeMap::new();
     for e in &node.edges {
         let ps = match (&e.end, e.next) {
             (Some(end), _) => vec![Part {
@@ -404,7 +426,8 @@ fn aggregate_node(node: &ExecNode, done: &[Option<Vec<Part>>]) -> Result<Vec<Par
         if let Some(a) = &e.step.alternative {
             choices
                 .entry((a.choice.clone(), a.key.clone()))
-                .or_default()
+                .or_insert_with(|| (a.kind, BTreeMap::new()))
+                .1
                 .entry(a.index)
                 .or_default()
                 .extend(ps);
@@ -420,11 +443,17 @@ fn aggregate_node(node: &ExecNode, done: &[Option<Vec<Part>>]) -> Result<Vec<Par
         }
     }
     let mut all = plain;
-    for alts in choices.into_values() {
-        all.extend(refine(alts.into_values().collect(), combine_paths));
+    for ((choice, _), (kind, alts)) in choices {
+        let groups = alts.into_values().collect();
+        all.extend(match kind {
+            AlternativeKind::Choice => refine(groups, &combine_paths),
+            AlternativeKind::Candidate => {
+                refine(groups, &|s: &[Summary]| combine_candidates(&choice, s))
+            }
+        });
     }
     for copies in floods.into_values() {
-        all.extend(refine(copies.into_values().collect(), combine_flood));
+        all.extend(refine(copies.into_values().collect(), &combine_flood));
     }
     Ok(merge(all))
 }

@@ -48,6 +48,13 @@ pub enum Encap {
         src: IpAddr,
         dst: IpAddr,
     },
+    /// A VCMP packet of an SD-WAN overlay: UDP between 2 WAN links. The
+    /// segment selects the VRF at the far end.
+    Vcmp {
+        src: IpAddr,
+        dst: IpAddr,
+        segment: u32,
+    },
 }
 
 /// How a path query treats a field that it does not state.

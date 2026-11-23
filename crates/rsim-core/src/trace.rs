@@ -49,5 +49,7 @@ pub struct TraceStep {
     /// The QoS treatment of the output.
     pub qos: QosView,
     pub rate_condition: Option<RateCondition>,
+    /// The assumption of the branch.
+    pub assumption: Option<String>,
     pub rib_guard: RibGuardFlag,
 }

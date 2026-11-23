@@ -21,7 +21,7 @@ pub mod spec;
 pub mod trace;
 
 pub use addr::{Mac, Prefix};
-pub use branch::{Alternative, Branch, FloodCopy, RateCondition};
+pub use branch::{Alternative, AlternativeKind, Branch, FloodCopy, RateCondition};
 pub use context::{Attr, Context, ContextAttr, NeighbourTarget, NextHop, SessionMatch};
 pub use delay::{Delay, DelayGap};
 pub use describe::{EncapDesc, HEADER_FIELDS, HeaderDesc, Member, Values};

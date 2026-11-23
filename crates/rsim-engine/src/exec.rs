@@ -648,6 +648,7 @@ fn trace_step(f: &dyn NetFunction, input: &PacketSet, b: &Branch) -> TraceStep {
             queue: b.ctx.queue.clone(),
         },
         rate_condition: b.rate_condition.clone(),
+        assumption: b.assumption.clone(),
         rib_guard: if f.kind() == FunctionKind::RouteLookup {
             RibGuardFlag::NotChecked
         } else {

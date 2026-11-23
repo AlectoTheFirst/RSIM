@@ -121,14 +121,21 @@ pub fn step(st: &StepOut) -> String {
         let _ = writeln!(s, "source     {}:{}-{}", p.file, p.first_line, p.last_line);
     }
     if let Some(a) = &t.alternative {
+        let word = match a.kind.as_deref() {
+            Some("candidate") => "candidate",
+            _ => "alternative",
+        };
         let _ = writeln!(
             s,
-            "choice     {} alternative {} of {} ({})",
+            "choice     {} {word} {} of {} ({})",
             a.choice,
             a.index + 1,
             a.count,
             a.label
         );
+    }
+    if let Some(a) = &t.assumption {
+        let _ = writeln!(s, "assumption {a}");
     }
     if let Some(r) = &t.rate_condition {
         let _ = writeln!(

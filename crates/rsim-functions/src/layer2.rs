@@ -4,10 +4,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rsim_core::{
-    AddrField, Alternative, Attr, Branch, BridgeDomainId, Context, ContextAttr, Dependency,
-    Destination, EndpointId, FieldValue, FloodCopy, FlowState, FunctionId, FunctionKind,
-    InterfaceId, Mac, MacCond, Match, NetFunction, Outcome, PacketSet, PortCond, PortId, Prefix,
-    PrefixTable, Reason, ReasonCode, Rewrite, RulePredicate, SourceSpan, TriePrefixTable,
+    AddrField, Alternative, AlternativeKind, Attr, Branch, BridgeDomainId, Context, ContextAttr,
+    Dependency, Destination, EndpointId, FieldValue, FloodCopy, FlowState, FunctionId,
+    FunctionKind, InterfaceId, Mac, MacCond, Match, NetFunction, Outcome, PacketSet, PortCond,
+    PortId, Prefix, PrefixTable, Reason, ReasonCode, Rewrite, RulePredicate, SourceSpan,
+    TriePrefixTable,
 };
 
 use crate::common::{Meta, push_nonempty};
@@ -824,6 +825,7 @@ impl NetFunction for PortEgress {
                     b = b.with_spans(spans);
                     if count > 1 {
                         b = b.with_alternative(Alternative {
+                            kind: AlternativeKind::Choice,
                             choice: self.meta.id.clone(),
                             key: self.port.to_string(),
                             index: u32::try_from(i).expect("too many peers"),

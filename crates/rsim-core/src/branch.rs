@@ -8,9 +8,22 @@ use crate::outcome::{Outcome, Reason};
 use crate::packet_set::PacketSet;
 use crate::provenance::SourceSpan;
 
+/// How a device uses the alternatives of one decision point.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AlternativeKind {
+    /// The device sends packets to each alternative, as on equal-cost
+    /// paths.
+    #[default]
+    Choice,
+    /// The device sends packets to one or more of the alternatives, and
+    /// the selection is not collected.
+    Candidate,
+}
+
 /// The alternative of a forwarding choice to which a branch belongs.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Alternative {
+    pub kind: AlternativeKind,
     /// The function that made the choice.
     pub choice: FunctionId,
     /// The decision point in the function, for example the route prefix.
@@ -57,13 +70,17 @@ pub struct Branch {
     pub alternative: Option<Alternative>,
     pub flood_copy: Option<FloodCopy>,
     pub rate_condition: Option<RateCondition>,
+    /// A statement that the collected data does not prove and on which the
+    /// result of the branch depends.
+    pub assumption: Option<String>,
     /// The source spans of the part of the function that decided this
     /// branch, for example one rule. Empty if the whole function decided it.
     pub spans: Vec<SourceSpan>,
 }
 
 impl Branch {
-    /// A branch with no alternative, flood copy, rate condition or spans.
+    /// A branch with no alternative, flood copy, rate condition, assumption
+    /// or spans.
     pub fn new(
         packets: PacketSet,
         outcome: Outcome,
@@ -82,6 +99,7 @@ impl Branch {
             alternative: None,
             flood_copy: None,
             rate_condition: None,
+            assumption: None,
             spans: Vec::new(),
         }
     }
@@ -93,6 +111,11 @@ impl Branch {
 
     pub fn with_alternative(mut self, a: Alternative) -> Self {
         self.alternative = Some(a);
+        self
+    }
+
+    pub fn with_assumption(mut self, a: impl Into<String>) -> Self {
+        self.assumption = Some(a.into());
         self
     }
 }

@@ -1144,6 +1144,27 @@ impl PacketSet {
         })
     }
 
+    /// The packets with a VCMP encapsulation.
+    pub fn vcmp(&self) -> PacketSet {
+        self.op(&[], |ops| {
+            let kind = ops
+                .builder()
+                .value(bits::ENCAP_KIND, Bank::Current, bits::ENCAP_VCMP)?;
+            ops.dd.and(self.edge, kind)
+        })
+    }
+
+    /// The packets with a VCMP encapsulation with the segment `segment`.
+    pub fn vcmp_segment(&self, segment: u32) -> PacketSet {
+        self.op(&[], |ops| {
+            let mut b = ops.builder();
+            let kind = b.value(bits::ENCAP_KIND, Bank::Current, bits::ENCAP_VCMP)?;
+            let id = b.value(bits::ENCAP_VNI, Bank::Current, u128::from(segment))?;
+            let m = ops.dd.and(kind, id)?;
+            ops.dd.and(self.edge, m)
+        })
+    }
+
     /// The packets with a VXLAN encapsulation with the network identifier
     /// `vni`.
     pub fn vxlan_vni(&self, vni: u32) -> PacketSet {

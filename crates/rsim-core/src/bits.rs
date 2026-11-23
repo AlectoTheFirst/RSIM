@@ -170,6 +170,7 @@ pub const ENCAP_GRE: u128 = 1;
 pub const ENCAP_VXLAN: u128 = 2;
 pub const ENCAP_MPLS: u128 = 3;
 pub const ENCAP_WIREGUARD: u128 = 4;
+pub const ENCAP_VCMP: u128 = 5;
 
 /// The fragment states in [`FRAGMENT`].
 pub const FRAGMENT_UNFRAGMENTED: u128 = 0;
@@ -248,14 +249,19 @@ pub(crate) type BitValue = Option<bool>;
 /// header does not state has free value bits.
 pub(crate) fn encode(h: &Header) -> Vec<BitValue> {
     let mut bits: Vec<BitValue> = vec![Some(false); BITS as usize];
-    // With no known address, the addresses of a GRE, VXLAN or WireGuard
-    // encapsulation give the address family.
+    // With no known address, the addresses of a GRE, VXLAN, WireGuard or
+    // VCMP encapsulation give the address family.
     let v6 = match (h.src_ip, h.dst_ip, h.encap.first()) {
         (FieldValue::Known(a), _, _) | (_, FieldValue::Known(a), _) => Some(a.is_ipv6()),
         (
             _,
             _,
-            Some(Encap::Gre { src, .. } | Encap::Vxlan { src, .. } | Encap::Wireguard { src, .. }),
+            Some(
+                Encap::Gre { src, .. }
+                | Encap::Vxlan { src, .. }
+                | Encap::Wireguard { src, .. }
+                | Encap::Vcmp { src, .. },
+            ),
         ) => Some(src.is_ipv6()),
         _ => None,
     };
@@ -331,6 +337,13 @@ pub(crate) fn encode(h: &Header) -> Vec<BitValue> {
             ),
             Encap::Mpls { label, .. } => (ENCAP_MPLS, 0, 0, 0, u128::from(*label)),
             Encap::Wireguard { src, dst } => (ENCAP_WIREGUARD, ip_bits(*src), ip_bits(*dst), 0, 0),
+            Encap::Vcmp { src, dst, segment } => (
+                ENCAP_VCMP,
+                ip_bits(*src),
+                ip_bits(*dst),
+                u128::from(*segment),
+                0,
+            ),
         };
         for (f, v) in [
             (ENCAP_KIND, kind),
@@ -471,6 +484,11 @@ pub(crate) fn decode(bit: &dyn Fn(u32) -> bool) -> Header {
         ENCAP_WIREGUARD => vec![Encap::Wireguard {
             src: bits_ip(v6, value_of(ENCAP_SRC, bit)),
             dst: bits_ip(v6, value_of(ENCAP_DST, bit)),
+        }],
+        ENCAP_VCMP => vec![Encap::Vcmp {
+            src: bits_ip(v6, value_of(ENCAP_SRC, bit)),
+            dst: bits_ip(v6, value_of(ENCAP_DST, bit)),
+            segment: value_of(ENCAP_VNI, bit) as u32,
         }],
         ENCAP_MPLS => vec![Encap::Mpls {
             label: value_of(ENCAP_LABEL, bit) as u32,
