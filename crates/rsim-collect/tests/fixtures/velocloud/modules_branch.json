@@ -1,0 +1,66 @@
+{
+  "WAN": {
+    "version": "2",
+    "schemaVersion": "3.2.0",
+    "type": "WAN",
+    "data": {
+      "links": [
+        {
+          "logicalId": "link-b-mpls",
+          "internalId": "int-b-mpls",
+          "name": "MPLS",
+          "mode": "PRIVATE",
+          "type": "WIRED",
+          "isp": "carrier-a",
+          "upstreamMbps": 100,
+          "downstreamMbps": 100,
+          "MTU": 1500,
+          "nextHopIpAddress": "172.16.10.1",
+          "vlanId": null,
+          "interfaces": ["GE3"]
+        },
+        {
+          "logicalId": "link-b-dia",
+          "internalId": "int-b-dia",
+          "name": "DIA",
+          "mode": "PUBLIC",
+          "type": "WIRED",
+          "isp": "carrier-b",
+          "upstreamMbps": 50,
+          "downstreamMbps": 200,
+          "MTU": 1500,
+          "nextHopIpAddress": "203.0.113.9",
+          "vlanId": null,
+          "interfaces": ["GE4"]
+        }
+      ],
+      "networks": []
+    }
+  },
+  "controlPlane": {
+    "version": "0",
+    "type": "OPERATOR",
+    "data": {
+      "gatewaySegmentDetailList": [
+        {
+          "segment": {"segmentId": 0, "name": "Global Segment", "type": "REGULAR"},
+          "gatewayDetailList": [
+            {"name": "gateway-1", "ipAddress": "192.0.2.50", "logicalId": "gatewayg-1", "roles": [{"role": "VPN_TUNNEL"}, {"role": "primary"}]},
+            {"name": "gateway-2", "ipAddress": "192.0.2.51", "logicalId": "gatewayg-2", "roles": [{"role": "DNS"}]}
+          ]
+        }
+      ],
+      "segments": [
+        {
+          "segment": {"segmentId": 0, "name": "Global Segment", "type": "REGULAR"},
+          "vpn": {"dataCenterEdges": [{"logicalId": "edge-hub"}]}
+        }
+      ],
+      "routingConfiguration": {
+        "edge": {"bgp": {"uplinkCommunity": "65000:100"}},
+        "preferenceBuckets": [{"entity": "edge", "exitType": "EDGE", "protocol": "BGP"}]
+      },
+      "snmp": {"community": "fake-snmp-community"}
+    }
+  }
+}

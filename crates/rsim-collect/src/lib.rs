@@ -34,6 +34,8 @@ mod trust;
 mod tunnel;
 #[cfg(feature = "unifi")]
 pub mod unifi;
+#[cfg(feature = "velocloud")]
+pub mod velocloud;
 #[cfg(feature = "vyos")]
 pub mod vyos;
 

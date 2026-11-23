@@ -17,7 +17,7 @@
 //! | `IOSXR_<NAME>_IP`, `IOSXR_USER`, `IOSXR_PASS` | An IOS XR router and the credential of the IOS XR routers, with the same `KEY_FILE`, `AGENT`, `VIA`, `PROXY`, `MODE` and `PROFILE` keys as VyOS |
 //! | `IOSXE_<NAME>_IP`, `IOSXE_USER`, `IOSXE_PASS` | An IOS XE device and the credential of the IOS XE devices, with the same keys as IOS XR |
 //! | `NXOS_<NAME>_CHANNELS`, `IOSXR_<NAME>_CHANNELS`, `IOSXE_<NAME>_CHANNELS` | The exec channels at one time. The default is 1: one command after the other. |
-//! | `<P>_TIMEOUT`, `<P>_<NAME>_TIMEOUT` | The time for all sections of a device, in whole seconds from 1 to 86400. The default is 45. `<P>` is `VYOS`, `NXOS`, `IOSXR`, `IOSXE` or `UNIFI`; UniFi has only the vendor key. |
+//! | `<P>_TIMEOUT`, `<P>_<NAME>_TIMEOUT` | The time for all sections of a device, in whole seconds from 1 to 86400. The default is 45. `<P>` is `VYOS`, `NXOS`, `IOSXR`, `IOSXE`, `UNIFI` or `VELOCLOUD`; UniFi has only the vendor key, and the `<NAME>` of VeloCloud is the orchestrator. |
 //! | `<P>_SECTION_TIMEOUT`, `<P>_<NAME>_SECTION_TIMEOUT` | The time for one section, in whole seconds from 1 to 86400. The default is 20. |
 //! | `<P>_CAPTURE_BGP`, `<P>_<NAME>_CAPTURE_BGP` | The BGP sections of a router: `sessions` (the default) for the session summaries, `all` for the summaries, the neighbour detail and the tables of each neighbour, or `off`. `<P>` is `VYOS`, `NXOS`, `IOSXR` or `IOSXE`. A router with `all` can need a longer `<P>_<NAME>_TIMEOUT`. |
 //! | `UNIFI_CONTROLLER` | The addresses of the UniFi consoles, separated by commas |
@@ -27,6 +27,18 @@
 //! | `UNIFI_VIA`, `UNIFI_PROXY` | The jump hosts and the proxy to the consoles |
 //! | `UNIFI_TLS` | `pin` (the default), `ca` with `UNIFI_CA_FILE`, or `none` for no check of the certificate |
 //! | `UNIFI_CLIENT_CERT`, `UNIFI_CLIENT_KEY` | PEM files of a client certificate for mutual TLS |
+//! | `VELOCLOUD_<NAME>_URL` | The base URL of the VeloCloud orchestrator `<name>` |
+//! | `VELOCLOUD_<NAME>_TOKEN` | The API token of the orchestrator, sent as `Authorization: Token <token>` |
+//! | `VELOCLOUD_<NAME>_ENTERPRISES` | The enterprise logicalIds, separated by commas or by lines. Each enterprise is the device `vco-<name>-<logicalId>`. |
+//! | `VELOCLOUD_<NAME>_RELEASE` | The orchestrator release, 3 or 4 numbers from 5.0.0.0 |
+//! | `VELOCLOUD_<NAME>_BASE` | The API v2 base path. The default is `/api/sdwan/v2`. |
+//! | `VELOCLOUD_<NAME>_CONCURRENCY` | The requests in flight and the request starts in each second to the orchestrator, from 1 to 16. The default is 4. |
+//! | `VELOCLOUD_<NAME>_REFRESH` | The seconds after which the modules of an edge are read again. The default is 1800, and 0 reads them in each cycle. |
+//! | `VELOCLOUD_<NAME>_TLS` | `public` (the default) for the public roots, `pin`, `ca` with `VELOCLOUD_<NAME>_CA_FILE`, or `none` |
+//! | `VELOCLOUD_<NAME>_CLIENT_CERT`, `VELOCLOUD_<NAME>_CLIENT_KEY` | PEM files of a client certificate |
+//! | `VELOCLOUD_<NAME>_RETRIES` | The retries of a read after a 429, from 0 to 10. The default is 0. |
+//! | `VELOCLOUD_<NAME>_REQUEST_TIMEOUT` | The time for one request, in whole seconds from 1 to 86400. The default is 60. |
+//! | `VELOCLOUD_<NAME>_VIA`, `VELOCLOUD_<NAME>_PROXY` | The jump hosts and the proxy to the orchestrator. A jump host needs a pinned host key. |
 //! | `JUMP_<NAME>_IP` | The address of the jump host `<name>` |
 //! | `JUMP_<NAME>_USER` | The user on the jump host |
 //! | `JUMP_<NAME>_PASS`, `JUMP_<NAME>_KEY_FILE`, `JUMP_<NAME>_KEY_PASS`, `JUMP_<NAME>_AGENT` | The secret of the jump host, as for VyOS |
@@ -42,7 +54,10 @@
 //! The data folder holds the store, the store keys and the pin file. The
 //! keys are made at the first run. The command `seed` writes the cycles of a
 //! demo folder into a new store through the fake transport, with no env
-//! file and no network.
+//! file and no network. The commands `discover <name>` and `probe <name>`
+//! read the VeloCloud orchestrator `<name>` of the env file: `discover`
+//! prints the logicalId and the name of each enterprise, and `probe` reads
+//! one edge of each enterprise.
 //!
 //! With an inventory database, from `--inventory`, the environment variable
 //! `RSIM_INVENTORY_URL` or the env key `RSIM_INVENTORY_URL`, the collector
@@ -55,7 +70,9 @@
 //! reads the login in the URL of `<KEY>`. A managed credential has its
 //! sealed secret in the database, which the secret key of the env key
 //! `RSIM_SECRET_KEY`, in the environment or in the env file, opens: a password for SSH, an HTTPS login and a proxy login, a
-//! private key for SSH, and an API key for HTTPS. The client certificate of
+//! private key for SSH, and an API key for HTTPS, which a VeloCloud
+//! orchestrator takes as its token; an env credential of a VeloCloud
+//! orchestrator reads `<P>_TOKEN`. The client certificate of
 //! the UniFi consoles stays in `UNIFI_CLIENT_CERT` and `UNIFI_CLIENT_KEY`.
 //! `--inventory-ca-file`, `RSIM_INVENTORY_CA_FILE` or the env key of the same
 //! name gives the CA bundle of the database server. A cycle whose inventory
@@ -71,17 +88,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use rsim_collect::https::{ClientCert, HttpsLimits, HttpsProfile, HttpsTransport, TlsTrust};
+use rsim_collect::https::{
+    ApiServer, ClientCert, HttpsLimits, HttpsProfile, HttpsTransport, TlsTrust,
+};
 use rsim_collect::iosxe::{IosxeSource, SHELL_SETUP as IOSXE_SHELL_SETUP};
 use rsim_collect::iosxr::{IosxrSource, SHELL_SETUP as IOSXR_SHELL_SETUP};
 use rsim_collect::nxos::{NxosSource, SHELL_SETUP};
 use rsim_collect::ssh::{Algorithms, CommandMode, SshLimits, SshProfile, SshTransport};
 use rsim_collect::unifi::UnifiSource;
+use rsim_collect::velocloud::{self, Orchestrator, VelocloudMemory, VelocloudSource};
 use rsim_collect::vyos::VyosSource;
 use rsim_collect::{
-    CaptureBgp, Collector, Credential, CycleReport, DEFAULT_INTERVAL, Device, InventoryList, Jump,
-    Limits, MemoryCredentials, PinPolicy, Proxy, ProxyLogin, Route, Schedule, Secret, Source,
-    TimeLimits, TokioClock, TrustStore, Vendor, WAKE_LIMIT,
+    CaptureBgp, Clock, Collector, Credential, CycleReport, DEFAULT_INTERVAL, Device, Https,
+    InventoryList, Jump, Limits, MemoryCredentials, PinPolicy, Proxy, ProxyLogin, Route, Schedule,
+    Secret, Source, TimeLimits, TokioClock, TrustStore, Vendor, WAKE_LIMIT,
 };
 use rsim_inventory::env::parse_env;
 use rsim_inventory::{CredentialKind, CredentialSource, Inventory, Sealed, SecretKey};
@@ -127,6 +147,11 @@ enum Command {
     Status,
     /// Writes the raw bytes of a section of the newest snapshot to stdout.
     Show { device: String, section: String },
+    /// Prints the enterprises of a VeloCloud orchestrator of the env file.
+    Discover { name: String },
+    /// Reads one edge of each enterprise of a VeloCloud orchestrator of the
+    /// env file.
+    Probe { name: String },
     /// Seed a new store from a demo folder
     Seed {
         /// Demo folder
@@ -176,6 +201,198 @@ struct Setup {
     native_json: Vec<String>,
     /// The devices with a time key, with their time limits.
     times: Vec<(String, TimeLimits)>,
+    /// The retries after a 429 of each HTTPS device.
+    https_retries: Vec<(String, u32)>,
+    /// The request time of each HTTPS device with its own.
+    request_timeouts: Vec<(String, Duration)>,
+    /// The address of each VeloCloud orchestrator with its settings.
+    api_servers: Vec<(String, ApiServer)>,
+    /// The orchestrator settings of each VeloCloud device.
+    orchestrators: Vec<(String, Orchestrator)>,
+}
+
+impl Setup {
+    fn new() -> Setup {
+        Setup {
+            devices: Vec::new(),
+            credentials: MemoryCredentials::new(),
+            profiles: Vec::new(),
+            https: HttpsProfile::default(),
+            https_profiles: Vec::new(),
+            native_json: Vec::new(),
+            times: Vec::new(),
+            https_retries: Vec::new(),
+            request_timeouts: Vec::new(),
+            api_servers: Vec::new(),
+            orchestrators: Vec::new(),
+        }
+    }
+}
+
+/// A VeloCloud orchestrator of the env file.
+struct Vco {
+    /// The id form of the `<NAME>` of its keys.
+    name: String,
+    url: String,
+    enterprises: Vec<String>,
+    orchestrator: Orchestrator,
+    profile: HttpsProfile,
+    route: Route,
+    times: Option<TimeLimits>,
+    retries: Option<u32>,
+    request_timeout: Option<Duration>,
+}
+
+impl Vco {
+    /// The device of an enterprise, or the device of the orchestrator for
+    /// `None`.
+    fn device(&self, enterprise: Option<&str>) -> Device {
+        Device {
+            id: enterprise.map_or(format!("vco-{}", self.name), |e| {
+                velocloud::device_id(&self.name, e)
+            }),
+            vendor: Vendor::Velocloud,
+            address: self.url.clone(),
+            credential: format!("velocloud-{}", self.name),
+            site: enterprise.map(str::to_string),
+            capture_bgp: Default::default(),
+            route: self.route.clone(),
+            interval: DEFAULT_INTERVAL,
+        }
+    }
+
+    /// An HTTPS transport for the device of the orchestrator.
+    fn transport(&self, credentials: MemoryCredentials, trust: TrustStore) -> HttpsTransport {
+        let id = self.device(None).id;
+        let mut https = HttpsTransport::new(
+            Arc::new(credentials),
+            Arc::new(trust),
+            HttpsLimits::default(),
+        )
+        .with_profile(&id, self.profile.clone())
+        .with_api_server(
+            &self.url,
+            ApiServer {
+                concurrency: self.orchestrator.concurrency,
+            },
+        );
+        if let Some(n) = self.retries {
+            https = https.with_retries(&id, n);
+        }
+        if let Some(t) = self.request_timeout {
+            https = https.with_request_timeout(&id, t);
+        }
+        https
+    }
+}
+
+/// The VeloCloud orchestrators of the env file: each `VELOCLOUD_<NAME>_URL`
+/// with the keys of `<NAME>`. The token of each is the credential
+/// `velocloud-<name>`.
+fn velocloud_env(
+    env: &BTreeMap<String, String>,
+    credentials: &mut MemoryCredentials,
+) -> Result<Vec<Vco>, String> {
+    let mut out = Vec::new();
+    for (key, url) in env {
+        let Some(name) = key
+            .strip_prefix("VELOCLOUD_")
+            .and_then(|k| k.strip_suffix("_URL"))
+        else {
+            continue;
+        };
+        let get = |k: &str| env.get(&format!("VELOCLOUD_{name}_{k}"));
+        let key = |k: &str| format!("VELOCLOUD_{name}_{k}");
+        let id = name.to_lowercase().replace('_', "-");
+        let token = get("TOKEN").ok_or_else(|| format!("{} is not set", key("TOKEN")))?;
+        credentials.insert(
+            &format!("velocloud-{id}"),
+            Credential {
+                user: String::new(),
+                secret: Secret::Token(token.clone()),
+            },
+        );
+        let release = get("RELEASE").ok_or_else(|| format!("{} is not set", key("RELEASE")))?;
+        velocloud::check_release(release).map_err(|e| format!("{}: {e}", key("RELEASE")))?;
+        let concurrency = match get("CONCURRENCY") {
+            None => velocloud::DEFAULT_CONCURRENCY,
+            Some(c) => c
+                .parse::<usize>()
+                .ok()
+                .filter(|n| (1..=velocloud::MAX_CONCURRENCY).contains(n))
+                .ok_or_else(|| {
+                    format!(
+                        "{} {c} is not a number from 1 to {}",
+                        key("CONCURRENCY"),
+                        velocloud::MAX_CONCURRENCY
+                    )
+                })?,
+        };
+        let refresh =
+            match get("REFRESH") {
+                None => velocloud::DEFAULT_REFRESH,
+                Some(r) => Duration::from_secs(r.parse::<u64>().map_err(|_| {
+                    format!("{} {r} is not a whole number of seconds", key("REFRESH"))
+                })?),
+            };
+        let trust = match get("TLS").map(String::as_str) {
+            None | Some("public") => TlsTrust::PublicRoots,
+            Some("pin") => TlsTrust::Pin,
+            Some("ca") => TlsTrust::CaBundle(read_file(
+                get("CA_FILE")
+                    .ok_or_else(|| format!("{}=ca needs {}", key("TLS"), key("CA_FILE")))?,
+            )?),
+            Some("none") => TlsTrust::NoVerify,
+            Some(t) => {
+                return Err(format!("{} {t} is not public, pin, ca or none", key("TLS")));
+            }
+        };
+        let client = match (get("CLIENT_CERT"), get("CLIENT_KEY")) {
+            (Some(c), Some(k)) => Some(ClientCert {
+                chain: read_file(c)?,
+                key: read_file(k)?,
+            }),
+            (None, None) => None,
+            _ => {
+                return Err(format!(
+                    "{} and {} go together",
+                    key("CLIENT_CERT"),
+                    key("CLIENT_KEY")
+                ));
+            }
+        };
+        let retries =
+            match get("RETRIES") {
+                None => None,
+                Some(r) => Some(r.parse::<u32>().ok().filter(|n| *n <= 10).ok_or_else(|| {
+                    format!("{} {r} is not a number from 0 to 10", key("RETRIES"))
+                })?),
+            };
+        let request_timeout = seconds(env, &key("REQUEST_TIMEOUT"))?;
+        let times = time_limits(env, "VELOCLOUD", Some(name))?;
+        let route = route(env, "VELOCLOUD", Some(name), credentials)?;
+        out.push(Vco {
+            name: id,
+            url: url.trim_end_matches('/').to_string(),
+            enterprises: get("ENTERPRISES")
+                .map(|e| velocloud::enterprise_ids(e.as_str()))
+                .unwrap_or_default(),
+            orchestrator: Orchestrator {
+                base: get("BASE").map_or(velocloud::DEFAULT_BASE.to_string(), |b| {
+                    b.trim_end_matches('/').to_string()
+                }),
+                release: Some(release.clone()),
+                concurrency,
+                refresh,
+            },
+            profile: HttpsProfile { trust, client },
+            route,
+            times,
+            retries,
+            request_timeout,
+        });
+    }
+    Ok(out)
 }
 
 /// The largest time limit in seconds.
@@ -426,15 +643,7 @@ fn route(
 }
 
 fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
-    let mut s = Setup {
-        devices: Vec::new(),
-        credentials: MemoryCredentials::new(),
-        profiles: Vec::new(),
-        https: HttpsProfile::default(),
-        https_profiles: Vec::new(),
-        native_json: Vec::new(),
-        times: Vec::new(),
-    };
+    let mut s = Setup::new();
     let list = |key: &str| -> Vec<String> {
         env.get(key)
             .map(|v| {
@@ -469,7 +678,8 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
                     .ok_or("UNIFI_TLS=ca needs UNIFI_CA_FILE")?,
             )?),
             Some("none") => TlsTrust::NoVerify,
-            Some(t) => return Err(format!("UNIFI_TLS {t} is not pin, ca or none")),
+            Some("public") => TlsTrust::PublicRoots,
+            Some(t) => return Err(format!("UNIFI_TLS {t} is not pin, ca, public or none")),
         };
         s.https.client = match (env.get("UNIFI_CLIENT_CERT"), env.get("UNIFI_CLIENT_KEY")) {
             (Some(c), Some(k)) => Some(ClientCert {
@@ -518,10 +728,34 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
         };
         s.credentials.insert("unifi", credential);
     }
+    for v in velocloud_env(env, &mut s.credentials)? {
+        for e in &v.enterprises {
+            let d = v.device(Some(e.as_str()));
+            s.https_profiles.push((d.id.clone(), v.profile.clone()));
+            s.orchestrators.push((d.id.clone(), v.orchestrator.clone()));
+            if let Some(t) = v.times {
+                s.times.push((d.id.clone(), t));
+            }
+            if let Some(n) = v.retries {
+                s.https_retries.push((d.id.clone(), n));
+            }
+            if let Some(t) = v.request_timeout {
+                s.request_timeouts.push((d.id.clone(), t));
+            }
+            s.devices.push(d);
+        }
+        s.api_servers.push((
+            v.url.clone(),
+            ApiServer {
+                concurrency: v.orchestrator.concurrency,
+            },
+        ));
+    }
     if s.devices.is_empty() {
         return Err(
             "the env file has no VYOS_<NAME>_IP, no NXOS_<NAME>_IP, no IOSXR_<NAME>_IP, \
-                    no IOSXE_<NAME>_IP and no UNIFI_CONTROLLER"
+                    no IOSXE_<NAME>_IP, no UNIFI_CONTROLLER and no VELOCLOUD_<NAME>_URL \
+                    with enterprises"
                 .into(),
         );
     }
@@ -564,12 +798,34 @@ impl<'a> Secrets<'a> {
     }
 }
 
-/// The secret of a managed credential for its use: a password for each
-/// use, a private key for SSH and an API key for HTTPS.
+/// The use of a credential.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Use {
+    /// SSH: a password, a private key or an agent.
+    Ssh,
+    /// HTTPS with an API key or a login.
+    Https,
+    /// HTTPS with a token: a VeloCloud orchestrator.
+    Token,
+}
+
+impl Use {
+    /// The use of a vendor.
+    fn of(vendor: Vendor) -> Use {
+        match vendor {
+            Vendor::Unifi => Use::Https,
+            Vendor::Velocloud => Use::Token,
+            Vendor::Vyos | Vendor::Nxos | Vendor::Iosxr | Vendor::Iosxe => Use::Ssh,
+        }
+    }
+}
+
+/// The secret of a managed credential for its use: a password for SSH and
+/// an HTTPS login, a private key for SSH, an API key for HTTPS and a token.
 fn managed_credential(
     secrets: &Secrets,
     c: &rsim_inventory::Credential,
-    https: bool,
+    used: Use,
 ) -> Result<Credential, String> {
     let kind = c.kind.ok_or("the managed credential has no kind")?;
     let key = secrets
@@ -581,47 +837,63 @@ fn managed_credential(
         .ok_or("the managed credential has no sealed secret")?;
     let secret = key.open(&c.name, kind, sealed)?;
     let user = c.user.clone().unwrap_or_default();
-    match (kind, https) {
-        (CredentialKind::Password, _) => Ok(Credential {
+    match (kind, used) {
+        (CredentialKind::Password, Use::Ssh | Use::Https) => Ok(Credential {
             user,
             secret: Secret::Password(secret.value),
         }),
-        (CredentialKind::SshKey, false) => Ok(Credential {
+        (CredentialKind::Password, Use::Token) => {
+            Err("a password credential is not a token of a VeloCloud orchestrator".into())
+        }
+        (CredentialKind::SshKey, Use::Ssh) => Ok(Credential {
             user,
             secret: Secret::Key {
                 pem: secret.value,
                 passphrase: secret.passphrase,
             },
         }),
-        (CredentialKind::ApiKey, true) => Ok(Credential {
+        (CredentialKind::ApiKey, Use::Https) => Ok(Credential {
             user: String::new(),
             secret: Secret::ApiKey(secret.value),
         }),
-        (CredentialKind::SshKey, true) => {
+        (CredentialKind::ApiKey, Use::Token) => Ok(Credential {
+            user: String::new(),
+            secret: Secret::Token(secret.value),
+        }),
+        (CredentialKind::SshKey, Use::Https | Use::Token) => {
             Err("an ssh-key credential is not a credential of HTTPS".into())
         }
-        (CredentialKind::ApiKey, false) => {
+        (CredentialKind::ApiKey, Use::Ssh) => {
             Err("an api-key credential is not a credential of SSH".into())
         }
     }
 }
 
 /// The secret of a credential. An env credential of an HTTPS device takes
-/// `<P>_API_KEY` or `<P>_USER` with `<P>_PASS`; of an SSH device or a jump
-/// host `<P>_USER` with its SSH secret; `env-url` takes the login in the URL
-/// of its key; a managed credential opens its sealed secret.
+/// `<P>_API_KEY` or `<P>_USER` with `<P>_PASS`; of a VeloCloud orchestrator
+/// `<P>_TOKEN`; of an SSH device or a jump host `<P>_USER` with its SSH
+/// secret; `env-url` takes the login in the URL of its key; a managed
+/// credential opens its sealed secret.
 fn credential_secret(
     secrets: &Secrets,
     c: &rsim_inventory::Credential,
-    https: bool,
+    used: Use,
 ) -> Result<Credential, String> {
     let env = secrets.env;
     if c.source == CredentialSource::Managed {
-        return managed_credential(secrets, c, https);
+        return managed_credential(secrets, c, used);
     }
     let p = c.key.as_deref().ok_or("the credential has no key")?;
     match c.source {
-        CredentialSource::Env if https => {
+        CredentialSource::Env if used == Use::Token => Ok(Credential {
+            user: String::new(),
+            secret: Secret::Token(
+                env.get(&format!("{p}_TOKEN"))
+                    .ok_or_else(|| format!("{p}_TOKEN is not set"))?
+                    .clone(),
+            ),
+        }),
+        CredentialSource::Env if used == Use::Https => {
             match (
                 env.get(&format!("{p}_API_KEY")),
                 env.get(&format!("{p}_USER")),
@@ -668,12 +940,12 @@ fn reference(
     inv: &Inventory,
     secrets: &Secrets,
     name: &str,
-    https: bool,
+    used: Use,
 ) -> Result<Credential, String> {
     let c = inv
         .credential(name)
         .ok_or_else(|| format!("no credential is named {name}"))?;
-    credential_secret(secrets, c, https).map_err(|e| format!("the credential {name}: {e}"))
+    credential_secret(secrets, c, used).map_err(|e| format!("the credential {name}: {e}"))
 }
 
 /// The secrets of the credential references of an inventory, with the
@@ -731,7 +1003,7 @@ fn inventory_route(
         .transpose()
         .map_err(|e| format!("the route {name}: {e}"))?;
     if let (Some(p), Some(c)) = (&mut proxy, &r.proxy_credential) {
-        let cred = reference(inv, secrets, c, false)?;
+        let cred = reference(inv, secrets, c, Use::Ssh)?;
         let Secret::Password(password) = cred.secret else {
             return Err(format!(
                 "the proxy credential {c} of {name} has no password"
@@ -752,7 +1024,7 @@ fn inventory_route(
             .ok_or_else(|| format!("no jump host is named {j}"))?;
         credentials.add(
             &host.credential,
-            reference(inv, secrets, &host.credential, false)?,
+            reference(inv, secrets, &host.credential, Use::Ssh)?,
             format!("the jump host {j} (SSH)"),
         )?;
         jumps.push(Jump {
@@ -777,15 +1049,7 @@ fn setup_from_inventory(
     secrets: &Secrets,
 ) -> Result<(Setup, Vec<String>), String> {
     let env = secrets.env;
-    let mut s = Setup {
-        devices: Vec::new(),
-        credentials: MemoryCredentials::new(),
-        profiles: Vec::new(),
-        https: HttpsProfile::default(),
-        https_profiles: Vec::new(),
-        native_json: Vec::new(),
-        times: Vec::new(),
-    };
+    let mut s = Setup::new();
     let client = match (env.get("UNIFI_CLIENT_CERT"), env.get("UNIFI_CLIENT_KEY")) {
         (Some(c), Some(k)) => Some(ClientCert {
             chain: read_file(c)?,
@@ -805,13 +1069,14 @@ fn setup_from_inventory(
             continue;
         };
         let st = &d.settings;
-        let https = vendor == Vendor::Unifi;
+        let used = Use::of(vendor);
+        let https = used != Use::Ssh;
         let credential = st
             .credential
             .value
             .clone()
             .ok_or_else(|| format!("the device {} has no credential", d.name))?;
-        let secret = reference(inv, secrets, &credential, https)
+        let secret = reference(inv, secrets, &credential, used)
             .map_err(|e| format!("the device {}: {e}", d.name))?;
         let user = format!(
             "the device {} ({})",
@@ -832,7 +1097,9 @@ fn setup_from_inventory(
         }
         if https {
             let trust = match st.tls_trust.value {
+                _ if vendor == Vendor::Velocloud && !st.tls_trust.is_set() => TlsTrust::PublicRoots,
                 rsim_inventory::TlsTrust::Pin => TlsTrust::Pin,
+                rsim_inventory::TlsTrust::Public => TlsTrust::PublicRoots,
                 rsim_inventory::TlsTrust::None => TlsTrust::NoVerify,
                 rsim_inventory::TlsTrust::Ca => {
                     TlsTrust::CaBundle(read_file(st.tls_ca_file.value.as_deref().ok_or_else(
@@ -847,6 +1114,23 @@ fn setup_from_inventory(
                     client: client.clone(),
                 },
             ));
+            s.https_retries.push((d.name.clone(), st.retries.value));
+            s.request_timeouts.push((
+                d.name.clone(),
+                Duration::from_secs(st.request_timeout_seconds.value.into()),
+            ));
+            if vendor == Vendor::Velocloud {
+                s.orchestrators
+                    .push((d.name.clone(), Orchestrator::default()));
+                if !s.api_servers.iter().any(|(a, _)| *a == d.address) {
+                    s.api_servers.push((
+                        d.address.clone(),
+                        ApiServer {
+                            concurrency: velocloud::DEFAULT_CONCURRENCY,
+                        },
+                    ));
+                }
+            }
         } else {
             let mut profile = SshProfile {
                 algorithms: match st.ssh_algorithms.value {
@@ -910,8 +1194,8 @@ struct Collection {
 }
 
 /// The sources of a setup, with its transports, and the time limits of its
-/// devices.
-fn sources(setup: Setup, trust: &Arc<TrustStore>) -> Collection {
+/// devices. The VeloCloud source keeps its modules in `memory`.
+fn sources(setup: Setup, trust: &Arc<TrustStore>, memory: &Arc<VelocloudMemory>) -> Collection {
     let credentials = Arc::new(setup.credentials);
     let mut ssh = SshTransport::new(credentials.clone(), trust.clone(), SshLimits::default());
     for (id, p) in setup.profiles {
@@ -925,17 +1209,34 @@ fn sources(setup: Setup, trust: &Arc<TrustStore>) -> Collection {
     let vyos = VyosSource::new(ssh.clone());
     let iosxr = IosxrSource::new(ssh.clone());
     let iosxe = IosxeSource::new(ssh);
+    let clock: Arc<dyn Clock> = Arc::new(TokioClock::system());
     let mut https = HttpsTransport::new(credentials, trust.clone(), HttpsLimits::default())
-        .with_default_profile(setup.https);
+        .with_default_profile(setup.https)
+        .with_clock(clock.clone());
     for (id, p) in setup.https_profiles {
         https = https.with_profile(&id, p);
+    }
+    for (id, n) in setup.https_retries {
+        https = https.with_retries(&id, n);
+    }
+    for (id, t) in setup.request_timeouts {
+        https = https.with_request_timeout(&id, t);
+    }
+    for (address, a) in setup.api_servers {
+        https = https.with_api_server(&address, a);
+    }
+    let https: Arc<dyn Https> = Arc::new(https);
+    let mut vco = VelocloudSource::new(https.clone(), memory.clone(), clock);
+    for (id, o) in setup.orchestrators {
+        vco = vco.with_orchestrator(&id, o);
     }
     let sources: Vec<Arc<dyn Source>> = vec![
         Arc::new(vyos),
         Arc::new(nxos),
         Arc::new(iosxr),
         Arc::new(iosxe),
-        Arc::new(UnifiSource::new(Arc::new(https))),
+        Arc::new(UnifiSource::new(https)),
+        Arc::new(vco),
     ];
     Collection {
         devices: setup.devices,
@@ -998,6 +1299,7 @@ async fn configure_from_inventory(
     env: &BTreeMap<String, String>,
     key: Option<&SecretKey>,
     trust: &Arc<TrustStore>,
+    memory: &Arc<VelocloudMemory>,
     collector: &mut Collector,
 ) -> Result<(Inventory, Vec<Device>), String> {
     let (inv, sealed) = db.load_with_secrets().await.map_err(|e| e.to_string())?;
@@ -1014,7 +1316,7 @@ async fn configure_from_inventory(
         devices,
         sources,
         times,
-    } = sources(setup, trust);
+    } = sources(setup, trust, memory);
     collector.reconfigure(
         Box::new(InventoryList {
             devices: devices.clone(),
@@ -1175,13 +1477,19 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
         Arc::new(TokioClock::system()),
     )
     .map_err(|e| e.to_string())?;
+    let memory = Arc::new(VelocloudMemory::new());
+    match memory.warm_from(collector.store()) {
+        Ok(0) => {}
+        Ok(n) => eprintln!("VeloCloud modules of {n} devices from the store"),
+        Err(e) => eprintln!("error: VeloCloud modules from the store: {e}"),
+    }
     match db {
         None => {
             let Collection {
                 devices,
                 sources,
                 times,
-            } = sources(setup(&env)?, &trust);
+            } = sources(setup(&env)?, &trust, &memory);
             print_devices(&devices);
             collector.reconfigure(Box::new(devices), sources, times);
             if repeat {
@@ -1206,8 +1514,15 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
                     _ = tokio::time::sleep(wait) => {}
                 }
                 wait = WAKE_LIMIT;
-                match configure_from_inventory(&db, &env, key.as_ref(), &trust, &mut collector)
-                    .await
+                match configure_from_inventory(
+                    &db,
+                    &env,
+                    key.as_ref(),
+                    &trust,
+                    &memory,
+                    &mut collector,
+                )
+                .await
                 {
                     Ok((inv, devices)) => {
                         if shown != Some(inv.version) {
@@ -1241,6 +1556,56 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Reads the VeloCloud orchestrator `name` of the env file: the enterprises
+/// with `discover`, or one edge of each enterprise with `probe`. The trust
+/// store is the pin file of the data folder, or an empty one, and accepts
+/// no new pin.
+async fn orchestrator_read(cli: &Cli, name: &str, probe: bool) -> Result<(), String> {
+    let path = cli
+        .env
+        .as_ref()
+        .ok_or("give --env with the VELOCLOUD_<NAME>_* keys of the orchestrator")?;
+    let env =
+        parse_env(&std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?);
+    let mut credentials = MemoryCredentials::new();
+    let v = velocloud_env(&env, &mut credentials)?
+        .into_iter()
+        .find(|v| v.name == name)
+        .ok_or_else(|| {
+            format!(
+                "the env file has no VELOCLOUD_{}_URL",
+                name.to_uppercase().replace('-', "_")
+            )
+        })?;
+    let trust = match &cli.data {
+        Some(d) => TrustStore::open(&d.join("pins"), PinPolicy::Strict)?,
+        None => TrustStore::memory(PinPolicy::Strict),
+    };
+    let device = v.device(None);
+    let https = v.transport(credentials, trust);
+    let base = &v.orchestrator.base;
+    if probe {
+        let mut failed = 0;
+        for (id, r) in velocloud::probe(&https, &device, base, &v.enterprises).await {
+            match r {
+                Ok(()) => println!("{id} ok"),
+                Err(e) => {
+                    failed += 1;
+                    println!("{id} {e}");
+                }
+            }
+        }
+        if failed > 0 {
+            return Err(format!("{failed} reads failed"));
+        }
+    } else {
+        for (id, n) in velocloud::discover(&https, &device, base).await? {
+            println!("{id}\t{}", n.unwrap_or_default());
+        }
+    }
+    Ok(())
+}
+
 /// Waits for SIGINT or, on Unix, SIGTERM, the stop signal of a container.
 async fn stop_signal() {
     #[cfg(unix)]
@@ -1270,6 +1635,14 @@ fn main() -> ExitCode {
         Command::Show { device, section } => data(&cli)
             .and_then(open_store)
             .and_then(|s| show(&s, device, section)),
+        Command::Discover { name } | Command::Probe { name } => {
+            let probe = matches!(cli.command, Command::Probe { .. });
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| e.to_string())
+                .and_then(|rt| rt.block_on(orchestrator_read(&cli, name, probe)))
+        }
         Command::Seed { demo, if_empty } => data(&cli).and_then(|d| {
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -1432,8 +1805,12 @@ mod tests {
         let key = SecretKey::parse(&SecretKey::generate().unwrap()).unwrap();
         let mut sealed = BTreeMap::new();
         for c in &mut inv.credentials {
-            let https = c.name == "unifi";
-            let plain = credential_secret(&Secrets::env(&env), c, https).unwrap();
+            let used = if c.name == "unifi" {
+                Use::Https
+            } else {
+                Use::Ssh
+            };
+            let plain = credential_secret(&Secrets::env(&env), c, used).unwrap();
             let (kind, user, value) = match plain.secret {
                 Secret::Password(p) => (CredentialKind::Password, Some(plain.user), p),
                 Secret::ApiKey(k) => (CredentialKind::ApiKey, None, k),
@@ -1516,7 +1893,7 @@ mod tests {
             key: Some(&key),
             sealed: &sealed,
         };
-        let got = credential_secret(&s, &c, false).unwrap();
+        let got = credential_secret(&s, &c, Use::Ssh).unwrap();
         assert_eq!(got.user, "ro");
         assert_eq!(
             got.secret,
@@ -1525,8 +1902,90 @@ mod tests {
                 passphrase: Some("pp".into())
             }
         );
-        let e = credential_secret(&s, &c, true).unwrap_err();
+        let e = credential_secret(&s, &c, Use::Https).unwrap_err();
         assert!(e.contains("not a credential of HTTPS"), "{e}");
+    }
+
+    #[test]
+    fn a_managed_api_key_of_a_velocloud_orchestrator_is_its_token() {
+        let mut c = rsim_inventory::Credential::env("vco", CredentialSource::Env, "VCO");
+        c.source = CredentialSource::Managed;
+        c.key = None;
+        c.kind = Some(CredentialKind::ApiKey);
+        let key = SecretKey::parse(&SecretKey::generate().unwrap()).unwrap();
+        let input = rsim_inventory::SecretInput {
+            value: "fake-token".into(),
+            passphrase: None,
+        };
+        let sealed = BTreeMap::from([(
+            "vco".to_string(),
+            key.seal("vco", CredentialKind::ApiKey, &input).unwrap(),
+        )]);
+        let none = BTreeMap::new();
+        let s = Secrets {
+            env: &none,
+            key: Some(&key),
+            sealed: &sealed,
+        };
+        let token = credential_secret(&s, &c, Use::Token).unwrap();
+        assert_eq!(token.secret, Secret::Token("fake-token".into()));
+        let api_key = credential_secret(&s, &c, Use::Https).unwrap();
+        assert_eq!(api_key.secret, Secret::ApiKey("fake-token".into()));
+        let env = parse_env("VCO_TOKEN=fake-env-token\n");
+        let c = rsim_inventory::Credential::env("vco", CredentialSource::Env, "VCO");
+        let token = credential_secret(&Secrets::env(&env), &c, Use::Token).unwrap();
+        assert_eq!(token.secret, Secret::Token("fake-env-token".into()));
+    }
+
+    #[test]
+    fn the_env_file_gives_one_velocloud_device_for_each_enterprise() {
+        use rsim_collect::Credentials;
+        let env = parse_env(
+            "VELOCLOUD_LAB_URL=https://198.51.100.10/\nVELOCLOUD_LAB_TOKEN=fake-token\n\
+             VELOCLOUD_LAB_ENTERPRISES=ent-a, ent-b\nVELOCLOUD_LAB_RELEASE=6.4.0\n\
+             VELOCLOUD_LAB_CONCURRENCY=2\nVELOCLOUD_LAB_REFRESH=0\nVELOCLOUD_LAB_RETRIES=3\n",
+        );
+        let s = setup(&env).unwrap();
+        let ids: Vec<&str> = s.devices.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(ids, ["vco-lab-ent-a", "vco-lab-ent-b"]);
+        assert_eq!(s.devices[1].site.as_deref(), Some("ent-b"));
+        assert_eq!(s.devices[0].address, "https://198.51.100.10");
+        assert_eq!(s.devices[0].vendor, Vendor::Velocloud);
+        assert_eq!(
+            s.credentials.get("velocloud-lab").unwrap().secret,
+            Secret::Token("fake-token".into())
+        );
+        assert_eq!(s.https_profiles[0].1.trust, TlsTrust::PublicRoots);
+        assert_eq!(
+            s.api_servers,
+            [(
+                "https://198.51.100.10".to_string(),
+                ApiServer { concurrency: 2 }
+            )]
+        );
+        assert_eq!(s.orchestrators[0].1.refresh, Duration::ZERO);
+        assert_eq!(s.orchestrators[0].1.release.as_deref(), Some("6.4.0"));
+        assert_eq!(
+            s.https_retries,
+            [
+                ("vco-lab-ent-a".to_string(), 3),
+                ("vco-lab-ent-b".to_string(), 3)
+            ]
+        );
+        for bad in [
+            "VELOCLOUD_LAB_RELEASE=4.9.0",
+            "VELOCLOUD_LAB_CONCURRENCY=17",
+            "VELOCLOUD_LAB_TLS=strict",
+            "VELOCLOUD_LAB_RETRIES=11",
+        ] {
+            let mut e = env.clone();
+            let (k, v) = bad.split_once('=').unwrap();
+            e.insert(k.to_string(), v.to_string());
+            assert!(setup(&e).is_err(), "{bad}");
+        }
+        let mut e = env.clone();
+        e.remove("VELOCLOUD_LAB_TOKEN");
+        assert!(setup(&e).is_err());
     }
 
     #[test]

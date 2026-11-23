@@ -418,7 +418,7 @@ impl Builder<'_> {
             None => None,
             Some(t) => Some(
                 TlsTrust::parse(t)
-                    .ok_or_else(|| format!("UNIFI_TLS {t} is not pin, ca or none"))?,
+                    .ok_or_else(|| format!("UNIFI_TLS {t} is not pin, ca, public or none"))?,
             ),
         };
         if g.tls_trust == Some(TlsTrust::Ca) {

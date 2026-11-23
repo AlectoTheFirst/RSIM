@@ -4386,6 +4386,11 @@
             "type": "string"
           },
           {
+            "const": "public",
+            "description": "Public roots",
+            "type": "string"
+          },
+          {
             "const": "none",
             "description": "No check",
             "type": "string"

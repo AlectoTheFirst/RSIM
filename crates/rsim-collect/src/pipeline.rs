@@ -368,6 +368,9 @@ impl Collector {
             due: due.len(),
             ..CycleReport::default()
         };
+        for source in self.sources.values() {
+            source.begin_cycle();
+        }
 
         let cap = self.limits.channel;
         let (job_tx, job_rx) = mpsc::channel::<Due>(cap);

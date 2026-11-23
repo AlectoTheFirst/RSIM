@@ -101,6 +101,8 @@ words! {
         Pin = "pin",
         /// CA bundle
         Ca = "ca",
+        /// Public roots
+        Public = "public",
         /// No check
         None = "none",
     }
@@ -144,6 +146,7 @@ pub const COLLECTOR_VENDORS: &[(&str, CollectorTransport)] = &[
     ("iosxr", CollectorTransport::Ssh),
     ("nxos", CollectorTransport::Ssh),
     ("unifi", CollectorTransport::Https),
+    ("velocloud", CollectorTransport::Https),
     ("vyos", CollectorTransport::Ssh),
 ];
 

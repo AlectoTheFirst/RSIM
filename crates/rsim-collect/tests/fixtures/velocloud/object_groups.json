@@ -1,0 +1,24 @@
+[
+  {
+    "id": 3001,
+    "logicalId": "group-servers",
+    "name": "servers",
+    "type": "address_group",
+    "enterpriseId": 77,
+    "data": [
+      {"ip": "10.20.20.10", "mask": "255.255.255.255", "rule_type": "exact"},
+      {"ip": "10.20.21.0", "mask": "255.255.255.0", "rule_type": "netmask"}
+    ]
+  },
+  {
+    "id": 3002,
+    "logicalId": "group-web",
+    "name": "web",
+    "type": "port_group",
+    "enterpriseId": 77,
+    "data": [
+      {"proto": 6, "port_low": 80, "port_high": 80},
+      {"proto": 6, "port_low": 443, "port_high": 443}
+    ]
+  }
+]

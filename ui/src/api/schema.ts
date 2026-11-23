@@ -2127,7 +2127,7 @@ export interface components {
          */
         TcpFlag: "fin" | "syn" | "rst" | "psh" | "ack" | "urg" | "ece" | "cwr";
         /** @description TLS trust */
-        TlsTrust: "pin" | "ca" | "none";
+        TlsTrust: "pin" | "ca" | "public" | "none";
         /**
          * TokenIn
          * @description New API token body

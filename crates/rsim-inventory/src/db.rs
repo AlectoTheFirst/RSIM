@@ -48,6 +48,11 @@ pub const MIGRATIONS: &[(u32, &str, &str)] = &[
         "interval",
         include_str!("../migrations/0005_interval.sql"),
     ),
+    (
+        6,
+        "tls_public",
+        include_str!("../migrations/0006_tls_public.sql"),
+    ),
 ];
 
 /// The schema version of this build: the last migration.

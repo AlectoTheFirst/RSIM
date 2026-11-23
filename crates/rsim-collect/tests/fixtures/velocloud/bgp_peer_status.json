@@ -1,0 +1,42 @@
+[
+  {
+    "edgeId": 101,
+    "edgeLogicalId": "edge-branch",
+    "edgeName": "branch-1",
+    "edgeState": "CONNECTED",
+    "enterpriseId": 77,
+    "tag": "BGP_NEIGHBOR_SUMMARY",
+    "state": "ESTABLISHED",
+    "timestamp": "2026-11-23T07:59:00.000Z",
+    "data": {
+      "enterpriseLogicalId": "ent-a",
+      "neighborIp": "10.10.10.254",
+      "neighborAS": "65000",
+      "state": "ESTABLISHED",
+      "msgRcvd": 1200,
+      "msgSent": 1190,
+      "pfxRcvd": 12,
+      "upDownTime": 86400
+    }
+  },
+  {
+    "edgeId": 102,
+    "edgeLogicalId": "edge-hub",
+    "edgeName": "hub-1",
+    "edgeState": "CONNECTED",
+    "enterpriseId": 77,
+    "tag": "BGP_NEIGHBOR_SUMMARY",
+    "state": "IDLE",
+    "timestamp": "2026-11-23T07:59:00.000Z",
+    "data": {
+      "enterpriseLogicalId": "ent-a",
+      "neighborIp": "172.16.20.1",
+      "neighborAS": "65001",
+      "state": "IDLE",
+      "msgRcvd": 0,
+      "msgSent": 4,
+      "pfxRcvd": 0,
+      "upDownTime": 120
+    }
+  }
+]
