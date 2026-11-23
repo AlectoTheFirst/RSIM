@@ -33,7 +33,7 @@
 //! | `VELOCLOUD_<NAME>_RELEASE` | The orchestrator release, 3 or 4 numbers from 5.0.0.0 |
 //! | `VELOCLOUD_<NAME>_BASE` | The API v2 base path. The default is `/api/sdwan/v2`. |
 //! | `VELOCLOUD_<NAME>_CONCURRENCY` | The requests in flight and the request starts in each second to the orchestrator, from 1 to 16. The default is 4. |
-//! | `VELOCLOUD_<NAME>_REFRESH` | The seconds after which the modules of an edge are read again. The default is 1800, and 0 reads them in each cycle. |
+//! | `VELOCLOUD_<NAME>_REFRESH` | The seconds after which the modules of an edge are read again, from 0 to 86400. The default is 1800, and 0 reads them in each cycle. |
 //! | `VELOCLOUD_<NAME>_TLS` | `public` (the default) for the public roots, `pin`, `ca` with `VELOCLOUD_<NAME>_CA_FILE`, or `none` |
 //! | `VELOCLOUD_<NAME>_CLIENT_CERT`, `VELOCLOUD_<NAME>_CLIENT_KEY` | PEM files of a client certificate |
 //! | `VELOCLOUD_<NAME>_RETRIES` | The retries of a read after a 429, from 0 to 10. The default is 0. |
@@ -72,8 +72,11 @@
 //! `RSIM_SECRET_KEY`, in the environment or in the env file, opens: a password for SSH, an HTTPS login and a proxy login, a
 //! private key for SSH, and an API key for HTTPS, which a VeloCloud
 //! orchestrator takes as its token; an env credential of a VeloCloud
-//! orchestrator reads `<P>_TOKEN`. The client certificate of
-//! the UniFi consoles stays in `UNIFI_CLIENT_CERT` and `UNIFI_CLIENT_KEY`.
+//! orchestrator reads `<P>_TOKEN`. The settings `orchestrator_release`,
+//! `api_base`, `concurrency` and `refresh_seconds` of a VeloCloud device
+//! give its orchestrator; a device with no release fails before any read.
+//! The client certificate of the UniFi consoles stays in
+//! `UNIFI_CLIENT_CERT` and `UNIFI_CLIENT_KEY`.
 //! `--inventory-ca-file`, `RSIM_INVENTORY_CA_FILE` or the env key of the same
 //! name gives the CA bundle of the database server. A cycle whose inventory
 //! read fails, or whose secret does not open, writes nothing; with
@@ -328,13 +331,20 @@ fn velocloud_env(
                     )
                 })?,
         };
-        let refresh =
-            match get("REFRESH") {
-                None => velocloud::DEFAULT_REFRESH,
-                Some(r) => Duration::from_secs(r.parse::<u64>().map_err(|_| {
-                    format!("{} {r} is not a whole number of seconds", key("REFRESH"))
-                })?),
-            };
+        let refresh = match get("REFRESH") {
+            None => velocloud::DEFAULT_REFRESH,
+            Some(r) => Duration::from_secs(
+                r.parse::<u64>()
+                    .ok()
+                    .filter(|n| *n <= MAX_SECONDS)
+                    .ok_or_else(|| {
+                        format!(
+                            "{} {r} is not a whole number of seconds from 0 to {MAX_SECONDS}",
+                            key("REFRESH")
+                        )
+                    })?,
+            ),
+        };
         let trust = match get("TLS").map(String::as_str) {
             None | Some("public") => TlsTrust::PublicRoots,
             Some("pin") => TlsTrust::Pin,
@@ -384,6 +394,7 @@ fn velocloud_env(
                 release: Some(release.clone()),
                 concurrency,
                 refresh,
+                token_id: velocloud::token_id(token),
             },
             profile: HttpsProfile { trust, client },
             route,
@@ -1078,6 +1089,10 @@ fn setup_from_inventory(
             .ok_or_else(|| format!("the device {} has no credential", d.name))?;
         let secret = reference(inv, secrets, &credential, used)
             .map_err(|e| format!("the device {}: {e}", d.name))?;
+        let token_id = match &secret.secret {
+            Secret::Token(t) => velocloud::token_id(t),
+            _ => String::new(),
+        };
         let user = format!(
             "the device {} ({})",
             d.name,
@@ -1097,7 +1112,6 @@ fn setup_from_inventory(
         }
         if https {
             let trust = match st.tls_trust.value {
-                _ if vendor == Vendor::Velocloud && !st.tls_trust.is_set() => TlsTrust::PublicRoots,
                 rsim_inventory::TlsTrust::Pin => TlsTrust::Pin,
                 rsim_inventory::TlsTrust::Public => TlsTrust::PublicRoots,
                 rsim_inventory::TlsTrust::None => TlsTrust::NoVerify,
@@ -1120,16 +1134,34 @@ fn setup_from_inventory(
                 Duration::from_secs(st.request_timeout_seconds.value.into()),
             ));
             if vendor == Vendor::Velocloud {
-                s.orchestrators
-                    .push((d.name.clone(), Orchestrator::default()));
-                if !s.api_servers.iter().any(|(a, _)| *a == d.address) {
-                    s.api_servers.push((
-                        d.address.clone(),
-                        ApiServer {
-                            concurrency: velocloud::DEFAULT_CONCURRENCY,
-                        },
-                    ));
+                let o = Orchestrator {
+                    base: st
+                        .api_base
+                        .value
+                        .as_deref()
+                        .map_or(velocloud::DEFAULT_BASE.to_string(), |b| {
+                            b.trim_end_matches('/').to_string()
+                        }),
+                    release: st.orchestrator_release.value.clone(),
+                    concurrency: (st.concurrency.value as usize)
+                        .clamp(1, velocloud::MAX_CONCURRENCY),
+                    refresh: Duration::from_secs(st.refresh_seconds.value.into()),
+                    token_id,
+                };
+                let api = ApiServer {
+                    concurrency: o.concurrency,
+                };
+                match s.api_servers.iter().find(|(a, _)| *a == d.address) {
+                    Some((_, first)) if *first != api => {
+                        return Err(format!(
+                            "the devices of the orchestrator {} have the concurrency {} and {}",
+                            d.address, first.concurrency, api.concurrency
+                        ));
+                    }
+                    Some(_) => {}
+                    None => s.api_servers.push((d.address.clone(), api)),
                 }
+                s.orchestrators.push((d.name.clone(), o));
             }
         } else {
             let mut profile = SshProfile {
@@ -1717,7 +1749,7 @@ mod tests {
         times.sort_by(|a, b| a.0.cmp(&b.0));
         let https = devices
             .iter()
-            .filter(|d| d.vendor == Vendor::Unifi)
+            .filter(|d| matches!(d.vendor, Vendor::Unifi | Vendor::Velocloud))
             .map(|d| {
                 let p = s
                     .https_profiles
@@ -1748,7 +1780,12 @@ mod tests {
              IOSXE_E1_IP=192.0.2.5\nIOSXE_E1_SECTION_TIMEOUT=5\nIOSXE_USER=u\nIOSXE_PASS=p\n\
              IOSXE_CAPTURE_BGP=off\n\
              UNIFI_CONTROLLER=192.0.2.8, 192.0.2.9\nUNIFI_SITES=default, branch\n\
-             UNIFI_USER=ro\nUNIFI_PASS=x\nUNIFI_VIA=bastion-a\nUNIFI_TLS=none\nUNIFI_TIMEOUT=60\n",
+             UNIFI_USER=ro\nUNIFI_PASS=x\nUNIFI_VIA=bastion-a\nUNIFI_TLS=none\nUNIFI_TIMEOUT=60\n\
+             VELOCLOUD_LAB_URL=https://198.51.100.10/\nVELOCLOUD_LAB_TOKEN=fake-token\n\
+             VELOCLOUD_LAB_ENTERPRISES=ent-a, ent-b\nVELOCLOUD_LAB_RELEASE=6.4.0\n\
+             VELOCLOUD_LAB_BASE=/api/sdwan/v2/\nVELOCLOUD_LAB_CONCURRENCY=2\n\
+             VELOCLOUD_LAB_REFRESH=0\nVELOCLOUD_LAB_RETRIES=3\nVELOCLOUD_LAB_REQUEST_TIMEOUT=90\n\
+             VELOCLOUD_LAB_TIMEOUT=300\n",
         );
         let direct = setup(&env).unwrap();
         let (through, notes) = setup_from_inventory(&imported(&env), &Secrets::env(&env)).unwrap();
@@ -1760,7 +1797,26 @@ mod tests {
         assert_eq!(a.3, b.3);
         assert_eq!(a.4, b.4);
         assert_eq!(a.5, b.5);
-        assert_eq!(a.0.len(), 11);
+        assert_eq!(a.0.len(), 13);
+        // The VeloCloud devices get the same orchestrator, API server,
+        // retries and request time.
+        fn vco<T: Clone>(v: &[(String, T)]) -> Vec<(String, T)> {
+            let mut out: Vec<(String, T)> = v
+                .iter()
+                .filter(|(id, _)| id.starts_with("vco-"))
+                .cloned()
+                .collect();
+            out.sort_by(|x, y| x.0.cmp(&y.0));
+            out
+        }
+        assert_eq!(vco(&direct.orchestrators), vco(&through.orchestrators));
+        assert_eq!(vco(&direct.orchestrators).len(), 2);
+        assert_eq!(direct.api_servers, through.api_servers);
+        assert_eq!(vco(&direct.https_retries), vco(&through.https_retries));
+        assert_eq!(
+            vco(&direct.request_timeouts),
+            vco(&through.request_timeouts)
+        );
         let edge2 = a.0.iter().find(|d| d.id == "edge-2").unwrap();
         assert!(matches!(
             &edge2.route.proxy,
@@ -1977,6 +2033,7 @@ mod tests {
             "VELOCLOUD_LAB_CONCURRENCY=17",
             "VELOCLOUD_LAB_TLS=strict",
             "VELOCLOUD_LAB_RETRIES=11",
+            "VELOCLOUD_LAB_REFRESH=86401",
         ] {
             let mut e = env.clone();
             let (k, v) = bad.split_once('=').unwrap();
@@ -1989,6 +2046,143 @@ mod tests {
     }
 
     #[test]
+    fn an_inventory_velocloud_device_gets_its_token_trust_retries_and_orchestrator() {
+        let key = SecretKey::parse(&SecretKey::generate().unwrap()).unwrap();
+        let credential = rsim_inventory::Credential {
+            name: "vco-token".into(),
+            source: CredentialSource::Managed,
+            key: None,
+            kind: Some(CredentialKind::ApiKey),
+            user: None,
+            description: None,
+            secret_revision: Some(1),
+        };
+        let input = rsim_inventory::SecretInput {
+            value: "fake-token".into(),
+            passphrase: None,
+        };
+        let sealed = BTreeMap::from([(
+            "vco-token".to_string(),
+            key.seal("vco-token", CredentialKind::ApiKey, &input)
+                .unwrap(),
+        )]);
+        let group = rsim_inventory::Group {
+            name: "vco-lab".into(),
+            vendor: "velocloud".into(),
+            description: None,
+            settings: rsim_inventory::Settings {
+                credential: Some("vco-token".into()),
+                retries: Some(2),
+                request_timeout_seconds: Some(90),
+                orchestrator_release: Some("6.4.0".into()),
+                api_base: Some("/api/sdwan/v2/".into()),
+                concurrency: Some(2),
+                refresh_seconds: Some(600),
+                ..Default::default()
+            },
+        };
+        let device = |name: &str, enterprise: &str| rsim_inventory::Device {
+            name: name.into(),
+            group: "vco-lab".into(),
+            address: "https://198.51.100.10".into(),
+            site: None,
+            location: None,
+            console_site: Some(enterprise.into()),
+            settings: Default::default(),
+        };
+        let mut inv = Inventory {
+            version: 1,
+            credentials: vec![credential],
+            jump_hosts: Vec::new(),
+            routes: Vec::new(),
+            groups: vec![group],
+            devices: vec![device("vco-lab-ent-a", "ent-a")],
+            bindings: Default::default(),
+            collection: Default::default(),
+        };
+        let none = BTreeMap::new();
+        let secrets = Secrets {
+            env: &none,
+            key: Some(&key),
+            sealed: &sealed,
+        };
+        let (s, notes) = setup_from_inventory(&inv, &secrets).unwrap();
+        assert!(notes.is_empty(), "{notes:?}");
+        use rsim_collect::Credentials;
+        assert_eq!(
+            s.credentials.get("vco-token").unwrap().secret,
+            Secret::Token("fake-token".into())
+        );
+        let id = "vco-lab-ent-a".to_string();
+        assert_eq!(s.devices[0].site.as_deref(), Some("ent-a"));
+        assert_eq!(
+            s.https_profiles,
+            [(
+                id.clone(),
+                HttpsProfile {
+                    trust: TlsTrust::PublicRoots,
+                    client: None
+                }
+            )]
+        );
+        assert_eq!(s.https_retries, [(id.clone(), 2)]);
+        assert_eq!(s.request_timeouts, [(id.clone(), Duration::from_secs(90))]);
+        assert_eq!(
+            s.orchestrators,
+            [(
+                id.clone(),
+                Orchestrator {
+                    base: "/api/sdwan/v2".into(),
+                    release: Some("6.4.0".into()),
+                    concurrency: 2,
+                    refresh: Duration::from_secs(600),
+                    token_id: velocloud::token_id("fake-token"),
+                }
+            )]
+        );
+        assert_eq!(
+            s.api_servers,
+            [(
+                "https://198.51.100.10".to_string(),
+                ApiServer { concurrency: 2 }
+            )]
+        );
+
+        // With no settings of the orchestrator, the device has the defaults
+        // and no release, so its fetch fails.
+        let g = &mut inv.groups[0].settings;
+        g.retries = None;
+        g.request_timeout_seconds = None;
+        g.orchestrator_release = None;
+        g.api_base = None;
+        g.concurrency = None;
+        g.refresh_seconds = None;
+        let (s, _) = setup_from_inventory(&inv, &secrets).unwrap();
+        assert_eq!(s.https_retries, [(id.clone(), 0)]);
+        assert_eq!(s.request_timeouts, [(id.clone(), Duration::from_secs(60))]);
+        assert_eq!(
+            s.orchestrators[0].1,
+            Orchestrator {
+                token_id: velocloud::token_id("fake-token"),
+                ..Orchestrator::default()
+            }
+        );
+
+        // A pin of the group is the pin.
+        inv.groups[0].settings.tls_trust = Some(rsim_inventory::TlsTrust::Pin);
+        let (s, _) = setup_from_inventory(&inv, &secrets).unwrap();
+        assert_eq!(s.https_profiles[0].1.trust, TlsTrust::Pin);
+
+        // 2 enterprises of one orchestrator with 2 concurrencies are an
+        // error.
+        let mut other = device("vco-lab-ent-b", "ent-b");
+        other.settings.concurrency = Some(8);
+        inv.devices.push(other);
+        let e = setup_from_inventory(&inv, &secrets).err().unwrap();
+        assert!(e.contains("concurrency 4 and 8"), "{e}");
+    }
+
+    #[test]
     fn the_defaults_of_the_inventory_are_the_limits_of_the_collector() {
         let d = Limits::default();
         assert_eq!(
@@ -1998,6 +2192,18 @@ mod tests {
         assert_eq!(
             d.section_timeout,
             Duration::from_secs(rsim_inventory::DEFAULT_SECTION_TIMEOUT_SECONDS.into())
+        );
+        assert_eq!(
+            velocloud::DEFAULT_CONCURRENCY,
+            rsim_inventory::DEFAULT_CONCURRENCY as usize
+        );
+        assert_eq!(
+            velocloud::MAX_CONCURRENCY,
+            rsim_inventory::env::MAX_CONCURRENCY as usize
+        );
+        assert_eq!(
+            velocloud::DEFAULT_REFRESH,
+            Duration::from_secs(rsim_inventory::DEFAULT_REFRESH_SECONDS.into())
         );
     }
 

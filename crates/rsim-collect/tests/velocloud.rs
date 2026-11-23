@@ -34,6 +34,15 @@ const URL: &str = "https://198.51.100.10";
 const BASE: &str = "/api/sdwan/v2";
 const MINUTE: Duration = Duration::from_secs(60);
 
+/// The orchestrator settings of the tests: release 6.4.0 and the defaults.
+fn orchestrator() -> Orchestrator {
+    Orchestrator {
+        release: Some("6.4.0".into()),
+        token_id: velocloud::token_id("fake-token"),
+        ..Orchestrator::default()
+    }
+}
+
 fn fixture(name: &str) -> Value {
     let p = format!(
         "{}/tests/fixtures/velocloud/{name}",
@@ -473,7 +482,7 @@ const NOT_SENT: &[&str] = &[
 #[tokio::test(start_paused = true)]
 async fn the_reads_go_in_order_with_their_exact_bodies() {
     let v = Vco::small(Duration::from_millis(5));
-    let (src, _) = bare(&v, Orchestrator::default());
+    let (src, _) = bare(&v, orchestrator());
     let d = device("ent-a");
     let s = fetch(&src, &d).await;
     assert!(s.iter().all(|r| r.result.is_ok() || r.absent()), "{s:?}");
@@ -540,7 +549,7 @@ async fn a_page_token_goes_back_as_the_only_parameter() {
         &format!("{BASE}/enterprises/ent-a/bgpSessions?nextPageLink=second%20token"),
         page(json!([row("10.10.10.2")]), json!({"nextPageLink": ""})),
     );
-    let (src, _) = bare(&v, Orchestrator::default());
+    let (src, _) = bare(&v, orchestrator());
     let s = fetch(&src, &device("ent-a")).await;
     let sessions = answer(&s, "bgp_sessions");
     let ips: Vec<&str> = sessions
@@ -562,7 +571,7 @@ async fn a_bare_array_is_one_page() {
         &bgp_path("ent-a"),
         Ok(br#"[{"neighborIp": "10.10.10.1", "state": "ESTABLISHED"}]"#.to_vec()),
     );
-    let (src, _) = bare(&v, Orchestrator::default());
+    let (src, _) = bare(&v, orchestrator());
     let s = fetch(&src, &device("ent-a")).await;
     assert_eq!(answer(&s, "bgp_sessions").as_array().unwrap().len(), 1);
     assert_eq!(v.count("/bgpSessions"), 1);
@@ -592,7 +601,7 @@ async fn a_bad_page_fails_the_device_before_another_request() {
             &format!("{BASE}/enterprises/ent-a/bgpSessions?nextPageLink=again"),
             Ok(first.to_string().into_bytes()),
         );
-        let (src, _) = bare(&v, Orchestrator::default());
+        let (src, _) = bare(&v, orchestrator());
         let s = fetch(&src, &device("ent-a")).await;
         assert!(device_failed(&s, error), "{error}: {s:?}");
         assert_eq!(v.count("/bgpSessions"), requests, "{error}");
@@ -619,7 +628,7 @@ async fn each_gap_status_of_a_portal_read_gives_an_absent_section() {
                 json!({"enterpriseId": 12})
             };
             v.t.reply_status(&d, &post(op, body), *status, "refused");
-            let (src, _) = bare(&v, Orchestrator::default());
+            let (src, _) = bare(&v, orchestrator());
             let s = fetch(&src, &device("ent-a")).await;
             let name = op.rsplit('/').next().unwrap();
             for sec in sections {
@@ -668,7 +677,7 @@ async fn a_200_with_an_error_member_or_no_rows_is_a_gap() {
     for (command, reply, name, reason) in cases {
         let v = Vco::small(Duration::ZERO);
         v.t.reply(&v.dev(0), &command, Ok(reply.to_string().into_bytes()));
-        let (src, _) = bare(&v, Orchestrator::default());
+        let (src, _) = bare(&v, orchestrator());
         let s = fetch(&src, &device("ent-a")).await;
         assert_eq!(absent(&s, name), reason);
     }
@@ -678,7 +687,7 @@ async fn a_200_with_an_error_member_or_no_rows_is_a_gap() {
 async fn an_edge_gap_falls_back_to_the_api_v2_edges_with_no_module_read() {
     let v = Vco::small(Duration::ZERO);
     v.t.reply_status(&v.dev(0), &post(EDGES, edges_body(12)), 403, "forbidden");
-    let (src, _) = bare(&v, Orchestrator::default());
+    let (src, _) = bare(&v, orchestrator());
     let s = fetch(&src, &device("ent-a")).await;
     assert_eq!(absent(&s, "edges"), "getEnterpriseEdges: 403");
     let v2 = answer(&s, "edges_v2");
@@ -707,7 +716,7 @@ async fn an_error_of_the_api_v2_edges_fails_the_device() {
         404,
         "missing",
     );
-    let (src, _) = bare(&v, Orchestrator::default());
+    let (src, _) = bare(&v, orchestrator());
     let s = fetch(&src, &device("ent-a")).await;
     assert!(device_failed(&s, "HTTP 404"), "{s:?}");
 }
@@ -718,7 +727,7 @@ async fn an_enterprise_with_no_numeric_id_reads_only_the_api_v2() {
         let mut v = Vco::small(Duration::ZERO);
         v.ents[0].id = id.clone();
         v.load();
-        let (src, _) = bare(&v, Orchestrator::default());
+        let (src, _) = bare(&v, orchestrator());
         let s = fetch(&src, &device("ent-a")).await;
         assert!(section(&s, "aggregates").result.is_ok(), "{id}");
         for name in [
@@ -757,7 +766,7 @@ async fn a_whole_float_is_a_numeric_id() {
     v.ents[0].id = json!(12.0);
     v.ents[0].rows_mut()[0]["id"] = json!(true);
     v.load();
-    let (src, _) = bare(&v, Orchestrator::default());
+    let (src, _) = bare(&v, orchestrator());
     let s = fetch(&src, &device("ent-a")).await;
     assert!(section(&s, "edges").result.is_ok());
     let modules = answer(&s, "edge_modules");
@@ -787,7 +796,7 @@ async fn the_bgp_sessions_have_their_own_gap_statuses() {
     ] {
         let v = Vco::small(Duration::ZERO);
         v.t.reply_status(&v.dev(0), &bgp_path("ent-a"), status, "no");
-        let (src, _) = bare(&v, Orchestrator::default());
+        let (src, _) = bare(&v, orchestrator());
         let s = fetch(&src, &device("ent-a")).await;
         if gap {
             assert_eq!(absent(&s, "bgp_sessions"), format!("bgpSessions: {status}"));
@@ -807,7 +816,7 @@ async fn a_status_that_is_not_a_gap_or_an_answer_that_is_not_json_fails_the_devi
             status,
             "refused",
         );
-        let (src, _) = bare(&v, Orchestrator::default());
+        let (src, _) = bare(&v, orchestrator());
         assert!(device_failed(&fetch(&src, &device("ent-a")).await, text));
     }
     let v = Vco::small(Duration::ZERO);
@@ -816,7 +825,7 @@ async fn a_status_that_is_not_a_gap_or_an_answer_that_is_not_json_fails_the_devi
         &post(ROUTE_TABLE, json!({"enterpriseId": 12})),
         Ok(b"<html>".to_vec()),
     );
-    let (src, _) = bare(&v, Orchestrator::default());
+    let (src, _) = bare(&v, orchestrator());
     assert!(device_failed(
         &fetch(&src, &device("ent-a")).await,
         "not JSON"
@@ -832,7 +841,7 @@ async fn a_module_401_fails_the_device_and_a_module_gap_does_not() {
         401,
         "expired",
     );
-    let (src, _) = bare(&v, Orchestrator::default());
+    let (src, _) = bare(&v, orchestrator());
     assert!(device_failed(
         &fetch(&src, &device("ent-a")).await,
         "HTTP 401"
@@ -845,7 +854,7 @@ async fn a_module_401_fails_the_device_and_a_module_gap_does_not() {
         403,
         "denied",
     );
-    let (src, memory) = bare(&v, Orchestrator::default());
+    let (src, memory) = bare(&v, orchestrator());
     let s = fetch(&src, &device("ent-a")).await;
     assert_eq!(
         answer(&s, "edge_modules")["edge-branch"]["_capability"]["reason"],
@@ -856,16 +865,81 @@ async fn a_module_401_fails_the_device_and_a_module_gap_does_not() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_module_200_with_an_error_member_is_a_gap_and_not_a_module() {
+    let v = Vco::small(Duration::ZERO);
+    v.t.reply(
+        &v.dev(0),
+        &post(MODULES, modules_body(12, 101)),
+        Ok(
+            json!({"error": {"code": -32603, "message": "edgeNotFound"}})
+                .to_string()
+                .into_bytes(),
+        ),
+    );
+    let (src, memory) = bare(&v, orchestrator());
+    let s = fetch(&src, &device("ent-a")).await;
+    let modules = answer(&s, "edge_modules");
+    assert_eq!(
+        modules["edge-branch"]["_capability"]["reason"],
+        "getEdgeConfigurationModules: edgeNotFound"
+    );
+    assert_eq!(modules["edge-branch"].get("WAN"), None);
+    assert_eq!(memory.edges(&v.dev(0)), ["edge-hub"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_gap_of_the_sdwan_peers_of_an_edge_does_not_fail_the_device() {
+    let v = Vco::small(Duration::ZERO);
+    let command = post(SDWAN_PEERS, json!({"enterpriseId": 12, "edgeId": 101}));
+    v.t.reply_status(&v.dev(0), &command, 403, "denied");
+    v.t.reply(
+        &v.dev(0),
+        &post(SDWAN_PEERS, json!({"enterpriseId": 12, "edgeId": 102})),
+        Ok(json!({"error": {"message": "methodError"}})
+            .to_string()
+            .into_bytes()),
+    );
+    let (src, _) = bare(&v, orchestrator());
+    let s = fetch(&src, &device("ent-a")).await;
+    assert!(
+        s.iter()
+            .all(|r| !matches!(r.result, Err(TransportError::Command(_))))
+    );
+    let peers = answer(&s, "sdwan_peers");
+    assert_eq!(
+        peers["edge-branch"]["_capability"]["reason"],
+        "getEdgeSDWANPeers: 403"
+    );
+    assert_eq!(
+        peers["edge-hub"]["_capability"]["reason"],
+        "getEdgeSDWANPeers: methodError"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_release_before_5_fails_the_device_before_any_read() {
     let v = Vco::small(Duration::ZERO);
     let orch = Orchestrator {
         release: Some("4.5.0".into()),
-        ..Orchestrator::default()
+        ..orchestrator()
     };
     let (src, _) = bare(&v, orch);
     assert!(device_failed(
         &fetch(&src, &device("ent-a")).await,
         "before 5.0.0.0"
+    ));
+    assert_eq!(v.t.calls(), 0);
+
+    let (src, _) = bare(
+        &v,
+        Orchestrator {
+            release: None,
+            ..orchestrator()
+        },
+    );
+    assert!(device_failed(
+        &fetch(&src, &device("ent-a")).await,
+        "no release"
     ));
     assert_eq!(v.t.calls(), 0);
 }
@@ -895,7 +969,7 @@ async fn each_of_5_single_edge_changes_reads_one_edge_again() {
         ("serial", |e| e["serialNumber"] = json!("S-999999")),
     ];
     let mut v = Vco::fleet(1, 3, Duration::ZERO);
-    let (src, _) = bare(&v, Orchestrator::default());
+    let (src, _) = bare(&v, orchestrator());
     let d = device("ent-0");
     fetch(&src, &d).await;
     assert_eq!(module_reads(&v), 3);
@@ -934,7 +1008,7 @@ async fn each_of_5_single_edge_changes_reads_one_edge_again() {
 #[tokio::test(start_paused = true)]
 async fn the_ceiling_reads_each_module_again_and_zero_reads_them_each_time() {
     let v = Vco::fleet(1, 2, Duration::ZERO);
-    let (src, _) = bare(&v, Orchestrator::default());
+    let (src, _) = bare(&v, orchestrator());
     let d = device("ent-0");
     fetch(&src, &d).await;
     tokio::time::advance(Duration::from_secs(1799)).await;
@@ -949,7 +1023,7 @@ async fn the_ceiling_reads_each_module_again_and_zero_reads_them_each_time() {
     let v = Vco::fleet(1, 2, Duration::ZERO);
     let orch = Orchestrator {
         refresh: Duration::ZERO,
-        ..Orchestrator::default()
+        ..orchestrator()
     };
     let (src, _) = bare(&v, orch);
     for _ in 0..3 {
@@ -965,7 +1039,7 @@ async fn a_failed_refresh_keeps_the_module_with_its_first_time_as_stale() {
     let v = Vco::small(Duration::ZERO);
     let orch = Orchestrator {
         refresh: Duration::ZERO,
-        ..Orchestrator::default()
+        ..orchestrator()
     };
     let (src, _) = bare(&v, orch);
     let d = device("ent-a");
@@ -1016,7 +1090,7 @@ async fn a_failed_refresh_keeps_the_module_with_its_first_time_as_stale() {
 async fn a_changed_edge_or_a_cold_edge_whose_refresh_fails_gets_the_gap() {
     let failed = json!({"status": "unavailable", "reason": "Observation refresh failed"});
     let mut v = Vco::small(Duration::ZERO);
-    let (src, _) = bare(&v, Orchestrator::default());
+    let (src, _) = bare(&v, orchestrator());
     let d = device("ent-a");
     fetch(&src, &d).await;
     v.ents[0].rows_mut()[0]["serialNumber"] = json!("S-0009");
@@ -1030,7 +1104,7 @@ async fn a_changed_edge_or_a_cold_edge_whose_refresh_fails_gets_the_gap() {
 
     let v = Vco::small(Duration::ZERO);
     v.t.reply_status(&v.dev(0), &command, 429, "slow down");
-    let (src, _) = bare(&v, Orchestrator::default());
+    let (src, _) = bare(&v, orchestrator());
     let s = fetch(&src, &d).await;
     assert_eq!(
         answer(&s, "edge_modules")["edge-branch"]["_capability"],
@@ -1041,7 +1115,7 @@ async fn a_changed_edge_or_a_cold_edge_whose_refresh_fails_gets_the_gap() {
 #[tokio::test(start_paused = true)]
 async fn the_modules_of_an_edge_that_leaves_the_listing_are_dropped() {
     let mut v = Vco::small(Duration::ZERO);
-    let (src, memory) = bare(&v, Orchestrator::default());
+    let (src, memory) = bare(&v, orchestrator());
     let d = device("ent-a");
     let id = v.dev(0);
     fetch(&src, &d).await;
@@ -1075,7 +1149,7 @@ async fn the_modules_of_an_edge_that_leaves_the_listing_are_dropped() {
 #[tokio::test(start_paused = true)]
 async fn three_enterprises_of_1002_edges_take_1015_reads_cold_and_13_warm() {
     let v = Vco::fleet(3, 334, Duration::from_millis(1));
-    let mut e = env(v, Orchestrator::default());
+    let mut e = env(v, orchestrator());
     let r = e.c.run_cycle().await.unwrap();
     assert!(r.failed.is_empty(), "{r:?}");
     let want = BTreeMap::from([
@@ -1130,7 +1204,7 @@ async fn the_requests_in_flight_to_an_orchestrator_stay_at_its_concurrency() {
     let v = Vco::fleet(2, 12, Duration::from_millis(10));
     let orch = Orchestrator {
         concurrency: 2,
-        ..Orchestrator::default()
+        ..orchestrator()
     };
     let mut e = env(v, orch);
     let r = e.c.run_cycle().await.unwrap();
@@ -1142,7 +1216,7 @@ async fn the_requests_in_flight_to_an_orchestrator_stay_at_its_concurrency() {
 async fn a_cycle_with_no_change_writes_nothing_and_a_link_flap_changes_only_the_edge_state() {
     let v = Vco::small(Duration::from_millis(5));
     let d = v.dev(0);
-    let mut e = env(v, Orchestrator::default());
+    let mut e = env(v, orchestrator());
     let r = e.c.run_cycle().await.unwrap();
     assert_eq!(r.snapshot, Some(0));
     tokio::time::advance(MINUTE).await;
@@ -1177,22 +1251,40 @@ async fn a_cycle_with_no_change_writes_nothing_and_a_link_flap_changes_only_the_
 #[tokio::test(start_paused = true)]
 async fn the_forced_full_collection_sends_no_module_read() {
     let v = Vco::small(Duration::from_millis(5));
-    let mut e = env(v, Orchestrator::default());
+    let d = v.dev(0);
+    let mut e = env(v, orchestrator());
     e.c.run_cycle().await.unwrap();
-    tokio::time::advance(Duration::from_secs(900)).await;
+    let first = e.entry(&d, "edge_modules");
+    // A cycle that is not forced writes no snapshot.
+    tokio::time::advance(MINUTE).await;
+    let r = e.c.run_cycle().await.unwrap();
+    assert_eq!((r.due, r.snapshot), (1, None));
+    tokio::time::advance(Duration::from_secs(840)).await;
     e.v.t.clear_log();
     let r = e.c.run_cycle().await.unwrap();
     assert_eq!(r.due, 1);
     assert!(r.failed.is_empty(), "{r:?}");
+    // The forced cycle stores each section again: a snapshot with no
+    // changed class.
+    assert_eq!(r.snapshot, Some(1));
+    assert!(r.changed.is_empty(), "{r:?}");
     assert_eq!(e.v.count(MODULES), 0);
     assert_eq!(e.v.count(EDGES), 1);
+    // The modules come from the memory, with the time of their read.
+    let again = e.entry(&d, "edge_modules");
+    assert_eq!(again.blob, first.blob);
+    assert!(again.collected_at > first.collected_at, "{again:?}");
+    assert_eq!(
+        e.json(&d, "edge_modules")["edge-branch"]["_freshness"]["observed_at_ms"],
+        json!(T0)
+    );
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_503_on_the_profiles_keeps_the_last_good_snapshot_of_the_whole_device() {
     let v = Vco::small(Duration::from_millis(5));
     let d = v.dev(0);
-    let mut e = env(v, Orchestrator::default());
+    let mut e = env(v, orchestrator());
     e.c.run_cycle().await.unwrap();
     let before = e.c.store().latest().unwrap().unwrap().devices[&d].clone();
     e.v.ents[0].rows_mut()[0]["edgeState"] = json!("OFFLINE");
@@ -1221,13 +1313,13 @@ async fn a_503_on_the_profiles_keeps_the_last_good_snapshot_of_the_whole_device(
 #[tokio::test(start_paused = true)]
 async fn the_modules_of_the_stored_section_warm_a_new_memory() {
     let v = Vco::small(Duration::from_millis(5));
-    let mut e = env(v, Orchestrator::default());
+    let mut e = env(v, orchestrator());
     e.c.run_cycle().await.unwrap();
     assert_eq!(e.memory.edges(&e.v.dev(0)), ["edge-branch", "edge-hub"]);
     let memory = Arc::new(VelocloudMemory::new());
     assert_eq!(memory.warm_from(e.c.store()), Ok(1));
     assert_eq!(memory.edges(&e.v.dev(0)), ["edge-branch", "edge-hub"]);
-    let src: Arc<dyn Source> = source(&e.v, &memory, &e.clock, &Orchestrator::default());
+    let src: Arc<dyn Source> = source(&e.v, &memory, &e.clock, &orchestrator());
     e.c.reconfigure(Box::new(e.v.devices()), vec![src], BTreeMap::new());
     tokio::time::advance(MINUTE).await;
     e.v.t.clear_log();
@@ -1235,13 +1327,57 @@ async fn the_modules_of_the_stored_section_warm_a_new_memory() {
     assert!(r.failed.is_empty(), "{r:?}");
     assert_eq!(e.v.count(MODULES), 0);
     assert_eq!(e.v.count(EDGES), 1);
+
+    // A new release or a new token makes the warmed memory cold.
+    for orch in [
+        Orchestrator {
+            release: Some("6.4.1".into()),
+            ..orchestrator()
+        },
+        Orchestrator {
+            token_id: velocloud::token_id("fake-token-2"),
+            ..orchestrator()
+        },
+    ] {
+        let memory = Arc::new(VelocloudMemory::new());
+        assert_eq!(memory.warm_from(e.c.store()), Ok(1));
+        let src: Arc<dyn Source> = source(&e.v, &memory, &e.clock, &orch);
+        e.c.reconfigure(Box::new(e.v.devices()), vec![src], BTreeMap::new());
+        tokio::time::advance(MINUTE).await;
+        e.v.t.clear_log();
+        let r = e.c.run_cycle().await.unwrap();
+        assert!(r.failed.is_empty(), "{r:?}");
+        assert_eq!(e.v.count(MODULES), 2, "{orch:?}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_token_makes_the_module_memory_cold() {
+    let v = Vco::small(Duration::ZERO);
+    let memory = Arc::new(VelocloudMemory::new());
+    let clock = Arc::new(TokioClock::new(T0));
+    let d = device("ent-a");
+    fetch(&source(&v, &memory, &clock, &orchestrator()), &d).await;
+    assert_eq!(module_reads(&v), 2);
+    tokio::time::advance(MINUTE).await;
+    v.t.clear_log();
+    fetch(&source(&v, &memory, &clock, &orchestrator()), &d).await;
+    assert_eq!(module_reads(&v), 0);
+    let orch = Orchestrator {
+        token_id: velocloud::token_id("fake-token-2"),
+        ..orchestrator()
+    };
+    tokio::time::advance(MINUTE).await;
+    v.t.clear_log();
+    fetch(&source(&v, &memory, &clock, &orch), &d).await;
+    assert_eq!(module_reads(&v), 2);
 }
 
 #[tokio::test(start_paused = true)]
 async fn the_tables_hold_the_edges_the_links_the_routes_and_the_sessions() {
     let v = Vco::small(Duration::from_millis(5));
     let d = v.dev(0);
-    let mut e = env(v, Orchestrator::default());
+    let mut e = env(v, orchestrator());
     let r = e.c.run_cycle().await.unwrap();
     assert!(r.extract_errors.is_empty(), "{r:?}");
     assert_eq!(
@@ -1307,7 +1443,7 @@ async fn the_tables_hold_the_edges_the_links_the_routes_and_the_sessions() {
 async fn the_secrets_are_replaced_before_the_store() {
     let v = Vco::small(Duration::from_millis(5));
     let d = v.dev(0);
-    let mut e = env(v, Orchestrator::default());
+    let mut e = env(v, orchestrator());
     e.c.run_cycle().await.unwrap();
     for (section, secrets) in [
         (

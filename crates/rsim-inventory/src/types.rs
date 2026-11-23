@@ -318,6 +318,18 @@ pub struct Settings {
     /// Collection interval
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval_seconds: Option<u32>,
+    /// Orchestrator release
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestrator_release: Option<String>,
+    /// API base path
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_base: Option<String>,
+    /// Concurrency
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<u32>,
+    /// Module refresh
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_seconds: Option<u32>,
 }
 
 /// Device group

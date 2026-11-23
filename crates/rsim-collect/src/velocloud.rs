@@ -95,7 +95,8 @@ const LARGE_READS_TIME: Duration = Duration::from_secs(4 * 60);
 pub struct Orchestrator {
     /// The API v2 base path.
     pub base: String,
-    /// The orchestrator release, with 3 or 4 numbers.
+    /// The orchestrator release, with 3 or 4 numbers. A device with no
+    /// release fails before any read.
     pub release: Option<String>,
     /// The requests in flight to the orchestrator, from 1 to
     /// [`MAX_CONCURRENCY`].
@@ -103,6 +104,9 @@ pub struct Orchestrator {
     /// The refresh ceiling of the modules of an edge. Zero reads them in
     /// each cycle.
     pub refresh: Duration,
+    /// The identity of the token, from [`token_id`]. A new token makes the
+    /// module memory of the device cold.
+    pub token_id: String,
 }
 
 impl Default for Orchestrator {
@@ -112,39 +116,22 @@ impl Default for Orchestrator {
             release: None,
             concurrency: DEFAULT_CONCURRENCY,
             refresh: DEFAULT_REFRESH,
+            token_id: String::new(),
         }
     }
 }
 
-/// Checks a release of 3 or 4 numbers: it must be 5.0.0.0 or later.
-pub fn check_release(release: &str) -> Result<(), String> {
-    let parts: Option<Vec<u64>> = release.split('.').map(|p| p.parse().ok()).collect();
-    let mut parts = match parts {
-        Some(p) if (3..=4).contains(&p.len()) => p,
-        _ => return Err(format!("the release {release} is not 3 or 4 numbers")),
-    };
-    parts.resize(4, 0);
-    if parts.as_slice() < [5, 0, 0, 0].as_slice() {
-        return Err(format!(
-            "the release {release} is before 5.0.0.0, the first release with the API v2 reads"
-        ));
-    }
-    Ok(())
+/// The identity of a token: a BLAKE3 key derivation of the token, as hex.
+pub fn token_id(token: &str) -> String {
+    blake3::Hash::from(blake3::derive_key(
+        "rsim-collect velocloud token identity",
+        token.as_bytes(),
+    ))
+    .to_hex()
+    .to_string()
 }
 
-/// The enterprise logicalIds of a list, separated by commas or by lines.
-pub fn enterprise_ids(text: &str) -> Vec<String> {
-    text.split([',', '\n'])
-        .map(str::trim)
-        .filter(|x| !x.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
-/// The store device of an enterprise of an orchestrator.
-pub fn device_id(orchestrator: &str, enterprise: &str) -> String {
-    format!("vco-{orchestrator}-{enterprise}")
-}
+pub use rsim_inventory::env::{check_release, enterprise_device as device_id, enterprise_ids};
 
 /// A positive numeric id: a positive integer or a whole float. A boolean,
 /// 0, a negative number and a string are not ids.
@@ -331,14 +318,15 @@ struct Module {
     value: Map<String, Value>,
     observed_at_ms: u64,
     signature: String,
+    /// The memory key of the run that read the module.
+    key: String,
 }
 
 /// The modules of the edges of one enterprise device.
 #[derive(Debug, Default)]
 struct Edges {
-    /// The orchestrator address, the base, the release and the enterprise
-    /// of the modules. `None` for modules from a stored section, which
-    /// take the key of the next fetch.
+    /// The memory key of the modules. `None` for modules from a stored
+    /// section, whose own keys the next fetch compares with its key.
     key: Option<String>,
     modules: BTreeMap<String, Module>,
 }
@@ -366,8 +354,8 @@ impl VelocloudMemory {
     }
 
     /// Fills the modules of a device from the bytes of its stored
-    /// `edge_modules` section. A gap and an entry with no signature are
-    /// not modules. Gives the number of edges with modules.
+    /// `edge_modules` section. A gap and an entry with no signature or no
+    /// memory key are not modules. Gives the number of edges with modules.
     pub fn warm(&self, device: &str, bytes: &[u8]) -> Result<usize, String> {
         let v: Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
         let Value::Object(edges) = v else {
@@ -384,9 +372,10 @@ impl VelocloudMemory {
             let Some(fresh) = value.remove("_freshness") else {
                 continue;
             };
-            let (Some(observed_at_ms), Some(signature)) = (
+            let (Some(observed_at_ms), Some(signature), Some(key)) = (
                 fresh.get("observed_at_ms").and_then(Value::as_u64),
                 fresh.get("signature").and_then(Value::as_str),
+                fresh.get("key").and_then(Value::as_str),
             ) else {
                 continue;
             };
@@ -396,6 +385,7 @@ impl VelocloudMemory {
                     value,
                     observed_at_ms,
                     signature: signature.to_string(),
+                    key: key.to_string(),
                 },
             );
         }
@@ -1031,7 +1021,8 @@ impl Run<'_> {
                 None,
             ));
         };
-        let held = self.held(&e.logical);
+        let key = self.key();
+        let held = self.held(&e.logical, &key);
         let refresh = u64::try_from(self.orch.refresh.as_millis()).unwrap_or(u64::MAX);
         if let Some(m) = &held
             && m.signature == e.signature
@@ -1042,7 +1033,7 @@ impl Run<'_> {
                 m.value.clone(),
                 m.observed_at_ms,
                 false,
-                Some(m.signature.as_str()),
+                Some((m.signature.as_str(), key.as_str())),
             ));
         }
         let body = json!({"enterpriseId": eid, "edgeId": id, "modules": EDGE_MODULES});
@@ -1054,15 +1045,26 @@ impl Run<'_> {
                         value: value.clone(),
                         observed_at_ms: now,
                         signature: e.signature.clone(),
+                        key: key.clone(),
                     },
                 );
-                with_freshness(value, now, false, Some(e.signature.as_str()))
+                with_freshness(
+                    value,
+                    now,
+                    false,
+                    Some((e.signature.as_str(), key.as_str())),
+                )
             }
             ModuleRead::Gap(g) => with_freshness(edge_gap(&g), now, false, None),
             ModuleRead::Transient => match held.filter(|m| m.signature == e.signature) {
                 Some(m) => {
                     let signature = m.signature.clone();
-                    with_freshness(m.value, m.observed_at_ms, true, Some(signature.as_str()))
+                    with_freshness(
+                        m.value,
+                        m.observed_at_ms,
+                        true,
+                        Some((signature.as_str(), key.as_str())),
+                    )
                 }
                 None => with_freshness(edge_gap("Observation refresh failed"), now, true, None),
             },
@@ -1093,20 +1095,24 @@ impl Run<'_> {
         })
     }
 
-    /// The module memory key of the device.
+    /// The module memory key of the device: a BLAKE3 hash of the
+    /// orchestrator address, the base, the release, the enterprise and the
+    /// identity of the token.
     fn key(&self) -> String {
-        format!(
-            "{}\n{}\n{}\n{}",
+        let text = format!(
+            "{}\n{}\n{}\n{}\n{}",
             self.device.address,
             self.orch.base,
             self.orch.release.as_deref().unwrap_or(""),
-            self.enterprise
-        )
+            self.enterprise,
+            self.orch.token_id
+        );
+        blake3::hash(text.as_bytes()).to_hex().to_string()
     }
 
-    /// The memory of the device, emptied when its key changed.
-    fn held(&self, edge: &str) -> Option<Module> {
-        let key = self.key();
+    /// The module of an edge that the memory holds under `key`. The first
+    /// call with a new key drops each module of another key.
+    fn held(&self, edge: &str, key: &str) -> Option<Module> {
         let mut devices = self
             .source
             .memory
@@ -1114,11 +1120,9 @@ impl Run<'_> {
             .lock()
             .expect("the lock is not poisoned");
         let e = devices.entry(self.device.id.clone()).or_default();
-        if e.key.as_deref() != Some(key.as_str()) {
-            if e.key.is_some() {
-                e.modules.clear();
-            }
-            e.key = Some(key);
+        if e.key.as_deref() != Some(key) {
+            e.modules.retain(|_, m| m.key == key);
+            e.key = Some(key.to_string());
         }
         e.modules.get(edge).cloned()
     }
@@ -1168,9 +1172,12 @@ impl Run<'_> {
     /// The sections of the enterprise, or the error that fails the device.
     async fn sections(&self) -> Result<Vec<Outcome>, String> {
         let mut out: Vec<Outcome> = (0..SECTION_COUNT).map(|_| absent("not read")).collect();
-        if let Some(r) = &self.orch.release {
-            check_release(r)?;
-        }
+        let release = self
+            .orch
+            .release
+            .as_deref()
+            .ok_or("the orchestrator has no release")?;
+        check_release(release)?;
         // getAggregates
         let enterprise_id = match self.aggregates().await? {
             Aggregates::Answer(v) => {
@@ -1349,11 +1356,12 @@ fn with_freshness(
     mut m: Map<String, Value>,
     observed_at_ms: u64,
     stale: bool,
-    signature: Option<&str>,
+    held: Option<(&str, &str)>,
 ) -> Map<String, Value> {
     let mut f = json!({"observed_at_ms": observed_at_ms, "stale": stale});
-    if let Some(s) = signature {
-        f["signature"] = Value::String(s.to_string());
+    if let Some((signature, key)) = held {
+        f["signature"] = Value::String(signature.to_string());
+        f["key"] = Value::String(key.to_string());
     }
     m.insert("_freshness".into(), f);
     m

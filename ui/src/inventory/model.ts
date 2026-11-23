@@ -129,7 +129,7 @@ export function columnChars(sections: readonly Section[], by: Arrange): ColumnCh
       fit("credential", s.group.settings.credential);
       fit("route", s.group.settings.route);
       fit("ssh", sshText(s.group.settings.ssh_algorithms, s.group.settings.ssh_mode));
-      fit("trust", trustText(s.group.settings.tls_trust));
+      fit("trust", trustText(s.group.settings.tls_trust, s.group.vendor));
     }
     for (const d of s.devices) {
       fit("device", d.name);
@@ -139,7 +139,7 @@ export function columnChars(sections: readonly Section[], by: Arrange): ColumnCh
       fit("credential", d.settings.credential.value);
       fit("route", d.settings.route.value);
       fit("ssh", sshText(d.settings.ssh_algorithms.value, d.settings.ssh_mode.value));
-      fit("trust", trustText(d.settings.tls_trust.value));
+      fit("trust", d.settings.tls_trust.value);
     }
   }
   return w;
@@ -196,8 +196,8 @@ export function sshText(algorithms: string | null | undefined, mode: string | nu
 }
 
 /** The text of the TLS trust, with its default for none. */
-export function trustText(trust: string | null | undefined): string {
-  return trust ?? "pin";
+export function trustText(trust: string | null | undefined, vendor: string): string {
+  return trust ?? fallbackOf(SETTING_FIELDS.find((f) => f.key === "tls_trust")!, vendor);
 }
 
 /** The SSH cell of a device: the algorithms and the mode. */
@@ -208,7 +208,7 @@ export function sshState(st: ResolvedDevice["settings"], underGroup: boolean): C
 
 /** The trust cell of a device. */
 export function trustState(st: ResolvedDevice["settings"], underGroup: boolean): CellState {
-  return cellState(trustText(st.tls_trust.value), st.tls_trust.origin, underGroup);
+  return cellState(st.tls_trust.value, st.tls_trust.origin, underGroup);
 }
 
 /** The facts of a device that the collector reads, from the table `devices` of the twin. */
@@ -536,6 +536,8 @@ export interface SettingField {
   unit?: string;
   /** The text of the default when no resolved device gives it: "none" or "direct" for a setting with no default value. */
   fallback: string;
+  /** The default of each vendor whose default is not `fallback`. */
+  vendorFallback?: Readonly<Record<string, string>>;
   /** The transport of the setting; null for each transport. */
   transport: Transport | null;
   /** The vendors of the setting; absent for each vendor of the transport. */
@@ -555,7 +557,7 @@ export const SETTING_FIELDS: readonly SettingField[] = [
   { key: "ssh_mode", label: "SSH mode", kind: "choice", choices: ["exec", "shell", "connection"], fallback: "exec", transport: "ssh" },
   { key: "ssh_channels", label: "SSH channels", kind: "number", min: 1, max: I32_MAX, fallback: "1", transport: "ssh", vendors: ["nxos", "iosxr", "iosxe"] },
   { key: "nxos_json", label: "NX-OS JSON", kind: "choice", choices: ["plain", "native"], fallback: "plain", transport: "ssh", vendors: ["nxos"] },
-  { key: "tls_trust", label: "TLS trust", kind: "choice", choices: ["pin", "ca", "public", "none"], fallback: "pin", transport: "https" },
+  { key: "tls_trust", label: "TLS trust", kind: "choice", choices: ["pin", "ca", "public", "none"], fallback: "pin", vendorFallback: { velocloud: "public" }, transport: "https" },
   { key: "tls_ca_file", label: "TLS CA file", kind: "text", fallback: "none", transport: "https" },
   { key: "capture_bgp", label: "BGP sections", kind: "choice", choices: ["off", "sessions", "all"], fallback: "sessions", transport: null },
   { key: "interval_seconds", label: "interval", kind: "number", min: 60, max: 86400, unit: "s", fallback: "60", transport: null },
@@ -565,7 +567,16 @@ export const SETTING_FIELDS: readonly SettingField[] = [
   { key: "paged_section_timeout_seconds", label: "paged section time limit", kind: "number", min: 1, max: 86400, unit: "s", fallback: "300", transport: "https", unread: true },
   { key: "retries", label: "retries", kind: "number", min: 0, max: 10, fallback: "0", transport: null, unread: true },
   { key: "ha", label: "HA", kind: "choice", choices: ["none", "all", "one"], fallback: "none", transport: null, unread: true },
+  { key: "orchestrator_release", label: "orchestrator release", kind: "text", fallback: "none", transport: "https", vendors: ["velocloud"] },
+  { key: "api_base", label: "API base path", kind: "text", fallback: "/api/sdwan/v2", transport: "https", vendors: ["velocloud"] },
+  { key: "concurrency", label: "concurrency", kind: "number", min: 1, max: 16, fallback: "4", transport: "https", vendors: ["velocloud"] },
+  { key: "refresh_seconds", label: "module refresh", kind: "number", min: 0, max: 86400, unit: "s", fallback: "1800", transport: "https", vendors: ["velocloud"] },
 ];
+
+/** The text of the default of a setting for a vendor. */
+export function fallbackOf(f: SettingField, vendor: string): string {
+  return f.vendorFallback?.[vendor] ?? f.fallback;
+}
 
 /** The text of a stored value in an input: empty for none. */
 export function valueText(v: unknown): string {
@@ -601,11 +612,12 @@ export function usedSetting(f: SettingField, vendors: Vendors | null, vendor: st
 /** The default value of a setting as text, by setting. */
 export type SettingDefaults = Partial<Record<SettingKey, string>>;
 
-/** The defaults that the resolved devices give: the value of each setting whose origin is the default. */
+/** The defaults that the resolved devices give: the value of each setting whose origin is the default and whose default is the same for each vendor. */
 export function settingDefaults(devices: readonly ResolvedDevice[]): SettingDefaults {
   const out: SettingDefaults = {};
   for (const d of devices) {
     for (const f of SETTING_FIELDS) {
+      if (f.vendorFallback) continue;
       const r = d.settings[f.key as keyof ResolvedDevice["settings"]];
       if (r && r.origin === "default" && r.value !== null && r.value !== undefined && out[f.key] === undefined) out[f.key] = String(r.value);
     }
@@ -613,10 +625,10 @@ export function settingDefaults(devices: readonly ResolvedDevice[]): SettingDefa
   return out;
 }
 
-/** The value that an empty setting takes: the value of the group, else the default of the resolved devices, else `fallback`. */
-export function inherited(f: SettingField, group: Settings | null, defaults: SettingDefaults = {}): { from: "group" | "default"; text: string } {
+/** The value that an empty setting takes: the value of the group, else the default of the vendor, else the default of the resolved devices, else `fallback`. */
+export function inherited(f: SettingField, group: Settings | null, defaults: SettingDefaults = {}, vendor = ""): { from: "group" | "default"; text: string } {
   const v = group?.[f.key];
-  return v === null || v === undefined ? { from: "default", text: defaults[f.key] ?? f.fallback } : { from: "group", text: String(v) };
+  return v === null || v === undefined ? { from: "default", text: f.vendorFallback?.[vendor] ?? defaults[f.key] ?? f.fallback } : { from: "group", text: String(v) };
 }
 
 /** The texts of an edit of a record: one text for each field, an empty text for none. */
