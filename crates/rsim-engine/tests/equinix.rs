@@ -129,7 +129,7 @@ fn a_path_and_its_reply_cross_the_circuit_with_a_qinq_end() {
             "sw-a/port/1/out",
             "equinix-acct/port/fp-a/in",
             "equinix-acct/port/fp-a/circuit",
-            "sw-b/port/2/pop",
+            "equinix-acct/port/fp-b2/pop",
             "sw-b/port/2/in",
             "sw-b/mac",
             "sw-b/port/4/out",
@@ -137,12 +137,12 @@ fn a_path_and_its_reply_cross_the_circuit_with_a_qinq_end() {
     );
     assert_eq!(tags_after(b, "sw-a/port/1/out"), one_tag(200));
     assert_eq!(tags_after(b, "equinix-acct/port/fp-a/circuit"), QINQ);
-    assert_eq!(tags_after(b, "sw-b/port/2/pop"), one_tag(200));
+    assert_eq!(tags_after(b, "equinix-acct/port/fp-b2/pop"), one_tag(200));
 
     let reply = a.reply_of(0).expect("a reply");
     assert_eq!(reply.verdict(), Some(&deliver("ha2")));
     let r = &reply.branches()[0];
-    assert_eq!(tags_after(r, "sw-b/port/2/push"), QINQ);
+    assert_eq!(tags_after(r, "equinix-acct/port/fp-b2/push"), QINQ);
     assert_eq!(
         tags_after(r, "equinix-acct/port/fp-b2/circuit"),
         one_tag(200)
@@ -209,7 +209,7 @@ fn each_frame_of_a_port_goes_to_one_circuit_or_is_unknown() {
         targets,
         [
             "sw-b/port/1/in",
-            "sw-b/port/2/pop",
+            "equinix-acct/port/fp-b2/pop",
             "equinix-acct/circuit/sp-cloud/sink",
             "Unknown",
         ]

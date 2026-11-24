@@ -234,14 +234,16 @@ fn far(port: &str, tags: Tags, peer: &str) -> FarEnd {
 ///   192.0.2.10 in VLAN 100, ha2 198.51.100.10 in VLAN 200, ha3
 ///   198.51.100.70 in VLAN 150 and ha4 203.0.113.10 in VLAN 400
 /// - switch `sw-b` at site B: port 1 trunk to `fp-b1` with VLAN 100, port 2
-///   to the QinQ Fabric port `fp-b2` with VLAN 200 inside the service tag
-///   300 with the TPID `0x88a8`, and the access ports 3 and 4 with hb
-///   192.0.2.20 in VLAN 100 and hb2 198.51.100.20 in VLAN 200
+///   trunk to the QinQ Fabric port `fp-b2` with VLAN 200, and the access
+///   ports 3 and 4 with hb 192.0.2.20 in VLAN 100 and hb2 198.51.100.20 in
+///   VLAN 200
 /// - the account `equinix-acct` with the circuit `evpl-100` from `fp-a` VLAN
 ///   100 to `fp-b1` VLAN 100, the circuit `evpl-qinq` from `fp-a` VLAN 200
 ///   to `fp-b2` VLAN 300 with the TPID `0x88a8` and the inner VLAN 200, and
 ///   the circuit `sp-cloud` from `fp-a` VLAN 400 to the service profile
-///   `cloud-onramp-1`; VLAN 150 of `fp-a` has no circuit
+///   `cloud-onramp-1`; VLAN 150 of `fp-a` has no circuit; `fp-b2` pushes
+///   the service tag 300 with the TPID `0x88a8` at its entry and pops it
+///   at its exit
 pub fn equinix_fabric() -> TwinBuilder {
     let a = Dev::new("sw-a", generic_router());
     let b = Dev::new("sw-b", generic_router());
@@ -282,7 +284,7 @@ pub fn equinix_fabric() -> TwinBuilder {
             Trunk {
                 port: "port/2",
                 vlans: &[200],
-                peer: "sw-b/port/2/push",
+                peer: "equinix-acct/port/fp-b2/push",
             },
         ],
         &[
@@ -292,20 +294,21 @@ pub fn equinix_fabric() -> TwinBuilder {
             (200, ha2, "port/2"),
         ],
     ));
+
+    // The account: a gate and the circuits of each Fabric port, and the
+    // push and the pop of the service tag of `fp-b2`.
     fns.push(Arc::new(TagStack {
-        meta: b.meta("port/2/pop", 60, 60),
-        port: PortId::new("port/2"),
-        op: TagOp::Pop(S_TAG),
-        next: b.id("port/2/in"),
-    }));
-    fns.push(Arc::new(TagStack {
-        meta: b.meta("port/2/push", 61, 61),
-        port: PortId::new("port/2"),
+        meta: acct.meta("port/fp-b2/push", 21, 30),
+        port: PortId::new("port/fp-b2"),
         op: TagOp::Push(S_TAG),
         next: fid(&gate("fp-b2")),
     }));
-
-    // The account: a gate and the circuits of each Fabric port.
+    fns.push(Arc::new(TagStack {
+        meta: acct.meta("port/fp-b2/pop", 21, 30),
+        port: PortId::new("port/fp-b2"),
+        op: TagOp::Pop(S_TAG),
+        next: b.id("port/2/in"),
+    }));
     let dot1q = |v: u16| Tags::one(VlanTag::dot1q(v));
     let qinq = Tags::two(S_TAG, VlanTag::dot1q(200));
     let sink = acct.id("circuit/sp-cloud/sink");
@@ -323,7 +326,7 @@ pub fn equinix_fabric() -> TwinBuilder {
                 CircuitLeg {
                     circuit: "evpl-qinq".into(),
                     near: dot1q(200),
-                    far: far("port/fp-b2", qinq, "sw-b/port/2/pop"),
+                    far: far("port/fp-b2", qinq, "equinix-acct/port/fp-b2/pop"),
                     spans: connection(11),
                 },
                 CircuitLeg {
