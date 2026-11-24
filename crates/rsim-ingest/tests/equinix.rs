@@ -134,7 +134,7 @@ fn verdict(l: &Lowered, uuid: &str) -> Verdict {
     l.circuits
         .iter()
         .find(|c| c.uuid == uuid)
-        .unwrap_or_else(|| panic!("no circuit {uuid}"))
+        .expect("the circuit is in the rows")
         .verdict
         .clone()
 }
@@ -142,7 +142,7 @@ fn verdict(l: &Lowered, uuid: &str) -> Verdict {
 fn unknown(l: &Lowered, uuid: &str) -> String {
     match verdict(l, uuid) {
         Verdict::Unknown(r) => r,
-        v => panic!("{uuid}: {v:?}"),
+        _ => panic!("the circuit is not unknown"),
     }
 }
 
