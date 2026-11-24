@@ -181,6 +181,29 @@ fn build(t: &Loaded, def: &'static TableDef) -> Frame {
                 ]);
             }
         }
+        "fabric-connections" => {
+            for (device, rows) in &t.fabric {
+                for c in rows {
+                    let (result, reason) = match &c.verdict {
+                        rsim_ingest::equinix::Verdict::Lowered => ("lowered", None),
+                        rsim_ingest::equinix::Verdict::Ended => ("ended", None),
+                        rsim_ingest::equinix::Verdict::Unknown(r) => ("unknown", Some(r.as_str())),
+                    };
+                    b.push(&[
+                        Cell::Text(device),
+                        Cell::Text(&c.uuid),
+                        c.name.as_deref().map_or(Cell::Null, Cell::Text),
+                        c.kind.as_deref().map_or(Cell::Null, Cell::Text),
+                        c.state.as_deref().map_or(Cell::Null, Cell::Text),
+                        Cell::Text(&c.a),
+                        Cell::Text(&c.z),
+                        Cell::Text(result),
+                        reason.map_or(Cell::Null, Cell::Text),
+                        Cell::List(&spans(&c.spans)),
+                    ]);
+                }
+            }
+        }
         "bgp-sessions" => {
             for facts in t.bgp.values() {
                 for f in facts {
@@ -515,6 +538,7 @@ mod tests {
             bgp: BTreeMap::new(),
             facts: BTreeMap::new(),
             seen: Vec::new(),
+            fabric: BTreeMap::new(),
             tables: Default::default(),
             source: None,
         }

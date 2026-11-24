@@ -36,6 +36,8 @@ pub struct Estate {
     /// The LLDP and CDP records that name a neighbour with no device in the
     /// twin.
     pub seen: Vec<crate::links::SeenNeighbour>,
+    /// The circuits of each Equinix account, lowered or not.
+    pub fabric: BTreeMap<String, Vec<equinix::CircuitRow>>,
 }
 
 fn short(h: &Hash) -> String {
@@ -290,6 +292,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         bgp: BTreeMap::new(),
         facts: BTreeMap::new(),
         seen: Vec::new(),
+        fabric: BTreeMap::new(),
     };
     let mut routers: BTreeMap<String, Router> = BTreeMap::new();
     #[allow(clippy::type_complexity)]
@@ -831,6 +834,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         e.coverage
             .insert(device.clone(), equinix::coverage::classify(&p));
         let low = equinix::lower(&account, &eq_profile, &BTreeMap::new());
+        e.fabric.insert(device.clone(), low.circuits);
         let notes = e.notes.entry(device.clone()).or_default();
         notes.extend(p.notes);
         notes.extend(low.notes);
