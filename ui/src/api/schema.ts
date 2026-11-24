@@ -387,6 +387,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/inventory/devices/{device}/collect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Collect a device now */
+        post: operations["collectDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/inventory/groups": {
         parameters: {
             query?: never;
@@ -418,6 +435,23 @@ export interface paths {
         post?: never;
         /** Delete device group */
         delete: operations["deleteGroup"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inventory/groups/{group}/collect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Collect the devices of a group now */
+        post: operations["collectGroup"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1020,6 +1054,14 @@ export interface components {
             rsim_json: number;
         };
         /**
+         * CollectOut
+         * @description Collection request
+         */
+        CollectOut: {
+            /** @description Requested devices */
+            devices: string[];
+        };
+        /**
          * Collection
          * @description Collector settings
          */
@@ -1030,6 +1072,8 @@ export interface components {
              */
             history_days: number;
         };
+        /** @description Collection mode */
+        CollectionMode: "auto" | "manual";
         /**
          * CollectionOut
          * @description Collector settings
@@ -1680,6 +1724,11 @@ export interface components {
             value?: string | null;
         };
         /** @description Resolved setting */
+        Resolved10: {
+            origin: components["schemas"]["Origin"];
+            value: components["schemas"]["CollectionMode"];
+        };
+        /** @description Resolved setting */
         Resolved2: {
             origin: components["schemas"]["Origin"];
             value: components["schemas"]["SshAlgorithms"];
@@ -1748,6 +1797,7 @@ export interface components {
         ResolvedSettings: {
             api_base: components["schemas"]["Resolved"];
             capture_bgp: components["schemas"]["Resolved7"];
+            collection: components["schemas"]["Resolved10"];
             concurrency: components["schemas"]["Resolved4"];
             /** @description Credential */
             credential: components["schemas"]["Resolved"];
@@ -1927,6 +1977,7 @@ export interface components {
             /** @description API base path */
             api_base?: string | null;
             capture_bgp?: components["schemas"]["CaptureBgp"] | null;
+            collection?: components["schemas"]["CollectionMode"] | null;
             /**
              * Format: uint32
              * @description Concurrency
@@ -3336,6 +3387,37 @@ export interface operations {
             };
         };
     };
+    collectDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectOut"];
+                };
+            };
+            /** @description Problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     listGroups: {
         parameters: {
             query?: never;
@@ -3449,6 +3531,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WrittenOut"];
+                };
+            };
+            /** @description Problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    collectGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectOut"];
                 };
             };
             /** @description Problem */
