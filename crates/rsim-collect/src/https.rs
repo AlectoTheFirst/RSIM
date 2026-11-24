@@ -796,11 +796,7 @@ impl HttpsTransport {
         headers: &[(header::HeaderName, String)],
         body: Bytes,
     ) -> Result<Request<Full<Bytes>>, TransportError> {
-        let host = if console.port == 443 {
-            console.host.clone()
-        } else {
-            format!("{}:{}", console.host, console.port)
-        };
+        let host = host_header(&console.host, console.port);
         let mut b = Request::builder()
             .method(method)
             .uri(path)
@@ -1049,6 +1045,21 @@ impl Https for HttpsTransport {
     }
 }
 
+/// The value of the `Host` header. An IPv6 address goes in brackets, and a
+/// port other than 443 follows a colon.
+fn host_header(host: &str, port: u16) -> String {
+    let host = if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    };
+    if port == 443 {
+        host
+    } else {
+        format!("{host}:{port}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use futures_util::future::join_all;
@@ -1058,6 +1069,15 @@ mod tests {
 
     /// 2026-11-23 08:00:00 UTC in milliseconds since the Unix epoch.
     const CLOCK_MS: u64 = 1_795_420_800_000;
+
+    #[test]
+    fn host_header_puts_an_ipv6_address_in_brackets() {
+        assert_eq!(host_header("2001:db8::1", 443), "[2001:db8::1]");
+        assert_eq!(host_header("2001:db8::1", 8443), "[2001:db8::1]:8443");
+        assert_eq!(host_header("192.0.2.1", 443), "192.0.2.1");
+        assert_eq!(host_header("192.0.2.1", 8443), "192.0.2.1:8443");
+        assert_eq!(host_header("console.example", 8443), "console.example:8443");
+    }
 
     fn api_server() -> Arc<Server> {
         Arc::new(Server::new(Some(ApiServer { concurrency: 4 })))

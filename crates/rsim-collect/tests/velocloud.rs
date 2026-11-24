@@ -527,6 +527,39 @@ async fn the_reads_go_in_order_with_their_exact_bodies() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn devices_of_one_orchestrator_with_2_tokens_read_the_aggregates_each() {
+    let v = Vco::fleet(2, 1, Duration::from_millis(1));
+    let only_a = json!({"edgeCount": 0, "enterprises": [
+        {"logicalId": "ent-0", "id": 10, "name": "ent-0"}
+    ]});
+    v.t.reply(
+        &v.dev(0),
+        &post(AGGREGATES, json!({})),
+        Ok(only_a.to_string().into_bytes()),
+    );
+    let memory = Arc::new(VelocloudMemory::new());
+    let clock = Arc::new(TokioClock::new(T0));
+    let src = VelocloudSource::new(v.t.clone(), memory, clock)
+        .with_orchestrator(&v.dev(0), orchestrator())
+        .with_orchestrator(
+            &v.dev(1),
+            Orchestrator {
+                token_id: velocloud::token_id("fake-token-b"),
+                ..orchestrator()
+            },
+        );
+    let a = fetch(&src, &device("ent-0")).await;
+    let b = fetch(&src, &device("ent-1")).await;
+    assert_eq!(v.count(AGGREGATES), 2);
+    assert!(section(&a, "edges").result.is_ok(), "{a:?}");
+    assert!(section(&b, "edges").result.is_ok(), "{b:?}");
+    assert_eq!(
+        answer(&b, "aggregates")["enterprises"][1]["logicalId"],
+        "ent-1"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_page_token_goes_back_as_the_only_parameter() {
     let v = Vco::small(Duration::ZERO);
     let d = v.dev(0);
