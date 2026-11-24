@@ -28,7 +28,8 @@ pub const MAX_PARALLEL: usize = 16;
 pub const MAX_CONNECTIONS: usize = 512;
 
 /// The number of `/readyz` probes that run at the same time. Above it, a
-/// probe gets 503.
+/// probe gets the answer of the last probe that ran, or 503 before the
+/// first one.
 pub const MAX_PROBES: usize = 2;
 
 /// The longest wait for the head of a request. It also closes an idle
@@ -46,6 +47,8 @@ const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 struct Limits {
     queries: Arc<Semaphore>,
     probes: Arc<Semaphore>,
+    /// The answer of the last `/readyz` probe that ran.
+    ready: Arc<std::sync::Mutex<Option<Response>>>,
 }
 
 fn to_hyper(r: Response) -> hyper::Response<Full<Bytes>> {
@@ -164,12 +167,17 @@ async fn serve_one(
             return Ok(to_hyper(r));
         }
         let Ok(permit) = Arc::clone(&limits.probes).try_acquire_owned() else {
-            return Ok(to_hyper(
-                problem(503, "too_many_probes", "too many probes run now".into()).response(),
-            ));
+            let last = limits.ready.lock().ok().and_then(|g| g.clone());
+            return Ok(to_hyper(last.unwrap_or_else(|| {
+                problem(503, "too_many_probes", "too many probes run now".into()).response()
+            })));
         };
+        let ready = Arc::clone(&limits.ready);
         let r = tokio::task::spawn_blocking(move || {
             let r = handler::handle(&state, &request);
+            if let Ok(mut g) = ready.lock() {
+                *g = Some(r.clone());
+            }
             drop(permit);
             r
         })
@@ -228,6 +236,7 @@ pub async fn serve(listener: TcpListener, state: Arc<State>) -> std::io::Result<
     let limits = Arc::new(Limits {
         queries: Arc::new(Semaphore::new(MAX_PARALLEL)),
         probes: Arc::new(Semaphore::new(MAX_PROBES)),
+        ready: Arc::new(std::sync::Mutex::new(None)),
     });
     let connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     loop {
