@@ -406,7 +406,7 @@ pub fn lower(
         let mut used_sink = false;
         for (i, e) in plan.ends.iter().enumerate() {
             let At::Port(p, s) = e else { continue };
-            let p: &Port = *p;
+            let &p = p;
             let (near, port_based) = match s {
                 Spec::Tags(t) => (*t, false),
                 Spec::PortBased => (Tags::one(VlanTag::dot1q(1)), true),
@@ -417,7 +417,7 @@ pub fn lower(
             }
             let far = match (&plan.reason, &plan.ends[1 - i]) {
                 (None, At::Port(q, qs)) => {
-                    let q: &Port = *q;
+                    let &q = q;
                     let tags = match qs {
                         Spec::Tags(t) => *t,
                         _ => near,
