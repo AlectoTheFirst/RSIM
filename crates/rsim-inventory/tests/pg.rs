@@ -106,6 +106,37 @@ async fn the_history_of_the_store_is_one_setting_with_its_audit() {
 }
 
 #[tokio::test]
+async fn the_orchestrator_settings_are_stored_and_keep_their_ranges() {
+    let Some(db) = test_database("the_orchestrator_settings").await else {
+        return;
+    };
+    let mut g = group("core");
+    g.settings.orchestrator_release = Some("6.4.0".into());
+    g.settings.api_base = Some("/api/sdwan/v2".into());
+    g.settings.concurrency = Some(16);
+    g.settings.refresh_seconds = Some(0);
+    let mut changes = base();
+    changes[5] = Change::PutGroup(g.clone());
+    db.apply("tester", &changes).await.unwrap();
+    let inv = db.load().await.unwrap();
+    assert_eq!(inv.groups[0].settings, g.settings);
+    for (concurrency, refresh) in [(0, 0), (17, 0), (4, 86_401)] {
+        let mut bad = g.clone();
+        bad.settings.concurrency = Some(concurrency);
+        bad.settings.refresh_seconds = Some(refresh);
+        let e = db
+            .apply("tester", &[Change::PutGroup(bad)])
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(e, Error::Invalid(_)),
+            "{concurrency} {refresh}: {e:?}"
+        );
+    }
+    assert_eq!(db.load().await.unwrap(), inv);
+}
+
+#[tokio::test]
 async fn the_interval_of_a_group_and_a_device_resolves_and_keeps_its_range() {
     let Some(db) = test_database("the_interval_resolves").await else {
         return;

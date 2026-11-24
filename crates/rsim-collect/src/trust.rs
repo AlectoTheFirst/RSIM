@@ -20,6 +20,9 @@ pub enum Secret {
     },
     /// An API key that HTTPS sends in the `X-API-KEY` header.
     ApiKey(String),
+    /// An API token that HTTPS sends in the header
+    /// `Authorization: Token <token>`.
+    Token(String),
     /// The keys of an SSH agent at a Unix socket. With no socket, the
     /// socket is the value of `SSH_AUTH_SOCK`.
     Agent { socket: Option<PathBuf> },
@@ -31,6 +34,7 @@ impl fmt::Debug for Secret {
             Secret::Password(_) => "Password(..)",
             Secret::Key { .. } => "Key(..)",
             Secret::ApiKey(_) => "ApiKey(..)",
+            Secret::Token(_) => "Token(..)",
             Secret::Agent { .. } => "Agent(..)",
         })
     }
@@ -171,6 +175,22 @@ impl TrustStore {
     /// [`PinPolicy::AcceptNew`], it also accepts and pins the key of an
     /// address with no pin.
     pub fn check(&self, kind: PinKind, address: &str, key: &str) -> Result<(), String> {
+        self.check_with(self.policy, kind, address, key)
+    }
+
+    /// Accepts the key only if it is the pin of the address, whatever the
+    /// policy of the store.
+    pub fn check_pinned(&self, kind: PinKind, address: &str, key: &str) -> Result<(), String> {
+        self.check_with(PinPolicy::Strict, kind, address, key)
+    }
+
+    fn check_with(
+        &self,
+        policy: PinPolicy,
+        kind: PinKind,
+        address: &str,
+        key: &str,
+    ) -> Result<(), String> {
         let mut pins = self.lock();
         let id = (kind, address.to_string());
         match pins.get(&id) {
@@ -179,7 +199,7 @@ impl TrustStore {
                 "the {} key of {address} is {key}, and the pin is {pin}",
                 kind.name()
             )),
-            None if self.policy == PinPolicy::Strict => Err(format!(
+            None if policy == PinPolicy::Strict => Err(format!(
                 "the {} key of {address} has no pin: {key}",
                 kind.name()
             )),

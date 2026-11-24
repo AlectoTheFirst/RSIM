@@ -1,0 +1,24 @@
+[
+  {
+    "edgeLogicalId": "edge-branch",
+    "deviceLogicalId": "edge-hub",
+    "peerName": "hub-1",
+    "peerType": "HUB",
+    "peerHAType": "ACTIVE_STANDBY",
+    "clusterId": 31,
+    "description": "",
+    "scoreAfterVoice": 4.4,
+    "scoreAfterVideo": 4.3,
+    "scoreAfterTrans": 4.4,
+    "pathStatusCount": {"stable": 2, "unstable": 0, "standby": 0, "dead": 0, "unknown": 0, "total": 2},
+    "pathQoe": 4.4
+  },
+  {
+    "edgeLogicalId": "edge-branch",
+    "deviceLogicalId": "gatewayg-1",
+    "peerName": "gateway-1",
+    "peerType": "GATEWAY",
+    "pathStatusCount": {"stable": 1, "unstable": 0, "standby": 0, "dead": 1, "unknown": 0, "total": 2},
+    "pathQoe": 4.1
+  }
+]

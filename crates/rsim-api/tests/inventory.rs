@@ -125,6 +125,7 @@ fn the_vendors_with_a_collector_need_no_database() {
             ("iosxr", "ssh"),
             ("nxos", "ssh"),
             ("unifi", "https"),
+            ("velocloud", "https"),
             ("vyos", "ssh"),
         ]
     );

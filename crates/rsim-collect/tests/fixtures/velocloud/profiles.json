@@ -1,0 +1,74 @@
+[
+  {
+    "id": 77,
+    "name": "branch-profile",
+    "type": "SEGMENT_BASED",
+    "modules": [
+      {
+        "name": "deviceSettings",
+        "version": "9",
+        "data": {
+          "segments": [
+            {
+              "segment": {"segmentId": 0, "name": "Global Segment", "type": "REGULAR"},
+              "bgp": {"enabled": true, "ASN": "65010", "neighbors": [{"neighborIp": "10.10.10.254"}]},
+              "vpn": {
+                "enabled": true,
+                "edgeToEdgeDetail": {
+                  "vpnHubs": [{"_href": "/api/sdwan/v2/enterprises/ent-a/hubs/cluster-1", "name": "dc-cluster", "type": "edgeHubCluster"}]
+                }
+              }
+            }
+          ],
+          "radius": {"server": "10.10.10.5", "sharedSecret": "fake-radius-secret"},
+          "tacacs": {"server": "10.10.10.6", "key": "fake-tacacs-key"},
+          "vpn": {"thirdParty": [{"name": "psk", "value": "fake-ipsec-psk"}]}
+        }
+      },
+      {"name": "WAN", "version": "2", "data": {}},
+      {
+        "name": "QOS",
+        "version": "4",
+        "data": {
+          "segments": [
+            {
+              "segment": {"segmentId": 0, "name": "Global Segment", "type": "REGULAR"},
+              "rules": [
+                {
+                  "name": "voice",
+                  "ruleLogicalId": "rule-1",
+                  "match": {"dip": "10.20.20.0", "dsm": "255.255.255.0", "proto": 17},
+                  "action": {"edge2EdgeRouteAction": {"linkPolicy": "auto", "wanlink": "auto"}}
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "firewall",
+        "version": "1",
+        "data": {
+          "firewall_enabled": true,
+          "segments": [
+            {
+              "segment": {"segmentId": 0, "name": "Global Segment", "type": "REGULAR"},
+              "outbound": [
+                {"name": "deny-telnet", "match": {"proto": 6, "dport_low": 23, "dport_high": 23}, "action": {"allow_or_deny": "deny"}}
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": 78,
+    "name": "hub-profile",
+    "type": "SEGMENT_BASED",
+    "modules": [
+      {"name": "deviceSettings", "version": "5", "data": {"segments": []}},
+      {"name": "WAN", "version": "2", "data": {}}
+    ]
+  }
+]
