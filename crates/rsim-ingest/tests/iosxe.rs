@@ -229,7 +229,7 @@ fn the_states_of_key_stanzas() {
         (&[i, "standby use-bia"], Unhandled, Unhandled),
         (&[i, "vrrp 10 ip 192.0.2.130"], Handled, Handled),
         (&[i, "vrrp 10 address-family ipv4"], Unhandled, Unhandled),
-        (&[i, "description x"], Irrelevant, Irrelevant),
+        (&[i, "description x"], Handled, Handled),
         (&[i, "speed 1000"], Irrelevant, Irrelevant),
         (&[i, "ipv6 enable"], Irrelevant, Irrelevant),
         (&[i, "ipv6 address 2001:db8::1/64"], Handled, Handled),

@@ -25,7 +25,12 @@ pub fn summary(account: &Account) -> (crate::links::Summary, Vec<String>) {
             port.clone(),
             rsim_core::FunctionId::new(format!("{}/{port}/in", account.device)),
         );
-        s.port_spans.insert(port, p.span.clone());
+        s.port_spans.insert(port.clone(), p.span.clone());
+        s.fabric_ports.push(crate::links::FabricPortName {
+            port,
+            name: p.name.clone(),
+            cross_connects: p.cross_connects.clone(),
+        });
     }
     for b in &account.bindings {
         let found = account

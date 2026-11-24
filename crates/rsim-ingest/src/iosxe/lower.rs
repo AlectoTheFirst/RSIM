@@ -240,6 +240,14 @@ pub fn lower(
             sum.arp.push((v, a.ip, a.mac, a.span.clone()));
         }
     }
+    for i in &cfg.interfaces {
+        if let Some((text, lines)) = &i.description
+            && sum.entries.contains_key(&i.name)
+        {
+            sum.descriptions
+                .insert(i.name.clone(), (text.clone(), l.span(*lines)));
+        }
+    }
     if active.is_empty() {
         return (l.out, sum);
     }

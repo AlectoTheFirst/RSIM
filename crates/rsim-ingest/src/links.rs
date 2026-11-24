@@ -41,6 +41,78 @@ pub struct Binding {
     pub span: SourceSpan,
 }
 
+/// A Fabric port of a provider device, for the description rule of the
+/// join: its port, its name and its cross connect ids.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FabricPortName {
+    pub port: String,
+    pub name: String,
+    pub cross_connects: Vec<String>,
+}
+
+/// True if the description names the Fabric port `name`, ported from HST
+/// `_fabric_port_matcher`. A name of only ASCII letters, digits and `-`
+/// must be a whole run of these characters of the description; each other
+/// name must have no such character on either side. Case does not count.
+pub fn names_fabric_port(description: &str, name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '-';
+    if name.chars().all(word) {
+        return description
+            .split(|c: char| !word(c))
+            .any(|run| run.eq_ignore_ascii_case(name));
+    }
+    let d: Vec<char> = description.to_lowercase().chars().collect();
+    let n: Vec<char> = name.to_lowercase().chars().collect();
+    (0..d.len().saturating_sub(n.len() - 1)).any(|i| {
+        d[i..].starts_with(&n)
+            && (i == 0 || !word(d[i - 1]))
+            && d.get(i + n.len()).is_none_or(|c| !word(*c))
+    })
+}
+
+/// The cable ids that a description states, from HST
+/// `\b(?:CABLE\s*ID|CCID)\s*:?\s*(\d+)` with case ignored.
+pub fn cable_ids(description: &str) -> Vec<String> {
+    let d: Vec<char> = description.to_ascii_uppercase().chars().collect();
+    let is_word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let skip_space = |mut i: usize| {
+        while d.get(i).is_some_and(|c| c.is_whitespace()) {
+            i += 1;
+        }
+        i
+    };
+    let at = |i: usize, w: &str| -> bool {
+        w.chars().enumerate().all(|(k, c)| d.get(i + k) == Some(&c))
+    };
+    let mut out = Vec::new();
+    for i in 0..d.len() {
+        if i > 0 && is_word(d[i - 1]) {
+            continue;
+        }
+        let after = if at(i, "CCID") {
+            Some(i + 4)
+        } else if at(i, "CABLE") {
+            let j = skip_space(i + 5);
+            at(j, "ID").then_some(j + 2)
+        } else {
+            None
+        };
+        let Some(mut j) = after else { continue };
+        j = skip_space(j);
+        if d.get(j) == Some(&':') {
+            j = skip_space(j + 1);
+        }
+        let digits: String = d[j..].iter().take_while(|c| c.is_ascii_digit()).collect();
+        if !digits.is_empty() {
+            out.push(digits);
+        }
+    }
+    out
+}
+
 /// A circuit of a device between 2 of its ports, with one VLAN at each end:
 /// a frame of the VLAN of one end leaves the other end with the VLAN of
 /// that end.
@@ -146,6 +218,10 @@ pub struct Summary {
     /// The circuits between the ports of the device, for the placement of
     /// the endpoints across them.
     pub transits: Vec<Transit>,
+    /// The description of each port that can end a link, with its span.
+    pub descriptions: BTreeMap<String, (String, SourceSpan)>,
+    /// The Fabric ports of a provider device.
+    pub fabric_ports: Vec<FabricPortName>,
 }
 
 /// A layer 3 address of a port.
@@ -825,6 +901,7 @@ pub fn join(
             bound.push((here, far, spans));
         }
     }
+    bound.extend(described(switches, &bound, &mut out.notes));
     let bound_ends: BTreeSet<End> = bound
         .iter()
         .flat_map(|(a, b, _)| [a.clone(), b.clone()])
@@ -1090,6 +1167,109 @@ fn holder<'a>(
 }
 
 /// Adds a note to a device once.
+/// The links of the description rule: a port whose description names one
+/// Fabric port, with no stated cable id or with a stated cable id that is a
+/// cross connect id of the Fabric port, links to it. A description that
+/// names more than one Fabric port, a Fabric port that more than one port
+/// names, and a stated cable id that is no cross connect id give a note
+/// and no link. A port or a Fabric port of an operator binding takes no
+/// link of this rule.
+fn described(
+    switches: &BTreeMap<String, Summary>,
+    operator: &[(End, End, Vec<SourceSpan>)],
+    notes: &mut BTreeMap<String, Vec<String>>,
+) -> Vec<(End, End, Vec<SourceSpan>)> {
+    let taken: BTreeSet<&End> = operator.iter().flat_map(|(a, b, _)| [a, b]).collect();
+    let fabric: Vec<(End, &FabricPortName)> = switches
+        .iter()
+        .flat_map(|(d, s)| {
+            s.fabric_ports
+                .iter()
+                .map(move |f| (End(d.clone(), f.port.clone()), f))
+        })
+        .collect();
+    if fabric.is_empty() {
+        return Vec::new();
+    }
+    let mut named: BTreeMap<End, Vec<(End, SourceSpan)>> = BTreeMap::new();
+    for (d, s) in switches {
+        for (p, (text, span)) in &s.descriptions {
+            if !s.entries.contains_key(p) {
+                continue;
+            }
+            let hits: Vec<&(End, &FabricPortName)> = fabric
+                .iter()
+                .filter(|(_, f)| names_fabric_port(text, &f.name))
+                .collect();
+            let [(fp, f)] = hits.as_slice() else {
+                if hits.len() > 1 {
+                    let names: Vec<&str> = hits.iter().map(|(_, f)| f.name.as_str()).collect();
+                    add_note(
+                        notes,
+                        d,
+                        format!(
+                            "{p}: the description names the Fabric ports {}, no link",
+                            names.join(", ")
+                        ),
+                    );
+                }
+                continue;
+            };
+            let stated = cable_ids(text);
+            if !stated.is_empty() && !stated.iter().any(|id| f.cross_connects.contains(id)) {
+                add_note(
+                    notes,
+                    d,
+                    format!(
+                        "{p}: the description names the Fabric port {} with the cable id {}, which is no cross connect of the port, no link",
+                        f.name,
+                        stated.join(", ")
+                    ),
+                );
+                continue;
+            }
+            named
+                .entry(fp.clone())
+                .or_default()
+                .push((End(d.clone(), p.clone()), span.clone()));
+        }
+    }
+    let mut out = Vec::new();
+    for (fp, ports) in named {
+        let name = &switches[&fp.0]
+            .fabric_ports
+            .iter()
+            .find(|f| f.port == fp.1)
+            .expect("a Fabric port of the device")
+            .name;
+        let [(here, span)] = ports.as_slice() else {
+            let list: Vec<String> = ports
+                .iter()
+                .map(|(e, _)| format!("{} {}", e.0, e.1))
+                .collect();
+            add_note(
+                notes,
+                &fp.0,
+                format!(
+                    "{}: the descriptions of {} name the Fabric port {name}, no link",
+                    fp.1,
+                    list.join(", ")
+                ),
+            );
+            continue;
+        };
+        if taken.contains(&fp) || taken.contains(here) {
+            continue;
+        }
+        let mut spans = vec![span.clone()];
+        if let Some(sp) = switches[&fp.0].port_spans.get(&fp.1) {
+            spans.push(sp.clone());
+        }
+        out.push((fp, here.clone(), spans));
+    }
+    out
+}
+
 fn add_note(notes: &mut BTreeMap<String, Vec<String>>, device: &str, text: String) {
     let list = notes.entry(device.to_string()).or_default();
     if !list.contains(&text) {

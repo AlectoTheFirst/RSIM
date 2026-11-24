@@ -144,11 +144,7 @@ fn the_states_of_key_stanzas() {
             Handled,
             Handled,
         ),
-        (
-            &["interface Gi0/0/0/3", "description x"],
-            Irrelevant,
-            Irrelevant,
-        ),
+        (&["interface Gi0/0/0/3", "description x"], Handled, Handled),
         (&["interface preconfigure Gi0/0/0/9"], Unhandled, Unhandled),
         (&["vrf RED"], Handled, Handled),
         (&["vrf RED", "description x"], Irrelevant, Irrelevant),

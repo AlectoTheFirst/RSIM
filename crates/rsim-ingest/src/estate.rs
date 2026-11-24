@@ -517,7 +517,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     // The VyOS routers give their summaries too: the ports that can end a
     // link.
     for (d, r) in &routers {
-        summaries.insert(d.clone(), vyos::link_summary(d, &r.cfg, &r.col));
+        summaries.insert(d.clone(), vyos::link_summary(d, &r.file, &r.cfg, &r.col));
     }
     // The MACs of the collected devices: the interfaces of the routers and
     // of the switches, and the UniFi devices. None of them is an endpoint.

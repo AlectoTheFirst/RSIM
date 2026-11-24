@@ -724,3 +724,120 @@ fn a_circuit_vlan_that_a_bound_port_does_not_carry_gives_a_note() {
         ]
     );
 }
+
+#[test]
+fn a_fabric_port_name_matches_as_a_whole_word_and_a_cable_id_after_its_label() {
+    assert!(names_fabric_port("to EQX-DC1-01 trunk", "eqx-dc1-01"));
+    assert!(!names_fabric_port("to EQX-DC1-011 trunk", "EQX-DC1-01"));
+    assert!(!names_fabric_port("to XEQX-DC1-01", "EQX-DC1-01"));
+    assert!(names_fabric_port("uplink [port dc1.a] spare", "port dc1.a"));
+    assert!(!names_fabric_port("uplink port dc1.ab", "port dc1.a"));
+    assert!(!names_fabric_port("anything", ""));
+    assert_eq!(cable_ids("EQX-DC1-01 CCID: 12345"), ["12345"]);
+    assert_eq!(cable_ids("cable id 777, xccid9"), ["777"]);
+    assert_eq!(cable_ids("CABLE  ID:42 xccid 5"), ["42"]);
+    assert!(cable_ids("no id here").is_empty());
+}
+
+/// An account with the Fabric ports `fp-a` (`EQX-A`, cross connect 111)
+/// and `fp-b` (`EQX-B`, cross connect 222), and the operator bindings.
+fn named_account(bindings: &[(&str, &str, &str)]) -> Summary {
+    let mut s = account(bindings);
+    for (p, name, cc) in [("fp-a", "EQX-A", "111"), ("fp-b", "EQX-B", "222")] {
+        s.fabric_ports.push(FabricPortName {
+            port: format!("port/{p}"),
+            name: name.into(),
+            cross_connects: vec![cc.into()],
+        });
+    }
+    s
+}
+
+/// A switch with the ports `e1` and `e2` and their descriptions.
+fn described(name: &str, descriptions: &[(&str, &str)]) -> Summary {
+    let mut s = device(
+        name,
+        &[("e1", "00:00:5e:00:53:31"), ("e2", "00:00:5e:00:53:32")],
+        &[],
+        true,
+    );
+    s.port_macs.clear();
+    for (p, d) in descriptions {
+        s.descriptions.insert(
+            (*p).to_string(),
+            (
+                (*d).to_string(),
+                SourceSpan::line(format!("{name}/config"), 1),
+            ),
+        );
+    }
+    s
+}
+
+fn estate_of(acct: Summary, a: Summary, b: Summary) -> BTreeMap<String, Summary> {
+    BTreeMap::from([
+        ("acct".to_string(), acct),
+        ("sw-a".to_string(), a),
+        ("sw-b".to_string(), b),
+    ])
+}
+
+#[test]
+fn a_description_with_the_name_and_a_matching_cable_id_links_the_port() {
+    let devices = estate_of(
+        named_account(&[]),
+        described("sw-a", &[("e1", "EQX-A CCID 111")]),
+        described("sw-b", &[("e1", "to eqx-b")]),
+    );
+    let (p, notes) = peers(&devices);
+    assert_eq!(p["sw-a:e1"], ["acct/port/fp-a/in"]);
+    assert_eq!(p["sw-b:e1"], ["acct/port/fp-b/in"]);
+    assert!(notes.is_empty(), "{notes:?}");
+}
+
+#[test]
+fn a_cable_id_of_another_cross_connect_is_a_conflict_and_links_nothing() {
+    let devices = estate_of(
+        named_account(&[]),
+        described("sw-a", &[("e1", "EQX-A CCID 999")]),
+        described("sw-b", &[]),
+    );
+    let (p, notes) = peers(&devices);
+    assert!(p.is_empty(), "{p:?}");
+    assert_eq!(
+        notes,
+        [
+            "e1: the description names the Fabric port EQX-A with the cable id 999, which is no cross connect of the port, no link"
+        ]
+    );
+}
+
+#[test]
+fn a_description_of_2_fabric_ports_and_a_fabric_port_of_2_descriptions_link_nothing() {
+    let devices = estate_of(
+        named_account(&[]),
+        described("sw-a", &[("e1", "EQX-A and EQX-B")]),
+        described("sw-b", &[("e1", "EQX-B"), ("e2", "EQX-B spare")]),
+    );
+    let (p, notes) = peers(&devices);
+    assert!(p.is_empty(), "{p:?}");
+    assert_eq!(
+        notes,
+        [
+            "port/fp-b: the descriptions of sw-b e1, sw-b e2 name the Fabric port EQX-B, no link",
+            "e1: the description names the Fabric ports EQX-A, EQX-B, no link",
+        ]
+    );
+}
+
+#[test]
+fn an_operator_binding_wins_over_a_description() {
+    let devices = estate_of(
+        named_account(&[("fp-a", "sw-b", "e2")]),
+        described("sw-a", &[("e1", "EQX-A")]),
+        described("sw-b", &[]),
+    );
+    let (p, _) = peers(&devices);
+    assert_eq!(p["sw-b:e2"], ["acct/port/fp-a/in"]);
+    assert!(!p.contains_key("sw-a:e1"), "{p:?}");
+}

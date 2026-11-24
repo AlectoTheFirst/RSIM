@@ -729,7 +729,12 @@ pub fn interface_addresses(cfg: &Config, col: &Collected) -> BTreeMap<String, Ve
 /// the links table with its MAC. Its layer 3 addresses are the addresses of
 /// the interface and of its VLAN subinterfaces. A router has no neighbour
 /// section.
-pub fn link_summary(device: &str, cfg: &Config, col: &Collected) -> crate::links::Summary {
+pub fn link_summary(
+    device: &str,
+    file: &str,
+    cfg: &Config,
+    col: &Collected,
+) -> crate::links::Summary {
     let mut s = crate::links::Summary::default();
     let addrs = interface_addresses(cfg, col);
     let mut by_prefix: BTreeMap<String, Vec<&crate::collected::RouteRow>> = BTreeMap::new();
@@ -765,6 +770,19 @@ pub fn link_summary(device: &str, cfg: &Config, col: &Collected) -> crate::links
             }
         }
         s.l3.insert(iface, vlans);
+    }
+    for i in &cfg.interfaces {
+        if let Some((text, lines)) = &i.description
+            && s.entries.contains_key(&i.name)
+        {
+            s.descriptions.insert(
+                i.name.clone(),
+                (
+                    text.clone(),
+                    SourceSpan::new(file, lines.first.max(1), lines.last.max(lines.first).max(1)),
+                ),
+            );
+        }
     }
     s
 }

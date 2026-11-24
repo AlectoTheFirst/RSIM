@@ -308,6 +308,14 @@ pub fn lower(
     cross_check(&mut l, cfg, &st);
     let groups = hsrp(&mut l, cfg, &st, &active, &names);
     let mut sum = summary(&l, cfg, &st, &active, &names);
+    for i in &cfg.interfaces {
+        if let Some((text, lines)) = &i.description
+            && sum.entries.contains_key(&i.name)
+        {
+            sum.descriptions
+                .insert(i.name.clone(), (text.clone(), l.span(*lines)));
+        }
+    }
     if active.is_empty() {
         return (l.out, sum);
     }

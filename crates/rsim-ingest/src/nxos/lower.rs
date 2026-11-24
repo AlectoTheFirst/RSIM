@@ -200,6 +200,14 @@ pub fn lower(
             sum.port_macs.insert(p, m);
         }
     }
+    for i in &cfg.interfaces {
+        if let Some((text, lines)) = &i.description
+            && sum.entries.contains_key(&i.name)
+        {
+            sum.descriptions
+                .insert(i.name.clone(), (text.clone(), l.span(*lines)));
+        }
+    }
     // A switch with no layer 3 interface has no layer 3 chain.
     if active.is_empty() {
         return (l.out, sum);

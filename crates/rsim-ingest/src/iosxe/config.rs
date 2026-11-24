@@ -80,6 +80,8 @@ pub struct Interface {
     pub hsrp_version: Option<(u8, Lines)>,
     /// The HSRP and VRRP groups, in the order of their first lines.
     pub fhrp: Vec<FhrpGroup>,
+    /// The text of the `description` line.
+    pub description: Option<(String, Lines)>,
     /// The masked lines that the handlers do not read: the unhandled
     /// options and the handled lines with a form that the handler cannot
     /// read.
@@ -406,6 +408,9 @@ fn interface_line(i: &mut Interface, c: &Stanza) -> bool {
     match words(&c.key).as_slice() {
         ["shutdown"] => i.admin_up = Some(false),
         ["no", "shutdown"] => i.admin_up = Some(true),
+        ["description", ..] => {
+            i.description = Some((crate::nxos::config::description_text(&c.key), lines));
+        }
         ["vrf", "forwarding", v] | ["ip", "vrf", "forwarding", v] => {
             i.vrf = Some(((*v).to_string(), lines));
         }
