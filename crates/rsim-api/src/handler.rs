@@ -2,7 +2,7 @@
 //! The server in `server.rs` reads the request from a connection and
 //! writes the response.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use rsim_cli::commands::{self, Loaded};
@@ -84,7 +84,7 @@ pub struct Settings {
 pub struct State {
     pub settings: Settings,
     mcp: rsim_mcp::tools::Tools,
-    long_queries: Mutex<BTreeMap<String, String>>,
+    long_queries: Mutex<LongQueries>,
     pub(crate) inventory: Option<crate::inventory::InventoryHandle>,
     pub(crate) rate: crate::auth::Rate,
 }
@@ -103,7 +103,7 @@ impl State {
         State {
             settings,
             mcp,
-            long_queries: Mutex::new(BTreeMap::new()),
+            long_queries: Mutex::new(LongQueries::default()),
             inventory: None,
             rate: crate::auth::Rate::default(),
         }
@@ -115,6 +115,42 @@ impl State {
     pub fn with_inventory(mut self, inventory: crate::inventory::InventoryHandle) -> Self {
         self.inventory = Some(inventory);
         self
+    }
+}
+
+/// The largest sum of the lengths of the kept query texts, in bytes.
+pub const MAX_LONG_QUERY_BYTES: usize = 64 * 1024 * 1024;
+
+/// The query texts above the inline limit under their hash identifiers.
+/// When the sum of the text lengths exceeds `MAX_LONG_QUERY_BYTES`, the
+/// oldest texts are removed in the order of their first insert.
+#[derive(Default)]
+struct LongQueries {
+    texts: BTreeMap<String, String>,
+    order: VecDeque<String>,
+    bytes: usize,
+}
+
+impl LongQueries {
+    fn insert(&mut self, id: String, text: &str) {
+        if self.texts.contains_key(&id) {
+            return;
+        }
+        self.bytes += text.len();
+        self.order.push_back(id.clone());
+        self.texts.insert(id, text.to_string());
+        while self.bytes > MAX_LONG_QUERY_BYTES && self.order.len() > 1 {
+            let Some(old) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(t) = self.texts.remove(&old) {
+                self.bytes -= t.len();
+            }
+        }
+    }
+
+    fn get(&self, id: &str) -> Option<&String> {
+        self.texts.get(id)
     }
 }
 
@@ -224,7 +260,7 @@ impl State {
         let id = qid::of(text);
         if id.starts_with('h') {
             let mut m = self.long_queries.lock().unwrap_or_else(|p| p.into_inner());
-            m.insert(id.clone(), text.to_string());
+            m.insert(id.clone(), text);
         }
         id
     }
@@ -457,17 +493,24 @@ fn check_host(state: &State, req: &Request) -> Option<Problem> {
     })
 }
 
+/// The 304 response of a GET request whose `If-None-Match` is the ETag.
+fn not_modified(req: &Request, etag: &str) -> Option<Response> {
+    let tag = format!("\"{etag}\"");
+    (req.method == "GET"
+        && req.headers.get("if-none-match").map(String::as_str) == Some(tag.as_str()))
+    .then(|| Response {
+        status: 304,
+        headers: vec![("etag".into(), tag)],
+        body: Vec::new(),
+    })
+}
+
 /// An answer with its ETag, or 304 if the client has it.
 fn cached(req: &Request, etag: String, mut res: Response) -> Response {
-    let tag = format!("\"{etag}\"");
-    if req.headers.get("if-none-match").map(String::as_str) == Some(tag.as_str()) {
-        return Response {
-            status: 304,
-            headers: vec![("etag".into(), tag)],
-            body: Vec::new(),
-        };
+    if let Some(r) = not_modified(req, &etag) {
+        return r;
     }
-    res.headers.push(("etag".into(), tag));
+    res.headers.push(("etag".into(), format!("\"{etag}\"")));
     res.headers
         .push(("cache-control".into(), "private, no-cache".into()));
     res
@@ -624,6 +667,9 @@ fn route(
                 }
             };
             let etag = format!("{}.{contract}", t.loaded.identity.id);
+            if let Some(res) = not_modified(req, &etag) {
+                return Ok(res);
+            }
             let res = twin_route(state, req, &t, rest)?;
             Ok(if res.status == 200 && req.method == "GET" {
                 cached(req, etag, res)
@@ -1224,4 +1270,26 @@ fn mcp(state: &State, req: &Request) -> Result<Response, Problem> {
             body: Vec::new(),
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LongQueries, MAX_LONG_QUERY_BYTES};
+
+    #[test]
+    fn the_oldest_long_query_is_removed_above_the_byte_limit() {
+        let mut m = LongQueries::default();
+        let half = "x".repeat(MAX_LONG_QUERY_BYTES / 2);
+        m.insert("ha".into(), &half);
+        m.insert("hb".into(), &half);
+        m.insert("hb".into(), &half);
+        assert!(m.get("ha").is_some());
+        assert_eq!(m.bytes, MAX_LONG_QUERY_BYTES);
+        m.insert("hc".into(), "y");
+        assert!(m.get("ha").is_none());
+        assert!(m.get("hb").is_some());
+        assert_eq!(m.get("hc").map(String::as_str), Some("y"));
+        assert_eq!(m.bytes, MAX_LONG_QUERY_BYTES / 2 + 1);
+        assert_eq!(m.order.len(), 2);
+    }
 }
