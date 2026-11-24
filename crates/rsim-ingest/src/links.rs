@@ -1,9 +1,11 @@
 //! The links between the devices of the estate from their neighbour
-//! records, and the place of each endpoint across these links. The join
+//! records and, for a device with no neighbour record and no MAC, from its
+//! addresses, and the place of each endpoint across these links. The join
 //! knows no vendor: each device gives a summary of its ports, its
-//! neighbours, its MAC table, its ARP rows and its next hops. Both need all
-//! devices of the estate, so the estate runs them between a first lowering
-//! of each device, which gives its summary, and the final lowering.
+//! neighbours, its MAC table, its ARP rows, its addresses and its next hops.
+//! Both need all devices of the estate, so the estate runs them between a
+//! first lowering of each device, which gives its summary, and the final
+//! lowering.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
@@ -98,6 +100,49 @@ pub struct Summary {
     /// route lookup on the address of a BGP peer. The estate takes them out
     /// after that lookup, so they are empty in the join.
     pub routes: crate::resolve::Resolver,
+    /// True for a device with no neighbour record and no MAC: the join
+    /// links its ports by their addresses, and the placement of the
+    /// endpoints leaves out its addresses.
+    pub by_address: bool,
+    /// The layer 3 address of each port with its VLAN and its VRF, for the
+    /// address rules of the join.
+    pub port_addresses: Vec<PortAddress>,
+    /// The addresses that the ports of a device that the join links by
+    /// address name as their BGP neighbours and their gateways.
+    pub address_peers: Vec<AddressPeer>,
+    /// The addresses of the device after a NAT in front of it, which more
+    /// than one device can share.
+    pub shared_addresses: BTreeSet<IpAddr>,
+    /// The VRFs of each next hop whose route states its VRF.
+    pub next_hop_vrfs: BTreeMap<IpAddr, BTreeSet<String>>,
+    /// The VRF of the SVI of each VLAN, for an SVI in a VRF other than the
+    /// default VRF.
+    pub vlan_vrfs: BTreeMap<u16, String>,
+}
+
+/// A layer 3 address of a port.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PortAddress {
+    pub port: String,
+    pub address: IpAddr,
+    /// The VLAN of a subinterface or an SVI, `None` for the untagged
+    /// interface.
+    pub vlan: Option<u16>,
+    /// The VRF of the address, `None` for the default VRF.
+    pub vrf: Option<String>,
+    pub spans: Vec<SourceSpan>,
+}
+
+/// An address that a port names as its BGP neighbour or its gateway.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AddressPeer {
+    pub port: String,
+    pub address: IpAddr,
+    /// The VRF of the port, `None` for the default VRF.
+    pub vrf: Option<String>,
+    /// The config lines that name the address, and the rows of the observed
+    /// BGP sessions with it.
+    pub spans: Vec<SourceSpan>,
 }
 
 /// The peer of a BGP neighbour.
@@ -444,8 +489,9 @@ fn target(devices: &BTreeMap<String, Summary>, end: &End) -> Option<FunctionId> 
 /// records of a port. A record names the far device by its name, else by
 /// the MAC of the far port, else by its chassis MAC; the far port is the
 /// port of the name or of the MAC. When the far device has a neighbour
-/// section, it must report the link too. An end that 2 links claim gets no
-/// link.
+/// section, it must report the link too. The ports of a device that the
+/// join links by address link by the rules of `address_links`. An end that
+/// 2 links claim gets no link.
 pub fn join(
     devices: &BTreeMap<String, Summary>,
     next_hops: &BTreeSet<IpAddr>,
@@ -710,6 +756,7 @@ pub fn join(
     // The member ports of a vPC link do not link on their own.
     let vpc_members: BTreeSet<&End> = vpc_links.iter().flat_map(|(_, e, _)| e.iter()).collect();
     links.retain(|(a, b, _)| !vpc_members.contains(a) && !vpc_members.contains(b));
+    links.extend(address_links(switches, &named, &mut out.notes));
 
     // An end that 2 links claim gets no link.
     let mut claims: BTreeMap<&End, u32> = BTreeMap::new();
@@ -837,8 +884,207 @@ pub fn join(
             svi_macs: v.svi_macs.clone(),
         });
     }
-    place(switches, &mut out, &l2_far, next_hops, device_macs);
+    let linked_by_address: BTreeSet<IpAddr> = switches
+        .values()
+        .filter(|s| s.by_address)
+        .flat_map(|s| {
+            s.port_addresses
+                .iter()
+                .map(|a| a.address)
+                .chain(s.shared_addresses.iter().copied())
+        })
+        .collect();
+    let leave_out = Leave {
+        next_hops,
+        device_macs,
+        addresses: &linked_by_address,
+    };
+    place(switches, &mut out, &l2_far, &leave_out);
     out
+}
+
+/// The addresses and the MACs that are no endpoint.
+struct Leave<'a> {
+    next_hops: &'a BTreeSet<IpAddr>,
+    device_macs: &'a BTreeSet<Mac>,
+    /// The addresses of the devices that the join links by address.
+    addresses: &'a BTreeSet<IpAddr>,
+}
+
+/// The ports of each address with their devices.
+type Holders<'a> = BTreeMap<IpAddr, Vec<(&'a str, &'a PortAddress)>>;
+
+/// The one port of a device other than `near` that has the address `addr`,
+/// in the VRF `vrf` when both sides state one. `None` when no device has
+/// the address; an error with the reason when the address is no evidence:
+/// a shared address, an address of more than one port, or an address of a
+/// port in another VRF only.
+fn holder<'a>(
+    holders: &Holders<'a>,
+    shared: &BTreeSet<IpAddr>,
+    addr: IpAddr,
+    vrf: Option<&str>,
+    near: &str,
+) -> Result<Option<(&'a str, &'a PortAddress)>, String> {
+    if shared.contains(&addr) {
+        return Err("is a shared address".to_string());
+    }
+    let all: Vec<(&'a str, &'a PortAddress)> = holders
+        .get(&addr)
+        .map(|v| v.iter().filter(|(d, _)| *d != near).copied().collect())
+        .unwrap_or_default();
+    let same: Vec<(&'a str, &'a PortAddress)> = all
+        .iter()
+        .filter(|(_, a)| match (vrf, a.vrf.as_deref()) {
+            (Some(x), Some(y)) => x == y,
+            _ => true,
+        })
+        .copied()
+        .collect();
+    match same.as_slice() {
+        [one] => Ok(Some(*one)),
+        [] if all.is_empty() => Ok(None),
+        [] => Err("is in another VRF".to_string()),
+        _ => Err("is on more than one port".to_string()),
+    }
+}
+
+/// Adds a note to a device once.
+fn add_note(notes: &mut BTreeMap<String, Vec<String>>, device: &str, text: String) {
+    let list = notes.entry(device.to_string()).or_default();
+    if !list.contains(&text) {
+        list.push(text);
+    }
+}
+
+/// The 2 ends of a link in order, so that each link has one key.
+fn ordered(a: End, b: End) -> (End, End) {
+    if a <= b { (a, b) } else { (b, a) }
+}
+
+/// The links of the ports of the devices that the join links by address,
+/// by 2 rules. `cable-from-arp-port`: an ARP row of another device gives
+/// the MAC of an address of such a port, and the MAC table rows lead, across
+/// the links of the neighbour records, to the switch port of the MAC.
+/// `bgp-peer-from-address`: the address that such a port names as its BGP
+/// neighbour or its gateway is the address of a port of another device. An
+/// address is evidence only when exactly one port of one device has it, in
+/// the same VRF when both sides state one, and a shared address is no
+/// evidence; each other case gives no link and a note.
+fn address_links(
+    devices: &BTreeMap<String, Summary>,
+    named: &BTreeMap<End, (Option<End>, Vec<SourceSpan>)>,
+    notes: &mut BTreeMap<String, Vec<String>>,
+) -> Vec<(End, End, Vec<SourceSpan>)> {
+    if !devices.values().any(|s| s.by_address) {
+        return Vec::new();
+    }
+    let mut holders: Holders = BTreeMap::new();
+    let mut shared: BTreeSet<IpAddr> = BTreeSet::new();
+    for (d, s) in devices {
+        for a in &s.port_addresses {
+            holders.entry(a.address).or_default().push((d.as_str(), a));
+        }
+        shared.extend(s.shared_addresses.iter().copied());
+    }
+    let mut found: BTreeMap<(End, End), Vec<SourceSpan>> = BTreeMap::new();
+
+    // cable-from-arp-port
+    for (d, s) in devices.iter().filter(|(_, s)| !s.by_address) {
+        for (vlan, ip, m, span) in &s.arp {
+            let of_address_device = holders
+                .get(ip)
+                .is_some_and(|v| v.iter().any(|(o, _)| devices[*o].by_address));
+            if !of_address_device && !shared.contains(ip) {
+                continue;
+            }
+            let vrf = s.vlan_vrfs.get(vlan).map(String::as_str);
+            let (o, a) = match holder(&holders, &shared, *ip, vrf, d) {
+                Ok(Some((o, a))) if devices[o].by_address => (o, a),
+                Ok(_) => continue,
+                Err(why) => {
+                    add_note(notes, d, format!("ARP row {ip} {why}, no link"));
+                    continue;
+                }
+            };
+            // The MAC table rows from the device of the ARP row to the port
+            // of the MAC.
+            let mut dev = d.clone();
+            let mut spans = vec![span.clone()];
+            let mut seen = BTreeSet::new();
+            let mut port = None;
+            while seen.insert(dev.clone()) {
+                let Some((p, row)) = devices[&dev].macs.get(&(*vlan, *m)) else {
+                    break;
+                };
+                spans.push(row.clone());
+                match named.get(&End(dev.clone(), p.clone())) {
+                    Some((Some(far), _)) if devices[&far.0].ports.contains_key(&far.1) => {
+                        dev = far.0.clone();
+                    }
+                    _ => {
+                        port = Some(End(dev.clone(), p.clone()));
+                        break;
+                    }
+                }
+            }
+            let carries = |e: &End| match devices[&e.0].ports.get(&e.1) {
+                Some(Some(pv)) => pv.native == Some(*vlan) || pv.tagged.contains(vlan),
+                _ => false,
+            };
+            let Some(here) = port.filter(carries) else {
+                add_note(
+                    notes,
+                    d,
+                    format!(
+                        "ARP row {ip}: no switch port of VLAN {vlan} in the MAC table, no link"
+                    ),
+                );
+                continue;
+            };
+            spans.extend(a.spans.iter().cloned());
+            found
+                .entry(ordered(here, End(o.to_string(), a.port.clone())))
+                .or_default()
+                .extend(spans);
+        }
+    }
+
+    // bgp-peer-from-address
+    for (d, s) in devices.iter().filter(|(_, s)| s.by_address) {
+        for p in &s.address_peers {
+            match holder(&holders, &shared, p.address, p.vrf.as_deref(), d) {
+                Ok(None) => {}
+                Ok(Some((o, a))) => match a.vlan {
+                    Some(v) => add_note(
+                        notes,
+                        d,
+                        format!("{}: {} on VLAN {v} of {o}, no link", p.port, p.address),
+                    ),
+                    None => {
+                        let mut spans = p.spans.clone();
+                        spans.extend(a.spans.iter().cloned());
+                        found
+                            .entry(ordered(
+                                End(d.clone(), p.port.clone()),
+                                End(o.to_string(), a.port.clone()),
+                            ))
+                            .or_default()
+                            .extend(spans);
+                    }
+                },
+                Err(why) => add_note(
+                    notes,
+                    d,
+                    format!("{}: {} {why}, no link", p.port, p.address),
+                ),
+            }
+        }
+    }
+    found
+        .into_iter()
+        .map(|((a, b), spans)| (a, b, spans))
+        .collect()
 }
 
 /// The BGP peer facts of each device with one, each configured neighbour
@@ -1012,14 +1258,14 @@ fn far_end(
 /// The places of the endpoints. From an ARP row of an SVI, the MAC table
 /// rows lead across the links of switch ports to an edge access port. One
 /// endpoint is one MAC on one port, with the addresses of all ARP rows that
-/// lead there. A MAC with an address that is a next hop, or a MAC of a
-/// collected device, is not an endpoint.
+/// lead there. A MAC of a collected device, a MAC with an address of a
+/// device that the join links by address and a MAC with an address that is
+/// a next hop are not an endpoint.
 fn place(
     switches: &BTreeMap<String, Summary>,
     out: &mut Joined,
     far: &BTreeMap<(String, String), (String, String)>,
-    next_hops: &BTreeSet<IpAddr>,
-    device_macs: &BTreeSet<Mac>,
+    leave: &Leave,
 ) {
     // Each ARP row leads to a place, or to none.
     struct At {
@@ -1114,9 +1360,11 @@ fn place(
     let mut keep = Vec::new();
     for ((dev, port, m), a) in at {
         let id = format!("{dev}/vlan{}/{m:?}", a.vlan);
-        let why = if device_macs.contains(&m) {
+        let why = if leave.device_macs.contains(&m) {
             Some("a MAC of a collected device")
-        } else if a.addrs.iter().any(|(ip, _)| next_hops.contains(ip)) {
+        } else if a.addrs.iter().any(|(ip, _)| leave.addresses.contains(ip)) {
+            Some("an address of a device of the twin")
+        } else if a.addrs.iter().any(|(ip, _)| leave.next_hops.contains(ip)) {
             Some("a next hop of a route")
         } else {
             None

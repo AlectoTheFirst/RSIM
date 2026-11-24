@@ -15,7 +15,7 @@ use crate::bgp_peers::{BgpConfig, InterfaceAddresses, address_of};
 use crate::collected::{self, Collected};
 use crate::coverage::{Coverage, Table, classify};
 use crate::facts::{self, DeviceFacts};
-use crate::links::{BgpPeerFact, Summary};
+use crate::links::{BgpPeerFact, PortAddress, Summary};
 use crate::route_tables::RouteTables;
 use crate::stanza::{Document, read_json};
 use crate::{iosxe, iosxr, nxos, unifi, velocloud, vyos};
@@ -257,12 +257,13 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
 
 /// Builds the twin of the inputs with the BGP session sections of each
 /// device. The first lowering of each NX-OS switch, each IOS-XR router and
-/// each IOS-XE router or switch gives its summary, and the VyOS routers and
-/// the root devices of the UniFi sites give theirs; each router and switch
-/// adds its BGP peer facts and its local addresses to its summary. The link
-/// join of the summaries gives the links. Then each UniFi site, each VyOS
-/// router, each NX-OS switch, each IOS-XR router and each IOS-XE device is
-/// lowered with its links.
+/// each IOS-XE router or switch gives its summary, and the VeloCloud edges,
+/// the VyOS routers and the root devices of the UniFi sites give theirs;
+/// each router and switch adds its BGP peer facts, its local addresses and
+/// the addresses of its ports to its summary. The link join of the
+/// summaries gives the links. Then each UniFi site, each VyOS router, each
+/// NX-OS switch, each IOS-XR router, each IOS-XE device and each VeloCloud
+/// edge is lowered with its links.
 pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSections>) -> Estate {
     let mut e = Estate {
         builder: TwinBuilder::new(),
@@ -450,6 +451,29 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         );
         summaries.insert(d.clone(), sum);
     }
+    // The VeloCloud enterprises: the coverage of the shared stanzas and of
+    // each edge, and the summary of each edge, whose ports the join links by
+    // address.
+    let mut ents: Vec<velocloud::Enterprise> = Vec::new();
+    for (device, sections) in &enterprises {
+        let p = velocloud::Parsed::new(sections);
+        let ent = velocloud::read(device, &velocloud::enterprise_of(device, &p), &p, &[]);
+        e.coverage.insert(
+            device.clone(),
+            velocloud::coverage::classify_part(&p, velocloud::coverage::Part::Shared),
+        );
+        for edge in &ent.edges {
+            e.coverage.insert(
+                edge.device.clone(),
+                velocloud::coverage::classify_part(
+                    &p,
+                    velocloud::coverage::Part::Edge(&edge.logical_id),
+                ),
+            );
+        }
+        summaries.extend(velocloud::summaries(&ent));
+        ents.push(ent);
+    }
     for s in summaries.values() {
         next_hops.extend(s.next_hops.iter().copied());
     }
@@ -574,6 +598,17 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
             (i.name.clone(), i.vrf.as_ref().map(|v| v.0.clone()), addrs)
         });
         peers.add(d, "iosxe", file, &cfg.bgp, interfaces(i));
+    }
+    // The VRFs of the next hops of the collected route tables.
+    for (d, r) in &routers {
+        if let Some(s) = summaries.get_mut(d) {
+            s.next_hop_vrfs = hop_vrfs(&r.col.routes);
+        }
+    }
+    for (d, (_, col, _, _)) in &switches {
+        if let Some(s) = summaries.get_mut(d) {
+            s.next_hop_vrfs = hop_vrfs(&col.routes);
+        }
     }
     let mut joined = crate::links::join(&summaries, &next_hops, &device_macs);
     for (d, notes) in std::mem::take(&mut joined.notes) {
@@ -769,26 +804,16 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         }
     }
 
-    // The VeloCloud enterprises: the coverage of the shared stanzas and of
-    // each edge, the edges and the transport networks.
+    // The VeloCloud edges, with their links, and the transport networks.
     let vc_profile = velocloud::profile();
-    for (device, sections) in &enterprises {
-        let p = velocloud::Parsed::new(sections);
-        let ent = velocloud::read(device, &velocloud::enterprise_of(device, &p), &p, &[]);
-        e.coverage.insert(
-            device.clone(),
-            velocloud::coverage::classify_part(&p, velocloud::coverage::Part::Shared),
+    for ent in &ents {
+        let low = velocloud::lower(
+            ent,
+            &vc_profile,
+            velocloud::HubChoice::None,
+            &joined.devices,
+            &twin_addresses,
         );
-        for edge in &ent.edges {
-            e.coverage.insert(
-                edge.device.clone(),
-                velocloud::coverage::classify_part(
-                    &p,
-                    velocloud::coverage::Part::Edge(&edge.logical_id),
-                ),
-            );
-        }
-        let low = velocloud::lower(&ent, &vc_profile, velocloud::HubChoice::None);
         for (d, notes) in low.notes {
             e.notes.entry(d).or_default().extend(notes);
         }
@@ -875,6 +900,109 @@ fn device_addresses(summaries: &BTreeMap<String, Summary>) -> BTreeSet<IpAddr> {
     out
 }
 
+/// The VRFs of the next hops of the rows of a route table: the VRF of a
+/// `%<vrf>` suffix, else the VRF of the row.
+fn hop_vrfs(rows: &[collected::RouteRow]) -> BTreeMap<IpAddr, BTreeSet<String>> {
+    let mut out: BTreeMap<IpAddr, BTreeSet<String>> = BTreeMap::new();
+    for r in rows {
+        let Some(hop) = r.next_hop.as_deref() else {
+            continue;
+        };
+        let (addr, vrf) = hop.split_once('%').unwrap_or((hop, r.vrf.as_str()));
+        if let Ok(a) = addr.parse::<IpAddr>() {
+            out.entry(a).or_default().insert(vrf.to_string());
+        }
+    }
+    out
+}
+
+/// The layer 3 address of each port of a summary with its VRF: the
+/// addresses of `l3`, the addresses of each other port that ends a link,
+/// and the host addresses of the VLANs, which hold the SVI addresses and
+/// the active virtual addresses, at the port `Vlan<n>` with their VLAN. The
+/// VRF of an address is the one VRF of the interfaces with the address,
+/// and of a VLAN host the VRF of its SVI; none for the default VRF or for
+/// an address of more than one VRF.
+fn port_addresses(sum: &Summary, interfaces: &InterfaceAddresses) -> Vec<PortAddress> {
+    let vrf_of = |a: IpAddr| -> Option<String> {
+        let vrfs: BTreeSet<&String> = interfaces
+            .values()
+            .filter(|(_, addrs)| addrs.contains(&a))
+            .map(|(v, _)| v)
+            .collect();
+        match vrfs.into_iter().collect::<Vec<_>>().as_slice() {
+            [one] if one.as_str() != crate::bgp_peers::DEFAULT_VRF => Some((*one).clone()),
+            _ => None,
+        }
+    };
+    let mut out = Vec::new();
+    for (port, vlans) in &sum.l3 {
+        let spans: Vec<SourceSpan> = sum.port_spans.get(port).cloned().into_iter().collect();
+        for (vlan, addrs) in vlans {
+            for (a, _) in addrs {
+                out.push(PortAddress {
+                    port: port.clone(),
+                    address: *a,
+                    vlan: *vlan,
+                    vrf: vrf_of(*a),
+                    spans: spans.clone(),
+                });
+            }
+        }
+    }
+    for port in sum.entries.keys() {
+        if sum.l3.contains_key(port) || sum.ports.contains_key(port) {
+            continue;
+        }
+        let Some((_, addrs)) = interfaces.get(port) else {
+            continue;
+        };
+        let spans: Vec<SourceSpan> = sum.port_spans.get(port).cloned().into_iter().collect();
+        for a in addrs {
+            out.push(PortAddress {
+                port: port.clone(),
+                address: *a,
+                vlan: None,
+                vrf: vrf_of(*a),
+                spans: spans.clone(),
+            });
+        }
+    }
+    let svi_vrfs = vlan_vrfs(interfaces);
+    for (n, v) in &sum.vlans {
+        let port = format!("Vlan{n}");
+        for (p, host) in v.hosts.entries() {
+            if p.len() != if p.addr().is_ipv4() { 32 } else { 128 } {
+                continue;
+            }
+            let a = p.addr();
+            if out.iter().any(|x| x.port == port && x.address == a) {
+                continue;
+            }
+            out.push(PortAddress {
+                port: port.clone(),
+                address: a,
+                vlan: Some(*n),
+                vrf: svi_vrfs.get(n).cloned(),
+                spans: host.spans.clone(),
+            });
+        }
+    }
+    out
+}
+
+/// The VRF of each SVI `Vlan<n>` in a VRF other than the default VRF.
+fn vlan_vrfs(interfaces: &InterfaceAddresses) -> BTreeMap<u16, String> {
+    interfaces
+        .iter()
+        .filter(|(_, (vrf, _))| vrf != crate::bgp_peers::DEFAULT_VRF)
+        .filter_map(|(name, (vrf, _))| {
+            let n = name.strip_prefix("Vlan")?.parse::<u16>().ok()?;
+            Some((n, vrf.clone()))
+        })
+        .collect()
+}
+
 /// The BGP peer facts of the devices, into the summary of each device.
 struct Peers<'a> {
     sessions: &'a BTreeMap<String, SessionSections>,
@@ -901,6 +1029,8 @@ impl Peers<'_> {
         let routes = std::mem::take(&mut sum.routes);
         crate::bgp_peers::lookup_sources(&mut facts, &routes, &interfaces);
         sum.local_addresses = crate::bgp_peers::local_addresses(&interfaces);
+        sum.port_addresses = port_addresses(sum, &interfaces);
+        sum.vlan_vrfs = vlan_vrfs(&interfaces);
         sum.bgp_read = !self.hidden.get(device).copied().unwrap_or(false)
             && !self
                 .unread
