@@ -6,6 +6,7 @@ pub mod bgp;
 pub mod bgp_peers;
 pub mod collected;
 pub mod coverage;
+pub mod equinix;
 pub mod estate;
 pub mod facts;
 pub mod iosxe;

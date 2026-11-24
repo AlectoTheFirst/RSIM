@@ -333,6 +333,7 @@ pub fn device(
                 Identity::all(Reason::NotCollected)
             }
         }
+        "equinix" => Identity::all(Reason::NotCollected),
         _ => Identity::all(Reason::NotRead),
     };
     vec![(name.to_string(), facts(id, address))]

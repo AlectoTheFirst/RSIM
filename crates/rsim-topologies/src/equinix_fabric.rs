@@ -322,18 +322,21 @@ pub fn equinix_fabric() -> TwinBuilder {
                     near: dot1q(100),
                     far: far("port/fp-b1", dot1q(100), "sw-b/port/1/in"),
                     spans: connection(1),
+                    port_based: false,
                 },
                 CircuitLeg {
                     circuit: "evpl-qinq".into(),
                     near: dot1q(200),
                     far: far("port/fp-b2", qinq, "equinix-acct/port/fp-b2/pop"),
                     spans: connection(11),
+                    port_based: false,
                 },
                 CircuitLeg {
                     circuit: "sp-cloud".into(),
                     near: dot1q(400),
                     far: FarEnd::Sink(sink.clone()),
                     spans: connection(21),
+                    port_based: false,
                 },
             ],
         ),
@@ -345,6 +348,7 @@ pub fn equinix_fabric() -> TwinBuilder {
                 near: dot1q(100),
                 far: far("port/fp-a", dot1q(100), "sw-a/port/1/in"),
                 spans: connection(1),
+                port_based: false,
             }],
         ),
         (
@@ -355,6 +359,7 @@ pub fn equinix_fabric() -> TwinBuilder {
                 near: qinq,
                 far: far("port/fp-a", dot1q(200), "sw-a/port/1/in"),
                 spans: connection(11),
+                port_based: false,
             }],
         ),
     ];

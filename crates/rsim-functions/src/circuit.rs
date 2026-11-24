@@ -125,6 +125,10 @@ pub struct CircuitLeg {
     pub near: Tags,
     pub far: FarEnd,
     pub spans: Vec<SourceSpan>,
+    /// True for a port-based circuit: each frame of the port goes into the
+    /// circuit, and the frame leaves the far end with its tags unchanged.
+    /// `near` and the tags of a far port are then not read.
+    pub port_based: bool,
 }
 
 /// The circuits of a provider port. A frame with exactly the tags of the
@@ -187,25 +191,34 @@ impl NetFunction for Circuit {
             if rest.is_empty() {
                 break;
             }
-            let (matched, other, uncertain) = leg.near.split(&rest);
+            let (matched, other, uncertain) = if leg.port_based {
+                (rest.clone(), input.empty(), input.empty())
+            } else {
+                leg.near.split(&rest)
+            };
             rest = other;
             unclear = unclear.union(&uncertain);
             if matched.is_empty() {
                 continue;
             }
-            let from = format!(
-                "circuit {} from port {} {}",
-                leg.circuit,
-                self.port,
+            let near = if leg.port_based {
+                "each frame".to_string()
+            } else {
                 leg.near.text()
-            );
+            };
+            let from = format!("circuit {} from port {} {near}", leg.circuit, self.port);
             let b = match &leg.far {
                 FarEnd::Port { port, tags, peer } => {
+                    let (out, text) = if leg.port_based {
+                        (matched, "with its tags".to_string())
+                    } else {
+                        (tags.put(&matched), tags.text())
+                    };
                     let mut b = self.meta.forward(
-                        tags.put(&matched),
+                        out,
                         peer,
                         ReasonCode::LinkHandOff,
-                        format!("{from} to port {port} {}, to {peer}", tags.text()),
+                        format!("{from} to port {port} {text}, to {peer}"),
                         c.clone(),
                         state,
                     );
