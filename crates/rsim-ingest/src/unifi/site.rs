@@ -14,6 +14,7 @@ pub struct Network {
     /// The network in CIDR form, if the controller gives one.
     pub subnet: Option<String>,
     pub isolation: bool,
+    pub enabled: bool,
     pub index: usize,
 }
 
@@ -38,9 +39,13 @@ pub enum Forward {
     All,
     /// The native network only.
     Native,
-    /// The native network and each network that is not excluded.
+    /// The native network and each listed network, or each network that is
+    /// not excluded if the port lists none.
     Customize,
     Disabled,
+    /// The port states no mode. It carries the native network only, except
+    /// the uplink port of an access point, which carries each network.
+    Unstated,
     /// A mode that the handler does not know.
     Other,
 }
@@ -54,6 +59,8 @@ pub struct Port {
     pub forward: Forward,
     pub native: Option<String>,
     pub excluded: Vec<String>,
+    /// The tagged networks of a `Customize` port, if the port lists them.
+    pub tagged: Option<Vec<String>>,
     /// The STP state, for example `forwarding`.
     pub stp_state: Option<String>,
     pub isolation: bool,
@@ -145,8 +152,9 @@ pub struct Site {
 }
 
 impl Site {
+    /// The enabled network with the ID `id`.
     pub fn network(&self, id: &str) -> Option<&Network> {
-        self.networks.iter().find(|n| n.id == id)
+        self.networks.iter().find(|n| n.id == id && n.enabled)
     }
 
     pub fn device(&self, mac: &str) -> Option<&Device> {
@@ -209,6 +217,7 @@ pub fn read(networks: &Value, wlans: &Value, devices: &Value, clients: &Value) -
                 vlan,
                 subnet: s(x, "ip_subnet"),
                 isolation: b(x, "network_isolation_enabled"),
+                enabled: x.get("enabled").and_then(Value::as_bool).unwrap_or(true),
                 index,
             })
         })
@@ -340,13 +349,20 @@ pub fn read(networks: &Value, wlans: &Value, devices: &Value, clients: &Value) -
     }
 }
 
+/// The port of a `port_table` entry. A known `tagged_vlan_mgmt` sets the
+/// mode of a port that `forward` does not disable.
 fn port(x: &Value) -> Option<Port> {
-    let forward = match x.get("forward").and_then(Value::as_str) {
-        Some("all") | None => Forward::All,
-        Some("native") => Forward::Native,
-        Some("customize") => Forward::Customize,
-        Some("disabled") => Forward::Disabled,
-        Some(_) => Forward::Other,
+    let mgmt = x.get("tagged_vlan_mgmt").and_then(Value::as_str);
+    let forward = match (x.get("forward").and_then(Value::as_str), mgmt) {
+        (Some("disabled"), _) => Forward::Disabled,
+        (_, Some("block_all")) => Forward::Native,
+        (_, Some("auto")) => Forward::All,
+        (_, Some("custom")) => Forward::Customize,
+        (Some("all"), _) => Forward::All,
+        (Some("native"), _) => Forward::Native,
+        (Some("customize"), _) => Forward::Customize,
+        (None, None) => Forward::Unstated,
+        _ => Forward::Other,
     };
     Some(Port {
         idx: u32::try_from(n(x, "port_idx")?).ok()?,
@@ -355,6 +371,10 @@ fn port(x: &Value) -> Option<Port> {
         forward,
         native: s(x, "native_networkconf_id"),
         excluded: strings(x, "excluded_networkconf_ids"),
+        tagged: x
+            .get("tagged_networkconf_ids")
+            .is_some_and(Value::is_array)
+            .then(|| strings(x, "tagged_networkconf_ids")),
         stp_state: s(x, "stp_state"),
         isolation: b(x, "isolation"),
         aggregated: x

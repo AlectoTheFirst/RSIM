@@ -108,31 +108,41 @@ impl<'a> L<'a> {
     fn bd(&self, n: &Network) -> BridgeDomainId {
         BridgeDomainId::new(format!("{}/{}", self.prefix, n.name))
     }
-    /// The default network: the network with no VLAN.
+    /// The default network: the enabled network with no VLAN.
     fn default_network(&self) -> Option<&'a Network> {
         self.site
             .networks
             .iter()
-            .find(|n| n.vlan.is_none() && n.purpose != "wan")
+            .find(|n| n.vlan.is_none() && n.purpose != "wan" && n.enabled)
     }
-    /// The native bridge domain and the tagged bridge domains of a port.
+    /// The native bridge domain and the tagged bridge domains of a port. A
+    /// port carries no disabled network.
     fn membership(&self, p: &Port) -> (Option<&'a Network>, Vec<&'a Network>) {
-        let native = p
+        let named = p
             .native
             .as_deref()
-            .and_then(|id| self.site.network(id))
-            .or_else(|| self.default_network());
+            .and_then(|id| self.site.networks.iter().find(|n| n.id == id));
+        let native = match named {
+            Some(n) => n.enabled.then_some(n),
+            None => self.default_network(),
+        };
         let others = || {
             self.site.networks.iter().filter(|n| {
                 n.vlan.is_some()
                     && n.purpose != "wan"
+                    && n.enabled
                     && Some(n.id.as_str()) != native.map(|x| x.id.as_str())
             })
         };
-        let tagged = match p.forward {
-            Forward::All => others().collect(),
-            Forward::Customize => others().filter(|n| !p.excluded.contains(&n.id)).collect(),
-            Forward::Native | Forward::Disabled | Forward::Other => Vec::new(),
+        let tagged = match (p.forward, &p.tagged) {
+            (Forward::All, _) => others().collect(),
+            (Forward::Customize, Some(ids)) => others().filter(|n| ids.contains(&n.id)).collect(),
+            (Forward::Customize, None) => {
+                others().filter(|n| !p.excluded.contains(&n.id)).collect()
+            }
+            (Forward::Native | Forward::Disabled | Forward::Unstated | Forward::Other, _) => {
+                Vec::new()
+            }
         };
         let native = if p.forward == Forward::Disabled {
             None
@@ -200,10 +210,19 @@ impl<'a> L<'a> {
 }
 
 /// The ports of a device. An access point with no port table gets one port
-/// for its uplink that carries all networks.
+/// for its uplink that carries all networks, and the uplink port of an access
+/// point with no mode carries all networks.
 fn ports(d: &Device) -> Vec<Port> {
     if !d.ports.is_empty() {
-        return d.ports.clone();
+        let mut ports = d.ports.clone();
+        if d.kind == DeviceKind::AccessPoint {
+            for p in &mut ports {
+                if p.forward == Forward::Unstated && Some(p.idx) == d.uplink_port {
+                    p.forward = Forward::All;
+                }
+            }
+        }
+        return ports;
     }
     match d.uplink_port.or(Some(1)) {
         Some(idx) if d.kind == DeviceKind::AccessPoint => vec![Port {
@@ -213,6 +232,7 @@ fn ports(d: &Device) -> Vec<Port> {
             forward: Forward::All,
             native: None,
             excluded: Vec::new(),
+            tagged: None,
             stp_state: None,
             isolation: false,
             aggregated: false,
@@ -483,6 +503,14 @@ pub fn lower(
         } else {
             None
         };
+        // The frames of an isolated port go to the MAC lookup `mac/isolated`
+        // and the flood `flood/isolated`, which do not reach the other
+        // isolated ports of the device.
+        let isolated: BTreeSet<PortId> = dports
+            .iter()
+            .filter(|p| p.isolation)
+            .map(|p| PortId::new(format!("port/{}", p.idx)))
+            .collect();
         for p in &dports {
             let (native, tagged) = l.membership(p);
             let pid = PortId::new(format!("port/{}", p.idx));
@@ -490,12 +518,6 @@ pub fn lower(
             if p.aggregated {
                 l.out.notes.push(format!(
                     "{} port {}: link aggregation not lowered",
-                    d.name, p.idx
-                ));
-            }
-            if p.isolation {
-                l.out.notes.push(format!(
-                    "{} port {}: port isolation not lowered",
                     d.name, p.idx
                 ));
             }
@@ -509,7 +531,7 @@ pub fn lower(
                     .iter()
                     .filter_map(|n| n.vlan.map(|v| (v, l.bd(n))))
                     .collect(),
-                next: l.id(d, "mac"),
+                next: l.id(d, if p.isolation { "mac/isolated" } else { "mac" }),
             }));
             // The peer of the port.
             let local = l.port_facts(d, p.idx);
@@ -661,7 +683,7 @@ pub fn lower(
         if let Some(r) = router
             && let Some(port) = l.port_toward(d, None)
         {
-            for n in &site.networks {
+            for n in site.networks.iter().filter(|n| n.enabled) {
                 if r.vlans.contains_key(&n.vlan) {
                     mac_tables.entry(l.bd(n)).or_default().insert(
                         r.mac,
@@ -695,6 +717,35 @@ pub fn lower(
             } else {
                 hairpin.insert(pid);
             }
+        }
+        if !isolated.is_empty() {
+            let mut blocked = blocked.clone();
+            for pid in &isolated {
+                let macs = mac_tables
+                    .values()
+                    .flat_map(|t| t.iter())
+                    .filter(|(_, e)| e.port != *pid && isolated.contains(&e.port))
+                    .map(|(m, _)| *m);
+                blocked.entry(pid.clone()).or_default().extend(macs);
+            }
+            let meta = l.meta(d, "mac/isolated", vec![l.dev_span(d)]);
+            l.out.functions.push(Arc::new(MacLookup {
+                meta,
+                tables: mac_tables.clone(),
+                egress: egress.clone(),
+                flood: l.id(d, "flood/isolated"),
+                hairpin: hairpin.clone(),
+                blocked,
+            }));
+            let ports: BTreeMap<BridgeDomainId, Vec<(PortId, FunctionId)>> = flood
+                .iter()
+                .map(|(bd, v)| {
+                    let open = v.iter().filter(|(p, _)| !isolated.contains(p)).cloned();
+                    (bd.clone(), open.collect())
+                })
+                .collect();
+            let meta = l.meta(d, "flood/isolated", vec![l.dev_span(d)]);
+            l.out.functions.push(Arc::new(Flood { meta, ports }));
         }
         let meta = l.meta(d, "mac", vec![l.dev_span(d)]);
         l.out.functions.push(Arc::new(MacLookup {
