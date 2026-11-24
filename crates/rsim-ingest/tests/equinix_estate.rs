@@ -46,8 +46,8 @@ fn mac_row(dev: &str, vlan: u16, mac: &str, port: &str, i: u64) -> MacRow {
 }
 
 /// The collected state of a switch: the connected route of its SVI, the
-/// MAC of the SVI, the ARP row of its host and the MAC rows of both hosts.
-fn collected(dev: &str, vlan: u16, host: (&str, &str), far: &str) -> Collected {
+/// MAC of the SVI, and the ARP rows and the MAC rows of both hosts.
+fn collected(dev: &str, vlan: u16, host: (&str, &str), far: (&str, &str)) -> Collected {
     let svi = format!("Vlan{vlan}");
     Collected {
         routes: vec![RouteRow {
@@ -70,16 +70,20 @@ fn collected(dev: &str, vlan: u16, host: (&str, &str), far: &str) -> Collected {
             vlan: None,
             span: row_span(dev, "links", "b4", 0),
         }],
-        neighbours: vec![NeighbourRow {
-            interface: svi,
-            ip: host.0.into(),
-            mac: Some(host.1.into()),
-            state: None,
-            span: row_span(dev, "neighbours", "b2", 0),
-        }],
+        neighbours: [host, far]
+            .iter()
+            .zip(0u64..)
+            .map(|((ip, mac), i)| NeighbourRow {
+                interface: svi.clone(),
+                ip: (*ip).into(),
+                mac: Some((*mac).into()),
+                state: None,
+                span: row_span(dev, "neighbours", "b2", i),
+            })
+            .collect(),
         macs: vec![
             mac_row(dev, vlan, host.1, "Eth1/5", 0),
-            mac_row(dev, vlan, far, "Eth1/49", 1),
+            mac_row(dev, vlan, far.1, "Eth1/49", 1),
         ],
         ..Collected::default()
     }
@@ -159,14 +163,14 @@ fn estate() -> Estate {
             name: "sw-a".into(),
             config: switch("sw-a", 100, "192.0.2.1").into_bytes(),
             file: "sw-a/config".into(),
-            collected: collected("sw-a", 100, ("192.0.2.10", H1), H2),
+            collected: collected("sw-a", 100, ("192.0.2.10", H1), ("192.0.2.20", H2)),
             sections: sections("sw-a", 100),
         },
         Input::Nxos {
             name: "sw-b".into(),
             config: switch("sw-b", 200, "192.0.2.2").into_bytes(),
             file: "sw-b/config".into(),
-            collected: collected("sw-b", 200, ("192.0.2.20", H2), H1),
+            collected: collected("sw-b", 200, ("192.0.2.20", H2), ("192.0.2.10", H1)),
             sections: sections("sw-b", 200),
         },
         Input::Equinix {
