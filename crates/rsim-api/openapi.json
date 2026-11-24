@@ -1945,6 +1945,21 @@
         ],
         "type": "object"
       },
+      "NetworkEdge": {
+        "description": "Network Edge",
+        "oneOf": [
+          {
+            "const": "off",
+            "description": "Off",
+            "type": "string"
+          },
+          {
+            "const": "on",
+            "description": "On",
+            "type": "string"
+          }
+        ]
+      },
       "NewTokenOut": {
         "description": "New API token",
         "properties": {
@@ -2908,6 +2923,22 @@
         ],
         "type": "object"
       },
+      "Resolved9": {
+        "description": "Resolved setting",
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "value": {
+            "$ref": "#/components/schemas/NetworkEdge"
+          }
+        },
+        "required": [
+          "value",
+          "origin"
+        ],
+        "type": "object"
+      },
       "ResolvedDevice": {
         "description": "Resolved device",
         "properties": {
@@ -3000,11 +3031,17 @@
           "interval_seconds": {
             "$ref": "#/components/schemas/Resolved4"
           },
+          "network_edge": {
+            "$ref": "#/components/schemas/Resolved9"
+          },
           "nxos_json": {
             "$ref": "#/components/schemas/Resolved5"
           },
           "orchestrator_release": {
             "$ref": "#/components/schemas/Resolved"
+          },
+          "page_size": {
+            "$ref": "#/components/schemas/Resolved4"
           },
           "paged_section_timeout_seconds": {
             "$ref": "#/components/schemas/Resolved4"
@@ -3064,7 +3101,9 @@
           "orchestrator_release",
           "api_base",
           "concurrency",
-          "refresh_seconds"
+          "refresh_seconds",
+          "network_edge",
+          "page_size"
         ],
         "type": "object"
       },
@@ -3750,6 +3789,16 @@
               "null"
             ]
           },
+          "network_edge": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NetworkEdge"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "nxos_json": {
             "anyOf": [
               {
@@ -3764,6 +3813,15 @@
             "description": "Orchestrator release",
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "page_size": {
+            "description": "Page size",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
               "null"
             ]
           },

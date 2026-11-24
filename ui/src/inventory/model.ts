@@ -573,6 +573,8 @@ export const SETTING_FIELDS: readonly SettingField[] = [
   { key: "api_base", label: "API base path", kind: "text", fallback: "/api/sdwan/v2", transport: "https", vendors: ["velocloud"] },
   { key: "concurrency", label: "concurrency", kind: "number", min: 1, max: 16, fallback: "4", transport: "https", vendors: ["velocloud"] },
   { key: "refresh_seconds", label: "module refresh", kind: "number", min: 0, max: 86400, unit: "s", fallback: "1800", transport: "https", vendors: ["velocloud"] },
+  { key: "network_edge", label: "Network Edge", kind: "choice", choices: ["off", "on"], fallback: "off", transport: "https", vendors: ["equinix"] },
+  { key: "page_size", label: "page size", kind: "number", min: 1, max: 1000, fallback: "100", transport: "https", vendors: ["equinix"] },
 ];
 
 /** The text of the default of a setting for a vendor. */
