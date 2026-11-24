@@ -1218,7 +1218,7 @@ mod tests {
         let sql = upsert("devices", &["name", "device_group"]);
         assert!(sql.starts_with("INSERT INTO devices (name, device_group, credential, route,"));
         assert!(sql.contains("VALUES ($1, $2, $3,"));
-        assert!(sql.contains("$22)"));
+        assert!(sql.contains("$24)"));
         assert!(
             sql.contains("ON CONFLICT (name) DO UPDATE SET device_group = EXCLUDED.device_group")
         );

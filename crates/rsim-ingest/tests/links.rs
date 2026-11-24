@@ -3,7 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rsim_core::{FunctionId, Mac, SourceSpan};
-use rsim_ingest::links::{AddressPeer, Binding, Neighbour, PortAddress, PortVlans, Summary, join};
+use rsim_ingest::links::{
+    AddressPeer, Binding, Neighbour, PortAddress, PortVlans, Summary, Transit, join,
+};
 
 fn mac(s: &str) -> Mac {
     s.parse().unwrap()
