@@ -120,6 +120,16 @@ words! {
 }
 
 words! {
+    /// Collection mode
+    CollectionMode {
+        /// On the schedule
+        Auto = "auto",
+        /// On request only
+        Manual = "manual",
+    }
+}
+
+words! {
     /// Network Edge
     NetworkEdge {
         /// Off
@@ -346,6 +356,8 @@ pub struct Settings {
     /// Page size
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_size: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection: Option<CollectionMode>,
 }
 
 /// Device group

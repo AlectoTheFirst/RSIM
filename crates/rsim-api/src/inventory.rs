@@ -62,6 +62,13 @@ pub struct WrittenOut {
     pub version: u64,
 }
 
+/// Collection request
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct CollectOut {
+    /// Requested devices
+    pub devices: Vec<String>,
+}
+
 /// Credential body
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -255,6 +262,24 @@ pub const ROUTES: &[ApiRoute] = &[
         query: ONE,
         body: &[],
         ok: (200, &[schema::<WrittenOut>]),
+    },
+    ApiRoute {
+        method: "post",
+        path: "/v1/inventory/groups/{group}/collect",
+        id: "collectGroup",
+        summary: "Collect the devices of a group now",
+        query: ONE,
+        body: &[],
+        ok: (200, &[schema::<CollectOut>]),
+    },
+    ApiRoute {
+        method: "post",
+        path: "/v1/inventory/devices/{device}/collect",
+        id: "collectDevice",
+        summary: "Collect a device now",
+        query: ONE,
+        body: &[],
+        ok: (200, &[schema::<CollectOut>]),
     },
     ApiRoute {
         method: "get",
@@ -566,6 +591,12 @@ pub fn route(
     };
     let not_found =
         |what: &str, name: &str| problem(404, "not_found", format!("no {what} is named {name}"));
+    let collect = |devices: Vec<String>| -> Result<Response, Problem> {
+        let devices = h
+            .run(h.db.request_collection(actor, &devices))
+            .map_err(from_error)?;
+        Ok(json_out(&CollectOut { devices }))
+    };
     match segs.as_slice() {
         [] => {
             allow(req, &["GET"])?;
@@ -606,6 +637,22 @@ pub fn route(
                 }
                 _ => write(vec![Change::DeleteGroup(name.to_string())]),
             }
+        }
+        ["groups", name, "collect"] => {
+            allow(req, &["POST"])?;
+            let inv = load()?;
+            inv.group(name).ok_or_else(|| not_found("group", name))?;
+            let devices: Vec<String> = inv
+                .devices
+                .iter()
+                .filter(|d| d.group == *name)
+                .map(|d| d.name.clone())
+                .collect();
+            collect(devices)
+        }
+        ["devices", name, "collect"] => {
+            allow(req, &["POST"])?;
+            collect(vec![(*name).to_string()])
         }
         ["devices"] => {
             allow(req, &["GET"])?;

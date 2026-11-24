@@ -58,7 +58,7 @@ pub fn gate(method: &str, segs: &[&str]) -> Gate {
         ["v1", "auth", "logout"] | ["v1", "auth", "me"] => Gate::SignedIn,
         ["v1", "auth", "tokens", ..] => Gate::Session,
         ["v1", "admin", ..] => Gate::Scope(SCOPE_ADMIN),
-        ["v1", "inventory", ..] if method == "PUT" || method == "DELETE" => {
+        ["v1", "inventory", ..] if method == "PUT" || method == "DELETE" || method == "POST" => {
             Gate::Scope(SCOPE_INVENTORY_WRITE)
         }
         _ => Gate::Scope(SCOPE_READ),
@@ -807,6 +807,13 @@ mod tests {
         );
         assert_eq!(
             gate("put", &["v1", "inventory", "groups", "{name}"]),
+            Gate::Scope(SCOPE_INVENTORY_WRITE)
+        );
+        assert_eq!(
+            gate(
+                "POST",
+                &["v1", "inventory", "devices", "{device}", "collect"]
+            ),
             Gate::Scope(SCOPE_INVENTORY_WRITE)
         );
         assert_eq!(gate("GET", &["v1", "inventory"]), Gate::Scope(SCOPE_READ));

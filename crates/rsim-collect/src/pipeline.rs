@@ -198,6 +198,10 @@ pub struct Collector {
     /// The time of the newest snapshot of the store.
     newest: Option<u64>,
     history: Duration,
+    /// The devices that the schedule never makes due.
+    manual: BTreeSet<String>,
+    /// The devices of a request that the next cycle collects.
+    requested: BTreeSet<String>,
     /// The time of the last prune.
     pruned_at: Option<u64>,
 }
@@ -228,6 +232,8 @@ impl Collector {
         Ok(Collector {
             newest,
             history: DEFAULT_HISTORY,
+            manual: BTreeSet::new(),
+            requested: BTreeSet::new(),
             pruned_at: None,
             store: Arc::new(store),
             inventory,
@@ -272,6 +278,18 @@ impl Collector {
         self.times = Arc::new(times);
     }
 
+    /// Sets the devices that only a request makes due.
+    pub fn set_manual(&mut self, devices: BTreeSet<String>) {
+        self.manual = devices;
+    }
+
+    /// Requests a collection of the devices in the next cycle. The
+    /// collection of a requested device is forced. A device that is not in
+    /// the inventory of that cycle is not collected.
+    pub fn request(&mut self, devices: impl IntoIterator<Item = String>) {
+        self.requested.extend(devices);
+    }
+
     /// Sets the history of the store: a prune deletes the snapshots that
     /// are older, except the newest snapshot.
     pub fn set_history(&mut self, history: Duration) {
@@ -298,10 +316,19 @@ impl Collector {
     }
 
     /// The time of the next cycle: the earliest due time of the devices of
-    /// the inventory, `now` for a device of the store that the inventory
-    /// does not have, and at most [`WAKE_LIMIT`] after `now`.
+    /// the inventory that are not manual, `now` for a requested device and
+    /// for a device of the store that the inventory does not have, and at
+    /// most [`WAKE_LIMIT`] after `now`.
     pub fn next_wake(&self, now: u64) -> u64 {
-        let devices = self.inventory.devices();
+        if !self.requested.is_empty() {
+            return now;
+        }
+        let devices: Vec<Device> = self
+            .inventory
+            .devices()
+            .into_iter()
+            .filter(|d| !self.manual.contains(&d.id))
+            .collect();
         let limit = now.saturating_add(u64::try_from(WAKE_LIMIT.as_millis()).unwrap_or(u64::MAX));
         let ids: BTreeSet<&str> = devices.iter().map(|d| d.id.as_str()).collect();
         if self.state.keys().any(|d| !ids.contains(d.as_str())) {
@@ -351,7 +378,23 @@ impl Collector {
                 d.id
             )));
         }
-        let due = self.scheduler.due(now, &devices);
+        let scheduled: Vec<Device> = devices
+            .iter()
+            .filter(|d| !self.manual.contains(&d.id))
+            .cloned()
+            .collect();
+        let mut due = self.scheduler.due(now, &scheduled);
+        let requested = std::mem::take(&mut self.requested);
+        for d in devices.iter().filter(|d| requested.contains(&d.id)) {
+            match due.iter_mut().find(|x| x.device.id == d.id) {
+                Some(x) => x.forced = true,
+                None => due.push(Due {
+                    device: d.clone(),
+                    forced: true,
+                }),
+            }
+        }
+        due.sort_by(|a, b| a.device.id.cmp(&b.device.id));
         if due.is_empty() && self.state.keys().all(|d| ids.contains(d)) {
             return Ok(CycleReport {
                 time: now,
@@ -774,6 +817,65 @@ mod tests {
         }
         stage.await.unwrap();
         assert_eq!((n, t.calls()), (20, 20));
+    }
+
+    fn vyos(id: &str) -> Device {
+        Device {
+            id: id.into(),
+            vendor: Vendor::Vyos,
+            address: "192.0.2.1".into(),
+            credential: "lab".into(),
+            site: None,
+            capture_bgp: Default::default(),
+            route: Default::default(),
+            interval: crate::DEFAULT_INTERVAL,
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_manual_device_is_collected_only_on_a_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path(), rsim_store::Keys::new([1; 32], [2; 32])).unwrap();
+        let t = Arc::new(FakeTransport::new(Duration::ZERO));
+        for id in ["auto1", "manual1"] {
+            t.reply(id, "show", Ok(b"config".to_vec()));
+        }
+        let mut c = Collector::new(
+            store,
+            Box::new(vec![vyos("auto1"), vyos("manual1")]),
+            Schedule {
+                spread: false,
+                ..Schedule::default()
+            },
+            Limits::default(),
+            Arc::new(TokioClock::new(1_795_420_800_000)),
+        )
+        .unwrap()
+        .with_source(Arc::new(OneSection(t.clone())));
+        c.set_manual(BTreeSet::from(["manual1".to_string()]));
+        let devices =
+            |t: &FakeTransport| -> Vec<String> { t.log().into_iter().map(|(d, _)| d).collect() };
+
+        let r = c.run_cycle().await.unwrap();
+        assert_eq!(r.due, 1);
+        assert_eq!(devices(&t), ["auto1"]);
+        let now = c.now_ms();
+        assert!(c.next_wake(now) > now);
+
+        c.request(["manual1".to_string()]);
+        assert_eq!(c.next_wake(now), now);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        t.clear_log();
+        let r = c.run_cycle().await.unwrap();
+        assert_eq!(r.due, 1);
+        assert_eq!(devices(&t), ["manual1"]);
+
+        // The request is used once.
+        tokio::time::advance(Duration::from_secs(1)).await;
+        t.clear_log();
+        let r = c.run_cycle().await.unwrap();
+        assert_eq!(r.due, 0);
+        assert!(devices(&t).is_empty());
     }
 
     /// 5 sections, read one after the other, each in 2 s.

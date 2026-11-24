@@ -123,6 +123,7 @@ function resolved(name: string, group: string, vendor: string, s: Partial<Resolv
     refresh_seconds: r(1800, "default"),
     network_edge: r("off", "default"),
     page_size: r(100, "default"),
+    collection: r("auto", "default"),
   };
   return { name, group, vendor, address: "192.0.2.99", site: site ?? null, settings: { ...base, ...s } };
 }

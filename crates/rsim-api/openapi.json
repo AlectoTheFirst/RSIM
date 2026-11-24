@@ -544,6 +544,23 @@
         "title": "ClaimsOut",
         "type": "object"
       },
+      "CollectOut": {
+        "description": "Collection request",
+        "properties": {
+          "devices": {
+            "description": "Requested devices",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "devices"
+        ],
+        "title": "CollectOut",
+        "type": "object"
+      },
       "Collection": {
         "additionalProperties": false,
         "description": "Collector settings",
@@ -560,6 +577,21 @@
         ],
         "title": "Collection",
         "type": "object"
+      },
+      "CollectionMode": {
+        "description": "Collection mode",
+        "oneOf": [
+          {
+            "const": "auto",
+            "description": "On the schedule",
+            "type": "string"
+          },
+          {
+            "const": "manual",
+            "description": "On request only",
+            "type": "string"
+          }
+        ]
       },
       "CollectionOut": {
         "description": "Collector settings",
@@ -2809,6 +2841,22 @@
         ],
         "type": "object"
       },
+      "Resolved10": {
+        "description": "Resolved setting",
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "value": {
+            "$ref": "#/components/schemas/CollectionMode"
+          }
+        },
+        "required": [
+          "value",
+          "origin"
+        ],
+        "type": "object"
+      },
       "Resolved2": {
         "description": "Resolved setting",
         "properties": {
@@ -3018,6 +3066,9 @@
           "capture_bgp": {
             "$ref": "#/components/schemas/Resolved7"
           },
+          "collection": {
+            "$ref": "#/components/schemas/Resolved10"
+          },
           "concurrency": {
             "$ref": "#/components/schemas/Resolved4"
           },
@@ -3103,7 +3154,8 @@
           "concurrency",
           "refresh_seconds",
           "network_edge",
-          "page_size"
+          "page_size",
+          "collection"
         ],
         "type": "object"
       },
@@ -3748,6 +3800,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/CaptureBgp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "collection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CollectionMode"
               },
               {
                 "type": "null"
@@ -6591,6 +6653,56 @@
         "summary": "Put device"
       }
     },
+    "/v1/inventory/devices/{device}/collect": {
+      "post": {
+        "operationId": "collectDevice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Collect a device now"
+      }
+    },
     "/v1/inventory/groups": {
       "get": {
         "operationId": "listGroups",
@@ -6786,6 +6898,56 @@
           }
         ],
         "summary": "Put device group"
+      }
+    },
+    "/v1/inventory/groups/{group}/collect": {
+      "post": {
+        "operationId": "collectGroup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "rsim.inventory.write"
+            ]
+          },
+          {
+            "token": [
+              "rsim.inventory.write"
+            ]
+          }
+        ],
+        "summary": "Collect the devices of a group now"
       }
     },
     "/v1/inventory/jump-hosts": {
