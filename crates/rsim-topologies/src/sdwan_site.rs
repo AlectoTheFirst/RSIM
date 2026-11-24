@@ -269,6 +269,11 @@ fn edge(b: &mut TwinBuilder, e: &Edge, far: &Edge, private_tunnel: TunnelState, 
             })
             .collect(),
         steering,
+        mandatory: if pin_dns {
+            BTreeSet::from(["dns".to_string()])
+        } else {
+            BTreeSet::new()
+        },
     });
     for (i, (link, source, gateway, peer, _)) in links.iter().enumerate() {
         b.add(VcmpEncap {

@@ -1,6 +1,6 @@
 //! The twin of a snapshot: the VyOS, IOS-XR and IOS-XE routers, the UniFi
 //! sites, the NX-OS switches and the IOS-XE switches, with the links between
-//! them.
+//! them, and the VeloCloud edges with their transport networks.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
@@ -18,7 +18,7 @@ use crate::facts::{self, DeviceFacts};
 use crate::links::{BgpPeerFact, Summary};
 use crate::route_tables::RouteTables;
 use crate::stanza::{Document, read_json};
-use crate::{iosxe, iosxr, nxos, unifi, vyos};
+use crate::{iosxe, iosxr, nxos, unifi, velocloud, vyos};
 
 /// The twin builder of a snapshot, with the coverage, the unread handled
 /// stanzas, the lowering notes, the BGP peers and the facts of each device.
@@ -93,6 +93,11 @@ pub enum Input {
     },
     /// A UniFi site: each section with its file name.
     Unifi {
+        name: String,
+        sections: BTreeMap<String, (Vec<u8>, String)>,
+    },
+    /// A VeloCloud enterprise: each section with its file name.
+    Velocloud {
         name: String,
         sections: BTreeMap<String, (Vec<u8>, String)>,
     },
@@ -188,6 +193,18 @@ pub fn inputs(store: &Store, snap: &Snapshot) -> Result<(Vec<Input>, Vec<String>
                     sections,
                 });
             }
+            "velocloud" => {
+                let mut sections = BTreeMap::new();
+                for name in velocloud::SECTIONS {
+                    if let Some(x) = section(name)? {
+                        sections.insert(name.to_string(), x);
+                    }
+                }
+                out.push(Input::Velocloud {
+                    name: device.clone(),
+                    sections,
+                });
+            }
             other => skipped.push(format!("{device}: vendor {other} not lowered")),
         }
     }
@@ -270,6 +287,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     let mut xr: BTreeMap<String, (iosxr::Config, String, Sections)> = BTreeMap::new();
     let mut xe: BTreeMap<String, (iosxe::Config, String, Sections)> = BTreeMap::new();
     let mut sites = Vec::new();
+    let mut enterprises: Vec<(String, Sections)> = Vec::new();
     // True for each device with a BGP stanza that can hold a neighbour and
     // that is not handled when no route rows are collected.
     let mut bgp_hidden: BTreeMap<String, bool> = BTreeMap::new();
@@ -364,6 +382,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 xe.insert(name, (cfg, file, sections));
             }
             Input::Unifi { name, sections } => sites.push((name, sections)),
+            Input::Velocloud { name, sections } => enterprises.push((name, sections)),
         }
     }
 
@@ -747,6 +766,37 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         }
         for a in low.attachments {
             e.builder.attachment(a);
+        }
+    }
+
+    // The VeloCloud enterprises: the coverage of the shared stanzas and of
+    // each edge, the edges and the transport networks.
+    let vc_profile = velocloud::profile();
+    for (device, sections) in &enterprises {
+        let p = velocloud::Parsed::new(sections);
+        let ent = velocloud::read(device, &velocloud::enterprise_of(device, &p), &p, &[]);
+        e.coverage.insert(
+            device.clone(),
+            velocloud::coverage::classify_part(&p, velocloud::coverage::Part::Shared),
+        );
+        for edge in &ent.edges {
+            e.coverage.insert(
+                edge.device.clone(),
+                velocloud::coverage::classify_part(
+                    &p,
+                    velocloud::coverage::Part::Edge(&edge.logical_id),
+                ),
+            );
+        }
+        let low = velocloud::lower(&ent, &vc_profile, velocloud::HubChoice::None);
+        for (d, notes) in low.notes {
+            e.notes.entry(d).or_default().extend(notes);
+        }
+        for f in low.functions {
+            e.builder.add_arc(f);
+        }
+        for x in low.edges {
+            e.builder.edge_interface(x);
         }
     }
     e

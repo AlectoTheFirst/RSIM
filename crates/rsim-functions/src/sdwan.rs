@@ -13,6 +13,7 @@ use rsim_core::{
 
 use crate::common::{Meta, push_nonempty};
 use crate::forwarding::meta_methods;
+use crate::routing::RouteLookup;
 use crate::rules::{Decision, Rule, RuleBody, RuleRef, UnknownCause, evaluate};
 
 /// The UDP port of VCMP.
@@ -86,15 +87,20 @@ pub struct OverlaySelect {
     /// The far edge or gateway of the tunnels.
     pub far: String,
     pub tunnels: Vec<OverlayTunnel>,
-    /// The rules that pin their packets to local links, in rule order. The
-    /// action of a rule is the set of the links. The packets of a rule
-    /// with no tunnel up on its links are dropped.
+    /// The steering rules, in rule order. The action of a rule is the set
+    /// of the local links to which it pins its packets; an empty set keeps
+    /// each tunnel.
     pub steering: Vec<Rule<BTreeSet<String>>>,
+    /// The names of the steering rules with Mandatory steering. The
+    /// packets of such a rule with no tunnel up on its links are dropped;
+    /// the packets of another rule with no tunnel up on its links are
+    /// unknown.
+    pub mandatory: BTreeSet<String>,
 }
 
 impl OverlaySelect {
     /// The branches of the packets `set`, which the steering rule `rule`
-    /// pins to `links`. With no rule, `links` is empty and each tunnel is
+    /// pins to `links`. With no rule or an empty `links`, each tunnel is
     /// kept.
     fn select(
         &self,
@@ -105,10 +111,12 @@ impl OverlaySelect {
         state: &FlowState,
         out: &mut Vec<Branch>,
     ) {
+        let pinned = rule.is_some() && !links.is_empty();
+        let mandatory = rule.is_some_and(|r| self.mandatory.contains(r));
         let kept: Vec<&OverlayTunnel> = self
             .tunnels
             .iter()
-            .filter(|t| rule.is_none() || links.contains(&t.link))
+            .filter(|t| !pinned || links.contains(&t.link))
             .collect();
         let by = match rule {
             Some(r) => format!("steering rule {r}"),
@@ -129,10 +137,20 @@ impl OverlaySelect {
             .filter(|t| t.state == TunnelState::Up)
             .collect();
         match up.as_slice() {
-            [] if rule.is_some() => out.push(self.meta.drop(
+            [] if pinned && mandatory => out.push(self.meta.drop(
                 set,
                 ReasonCode::NoNeighbour,
                 format!("no tunnel to {} is up on the links of {by}", self.far),
+                ctx,
+                state,
+            )),
+            [] if pinned => out.push(self.meta.unknown(
+                set,
+                ReasonCode::NotCollected,
+                format!(
+                    "no tunnel to {} is up on the links of {by}, steering mode not collected",
+                    self.far
+                ),
                 ctx,
                 state,
             )),
@@ -484,5 +502,76 @@ impl NetFunction for VcmpDecap {
         };
         push_nonempty(&mut out, other);
         out
+    }
+}
+
+/// The route lookup of a transport network outside the twin, for example
+/// the internet or the private network of a carrier. Each branch to an
+/// egress interface has the assumption that the network carries the VCMP
+/// packets between the ingress and the egress interface.
+#[derive(Clone, Debug)]
+pub struct TransportLookup {
+    pub lookup: RouteLookup,
+}
+
+impl NetFunction for TransportLookup {
+    fn id(&self) -> &FunctionId {
+        self.lookup.id()
+    }
+    fn kind(&self) -> FunctionKind {
+        self.lookup.kind()
+    }
+    fn device(&self) -> Option<&rsim_core::DeviceId> {
+        self.lookup.device()
+    }
+    fn provenance(&self) -> &[SourceSpan] {
+        self.lookup.provenance()
+    }
+    fn each_span(&self, f: &mut dyn FnMut(&SourceSpan)) {
+        self.lookup.each_span(f);
+    }
+    fn qos_reads(&self) -> Vec<HeaderField> {
+        self.lookup.qos_reads()
+    }
+    fn qos_writes(&self) -> Vec<HeaderField> {
+        self.lookup.qos_writes()
+    }
+    fn requires(&self) -> Vec<ContextAttr> {
+        self.lookup.requires()
+    }
+    fn provides(&self) -> Vec<ContextAttr> {
+        self.lookup.provides()
+    }
+    fn reads(&self) -> Vec<Dependency> {
+        self.lookup.reads()
+    }
+    fn successors(&self) -> Vec<FunctionId> {
+        self.lookup.successors()
+    }
+    fn apply(&self, input: &PacketSet, ctx: &Context, state: &FlowState) -> Vec<Branch> {
+        let from = ctx
+            .ingress_interface
+            .known()
+            .map_or_else(|| "a link".to_string(), ToString::to_string);
+        self.lookup
+            .apply(input, ctx, state)
+            .into_iter()
+            .map(|b| {
+                let to = match (&b.outcome, b.ctx.egress_interface.known()) {
+                    (Outcome::Forward(_), Some(i)) => Some(i.to_string()),
+                    _ => None,
+                };
+                match to {
+                    Some(to) => {
+                        let text = format!(
+                            "{} carries UDP {VCMP_PORT} from {from} to {to}",
+                            self.lookup.meta.device
+                        );
+                        b.with_assumption(text)
+                    }
+                    None => b,
+                }
+            })
+            .collect()
     }
 }

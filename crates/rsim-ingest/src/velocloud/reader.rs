@@ -210,6 +210,9 @@ pub struct Interface {
     pub addressing: Option<String>,
     /// The next hop of a WAN interface.
     pub gateway: Option<IpAddr>,
+    /// `natDirect` of a routed interface: the source NAT of the traffic
+    /// that leaves on it direct.
+    pub nat_direct: Option<bool>,
     pub vlan: Option<u16>,
     pub span: SourceSpan,
 }
@@ -1076,6 +1079,7 @@ fn interfaces(b: &Merged<'_>) -> Vec<Interface> {
             } else {
                 None
             },
+            nat_direct: i.bool("natDirect"),
             vlan: None,
             span: i.span(),
         });
@@ -1098,6 +1102,7 @@ fn interfaces(b: &Merged<'_>) -> Vec<Interface> {
                 address: sa.and_then(interface_address),
                 addressing: sa.and_then(|a| a.text("type")),
                 gateway: None,
+                nat_direct: None,
                 vlan: s.int("vlanId").and_then(|v| u16::try_from(v).ok()),
                 span: s.span(),
             });
@@ -1120,6 +1125,7 @@ fn interfaces(b: &Merged<'_>) -> Vec<Interface> {
                 },
                 addressing: None,
                 gateway: None,
+                nat_direct: None,
                 vlan: None,
                 span: lo.span(),
             });
@@ -1142,6 +1148,7 @@ fn interfaces(b: &Merged<'_>) -> Vec<Interface> {
             address: interface_address(n),
             addressing: None,
             gateway: None,
+            nat_direct: None,
             vlan,
             span: n.span(),
         });

@@ -51,6 +51,7 @@ const DEVICE_SETTINGS: Rows = &[
     ("routedInterfaces/*/wanOverlay", H, N),
     ("routedInterfaces/*/segmentId", H, N),
     ("routedInterfaces/*/disabled", H, N),
+    ("routedInterfaces/*/natDirect", H, N),
     ("routedInterfaces/*/subinterfaces", H, N),
     ("routedInterfaces/*/subinterfaces/*", H, N),
     ("routedInterfaces/*/subinterfaces/*/subinterfaceId", H, N),
@@ -622,15 +623,57 @@ pub fn table(section: &str) -> Table {
     t
 }
 
+/// The sections whose root is an array of edge rows.
+const EDGE_ROWS: &[&str] = &["edges", "edge_state", "edges_v2"];
+
+/// The stanzas that a coverage report counts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Part<'a> {
+    All,
+    /// The stanzas of one edge, by its logicalId: its rows of `edges`,
+    /// `edge_state` and `edges_v2`, and its members of `edge_modules` and
+    /// `sdwan_peers`.
+    Edge(&'a str),
+    /// The stanzas of no single edge.
+    Shared,
+}
+
+/// The logicalId of the edge of a top-level stanza of a section.
+fn edge_of(section: &str, s: &Stanza) -> Option<String> {
+    if BY_EDGE.contains(&section) {
+        return Some(s.key.clone());
+    }
+    if EDGE_ROWS.contains(&section) {
+        return s
+            .get("logicalId")
+            .and_then(Stanza::text)
+            .map(str::to_string);
+    }
+    None
+}
+
 /// The coverage of the sections of an enterprise, with the path of each
 /// unhandled stanza under the name of its section.
 pub fn classify(p: &Parsed) -> Coverage {
+    classify_part(p, Part::All)
+}
+
+/// The coverage of a part of the sections of an enterprise.
+pub fn classify_part(p: &Parsed, part: Part<'_>) -> Coverage {
     let mut cov = Coverage::default();
     for (name, section) in &p.sections {
         let t = table(name);
         let by_edge = BY_EDGE.contains(&name.as_str());
         let mut path = Vec::new();
         for c in section.doc.root.children() {
+            let keep = match part {
+                Part::All => true,
+                Part::Edge(e) => edge_of(name, c).as_deref() == Some(e),
+                Part::Shared => edge_of(name, c).is_none(),
+            };
+            if !keep {
+                continue;
+            }
             let key = match (&section.doc.root.body, by_edge) {
                 (Body::Array(_), _) | (_, true) => "*".to_string(),
                 _ => c.key.clone(),
