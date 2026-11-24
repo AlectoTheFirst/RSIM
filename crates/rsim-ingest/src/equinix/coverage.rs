@@ -111,6 +111,12 @@ pub fn table(section: &str) -> Table {
                 }
             }
         }
+        "bindings" => {
+            t.push("*", H, N);
+            for k in ["fabric_port", "device", "port"] {
+                t.push(&format!("*/{k}"), H, S);
+            }
+        }
         _ => {}
     }
     t

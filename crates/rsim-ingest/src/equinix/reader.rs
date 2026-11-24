@@ -65,12 +65,23 @@ pub struct Connection {
     pub span: SourceSpan,
 }
 
-/// The ports and the connections of an account.
+/// A binding of a Fabric port to a port of a device of the store.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Binding {
+    /// The uuid or the name of the Fabric port.
+    pub fabric_port: String,
+    pub device: String,
+    pub port: String,
+    pub span: SourceSpan,
+}
+
+/// The ports, the connections and the bindings of an account.
 #[derive(Clone, Debug, Default)]
 pub struct Account {
     pub device: String,
     pub ports: Vec<Port>,
     pub connections: Vec<Connection>,
+    pub bindings: Vec<Binding>,
     pub notes: Vec<String>,
 }
 
@@ -124,8 +135,9 @@ fn cross_connects(p: J<'_>) -> Vec<String> {
     ids
 }
 
-/// Reads the Fabric ports and the connections of the sections of an
-/// account. An item with no `uuid` is left out with a note.
+/// Reads the Fabric ports, the connections and the bindings of the sections
+/// of an account. An item with no `uuid` is left out with a note, and so is
+/// a binding with no Fabric port, device or port.
 pub fn read(device: &str, p: &Parsed) -> Account {
     let mut a = Account {
         device: device.to_string(),
@@ -180,6 +192,25 @@ pub fn read(device: &str, p: &Parsed) -> Account {
             z: end(x.obj("zSide")),
             span: x.span(),
         });
+    }
+    for (n, x) in p
+        .root("bindings")
+        .map(J::rows)
+        .unwrap_or_default()
+        .into_iter()
+        .enumerate()
+    {
+        match (x.text("fabric_port"), x.text("device"), x.text("port")) {
+            (Some(fabric_port), Some(device), Some(port)) => a.bindings.push(Binding {
+                fabric_port,
+                device,
+                port,
+                span: x.span(),
+            }),
+            _ => a
+                .notes
+                .push(format!("bindings: item {} is not complete", n + 1)),
+        }
     }
     a
 }

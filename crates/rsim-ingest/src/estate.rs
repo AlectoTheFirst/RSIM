@@ -496,6 +496,21 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         summaries.extend(velocloud::summaries(&ent));
         ents.push(ent);
     }
+    // The Equinix accounts: the coverage, and the summary of the gates and
+    // the bindings of the Fabric ports.
+    let mut fabric_accounts: Vec<(String, equinix::Account)> = Vec::new();
+    for (device, sections) in &accounts {
+        let p = velocloud::Parsed::new(sections);
+        let account = equinix::read(device, &p);
+        e.coverage
+            .insert(device.clone(), equinix::coverage::classify(&p));
+        let (sum, notes) = equinix::summary(&account);
+        let n = e.notes.entry(device.clone()).or_default();
+        n.extend(p.notes);
+        n.extend(notes);
+        summaries.insert(device.clone(), sum);
+        fabric_accounts.push((device.clone(), account));
+    }
     for s in summaries.values() {
         next_hops.extend(s.next_hops.iter().copied());
     }
@@ -826,18 +841,22 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         }
     }
 
-    // The Equinix accounts: the gate and the circuits of each Fabric port.
+    // The Equinix accounts: the gate and the circuits of each Fabric port,
+    // with the peer of each bound Fabric port.
     let eq_profile = equinix::profile();
-    for (device, sections) in &accounts {
-        let p = velocloud::Parsed::new(sections);
-        let account = equinix::read(device, &p);
-        e.coverage
-            .insert(device.clone(), equinix::coverage::classify(&p));
-        let low = equinix::lower(&account, &eq_profile, &BTreeMap::new());
+    for (device, account) in &fabric_accounts {
+        let ext = joined.devices.remove(device).unwrap_or_default();
+        let peers: BTreeMap<String, rsim_core::FunctionId> = ext
+            .peers
+            .iter()
+            .filter_map(|(port, list)| {
+                let uuid = port.strip_prefix("port/")?;
+                Some((uuid.to_string(), list.first()?.target.clone()))
+            })
+            .collect();
+        let low = equinix::lower(account, &eq_profile, &peers);
         e.fabric.insert(device.clone(), low.circuits);
-        let notes = e.notes.entry(device.clone()).or_default();
-        notes.extend(p.notes);
-        notes.extend(low.notes);
+        e.notes.entry(device.clone()).or_default().extend(low.notes);
         for f in low.functions {
             e.builder.add_arc(f);
         }

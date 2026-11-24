@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rsim_core::{FunctionId, Mac, SourceSpan};
-use rsim_ingest::links::{AddressPeer, Neighbour, PortAddress, PortVlans, Summary, join};
+use rsim_ingest::links::{AddressPeer, Binding, Neighbour, PortAddress, PortVlans, Summary, join};
 
 fn mac(s: &str) -> Mac {
     s.parse().unwrap()
@@ -577,5 +577,109 @@ fn a_gateway_on_an_svi_and_on_a_routed_port_gives_no_link() {
     assert!(
         notes.contains(&"wan: 198.51.100.1 is on more than one port, no link".to_string()),
         "{notes:?}"
+    );
+}
+
+/// An account with the Fabric ports `fp-a` and `fp-b`, each bound to a
+/// port of a switch.
+fn account(bindings: &[(&str, &str, &str)]) -> Summary {
+    let mut s = Summary::default();
+    for p in ["fp-a", "fp-b"] {
+        s.entries.insert(
+            format!("port/{p}"),
+            FunctionId::new(format!("acct/port/{p}/in")),
+        );
+    }
+    for (i, (port, device, far)) in bindings.iter().enumerate() {
+        s.bindings.push(Binding {
+            port: format!("port/{port}"),
+            device: (*device).to_string(),
+            far_port: (*far).to_string(),
+            span: SourceSpan::line("acct/bindings", u32::try_from(i + 1).unwrap()),
+        });
+    }
+    s
+}
+
+#[test]
+fn a_binding_links_a_fabric_port_with_no_record_at_the_far_end() {
+    let devices = BTreeMap::from([
+        (
+            "acct".to_string(),
+            account(&[("fp-a", "sw-a", "e1"), ("fp-b", "sw-b", "e1")]),
+        ),
+        (
+            "sw-a".to_string(),
+            device("sw-a", &[("e1", "00:00:5e:00:53:01")], &[], true),
+        ),
+        (
+            "sw-b".to_string(),
+            device("sw-b", &[("e1", "00:00:5e:00:53:02")], &[], true),
+        ),
+    ]);
+    let (p, notes) = peers(&devices);
+    assert_eq!(p["acct:port/fp-a"], ["sw-a/in/e1"]);
+    assert_eq!(p["sw-a:e1"], ["acct/port/fp-a/in"]);
+    assert_eq!(p["sw-b:e1"], ["acct/port/fp-b/in"]);
+    assert!(notes.is_empty(), "{notes:?}");
+}
+
+#[test]
+fn a_binding_replaces_a_direct_neighbour_link_across_the_circuit() {
+    let devices = BTreeMap::from([
+        (
+            "acct".to_string(),
+            account(&[("fp-a", "sw-a", "e1"), ("fp-b", "sw-b", "e1")]),
+        ),
+        (
+            "sw-a".to_string(),
+            device(
+                "sw-a",
+                &[("e1", "00:00:5e:00:53:01")],
+                &[("e1", Some("sw-b"), "e1", None)],
+                true,
+            ),
+        ),
+        (
+            "sw-b".to_string(),
+            device(
+                "sw-b",
+                &[("e1", "00:00:5e:00:53:02")],
+                &[("e1", Some("sw-a"), "e1", None)],
+                true,
+            ),
+        ),
+    ]);
+    let (p, notes) = peers(&devices);
+    assert_eq!(p["sw-a:e1"], ["acct/port/fp-a/in"]);
+    assert_eq!(p["sw-b:e1"], ["acct/port/fp-b/in"]);
+    assert!(
+        notes
+            .iter()
+            .any(|n| n == "e1: a binding replaces the link of the neighbour records"),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn a_binding_to_a_port_that_the_twin_does_not_have_gives_a_note_and_no_link() {
+    let devices = BTreeMap::from([
+        (
+            "acct".to_string(),
+            account(&[("fp-a", "sw-a", "e9"), ("fp-b", "sw-x", "e1")]),
+        ),
+        (
+            "sw-a".to_string(),
+            device("sw-a", &[("e1", "00:00:5e:00:53:01")], &[], true),
+        ),
+    ]);
+    let (p, notes) = peers(&devices);
+    assert!(p.is_empty(), "{p:?}");
+    assert_eq!(
+        notes,
+        [
+            "port/fp-a: the binding names the port e9 of sw-a, which is not a lowered port",
+            "port/fp-b: the binding names the device sw-x, which is not in the twin",
+        ]
     );
 }

@@ -3,7 +3,9 @@
 //! connections of the ports and, with Network Edge on, the Network Edge
 //! devices, their device link groups and their connections. Each section
 //! is the list of the items of all pages of one collection, with the
-//! secrets redacted, sorted by `uuid` and then by the canonical bytes.
+//! secrets redacted, sorted by `uuid` and then by the canonical bytes. The
+//! section `bindings` holds the bindings of the Fabric ports of the
+//! account from the inventory, with no read.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -133,13 +135,23 @@ const EDGE_LINKS_KEEP: &[&str] = &[
     "*/linkDevices/*/status",
 ];
 
+/// The binding of a Fabric port, by its uuid or its name, to a port of a
+/// device of the store.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PortBinding {
+    pub fabric_port: String,
+    pub device: String,
+    pub port: String,
+}
+
 /// The settings of an account.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Account {
     /// True if the source reads the Network Edge sections.
     pub network_edge: bool,
     /// The items of one page, from 1 to [`MAX_PAGE_SIZE`].
     pub page_size: u32,
+    pub bindings: Vec<PortBinding>,
 }
 
 impl Default for Account {
@@ -147,8 +159,22 @@ impl Default for Account {
         Account {
             network_edge: false,
             page_size: DEFAULT_PAGE_SIZE,
+            bindings: Vec::new(),
         }
     }
+}
+
+/// The section `bindings`: the bindings in order, each an object with
+/// `fabric_port`, `device` and `port`.
+pub fn bindings_section(bindings: &[PortBinding]) -> Vec<u8> {
+    let mut list = bindings.to_vec();
+    list.sort();
+    list.dedup();
+    let items: Vec<Value> = list
+        .iter()
+        .map(|b| json!({"fabric_port": b.fabric_port, "device": b.device, "port": b.port}))
+        .collect();
+    Value::Array(items).to_string().into_bytes()
 }
 
 fn spec(name: &'static str, command: String, keep: &'static [&'static str]) -> SectionSpec {
@@ -170,6 +196,7 @@ pub fn sections(account: &Account) -> Vec<SectionSpec> {
     let mut out = vec![
         spec("ports", format!("GET {PORTS}"), PORTS_KEEP),
         spec("connections", format!("POST {SEARCH}"), CONNECTIONS_KEEP),
+        spec("bindings", "inventory bindings".to_string(), &[]),
     ];
     if account.network_edge {
         for s in [
@@ -296,7 +323,7 @@ impl EquinixSource {
     }
 
     fn account(&self, device: &Device) -> Account {
-        self.accounts.get(&device.id).copied().unwrap_or_default()
+        self.accounts.get(&device.id).cloned().unwrap_or_default()
     }
 
     /// Reads all pages of one collection, ported from HST `_pages`. With
@@ -417,6 +444,10 @@ impl Source for EquinixSource {
             let mut results: Vec<Result<Vec<Value>, TransportError>> = Vec::new();
             let mut stop: Option<TransportError> = None;
             for spec in &specs {
+                if spec.name == "bindings" {
+                    results.push(Ok(Vec::new()));
+                    continue;
+                }
                 if let Some(e) = &stop {
                     results.push(Err(e.clone()));
                     continue;
@@ -442,7 +473,7 @@ impl Source for EquinixSource {
                         self.section(device, Read::Get(EDGE_LINKS), limit, timeouts)
                             .await
                     }
-                    _ => match after(&results[2], "edge_devices") {
+                    _ => match after(&results[3], "edge_devices") {
                         Ok(None) => Ok(Vec::new()),
                         Ok(Some(u)) => {
                             self.section(
@@ -464,9 +495,13 @@ impl Source for EquinixSource {
             specs
                 .into_iter()
                 .zip(results)
-                .map(|(spec, r)| RawSection {
-                    spec,
-                    result: r.map(|items| section_bytes(&items)),
+                .map(|(spec, r)| {
+                    let result = if spec.name == "bindings" {
+                        Ok(bindings_section(&account.bindings))
+                    } else {
+                        r.map(|items| section_bytes(&items))
+                    };
+                    RawSection { spec, result }
                 })
                 .collect()
         })

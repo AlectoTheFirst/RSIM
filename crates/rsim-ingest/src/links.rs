@@ -30,6 +30,17 @@ pub struct Neighbour {
     pub span: SourceSpan,
 }
 
+/// An operator record that names the far end of a port: a device of the
+/// store and its port, by the full name of the port in its config.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Binding {
+    /// The local port.
+    pub port: String,
+    pub device: String,
+    pub far_port: String,
+    pub span: SourceSpan,
+}
+
 /// The layer 3 addresses of a port by VLAN, with their prefix lengths.
 pub type VlanAddrs = BTreeMap<Option<u16>, Vec<(IpAddr, u8)>>;
 
@@ -118,6 +129,9 @@ pub struct Summary {
     /// The VRF of the SVI of each VLAN, for an SVI in a VRF other than the
     /// default VRF.
     pub vlan_vrfs: BTreeMap<u16, String>,
+    /// The bindings of the ports. A binding is a link that needs no record
+    /// at the far end, and it removes each other link of its 2 ends.
+    pub bindings: Vec<Binding>,
 }
 
 /// A layer 3 address of a port.
@@ -757,6 +771,65 @@ pub fn join(
     let vpc_members: BTreeSet<&End> = vpc_links.iter().flat_map(|(_, e, _)| e.iter()).collect();
     links.retain(|(a, b, _)| !vpc_members.contains(a) && !vpc_members.contains(b));
     links.extend(address_links(switches, &named, &mut out.notes));
+
+    // The bindings: a link from each binding to a lowered port of a device
+    // of the twin. A binding removes each other link of its 2 ends.
+    let mut bound: Vec<(End, End, Vec<SourceSpan>)> = Vec::new();
+    for (d, s) in switches {
+        for b in &s.bindings {
+            let here = End(d.clone(), b.port.clone());
+            let far = End(b.device.clone(), b.far_port.clone());
+            match switches.get(&b.device) {
+                None => {
+                    add_note(
+                        &mut out.notes,
+                        d,
+                        format!(
+                            "{}: the binding names the device {}, which is not in the twin",
+                            b.port, b.device
+                        ),
+                    );
+                    continue;
+                }
+                Some(fs) if !fs.entries.contains_key(&b.far_port) => {
+                    add_note(
+                        &mut out.notes,
+                        d,
+                        format!(
+                            "{}: the binding names the port {} of {}, which is not a lowered port",
+                            b.port, b.far_port, b.device
+                        ),
+                    );
+                    continue;
+                }
+                Some(_) => {}
+            }
+            let mut spans = vec![b.span.clone()];
+            if let Some(sp) = switches[&b.device].port_spans.get(&b.far_port) {
+                spans.push(sp.clone());
+            }
+            bound.push((here, far, spans));
+        }
+    }
+    let bound_ends: BTreeSet<End> = bound
+        .iter()
+        .flat_map(|(a, b, _)| [a.clone(), b.clone()])
+        .collect();
+    links.retain(|(a, b, _)| {
+        let hit = bound_ends.contains(a) || bound_ends.contains(b);
+        if hit {
+            for End(d, p) in [a, b].into_iter().filter(|e| bound_ends.contains(e)) {
+                out.notes.entry(d.clone()).or_default().push(format!(
+                    "{p}: a binding replaces the link of the neighbour records"
+                ));
+            }
+        }
+        !hit
+    });
+    vpc_links.retain(|(a, ends, _)| {
+        !bound_ends.contains(a) && !ends.iter().any(|e| bound_ends.contains(e))
+    });
+    links.extend(bound);
 
     // An end that 2 links claim gets no link.
     let mut claims: BTreeMap<&End, u32> = BTreeMap::new();

@@ -103,7 +103,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use rsim_collect::equinix::{self, Account, EquinixSource};
+use rsim_collect::equinix::{self, Account, EquinixSource, PortBinding};
 use rsim_collect::https::{
     ApiServer, ClientCert, HttpsLimits, HttpsProfile, HttpsTransport, TlsTrust,
 };
@@ -494,6 +494,7 @@ fn equinix_env(
         let account = Account {
             network_edge: network_edge == Some(rsim_inventory::NetworkEdge::On),
             page_size: page_size.unwrap_or(equinix::DEFAULT_PAGE_SIZE),
+            bindings: Vec::new(),
         };
         let id = format!("equinix-{}", name.to_lowercase().replace('_', "-"));
         out.push(EquinixAccount {
@@ -1255,6 +1256,17 @@ fn setup_from_inventory(
                 Account {
                     network_edge: st.network_edge.value == rsim_inventory::NetworkEdge::On,
                     page_size: st.page_size.value,
+                    bindings: inv
+                        .bindings
+                        .fabric_ports
+                        .iter()
+                        .filter(|b| b.account == d.name)
+                        .map(|b| PortBinding {
+                            fabric_port: b.fabric_port.clone(),
+                            device: b.device.clone(),
+                            port: b.port.clone(),
+                        })
+                        .collect(),
                 },
             ));
             s.times.push((
@@ -2015,7 +2027,8 @@ mod tests {
                     "equinix-lab".to_string(),
                     Account {
                         network_edge: true,
-                        page_size: 100
+                        page_size: 100,
+                        bindings: Vec::new(),
                     }
                 ),
                 ("equinix-prod".to_string(), Account::default()),

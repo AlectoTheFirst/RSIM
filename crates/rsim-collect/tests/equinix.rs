@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use rsim_collect::equinix::{
     Account, DEVICE_PROPERTIES, EDGE_DEVICES, EDGE_LINKS, EquinixSource, PORT_PROPERTIES, PORTS,
-    SEARCH, search_body,
+    PortBinding, SEARCH, search_body,
 };
 use rsim_collect::fake::FakeTransport;
 use rsim_collect::redact::REDACTED;
@@ -136,6 +136,7 @@ fn small_pages() -> Account {
     Account {
         network_edge: false,
         page_size: 2,
+        ..Account::default()
     }
 }
 
@@ -145,7 +146,7 @@ async fn the_ports_and_their_connections_read_in_order_with_all_pages() {
     account_api(&t, "2026-01-01T00:00:00Z");
     let out = fetch(&source(&t, small_pages())).await;
     let names: Vec<&str> = out.iter().map(|s| s.spec.name).collect();
-    assert_eq!(names, ["ports", "connections"]);
+    assert_eq!(names, ["ports", "connections", "bindings"]);
     assert_eq!(
         commands(&t),
         [
@@ -261,10 +262,16 @@ async fn a_login_that_fails_fails_each_section_and_sends_nothing_more() {
     let account = Account {
         network_edge: true,
         page_size: 100,
+        ..Account::default()
     };
     let out = fetch(&source(&t, account)).await;
-    assert_eq!(out.len(), 5);
-    assert!(out.iter().all(|s| s.result == Err(login.clone())));
+    assert_eq!(out.len(), 6);
+    assert!(
+        out.iter()
+            .filter(|s| s.spec.name != "bindings")
+            .all(|s| s.result == Err(login.clone()))
+    );
+    assert_eq!(json_of(by_name(&out, "bindings")), json!([]));
     assert_eq!(t.calls(), 1);
 }
 
@@ -303,9 +310,10 @@ async fn network_edge_reads_the_devices_the_links_and_their_connections() {
     let account = Account {
         network_edge: true,
         page_size: 100,
+        ..Account::default()
     };
     let src = source(&t, account);
-    assert_eq!(src.sections(&device()).len(), 5);
+    assert_eq!(src.sections(&device()).len(), 6);
     let out = fetch(&src).await;
     assert!(out.iter().all(|s| s.result.is_ok()), "{out:?}");
     let devices = json_of(by_name(&out, "edge_devices"));
@@ -334,6 +342,7 @@ async fn an_account_with_no_network_edge_has_the_edge_sections_absent() {
     let account = Account {
         network_edge: true,
         page_size: 100,
+        ..Account::default()
     };
     let out = fetch(&source(&t, account)).await;
     for name in ["edge_devices", "edge_links", "edge_connections"] {
@@ -386,4 +395,31 @@ async fn a_cycle_with_only_a_changed_time_writes_no_snapshot() {
     );
     let r = c.run_cycle().await.unwrap();
     assert!(r.snapshot.is_some(), "{r:?}");
+}
+
+#[tokio::test]
+async fn the_bindings_of_the_account_are_a_section_with_no_read() {
+    let t = Arc::new(FakeTransport::new(Duration::ZERO));
+    ok(&t, &get(PORTS, 0, 100), page(json!([]), 0));
+    let binding = |p: &str, d: &str, q: &str| PortBinding {
+        fabric_port: p.into(),
+        device: d.into(),
+        port: q.into(),
+    };
+    let account = Account {
+        bindings: vec![
+            binding("p2", "sw-b", "Ethernet1/49"),
+            binding("p1", "sw-a", "Ethernet1/49"),
+        ],
+        ..Account::default()
+    };
+    let out = fetch(&source(&t, account)).await;
+    assert_eq!(
+        json_of(by_name(&out, "bindings")),
+        json!([
+            {"device": "sw-a", "fabric_port": "p1", "port": "Ethernet1/49"},
+            {"device": "sw-b", "fabric_port": "p2", "port": "Ethernet1/49"},
+        ])
+    );
+    assert_eq!(t.calls(), 1);
 }
