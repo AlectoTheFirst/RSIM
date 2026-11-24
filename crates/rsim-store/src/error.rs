@@ -23,7 +23,8 @@ pub enum StoreError {
     /// A value is not valid for its field.
     Invalid(String),
     /// A file of the cycle exists, because another writer took the same
-    /// cycle number. The cycle publishes nothing.
+    /// cycle number. The cycle publishes nothing. A prune also fails with it
+    /// while another writer has the store open.
     Conflict(String),
 }
 

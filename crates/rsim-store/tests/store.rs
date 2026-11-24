@@ -786,6 +786,51 @@ fn a_prune_of_a_store_with_no_old_snapshot_changes_nothing() {
 }
 
 #[test]
+fn a_prune_fails_and_deletes_nothing_while_another_writer_has_the_store_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    six_cycles(&store);
+    let other = Store::open(dir.path(), keys()).unwrap();
+    let blob = other
+        .put_blob(b"not yet published", &mut Replay(0))
+        .unwrap();
+    let before = files(dir.path());
+    assert!(matches!(store.prune(3_000), Err(StoreError::Conflict(_))));
+    assert_eq!(files(dir.path()), before);
+    let s6 = commit(&store, 6, vec![update(&store, "r2", "b6", None)]).unwrap();
+    assert_eq!(s6.manifest.parent, Some(5));
+
+    drop(other);
+    // The failed prune keeps the shared lock of the store.
+    let lock = fs::File::open(dir.path().join("LOCK")).unwrap();
+    assert!(matches!(lock.try_lock(), Err(fs::TryLockError::WouldBlock)));
+    let p = store.prune(3_000).unwrap();
+    assert_eq!(p.snapshots, 3);
+    assert!(matches!(
+        store.read_blob(&blob),
+        Err(StoreError::NotFound(_))
+    ));
+    // The prune takes the shared lock again.
+    assert!(matches!(lock.try_lock(), Err(fs::TryLockError::WouldBlock)));
+    drop(lock);
+    let other = Store::open(dir.path(), keys()).unwrap();
+    assert!(matches!(store.prune(5_000), Err(StoreError::Conflict(_))));
+    drop(other);
+    assert_eq!(store.prune(5_000).unwrap().snapshots, 2);
+}
+
+#[test]
+fn a_store_opened_to_read_is_not_pruned() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path(), keys()).unwrap();
+    six_cycles(&store);
+    let reader = Store::open_read(dir.path(), keys()).unwrap();
+    let before = files(dir.path());
+    assert!(matches!(reader.prune(3_000), Err(StoreError::Invalid(_))));
+    assert_eq!(files(dir.path()), before);
+}
+
+#[test]
 fn a_prune_deletes_a_stopped_cycle_before_the_newest_snapshot() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path(), keys()).unwrap();

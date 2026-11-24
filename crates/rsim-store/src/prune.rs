@@ -2,7 +2,7 @@
 //! store.
 
 use std::collections::BTreeSet;
-use std::fs;
+use std::fs::{self, TryLockError};
 use std::path::Path;
 
 use crate::store::write_replace;
@@ -71,16 +71,64 @@ impl Store {
     ///
     /// After each step the kept snapshots read. A store whose oldest
     /// snapshot is at or after `cutoff` is not changed.
+    ///
+    /// A prune that deletes a snapshot holds the exclusive lock on the file
+    /// `LOCK` and then takes the shared lock of the store again. It fails
+    /// with [`StoreError::Conflict`] and changes nothing while another
+    /// [`Store`] opened to write holds its shared lock. A prune of a store
+    /// opened to read fails with [`StoreError::Invalid`].
     pub fn prune(&self, cutoff: u64) -> Result<Pruned, StoreError> {
+        let Some(lock) = self.lock_file() else {
+            return Err(StoreError::Invalid(
+                "a store opened to read is not pruned".into(),
+            ));
+        };
+        if !self.has_old_snapshot(cutoff)? {
+            return Ok(Pruned::default());
+        }
+        let path = self.dir().join("LOCK");
+        lock.unlock().map_err(|e| StoreError::io(&path, e))?;
+        if let Err(e) = lock.try_lock() {
+            lock.lock_shared().map_err(|e| StoreError::io(&path, e))?;
+            return Err(match e {
+                TryLockError::WouldBlock => {
+                    StoreError::Conflict("another writer has the store open".into())
+                }
+                TryLockError::Error(e) => StoreError::io(&path, e),
+            });
+        }
+        let out = self.prune_locked(cutoff);
+        let shared = lock
+            .unlock()
+            .and_then(|()| lock.lock_shared())
+            .map_err(|e| StoreError::io(&path, e));
+        let out = out?;
+        shared?;
+        Ok(out)
+    }
+
+    /// Whether the oldest snapshot is older than the newest snapshot and
+    /// has a time before `cutoff`.
+    fn has_old_snapshot(&self, cutoff: u64) -> Result<bool, StoreError> {
+        let Some(head) = self.head()? else {
+            return Ok(false);
+        };
+        Ok(match self.cycles()?.first() {
+            Some(&c) => c != head && self.snapshot_manifest(c)?.time < cutoff,
+            None => false,
+        })
+    }
+
+    /// [`Store::prune`] with the exclusive lock held.
+    fn prune_locked(&self, cutoff: u64) -> Result<Pruned, StoreError> {
         let mut out = Pruned::default();
+        if !self.has_old_snapshot(cutoff)? {
+            return Ok(out);
+        }
         let Some(head) = self.head()? else {
             return Ok(out);
         };
         let cycles = self.cycles()?;
-        match cycles.first() {
-            Some(&c) if c != head && self.snapshot_manifest(c)?.time < cutoff => {}
-            _ => return Ok(out),
-        }
 
         // The walk keeps the cycle and the device manifests of each kept
         // snapshot, and the whole manifest of the oldest one.
