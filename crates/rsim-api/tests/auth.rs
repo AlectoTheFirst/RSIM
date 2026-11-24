@@ -242,6 +242,13 @@ fn five_failed_sign_ins_give_429() {
     assert_eq!(r.status, 429);
     let wait: u64 = r.header("retry-after").unwrap().parse().unwrap();
     assert!((1..=900).contains(&wait));
+    // The failures of one address leave the name open to another address.
+    let mut other = with_body(
+        req("POST", "/v1/auth/login"),
+        json!({"name": "admin", "password": PASSWORD}),
+    );
+    other.peer = Some("192.0.2.7".parse::<IpAddr>().unwrap());
+    assert_eq!(handle(&s, &other).status, 200);
 }
 
 #[test]
