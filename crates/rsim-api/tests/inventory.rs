@@ -473,3 +473,51 @@ fn a_server_with_no_secret_key_refuses_a_secret() {
     );
     assert_eq!(r.status, 200);
 }
+
+#[test]
+fn collect_now_requests_a_device_or_the_devices_of_a_group() {
+    let Some((s, _rt)) = with_db("api_collect_now") else {
+        return;
+    };
+    let ok = |r: Response| {
+        assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
+        json(&r)
+    };
+    ok(call(
+        &s,
+        "PUT",
+        "/v1/inventory/credentials/vyos",
+        Some(json!({"source": "env", "key": "VYOS"})),
+    ));
+    ok(call(
+        &s,
+        "PUT",
+        "/v1/inventory/groups/core",
+        Some(json!({"vendor": "vyos", "settings": {"credential": "vyos", "collection": "manual"}})),
+    ));
+    for d in ["r1", "r2"] {
+        ok(call(
+            &s,
+            "PUT",
+            &format!("/v1/inventory/devices/{d}"),
+            Some(json!({"group": "core", "address": "192.0.2.1"})),
+        ));
+    }
+    let d = ok(call(&s, "GET", "/v1/inventory/devices/r1", None));
+    assert_eq!(
+        d["settings"]["collection"],
+        json!({"value": "manual", "origin": "group"})
+    );
+    let one = ok(call(&s, "POST", "/v1/inventory/devices/r2/collect", None));
+    assert_eq!(one, json!({"devices": ["r2"]}));
+    let all = ok(call(&s, "POST", "/v1/inventory/groups/core/collect", None));
+    assert_eq!(all, json!({"devices": ["r1", "r2"]}));
+    assert_eq!(
+        call(&s, "POST", "/v1/inventory/devices/r9/collect", None).status,
+        404
+    );
+    assert_eq!(
+        call(&s, "GET", "/v1/inventory/devices/r1/collect", None).status,
+        405
+    );
+}

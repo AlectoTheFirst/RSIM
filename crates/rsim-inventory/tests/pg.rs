@@ -655,3 +655,26 @@ async fn a_managed_credential_keeps_its_secret_out_of_each_read() {
         assert!(matches!(e, Error::Invalid(_)), "{e:?}");
     }
 }
+
+#[tokio::test]
+async fn a_collection_request_wakes_the_listener_and_is_taken_once() {
+    let Some(db) = test_database("collection_requests").await else {
+        return;
+    };
+    db.apply("tester", &base()).await.unwrap();
+    let wake = std::sync::Arc::new(tokio::sync::Notify::new());
+    let listener = db.listen_collect(wake.clone());
+    let wait = || tokio::time::timeout(std::time::Duration::from_secs(10), wake.notified());
+    wait().await.expect("the listener connects");
+    let r1 = vec!["r1".to_string()];
+    assert_eq!(db.request_collection("tester", &r1).await.unwrap(), r1);
+    assert_eq!(db.request_collection("tester", &r1).await.unwrap(), r1);
+    wait().await.expect("the notification wakes the listener");
+    assert_eq!(db.take_collection_requests().await.unwrap(), r1);
+    assert!(db.take_collection_requests().await.unwrap().is_empty());
+    assert!(matches!(
+        db.request_collection("tester", &["r9".to_string()]).await,
+        Err(Error::NotFound(_))
+    ));
+    listener.abort();
+}

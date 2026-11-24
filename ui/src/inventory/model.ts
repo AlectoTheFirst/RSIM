@@ -562,6 +562,7 @@ export const SETTING_FIELDS: readonly SettingField[] = [
   { key: "tls_trust", label: "TLS trust", kind: "choice", choices: ["pin", "ca", "public", "none"], fallback: "pin", vendorFallback: { velocloud: "public", equinix: "public" }, transport: "https" },
   { key: "tls_ca_file", label: "TLS CA file", kind: "text", fallback: "none", transport: "https" },
   { key: "capture_bgp", label: "BGP sections", kind: "choice", choices: ["off", "sessions", "all"], fallback: "sessions", transport: null },
+  { key: "collection", label: "collection", kind: "choice", choices: ["auto", "manual"], fallback: "auto", transport: null },
   { key: "interval_seconds", label: "interval", kind: "number", min: 60, max: 86400, unit: "s", fallback: "60", vendorFallback: { equinix: "900" }, transport: null },
   { key: "timeout_seconds", label: "device time limit", kind: "number", min: 1, max: 86400, unit: "s", fallback: "45", vendorFallback: { equinix: "900" }, transport: null },
   { key: "section_timeout_seconds", label: "section time limit", kind: "number", min: 1, max: 86400, unit: "s", fallback: "20", transport: null, notVendors: ["equinix"] },

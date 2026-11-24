@@ -5,8 +5,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{
-    CaptureBgp, Device, Group, Ha, Inventory, NetworkEdge, NxosJson, Settings, SshAlgorithms,
-    SshMode, TlsTrust,
+    CaptureBgp, CollectionMode, Device, Group, Ha, Inventory, NetworkEdge, NxosJson, Settings,
+    SshAlgorithms, SshMode, TlsTrust,
 };
 
 /// The time for all sections of a device, in seconds, with no setting.
@@ -134,6 +134,7 @@ pub struct ResolvedSettings {
     pub refresh_seconds: Resolved<u32>,
     pub network_edge: Resolved<NetworkEdge>,
     pub page_size: Resolved<u32>,
+    pub collection: Resolved<CollectionMode>,
 }
 
 /// The settings of a device of a vendor that inherits from a group.
@@ -211,6 +212,7 @@ pub fn resolve_settings(device: &Settings, group: &Settings, vendor: &str) -> Re
         ),
         network_edge: pick(&device.network_edge, &group.network_edge, NetworkEdge::Off),
         page_size: pick(&device.page_size, &group.page_size, DEFAULT_PAGE_SIZE),
+        collection: pick(&device.collection, &group.collection, CollectionMode::Auto),
     }
 }
 

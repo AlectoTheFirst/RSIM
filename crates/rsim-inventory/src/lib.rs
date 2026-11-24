@@ -19,11 +19,11 @@ mod secret;
 mod types;
 
 pub use db::{
-    Account, Attempt, AuthEvent, AuthEventPage, Change, Db, Error, MAX_PASSWORD, MIGRATIONS,
-    Principal, Role, SCOPE_ADMIN, SCOPE_INVENTORY_WRITE, SCOPE_READ, SCOPE_SCENARIO_WRITE, SCOPES,
-    SESSION_MAX_SECONDS, TOKEN_PREFIX, TokenInfo, User, Via, check_password, hash_password,
-    import_changes, new_secret, schema_version, secret_hash, valid_user_name, verify_nothing,
-    verify_password,
+    Account, Attempt, AuthEvent, AuthEventPage, COLLECT_CHANNEL, Change, Db, Error, MAX_PASSWORD,
+    MIGRATIONS, Principal, Role, SCOPE_ADMIN, SCOPE_INVENTORY_WRITE, SCOPE_READ,
+    SCOPE_SCENARIO_WRITE, SCOPES, SESSION_MAX_SECONDS, TOKEN_PREFIX, TokenInfo, User, Via,
+    check_password, hash_password, import_changes, new_secret, schema_version, secret_hash,
+    valid_user_name, verify_nothing, verify_password,
 };
 pub use resolve::{
     DEFAULT_CONCURRENCY, DEFAULT_INTERVAL_SECONDS, DEFAULT_PAGE_SIZE,
@@ -36,9 +36,10 @@ pub use resolve::{
 pub use secret::{KEY_VAR, MAX_SECRET, Sealed, SecretInput, SecretKey};
 pub use types::{
     Action, AuditPage, AuditRecord, Bindings, COLLECTOR_VENDORS, CaptureBgp, Collection,
-    CollectorTransport, Credential, CredentialKind, CredentialSource, DEFAULT_HISTORY_DAYS, Device,
-    EdgeDeviceBinding, FabricPortBinding, Group, Ha, Inventory, JumpHost, NetworkEdge, NxosJson,
-    Route, Settings, SshAlgorithms, SshMode, TlsTrust, valid_device_name, valid_name,
+    CollectionMode, CollectorTransport, Credential, CredentialKind, CredentialSource,
+    DEFAULT_HISTORY_DAYS, Device, EdgeDeviceBinding, FabricPortBinding, Group, Ha, Inventory,
+    JumpHost, NetworkEdge, NxosJson, Route, Settings, SshAlgorithms, SshMode, TlsTrust,
+    valid_device_name, valid_name,
 };
 
 /// The environment variable of the URL of the inventory database.

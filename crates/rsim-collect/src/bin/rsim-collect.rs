@@ -69,6 +69,11 @@
 //! prints the logicalId and the name of each enterprise, and `probe` reads
 //! one edge of each enterprise.
 //!
+//! A device with the setting `collection` `manual` is collected only on a
+//! request of the inventory database, which the API writes for a press of
+//! "Collect now". With `--repeat`, the collector listens on the channel
+//! `rsim_collect` and starts a cycle at each request.
+//!
 //! With an inventory database, from `--inventory`, the environment variable
 //! `RSIM_INVENTORY_URL` or the env key `RSIM_INVENTORY_URL`, the collector
 //! reads the devices, the groups, the routes and the credentials from the
@@ -1544,7 +1549,18 @@ async fn configure_from_inventory(
     collector.set_history(Duration::from_secs(
         u64::from(inv.collection.history_days) * 86_400,
     ));
+    collector.set_manual(manual_devices(&inv)?);
     Ok((inv, devices))
+}
+
+/// The devices of an inventory whose collection mode is `manual`.
+fn manual_devices(inv: &Inventory) -> Result<std::collections::BTreeSet<String>, String> {
+    Ok(inv
+        .resolve()?
+        .into_iter()
+        .filter(|d| d.settings.collection.value == rsim_inventory::CollectionMode::Manual)
+        .map(|d| d.name)
+        .collect())
 }
 
 /// Reads the store keys, or makes new keys in a file that only the owner
@@ -1724,10 +1740,14 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
             tokio::pin!(stop);
             let mut shown = None;
             let mut wait = Duration::ZERO;
+            // A requested collection wakes the loop at once.
+            let wake = Arc::new(tokio::sync::Notify::new());
+            let listener = repeat.then(|| db.listen_collect(wake.clone()));
             loop {
                 tokio::select! {
                     _ = &mut stop => break,
                     _ = tokio::time::sleep(wait) => {}
+                    _ = wake.notified() => {}
                 }
                 wait = WAKE_LIMIT;
                 match configure_from_inventory(
@@ -1753,6 +1773,14 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
                     }
                     Err(e) => return Err(format!("inventory: {e}")),
                 }
+                match db.take_collection_requests().await {
+                    Ok(r) if r.is_empty() => {}
+                    Ok(r) => {
+                        eprintln!("requested collection: {}", r.join(", "));
+                        collector.request(r);
+                    }
+                    Err(e) => eprintln!("error: collection requests: {e}"),
+                }
                 let r = collector.run_cycle().await.map_err(|e| e.to_string())?;
                 if !repeat {
                     print_report(&r);
@@ -1762,6 +1790,9 @@ async fn run(cli: &Cli, repeat: bool, strict: bool) -> Result<(), String> {
                 print_prune_error(&r);
                 let now = collector.now_ms();
                 wait = Duration::from_millis(collector.next_wake(now).saturating_sub(now));
+            }
+            if let Some(l) = listener {
+                l.abort();
             }
         }
     }

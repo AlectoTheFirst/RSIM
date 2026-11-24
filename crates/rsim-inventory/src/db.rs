@@ -19,10 +19,10 @@ pub use auth::*;
 
 use crate::secret::Sealed;
 use crate::types::{
-    Action, AuditPage, AuditRecord, Bindings, CaptureBgp, Collection, Credential, CredentialKind,
-    CredentialSource, Device, EdgeDeviceBinding, FabricPortBinding, Group, Ha, Inventory, JumpHost,
-    NetworkEdge, NxosJson, Route, Settings, SshAlgorithms, SshMode, TlsTrust, valid_device_name,
-    valid_name,
+    Action, AuditPage, AuditRecord, Bindings, CaptureBgp, Collection, CollectionMode, Credential,
+    CredentialKind, CredentialSource, Device, EdgeDeviceBinding, FabricPortBinding, Group, Ha,
+    Inventory, JumpHost, NetworkEdge, NxosJson, Route, Settings, SshAlgorithms, SshMode, TlsTrust,
+    valid_device_name, valid_name,
 };
 
 /// The migrations: the version, the name and the SQL, in order. A version
@@ -60,6 +60,11 @@ pub const MIGRATIONS: &[(u32, &str, &str)] = &[
         include_str!("../migrations/0007_orchestrator.sql"),
     ),
     (8, "equinix", include_str!("../migrations/0008_equinix.sql")),
+    (
+        9,
+        "manual_collection",
+        include_str!("../migrations/0009_manual_collection.sql"),
+    ),
 ];
 
 /// The schema version of this build: the last migration.
@@ -157,6 +162,9 @@ fn tls(ca_pem: Option<&str>) -> Result<MakeRustlsConnect> {
     Ok(MakeRustlsConnect::new(config))
 }
 
+/// The channel of the notifications of a requested collection.
+pub const COLLECT_CHANNEL: &str = "rsim_collect";
+
 /// A connection to the inventory database. It connects at the first use
 /// and again after the connection closes. The calls take turns on the one
 /// connection.
@@ -229,6 +237,91 @@ impl Db {
         let client = self.client(&mut slot).await?;
         client.batch_execute(sql).await?;
         Ok(())
+    }
+
+    /// Requests a collection of each device, by the actor, and notifies
+    /// the channel [`COLLECT_CHANNEL`]. A device with a request keeps its
+    /// first request. Gives the devices in name order, or a `NotFound`
+    /// error for a name that is no device.
+    pub async fn request_collection(&self, actor: &str, devices: &[String]) -> Result<Vec<String>> {
+        let mut slot = self.client.lock().await;
+        let client = self.client(&mut slot).await?;
+        let tx = client.transaction().await?;
+        let known: Vec<String> = tx
+            .query(
+                "SELECT name FROM devices WHERE name = ANY($1) ORDER BY name",
+                &[&devices],
+            )
+            .await?
+            .iter()
+            .map(|r| r.get(0))
+            .collect();
+        if let Some(missing) = devices.iter().find(|d| !known.contains(d)) {
+            return Err(Error::NotFound(format!("no device is named {missing}")));
+        }
+        for d in &known {
+            tx.execute(
+                "INSERT INTO collection_requests (device, actor) VALUES ($1, $2) \
+                 ON CONFLICT (device) DO NOTHING",
+                &[d, &actor],
+            )
+            .await?;
+        }
+        tx.batch_execute(&format!("NOTIFY {COLLECT_CHANNEL}"))
+            .await?;
+        tx.commit().await?;
+        Ok(known)
+    }
+
+    /// Takes each requested collection: removes the requests and gives
+    /// their devices in name order.
+    pub async fn take_collection_requests(&self) -> Result<Vec<String>> {
+        let mut slot = self.client.lock().await;
+        let client = self.client(&mut slot).await?;
+        let mut out: Vec<String> = client
+            .query("DELETE FROM collection_requests RETURNING device", &[])
+            .await?
+            .iter()
+            .map(|r| r.get(0))
+            .collect();
+        out.sort();
+        Ok(out)
+    }
+
+    /// Listens on the channel [`COLLECT_CHANNEL`] on a connection of its
+    /// own and wakes `wake` at each notification and at each new
+    /// connection. After a lost connection it connects again 5 s later.
+    pub fn listen_collect(&self, wake: Arc<tokio::sync::Notify>) -> tokio::task::JoinHandle<()> {
+        let config = self.config.clone();
+        let tls = self.tls.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Ok((client, mut connection)) = config.connect(tls.clone()).await {
+                    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+                    let messages = tokio::spawn(async move {
+                        while let Some(Ok(m)) =
+                            std::future::poll_fn(|cx| connection.poll_message(cx)).await
+                        {
+                            if matches!(m, tokio_postgres::AsyncMessage::Notification(_)) {
+                                let _ = tx.send(());
+                            }
+                        }
+                    });
+                    if client
+                        .batch_execute(&format!("LISTEN {COLLECT_CHANNEL}"))
+                        .await
+                        .is_ok()
+                    {
+                        wake.notify_one();
+                        while rx.recv().await.is_some() {
+                            wake.notify_one();
+                        }
+                    }
+                    messages.abort();
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        })
     }
 
     /// Applies the migrations that the database does not have, in one
@@ -875,7 +968,7 @@ async fn collection(c: &impl GenericClient) -> Result<Collection> {
 }
 
 /// The settings columns, in the order of [`settings_params`].
-const SETTINGS: [&str; 22] = [
+const SETTINGS: [&str; 23] = [
     "credential",
     "route",
     "ssh_algorithms",
@@ -898,6 +991,7 @@ const SETTINGS: [&str; 22] = [
     "refresh_seconds",
     "network_edge",
     "page_size",
+    "collection",
 ];
 
 /// The insert of a record with its settings, or the update of all its
@@ -952,6 +1046,7 @@ fn settings_params(s: &Settings) -> Result<Vec<Box<dyn ToSql + Sync + Send>>> {
         Box::new(number("refresh_seconds", s.refresh_seconds)?),
         w(s.network_edge.map(NetworkEdge::word)),
         Box::new(number("page_size", s.page_size)?),
+        w(s.collection.map(CollectionMode::word)),
     ])
 }
 
@@ -991,6 +1086,7 @@ fn settings(row: &Row) -> Result<Settings> {
         refresh_seconds: count(row, "refresh_seconds"),
         network_edge: word(row, "network_edge", NetworkEdge::parse)?,
         page_size: count(row, "page_size"),
+        collection: word(row, "collection", CollectionMode::parse)?,
     })
 }
 
@@ -1218,7 +1314,7 @@ mod tests {
         let sql = upsert("devices", &["name", "device_group"]);
         assert!(sql.starts_with("INSERT INTO devices (name, device_group, credential, route,"));
         assert!(sql.contains("VALUES ($1, $2, $3,"));
-        assert!(sql.contains("$24)"));
+        assert!(sql.contains("$25)"));
         assert!(
             sql.contains("ON CONFLICT (name) DO UPDATE SET device_group = EXCLUDED.device_group")
         );
