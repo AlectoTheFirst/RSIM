@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 
 use serde_json::{Value, json};
 
-const TOPOLOGIES: [&str; 7] = [
+const TOPOLOGIES: [&str; 8] = [
     "mini-enterprise",
     "edge-dnat",
     "ecmp",
@@ -16,6 +16,7 @@ const TOPOLOGIES: [&str; 7] = [
     "hairpin",
     "chain",
     "leaf-spine",
+    "equinix-fabric",
 ];
 
 /// An empty folder for one test, below the temporary folder of cargo.

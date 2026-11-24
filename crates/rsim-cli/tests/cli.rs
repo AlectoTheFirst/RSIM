@@ -11,7 +11,7 @@ use rsim_cli::{QueryInput, commands, json};
 use serde_json::Value;
 
 /// One stated query for each built-in topology, as `rsim path` arguments.
-const QUERIES: [(&str, &[&str]); 7] = [
+const QUERIES: [(&str, &[&str]); 8] = [
     (
         "mini-enterprise",
         &[
@@ -117,6 +117,71 @@ const QUERIES: [(&str, &[&str]); 7] = [
             "40000",
             "--destination.port",
             "22",
+        ],
+    ),
+    (
+        "equinix-fabric",
+        &[
+            "--source.ip",
+            "192.0.2.10",
+            "--destination.ip",
+            "192.0.2.20",
+            "--network.transport",
+            "tcp",
+            "--source.port",
+            "40000",
+            "--destination.port",
+            "443",
+        ],
+    ),
+];
+
+/// More stated queries of the topology `equinix-fabric`: the name of the
+/// stored file and the `rsim path` arguments.
+const EQUINIX_QUERIES: [(&str, &[&str]); 3] = [
+    (
+        "equinix-fabric-qinq",
+        &[
+            "--source.ip",
+            "198.51.100.10",
+            "--destination.ip",
+            "198.51.100.20",
+            "--network.transport",
+            "tcp",
+            "--source.port",
+            "40000",
+            "--destination.port",
+            "443",
+        ],
+    ),
+    (
+        "equinix-fabric-no-circuit",
+        &[
+            "--source.ip",
+            "198.51.100.70",
+            "--destination.ip",
+            "198.51.100.80",
+            "--network.transport",
+            "tcp",
+            "--source.port",
+            "40000",
+            "--destination.port",
+            "443",
+        ],
+    ),
+    (
+        "equinix-fabric-service-profile",
+        &[
+            "--source.ip",
+            "203.0.113.10",
+            "--destination.ip",
+            "203.0.113.1",
+            "--network.transport",
+            "tcp",
+            "--source.port",
+            "40000",
+            "--destination.port",
+            "443",
         ],
     ),
 ];
@@ -257,6 +322,15 @@ fn the_brief_forms_give_the_stored_json() {
 fn the_fabric_queries_give_the_stored_json() {
     for (file, flags) in FABRIC_QUERIES {
         let o = rsim(&path_args("leaf-spine", flags));
+        assert_eq!(o.status.code(), Some(0), "{file}");
+        assert_eq!(stdout(&o), stored(file), "{file} differs from its file");
+    }
+}
+
+#[test]
+fn the_equinix_queries_give_the_stored_json() {
+    for (file, flags) in EQUINIX_QUERIES {
+        let o = rsim(&path_args("equinix-fabric", flags));
         assert_eq!(o.status.code(), Some(0), "{file}");
         assert_eq!(stdout(&o), stored(file), "{file} differs from its file");
     }
