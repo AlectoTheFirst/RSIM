@@ -3,6 +3,8 @@
 #   rsim-collect  the collector, with the replies of the demo estate in
 #                 /usr/share/rsim/demo for `rsim-collect --data /data seed --demo /usr/share/rsim/demo --if-empty`
 # Build one with `podman build --target rsim -t rsim .` or through compose.yaml.
+# Behind a proxy that signs TLS with its own CA, add `--secret id=ca,src=<CA PEM file>`:
+# cargo then trusts that CA and the public roots of the image.
 
 # The browser UI, which rsim-api embeds at build time.
 FROM docker.io/library/node:24.22.2-trixie-slim@sha256:0820eaa85e07d0490446dd01d14707e17e6108a36988cf374899cd057eb3812d AS ui
@@ -22,7 +24,12 @@ COPY --from=ui /src/ui/dist ui/dist
 ENV RSIM_UI_REQUIRED=1
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked \
+    --mount=type=secret,id=ca,target=/run/secrets/ca,required=false \
+    if [ -s /run/secrets/ca ]; then \
+        cat /etc/ssl/certs/ca-certificates.crt /run/secrets/ca > /tmp/ca.pem \
+        && export CARGO_HTTP_CAINFO=/tmp/ca.pem; \
+    fi \
+    && cargo build --release --locked \
         -p rsim-api -p rsim-cli -p rsim-inventory -p rsim-collect \
         --bin rsim-api --bin rsim --bin rsim-inventory --bin rsim-collect \
     && mkdir -p /out/bin /out/data \
