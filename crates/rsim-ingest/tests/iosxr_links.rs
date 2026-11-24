@@ -756,10 +756,14 @@ fn pe1_with(stanza: &str) -> Input {
 fn a_vlan_of_a_sub_interface_that_is_not_lowered_gives_unknown() {
     let l2 = "interface Bundle-Ether20.300 l2transport\n encapsulation dot1q 300\n!\n";
     let routed = "interface Bundle-Ether20.300\n vrf BLUE\n ipv4 address 192.0.2.193 255.255.255.192\n encapsulation dot1q 300 second-dot1q 5\n!\n";
+    let unnumbered = "interface Bundle-Ether20.300\n vrf BLUE\n ipv4 unnumbered Loopback0\n encapsulation dot1q 300\n!\n";
+    let ipv6 = "interface Bundle-Ether20.300\n vrf BLUE\n ipv6 address 2001:db8::1/64\n encapsulation dot1q 300\n!\n";
     for (stanza, dst) in [
         (l2, "192.0.2.200"),
         (l2, "192.0.2.193"),
         (routed, "192.0.2.193"),
+        (unnumbered, "192.0.2.193"),
+        (ipv6, "192.0.2.193"),
     ] {
         let t = twin_of(assemble(vec![
             core1(),

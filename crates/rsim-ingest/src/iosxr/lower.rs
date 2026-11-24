@@ -384,16 +384,18 @@ pub fn lower(
         &groups,
         &sum,
         ext,
-        &unlowered(cfg, &active),
+        &unlowered(cfg, &st, &active),
     );
     edges(&mut l, device, &active);
     (l.out, sum)
 }
 
-/// The sub-interfaces whose frames the hand-off of their port does not
-/// lower: the `l2transport` sub-interfaces and the lowered sub-interfaces
-/// with no dot1q VLAN that the handlers read.
-fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
+/// The interfaces whose frames the hand-off of their port does not lower:
+/// the `l2transport` sub-interfaces, the lowered sub-interfaces with no
+/// dot1q VLAN that the handlers read, and the interfaces that are not shut,
+/// not down in `show interfaces` and not lowered, with an IPv6 address or
+/// an unhandled line.
+fn unlowered(cfg: &Config, st: &state::State, active: &[Port]) -> Vec<Unlowered> {
     let mut out: Vec<Unlowered> = cfg
         .l2transport
         .iter()
@@ -401,6 +403,7 @@ fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
             name: t.name.clone(),
             vlan: t.dot1q,
             routed: false,
+            tagged: true,
             untagged: false,
             reason: format!("{} not lowered", t.key),
             lines: t.lines,
@@ -414,21 +417,45 @@ fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
                 name: p.i.name.clone(),
                 vlan: None,
                 routed: true,
+                tagged: true,
                 untagged: false,
                 reason: format!("dot1q VLAN of {} not read", p.i.name),
                 lines: p.i.lines,
             }),
     );
+    let states = st.interfaces.as_ref().and_then(|x| x.as_ref().ok());
+    for i in &cfg.interfaces {
+        let s = states.and_then(|m| m.get(&i.name));
+        if i.shutdown || i.bundle.is_some() || s.and_then(|s| s.oper_up) == Some(false) {
+            continue;
+        }
+        let lowered = active.iter().any(|p| p.i.name == i.name);
+        if lowered || (i.ipv6.is_empty() && i.unhandled.is_empty()) {
+            continue;
+        }
+        let sub = i.name.contains('.');
+        out.push(Unlowered {
+            name: i.name.clone(),
+            vlan: i.dot1q.map(|d| d.0),
+            routed: true,
+            tagged: sub,
+            untagged: !sub,
+            reason: format!("{} not lowered", i.name),
+            lines: i.lines,
+        });
+    }
     out
 }
 
-/// A sub-interface whose frames the hand-off of its port does not lower.
+/// An interface whose frames the hand-off of its port does not lower.
 pub(crate) struct Unlowered {
     pub(crate) name: String,
     /// Its VLAN; with none, each VLAN of no lowered sub-interface.
     pub(crate) vlan: Option<u16>,
     /// True when only its frames to a MAC of the router are affected.
     pub(crate) routed: bool,
+    /// True when it can take a tagged frame.
+    pub(crate) tagged: bool,
     /// True when it can take an untagged frame too.
     pub(crate) untagged: bool,
     pub(crate) reason: String,
@@ -785,12 +812,12 @@ fn hsrp(
 /// The hand-off of each port with a link: the MACs of the port, of its
 /// sub-interfaces and of its active groups go to the ingress of the port or
 /// of the sub-interface of the dot1q VLAN. A frame to the virtual MAC of a
-/// group whose state is not known gives `Unknown`, as does a frame of a
-/// sub-interface in `unlowered`: each frame of its VLAN, or of a routed
-/// sub-interface each frame of its VLAN to a MAC of the router, and the
-/// untagged frames of a sub-interface that can take them. If an active
-/// group or a group whose state is not known has no known virtual MAC, each
-/// frame of the port gives `Unknown`.
+/// group whose state is not known gives `Unknown`, as does a frame of an
+/// interface in `unlowered`: each frame of its VLAN, or of a routed
+/// interface each frame of its VLAN to a MAC of the router, if it can take
+/// a tagged frame, and the untagged frames of an interface that can take
+/// them. If an active group or a group whose state is not known has no
+/// known virtual MAC, each frame of the port gives `Unknown`.
 pub(crate) fn handoffs(
     l: &mut L,
     active: &[Port],
@@ -845,7 +872,10 @@ pub(crate) fn handoffs(
         }
         let tagged: BTreeSet<u16> = mine.iter().filter_map(|p| p.dot1q).collect();
         let mut rules: Vec<FRule<RuleAction>> = Vec::new();
-        for u in unlowered.iter().filter(|u| parent(&u.name) == port) {
+        for u in unlowered
+            .iter()
+            .filter(|u| parent(&u.name) == port && u.tagged)
+        {
             let vlans = u
                 .vlan
                 .map_or_else(|| other_vlans(&tagged), |v| vec![(v, v)]);

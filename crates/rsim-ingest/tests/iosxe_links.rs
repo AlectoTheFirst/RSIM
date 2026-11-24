@@ -1322,6 +1322,33 @@ fn a_native_sub_interface_makes_the_untagged_frames_unknown() {
 }
 
 #[test]
+fn a_port_with_a_layer_3_line_that_is_not_lowered_makes_the_untagged_frames_unknown() {
+    for line in [
+        " ip address dhcp\n",
+        " ip unnumbered Loopback0\n",
+        " no ip address\n ipv6 address 2001:db8::2/64\n",
+    ] {
+        let t = twin_of(routers_with_config(
+            " description LAN trunk\n no ip address\n",
+            &format!(" description LAN trunk\n{line}"),
+            pe3_untagged(),
+        ));
+        let (verdict, steps) = only(&query(
+            &t,
+            "pe3",
+            "GigabitEthernet0/0/0/0",
+            "192.0.2.20",
+            "192.0.2.3",
+        ));
+        assert_eq!(verdict, VerdictKind::Unknown, "{line}: {steps:#?}");
+        assert!(
+            says(&steps, "GigabitEthernet0/0/1 not lowered"),
+            "{line}: {steps:#?}"
+        );
+    }
+}
+
+#[test]
 fn with_no_vtp_mode_line_the_vlans_of_each_switch_port_are_not_known() {
     let config = String::from_utf8(acc1_clean())
         .unwrap()
