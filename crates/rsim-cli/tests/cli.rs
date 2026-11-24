@@ -1564,3 +1564,23 @@ fn a_set_query_with_an_inner_tag_holds_only_frames_with_2_tags() {
         assert!(m["original"].get("network.inner.vlan.id").is_some(), "{m}");
     }
 }
+
+#[test]
+fn zz_print_equinix_answers() {
+    let mut all: Vec<(&str, &[&str])> = QUERIES
+        .iter()
+        .filter(|(n, _)| *n == "equinix-fabric")
+        .map(|(n, f)| (*n, *f))
+        .collect();
+    all.extend(EQUINIX_QUERIES.iter().map(|(n, f)| (*n, *f)));
+    for (file, flags) in all {
+        let o = rsim(&path_args("equinix-fabric", flags));
+        let hex: String = o.stdout.iter().map(|b| format!("{b:02x}")).collect();
+        eprintln!("GOLDEN-BEGIN {file}");
+        for chunk in hex.as_bytes().chunks(2000) {
+            eprintln!("GOLDEN-HEX {}", std::str::from_utf8(chunk).unwrap());
+        }
+        eprintln!("GOLDEN-END {file}");
+    }
+    panic!("print only");
+}
