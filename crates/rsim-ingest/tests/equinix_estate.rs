@@ -37,7 +37,7 @@ interface Ethernet1/5
 
 fn mac_row(dev: &str, vlan: u16, mac: &str, port: &str, i: u64) -> MacRow {
     MacRow {
-        vlan,
+        vlan: vlan.into(),
         mac: mac.into(),
         port: Some(port.into()),
         kind: Some("dynamic".into()),
