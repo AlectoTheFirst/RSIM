@@ -78,7 +78,7 @@ fn as_str(v: &[(String, u32, u32)]) -> Vec<(&str, u32, u32)> {
 
 #[test]
 fn the_coverage_shares_of_the_fixtures() {
-    for (config, handled, irrelevant, unhandled) in [(ROUTER, 129, 144, 27), (SWITCH, 45, 61, 4)] {
+    for (config, handled, irrelevant, unhandled) in [(ROUTER, 139, 134, 27), (SWITCH, 49, 57, 4)] {
         let doc = iosxe::read_text(config);
         let cov = classify(
             &doc,

@@ -60,8 +60,8 @@ fn the_coverage_shares_of_the_fixture() {
         &doc,
         &iosxr::table(&RouteTables::uniform(true, Default::default())),
     );
-    assert_eq!(cov.lines[&State::Handled], 108);
-    assert_eq!(cov.lines[&State::Irrelevant], 134);
+    assert_eq!(cov.lines[&State::Handled], 114);
+    assert_eq!(cov.lines[&State::Irrelevant], 128);
     assert_eq!(cov.lines[&State::Unhandled], 5);
     assert!(cov.share(State::Unhandled) < 0.05);
 }
