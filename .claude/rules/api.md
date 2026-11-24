@@ -1,0 +1,49 @@
+---
+paths:
+  - "crates/rsim-api/**"
+  - "crates/rsim-mcp/**"
+---
+
+# `rsim-api`
+
+`rsim-api` is the REST server: `handler.rs` turns one request into one response with no socket, so the tests call it directly; `server.rs` is the HTTP/1.1 layer on `hyper` and `tokio`, with the engine work on worker threads and a limit of parallel queries; `openapi.rs` makes the OpenAPI 3.1 document from its route table and the schemas of `rsim-contract`, and `crates/rsim-api/openapi.json` is the committed copy that a test compares.
+
+A query is a resource: `POST /v1/twins/{twin}/queries` gives 303 to `/v1/twins/{twin}/queries/{qid}`, where `qid` holds the canonical query text, or its hash for a long query. Errors are problem objects of RFC 9457. The server gives the response of `GET .../queries/{qid}` the header `Server-Timing`: `engine;dur=<ms>` with the time of the handler, or `cache;desc=hit` for 304; the body stays the same bytes.
+
+`GET /v1/twins/{twin}/sources?file=..&lines=a-b` gives the masked source lines of a span (`rsim-cli/src/sources.rs`): the file `<device>/<section>@<blob>` is a section of the snapshot of the twin, read through the store of `Loaded`, and the lines are those of its canonical form with the secrets masked by `rsim_ingest::mask::section_lines`, numbered as the spans of the section number them: a JSON section and a running config by the lines of the stanza reader, and an IOS-XR or IOS-XE text section of `SECTIONS`, which a template of `rsim-textfsm` reads, by `rsim_textfsm::split_lines` (the line breaks of Python `splitlines`), which also numbers its records, its time line and the parts of `arp_vrfs`; a hand-built topology of the tests gives `no_source_text`, a section inside a span of text with no mask for its vendor and format gives `not_masked`, and a row span gives `no_source_text`.
+
+A row span (`SourceSpan::row`, `SourceSpan::is_row`) names the rows of a collected table, such as a UniFi device or client, a VyOS address row or an NX-OS JSON row, with the file `<device>/<table>@<blob>#row` and the row numbers from 1 as its lines; the step resource refuses its lines and the UI shows it as a label `<table> row <n>`.
+
+The span gate runs before the section is read and gives only the lines that lie inside a source span of text of a function of the twin, whatever the length of the section, and no answer names the line count of a section; a line of a span past the end of the section is not given: `sources::SpanIndex` holds the sorted, merged line ranges of all spans of text of each file, with no row span, from `NetFunction::each_span` (the provenance and the spans of the rules, routes, neighbours, hosts, MAC entries and links that a branch can name), built once for each loaded twin; the status depends only on the index: a range with no such line gives `not_a_source_span` (403), and a range with such a line gives 200 with the covered lines inside the section, and each other line of the range, outside every span or past the end of the section, in `left_out`, with a note; a range whose covered lines all lie past the end gives 200 with no lines.
+
+`crates/rsim-cli/tests/span_index.rs` checks that each span of text of each trace step lies inside the index and that a row span admits no line.
+
+`rsim-cli/src/topology.rs` gives the topology of a twin and the drawing of the paths of an answer, with the overlay edge of a tunnel and its underlay hops, where a VCMP tunnel with no decapsulation in the branch ends at a node `peer` when no device of the twin has the tunnel end of its peer; a device with a `TransportLookup` is a node of the kind `network`; `GET /v1/twins/{twin}/topology` and `GET .../queries/{qid}/topology` serve them.
+
+`rsim-mcp` is a library and a binary: `rsim-api` serves its tools at `/mcp`, and the twins of the tools share one cache, so parallel requests do not wait for each other.
+
+In `rsim-api`, the twin `store` is the newest built snapshot of the store (`Tools::reload_store`): a request for the store, a snapshot name of the store or `GET /v1/twins` reads `HEAD` and the time of its manifest (read once for each cycle of `HEAD`), and if it is newer than the current twin and no build runs, the twin of that snapshot builds on its own thread (`rsim-reload`, `commands::load_store_at`) while the current twin answers each request with no wait; when it is built, it becomes the current twin and the older one becomes the previous twin. Before a build starts, the server releases the previous twin, so it holds at most 2 twins. The first build runs in the first request for the store, and the other requests wait for it. A snapshot that does not build keeps the current twin, gives its error on stderr and in `reload_error`, and is not built again; a `HEAD` that cannot be read gives `reload_error` with the snapshot null. The reload follows the snapshot time, and the build of a time finds its cycle with `Store::cycle_at`. The current twin and the previous twin answer for their own snapshot name; an older name gives 410 with the code `snapshot_replaced`, and a newer name that is not built, `snap-<n>` and a name that is not a UTC second give 404. `POST /v1/twins/store/queries` gives the 303 to the query resource on the current snapshot with no 307 before it.
+
+The entry `store` of `GET /v1/twins` has `held` (the current twin), `previous`, `newest` (the snapshot of `HEAD`), `loading` and `reload_error`, each a snapshot name; a `HEAD` whose manifest cannot be read gives `reload_error` with the snapshot null.
+
+The UI pins a page to a run: a page on `store` moves to the snapshot name of `held` (`isSnapshot` of `url.ts`; names compare as text), a new run does not change the page, the UI reads the twin list each 60 s and shows the button "Load newest snapshot" when `held` is newer than the run of the page, and on `snapshot_replaced` (`onReplaced` of `client.ts`) the page moves to the newest built run with a note; the hatch mark beside the twin selector shows `reload_error`, and a request of a replaced run is sent again on `store` except a trace step and source lines (`onNewestRun`). `../rsim-project/design/twin-reload.md` gives the options of the reload and the plan of the delta twin.
+
+The brief forms come from the engine answer with no description of the packet sets of the trace steps (`json::brief_json`), so they cost much less than the full form.
+
+With no inventory database, the server has no sign-in and accepts only a loopback listen address. The server accepts the `Host` of its address and of each `--public-origin`, and the origins of `--allow-origin` and `--public-origin`; the probes `GET /healthz` and `GET /readyz` give no data and accept each host.
+
+`rsim-api/src/auth.rs` holds the sign-in: with the inventory database, `auth::gate` gives the rule of each route (open: the UI files, the probes, `/v1/auth/login` and `/v1/auth/setup`; a signed-in user: `/v1/auth/me` and `/v1/auth/logout`; a browser session: `/v1/auth/tokens`; else a scope: `rsim.admin` for `/v1/admin`, `rsim.inventory.write` for a PUT, POST or DELETE of `/v1/inventory`, `rsim.read` for each other route, `/mcp` included), and the OpenAPI document takes the security of each operation from the same function. A request proves its user by the session cookie (`__Host-rsim_session` on HTTPS through a trusted proxy, `rsim_session` on plain HTTP; `HttpOnly`, `SameSite=Strict`) or by `Authorization: Bearer rsim_<64 hex digits>`; a request with a cookie that is not a GET or HEAD needs an `Origin` header. A token has the scopes that it names and that the role of its user gives. A refused request with credentials gets an event in `auth_events`. Each session and token has a limit of the request rate in memory (`auth::Rate`) with 429 and `Retry-After`. `POST /v1/auth/setup` makes the first admin only while no user exists, with no protection.
+
+## Commands
+
+| Task | Command |
+|---|---|
+| MCP stdio tests | `cargo test -p rsim-mcp --test stdio` |
+| REST API on a loopback port | `cargo run -p rsim-api -- --listen 127.0.0.1:8787`. Add `--store <data folder>` for the twin `store`, and `--allow-origin <origin>` for a browser. `rsim-api --openapi` prints the OpenAPI document. |
+| API tests | `cargo test -p rsim-api` |
+| REST API with the inventory | `cargo run -p rsim-api -- --inventory <postgres URL>`. It applies the migrations at the start, serves `/v1/inventory`, and has sign-in: while no user exists, the UI shows the one-time setup page that makes the first admin. Add `--listen 0.0.0.0:8787` for a container, `--public-origin https://<host>` for the host behind a proxy, and `--trusted-proxy <address/length>` for the proxy whose `X-Forwarded-For` and `X-Forwarded-Proto` the server reads. |
+| Sign-in tests | `cargo test -p rsim-api --test auth` and `cargo test -p rsim-inventory --test auth` |
+| UI test of the server | `cargo test -p rsim-api --test ui` |
+| API load test | `cargo run --release -p rsim-api --example load -- 1,4 20`: clients, then requests per client. Keep the numbers small on a laptop. |
+| Masked source lines of a span | `GET /v1/twins/{twin}/sources?file=<device>/<section>@<blob>&lines=a-b` on `rsim-api` with `--store`: only the lines inside a source span of a function of the twin (`not_a_source_span` for a range with none, whatever its size, `left_out` for the lines outside and the covered lines past the end of the section, `no_source_text` for a row span `...#row`), at most 200 lines; `left_out` covers only the lines up to the cut, and the lines after the cut are named only by the note of the cut. The step resource takes `?source_lines=true`, and the MCP tool `explain_step` the argument `source_lines`. |
+| MCP through HTTP | `rsim-api` serves the same tools at `POST /mcp`, the Streamable HTTP transport of MCP revision 2026-07-28: one JSON-RPC message for each POST, with the headers `MCP-Protocol-Version`, `Mcp-Method` and, for `tools/call`, `Mcp-Name`. |
