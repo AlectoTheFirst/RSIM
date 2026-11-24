@@ -711,6 +711,10 @@ fn projection(def: &TableDef, sel: &Selection) -> Result<(Vec<String>, Vec<usize
     Ok((names, idx))
 }
 
+/// The largest number of rows of a page. A selection with no limit or a
+/// larger limit gets a page of at most this size.
+pub const MAX_ROWS: usize = 10_000;
+
 /// The first and the end match of the page.
 fn bounds(sel: &Selection, total: usize) -> Result<(usize, usize), String> {
     let start = match &sel.cursor {
@@ -723,8 +727,8 @@ fn bounds(sel: &Selection, total: usize) -> Result<(usize, usize), String> {
     };
     let end = match sel.limit {
         Some(0) => return Err("the limit is 0".into()),
-        Some(l) => start.saturating_add(l).min(total),
-        None => total,
+        Some(l) => start.saturating_add(l.min(MAX_ROWS)).min(total),
+        None => start.saturating_add(MAX_ROWS).min(total),
     };
     Ok((start, end))
 }
@@ -749,8 +753,8 @@ fn page_of(
 }
 
 /// The page of the rows that match the filters, in the order of the
-/// selection. An error names a column, an op, a filter value, a cursor or
-/// a limit that is not valid.
+/// selection, with at most [`MAX_ROWS`] rows. An error names a column, an
+/// op, a filter value, a cursor or a limit that is not valid.
 pub fn show(def: &TableDef, frame: &Frame, sel: &Selection) -> Result<Page, String> {
     let plan = plan(def, frame, sel)?;
     let proj = projection(def, sel)?;
