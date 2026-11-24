@@ -71,8 +71,9 @@ fn each_circuit_of_the_account_is_a_row_with_its_result() {
     let t = loaded();
     let out =
         rsim_cli::tables::show("equinix", &t, "fabric-connections", &Selection::default()).unwrap();
+    let rows: Vec<Value> = out.rows.iter().map(|r| json!(r)).collect();
     assert_eq!(
-        out.rows,
+        rows,
         [
             json!([
                 ACCT,
