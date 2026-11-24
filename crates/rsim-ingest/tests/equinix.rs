@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use rsim_core::{FunctionId, NetFunction};
+use rsim_core::FunctionId;
 use rsim_functions::{CircuitLeg, FarEnd, Tags, VlanTag};
 use rsim_ingest::equinix::{self, Lowered, Verdict};
 use rsim_ingest::estate::{Input, assemble};
