@@ -319,6 +319,32 @@ fn an_ended_circuit_has_no_leg_and_a_port_that_is_not_lowered_has_no_circuit() {
 }
 
 #[test]
+fn a_repeated_fabric_port_has_one_gate_and_is_not_lowered_when_its_items_differ() {
+    let mut list = ports();
+    let items = list.as_array_mut().unwrap();
+    items.push(port("p1", "ACTIVE", "DOT1Q", None));
+    items.push(port("p2", "ACTIVE", "QINQ", None));
+    let s = sections(&[("ports", list), ("connections", connections())]);
+    let account = equinix::read(ACCT, &Parsed::new(&s));
+    assert_eq!(account.ports.iter().filter(|p| p.uuid == "p1").count(), 1);
+    let l = equinix::lower(&account, &equinix::profile(), &BTreeMap::new());
+    assert_eq!(l.ports["p1"].reason, None);
+    let r = "the 2 items of the Fabric port p2 differ";
+    assert_eq!(l.ports["p2"].reason.as_deref(), Some(r));
+    assert!(l.notes.iter().any(|n| n == r));
+    let ids: Vec<String> = l.functions.iter().map(|f| f.id().to_string()).collect();
+    let mut once = ids.clone();
+    once.sort();
+    once.dedup();
+    assert_eq!(ids.len(), once.len());
+    let e = assemble(vec![Input::Equinix {
+        name: ACCT.into(),
+        sections: s,
+    }]);
+    e.builder.build().expect("the twin builds");
+}
+
+#[test]
 fn the_twin_of_an_account_builds_the_same_way_twice() {
     let input = || Input::Equinix {
         name: ACCT.into(),

@@ -107,6 +107,9 @@ fn port_tpid(p: &Port) -> Result<u16, String> {
 
 /// The reason why a port is not lowered, or its TPID.
 fn port_state(p: &Port) -> Result<u16, String> {
+    if let Some(r) = &p.conflict {
+        return Err(r.clone());
+    }
     match p.state.as_deref() {
         Some("ACTIVE") => {}
         Some(s) => {
