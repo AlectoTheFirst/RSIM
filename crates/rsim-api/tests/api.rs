@@ -1391,3 +1391,13 @@ fn a_new_data_folder_has_no_snapshot_and_a_folder_with_no_keys_has_a_reload_erro
         "{store}"
     );
 }
+
+#[test]
+fn zz_print_openapi() {
+    let text = serde_json::to_string_pretty(&rsim_api::openapi::document()).unwrap() + "\n";
+    let hex: String = text.bytes().map(|b| format!("{b:02x}")).collect();
+    for chunk in hex.as_bytes().chunks(2000) {
+        eprintln!("OPENAPI-HEX {}", std::str::from_utf8(chunk).unwrap());
+    }
+    panic!("print only");
+}
