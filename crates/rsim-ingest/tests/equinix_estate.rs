@@ -1,0 +1,260 @@
+//! 2 NX-OS switches at 2 sites, each bound to a Fabric port of an Equinix
+//! account, with a circuit from VLAN 100 at the first site to VLAN 200 at
+//! the second site, on synthetic configs and sections.
+
+use std::collections::BTreeMap;
+use std::net::IpAddr;
+
+use rsim_core::{Header, PROTO_TCP, Verdict, VerdictKind};
+use rsim_engine::{Answer, Executor, Query, Twin};
+use rsim_ingest::collected::{Collected, LinkRow, MacRow, NeighbourRow, RouteRow, row_span};
+use rsim_ingest::estate::{Estate, Input, assemble};
+use serde_json::json;
+
+const ACCT: &str = "equinix-lab";
+const H1: &str = "00:00:5e:00:53:a1";
+const H2: &str = "00:00:5e:00:53:a2";
+
+fn switch(name: &str, vlan: u16, svi: &str) -> String {
+    format!(
+        "hostname {name}
+vlan 1,{vlan}
+interface Vlan{vlan}
+  no shutdown
+  ip address {svi}/24
+interface Ethernet1/49
+  switchport
+  switchport mode trunk
+  switchport trunk allowed vlan {vlan}
+  no shutdown
+interface Ethernet1/5
+  switchport
+  switchport access vlan {vlan}
+  no shutdown
+"
+    )
+}
+
+fn mac_row(dev: &str, vlan: u16, mac: &str, port: &str, i: u64) -> MacRow {
+    MacRow {
+        vlan,
+        mac: mac.into(),
+        port: Some(port.into()),
+        kind: Some("dynamic".into()),
+        span: row_span(dev, "mac_table", "b3", i),
+    }
+}
+
+/// The collected state of a switch: the connected route of its SVI, the
+/// MAC of the SVI, the ARP row of its host and the MAC rows of both hosts.
+fn collected(dev: &str, vlan: u16, host: (&str, &str), far: &str) -> Collected {
+    let svi = format!("Vlan{vlan}");
+    Collected {
+        routes: vec![RouteRow {
+            vrf: "default".into(),
+            prefix: "192.0.2.0/24".into(),
+            protocol: "direct".into(),
+            selected: true,
+            next_hop: None,
+            interface: Some(svi.clone()),
+            span: row_span(dev, "routes", "b1", 0),
+        }],
+        links: vec![LinkRow {
+            interface: svi.clone(),
+            mac: Some(if vlan == 100 {
+                "00:00:5e:00:53:01".into()
+            } else {
+                "00:00:5e:00:53:02".into()
+            }),
+            parent: None,
+            vlan: None,
+            span: row_span(dev, "links", "b4", 0),
+        }],
+        neighbours: vec![NeighbourRow {
+            interface: svi,
+            ip: host.0.into(),
+            mac: Some(host.1.into()),
+            state: None,
+            span: row_span(dev, "neighbours", "b2", 0),
+        }],
+        macs: vec![
+            mac_row(dev, vlan, host.1, "Eth1/5", 0),
+            mac_row(dev, vlan, far, "Eth1/49", 1),
+        ],
+        ..Collected::default()
+    }
+}
+
+fn sections(host: &str, vlan: u16) -> BTreeMap<String, (Vec<u8>, String)> {
+    let ifs: Vec<String> = [format!("Vlan{vlan}"), "Ethernet1/49".into(), "Ethernet1/5".into()]
+        .iter()
+        .map(|i| {
+            format!(
+                r#"{{"interface":"{i}","admin_state":"up","state":"up","svi_admin_state":"up","svi_line_proto":"up"}}"#
+            )
+        })
+        .collect();
+    BTreeMap::from([
+        (
+            "lldp".to_string(),
+            r#"{"TABLE_nbor_detail":{"ROW_nbor_detail":[]}}"#.to_string(),
+        ),
+        (
+            "interfaces".to_string(),
+            format!(
+                r#"{{"TABLE_interface":{{"ROW_interface":[{}]}}}}"#,
+                ifs.join(",")
+            ),
+        ),
+        (
+            "version".to_string(),
+            format!(r#"{{"host_name":"{host}"}}"#),
+        ),
+    ])
+    .into_iter()
+    .map(|(k, v)| (k.clone(), (v.into_bytes(), format!("{host}/{k}"))))
+    .collect()
+}
+
+fn account() -> BTreeMap<String, (Vec<u8>, String)> {
+    let port = |uuid: &str| {
+        json!({"uuid": uuid, "name": format!("lab-{uuid}"), "state": "ACTIVE",
+               "encapsulation": {"type": "DOT1Q"}})
+    };
+    let colo = |p: &str, tag: u16| {
+        json!({"accessPoint": {"type": "COLO", "port": {"uuid": p},
+               "linkProtocol": {"type": "DOT1Q", "vlanTag": tag}}})
+    };
+    [
+        ("ports", json!([port("p1"), port("p2")])),
+        (
+            "connections",
+            json!([{"uuid": "c1", "type": "EVPL_VC", "state": "ACTIVE",
+                    "aSide": colo("p1", 100), "zSide": colo("p2", 200)}]),
+        ),
+        (
+            "bindings",
+            json!([
+                {"fabric_port": "p1", "device": "sw-a", "port": "Ethernet1/49"},
+                {"fabric_port": "lab-p2", "device": "sw-b", "port": "Ethernet1/49"},
+            ]),
+        ),
+    ]
+    .into_iter()
+    .map(|(k, v)| {
+        (
+            k.to_string(),
+            (
+                serde_json::to_vec_pretty(&v).unwrap(),
+                format!("{ACCT}/{k}@b1"),
+            ),
+        )
+    })
+    .collect()
+}
+
+fn estate() -> Estate {
+    assemble(vec![
+        Input::Nxos {
+            name: "sw-a".into(),
+            config: switch("sw-a", 100, "192.0.2.1").into_bytes(),
+            file: "sw-a/config".into(),
+            collected: collected("sw-a", 100, ("192.0.2.10", H1), H2),
+            sections: sections("sw-a", 100),
+        },
+        Input::Nxos {
+            name: "sw-b".into(),
+            config: switch("sw-b", 200, "192.0.2.2").into_bytes(),
+            file: "sw-b/config".into(),
+            collected: collected("sw-b", 200, ("192.0.2.20", H2), H1),
+            sections: sections("sw-b", 200),
+        },
+        Input::Equinix {
+            name: ACCT.into(),
+            sections: account(),
+        },
+    ])
+}
+
+fn ip(s: &str) -> IpAddr {
+    s.parse().unwrap()
+}
+
+fn run(t: &Twin, src: &str, dst: &str) -> Answer {
+    let h = Header::request(ip(src), ip(dst), PROTO_TCP)
+        .with_src_port(40000)
+        .with_dst_port(443);
+    Executor::new(t)
+        .run(&Query::path(t, &h).without_reply())
+        .expect("the query runs")
+}
+
+fn steps(a: &Answer) -> Vec<String> {
+    a.branches()
+        .iter()
+        .flat_map(|b| {
+            b.steps
+                .iter()
+                .map(|s| format!("{} {}", s.function, s.reason.detail))
+        })
+        .collect()
+}
+
+#[test]
+fn a_path_crosses_the_circuit_with_the_tag_of_each_site_in_both_directions() {
+    let t = estate().builder.build().expect("the twin builds");
+    for (src, dst, from, to) in [
+        ("192.0.2.10", "192.0.2.20", "p1 VLAN 100", "p2 VLAN 200"),
+        ("192.0.2.20", "192.0.2.10", "p2 VLAN 200", "p1 VLAN 100"),
+    ] {
+        let a = run(&t, src, dst);
+        let s = steps(&a);
+        assert!(
+            matches!(a.verdict(), Some(Verdict::Deliver(_))),
+            "{src} to {dst}: {:?} {s:#?}",
+            a.verdict()
+        );
+        assert!(
+            s.iter()
+                .any(|x| x.contains(&format!("from port port/{from} to port port/{to}"))),
+            "{s:#?}"
+        );
+        assert_eq!(
+            a.branches()
+                .iter()
+                .map(|b| b.verdict.kind())
+                .collect::<Vec<_>>(),
+            [VerdictKind::Deliver]
+        );
+    }
+}
+
+#[test]
+fn the_bound_ports_are_not_edge_ports_and_the_twin_is_the_same_from_2_runs() {
+    let one = estate();
+    let two = estate();
+    assert_eq!(one.notes, two.notes);
+    assert!(
+        one.notes.get(ACCT).is_none_or(Vec::is_empty),
+        "{:?}",
+        one.notes.get(ACCT)
+    );
+    let t = one.builder.build().expect("the twin builds");
+    let hosts: Vec<(String, String)> = t
+        .attachments()
+        .iter()
+        .map(|a| (a.address.to_string(), a.interface.to_string()))
+        .collect();
+    assert!(
+        hosts.contains(&("192.0.2.10".into(), "Ethernet1/5".into())),
+        "{hosts:?}"
+    );
+    assert!(
+        hosts.contains(&("192.0.2.20".into(), "Ethernet1/5".into())),
+        "{hosts:?}"
+    );
+    assert!(!hosts.iter().any(|(_, i)| i == "Ethernet1/49"), "{hosts:?}");
+    let fabric = &one.fabric[ACCT];
+    assert_eq!(fabric.len(), 1);
+    assert_eq!(fabric[0].verdict, rsim_ingest::equinix::Verdict::Lowered);
+}

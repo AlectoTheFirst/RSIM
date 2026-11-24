@@ -197,6 +197,7 @@ Before a change is done, read each new or changed text of the change against thi
 | VeloCloud ingestion tests | `cargo test -p rsim-ingest --test velocloud` |
 | VeloCloud lowering tests | `cargo test -p rsim-ingest --test velocloud_lower` |
 | Equinix ingestion tests | `cargo test -p rsim-ingest --test equinix` |
+| Equinix estate tests | `cargo test -p rsim-ingest --test equinix_estate` |
 | Equinix table tests | `cargo test -p rsim-cli --test equinix` |
 | VeloCloud topology, table and fact tests | `cargo test -p rsim-cli --test velocloud` |
 | TextFSM tests, with the conformance to Python textfsm | `cargo test -p rsim-textfsm` |
