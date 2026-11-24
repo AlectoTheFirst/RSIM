@@ -40,7 +40,7 @@ fn main() {
         .collect();
     let per: usize = args.get(1).and_then(|n| n.parse().ok()).unwrap_or(20);
     let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_io()
+        .enable_all()
         .build()
         .expect("runtime");
     let listener = rt
