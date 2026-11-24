@@ -5,7 +5,7 @@ use rsim_core::{
     Destination, EndpointId, FieldValue, Header, PROTO_TCP, PROTO_UDP, ReasonCode, SourceSpan,
     TraceStep, Verdict,
 };
-use rsim_engine::{Answer, BuildError, Executor, Query, Summary, Twin};
+use rsim_engine::{Answer, BuildError, ExecOptions, Executor, Query, Summary, Twin};
 use rsim_topologies::*;
 
 /// A path query. The ingress comes from the attachment record of the
@@ -463,6 +463,37 @@ fn equal_cost_paths_are_shown_one_by_one() {
         run(&twin, "client", web).single_summary(),
         Some(&Summary::Same(deliver("server")))
     );
+}
+
+#[test]
+fn a_query_past_the_branch_limit_ends_as_unknown_with_the_reason_step_budget() {
+    let twin = ecmp().build().unwrap();
+    let q = Query::path(&twin, &tcp("10.1.0.10", 40000, "10.4.0.10", 80));
+    let with_limit = |max_branches| {
+        let opts = ExecOptions {
+            max_branches,
+            ..ExecOptions::default()
+        };
+        Executor::with_options(&twin, opts).run(&q).unwrap()
+    };
+    let a = with_limit(4);
+    let Some(Verdict::Unknown(r)) = a.verdict() else {
+        panic!("{:?}", a.summary)
+    };
+    assert_eq!(r.code, ReasonCode::StepBudget);
+    assert!(r.detail.contains("branch limit 4"), "{r:?}");
+
+    // The reply walk counts against the same limit. The smallest limit that
+    // delivers the forward packets on both paths leaves the reply no branch.
+    let a = (1..1000)
+        .map(with_limit)
+        .find(|a| a.verdict() == Some(&deliver("server")))
+        .expect("a limit delivers the packets");
+    let reply = a.reply_of(0).expect("a reply ran");
+    let Some(Verdict::Unknown(r)) = reply.verdict() else {
+        panic!("{:?}", reply.summary)
+    };
+    assert_eq!(r.code, ReasonCode::StepBudget);
 }
 
 #[test]

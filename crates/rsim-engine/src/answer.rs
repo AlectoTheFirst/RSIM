@@ -1,6 +1,6 @@
 //! The answer of a query and the summary of its paths.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rsim_core::{
     AlternativeKind, Context, Delay, Destination, DeviceId, FlowState, FunctionId, InterfaceId,
@@ -9,7 +9,7 @@ use rsim_core::{
 
 /// The result of a query over all of its paths for one part of the packets.
 /// Each path and its own result are in [`Answer::branches`].
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Summary {
     /// Every path ends with this verdict.
     Same(Verdict),
@@ -82,8 +82,8 @@ pub struct End {
 pub enum IngressBasis {
     /// The query states the ingress.
     Explicit,
-    /// An attachment record names the source address. The spans are those
-    /// of the records.
+    /// Attachment records of the interface name the source addresses. The
+    /// spans are those of the records.
     Attachment(Vec<SourceSpan>),
     /// The source address is on a connected network of an edge interface.
     /// No record confirms the host.
@@ -156,7 +156,8 @@ impl Run {
 pub enum RunBody {
     /// The function applications of the run.
     Walked(Vec<ExecNode>),
-    /// The run ended before a function: no ingress, or the set budget.
+    /// The run ended before a function: no ingress, the set budget or the
+    /// branch limit.
     Ended(Box<End>),
 }
 
@@ -350,7 +351,8 @@ pub fn aggregate(nodes: &[ExecNode]) -> Result<Vec<Part>, String> {
     // handles each node after all of its children.
     let mut parts: Vec<Option<Vec<Part>>> = vec![None; nodes.len()];
     for i in (0..nodes.len()).rev() {
-        parts[i] = Some(aggregate_node(&nodes[i], &parts)?);
+        let p = aggregate_node(&nodes[i], &mut parts)?;
+        parts[i] = Some(p);
     }
     parts
         .into_iter()
@@ -360,7 +362,13 @@ pub fn aggregate(nodes: &[ExecNode]) -> Result<Vec<Part>, String> {
 }
 
 /// The parts of one alternative or one copy, combined with the parts of the
-/// others by intersection.
+/// others by intersection. The parts of each group are disjoint, so a part
+/// that is equal to a part of the next group meets no other part of that
+/// group.
+#[allow(
+    clippy::mutable_key_type,
+    reason = "the order of a packet set uses its edge and its arena address, which do not change"
+)]
 fn refine(groups: Vec<Vec<Part>>, combine: &dyn Fn(&[Summary]) -> Summary) -> Vec<Part> {
     let mut acc: Vec<(PacketSet, Vec<Summary>)> = Vec::new();
     for (i, g) in groups.into_iter().enumerate() {
@@ -371,9 +379,28 @@ fn refine(groups: Vec<Vec<Part>>, combine: &dyn Fn(&[Summary]) -> Summary) -> Ve
                 .collect();
             continue;
         }
+        let index: BTreeMap<&PacketSet, usize> = g
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| !p.packets.is_empty())
+            .map(|(j, p)| (&p.packets, j))
+            .collect();
+        let equal: BTreeSet<usize> = acc
+            .iter()
+            .filter_map(|(s, _)| index.get(s).copied())
+            .collect();
         let mut next = Vec::new();
         for (s, sums) in &acc {
-            for p in &g {
+            if let Some(&j) = index.get(s) {
+                let mut v = sums.clone();
+                v.push(g[j].summary.clone());
+                next.push((s.clone(), v));
+                continue;
+            }
+            for (j, p) in g.iter().enumerate() {
+                if equal.contains(&j) {
+                    continue;
+                }
                 let inter = s.intersect(&p.packets);
                 if !inter.is_empty() {
                     let mut v = sums.clone();
@@ -396,10 +423,14 @@ fn refine(groups: Vec<Vec<Part>>, combine: &dyn Fn(&[Summary]) -> Summary) -> Ve
 /// of each summary.
 pub fn merge(parts: Vec<Part>) -> Vec<Part> {
     let mut out: Vec<Part> = Vec::new();
+    let mut at: BTreeMap<Summary, usize> = BTreeMap::new();
     for p in parts {
-        match out.iter_mut().find(|q| q.summary == p.summary) {
-            Some(q) => q.packets = q.packets.union(&p.packets),
-            None => out.push(p),
+        match at.get(&p.summary).copied() {
+            Some(i) => out[i].packets = out[i].packets.union(&p.packets),
+            None => {
+                at.insert(p.summary.clone(), out.len());
+                out.push(p);
+            }
         }
     }
     out
@@ -408,7 +439,8 @@ pub fn merge(parts: Vec<Part>) -> Vec<Part> {
 /// The parts of each alternative or copy of one decision point, by index.
 type Groups = BTreeMap<u32, Vec<Part>>;
 
-fn aggregate_node(node: &ExecNode, done: &[Option<Vec<Part>>]) -> Result<Vec<Part>, String> {
+/// The parts of one node. It takes the parts of each child from `done`.
+fn aggregate_node(node: &ExecNode, done: &mut [Option<Vec<Part>>]) -> Result<Vec<Part>, String> {
     let mut plain = Vec::new();
     let mut choices: BTreeMap<(FunctionId, String), (AlternativeKind, Groups)> = BTreeMap::new();
     let mut floods: BTreeMap<(FunctionId, String), Groups> = BTreeMap::new();
@@ -419,7 +451,7 @@ fn aggregate_node(node: &ExecNode, done: &[Option<Vec<Part>>]) -> Result<Vec<Par
                 summary: Summary::Same(end.verdict.clone()),
             }],
             (None, Some(n)) => done[n]
-                .clone()
+                .take()
                 .ok_or_else(|| format!("the child of {} has no summary", node.function))?,
             (None, None) => return Err(format!("an edge of {} has no end", node.function)),
         };
