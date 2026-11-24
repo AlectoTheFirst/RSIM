@@ -57,6 +57,20 @@ pub enum TunnelState {
     NotCollected,
 }
 
+/// The reason of a tunnel state that is not known.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum StateReason {
+    /// The SD-WAN peers of the device are not collected.
+    NotCollected,
+    /// The state of a WAN link of the tunnels to the far end is not known.
+    LinkStateNotKnown,
+    /// The peer row of the far end has no path count.
+    PathsNotCollected,
+    /// The live paths of the far end differ from the tunnels whose links
+    /// are up.
+    PathsDiffer,
+}
+
 /// One tunnel to a far end: a pair of WAN links.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OverlayTunnel {
@@ -64,7 +78,15 @@ pub struct OverlayTunnel {
     pub link: String,
     /// The WAN link of the far end.
     pub far_link: String,
+    /// The transport network of the 2 links: `public` or the name of a
+    /// private network.
+    pub transport: String,
     pub state: TunnelState,
+    /// The reason of the state `NotCollected`.
+    pub state_reason: Option<StateReason>,
+    /// The number of stable and unstable paths of the far end of the tunnel
+    /// in the collected state, when the state gives it.
+    pub far_paths: Option<u32>,
     /// The encapsulation of the tunnel.
     pub next: FunctionId,
     pub spans: Vec<SourceSpan>,
@@ -86,6 +108,8 @@ pub struct OverlaySelect {
     pub meta: Meta,
     /// The far edge or gateway of the tunnels.
     pub far: String,
+    /// The segment of the packets.
+    pub segment: u32,
     pub tunnels: Vec<OverlayTunnel>,
     /// The steering rules, in rule order. The action of a rule is the set
     /// of the local links to which it pins its packets; an empty set keeps

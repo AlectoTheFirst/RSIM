@@ -8,7 +8,7 @@ import { VirtualRows } from "../page/VirtualRows";
 import { utcText } from "../page/frame";
 import { SIZE } from "../theme";
 import { type EndpointRow, FACT_LABELS, type PanelLink, endpointRowsOf, panelLinks, speedOf } from "./draw";
-import { type Layer, type MapGraph, deviceId, groupId } from "./graph";
+import { type Layer, type MapGraph, deviceId, groupId, isTwinDevice } from "./graph";
 import { type FactValue, deviceFacts, deviceFactsParams, endpointsParams, entryPoint } from "./select";
 
 /** The endpoints that one request reads. */
@@ -190,7 +190,8 @@ export function MapPanel(props: {
   if (!n) return null;
   const device = n.device;
   const hasEndpoints = device !== null && (props.graph.node.get(groupId(device))?.count ?? 0) > 0;
-  const expand = n.kind === "device" && device !== null ? props.onExpand(device) : null;
+  const twinDevice = isTwinDevice(n);
+  const expand = twinDevice && device !== null ? props.onExpand(device) : null;
   const deviceFoot =
     device !== null ? (
       <>
@@ -208,7 +209,7 @@ export function MapPanel(props: {
       </>
     ) : undefined;
 
-  if (n.kind === "device" && device !== null) {
+  if (twinDevice && device !== null) {
     return (
       <Panel title={<span class="t-value strong">{device}</span>} label={device} onClose={props.onClose} foot={deviceFoot} returnFocus={props.returnFocus} class="map-panel">
         <Facts twin={props.twin} device={device} />

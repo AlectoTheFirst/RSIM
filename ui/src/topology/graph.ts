@@ -10,8 +10,11 @@ export type TopoNode = components["schemas"]["TopoNode"];
 export type Layer = "physical" | "overlay";
 export const LAYERS: readonly Layer[] = ["physical", "overlay"];
 
-/** The kind of a card: a device of the twin, an endpoint of a path, the other endpoints of a device, a neighbour outside the twin, a tunnel peer outside the twin. */
-export type NodeKind = "device" | "endpoint" | "endpoints" | "outside" | "peer";
+/** The kind of a card: a device of the twin, a transport network of the twin, an endpoint of a path, the other endpoints of a device, a neighbour outside the twin, a tunnel peer outside the twin. */
+export type NodeKind = "device" | "network" | "endpoint" | "endpoints" | "outside" | "peer";
+
+/** Whether a node of the API is a device of the twin: a device or a transport network. */
+export const isTwinDevice = (n: { kind: string }) => n.kind === "device" || n.kind === "network";
 
 export interface MapNode {
   /** `d:<device>`, `e:<device>:<label>`, `g:<device>`, `o:<neighbour>` or `p:<node of the API>`. */
@@ -80,7 +83,7 @@ export interface Pair {
 }
 
 export interface MapGraph {
-  /** The nodes in the order: devices, tunnel peers, outside, endpoint cards. */
+  /** The nodes in the order: devices and transport networks, tunnel peers, outside, endpoint cards. */
   nodes: MapNode[];
   pairs: Pair[];
   node: Map<string, MapNode>;
@@ -299,11 +302,11 @@ export function buildGraph(input: GraphInput): MapGraph {
     nodes.push(n);
   };
   const devices = input.topology.nodes
-    .filter((n) => n.kind === "device")
-    .map((n) => ({ name: n.device ?? n.id, functions: n.functions ?? null }))
+    .filter(isTwinDevice)
+    .map((n) => ({ name: n.device ?? n.id, functions: n.functions ?? null, kind: n.kind === "network" ? ("network" as const) : ("device" as const) }))
     .sort((x, y) => natural(x.name, y.name));
   for (const d of devices) {
-    add({ id: deviceId(d.name), kind: "device", label: d.name, device: d.name, count: null, functions: d.functions, hatch: false });
+    add({ id: deviceId(d.name), kind: d.kind, label: d.name, device: d.name, count: null, functions: d.functions, hatch: false });
   }
   const idOf = apiNodeId(input.topology.nodes);
   const peers = input.topology.nodes.filter((n) => n.kind === "peer").sort((x, y) => natural(x.label, y.label) || natural(x.id, y.id));

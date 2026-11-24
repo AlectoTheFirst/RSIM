@@ -16,7 +16,7 @@ const W = SIZE.mapCard;
 const H = SIZE.mapCardHeight;
 const STRIP = hatchLines(SIZE.hatchSquare, H);
 
-/** The rounded ends of an endpoint, an endpoints card and a network outside the twin. */
+/** The rounded ends of an endpoint, an endpoints card, a transport network and a network outside the twin. */
 const roundEnds = (n: MapNode) => n.kind !== "device";
 const radiusOf = (n: MapNode) => (roundEnds(n) ? H / 2 : SIZE.cardRadius);
 

@@ -202,6 +202,30 @@ describe("the facts of a device", () => {
   });
 });
 
+describe("a transport network of an SD-WAN", () => {
+  const twinJson = { id: "builtin.sdwan", base: "builtin.sdwan", snapshot: null, layers: [] };
+  const node = (id: string, kind: string) => ({ id, kind, label: id, device: id, functions: 4 });
+  const link = (from: string, to: string) => ({ id: `physical:${from}|${to}`, layer: "physical", from, to, facts: { links: [] }, provenance: [], claims: {}, branches: [], overlay: null });
+  const topo = {
+    rsim_json: 2,
+    kind: "topology",
+    topology: "sdwan",
+    twin: twinJson,
+    level: "device",
+    layers: ["physical", "overlay"],
+    nodes: [node("e1", "device"), node("e2", "device"), node("ent/transport/public", "network")],
+    edges: [link("e1", "ent/transport/public"), link("e2", "ent/transport/public")],
+  } as unknown as TopologyOut;
+  const g = buildGraph({ topology: topo });
+
+  it("draws the network as a card of the twin with a link to each edge", () => {
+    expect(g.node.get("d:ent/transport/public")).toMatchObject({ kind: "network", device: "ent/transport/public", hatch: false });
+    expect(g.node.get("d:e1")).toMatchObject({ kind: "device" });
+    expect(g.pair.has(pairKey("physical", "d:e1", "d:ent/transport/public"))).toBe(true);
+    expect(g.pair.get(pairKey("physical", "d:e2", "d:ent/transport/public"))!.dashed).toBe(false);
+  });
+});
+
 describe("a path into a WireGuard tunnel to a peer outside the twin", () => {
   const twinJson = { id: "builtin.vpn", base: "builtin.vpn", snapshot: null, layers: [] };
   const peerNode = { id: "peer:203.0.113.5", kind: "peer", label: "remote", device: null, functions: null };

@@ -3,6 +3,7 @@
 
 use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::net::IpAddr;
 
 use rsim_contract::args::TopologyViewArgs;
 use rsim_contract::claim;
@@ -10,8 +11,9 @@ use rsim_contract::topology::{TopoEdge, TopoNode, TopologyOut};
 use rsim_core::FunctionKind;
 use rsim_engine::Answer;
 use rsim_functions::{
-    Egress, LinkFacts, OverlaySelect, PortEgress, TunnelPeer, TunnelState, VCMP_PORT, VcmpEncap,
-    VxlanEncap, WireguardEncap, WireguardPeer,
+    Egress, LinkFacts, OverlaySelect, PortEgress, RouteKind, RouteLookup, TransportLookup,
+    TunnelPeer, TunnelState, VCMP_PORT, VcmpDecap, VcmpEncap, VxlanEncap, WireguardEncap,
+    WireguardPeer,
 };
 use serde_json::{Value, json};
 
@@ -66,11 +68,18 @@ fn links(t: &Loaded) -> Vec<(String, String, String, Option<&LinkFacts>)> {
     out
 }
 
+/// The node of each device: the kind `network` for a transport network
+/// with a `TransportLookup`, else the kind `device`.
 fn device_nodes(t: &Loaded) -> BTreeMap<String, TopoNode> {
     let mut count: BTreeMap<String, usize> = BTreeMap::new();
+    let mut networks: BTreeSet<String> = BTreeSet::new();
     for f in t.functions() {
         if let Some(d) = f.device() {
             *count.entry(d.to_string()).or_default() += 1;
+            let any: &dyn Any = f.as_ref();
+            if any.is::<TransportLookup>() {
+                networks.insert(d.to_string());
+            }
         }
     }
     t.devices()
@@ -81,7 +90,11 @@ fn device_nodes(t: &Loaded) -> BTreeMap<String, TopoNode> {
                 id.clone(),
                 TopoNode {
                     id: id.clone(),
-                    kind: "device".into(),
+                    kind: if networks.contains(&id) {
+                        "network".into()
+                    } else {
+                        "device".into()
+                    },
                     label: id.clone(),
                     device: Some(id.clone()),
                     functions: count.get(&id).copied(),
@@ -163,13 +176,75 @@ fn wireguard_far(
         .collect()
 }
 
+/// The devices of each address of a VCMP tunnel end: the source address of
+/// each VCMP encapsulation, and each local host route of a route lookup
+/// whose local function is a VCMP decapsulation.
+pub(crate) fn vcmp_ends(t: &Loaded) -> BTreeMap<IpAddr, BTreeSet<String>> {
+    let is_decap = |id: &rsim_core::FunctionId| {
+        t.function(id).is_some_and(|f| {
+            let any: &dyn Any = f.as_ref();
+            any.is::<VcmpDecap>()
+        })
+    };
+    let mut ends: BTreeMap<IpAddr, BTreeSet<String>> = BTreeMap::new();
+    for f in t.functions() {
+        let Some(d) = f.device() else {
+            continue;
+        };
+        let any: &dyn Any = f.as_ref();
+        if let Some(v) = any.downcast_ref::<VcmpEncap>() {
+            ends.entry(v.source).or_default().insert(d.to_string());
+        }
+        if let Some(rl) = any.downcast_ref::<RouteLookup>()
+            && rl.local.as_ref().is_some_and(is_decap)
+        {
+            for fib in rl.tables.values() {
+                for (p, route) in fib.entries() {
+                    let host = if p.is_ipv4() { 32 } else { 128 };
+                    if route.kind == RouteKind::Local && p.len() == host {
+                        ends.entry(p.addr()).or_default().insert(d.to_string());
+                    }
+                }
+            }
+        }
+    }
+    ends
+}
+
+/// The devices of the twin with the tunnel end `peer`, other than `device`.
+pub(crate) fn vcmp_far(
+    ends: &BTreeMap<IpAddr, BTreeSet<String>>,
+    device: &str,
+    peer: IpAddr,
+) -> Vec<String> {
+    ends.get(&peer)
+        .into_iter()
+        .flatten()
+        .filter(|d| *d != device)
+        .cloned()
+        .collect()
+}
+
+/// The node `peer:<address>` of the far end of a VCMP tunnel outside the
+/// twin.
+fn vcmp_peer_node(v: &VcmpEncap) -> TopoNode {
+    TopoNode {
+        id: format!("peer:{}", v.peer),
+        kind: "peer".into(),
+        label: v.peer.to_string(),
+        device: None,
+        functions: None,
+    }
+}
+
 /// The tunnel edges: from each device with a VXLAN encapsulation to each
 /// device whose tunnel end is the peer, and from each device with a
 /// WireGuard interface to each peer: the device of the twin whose WireGuard
 /// source address is the endpoint of the peer, else a node `peer` outside
 /// the twin. A VCMP tunnel goes to the device whose WAN link has the peer
-/// address, else to a node `peer`, and has the state of its tunnel in the
-/// selection of the overlay. The nodes of the peers outside the twin come
+/// address or a local address of the route lookup before its VCMP
+/// decapsulation, else to a node `peer`, and has the state of its tunnel in
+/// the selection of the overlay. The nodes of the peers outside the twin come
 /// with the edges.
 fn overlay(t: &Loaded) -> (Vec<TopoEdge>, BTreeMap<String, TopoNode>) {
     let mut ends: BTreeMap<std::net::IpAddr, BTreeSet<String>> = BTreeMap::new();
@@ -177,8 +252,7 @@ fn overlay(t: &Loaded) -> (Vec<TopoEdge>, BTreeMap<String, TopoNode>) {
     let wg_ends = wireguard_ends(t);
     let mut wgs: Vec<(String, String, &WireguardEncap)> = Vec::new();
     let mut vcmps: Vec<(String, String, &VcmpEncap)> = Vec::new();
-    // The devices of the address of each WAN link with a VCMP tunnel.
-    let mut vcmp_ends: BTreeMap<std::net::IpAddr, BTreeSet<String>> = BTreeMap::new();
+    let vends = vcmp_ends(t);
     // The state of the tunnel of each VCMP encapsulation.
     let mut vcmp_states: BTreeMap<String, TunnelState> = BTreeMap::new();
     // The gateways of the route next hops that go to each function: the
@@ -200,7 +274,6 @@ fn overlay(t: &Loaded) -> (Vec<TopoEdge>, BTreeMap<String, TopoNode>) {
         if let Some(v) = any.downcast_ref::<VcmpEncap>()
             && let Some(d) = f.device()
         {
-            vcmp_ends.entry(v.source).or_default().insert(d.to_string());
             vcmps.push((d.to_string(), f.id().to_string(), v));
         }
         if let Some(s) = any.downcast_ref::<OverlaySelect>() {
@@ -296,22 +369,11 @@ fn overlay(t: &Loaded) -> (Vec<TopoEdge>, BTreeMap<String, TopoNode>) {
         }
     }
     for (d, encap, v) in &vcmps {
-        let far: Vec<String> = vcmp_ends
-            .get(&v.peer)
-            .into_iter()
-            .flatten()
-            .filter(|x| *x != d)
-            .cloned()
-            .collect();
+        let far = vcmp_far(&vends, d, v.peer);
         let targets = if far.is_empty() {
-            let id = format!("peer:{}", v.peer);
-            peers.entry(id.clone()).or_insert_with(|| TopoNode {
-                id: id.clone(),
-                kind: "peer".into(),
-                label: v.peer.to_string(),
-                device: None,
-                functions: None,
-            });
+            let node = vcmp_peer_node(v);
+            let id = node.id.clone();
+            peers.entry(id.clone()).or_insert(node);
             vec![id]
         } else {
             far
@@ -375,6 +437,25 @@ fn wireguard_step(
         functions: None,
     };
     Some((id, Some(node)))
+}
+
+/// The node `peer` of a VCMP encapsulation step whose peer address is the
+/// tunnel end of no other device of the twin; none for a peer address of a
+/// device of the twin.
+fn vcmp_step(
+    t: &Loaded,
+    ends: &BTreeMap<IpAddr, BTreeSet<String>>,
+    s: &rsim_core::TraceStep,
+) -> Option<(String, Option<TopoNode>)> {
+    let f = t.function(&s.function)?;
+    let any: &dyn Any = f.as_ref();
+    let v = any.downcast_ref::<VcmpEncap>()?;
+    let d = f.device()?.to_string();
+    if !vcmp_far(ends, &d, v.peer).is_empty() {
+        return None;
+    }
+    let node = vcmp_peer_node(v);
+    Some((node.id.clone(), Some(node)))
 }
 
 /// The source address of each WireGuard peer of the twin, with its devices.
@@ -560,7 +641,8 @@ struct OpenTunnel {
     start: String,
     /// The hops of the outer packet since the encapsulation.
     hops: Vec<(String, String)>,
-    /// The node of the WireGuard peer, or none for another tunnel.
+    /// The far end of a WireGuard tunnel, or the node `peer` of a VCMP
+    /// tunnel; none for another tunnel.
     far: Option<String>,
 }
 
@@ -587,12 +669,14 @@ fn close(
 /// encapsulates to the device that decapsulates. The id of an underlay
 /// edge holds both tunnel ends. A WireGuard tunnel with no decapsulation in
 /// the branch ends at its peer: the device of the twin whose WireGuard
-/// source address is the endpoint, else a node `peer`. Another tunnel with
-/// no decapsulation in the branch gives underlay edges with only the start
-/// device and no overlay edge.
+/// source address is the endpoint, else a node `peer`, and a VCMP tunnel
+/// whose peer address is the tunnel end of no device of the twin ends at a
+/// node `peer`. Another tunnel with no decapsulation in the branch gives
+/// underlay edges with only the start device and no overlay edge.
 pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
     let devices = device_nodes(t);
     let ends = wireguard_ends(t);
+    let vends = vcmp_ends(t);
     let mut used: BTreeSet<String> = BTreeSet::new();
     let mut peers: BTreeMap<String, TopoNode> = BTreeMap::new();
     let mut edges: BTreeMap<String, TopoEdge> = BTreeMap::new();
@@ -636,12 +720,14 @@ pub fn drawing(topology: &str, t: &Loaded, a: &Answer) -> TopologyOut {
                 if let Some(o) = tunnel.take() {
                     close(&mut add, &o.start, o.far.as_deref(), o.hops, b.index);
                 }
-                let far = wireguard_step(t, &ends, s).map(|(far, node)| {
-                    if let Some(n) = node {
-                        peers.entry(n.id.clone()).or_insert(n);
-                    }
-                    far
-                });
+                let far = wireguard_step(t, &ends, s)
+                    .or_else(|| vcmp_step(t, &vends, s))
+                    .map(|(far, node)| {
+                        if let Some(n) = node {
+                            peers.entry(n.id.clone()).or_insert(n);
+                        }
+                        far
+                    });
                 tunnel = Some(OpenTunnel {
                     start: d.clone(),
                     hops: Vec::new(),
@@ -903,6 +989,66 @@ mod tests {
         }
         assert_eq!(underlay.len(), 4);
         assert!(out.edges.iter().all(|e| e.layer != "physical"));
+    }
+
+    fn web(t: &Loaded) -> rsim_engine::Answer {
+        let h = rsim_topologies::tcp("10.1.0.10", 40000, "10.9.0.10", 443);
+        rsim_engine::Executor::new(&t.twin)
+            .run(&rsim_engine::Query::path(&t.twin, &h))
+            .expect("the query runs")
+    }
+
+    #[test]
+    fn a_vcmp_tunnel_whose_outer_packet_stops_before_the_far_edge_has_no_overlay_edge() {
+        let t = sdwan(rsim_topologies::SdwanOpts {
+            internet_denies_vcmp: true,
+            ..Default::default()
+        });
+        let out = super::drawing("sdwan", &t, &web(&t));
+        let tunnel = out
+            .edges
+            .iter()
+            .find(|e| e.id == "overlay:branch1>hub1")
+            .expect("the overlay edge");
+        assert_eq!(tunnel.branches, [1]);
+        let first: Vec<(&str, &str, &str, Option<&str>)> = out
+            .edges
+            .iter()
+            .filter(|e| e.branches.contains(&0))
+            .map(|e| {
+                (
+                    e.layer.as_str(),
+                    e.from.as_str(),
+                    e.to.as_str(),
+                    e.overlay.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(first, [("underlay", "branch1", "internet", None)]);
+        assert!(out.nodes.iter().all(|n| n.kind == "device"));
+    }
+
+    #[test]
+    fn a_vcmp_tunnel_to_an_address_of_no_device_of_the_twin_ends_at_a_peer_node() {
+        let t = sdwan(rsim_topologies::SdwanOpts::default());
+        let a = web(&t);
+        let branches = a.branches();
+        let step = branches
+            .iter()
+            .flat_map(|b| b.steps.iter().copied())
+            .find(|s| {
+                t.function(&s.function).is_some_and(|f| {
+                    let any: &dyn std::any::Any = f.as_ref();
+                    any.is::<rsim_functions::VcmpEncap>()
+                })
+            })
+            .expect("an encapsulation step");
+        assert!(super::vcmp_step(&t, &super::vcmp_ends(&t), step).is_none());
+        let (id, node) = super::vcmp_step(&t, &BTreeMap::new(), step).expect("the peer");
+        let node = node.expect("the node of the peer");
+        assert!(id.starts_with("peer:"), "{id}");
+        assert_eq!(node.id, id);
+        assert_eq!(node.kind, "peer");
     }
 
     #[test]

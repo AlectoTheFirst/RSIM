@@ -10,8 +10,8 @@ use rsim_core::{
 use rsim_engine::TwinBuilder;
 use rsim_functions::{
     EgressMode, ExitMark, Fib, OverlaySelect, OverlayTunnel, PolicyRoute, Route, RouteKind,
-    RouteLookup, RouteNextHop, RouteProtocol, Rule, RuleAction, TunnelState, VCMP_PORT, VcmpDecap,
-    VcmpEncap, VrfSelection,
+    RouteLookup, RouteNextHop, RouteProtocol, Rule, RuleAction, StateReason, TunnelState,
+    VCMP_PORT, VcmpDecap, VcmpEncap, VrfSelection,
 };
 
 use crate::builders::*;
@@ -27,6 +27,12 @@ const PRIVATE: &str = "wan2";
 const HUB_EXIT: &str = "eth8";
 const INTERNET_EXIT: &str = "eth0";
 const INTERNET_GATEWAY: &str = "192.0.2.254";
+
+/// The transport network of a WAN link: `public` for the public link, else
+/// the private network `mpls`.
+fn transport_of(link: &str) -> &'static str {
+    if link == PUBLIC { "public" } else { "mpls" }
+}
 
 /// The options of [`sdwan_site`].
 #[derive(Clone, Copy, Debug)]
@@ -257,13 +263,18 @@ fn edge(b: &mut TwinBuilder, e: &Edge, far: &Edge, private_tunnel: TunnelState, 
     b.add(OverlaySelect {
         meta: d.meta(&select, 20, 22),
         far: far.name.to_string(),
+        segment: 0,
         tunnels: links
             .iter()
             .enumerate()
             .map(|(i, (link, _, _, _, state))| OverlayTunnel {
                 link: (*link).to_string(),
                 far_link: format!("{}:{link}", far.name),
+                transport: transport_of(link).to_string(),
                 state: *state,
+                state_reason: (*state == TunnelState::NotCollected)
+                    .then_some(StateReason::NotCollected),
+                far_paths: None,
                 next: d.id(&encap(link)),
                 spans: vec![d.span(23 + i as u32, 23 + i as u32)],
             })
