@@ -17,6 +17,7 @@ pub mod resolve;
 pub mod route_tables;
 pub mod stanza;
 pub mod unifi;
+pub mod velocloud;
 pub mod vyos;
 
 pub use coverage::{Coverage, Entry, Reach, State, Table, classify, unread};

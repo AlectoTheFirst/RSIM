@@ -10,7 +10,8 @@ use rsim_store::{Snapshot, Store, StoreError};
 use serde_json::Value;
 
 use crate::stanza::read_json;
-use crate::{iosxe, iosxr, unifi, vyos};
+use crate::velocloud::json::J;
+use crate::{iosxe, iosxr, unifi, velocloud, vyos};
 
 /// Why a fact is not known.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -115,7 +116,8 @@ pub struct DeviceFacts {
     /// epoch.
     pub collected_at: u64,
     /// The device of the store whose manifest gives the facts: the console
-    /// of a UniFi device, else the device itself.
+    /// of a UniFi device, the enterprise of a VeloCloud edge, else the
+    /// device itself.
     pub store_device: String,
 }
 
@@ -230,6 +232,7 @@ pub fn sections(vendor: &str) -> &'static [&'static str] {
         "vyos" | "nxos" | "iosxe" => &["version"],
         "iosxr" => &["version", "inventory"],
         "unifi" => &["devices"],
+        "velocloud" => &["edges", "edges_v2"],
         _ => &[],
     }
 }
@@ -254,7 +257,11 @@ impl Identity {
 /// The facts of one device manifest, by twin device. A UniFi console gives
 /// one entry for each device record of its `devices` section, by the name
 /// that the lowering gives the device, and an entry of its own only when
-/// the section gives no device. Each other device gives one entry.
+/// the section gives no device. A VeloCloud enterprise gives one entry for
+/// each edge row of its `edges` section, else of its `edges_v2` section, by
+/// the twin device of the edge, with no management address, and an entry
+/// of its own only when neither section gives an edge. Each other device
+/// gives one entry.
 pub fn device(
     name: &str,
     vendor: &str,
@@ -308,6 +315,23 @@ pub fn device(
                 .into_iter()
                 .map(|(d, id, ip)| (d, facts(id, ip)))
                 .collect();
+        }
+        "velocloud" => {
+            let rows = ["edges", "edges_v2"]
+                .iter()
+                .filter_map(|s| get(s).map(|(b, f)| velocloud_edges(name, b, f)))
+                .find(|r| !r.is_empty());
+            if let Some(rows) = rows {
+                return rows
+                    .into_iter()
+                    .map(|(d, id)| (d, facts(id, Fact::Unknown(Reason::NotCollected))))
+                    .collect();
+            }
+            if get("edges").is_some() || get("edges_v2").is_some() {
+                Identity::all(Reason::NotRead)
+            } else {
+                Identity::all(Reason::NotCollected)
+            }
         }
         _ => Identity::all(Reason::NotRead),
     };
@@ -499,6 +523,45 @@ fn unifi_devices(bytes: &[u8], file: &str) -> Vec<(String, Identity, Fact)> {
             ))
         })
         .collect()
+}
+
+/// The edge rows of a VeloCloud `edges` or `edges_v2` section: the twin
+/// device of each edge, with its `modelNumber`, `softwareVersion` and
+/// `serialNumber`, each with the lines of its member.
+fn velocloud_edges(store: &str, bytes: &[u8], file: &str) -> Vec<(String, Identity)> {
+    let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
+        return Vec::new();
+    };
+    let Ok(doc) = read_json(bytes) else {
+        return Vec::new();
+    };
+    let root = J {
+        v: &v,
+        s: &doc.root,
+        file,
+    };
+    let mut out: Vec<(String, Identity)> = root
+        .rows()
+        .into_iter()
+        .filter_map(|r| {
+            let id = r.text("logicalId")?;
+            let field = |k: &str| (r.str(k), r.get(k).unwrap_or(r).span());
+            let (model, model_span) = field("modelNumber");
+            let (version, version_span) = field("softwareVersion");
+            let (serial, serial_span) = field("serialNumber");
+            Some((
+                velocloud::device_name(store, &id),
+                Identity {
+                    platform: Fact::named(model, model_span),
+                    os_version: Fact::named(version, version_span),
+                    serial: Fact::serial(serial, serial_span),
+                },
+            ))
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out.dedup_by(|a, b| a.0 == b.0);
+    out
 }
 
 #[cfg(test)]

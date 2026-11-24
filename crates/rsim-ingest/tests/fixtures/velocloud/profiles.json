@@ -1,0 +1,354 @@
+[
+  {
+    "id": 77,
+    "name": "profile-77",
+    "type": "SEGMENT_BASED",
+    "modules": [
+      {
+        "name": "deviceSettings",
+        "version": "9",
+        "data": {
+          "segments": [
+            {
+              "segment": {
+                "segmentId": 0,
+                "name": "Global Segment",
+                "type": "REGULAR"
+              },
+              "bgp": {
+                "enabled": true,
+                "ASN": "65010",
+                "neighbors": [
+                  {
+                    "neighborIp": "10.255.0.9"
+                  }
+                ]
+              },
+              "vpn": {
+                "enabled": true,
+                "edgeToEdgeDetail": {
+                  "vpnHubs": [
+                    {
+                      "logicalId": "cl-dc",
+                      "name": " DC-CLUSTER",
+                      "type": "edgeHubCluster"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "segment": {
+                "segmentId": 1,
+                "name": "corp",
+                "type": "REGULAR"
+              },
+              "bgp": {
+                "enabled": true,
+                "ASN": "65010"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "QOS",
+        "version": "4",
+        "data": {
+          "segments": [
+            {
+              "segment": {
+                "segmentId": 1,
+                "name": "corp",
+                "type": "REGULAR"
+              },
+              "rules": [
+                {
+                  "name": "voice",
+                  "ruleLogicalId": "rule-voice",
+                  "match": {
+                    "appid": -1,
+                    "classid": -1,
+                    "dscp": 46,
+                    "proto": 17,
+                    "sip": "any",
+                    "ssm": "255.255.255.255",
+                    "dip": "10.20.0.0",
+                    "dsm": "255.255.0.0",
+                    "dport_low": 5060,
+                    "dport_high": 5061,
+                    "sport_low": -1,
+                    "sport_high": -1,
+                    "hostname": "",
+                    "ipVersion": "IPv4"
+                  },
+                  "action": {
+                    "routeType": "edge2Any",
+                    "QoS": {
+                      "type": "realtime",
+                      "txScheduler": {
+                        "priority": "high",
+                        "bandwidthCapPct": -1
+                      },
+                      "rxScheduler": {
+                        "priority": "high",
+                        "bandwidthCapPct": 20
+                      }
+                    },
+                    "sla": {
+                      "jitterMs": "0",
+                      "latencyMs": "150",
+                      "lossPct": "0.0"
+                    },
+                    "nat": {
+                      "destIp": "no",
+                      "sourceIp": "no"
+                    },
+                    "edge2EdgeRouteAction": {
+                      "routePolicy": "auto",
+                      "linkPolicy": "fixed",
+                      "wanlink": "l-br-mpls",
+                      "linkOuterDscpTag": "EF",
+                      "linkInnerDscpTag": "EF"
+                    }
+                  }
+                },
+                {
+                  "name": "web",
+                  "ruleLogicalId": "rule-web",
+                  "match": {
+                    "sAddressGroup": "grp-users",
+                    "dPortGroup": "grp-web",
+                    "appid": 12
+                  },
+                  "action": {
+                    "edge2EdgeRouteAction": {
+                      "routePolicy": "direct",
+                      "linkPolicy": "auto",
+                      "interface": "GE2"
+                    }
+                  }
+                },
+                {
+                  "name": "backup",
+                  "ruleLogicalId": "rule-backup",
+                  "match": {
+                    "dipV6": "2001:db8:30::/48",
+                    "ipVersion": "IPv6"
+                  },
+                  "action": {
+                    "edge2EdgeRouteAction": {
+                      "routePolicy": "gateway",
+                      "linkPolicy": "mystery"
+                    },
+                    "edge2CloudRouteAction": {
+                      "routePolicy": "backhaul",
+                      "linkPolicy": "private",
+                      "linkOuterDscpTag": "CS0",
+                      "serviceGroup": "ALL",
+                      "routeCfg": {
+                        "backhaulEdges": [
+                          {
+                            "name": " DC-CLUSTER",
+                            "type": "edgeHubCluster"
+                          },
+                          {
+                            "name": "hub-1",
+                            "type": "edgeHub"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ],
+              "defaults": [
+                {
+                  "name": "Default-Any-Other",
+                  "ruleLogicalId": "d-any",
+                  "match": {},
+                  "action": {
+                    "edge2CloudRouteAction": {
+                      "routePolicy": "direct",
+                      "linkPolicy": "auto"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "WAN",
+        "version": "2",
+        "data": {}
+      },
+      {
+        "name": "firewall",
+        "version": "1",
+        "data": {
+          "firewall_enabled": true,
+          "stateful_firewall_enabled": true,
+          "firewall_logging_enabled": false,
+          "segments": [
+            {
+              "segment": {
+                "segmentId": 1,
+                "name": "corp",
+                "type": "REGULAR"
+              },
+              "stateful_firewall_enabled": true,
+              "firewall_logging_enabled": false,
+              "outbound": [
+                {
+                  "name": "dns",
+                  "ruleLogicalId": "fw-dns",
+                  "match": {
+                    "proto": 17,
+                    "dport_low": 53,
+                    "dport_high": 53
+                  },
+                  "action": {
+                    "allow_or_deny": "allow"
+                  }
+                },
+                {
+                  "name": "block-guest",
+                  "ruleLogicalId": "fw-block-guest",
+                  "match": {
+                    "sip": "10.10.10.0",
+                    "ssm": "255.255.255.0",
+                    "s_rule_type": "netmask",
+                    "dip": "203.0.113.0",
+                    "dsm": "255.255.255.0"
+                  },
+                  "action": {
+                    "allow_or_deny": "drop"
+                  }
+                },
+                {
+                  "name": "chat",
+                  "ruleLogicalId": "fw-chat",
+                  "match": {
+                    "appid": 7
+                  },
+                  "action": {
+                    "allow_or_deny": "skip"
+                  }
+                }
+              ]
+            }
+          ],
+          "inbound": [
+            {
+              "name": "web-in",
+              "ruleLogicalId": "fw-in-web",
+              "match": {
+                "proto": 6,
+                "dport_low": 443,
+                "dport_high": 443
+              },
+              "action": {
+                "type": "port_forwarding",
+                "nat": {
+                  "lan_ip": "10.10.10.20",
+                  "lan_port": 8443,
+                  "outbound": false
+                },
+                "interface": "GE2"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": 78,
+    "name": "profile-78",
+    "type": "SEGMENT_BASED",
+    "modules": [
+      {
+        "name": "deviceSettings",
+        "version": "9",
+        "data": {
+          "segments": [
+            {
+              "segment": {
+                "segmentId": 0,
+                "name": "Global Segment",
+                "type": "REGULAR"
+              },
+              "vpn": {
+                "enabled": false
+              }
+            },
+            {
+              "segment": {
+                "segmentId": 1,
+                "name": "corp",
+                "type": "REGULAR"
+              },
+              "bgp": {
+                "enabled": true,
+                "ASN": "65010"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "QOS",
+        "version": "4",
+        "data": {
+          "segments": [
+            {
+              "segment": {
+                "segmentId": 1,
+                "name": "corp",
+                "type": "REGULAR"
+              },
+              "rules": [
+                {
+                  "name": "web",
+                  "ruleLogicalId": "rule-web",
+                  "match": {
+                    "sAddressGroup": "grp-users",
+                    "dPortGroup": "grp-web",
+                    "appid": 12
+                  },
+                  "action": {
+                    "edge2EdgeRouteAction": {
+                      "routePolicy": "direct",
+                      "linkPolicy": "auto",
+                      "interface": "GE2"
+                    }
+                  }
+                }
+              ],
+              "defaults": [
+                {
+                  "name": "Default-Any-Other",
+                  "ruleLogicalId": "d-any",
+                  "match": {},
+                  "action": {
+                    "edge2CloudRouteAction": {
+                      "routePolicy": "direct",
+                      "linkPolicy": "auto"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "WAN",
+        "version": "2",
+        "data": {}
+      }
+    ]
+  }
+]

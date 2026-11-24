@@ -1,0 +1,61 @@
+[
+  {
+    "id": 5,
+    "logicalId": "grp-users",
+    "name": "users",
+    "type": "address_group",
+    "description": "",
+    "data": [
+      {
+        "ip": "10.10.10.0",
+        "mask": "255.255.255.0",
+        "rule_type": "netmask"
+      },
+      {
+        "ip": "10.11.0.0",
+        "mask": "0.0.255.255",
+        "rule_type": "wildcard"
+      },
+      {
+        "ip": "10.12.0.1",
+        "mask": "0.255.0.255",
+        "rule_type": "wildcard"
+      },
+      {
+        "ip": "2001:db8:10::",
+        "mask": "48",
+        "rule_type": "prefix"
+      }
+    ]
+  },
+  {
+    "id": 6,
+    "logicalId": "grp-web",
+    "name": "web-ports",
+    "type": "port_group",
+    "description": "",
+    "data": [
+      {
+        "proto": 6,
+        "port_low": 80,
+        "port_high": 80
+      },
+      {
+        "proto": 6,
+        "port_low": 443
+      }
+    ]
+  },
+  {
+    "id": 7,
+    "logicalId": "grp-domains",
+    "name": "domains",
+    "type": "address_group",
+    "description": "",
+    "data": [
+      {
+        "domain": "example.com"
+      }
+    ]
+  }
+]

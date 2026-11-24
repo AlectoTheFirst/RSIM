@@ -1,0 +1,35 @@
+{
+  "e-br": [
+    {
+      "edgeLogicalId": "e-hub",
+      "peerName": "hub-1",
+      "peerType": "HUB",
+      "peerHAType": "ACTIVE_ACTIVE",
+      "clusterId": 31,
+      "pathStatusCount": {
+        "stable": 2,
+        "unstable": 0,
+        "standby": 0,
+        "dead": 0,
+        "unknown": 0,
+        "total": 2
+      },
+      "pathQoe": 9.5
+    },
+    {
+      "deviceLogicalId": "g-1",
+      "peerName": "gw-1",
+      "peerType": "GATEWAY",
+      "pathStatusCount": {
+        "stable": 2,
+        "total": 2
+      }
+    }
+  ],
+  "e-hub": {
+    "_capability": {
+      "status": "unavailable",
+      "reason": "getEdgeSDWANPeers: 403"
+    }
+  }
+}
