@@ -1739,13 +1739,17 @@ export interface components {
         };
         /** @description Resolved settings */
         ResolvedSettings: {
+            api_base: components["schemas"]["Resolved"];
             capture_bgp: components["schemas"]["Resolved7"];
+            concurrency: components["schemas"]["Resolved4"];
             /** @description Credential */
             credential: components["schemas"]["Resolved"];
             ha: components["schemas"]["Resolved8"];
             interval_seconds: components["schemas"]["Resolved4"];
             nxos_json: components["schemas"]["Resolved5"];
+            orchestrator_release: components["schemas"]["Resolved"];
             paged_section_timeout_seconds: components["schemas"]["Resolved4"];
+            refresh_seconds: components["schemas"]["Resolved4"];
             request_timeout_seconds: components["schemas"]["Resolved4"];
             retries: components["schemas"]["Resolved4"];
             /** @description Route */
@@ -1911,7 +1915,14 @@ export interface components {
         };
         /** @description Settings */
         Settings: {
+            /** @description API base path */
+            api_base?: string | null;
             capture_bgp?: components["schemas"]["CaptureBgp"] | null;
+            /**
+             * Format: uint32
+             * @description Concurrency
+             */
+            concurrency?: number | null;
             /** @description Name */
             credential?: string | null;
             ha?: components["schemas"]["Ha"] | null;
@@ -1921,11 +1932,18 @@ export interface components {
              */
             interval_seconds?: number | null;
             nxos_json?: components["schemas"]["NxosJson"] | null;
+            /** @description Orchestrator release */
+            orchestrator_release?: string | null;
             /**
              * Format: uint32
              * @description Paged section time limit
              */
             paged_section_timeout_seconds?: number | null;
+            /**
+             * Format: uint32
+             * @description Module refresh
+             */
+            refresh_seconds?: number | null;
             /**
              * Format: uint32
              * @description Request time limit
@@ -2127,7 +2145,7 @@ export interface components {
          */
         TcpFlag: "fin" | "syn" | "rst" | "psh" | "ack" | "urg" | "ece" | "cwr";
         /** @description TLS trust */
-        TlsTrust: "pin" | "ca" | "none";
+        TlsTrust: "pin" | "ca" | "public" | "none";
         /**
          * TokenIn
          * @description New API token body

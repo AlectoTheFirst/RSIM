@@ -152,7 +152,7 @@ function GroupRow(props: { r: Extract<ListRow, { kind: "group" }>; by: Arrange; 
       {g ? g.settings.credential ? <span>{g.settings.credential}</span> : <HatchText>none</HatchText> : <span />}
       {g ? g.settings.route ? <span>{g.settings.route}</span> : <span class="t-label">direct</span> : <span />}
       {transport === "ssh" ? <span>{sshText(g!.settings.ssh_algorithms, g!.settings.ssh_mode)}</span> : <span />}
-      {transport === "https" ? <span>{trustText(g!.settings.tls_trust)}</span> : transport === "ssh" ? <HatchText>not known</HatchText> : <span />}
+      {transport === "https" ? <span>{trustText(g!.settings.tls_trust, g!.vendor)}</span> : transport === "ssh" ? <HatchText>not known</HatchText> : <span />}
       <span />
       <span />
       {g ? (

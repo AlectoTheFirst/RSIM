@@ -20,6 +20,21 @@ pub const DEFAULT_PAGED_SECTION_TIMEOUT_SECONDS: u32 = 300;
 /// The time between 2 collections of a device, in seconds, with no
 /// setting.
 pub const DEFAULT_INTERVAL_SECONDS: u32 = 60;
+/// The requests in flight to an orchestrator with no setting.
+pub const DEFAULT_CONCURRENCY: u32 = 4;
+/// The seconds after which the modules of an edge are read again, with no
+/// setting.
+pub const DEFAULT_REFRESH_SECONDS: u32 = 1800;
+
+/// The TLS trust of a vendor with no setting: the public roots for
+/// `velocloud`, else the pin.
+pub fn default_tls_trust(vendor: &str) -> TlsTrust {
+    if vendor == "velocloud" {
+        TlsTrust::Public
+    } else {
+        TlsTrust::Pin
+    }
+}
 
 /// Setting origin
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -85,10 +100,14 @@ pub struct ResolvedSettings {
     pub retries: Resolved<u32>,
     pub ha: Resolved<Ha>,
     pub interval_seconds: Resolved<u32>,
+    pub orchestrator_release: Resolved<Option<String>>,
+    pub api_base: Resolved<Option<String>>,
+    pub concurrency: Resolved<u32>,
+    pub refresh_seconds: Resolved<u32>,
 }
 
-/// The settings of a device that inherits from a group.
-pub fn resolve_settings(device: &Settings, group: &Settings) -> ResolvedSettings {
+/// The settings of a device of a vendor that inherits from a group.
+pub fn resolve_settings(device: &Settings, group: &Settings, vendor: &str) -> ResolvedSettings {
     let opt = |d: &Option<String>, g: &Option<String>| match (d, g) {
         (Some(v), _) => Resolved {
             value: Some(v.clone()),
@@ -114,7 +133,11 @@ pub fn resolve_settings(device: &Settings, group: &Settings) -> ResolvedSettings
         ssh_mode: pick(&device.ssh_mode, &group.ssh_mode, SshMode::Exec),
         ssh_channels: pick(&device.ssh_channels, &group.ssh_channels, 1),
         nxos_json: pick(&device.nxos_json, &group.nxos_json, NxosJson::Plain),
-        tls_trust: pick(&device.tls_trust, &group.tls_trust, TlsTrust::Pin),
+        tls_trust: pick(
+            &device.tls_trust,
+            &group.tls_trust,
+            default_tls_trust(vendor),
+        ),
         tls_ca_file: opt(&device.tls_ca_file, &group.tls_ca_file),
         capture_bgp: pick(
             &device.capture_bgp,
@@ -147,6 +170,14 @@ pub fn resolve_settings(device: &Settings, group: &Settings) -> ResolvedSettings
             &device.interval_seconds,
             &group.interval_seconds,
             DEFAULT_INTERVAL_SECONDS,
+        ),
+        orchestrator_release: opt(&device.orchestrator_release, &group.orchestrator_release),
+        api_base: opt(&device.api_base, &group.api_base),
+        concurrency: pick(&device.concurrency, &group.concurrency, DEFAULT_CONCURRENCY),
+        refresh_seconds: pick(
+            &device.refresh_seconds,
+            &group.refresh_seconds,
+            DEFAULT_REFRESH_SECONDS,
         ),
     }
 }
@@ -185,7 +216,7 @@ pub fn resolve_device(device: &Device, group: &Group) -> ResolvedDevice {
         site: device.site.clone(),
         location: device.location.clone(),
         console_site: device.console_site.clone(),
-        settings: resolve_settings(&device.settings, &group.settings),
+        settings: resolve_settings(&device.settings, &group.settings, &group.vendor),
     }
 }
 
@@ -305,6 +336,31 @@ mod tests {
             (s.interval_seconds.value, s.interval_seconds.origin),
             (60, Origin::Default)
         );
+        assert_eq!(s.orchestrator_release.value, None);
+        assert_eq!(s.api_base.value, None);
+        assert_eq!(s.concurrency.value, 4);
+        assert_eq!(s.refresh_seconds.value, 1800);
+    }
+
+    #[test]
+    fn a_velocloud_device_with_no_tls_setting_takes_the_public_roots() {
+        let mut g = group(Settings::default());
+        g.vendor = "velocloud".into();
+        let s = resolve_device(&device(Settings::default()), &g).settings;
+        assert_eq!(
+            (s.tls_trust.value, s.tls_trust.origin),
+            (TlsTrust::Public, Origin::Default)
+        );
+        g.settings.tls_trust = Some(TlsTrust::Pin);
+        let s = resolve_device(&device(Settings::default()), &g).settings;
+        assert_eq!(
+            (s.tls_trust.value, s.tls_trust.origin),
+            (TlsTrust::Pin, Origin::Group)
+        );
+        g.vendor = "unifi".into();
+        g.settings.tls_trust = None;
+        let s = resolve_device(&device(Settings::default()), &g).settings;
+        assert_eq!(s.tls_trust.value, TlsTrust::Pin);
     }
 
     #[test]

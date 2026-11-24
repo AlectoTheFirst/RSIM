@@ -1,0 +1,194 @@
+[
+  {
+    "_href": "/api/sdwan/v2/enterprises/ent-a/edges/edge-branch",
+    "id": 101,
+    "logicalId": "edge-branch",
+    "name": "branch-1",
+    "serialNumber": "S-0001",
+    "modelNumber": "edge610",
+    "edgeState": "CONNECTED",
+    "haState": "READY",
+    "isHub": false,
+    "activationKey": "FAKE-ACTV-0001",
+    "lastActive": "2026-11-23T07:59:00.000Z",
+    "site": {
+      "_href": "/api/sdwan/v2/enterprises/ent-a/sites/site-1",
+      "name": "branch-1",
+      "city": "Example City",
+      "lat": 0,
+      "lon": 0
+    },
+    "ha": {
+      "type": "ACTIVE_STANDBY",
+      "data": {
+        "haSerialNumber": "S-0002",
+        "haState": "READY",
+        "haMode": "standard"
+      }
+    },
+    "links": [
+      {
+        "_href": "/api/sdwan/v2/enterprises/ent-a/edges/edge-branch/links/link-b-mpls",
+        "logicalId": "link-b-mpls",
+        "internalId": "int-b-mpls",
+        "interface": "GE3",
+        "ipAddress": "172.16.10.2",
+        "networkSide": "WAN",
+        "networkType": "ETHERNET",
+        "displayName": "MPLS",
+        "isp": "carrier-a",
+        "state": "STABLE",
+        "linkMode": "ACTIVE",
+        "vpnState": "STABLE",
+        "backupState": "UNCONFIGURED",
+        "lastActive": "2026-11-23T07:59:00.000Z"
+      },
+      {
+        "_href": "/api/sdwan/v2/enterprises/ent-a/edges/edge-branch/links/link-b-dia",
+        "logicalId": "link-b-dia",
+        "internalId": "int-b-dia",
+        "interface": "GE4",
+        "ipAddress": "203.0.113.10",
+        "networkSide": "WAN",
+        "networkType": "ETHERNET",
+        "displayName": "DIA",
+        "isp": "carrier-b",
+        "state": "STABLE",
+        "linkMode": "ACTIVE",
+        "vpnState": "STABLE",
+        "backupState": "UNCONFIGURED",
+        "lastActive": "2026-11-23T07:59:00.000Z"
+      }
+    ],
+    "configuration": {
+      "operator": {
+        "id": 55,
+        "name": "operator-profile",
+        "modules": [
+          {"name": "controlPlane", "type": "OPERATOR", "version": "0", "isEdgeSpecific": false},
+          {"name": "metaData", "type": "OPERATOR", "version": "3", "isEdgeSpecific": false}
+        ]
+      },
+      "enterprise": {
+        "id": 77,
+        "name": "branch-profile",
+        "modules": [
+          {
+            "name": "deviceSettings",
+            "type": "ENTERPRISE",
+            "version": "9",
+            "isEdgeSpecific": true,
+            "edgeSpecificData": {
+              "routedInterfaces": [
+                {
+                  "name": "GE3",
+                  "wanOverlay": "AUTO_DISCOVERED",
+                  "segmentId": -1,
+                  "addressing": {"type": "STATIC", "cidrIp": "172.16.10.2", "cidrPrefix": 30, "gateway": "172.16.10.1"}
+                },
+                {
+                  "name": "GE4",
+                  "wanOverlay": "AUTO_DISCOVERED",
+                  "segmentId": -1,
+                  "addressing": {"type": "STATIC", "cidrIp": "203.0.113.10", "cidrPrefix": 29, "gateway": "203.0.113.9"}
+                }
+              ],
+              "lan": {
+                "networks": [
+                  {"name": "corporate", "vlanId": 10, "cidrIp": "10.10.10.1", "cidrPrefix": 24, "segmentId": 0}
+                ]
+              },
+              "segments": [
+                {
+                  "segment": {"segmentId": 0, "name": "Global Segment", "type": "REGULAR"},
+                  "bgp": {
+                    "enabled": true,
+                    "ASN": "65010",
+                    "routerId": "10.10.10.1",
+                    "neighbors": [
+                      {"neighborIp": "10.10.10.254", "neighborAS": "65000", "localIp": "10.10.10.1", "password": "fake-bgp-secret"}
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {"name": "QOS", "type": "ENTERPRISE", "version": "4", "isEdgeSpecific": false},
+          {"name": "WAN", "type": "ENTERPRISE", "version": "2", "isEdgeSpecific": false},
+          {"name": "firewall", "type": "ENTERPRISE", "version": "1", "isEdgeSpecific": false}
+        ]
+      }
+    }
+  },
+  {
+    "_href": "/api/sdwan/v2/enterprises/ent-a/edges/edge-hub",
+    "id": 102.0,
+    "logicalId": "edge-hub",
+    "name": "hub-1",
+    "serialNumber": "S-0003",
+    "modelNumber": "edge3810",
+    "edgeState": "CONNECTED",
+    "haState": "UNCONFIGURED",
+    "isHub": true,
+    "activationKey": "FAKE-ACTV-0003",
+    "lastActive": "2026-11-23T07:59:00.000Z",
+    "site": {
+      "_href": "/api/sdwan/v2/enterprises/ent-a/sites/site-2",
+      "name": "hub-1",
+      "city": "Example City",
+      "lat": 0,
+      "lon": 0
+    },
+    "links": [
+      {
+        "_href": "/api/sdwan/v2/enterprises/ent-a/edges/edge-hub/links/link-h-mpls",
+        "logicalId": "link-h-mpls",
+        "internalId": "int-h-mpls",
+        "interface": "GE3",
+        "ipAddress": "172.16.20.2",
+        "networkSide": "WAN",
+        "networkType": "ETHERNET",
+        "displayName": "MPLS",
+        "isp": "carrier-a",
+        "state": "STABLE",
+        "linkMode": "ACTIVE",
+        "vpnState": "STABLE",
+        "backupState": "UNCONFIGURED",
+        "lastActive": "2026-11-23T07:59:00.000Z"
+      },
+      {
+        "_href": "/api/sdwan/v2/enterprises/ent-a/edges/edge-hub/links/link-h-dia",
+        "logicalId": "link-h-dia",
+        "internalId": "int-h-dia",
+        "interface": "GE4",
+        "ipAddress": "198.51.100.20",
+        "networkSide": "WAN",
+        "networkType": "ETHERNET",
+        "displayName": "DIA",
+        "isp": "carrier-b",
+        "state": "STABLE",
+        "linkMode": "ACTIVE",
+        "vpnState": "STABLE",
+        "backupState": "UNCONFIGURED",
+        "lastActive": "2026-11-23T07:59:00.000Z"
+      }
+    ],
+    "configuration": {
+      "operator": {
+        "id": 55,
+        "name": "operator-profile",
+        "modules": [
+          {"name": "controlPlane", "type": "OPERATOR", "version": "0", "isEdgeSpecific": false}
+        ]
+      },
+      "enterprise": {
+        "id": 78,
+        "name": "hub-profile",
+        "modules": [
+          {"name": "deviceSettings", "type": "ENTERPRISE", "version": "5", "isEdgeSpecific": false},
+          {"name": "WAN", "type": "ENTERPRISE", "version": "2", "isEdgeSpecific": false}
+        ]
+      }
+    }
+  }
+]

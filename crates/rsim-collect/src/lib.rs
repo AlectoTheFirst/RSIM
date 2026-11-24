@@ -34,6 +34,8 @@ mod trust;
 mod tunnel;
 #[cfg(feature = "unifi")]
 pub mod unifi;
+#[cfg(feature = "velocloud")]
+pub mod velocloud;
 #[cfg(feature = "vyos")]
 pub mod vyos;
 
@@ -46,7 +48,9 @@ pub use pipeline::{
 };
 pub use schedule::{Due, Schedule, Scheduler};
 pub use source::{Capture, Extract, RawSection, SectionSpec, Source, Timeouts, fetch_sections};
-pub use transport::{BoxFuture, Https, Ssh, TransportError};
+pub use transport::{
+    BoxFuture, ERROR_TEXT_CHARS, HttpReply, Https, Ssh, TransportError, error_text,
+};
 pub use trust::{
     Credential, Credentials, MemoryCredentials, PinKind, PinPolicy, Secret, TrustStore,
 };

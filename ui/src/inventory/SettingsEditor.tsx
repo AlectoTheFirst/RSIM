@@ -98,7 +98,7 @@ export function SettingsEditor(props: {
   return (
     <div class="inv-settings">
       {SETTING_FIELDS.filter((f) => !props.omit?.includes(f.key) && usedSetting(f, props.vendors, props.vendor)).map((f) => {
-        const i = inherited(f, props.group, props.defaults);
+        const i = inherited(f, props.group, props.defaults, props.vendor);
         const origin = draftOrigin(f, draft, props.group, props.own);
         const set = origin === props.own;
         const value = draft[f.key] ?? "";
