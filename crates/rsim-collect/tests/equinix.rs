@@ -347,8 +347,15 @@ async fn an_account_with_no_network_edge_has_the_edge_sections_absent() {
     assert_eq!(t.calls(), 3);
 }
 
+/// The scheduler forces each collection of a device whose interval is
+/// 900 s or more, so the test of the keep lists uses 60 s.
 #[tokio::test(start_paused = true)]
 async fn a_cycle_with_only_a_changed_time_writes_no_snapshot() {
+    let minute = Duration::from_secs(60);
+    let dev = Device {
+        interval: minute,
+        ..device()
+    };
     let dir = tempfile::tempdir().unwrap();
     let clock = Arc::new(TokioClock::new(T0));
     let store = Store::open(dir.path(), keys::keys()).unwrap();
@@ -356,7 +363,7 @@ async fn a_cycle_with_only_a_changed_time_writes_no_snapshot() {
     account_api(&t, "2026-01-01T00:00:00Z");
     let mut c = Collector::new(
         store,
-        Box::new(vec![device()]),
+        Box::new(vec![dev]),
         Schedule {
             spread: false,
             ..Schedule::default()
@@ -370,13 +377,13 @@ async fn a_cycle_with_only_a_changed_time_writes_no_snapshot() {
     assert!(r.failed.is_empty(), "{r:?}");
     assert!(r.snapshot.is_some());
 
-    tokio::time::advance(INTERVAL).await;
+    tokio::time::advance(minute).await;
     account_api(&t, "2026-06-01T00:00:00Z");
     let r = c.run_cycle().await.unwrap();
     assert!(r.failed.is_empty(), "{r:?}");
     assert_eq!(r.snapshot, None);
 
-    tokio::time::advance(INTERVAL).await;
+    tokio::time::advance(minute).await;
     let mut ended = connection("c2", "p1", "p2", "2026-06-01T00:00:00Z");
     ended["state"] = json!("DEPROVISIONED");
     ok(
