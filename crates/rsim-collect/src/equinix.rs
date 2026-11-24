@@ -282,15 +282,10 @@ fn uuid(v: &Value) -> &str {
     v.get("uuid").and_then(Value::as_str).unwrap_or_default()
 }
 
-/// The `uuid` of each item, each once, in item order.
+/// The `uuid` of each item, each once, in sorted order.
 fn uuids(items: &[Value]) -> Vec<String> {
-    let mut seen = BTreeSet::new();
-    items
-        .iter()
-        .map(uuid)
-        .filter(|u| !u.is_empty() && seen.insert(*u))
-        .map(str::to_string)
-        .collect()
+    let set: BTreeSet<&str> = items.iter().map(uuid).filter(|u| !u.is_empty()).collect();
+    set.into_iter().map(str::to_string).collect()
 }
 
 /// The section of the items: the list sorted by `uuid` and then by the
