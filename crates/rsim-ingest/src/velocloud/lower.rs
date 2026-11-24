@@ -905,16 +905,27 @@ impl<'a> L<'a> {
         let mut own = 0;
         if let Some(t) = &ent.overlay {
             for row in t.rows.iter().filter(|r| r.segment == s.id) {
-                if row.edge == e.logical_id {
+                if row.edge.as_deref() == Some(e.logical_id.as_str()) {
                     own += 1;
                     continue;
                 }
                 let kind = RouteKind::Learned(RouteProtocol::Overlay);
                 let spans = vec![row.span.clone()];
-                let route = match ent.edge(&row.edge) {
+                let Some(far_edge) = &row.edge else {
+                    let reason = match row.edge_id {
+                        Some(n) => format!("edge {n} not known"),
+                        None => "edge of the exit not known".to_string(),
+                    };
+                    cands.entry(row.prefix).or_default().push(Candidate {
+                        class: row.class(&e.logical_id),
+                        route: Route::unknown(kind, reason, spans),
+                    });
+                    continue;
+                };
+                let route = match ent.edge(far_edge) {
                     None => Route::unknown(
                         kind,
-                        format!("edge {} not in the enterprise", row.edge),
+                        format!("edge {far_edge} not in the enterprise"),
                         spans,
                     ),
                     Some(_) if lan => {
@@ -933,7 +944,7 @@ impl<'a> L<'a> {
                         spans,
                     ),
                     Some(_) => {
-                        let far = Far::Edge(row.edge.clone());
+                        let far = Far::Edge(far_edge.clone());
                         let next = self.use_select(s, far, Traffic::Overlay);
                         Route::new(kind, vec![self.nh("overlay", None, &next)], spans)
                     }

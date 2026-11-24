@@ -4,7 +4,8 @@
 //! The route table holds the routes that each edge advertises into the
 //! overlay: one row for each subnet and each preferred exit of an edge. An
 //! exit of a router, a filtered or unreachable exit and an eligible exit
-//! give no row and are counted.
+//! give no row and are counted. A row whose edge is not known and a row of
+//! a segment that the enterprise does not list are kept and counted.
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -29,11 +30,13 @@ pub enum ExitKind {
 pub struct OverlayRow {
     pub prefix: Prefix,
     /// The segment of the exit, of the learned route or of the `subnet`
-    /// key, when it is a segment of the enterprise; else the Global
-    /// Segment.
+    /// key. It is the Global Segment when the row names no segment.
     pub segment: u32,
-    /// The logicalId of the edge.
-    pub edge: String,
+    /// The logicalId of the edge, or `None` when the exit has no
+    /// `edgeLogicalId` and its `edgeId` is not an edge of the listing.
+    pub edge: Option<String>,
+    /// `edgeId`.
+    pub edge_id: Option<u64>,
     pub kind: ExitKind,
     /// `entity`, for example `EDGE` or `HUB`.
     pub entity: Option<String>,
@@ -47,7 +50,8 @@ pub struct OverlayRow {
     pub span: SourceSpan,
 }
 
-/// The counts of the exits and subnets that give no row.
+/// The counts of the exits and subnets that give no row, and of the rows
+/// with an edge or a segment that the enterprise does not list.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Counts {
     /// Exits whose `exitType` is not `EDGE`.
@@ -56,7 +60,7 @@ pub struct Counts {
     pub withheld: u32,
     /// Edge exits of `eligableExits`.
     pub eligible: u32,
-    /// Preferred edge exits that name no edge.
+    /// Rows whose edge is not known.
     pub no_edge: u32,
     /// Subnets with no prefix that reads.
     pub no_prefix: u32,
@@ -132,24 +136,23 @@ pub fn overlay(root: J<'_>, edges: &BTreeMap<u64, String>, segments: &[Segment])
                     t.counts.eligible += 1;
                     continue;
                 }
-                let edge = e.text("edgeLogicalId").or_else(|| {
-                    e.v.get("edgeId")
-                        .and_then(numeric_id)
-                        .and_then(|n| edges.get(&n).cloned())
-                });
-                let Some(edge) = edge else {
+                let edge_id = e.v.get("edgeId").and_then(numeric_id);
+                let edge = e
+                    .text("edgeLogicalId")
+                    .or_else(|| edge_id.and_then(|n| edges.get(&n).cloned()));
+                if edge.is_none() {
                     t.counts.no_edge += 1;
-                    continue;
-                };
+                }
                 let seg = |v: Option<i64>| v.and_then(|n| u32::try_from(n).ok());
                 let named = seg(e.int("segmentId"))
                     .or_else(|| seg(route.and_then(|r| r.int("segmentId"))))
                     .or_else(|| tail.and_then(|x| x.trim().parse().ok()));
                 let segment = match named {
-                    Some(n) if segments.iter().any(|s| s.id == n) => n,
-                    Some(_) => {
-                        t.counts.other_segment += 1;
-                        global
+                    Some(n) => {
+                        if !segments.iter().any(|s| s.id == n) {
+                            t.counts.other_segment += 1;
+                        }
+                        n
                     }
                     None => global,
                 };
@@ -164,6 +167,7 @@ pub fn overlay(root: J<'_>, edges: &BTreeMap<u64, String>, segments: &[Segment])
                     prefix: p,
                     segment,
                     edge,
+                    edge_id,
                     kind,
                     entity: e.text("entity"),
                     protocol: e.text("protocol"),
@@ -295,11 +299,14 @@ pub fn order(a: (Prefix, RouteClass), b: (Prefix, RouteClass)) -> Option<Orderin
 impl OverlayRow {
     /// The class of the row on the edge `local`: a row of another edge is a
     /// remote route. A learned row of another edge is an overlay dynamic
-    /// route with no known preference. A static row of the edge, whose
-    /// Preferred the row does not give, a learned row of the edge and a row
-    /// of another kind are `NotKnown`.
+    /// route with no known preference. A row whose edge is not known, a
+    /// static row of the edge, whose Preferred the row does not give, a
+    /// learned row of the edge and a row of another kind are `NotKnown`.
     pub fn class(&self, local: &str) -> RouteClass {
-        let remote = self.edge != local;
+        let Some(edge) = &self.edge else {
+            return RouteClass::NotKnown;
+        };
+        let remote = edge.as_str() != local;
         match (&self.kind, remote) {
             (ExitKind::Connected, false) => RouteClass::LocalConnected,
             (ExitKind::Connected, true) => RouteClass::RemoteConnected,
