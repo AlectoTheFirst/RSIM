@@ -15,7 +15,7 @@ iosxr = ["ssh"]
 iosxe = ["ssh"]
 unifi = ["https"]
 ssh = ["dep:russh"]
-https = ["ssh", "dep:ring", "dep:rustls", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:bytes"]
+https = ["ssh", "dep:ring", "dep:rustls", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:bytes", "dep:httpdate", "dep:webpki-roots"]
 
 [dependencies]
 futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
@@ -23,6 +23,7 @@ bytes = { version = "1.12.1", optional = true }
 clap = { version = "4.6.7", features = ["derive", "env"] }
 getrandom = "0.3.4"
 http-body-util = { version = "0.1.5", optional = true }
+httpdate = { version = "1.0.3", optional = true }
 hyper = { version = "1.12.0", features = ["client", "http1"], optional = true }
 hyper-util = { version = "0.1.21", features = ["tokio"], optional = true }
 ring = { version = "0.17.14", optional = true }
@@ -33,6 +34,7 @@ rustls = { version = "0.23.46", default-features = false, features = ["ring", "s
 serde_json = "1"
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "net", "io-util", "signal"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"], optional = true }
+webpki-roots = { version = "=1.0.12", optional = true }
 
 [dev-dependencies]
 arrow-array = "60.1.0"
