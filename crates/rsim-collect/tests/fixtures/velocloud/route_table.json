@@ -1,0 +1,64 @@
+{
+  "profiles": [77, 78],
+  "subnets": [
+    {
+      "subnet": "10.20.20.0/24:1",
+      "ipVersion": 4,
+      "created": "2026-11-20T10:00:00.000Z",
+      "learnedRoute": {"cidrIp": "10.20.20.0", "cidrPrefix": 24, "segmentId": 1, "logicalId": "route-1", "modified": "2026-11-20T10:00:00.000Z"},
+      "preferredExits": [
+        {
+          "type": "LEARNED",
+          "exitType": "EDGE",
+          "entity": "edge",
+          "protocol": "BGP",
+          "segmentId": 1,
+          "edgeId": 102,
+          "edgeLogicalId": "edge-hub",
+          "neighborIp": "172.16.20.1",
+          "cost": 0,
+          "id": 9001,
+          "routeId": 501,
+          "edgeName": "hub-1"
+        }
+      ],
+      "eligableExits": [
+        {
+          "type": "LEARNED",
+          "exitType": "ROUTER",
+          "entity": "router",
+          "segmentId": 1,
+          "neighborIp": "172.16.20.1",
+          "cost": "10"
+        }
+      ]
+    },
+    {
+      "subnet": "10.10.10.0/24:0",
+      "ipVersion": 4,
+      "learnedRoute": {"cidrIp": "10.10.10.0", "cidrPrefix": 24, "segmentId": 0, "logicalId": "route-2"},
+      "preferredExits": [
+        {"type": "CONNECTED", "exitType": "EDGE", "edgeId": 101, "edgeLogicalId": "edge-branch", "interface": "GE2", "cost": 0}
+      ],
+      "eligableExits": []
+    },
+    {
+      "subnet": "2001:db8::/32:1",
+      "ipVersion": 6,
+      "learnedRoute": {"cidrIp": "2001:db8::", "cidrPrefix": 32, "segmentId": 1, "logicalId": "route-3"},
+      "preferredExits": [
+        {"type": "STATIC", "exitType": "EDGE", "edgeLogicalId": "edge-hub", "state": "UNREACHABLE", "cost": 5}
+      ],
+      "eligableExits": []
+    },
+    {
+      "subnet": "10.30.0.0/16",
+      "ipVersion": 4,
+      "learnedRoute": {"cidrIp": "10.30.0.0", "cidrPrefix": 16, "segmentId": 2, "logicalId": "route-4"},
+      "preferredExits": [
+        {"type": "STATIC", "exitType": "EDGE", "edgeLogicalId": "edge-branch", "cost": 1}
+      ],
+      "eligableExits": []
+    }
+  ]
+}

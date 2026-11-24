@@ -39,5 +39,6 @@ pub use prune::Pruned;
 pub use store::{Cycle, DeviceUpdate, Prepared, Snapshot, Store};
 pub use table::{
     ADDRESSES, CLIENTS, Cell, ColType, Column, LINK_SPEEDS, LINKS, MAC_TABLE, NEIGHBOURS,
-    PREFIX_COLUMNS, ROUTES, Row, TABLES, TableSchema, table,
+    PREFIX_COLUMNS, ROUTES, Row, TABLES, TableSchema, VELOCLOUD_BGP_SESSION, VELOCLOUD_EDGE_STATE,
+    VELOCLOUD_LINK_STATE, VELOCLOUD_ROUTE, table,
 };

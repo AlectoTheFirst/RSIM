@@ -2981,8 +2981,14 @@
       "ResolvedSettings": {
         "description": "Resolved settings",
         "properties": {
+          "api_base": {
+            "$ref": "#/components/schemas/Resolved"
+          },
           "capture_bgp": {
             "$ref": "#/components/schemas/Resolved7"
+          },
+          "concurrency": {
+            "$ref": "#/components/schemas/Resolved4"
           },
           "credential": {
             "$ref": "#/components/schemas/Resolved",
@@ -2997,7 +3003,13 @@
           "nxos_json": {
             "$ref": "#/components/schemas/Resolved5"
           },
+          "orchestrator_release": {
+            "$ref": "#/components/schemas/Resolved"
+          },
           "paged_section_timeout_seconds": {
+            "$ref": "#/components/schemas/Resolved4"
+          },
+          "refresh_seconds": {
             "$ref": "#/components/schemas/Resolved4"
           },
           "request_timeout_seconds": {
@@ -3048,7 +3060,11 @@
           "paged_section_timeout_seconds",
           "retries",
           "ha",
-          "interval_seconds"
+          "interval_seconds",
+          "orchestrator_release",
+          "api_base",
+          "concurrency",
+          "refresh_seconds"
         ],
         "type": "object"
       },
@@ -3682,6 +3698,13 @@
         "additionalProperties": false,
         "description": "Settings",
         "properties": {
+          "api_base": {
+            "description": "API base path",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "capture_bgp": {
             "anyOf": [
               {
@@ -3690,6 +3713,15 @@
               {
                 "type": "null"
               }
+            ]
+          },
+          "concurrency": {
+            "description": "Concurrency",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
             ]
           },
           "credential": {
@@ -3728,8 +3760,24 @@
               }
             ]
           },
+          "orchestrator_release": {
+            "description": "Orchestrator release",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "paged_section_timeout_seconds": {
             "description": "Paged section time limit",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "refresh_seconds": {
+            "description": "Module refresh",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -4383,6 +4431,11 @@
           {
             "const": "ca",
             "description": "CA bundle",
+            "type": "string"
+          },
+          {
+            "const": "public",
+            "description": "Public roots",
             "type": "string"
           },
           {

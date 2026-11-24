@@ -1,0 +1,23 @@
+{
+  "data": [
+    {
+      "edge": {"_href": "/api/sdwan/v2/enterprises/ent-a/edges/edge-branch"},
+      "neighborIp": "10.10.10.254",
+      "neighborAS": 65000,
+      "state": "ESTABLISHED",
+      "pfxRcvd": 12,
+      "upDownTime": 86400,
+      "timestamp": "2026-11-23T07:59:00.000Z"
+    },
+    {
+      "edge": {"_href": "/api/sdwan/v2/enterprises/ent-a/edges/edge-hub", "logicalId": "edge-hub"},
+      "neighborIp": "172.16.20.1",
+      "neighborAS": "65001",
+      "state": "IDLE",
+      "pfxRcvd": 0,
+      "upDownTime": 120,
+      "timestamp": "2026-11-23T07:59:00.000Z"
+    }
+  ],
+  "metaData": {"limit": 50, "more": false, "nextPageLink": null}
+}

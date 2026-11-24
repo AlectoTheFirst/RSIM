@@ -4,8 +4,10 @@
 //! vendor, with the credential reference `env:<P>`, the route of `<P>_VIA`
 //! and `<P>_PROXY`, and the vendor keys of the time limits and the BGP
 //! sections. A device with its own `VIA` or `PROXY` key gets its own route.
-//! A proxy login becomes the reference `env-url:<key>`, so no secret leaves
-//! the env file.
+//! Each VeloCloud orchestrator `VELOCLOUD_<NAME>_URL` is the group
+//! `velocloud-<name>` with the credential reference `env:VELOCLOUD_<NAME>`,
+//! and each of its enterprises is a device. A proxy login becomes the
+//! reference `env-url:<key>`, so no secret leaves the env file.
 
 use std::collections::BTreeMap;
 
@@ -44,6 +46,43 @@ pub const SSH_PREFIXES: [(&str, &str); 4] = [
 
 /// The largest time limit in seconds.
 pub const MAX_SECONDS: u32 = 86_400;
+
+/// The most requests in flight to a VeloCloud orchestrator.
+pub const MAX_CONCURRENCY: u32 = 16;
+
+/// The most retries of a read after a 429.
+pub const MAX_RETRIES: u32 = 10;
+
+/// Checks a VeloCloud release of 3 or 4 numbers: it must be 5.0.0.0 or
+/// later.
+pub fn check_release(release: &str) -> Result<(), String> {
+    let parts: Option<Vec<u64>> = release.split('.').map(|p| p.parse().ok()).collect();
+    let mut parts = match parts {
+        Some(p) if (3..=4).contains(&p.len()) => p,
+        _ => return Err(format!("the release {release} is not 3 or 4 numbers")),
+    };
+    parts.resize(4, 0);
+    if parts.as_slice() < [5, 0, 0, 0].as_slice() {
+        return Err(format!(
+            "the release {release} is before 5.0.0.0, the first release with the API v2 reads"
+        ));
+    }
+    Ok(())
+}
+
+/// The enterprise logicalIds of a list, separated by commas or by lines.
+pub fn enterprise_ids(text: &str) -> Vec<String> {
+    text.split([',', '\n'])
+        .map(str::trim)
+        .filter(|x| !x.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// The store device of an enterprise of a VeloCloud orchestrator.
+pub fn enterprise_device(orchestrator: &str, enterprise: &str) -> String {
+    format!("vco-{orchestrator}-{enterprise}")
+}
 
 /// The records of an env file, in the order of their dependencies.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -418,7 +457,7 @@ impl Builder<'_> {
             None => None,
             Some(t) => Some(
                 TlsTrust::parse(t)
-                    .ok_or_else(|| format!("UNIFI_TLS {t} is not pin, ca or none"))?,
+                    .ok_or_else(|| format!("UNIFI_TLS {t} is not pin, ca, public or none"))?,
             ),
         };
         if g.tls_trust == Some(TlsTrust::Ca) {
@@ -464,6 +503,145 @@ impl Builder<'_> {
         }
         Ok(())
     }
+
+    /// The VeloCloud orchestrators: one group `velocloud-<name>` for each
+    /// `VELOCLOUD_<NAME>_URL` with the keys of `<NAME>`, and one device
+    /// `vco-<name>-<logicalId>` for each enterprise, with the logicalId as
+    /// its console site.
+    fn velocloud(&mut self) -> Result<(), String> {
+        let env = self.env;
+        for (key, url) in env {
+            let Some(name) = key
+                .strip_prefix("VELOCLOUD_")
+                .and_then(|k| k.strip_suffix("_URL"))
+            else {
+                continue;
+            };
+            check_section_name(env, "VELOCLOUD", name)?;
+            let prefix = format!("VELOCLOUD_{name}");
+            let key = |k: &str| format!("{prefix}_{k}");
+            let get = |k: &str| env.get(&key(k));
+            let id = id_of(name);
+            let group = format!("velocloud-{id}");
+            if get("TOKEN").is_none() {
+                return Err(format!("{} is not set", key("TOKEN")));
+            }
+            for k in ["CLIENT_CERT", "CLIENT_KEY"] {
+                if get(k).is_some() {
+                    return Err(format!(
+                        "{}: the inventory has no client certificate of an orchestrator",
+                        key(k)
+                    ));
+                }
+            }
+            let release = get("RELEASE").ok_or_else(|| format!("{} is not set", key("RELEASE")))?;
+            check_release(release).map_err(|e| format!("{}: {e}", key("RELEASE")))?;
+            let concurrency = match get("CONCURRENCY") {
+                None => None,
+                Some(c) => Some(
+                    c.parse::<u32>()
+                        .ok()
+                        .filter(|n| (1..=MAX_CONCURRENCY).contains(n))
+                        .ok_or_else(|| {
+                            format!(
+                                "{} {c} is not a number from 1 to {MAX_CONCURRENCY}",
+                                key("CONCURRENCY")
+                            )
+                        })?,
+                ),
+            };
+            let refresh_seconds = match get("REFRESH") {
+                None => None,
+                Some(r) => Some(
+                    r.parse::<u32>()
+                        .ok()
+                        .filter(|n| *n <= MAX_SECONDS)
+                        .ok_or_else(|| {
+                            format!(
+                                "{} {r} is not a whole number of seconds from 0 to {MAX_SECONDS}",
+                                key("REFRESH")
+                            )
+                        })?,
+                ),
+            };
+            let retries = match get("RETRIES") {
+                None => None,
+                Some(r) => Some(
+                    r.parse::<u32>()
+                        .ok()
+                        .filter(|n| *n <= MAX_RETRIES)
+                        .ok_or_else(|| {
+                            format!(
+                                "{} {r} is not a number from 0 to {MAX_RETRIES}",
+                                key("RETRIES")
+                            )
+                        })?,
+                ),
+            };
+            let tls_trust =
+                match get("TLS") {
+                    None => None,
+                    Some(t) => Some(TlsTrust::parse(t).ok_or_else(|| {
+                        format!("{} {t} is not public, pin, ca or none", key("TLS"))
+                    })?),
+                };
+            let tls_ca_file = if tls_trust == Some(TlsTrust::Ca) {
+                Some(
+                    get("CA_FILE")
+                        .ok_or_else(|| format!("{}=ca needs {}", key("TLS"), key("CA_FILE")))?
+                        .clone(),
+                )
+            } else {
+                None
+            };
+            let either = |k: &str| -> Result<Option<u32>, String> {
+                Ok(seconds(env, &key(k))?.or(seconds(env, &format!("VELOCLOUD_{k}"))?))
+            };
+            let mut g = Settings {
+                credential: Some(group.clone()),
+                tls_trust,
+                tls_ca_file,
+                timeout_seconds: either("TIMEOUT")?,
+                section_timeout_seconds: either("SECTION_TIMEOUT")?,
+                request_timeout_seconds: seconds(env, &key("REQUEST_TIMEOUT"))?,
+                retries,
+                orchestrator_release: Some(release.clone()),
+                api_base: get("BASE").map(|b| b.trim_end_matches('/').to_string()),
+                concurrency,
+                refresh_seconds,
+                ..Settings::default()
+            };
+            if self.has_route_keys("VELOCLOUD", Some(name))
+                || self.has_route_keys("VELOCLOUD", None)
+            {
+                self.route(&group, "VELOCLOUD", Some(name))?;
+                g.route = Some(group.clone());
+            }
+            self.credential(&group, CredentialSource::Env, &prefix);
+            self.out.groups.push(Group {
+                name: group.clone(),
+                vendor: "velocloud".into(),
+                description: None,
+                settings: g,
+            });
+            let address = url.trim_end_matches('/').to_string();
+            for e in get("ENTERPRISES")
+                .map(|e| enterprise_ids(e.as_str()))
+                .unwrap_or_default()
+            {
+                self.out.devices.push(Device {
+                    name: enterprise_device(&id, &e),
+                    group: group.clone(),
+                    address: address.clone(),
+                    site: None,
+                    location: None,
+                    console_site: Some(e),
+                    settings: Settings::default(),
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The inventory records of an env file. The checks are those of the
@@ -479,6 +657,7 @@ pub fn import(env: &BTreeMap<String, String>) -> Result<Records, String> {
         b.ssh_vendor(prefix, vendor)?;
     }
     b.unifi()?;
+    b.velocloud()?;
     let mut seen: BTreeMap<&str, &Device> = BTreeMap::new();
     for d in &b.out.devices {
         if let Some(first) = seen.insert(&d.name, d) {
@@ -543,6 +722,66 @@ mod tests {
         let branch = devices.iter().find(|d| d.name == "unifi-branch").unwrap();
         assert_eq!(branch.console_site.as_deref(), Some("branch"));
         assert_eq!(branch.address, "192.0.2.8");
+    }
+
+    #[test]
+    fn a_velocloud_orchestrator_is_a_group_and_each_enterprise_a_device() {
+        let env = parse_env(
+            "VELOCLOUD_LAB_URL=https://198.51.100.10/\nVELOCLOUD_LAB_TOKEN=fake-token\n\
+             VELOCLOUD_LAB_ENTERPRISES=ent-a, ent-b\nVELOCLOUD_LAB_RELEASE=6.4.0\n\
+             VELOCLOUD_LAB_BASE=/api/sdwan/v2/\nVELOCLOUD_LAB_CONCURRENCY=2\n\
+             VELOCLOUD_LAB_REFRESH=0\nVELOCLOUD_LAB_RETRIES=3\n\
+             VELOCLOUD_LAB_REQUEST_TIMEOUT=90\nVELOCLOUD_TIMEOUT=300\n",
+        );
+        let r = import(&env).unwrap();
+        assert_eq!(
+            r.credentials,
+            [Credential::env(
+                "velocloud-lab",
+                CredentialSource::Env,
+                "VELOCLOUD_LAB"
+            )]
+        );
+        assert!(!format!("{r:?}").contains("fake-token"));
+        let g = &r.groups[0];
+        assert_eq!(
+            (g.name.as_str(), g.vendor.as_str()),
+            ("velocloud-lab", "velocloud")
+        );
+        assert_eq!(
+            g.settings,
+            Settings {
+                credential: Some("velocloud-lab".into()),
+                timeout_seconds: Some(300),
+                request_timeout_seconds: Some(90),
+                retries: Some(3),
+                orchestrator_release: Some("6.4.0".into()),
+                api_base: Some("/api/sdwan/v2".into()),
+                concurrency: Some(2),
+                refresh_seconds: Some(0),
+                ..Settings::default()
+            }
+        );
+        let names: Vec<(&str, &str, Option<&str>)> = r
+            .devices
+            .iter()
+            .map(|d| {
+                (
+                    d.name.as_str(),
+                    d.address.as_str(),
+                    d.console_site.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("vco-lab-ent-a", "https://198.51.100.10", Some("ent-a")),
+                ("vco-lab-ent-b", "https://198.51.100.10", Some("ent-b")),
+            ]
+        );
+        let devices = inventory(r).resolve().unwrap();
+        assert_eq!(devices[0].settings.tls_trust.value, TlsTrust::Public);
     }
 
     #[test]
@@ -641,6 +880,29 @@ mod tests {
             (
                 "VYOS_R1_IP=192.0.2.1\nVYOS_USER=u\nVYOS_PASS=p\nVYOS_PROXY=ftp://h:1\n",
                 "scheme ftp",
+            ),
+            (
+                "VELOCLOUD_LAB_URL=https://198.51.100.10\nVELOCLOUD_LAB_RELEASE=6.4.0\n",
+                "VELOCLOUD_LAB_TOKEN",
+            ),
+            (
+                "VELOCLOUD_LAB_URL=https://198.51.100.10\nVELOCLOUD_LAB_TOKEN=t\n\
+                 VELOCLOUD_LAB_RELEASE=4.5.0\n",
+                "before 5.0.0.0",
+            ),
+            (
+                "VELOCLOUD_LAB_URL=https://198.51.100.10\nVELOCLOUD_LAB_TOKEN=t\n",
+                "VELOCLOUD_LAB_RELEASE",
+            ),
+            (
+                "VELOCLOUD_LAB_URL=https://198.51.100.10\nVELOCLOUD_LAB_TOKEN=t\n\
+                 VELOCLOUD_LAB_RELEASE=6.4.0\nVELOCLOUD_LAB_CONCURRENCY=17\n",
+                "from 1 to 16",
+            ),
+            (
+                "VELOCLOUD_LAB_URL=https://198.51.100.10\nVELOCLOUD_LAB_TOKEN=t\n\
+                 VELOCLOUD_LAB_RELEASE=6.4.0\nVELOCLOUD_LAB_CLIENT_CERT=/c.pem\n",
+                "client certificate",
             ),
         ] {
             let err = import(&parse_env(text))

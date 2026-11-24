@@ -317,15 +317,23 @@ impl SshTransport {
             None
         } else {
             Some(
-                Tunnel::connect(route, self.credentials.as_ref(), &self.trust, limits, false)
-                    .await
-                    .map_err(connect)?,
+                Tunnel::connect(
+                    route,
+                    self.credentials.as_ref(),
+                    &self.trust,
+                    limits,
+                    false,
+                    false,
+                )
+                .await
+                .map_err(connect)?,
             )
         };
         let hop = Hop {
             role: "device",
             address,
             pin: route.pin_name(route.jumps.len(), address),
+            pinned: false,
             credential,
             algorithms: profile.algorithms,
             last: true,
