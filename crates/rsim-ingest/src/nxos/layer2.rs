@@ -360,17 +360,25 @@ impl L<'_> {
                         }
                     };
                     let used: Vec<u16> = native.into_iter().chain(tagged.iter().copied()).collect();
+                    let native_tagged = cfg
+                        .native_tagging
+                        .as_ref()
+                        .filter(|_| mode == PortMode::Trunk && native.is_some());
                     match (
                         native.filter(|v| !vlans.contains(v)),
                         used.iter().find(|v| unknown_vlans.contains(v)),
+                        native_tagged,
                     ) {
-                        (Some(v), _) => {
+                        (Some(v), _, _) => {
                             Plan::Unknown(format!("VLAN {v} not in the config"), i.lines)
                         }
-                        (None, Some(v)) => {
+                        (None, Some(v), _) => {
                             Plan::Unknown(format!("VLAN {v} with a line not lowered"), i.lines)
                         }
-                        (None, None) => Plan::Exact {
+                        (None, None, Some(line)) => {
+                            Plan::Unknown(format!("{line} not lowered"), i.lines)
+                        }
+                        (None, None, None) => Plan::Exact {
                             native,
                             qos_in: i.qos_in.clone(),
                             qos_out: i.qos_out.clone(),
@@ -1059,7 +1067,7 @@ impl L<'_> {
             self.add(HostResolution {
                 meta,
                 interface: InterfaceId::new(&e.port),
-                hosts: e.hosts.clone(),
+                hosts: (*e.hosts).clone(),
                 local: e.local.clone(),
                 gateway: e.gateway.clone(),
                 next,

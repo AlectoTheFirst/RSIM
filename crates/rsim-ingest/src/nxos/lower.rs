@@ -162,6 +162,13 @@ pub fn lower(
             i.unhandled
                 .push("ip access-group out on an interface with a NAT role".into());
         }
+        if let Some(v) = super::layer2::svi_vlan(&i.name) {
+            for (line, ranges) in &cfg.vlan_filters {
+                if ranges.iter().any(|(a, b)| (*a..=*b).contains(&v)) {
+                    i.unhandled.push(line.clone());
+                }
+            }
+        }
         active.push(i);
     }
     let nat_ifs = |role: NatRole| -> BTreeSet<InterfaceId> {
@@ -1305,6 +1312,16 @@ impl L<'_> {
                     }
                 }
             }
+            // The static routes of each prefix with the lowest preference.
+            #[derive(Default)]
+            struct Best {
+                preference: u8,
+                null: bool,
+                not_known: bool,
+                hops: Vec<RouteNextHop>,
+                spans: Vec<SourceSpan>,
+            }
+            let mut statics: BTreeMap<Prefix, Best> = BTreeMap::new();
             for r in self.cfg.static_routes.clone() {
                 if r.vrf != vrf {
                     continue;
@@ -1314,11 +1331,25 @@ impl L<'_> {
                     self.note(format!("static route {}: prefix not valid", r.prefix));
                     continue;
                 };
+                let best = statics.entry(p).or_insert_with(|| Best {
+                    preference: r.preference,
+                    ..Best::default()
+                });
+                if r.preference < best.preference {
+                    *best = Best {
+                        preference: r.preference,
+                        ..Best::default()
+                    };
+                }
+                if r.preference > best.preference {
+                    continue;
+                }
+                best.spans.extend(span);
                 if r.interface
                     .as_deref()
                     .is_some_and(|i| i.eq_ignore_ascii_case("null0"))
                 {
-                    t.insert(p, Route::new(RouteKind::Null, Vec::new(), span));
+                    best.null = true;
                     continue;
                 }
                 let gw = r.next_hop.as_deref().and_then(|g| g.parse::<IpAddr>().ok());
@@ -1336,17 +1367,35 @@ impl L<'_> {
                         })
                         .map(|i| i.name.clone())
                 });
-                let hops = match iface {
-                    Some(i) if r.unhandled.is_empty() => vec![hop(self, &i, gw)],
+                match iface {
+                    Some(i) if r.unhandled.is_empty() => best.hops.push(hop(self, &i, gw)),
                     _ => {
                         self.note(format!(
                             "static route {} in VRF {vrf}, next hop not known",
                             r.prefix
                         ));
-                        Vec::new()
+                        best.not_known = true;
                     }
+                }
+            }
+            for (p, best) in statics {
+                if t.get(&p).is_some_and(|c| c.kind == RouteKind::Connected) {
+                    continue;
+                }
+                let route = match (best.null, best.not_known, best.hops.is_empty()) {
+                    (true, false, true) => Route::new(RouteKind::Null, Vec::new(), best.spans),
+                    (false, _, true) | (false, false, false) => {
+                        Route::new(RouteKind::Static, best.hops, best.spans)
+                    }
+                    _ => Route::unknown(
+                        RouteKind::Static,
+                        format!(
+                            "static route {p} in VRF {vrf}, a next hop of the same preference not known"
+                        ),
+                        best.spans,
+                    ),
                 };
-                t.insert(p, Route::new(RouteKind::Static, hops, span));
+                t.insert(p, route);
             }
             if let Some(found) = self.cfg.dynamic_vrfs.get(vrf).cloned() {
                 self.note(format!(
