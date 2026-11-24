@@ -41,6 +41,17 @@ pub struct Binding {
     pub span: SourceSpan,
 }
 
+/// A circuit of a device between 2 of its ports, with one VLAN at each end:
+/// a frame of the VLAN of one end leaves the other end with the VLAN of
+/// that end.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Transit {
+    pub circuit: String,
+    pub a: (String, u16),
+    pub b: (String, u16),
+    pub span: SourceSpan,
+}
+
 /// The layer 3 addresses of a port by VLAN, with their prefix lengths.
 pub type VlanAddrs = BTreeMap<Option<u16>, Vec<(IpAddr, u8)>>;
 
@@ -132,6 +143,9 @@ pub struct Summary {
     /// The bindings of the ports. A binding is a link that needs no record
     /// at the far end, and it removes each other link of its 2 ends.
     pub bindings: Vec<Binding>,
+    /// The circuits between the ports of the device, for the placement of
+    /// the endpoints across them.
+    pub transits: Vec<Transit>,
 }
 
 /// A layer 3 address of a port.
@@ -829,6 +843,59 @@ pub fn join(
     vpc_links.retain(|(a, ends, _)| {
         !bound_ends.contains(a) && !ends.iter().any(|e| bound_ends.contains(e))
     });
+    // The transit map of the circuits between 2 bound ports, and the notes
+    // of a circuit whose VLAN the bound port does not carry.
+    let bound_port: BTreeMap<&End, &End> = bound.iter().map(|(a, b, _)| (a, b)).collect();
+    let mut transit: BTreeMap<(String, String, u16), (String, String, u16)> = BTreeMap::new();
+    for (d, s) in switches {
+        for t in &s.transits {
+            let ends = [&t.a, &t.b].map(|(p, v)| {
+                bound_port
+                    .get(&End(d.clone(), p.clone()))
+                    .map(|e| ((*e).clone(), *v))
+            });
+            let [Some((ea, va)), Some((eb, vb))] = ends else {
+                continue;
+            };
+            transit.insert(
+                (ea.0.clone(), ea.1.clone(), va),
+                (eb.0.clone(), eb.1.clone(), vb),
+            );
+            transit.insert(
+                (eb.0.clone(), eb.1.clone(), vb),
+                (ea.0.clone(), ea.1.clone(), va),
+            );
+            let carried = |e: &End, v: u16| -> Option<bool> {
+                let pv = switches.get(&e.0)?.ports.get(&e.1)?.as_ref()?;
+                Some(pv.tagged.contains(&v) || pv.native == Some(v))
+            };
+            let missing: Vec<String> = [(&ea, va), (&eb, vb)]
+                .into_iter()
+                .filter(|(e, v)| carried(e, *v) == Some(false))
+                .map(|(e, v)| format!("VLAN {v} on {} {}", e.0, e.1))
+                .collect();
+            match missing.len() {
+                0 => {}
+                1 => add_note(
+                    &mut out.notes,
+                    d,
+                    format!(
+                        "circuit {}: the bound port does not carry {}",
+                        t.circuit, missing[0]
+                    ),
+                ),
+                _ => add_note(
+                    &mut out.notes,
+                    d,
+                    format!(
+                        "circuit {}: no bound port carries its VLAN: {}",
+                        t.circuit,
+                        missing.join(", ")
+                    ),
+                ),
+            }
+        }
+    }
     links.extend(bound);
 
     // An end that 2 links claim gets no link.
@@ -972,7 +1039,7 @@ pub fn join(
         device_macs,
         addresses: &linked_by_address,
     };
-    place(switches, &mut out, &l2_far, &leave_out);
+    place(switches, &mut out, &l2_far, &transit, &leave_out);
     out
 }
 
@@ -1338,6 +1405,7 @@ fn place(
     switches: &BTreeMap<String, Summary>,
     out: &mut Joined,
     far: &BTreeMap<(String, String), (String, String)>,
+    transit: &BTreeMap<(String, String, u16), (String, String, u16)>,
     leave: &Leave,
 ) {
     // Each ARP row leads to a place, or to none.
@@ -1366,6 +1434,16 @@ fn place(
                 };
                 // A port with a link leads on; it is never an edge port.
                 let Some((d2, q)) = far.get(&(dev.clone(), port.clone())) else {
+                    // A port bound to a circuit leads on with the VLAN of
+                    // the far end.
+                    let carried = pv.tagged.contains(&vlan) || pv.native == Some(vlan);
+                    if carried
+                        && let Some((d2, _, v2)) = transit.get(&(dev.clone(), port.clone(), vlan))
+                    {
+                        vlan = *v2;
+                        dev = d2.clone();
+                        continue;
+                    }
                     if pv.edge && pv.native == Some(vlan) {
                         place = Some((dev.clone(), port.clone()));
                     }

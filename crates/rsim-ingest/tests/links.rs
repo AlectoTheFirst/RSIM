@@ -683,3 +683,44 @@ fn a_binding_to_a_port_that_the_twin_does_not_have_gives_a_note_and_no_link() {
         ]
     );
 }
+
+/// A switch with the trunk `e1` of the VLANs `tagged`.
+fn trunk(name: &str, tagged: &[u16]) -> Summary {
+    let mut s = device(name, &[("e1", "00:00:5e:00:53:0e")], &[], true);
+    s.port_macs.clear();
+    s.ports.insert(
+        "e1".into(),
+        Some(PortVlans {
+            native: None,
+            tagged: tagged.iter().copied().collect(),
+            edge: false,
+        }),
+    );
+    s
+}
+
+#[test]
+fn a_circuit_vlan_that_a_bound_port_does_not_carry_gives_a_note() {
+    let mut acct = account(&[("fp-a", "sw-a", "e1"), ("fp-b", "sw-b", "e1")]);
+    for (c, va, vb) in [("c1", 100, 200), ("c2", 300, 300)] {
+        acct.transits.push(Transit {
+            circuit: c.into(),
+            a: ("port/fp-a".into(), va),
+            b: ("port/fp-b".into(), vb),
+            span: SourceSpan::line("acct/connections", 1),
+        });
+    }
+    let devices = BTreeMap::from([
+        ("acct".to_string(), acct),
+        ("sw-a".to_string(), trunk("sw-a", &[100])),
+        ("sw-b".to_string(), trunk("sw-b", &[100])),
+    ]);
+    let (_, notes) = peers(&devices);
+    assert_eq!(
+        notes,
+        [
+            "circuit c1: the bound port does not carry VLAN 200 on sw-b e1",
+            "circuit c2: no bound port carries its VLAN: VLAN 300 on sw-a e1, VLAN 300 on sw-b e1",
+        ]
+    );
+}

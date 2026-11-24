@@ -12,9 +12,10 @@ pub use profile::profile;
 pub use reader::{Account, Binding, Connection, End, EndKind, Port, read};
 
 /// The summary of an account for the join: the gate of each Fabric port
-/// as its entry, and a binding record for each binding whose Fabric port
-/// is a port of the account, by uuid or by name. A binding that names no
-/// Fabric port gives a note.
+/// as its entry, a binding record for each binding whose Fabric port is a
+/// port of the account, by uuid or by name, and a transit for each lowered
+/// circuit with one tag at each end. A binding that names no Fabric port
+/// gives a note.
 pub fn summary(account: &Account) -> (crate::links::Summary, Vec<String>) {
     let mut s = crate::links::Summary::default();
     let mut notes = Vec::new();
@@ -43,6 +44,28 @@ pub fn summary(account: &Account) -> (crate::links::Summary, Vec<String>) {
                 "the binding of {} names no Fabric port of the account",
                 b.fabric_port
             )),
+        }
+    }
+    let low = lower(account, &profile(), &std::collections::BTreeMap::new());
+    for (uuid, plan) in &low.ports {
+        for leg in plan
+            .legs
+            .iter()
+            .filter(|l| !l.port_based && l.near.inner.is_none())
+        {
+            let rsim_functions::FarEnd::Port { port, tags, .. } = &leg.far else {
+                continue;
+            };
+            let here = format!("port/{uuid}");
+            if tags.inner.is_some() || here.as_str() >= port.as_str() {
+                continue;
+            }
+            s.transits.push(crate::links::Transit {
+                circuit: leg.circuit.clone(),
+                a: (here, leg.near.outer.vlan),
+                b: (port.to_string(), tags.outer.vlan),
+                span: leg.spans[0].clone(),
+            });
         }
     }
     (s, notes)
