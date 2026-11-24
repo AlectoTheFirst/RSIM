@@ -237,10 +237,14 @@ enum Aggregates {
 /// `getAggregates` answer of each orchestrator and token in the current
 /// cycle and the workers of each orchestrator. The source of each cycle
 /// shares one.
+/// The `getAggregates` answer of each pair of an orchestrator address and a
+/// token identity.
+type AggregatesByToken = HashMap<(String, String), Arc<OnceCell<Aggregates>>>;
+
 #[derive(Debug, Default)]
 pub struct VelocloudMemory {
     devices: Mutex<HashMap<String, Edges>>,
-    aggregates: Mutex<HashMap<(String, String), Arc<OnceCell<Aggregates>>>>,
+    aggregates: Mutex<AggregatesByToken>,
     workers: Mutex<HashMap<String, (usize, Arc<Semaphore>)>>,
 }
 
