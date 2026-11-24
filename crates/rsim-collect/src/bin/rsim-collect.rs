@@ -46,6 +46,8 @@
 //! | `EQUINIX_TIMEOUT`, `EQUINIX_<NAME>_TIMEOUT` | The time for all sections of an account, in whole seconds from 1 to 86400. The default is 900. |
 //! | `EQUINIX_SECTION_TIMEOUT`, `EQUINIX_<NAME>_SECTION_TIMEOUT` | The time for all pages of one section. The default is 300. |
 //! | `EQUINIX_REQUEST_TIMEOUT`, `EQUINIX_<NAME>_REQUEST_TIMEOUT` | The time for one request. The default is 60. |
+//! | `EQUINIX_NETWORK_EDGE`, `EQUINIX_<NAME>_NETWORK_EDGE` | `on` reads the Network Edge devices, their device link groups and their connections. The default is `off`. |
+//! | `EQUINIX_PAGE_SIZE`, `EQUINIX_<NAME>_PAGE_SIZE` | The items of one page, from 1 to 1000. The default is 100. |
 //! | `EQUINIX_VIA`, `EQUINIX_<NAME>_VIA`, `EQUINIX_PROXY`, `EQUINIX_<NAME>_PROXY` | The jump hosts and the proxy to the API |
 //! | `JUMP_<NAME>_IP` | The address of the jump host `<name>` |
 //! | `JUMP_<NAME>_USER` | The user on the jump host |
@@ -101,6 +103,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use rsim_collect::equinix::{self, Account, EquinixSource};
 use rsim_collect::https::{
     ApiServer, ClientCert, HttpsLimits, HttpsProfile, HttpsTransport, TlsTrust,
 };
@@ -222,6 +225,8 @@ struct Setup {
     api_servers: Vec<(String, ApiServer)>,
     /// The orchestrator settings of each VeloCloud device.
     orchestrators: Vec<(String, Orchestrator)>,
+    /// The settings of each Equinix account.
+    accounts: Vec<(String, Account)>,
 }
 
 impl Setup {
@@ -238,6 +243,7 @@ impl Setup {
             request_timeouts: Vec::new(),
             api_servers: Vec::new(),
             orchestrators: Vec::new(),
+            accounts: Vec::new(),
         }
     }
 }
@@ -419,6 +425,7 @@ fn velocloud_env(
 /// An Equinix account of the env file.
 struct EquinixAccount {
     device: Device,
+    account: Account,
     profile: HttpsProfile,
     times: TimeLimits,
     request_timeout: Option<Duration>,
@@ -483,6 +490,11 @@ fn equinix_env(
             )),
             device: either("TIMEOUT")?.unwrap_or(EQUINIX_INTERVAL),
         };
+        let (network_edge, page_size) = rsim_inventory::env::equinix_reads(env, name)?;
+        let account = Account {
+            network_edge: network_edge == Some(rsim_inventory::NetworkEdge::On),
+            page_size: page_size.unwrap_or(equinix::DEFAULT_PAGE_SIZE),
+        };
         let id = format!("equinix-{}", name.to_lowercase().replace('_', "-"));
         out.push(EquinixAccount {
             device: Device {
@@ -495,6 +507,7 @@ fn equinix_env(
                 route: route(env, "EQUINIX", Some(name), credentials)?,
                 interval: EQUINIX_INTERVAL,
             },
+            account,
             profile: HttpsProfile {
                 trust,
                 client: None,
@@ -864,6 +877,7 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
     }
     for a in equinix_env(env, &mut s.credentials)? {
         let id = a.device.id.clone();
+        s.accounts.push((id.clone(), a.account));
         s.https_profiles.push((id.clone(), a.profile));
         s.times.push((id.clone(), a.times));
         if let Some(t) = a.request_timeout {
@@ -1236,6 +1250,13 @@ fn setup_from_inventory(
         let route = inventory_route(inv, secrets, st.route.value.as_deref(), &mut references)
             .map_err(|e| format!("the device {}: {e}", d.name))?;
         if vendor == Vendor::Equinix {
+            s.accounts.push((
+                d.name.clone(),
+                Account {
+                    network_edge: st.network_edge.value == rsim_inventory::NetworkEdge::On,
+                    page_size: st.page_size.value,
+                },
+            ));
             s.times.push((
                 d.name.clone(),
                 TimeLimits {
@@ -1404,6 +1425,10 @@ fn sources(setup: Setup, trust: &Arc<TrustStore>, memory: &Arc<VelocloudMemory>)
         https = https.with_api_server(&address, a);
     }
     let https: Arc<dyn Https> = Arc::new(https);
+    let mut equinix = EquinixSource::new(https.clone());
+    for (id, a) in setup.accounts {
+        equinix = equinix.with_account(&id, a);
+    }
     let mut vco = VelocloudSource::new(https.clone(), memory.clone(), clock);
     for (id, o) in setup.orchestrators {
         vco = vco.with_orchestrator(&id, o);
@@ -1415,6 +1440,7 @@ fn sources(setup: Setup, trust: &Arc<TrustStore>, memory: &Arc<VelocloudMemory>)
         Arc::new(iosxe),
         Arc::new(UnifiSource::new(https)),
         Arc::new(vco),
+        Arc::new(equinix),
     ];
     Collection {
         devices: setup.devices,
@@ -1940,7 +1966,8 @@ mod tests {
              EQUINIX_PROD_URL=https://api.equinix.com/\nEQUINIX_LAB_URL=https://api.equinix.com\n\
              EQUINIX_CLIENT_ID=group-id\nEQUINIX_CLIENT_SECRET=fake-secret\n\
              EQUINIX_LAB_CLIENT_ID=lab-id\nEQUINIX_LAB_CLIENT_SECRET=fake-lab-secret\n\
-             EQUINIX_LAB_SECTION_TIMEOUT=600\nEQUINIX_LAB_VIA=bastion-a\n",
+             EQUINIX_LAB_SECTION_TIMEOUT=600\nEQUINIX_LAB_VIA=bastion-a\n\
+             EQUINIX_LAB_NETWORK_EDGE=on\n",
         );
         let direct = setup(&env).unwrap();
         let (through, notes) = setup_from_inventory(&imported(&env), &Secrets::env(&env)).unwrap();
@@ -1976,6 +2003,24 @@ mod tests {
             (Duration::from_secs(600), Duration::from_secs(900))
         );
         assert_eq!(times("equinix-prod").section, Duration::from_secs(300));
+        let mut accounts = direct.accounts.clone();
+        accounts.sort_by(|x, y| x.0.cmp(&y.0));
+        let mut through_accounts = through.accounts.clone();
+        through_accounts.sort_by(|x, y| x.0.cmp(&y.0));
+        assert_eq!(accounts, through_accounts);
+        assert_eq!(
+            accounts,
+            [
+                (
+                    "equinix-lab".to_string(),
+                    Account {
+                        network_edge: true,
+                        page_size: 100
+                    }
+                ),
+                ("equinix-prod".to_string(), Account::default()),
+            ]
+        );
         assert_eq!(
             a.5.iter()
                 .find(|(d, _)| d == "equinix-prod")

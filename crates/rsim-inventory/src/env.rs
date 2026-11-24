@@ -15,8 +15,8 @@
 use std::collections::BTreeMap;
 
 use crate::types::{
-    CaptureBgp, Credential, CredentialSource, Device, Group, JumpHost, NxosJson, Route, Settings,
-    SshAlgorithms, SshMode, TlsTrust,
+    CaptureBgp, Credential, CredentialSource, Device, Group, JumpHost, NetworkEdge, NxosJson,
+    Route, Settings, SshAlgorithms, SshMode, TlsTrust,
 };
 
 /// Reads the lines `KEY=VALUE` of an env file. A line can start with
@@ -691,6 +691,7 @@ impl Builder<'_> {
             } else {
                 None
             };
+            let (network_edge, page_size) = equinix_reads(env, name)?;
             let mut g = Settings {
                 credential: Some(credential.clone()),
                 tls_trust,
@@ -698,6 +699,8 @@ impl Builder<'_> {
                 timeout_seconds: either("TIMEOUT")?,
                 paged_section_timeout_seconds: either("SECTION_TIMEOUT")?,
                 request_timeout_seconds: either("REQUEST_TIMEOUT")?,
+                network_edge,
+                page_size,
                 ..Settings::default()
             };
             if self.has_route_keys("EQUINIX", Some(name)) || self.has_route_keys("EQUINIX", None) {
@@ -723,6 +726,41 @@ impl Builder<'_> {
         }
         Ok(())
     }
+}
+
+/// The Network Edge setting and the page size of the Equinix account
+/// `<NAME>`: `EQUINIX_<NAME>_NETWORK_EDGE`, else `EQUINIX_NETWORK_EDGE`,
+/// with `on` or `off`, and `EQUINIX_<NAME>_PAGE_SIZE`, else
+/// `EQUINIX_PAGE_SIZE`, from 1 to 1000. `None` for a key that is not set.
+pub fn equinix_reads(
+    env: &BTreeMap<String, String>,
+    name: &str,
+) -> Result<(Option<NetworkEdge>, Option<u32>), String> {
+    let pick = |k: &str| {
+        let own = format!("EQUINIX_{name}_{k}");
+        match env.get(&own) {
+            Some(v) => Some((own, v)),
+            None => env
+                .get(&format!("EQUINIX_{k}"))
+                .map(|v| (format!("EQUINIX_{k}"), v)),
+        }
+    };
+    let network_edge = match pick("NETWORK_EDGE") {
+        None => None,
+        Some((k, v)) => {
+            Some(NetworkEdge::parse(v).ok_or_else(|| format!("{k} {v} is not on or off"))?)
+        }
+    };
+    let page_size = match pick("PAGE_SIZE") {
+        None => None,
+        Some((k, v)) => Some(
+            v.parse::<u32>()
+                .ok()
+                .filter(|n| (1..=1000).contains(n))
+                .ok_or_else(|| format!("{k} {v} is not a number from 1 to 1000"))?,
+        ),
+    };
+    Ok((network_edge, page_size))
 }
 
 /// The credential name and the env key prefix of the OAuth client of the
@@ -799,7 +837,8 @@ mod tests {
              EQUINIX_CLIENT_ID=group-id\nEQUINIX_CLIENT_SECRET=fake-secret\n\
              EQUINIX_LAB_CLIENT_ID=lab-id\nEQUINIX_LAB_CLIENT_SECRET=fake-lab-secret\n\
              EQUINIX_SECTION_TIMEOUT=600\nEQUINIX_LAB_TLS=ca\nEQUINIX_LAB_CA_FILE=/ca.pem\n\
-             EQUINIX_PROXY=http://192.0.2.9:3128\n",
+             EQUINIX_PROXY=http://192.0.2.9:3128\nEQUINIX_LAB_NETWORK_EDGE=on\n\
+             EQUINIX_PAGE_SIZE=50\n",
         );
         let r = import(&env).unwrap();
         let devices: Vec<(&str, &str, &str)> = r
@@ -833,11 +872,19 @@ mod tests {
         assert_eq!(lab.tls_ca_file.as_deref(), Some("/ca.pem"));
         assert_eq!(lab.paged_section_timeout_seconds, Some(600));
         assert_eq!(lab.route.as_deref(), Some("equinix-lab"));
+        assert_eq!(lab.network_edge, Some(NetworkEdge::On));
+        assert_eq!(lab.page_size, Some(50));
         let prod = &r.groups[1].settings;
         assert_eq!(prod.credential.as_deref(), Some("equinix"));
         assert_eq!(prod.tls_trust, None);
         assert_eq!(r.groups[1].vendor, "equinix");
 
+        let mut e = env.clone();
+        e.insert("EQUINIX_PAGE_SIZE".into(), "1001".into());
+        assert_eq!(
+            import(&e).unwrap_err(),
+            "EQUINIX_PAGE_SIZE 1001 is not a number from 1 to 1000"
+        );
         let mut e = env.clone();
         e.remove("EQUINIX_CLIENT_SECRET");
         assert_eq!(import(&e).unwrap_err(), "EQUINIX_CLIENT_SECRET is not set");

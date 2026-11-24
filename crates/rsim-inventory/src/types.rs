@@ -120,6 +120,16 @@ words! {
 }
 
 words! {
+    /// Network Edge
+    NetworkEdge {
+        /// Off
+        Off = "off",
+        /// On
+        On = "on",
+    }
+}
+
+words! {
     /// HA setting
     Ha {
         /// None
@@ -331,6 +341,11 @@ pub struct Settings {
     /// Module refresh
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_seconds: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_edge: Option<NetworkEdge>,
+    /// Page size
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_size: Option<u32>,
 }
 
 /// Device group

@@ -5,7 +5,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{
-    CaptureBgp, Device, Group, Ha, Inventory, NxosJson, Settings, SshAlgorithms, SshMode, TlsTrust,
+    CaptureBgp, Device, Group, Ha, Inventory, NetworkEdge, NxosJson, Settings, SshAlgorithms,
+    SshMode, TlsTrust,
 };
 
 /// The time for all sections of a device, in seconds, with no setting.
@@ -25,6 +26,9 @@ pub const DEFAULT_CONCURRENCY: u32 = 4;
 /// The seconds after which the modules of an edge are read again, with no
 /// setting.
 pub const DEFAULT_REFRESH_SECONDS: u32 = 1800;
+
+/// The items of one page of an Equinix read with no setting.
+pub const DEFAULT_PAGE_SIZE: u32 = 100;
 
 /// The time between 2 collections and the time for all sections of an
 /// Equinix account, in seconds, with no setting.
@@ -128,6 +132,8 @@ pub struct ResolvedSettings {
     pub api_base: Resolved<Option<String>>,
     pub concurrency: Resolved<u32>,
     pub refresh_seconds: Resolved<u32>,
+    pub network_edge: Resolved<NetworkEdge>,
+    pub page_size: Resolved<u32>,
 }
 
 /// The settings of a device of a vendor that inherits from a group.
@@ -203,6 +209,8 @@ pub fn resolve_settings(device: &Settings, group: &Settings, vendor: &str) -> Re
             &group.refresh_seconds,
             DEFAULT_REFRESH_SECONDS,
         ),
+        network_edge: pick(&device.network_edge, &group.network_edge, NetworkEdge::Off),
+        page_size: pick(&device.page_size, &group.page_size, DEFAULT_PAGE_SIZE),
     }
 }
 
@@ -356,6 +364,8 @@ mod tests {
         assert_eq!(s.timeout_seconds.value, 45);
         assert_eq!(s.request_timeout_seconds.value, 60);
         assert_eq!(s.paged_section_timeout_seconds.value, 300);
+        assert_eq!(s.network_edge.value, NetworkEdge::Off);
+        assert_eq!(s.page_size.value, 100);
         assert_eq!(
             (s.interval_seconds.value, s.interval_seconds.origin),
             (60, Origin::Default)

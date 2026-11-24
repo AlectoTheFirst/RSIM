@@ -21,7 +21,8 @@ use crate::secret::Sealed;
 use crate::types::{
     Action, AuditPage, AuditRecord, Bindings, CaptureBgp, Collection, Credential, CredentialKind,
     CredentialSource, Device, EdgeDeviceBinding, FabricPortBinding, Group, Ha, Inventory, JumpHost,
-    NxosJson, Route, Settings, SshAlgorithms, SshMode, TlsTrust, valid_device_name, valid_name,
+    NetworkEdge, NxosJson, Route, Settings, SshAlgorithms, SshMode, TlsTrust, valid_device_name,
+    valid_name,
 };
 
 /// The migrations: the version, the name and the SQL, in order. A version
@@ -58,6 +59,7 @@ pub const MIGRATIONS: &[(u32, &str, &str)] = &[
         "orchestrator",
         include_str!("../migrations/0007_orchestrator.sql"),
     ),
+    (8, "equinix", include_str!("../migrations/0008_equinix.sql")),
 ];
 
 /// The schema version of this build: the last migration.
@@ -873,7 +875,7 @@ async fn collection(c: &impl GenericClient) -> Result<Collection> {
 }
 
 /// The settings columns, in the order of [`settings_params`].
-const SETTINGS: [&str; 20] = [
+const SETTINGS: [&str; 22] = [
     "credential",
     "route",
     "ssh_algorithms",
@@ -894,6 +896,8 @@ const SETTINGS: [&str; 20] = [
     "api_base",
     "concurrency",
     "refresh_seconds",
+    "network_edge",
+    "page_size",
 ];
 
 /// The insert of a record with its settings, or the update of all its
@@ -946,6 +950,8 @@ fn settings_params(s: &Settings) -> Result<Vec<Box<dyn ToSql + Sync + Send>>> {
         Box::new(s.api_base.clone()),
         Box::new(number("concurrency", s.concurrency)?),
         Box::new(number("refresh_seconds", s.refresh_seconds)?),
+        w(s.network_edge.map(NetworkEdge::word)),
+        Box::new(number("page_size", s.page_size)?),
     ])
 }
 
@@ -983,6 +989,8 @@ fn settings(row: &Row) -> Result<Settings> {
         api_base: row.get("api_base"),
         concurrency: count(row, "concurrency"),
         refresh_seconds: count(row, "refresh_seconds"),
+        network_edge: word(row, "network_edge", NetworkEdge::parse)?,
+        page_size: count(row, "page_size"),
     })
 }
 
