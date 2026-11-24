@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rsim_core::{FunctionId, Mac, SourceSpan};
 use rsim_ingest::links::{
-    AddressPeer, Binding, Neighbour, PortAddress, PortVlans, Summary, Transit, join,
+    AddressPeer, Binding, FabricPortName, Neighbour, PortAddress, PortVlans, Summary, Transit,
+    cable_ids, join, names_fabric_port,
 };
 
 fn mac(s: &str) -> Mac {
