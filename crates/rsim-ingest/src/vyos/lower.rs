@@ -88,9 +88,16 @@ fn max_len(a: IpAddr) -> u8 {
 }
 
 /// The addresses of each interface: the config, then the collected rows.
+/// A disabled interface has no addresses.
 fn addresses(cfg: &Config, col: &Collected) -> Addrs {
     let mut m: Addrs = BTreeMap::new();
-    for i in &cfg.interfaces {
+    let disabled: BTreeSet<&str> = cfg
+        .interfaces
+        .iter()
+        .filter(|i| i.disabled)
+        .map(|i| i.name.as_str())
+        .collect();
+    for i in cfg.interfaces.iter().filter(|i| !i.disabled) {
         let v = m.entry(i.name.clone()).or_default();
         for a in &i.addresses {
             if let Some((ip, len)) = iface_addr(a) {
@@ -98,7 +105,11 @@ fn addresses(cfg: &Config, col: &Collected) -> Addrs {
             }
         }
     }
-    for row in &col.addresses {
+    for row in col
+        .addresses
+        .iter()
+        .filter(|r| !disabled.contains(r.interface.as_str()))
+    {
         if let Some((ip, len)) = iface_addr(&row.prefix) {
             let v = m.entry(row.interface.clone()).or_default();
             if !v.iter().any(|(a, _, _)| *a == ip) {
@@ -263,7 +274,7 @@ pub fn lower(
             .and_then(|a| a.parse::<IpAddr>().ok());
         match (addr, &r.translation_port) {
             (Some(a), None) => {
-                let p = l.predicate(&r.matches, &r.unhandled, None, &name);
+                let p = l.predicate(&r.matches, &r.unhandled, Some(Family::V4), &name);
                 dnat.push(
                     FRule::new(
                         name,
@@ -1318,6 +1329,7 @@ impl L<'_> {
                 }
             };
             let mut m = r.matches.clone();
+            m.state.clear();
             let ingress = interface_scope(&mut m.inbound_interface);
             let egress = interface_scope(&mut m.outbound_interface);
             let p = self.predicate(&m, &r.unhandled, Some(family), &rname);
@@ -1383,6 +1395,9 @@ impl L<'_> {
         }
         if m.icmp_type_name.is_some() {
             problems.push("icmp type-name".into());
+        }
+        if !m.state.is_empty() {
+            problems.push("state".into());
         }
         if problems.is_empty() {
             RulePredicate::exact(upper)

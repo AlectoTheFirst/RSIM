@@ -440,13 +440,17 @@ fn read_interfaces(r: &mut Reader, ifs: &Stanza, c: &mut Config) {
         r.mark(group);
         for i in members(group) {
             r.mark(i);
-            c.interfaces.push(read_interface(r, i, i.key.clone(), kind));
+            let parent = read_interface(r, i, i.key.clone(), kind);
+            let parent_disabled = parent.disabled;
+            c.interfaces.push(parent);
             if let Some(vifs) = i.get("vif") {
                 r.mark(vifs);
                 for v in members(vifs) {
                     r.mark(v);
                     let name = format!("{}.{}", i.key, v.key);
-                    c.interfaces.push(read_interface(r, v, name, kind));
+                    let mut vif = read_interface(r, v, name, kind);
+                    vif.disabled |= parent_disabled;
+                    c.interfaces.push(vif);
                 }
             }
         }
@@ -747,6 +751,10 @@ fn read_rules(r: &mut Reader, rules: &Stanza) -> Vec<Rule> {
         let iface = |r: &mut Reader, key: &str, unhandled: &mut Vec<String>| {
             x.get(key).and_then(|s| {
                 r.mark(s);
+                if !matches!(s.body, Body::Object(_)) {
+                    unhandled.push(key.to_string());
+                    return None;
+                }
                 unhandled.extend(others(s, key, &["name"]));
                 r.text(s, "name")
             })
