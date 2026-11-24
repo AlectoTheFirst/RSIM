@@ -145,6 +145,10 @@ describe("API parameters", () => {
     expect(tableCommand("leaf-spine", { ...base, verb: "top", ascending: true }, FIB)).toBe(
       "rsim leaf-spine fib top --device r1,r2 --column device --count 5 --ascending",
     );
+    const crafted = readState("?table=fib&f.x$(touch${IFS}y)=1");
+    expect(tableCommand("leaf-spine", crafted, FIB)).toBe(
+      "rsim leaf-spine fib show '--x$(touch${IFS}y)' 1 --limit 200",
+    );
   });
 });
 
