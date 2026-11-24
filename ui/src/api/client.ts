@@ -340,14 +340,6 @@ export const putRoute = (r: Route) => put(`/v1/inventory/routes/${encodeURICompo
 export const putJumpHost = (j: JumpHost) => put(`/v1/inventory/jump-hosts/${encodeURIComponent(j.name)}`, j);
 export const putCollection = (c: Collection) => put("/v1/inventory/collection", c);
 
-/** Requests a collection now; the answer is the requested devices. */
-async function collect(path: string): Promise<string[]> {
-  const r = await send(path, { method: "POST", headers: { accept: "application/json" } });
-  return ((await r.json()) as { devices: string[] }).devices;
-}
-export const collectDevice = (name: string) => collect(`/v1/inventory/devices/${encodeURIComponent(name)}/collect`);
-export const collectGroup = (name: string) => collect(`/v1/inventory/groups/${encodeURIComponent(name)}/collect`);
-
 /** Removes a record of the inventory; the answer is the inventory version. */
 async function del(path: string): Promise<number> {
   const r = await send(path, { method: "DELETE", headers: { accept: "application/json" } });

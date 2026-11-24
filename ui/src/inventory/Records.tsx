@@ -1,9 +1,8 @@
 // The panels of a device and of a group: each field of the record and each
-// setting, with "Save", "Cancel", "Collect now" and the delete; and the panels of a new
+// setting, with "Save", "Cancel" and the delete; and the panels of a new
 // device and a new group.
 import { useState } from "preact/hooks";
-import { collectDevice, collectGroup, deleteDevice, deleteGroup, putDevice, putGroup } from "../api/client";
-import { toast } from "../page/notes";
+import { deleteDevice, deleteGroup, putDevice, putGroup } from "../api/client";
 import { HatchText } from "../page/Hatch";
 import { Panel } from "../page/Panel";
 import {
@@ -23,7 +22,7 @@ import {
   newGroupBody,
   sameRecord,
 } from "./model";
-import { DeleteButton, type Refuse, type Write, problemOf, useDraft } from "./parts";
+import { DeleteButton, type Refuse, type Write, useDraft } from "./parts";
 import { type FieldHandlers, PickField, SettingsEditor, TextField } from "./SettingsEditor";
 
 /** The element that takes the focus when a panel closes. */
@@ -57,24 +56,6 @@ function saveBody<T>(c: { ok: true; body: T } | { ok: false; problem: Problem },
   }
   if (sameRecord(c.body, stored)) return;
   void write(() => put(c.body));
-}
-
-/** The button that requests a collection of a device or of the devices of a group now. */
-function CollectButton(props: { run: () => Promise<string[]>; refuse: Refuse }) {
-  const [busy, setBusy] = useState(false);
-  const press = () => {
-    setBusy(true);
-    props
-      .run()
-      .then((devices) => toast(devices.length ? `collection requested for ${devices.join(", ")}` : "no device to collect"))
-      .catch((e) => props.refuse(problemOf(e)))
-      .finally(() => setBusy(false));
-  };
-  return (
-    <button type="button" onClick={press} disabled={busy}>
-      Collect now
-    </button>
-  );
 }
 
 function Fact(props: { label: string; value: string | null | undefined; reason: string | null | undefined }) {
@@ -126,7 +107,6 @@ export function DevicePanel(props: {
           >
             Cancel
           </button>
-          <CollectButton run={() => collectDevice(stored.name)} refuse={props.refuse} />
           <span class="inv-grow" />
           <DeleteButton
             name={stored.name}
@@ -190,7 +170,6 @@ export function GroupPanel(props: { g: Group; inv: Inventory; vendors: Vendors |
           >
             Cancel
           </button>
-          <CollectButton run={() => collectGroup(g.name)} refuse={props.refuse} />
           <span class="inv-grow" />
           <DeleteButton
             name={g.name}
