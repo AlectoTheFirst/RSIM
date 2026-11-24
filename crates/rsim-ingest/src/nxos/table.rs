@@ -178,7 +178,7 @@ const ENTRIES: &[Entry] = &[
     e("vrf context */vni *", Handled, Subtree),
     e("system default switchport", Handled, Subtree),
     e("no system default switchport", Handled, Subtree),
-    e("interface */description ..", Irrelevant, Subtree),
+    e("interface */description ..", Handled, Subtree),
     e("interface */mtu ..", Irrelevant, Subtree),
     e("interface */speed ..", Irrelevant, Subtree),
     e("interface */duplex ..", Irrelevant, Subtree),

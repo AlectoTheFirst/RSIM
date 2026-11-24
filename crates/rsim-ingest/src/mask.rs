@@ -17,7 +17,7 @@
 use rsim_store::Format;
 use serde_json::Value;
 
-use crate::{iosxe, iosxr, nxos, unifi, velocloud, vyos};
+use crate::{equinix, iosxe, iosxr, nxos, unifi, velocloud, vyos};
 
 /// The text that takes the place of a masked key or value.
 pub const MASKED: &str = "<secret>";
@@ -231,6 +231,7 @@ pub fn section_lines(
         ("vyos", Format::Json) => json_lines(bytes, &vyos::mask::MASK),
         ("unifi", Format::Json) => json_lines(bytes, &unifi::mask::MASK),
         ("velocloud", Format::Json) => json_lines(bytes, &velocloud::mask::MASK),
+        ("equinix", Format::Json) => json_lines(bytes, &equinix::MASK),
         ("nxos", Format::Json) => json_lines(bytes, &nxos::JSON_MASK),
         ("nxos", Format::Text) => text_lines(bytes, nxos::mask),
         ("iosxr", Format::Text) if iosxr::SECTIONS.contains(&section) => {

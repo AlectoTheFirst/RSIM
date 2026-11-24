@@ -120,6 +120,16 @@ words! {
 }
 
 words! {
+    /// Network Edge
+    NetworkEdge {
+        /// Off
+        Off = "off",
+        /// On
+        On = "on",
+    }
+}
+
+words! {
     /// HA setting
     Ha {
         /// None
@@ -142,6 +152,7 @@ words! {
 /// The vendors that have a collector, each with its transport, in name
 /// order.
 pub const COLLECTOR_VENDORS: &[(&str, CollectorTransport)] = &[
+    ("equinix", CollectorTransport::Https),
     ("iosxe", CollectorTransport::Ssh),
     ("iosxr", CollectorTransport::Ssh),
     ("nxos", CollectorTransport::Ssh),
@@ -330,6 +341,11 @@ pub struct Settings {
     /// Module refresh
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_seconds: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_edge: Option<NetworkEdge>,
+    /// Page size
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_size: Option<u32>,
 }
 
 /// Device group

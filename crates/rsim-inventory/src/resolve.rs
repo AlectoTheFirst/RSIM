@@ -5,7 +5,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{
-    CaptureBgp, Device, Group, Ha, Inventory, NxosJson, Settings, SshAlgorithms, SshMode, TlsTrust,
+    CaptureBgp, Device, Group, Ha, Inventory, NetworkEdge, NxosJson, Settings, SshAlgorithms,
+    SshMode, TlsTrust,
 };
 
 /// The time for all sections of a device, in seconds, with no setting.
@@ -26,13 +27,40 @@ pub const DEFAULT_CONCURRENCY: u32 = 4;
 /// setting.
 pub const DEFAULT_REFRESH_SECONDS: u32 = 1800;
 
+/// The items of one page of an Equinix read with no setting.
+pub const DEFAULT_PAGE_SIZE: u32 = 100;
+
+/// The time between 2 collections and the time for all sections of an
+/// Equinix account, in seconds, with no setting.
+pub const EQUINIX_DEFAULT_SECONDS: u32 = 900;
+
 /// The TLS trust of a vendor with no setting: the public roots for
-/// `velocloud`, else the pin.
+/// `velocloud` and `equinix`, else the pin.
 pub fn default_tls_trust(vendor: &str) -> TlsTrust {
-    if vendor == "velocloud" {
+    if vendor == "velocloud" || vendor == "equinix" {
         TlsTrust::Public
     } else {
         TlsTrust::Pin
+    }
+}
+
+/// The time between 2 collections of a device of a vendor, in seconds, with
+/// no setting.
+pub fn default_interval_seconds(vendor: &str) -> u32 {
+    if vendor == "equinix" {
+        EQUINIX_DEFAULT_SECONDS
+    } else {
+        DEFAULT_INTERVAL_SECONDS
+    }
+}
+
+/// The time for all sections of a device of a vendor, in seconds, with no
+/// setting.
+pub fn default_timeout_seconds(vendor: &str) -> u32 {
+    if vendor == "equinix" {
+        EQUINIX_DEFAULT_SECONDS
+    } else {
+        DEFAULT_TIMEOUT_SECONDS
     }
 }
 
@@ -104,6 +132,8 @@ pub struct ResolvedSettings {
     pub api_base: Resolved<Option<String>>,
     pub concurrency: Resolved<u32>,
     pub refresh_seconds: Resolved<u32>,
+    pub network_edge: Resolved<NetworkEdge>,
+    pub page_size: Resolved<u32>,
 }
 
 /// The settings of a device of a vendor that inherits from a group.
@@ -147,7 +177,7 @@ pub fn resolve_settings(device: &Settings, group: &Settings, vendor: &str) -> Re
         timeout_seconds: pick(
             &device.timeout_seconds,
             &group.timeout_seconds,
-            DEFAULT_TIMEOUT_SECONDS,
+            default_timeout_seconds(vendor),
         ),
         section_timeout_seconds: pick(
             &device.section_timeout_seconds,
@@ -169,7 +199,7 @@ pub fn resolve_settings(device: &Settings, group: &Settings, vendor: &str) -> Re
         interval_seconds: pick(
             &device.interval_seconds,
             &group.interval_seconds,
-            DEFAULT_INTERVAL_SECONDS,
+            default_interval_seconds(vendor),
         ),
         orchestrator_release: opt(&device.orchestrator_release, &group.orchestrator_release),
         api_base: opt(&device.api_base, &group.api_base),
@@ -179,6 +209,8 @@ pub fn resolve_settings(device: &Settings, group: &Settings, vendor: &str) -> Re
             &group.refresh_seconds,
             DEFAULT_REFRESH_SECONDS,
         ),
+        network_edge: pick(&device.network_edge, &group.network_edge, NetworkEdge::Off),
+        page_size: pick(&device.page_size, &group.page_size, DEFAULT_PAGE_SIZE),
     }
 }
 
@@ -332,6 +364,8 @@ mod tests {
         assert_eq!(s.timeout_seconds.value, 45);
         assert_eq!(s.request_timeout_seconds.value, 60);
         assert_eq!(s.paged_section_timeout_seconds.value, 300);
+        assert_eq!(s.network_edge.value, NetworkEdge::Off);
+        assert_eq!(s.page_size.value, 100);
         assert_eq!(
             (s.interval_seconds.value, s.interval_seconds.origin),
             (60, Origin::Default)
@@ -361,6 +395,27 @@ mod tests {
         g.settings.tls_trust = None;
         let s = resolve_device(&device(Settings::default()), &g).settings;
         assert_eq!(s.tls_trust.value, TlsTrust::Pin);
+    }
+
+    #[test]
+    fn an_equinix_account_with_no_setting_takes_its_vendor_defaults() {
+        let mut g = group(Settings::default());
+        g.vendor = "equinix".into();
+        let s = resolve_device(&device(Settings::default()), &g).settings;
+        assert_eq!(
+            (s.tls_trust.value, s.tls_trust.origin),
+            (TlsTrust::Public, Origin::Default)
+        );
+        assert_eq!(
+            (s.interval_seconds.value, s.interval_seconds.origin),
+            (900, Origin::Default)
+        );
+        assert_eq!(
+            (s.timeout_seconds.value, s.timeout_seconds.origin),
+            (900, Origin::Default)
+        );
+        assert_eq!(s.request_timeout_seconds.value, 60);
+        assert_eq!(s.paged_section_timeout_seconds.value, 300);
     }
 
     #[test]

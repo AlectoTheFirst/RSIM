@@ -41,6 +41,7 @@ import {
   newGroupChecked,
   newJumpHostBody,
   usedSetting,
+  fallbackOf,
   parseSetting,
   rebase,
   routeBody,
@@ -59,6 +60,7 @@ import { viewOf, viewSearch } from "../src/page/url";
 
 const VENDORS: Vendors = {
   vendors: [
+    { vendor: "equinix", transport: "https" },
     { vendor: "nxos", transport: "ssh" },
     { vendor: "unifi", transport: "https" },
     { vendor: "vyos", transport: "ssh" },
@@ -119,6 +121,8 @@ function resolved(name: string, group: string, vendor: string, s: Partial<Resolv
     api_base: r(null, "default"),
     concurrency: r(4, "default"),
     refresh_seconds: r(1800, "default"),
+    network_edge: r("off", "default"),
+    page_size: r(100, "default"),
   };
   return { name, group, vendor, address: "192.0.2.99", site: site ?? null, settings: { ...base, ...s } };
 }
@@ -334,8 +338,16 @@ describe("edits of the settings", () => {
     expect(usedSetting(field("nxos_json"), VENDORS, "nxos")).toBe(true);
     expect(usedSetting(field("timeout_seconds"), VENDORS, "unifi")).toBe(true);
     expect(usedSetting(field("retries"), VENDORS, "vyos")).toBe(false);
-    expect(usedSetting(field("request_timeout_seconds"), VENDORS, "unifi")).toBe(false);
+    expect(usedSetting(field("request_timeout_seconds"), VENDORS, "unifi")).toBe(true);
+    expect(usedSetting(field("retries"), VENDORS, "unifi")).toBe(false);
+    expect(usedSetting(field("retries"), VENDORS, "equinix")).toBe(true);
     expect(usedSetting(field("tls_trust"), VENDORS, "othervendor")).toBe(true);
+    expect(usedSetting(field("paged_section_timeout_seconds"), VENDORS, "equinix")).toBe(true);
+    expect(usedSetting(field("paged_section_timeout_seconds"), VENDORS, "unifi")).toBe(false);
+    expect(usedSetting(field("section_timeout_seconds"), VENDORS, "equinix")).toBe(false);
+    expect(fallbackOf(field("interval_seconds"), "equinix")).toBe("900");
+    expect(usedSetting(field("network_edge"), VENDORS, "equinix")).toBe(true);
+    expect(usedSetting(field("page_size"), VENDORS, "unifi")).toBe(false);
     expect(usedSetting(field("tls_trust"), null, "vyos")).toBe(true);
   });
 

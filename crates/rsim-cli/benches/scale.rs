@@ -286,6 +286,7 @@ fn main() {
             bgp: BTreeMap::new(),
             facts: BTreeMap::new(),
             seen: Vec::new(),
+            fabric: BTreeMap::new(),
             tables: Default::default(),
             source: None,
         };

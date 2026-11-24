@@ -30,6 +30,100 @@ pub struct Neighbour {
     pub span: SourceSpan,
 }
 
+/// An operator record that names the far end of a port: a device of the
+/// store and its port, by the full name of the port in its config.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Binding {
+    /// The local port.
+    pub port: String,
+    pub device: String,
+    pub far_port: String,
+    pub span: SourceSpan,
+}
+
+/// A Fabric port of a provider device, for the description rule of the
+/// join: its port, its name and its cross connect ids.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FabricPortName {
+    pub port: String,
+    pub name: String,
+    pub cross_connects: Vec<String>,
+}
+
+/// True if the description names the Fabric port `name`, ported from HST
+/// `_fabric_port_matcher`. A name of only ASCII letters, digits and `-`
+/// must be a whole run of these characters of the description; each other
+/// name must have no such character on either side. Case does not count.
+pub fn names_fabric_port(description: &str, name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '-';
+    if name.chars().all(word) {
+        return description
+            .split(|c: char| !word(c))
+            .any(|run| run.eq_ignore_ascii_case(name));
+    }
+    let d: Vec<char> = description.to_lowercase().chars().collect();
+    let n: Vec<char> = name.to_lowercase().chars().collect();
+    (0..d.len().saturating_sub(n.len() - 1)).any(|i| {
+        d[i..].starts_with(&n)
+            && (i == 0 || !word(d[i - 1]))
+            && d.get(i + n.len()).is_none_or(|c| !word(*c))
+    })
+}
+
+/// The cable ids that a description states, from HST
+/// `\b(?:CABLE\s*ID|CCID)\s*:?\s*(\d+)` with case ignored.
+pub fn cable_ids(description: &str) -> Vec<String> {
+    let d: Vec<char> = description.to_ascii_uppercase().chars().collect();
+    let is_word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let skip_space = |mut i: usize| {
+        while d.get(i).is_some_and(|c| c.is_whitespace()) {
+            i += 1;
+        }
+        i
+    };
+    let at = |i: usize, w: &str| -> bool {
+        w.chars().enumerate().all(|(k, c)| d.get(i + k) == Some(&c))
+    };
+    let mut out = Vec::new();
+    for i in 0..d.len() {
+        if i > 0 && is_word(d[i - 1]) {
+            continue;
+        }
+        let after = if at(i, "CCID") {
+            Some(i + 4)
+        } else if at(i, "CABLE") {
+            let j = skip_space(i + 5);
+            at(j, "ID").then_some(j + 2)
+        } else {
+            None
+        };
+        let Some(mut j) = after else { continue };
+        j = skip_space(j);
+        if d.get(j) == Some(&':') {
+            j = skip_space(j + 1);
+        }
+        let digits: String = d[j..].iter().take_while(|c| c.is_ascii_digit()).collect();
+        if !digits.is_empty() {
+            out.push(digits);
+        }
+    }
+    out
+}
+
+/// A circuit of a device between 2 of its ports, with one VLAN at each end:
+/// a frame of the VLAN of one end leaves the other end with the VLAN of
+/// that end.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Transit {
+    pub circuit: String,
+    pub a: (String, u16),
+    pub b: (String, u16),
+    pub span: SourceSpan,
+}
+
 /// The layer 3 addresses of a port by VLAN, with their prefix lengths.
 pub type VlanAddrs = BTreeMap<Option<u16>, Vec<(IpAddr, u8)>>;
 
@@ -118,6 +212,16 @@ pub struct Summary {
     /// The VRF of the SVI of each VLAN, for an SVI in a VRF other than the
     /// default VRF.
     pub vlan_vrfs: BTreeMap<u16, String>,
+    /// The bindings of the ports. A binding is a link that needs no record
+    /// at the far end, and it removes each other link of its 2 ends.
+    pub bindings: Vec<Binding>,
+    /// The circuits between the ports of the device, for the placement of
+    /// the endpoints across them.
+    pub transits: Vec<Transit>,
+    /// The description of each port that can end a link, with its span.
+    pub descriptions: BTreeMap<String, (String, SourceSpan)>,
+    /// The Fabric ports of a provider device.
+    pub fabric_ports: Vec<FabricPortName>,
 }
 
 /// A layer 3 address of a port.
@@ -758,6 +862,119 @@ pub fn join(
     links.retain(|(a, b, _)| !vpc_members.contains(a) && !vpc_members.contains(b));
     links.extend(address_links(switches, &named, &mut out.notes));
 
+    // The bindings: a link from each binding to a lowered port of a device
+    // of the twin. A binding removes each other link of its 2 ends.
+    let mut bound: Vec<(End, End, Vec<SourceSpan>)> = Vec::new();
+    for (d, s) in switches {
+        for b in &s.bindings {
+            let here = End(d.clone(), b.port.clone());
+            let far = End(b.device.clone(), b.far_port.clone());
+            match switches.get(&b.device) {
+                None => {
+                    add_note(
+                        &mut out.notes,
+                        d,
+                        format!(
+                            "{}: the binding names the device {}, which is not in the twin",
+                            b.port, b.device
+                        ),
+                    );
+                    continue;
+                }
+                Some(fs) if !fs.entries.contains_key(&b.far_port) => {
+                    add_note(
+                        &mut out.notes,
+                        d,
+                        format!(
+                            "{}: the binding names the port {} of {}, which is not a lowered port",
+                            b.port, b.far_port, b.device
+                        ),
+                    );
+                    continue;
+                }
+                Some(_) => {}
+            }
+            let mut spans = vec![b.span.clone()];
+            if let Some(sp) = switches[&b.device].port_spans.get(&b.far_port) {
+                spans.push(sp.clone());
+            }
+            bound.push((here, far, spans));
+        }
+    }
+    bound.extend(described(switches, &bound, &mut out.notes));
+    let bound_ends: BTreeSet<End> = bound
+        .iter()
+        .flat_map(|(a, b, _)| [a.clone(), b.clone()])
+        .collect();
+    links.retain(|(a, b, _)| {
+        let hit = bound_ends.contains(a) || bound_ends.contains(b);
+        if hit {
+            for End(d, p) in [a, b].into_iter().filter(|e| bound_ends.contains(e)) {
+                out.notes.entry(d.clone()).or_default().push(format!(
+                    "{p}: a binding replaces the link of the neighbour records"
+                ));
+            }
+        }
+        !hit
+    });
+    vpc_links.retain(|(a, ends, _)| {
+        !bound_ends.contains(a) && !ends.iter().any(|e| bound_ends.contains(e))
+    });
+    // The transit map of the circuits between 2 bound ports, and the notes
+    // of a circuit whose VLAN the bound port does not carry.
+    let bound_port: BTreeMap<&End, &End> = bound.iter().map(|(a, b, _)| (a, b)).collect();
+    let mut transit: BTreeMap<(String, String, u16), (String, String, u16)> = BTreeMap::new();
+    for (d, s) in switches {
+        for t in &s.transits {
+            let ends = [&t.a, &t.b].map(|(p, v)| {
+                bound_port
+                    .get(&End(d.clone(), p.clone()))
+                    .map(|e| ((*e).clone(), *v))
+            });
+            let [Some((ea, va)), Some((eb, vb))] = ends else {
+                continue;
+            };
+            transit.insert(
+                (ea.0.clone(), ea.1.clone(), va),
+                (eb.0.clone(), eb.1.clone(), vb),
+            );
+            transit.insert(
+                (eb.0.clone(), eb.1.clone(), vb),
+                (ea.0.clone(), ea.1.clone(), va),
+            );
+            let carried = |e: &End, v: u16| -> Option<bool> {
+                let pv = switches.get(&e.0)?.ports.get(&e.1)?.as_ref()?;
+                Some(pv.tagged.contains(&v) || pv.native == Some(v))
+            };
+            let missing: Vec<String> = [(&ea, va), (&eb, vb)]
+                .into_iter()
+                .filter(|(e, v)| carried(e, *v) == Some(false))
+                .map(|(e, v)| format!("VLAN {v} on {} {}", e.0, e.1))
+                .collect();
+            match missing.len() {
+                0 => {}
+                1 => add_note(
+                    &mut out.notes,
+                    d,
+                    format!(
+                        "circuit {}: the bound port does not carry {}",
+                        t.circuit, missing[0]
+                    ),
+                ),
+                _ => add_note(
+                    &mut out.notes,
+                    d,
+                    format!(
+                        "circuit {}: no bound port carries its VLAN: {}",
+                        t.circuit,
+                        missing.join(", ")
+                    ),
+                ),
+            }
+        }
+    }
+    links.extend(bound);
+
     // An end that 2 links claim gets no link.
     let mut claims: BTreeMap<&End, u32> = BTreeMap::new();
     for (a, b, _) in &links {
@@ -899,7 +1116,7 @@ pub fn join(
         device_macs,
         addresses: &linked_by_address,
     };
-    place(switches, &mut out, &l2_far, &leave_out);
+    place(switches, &mut out, &l2_far, &transit, &leave_out);
     out
 }
 
@@ -950,6 +1167,109 @@ fn holder<'a>(
 }
 
 /// Adds a note to a device once.
+/// The links of the description rule: a port whose description names one
+/// Fabric port, with no stated cable id or with a stated cable id that is a
+/// cross connect id of the Fabric port, links to it. A description that
+/// names more than one Fabric port, a Fabric port that more than one port
+/// names, and a stated cable id that is no cross connect id give a note
+/// and no link. A port or a Fabric port of an operator binding takes no
+/// link of this rule.
+fn described(
+    switches: &BTreeMap<String, Summary>,
+    operator: &[(End, End, Vec<SourceSpan>)],
+    notes: &mut BTreeMap<String, Vec<String>>,
+) -> Vec<(End, End, Vec<SourceSpan>)> {
+    let taken: BTreeSet<&End> = operator.iter().flat_map(|(a, b, _)| [a, b]).collect();
+    let fabric: Vec<(End, &FabricPortName)> = switches
+        .iter()
+        .flat_map(|(d, s)| {
+            s.fabric_ports
+                .iter()
+                .map(move |f| (End(d.clone(), f.port.clone()), f))
+        })
+        .collect();
+    if fabric.is_empty() {
+        return Vec::new();
+    }
+    let mut named: BTreeMap<End, Vec<(End, SourceSpan)>> = BTreeMap::new();
+    for (d, s) in switches {
+        for (p, (text, span)) in &s.descriptions {
+            if !s.entries.contains_key(p) {
+                continue;
+            }
+            let hits: Vec<&(End, &FabricPortName)> = fabric
+                .iter()
+                .filter(|(_, f)| names_fabric_port(text, &f.name))
+                .collect();
+            let [(fp, f)] = hits.as_slice() else {
+                if hits.len() > 1 {
+                    let names: Vec<&str> = hits.iter().map(|(_, f)| f.name.as_str()).collect();
+                    add_note(
+                        notes,
+                        d,
+                        format!(
+                            "{p}: the description names the Fabric ports {}, no link",
+                            names.join(", ")
+                        ),
+                    );
+                }
+                continue;
+            };
+            let stated = cable_ids(text);
+            if !stated.is_empty() && !stated.iter().any(|id| f.cross_connects.contains(id)) {
+                add_note(
+                    notes,
+                    d,
+                    format!(
+                        "{p}: the description names the Fabric port {} with the cable id {}, which is no cross connect of the port, no link",
+                        f.name,
+                        stated.join(", ")
+                    ),
+                );
+                continue;
+            }
+            named
+                .entry(fp.clone())
+                .or_default()
+                .push((End(d.clone(), p.clone()), span.clone()));
+        }
+    }
+    let mut out = Vec::new();
+    for (fp, ports) in named {
+        let name = &switches[&fp.0]
+            .fabric_ports
+            .iter()
+            .find(|f| f.port == fp.1)
+            .expect("a Fabric port of the device")
+            .name;
+        let [(here, span)] = ports.as_slice() else {
+            let list: Vec<String> = ports
+                .iter()
+                .map(|(e, _)| format!("{} {}", e.0, e.1))
+                .collect();
+            add_note(
+                notes,
+                &fp.0,
+                format!(
+                    "{}: the descriptions of {} name the Fabric port {name}, no link",
+                    fp.1,
+                    list.join(", ")
+                ),
+            );
+            continue;
+        };
+        if taken.contains(&fp) || taken.contains(here) {
+            continue;
+        }
+        let mut spans = vec![span.clone()];
+        if let Some(sp) = switches[&fp.0].port_spans.get(&fp.1) {
+            spans.push(sp.clone());
+        }
+        out.push((fp, here.clone(), spans));
+    }
+    out
+}
+
 fn add_note(notes: &mut BTreeMap<String, Vec<String>>, device: &str, text: String) {
     let list = notes.entry(device.to_string()).or_default();
     if !list.contains(&text) {
@@ -1265,6 +1585,7 @@ fn place(
     switches: &BTreeMap<String, Summary>,
     out: &mut Joined,
     far: &BTreeMap<(String, String), (String, String)>,
+    transit: &BTreeMap<(String, String, u16), (String, String, u16)>,
     leave: &Leave,
 ) {
     // Each ARP row leads to a place, or to none.
@@ -1293,6 +1614,16 @@ fn place(
                 };
                 // A port with a link leads on; it is never an edge port.
                 let Some((d2, q)) = far.get(&(dev.clone(), port.clone())) else {
+                    // A port bound to a circuit leads on with the VLAN of
+                    // the far end.
+                    let carried = pv.tagged.contains(&vlan) || pv.native == Some(vlan);
+                    if carried
+                        && let Some((d2, _, v2)) = transit.get(&(dev.clone(), port.clone(), vlan))
+                    {
+                        vlan = *v2;
+                        dev = d2.clone();
+                        continue;
+                    }
                     if pv.edge && pv.native == Some(vlan) {
                         place = Some((dev.clone(), port.clone()));
                     }

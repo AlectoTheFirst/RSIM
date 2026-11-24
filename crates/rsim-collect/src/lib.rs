@@ -13,6 +13,8 @@ pub mod cli;
 #[cfg(all(feature = "nxos", feature = "iosxe", feature = "iosxr"))]
 pub mod demo;
 mod device;
+#[cfg(feature = "equinix")]
+pub mod equinix;
 pub mod fake;
 #[cfg(feature = "https")]
 pub mod https;
@@ -24,6 +26,8 @@ pub mod iosxr;
 pub mod nxos;
 mod path;
 mod pipeline;
+#[cfg(feature = "https")]
+pub mod redact;
 mod schedule;
 mod source;
 #[cfg(feature = "ssh")]

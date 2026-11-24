@@ -40,6 +40,10 @@ pub enum FunctionKind {
     PortEgress,
     WirelessAttachment,
     Layer3HandOff,
+    /// A point-to-point circuit of a provider between 2 ports.
+    Circuit,
+    /// A push or a pop of one VLAN tag.
+    TagStack,
     // Tunnels.
     TunnelSelection,
     Encapsulation,

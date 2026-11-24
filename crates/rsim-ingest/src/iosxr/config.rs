@@ -45,6 +45,8 @@ pub struct Interface {
     /// The bundle of a member port, from `bundle id`.
     pub bundle: Option<(u32, Lines)>,
     pub mtu: Option<(u32, Lines)>,
+    /// The text of the `description` line.
+    pub description: Option<(String, Lines)>,
     /// The masked lines of the options that the handlers do not read: the
     /// unhandled options and the handled lines with a form that the handler
     /// cannot read.
@@ -224,6 +226,10 @@ fn interface(r: &mut R, s: &Stanza, name: &str) -> Interface {
         let handled = match words(&c.key).as_slice() {
             ["shutdown"] => {
                 i.shutdown = true;
+                true
+            }
+            ["description", ..] => {
+                i.description = Some((crate::nxos::config::description_text(&c.key), lines));
                 true
             }
             ["vrf", v] => {

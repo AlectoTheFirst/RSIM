@@ -147,7 +147,7 @@ const FORWARDING: &[Entry] = &[
     e("interface */vrrp * authentication ..", Irrelevant, Subtree),
     e("interface */vrrp * description ..", Irrelevant, Subtree),
     e("interface */vrrp * track ..", Irrelevant, Subtree),
-    e("interface */description ..", Irrelevant, Subtree),
+    e("interface */description ..", Handled, Subtree),
     e("interface */negotiation ..", Irrelevant, Subtree),
     e("interface */speed ..", Irrelevant, Subtree),
     e("interface */duplex ..", Irrelevant, Subtree),

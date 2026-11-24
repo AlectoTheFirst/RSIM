@@ -33,7 +33,7 @@ const GROUPS: &[(&str, &str)] = &[
 const INTERFACE_OPTIONS: &[(&str, State, Reach)] = &[
     ("address", Handled, Subtree),
     ("disable", Handled, Subtree),
-    ("description", Irrelevant, Subtree),
+    ("description", Handled, Subtree),
     ("hw-id", Irrelevant, Subtree),
     ("mtu", Irrelevant, Subtree),
     ("ip/adjust-mss", Irrelevant, Subtree),

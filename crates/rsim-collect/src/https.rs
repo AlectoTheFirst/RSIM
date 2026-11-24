@@ -40,6 +40,9 @@ pub const DEFAULT_RETRY_WAIT: Duration = Duration::from_secs(5);
 /// The longest wait after a 429.
 pub const MAX_RETRY_WAIT: Duration = Duration::from_secs(86_400);
 
+/// The path of the token request of an OAuth2 client.
+pub const OAUTH_TOKEN_PATH: &str = "/oauth2/v1/token";
+
 /// How the transport checks the certificate of a console. The modes do not
 /// mix: a pin is not a fallback of a CA bundle, and the mode with no check
 /// writes no pin.
@@ -856,6 +859,34 @@ impl HttpsTransport {
                 }
                 session_headers(&headers)
             }
+            Secret::OAuthClient(secret) => {
+                let body = serde_json::json!({
+                    "grant_type": "client_credentials",
+                    "client_id": console.credential.user,
+                    "client_secret": secret,
+                });
+                let req = Self::request(
+                    console,
+                    Method::POST,
+                    OAUTH_TOKEN_PATH,
+                    &[],
+                    Bytes::from(body.to_string()),
+                )?;
+                let (status, _, reply) =
+                    self.send(console, req, self.limits.request_timeout).await?;
+                if !status.is_success() {
+                    return Err(TransportError::Connect(format!(
+                        "the token request of the client {} gave HTTP {status}",
+                        console.credential.user
+                    )));
+                }
+                let token = access_token(&reply).ok_or_else(|| {
+                    TransportError::Connect(
+                        "the token answer of Equinix has no access_token".into(),
+                    )
+                })?;
+                vec![(header::AUTHORIZATION, format!("Bearer {token}"))]
+            }
             Secret::Key { .. } | Secret::Agent { .. } => {
                 return Err(TransportError::Connect(
                     "an SSH key is not an HTTPS credential".into(),
@@ -868,7 +899,7 @@ impl HttpsTransport {
     }
 
     /// A read whose status from 400 to 599 goes to the source. A 401 with
-    /// a password gives one new login. A 429 holds each request to the
+    /// a password or an OAuth client gives one new login. A 429 holds each request to the
     /// server for the wait of `Retry-After`, and the read tries again while
     /// the device has retries.
     async fn read(
@@ -886,7 +917,7 @@ impl HttpsTransport {
             .copied()
             .unwrap_or(self.limits.retries);
         let (mut headers, mut generation) = self.login(&console, None).await?;
-        let mut login_again = matches!(console.credential.secret, Secret::Password(_));
+        let mut login_again = console.credential.secret.logs_in();
         loop {
             let req = Self::request(&console, method.clone(), path, &headers, body.clone())?;
             let (status, reply_headers, reply) = self.send(&console, req, timeout).await?;
@@ -929,6 +960,15 @@ fn clone_request(r: &Request<Full<Bytes>>) -> Request<Full<Bytes>> {
     b.body(body).expect("the parts come from a valid request")
 }
 
+/// The `access_token` of a token answer, a string that is not empty.
+fn access_token(body: &[u8]) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_slice(body).ok()?;
+    v.get("access_token")?
+        .as_str()
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+}
+
 /// The cookie and the CSRF token of a login response.
 fn session_headers(headers: &header::HeaderMap) -> Vec<(header::HeaderName, String)> {
     let cookies: Vec<&str> = headers
@@ -968,8 +1008,8 @@ impl Https for HttpsTransport {
                 if status.is_success() {
                     return Ok(body.to_vec());
                 }
-                let expired = status == StatusCode::UNAUTHORIZED
-                    && matches!(console.credential.secret, Secret::Password(_));
+                let expired =
+                    status == StatusCode::UNAUTHORIZED && console.credential.secret.logs_in();
                 if expired && attempt == 0 {
                     (headers, generation) = self.login(&console, Some(generation)).await?;
                     continue;
@@ -1056,6 +1096,23 @@ mod tests {
             capture_bgp: Default::default(),
             route: Default::default(),
             interval: DEFAULT_INTERVAL,
+        }
+    }
+
+    #[test]
+    fn a_token_answer_needs_a_string_access_token() {
+        assert_eq!(
+            access_token(br#"{"access_token":"tok","expires_in":3600}"#).as_deref(),
+            Some("tok")
+        );
+        for body in [
+            &br#"{"token":"tok"}"#[..],
+            br#"{"access_token":""}"#,
+            br#"{"access_token":7}"#,
+            br#"["access_token"]"#,
+            b"not json",
+        ] {
+            assert_eq!(access_token(body), None);
         }
     }
 

@@ -108,6 +108,7 @@ fn loaded_with(m: &BTreeMap<String, Value>, estate: Vec<Input>) -> Loaded {
         bgp: estate.bgp,
         facts,
         seen: estate.seen,
+        fabric: estate.fabric,
         tables: Default::default(),
         source: None,
     }

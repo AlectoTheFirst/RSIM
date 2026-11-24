@@ -15,7 +15,8 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode, header};
 use hyper_util::rt::TokioIo;
 use rsim_collect::https::{
-    ApiServer, ClientCert, HttpsLimits, HttpsProfile, HttpsTransport, TlsTrust, certificate_pin,
+    ApiServer, ClientCert, HttpsLimits, HttpsProfile, HttpsTransport, OAUTH_TOKEN_PATH, TlsTrust,
+    certificate_pin,
 };
 use rsim_collect::{
     Algorithms, Credential, Device, HttpReply, Https, Jump, MemoryCredentials, PinKind, PinPolicy,
@@ -103,7 +104,7 @@ async fn respond(state: Arc<State>, req: Request<hyper::body::Incoming>) -> Resp
     let method = req.method().clone();
     let headers = req.headers().clone();
     let body = req.into_body().collect().await.unwrap().to_bytes();
-    if path != "/api/auth/login" {
+    if path != "/api/auth/login" && path != OAUTH_TOKEN_PATH {
         state
             .starts
             .lock()
@@ -133,14 +134,44 @@ async fn respond(state: Arc<State>, req: Request<hyper::body::Incoming>) -> Resp
             .body(Full::new(Bytes::from_static(b"{}")))
             .unwrap();
     }
+    if path == OAUTH_TOKEN_PATH {
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        state
+            .posts
+            .lock()
+            .unwrap()
+            .push((path.clone(), body.clone()));
+        if v["client_id"] == "no-token" {
+            return reply(StatusCode::OK, "{\"expires_in\":3600}");
+        }
+        if v["grant_type"] != "client_credentials"
+            || v["client_id"] != "collector"
+            || v["client_secret"] != "s3cret"
+        {
+            return reply(StatusCode::UNAUTHORIZED, "{\"error\":\"invalid_client\"}");
+        }
+        let n = state.logins.fetch_add(1, Ordering::SeqCst) + 1;
+        let token = format!("bear{n}");
+        *state.token.lock().unwrap() = Some(token.clone());
+        return reply(
+            StatusCode::OK,
+            format!("{{\"access_token\":\"{token}\",\"expires_in\":3600}}"),
+        );
+    }
     let api_key = headers.get("x-api-key").is_some_and(|v| v == "key1");
     let token = state.token.lock().unwrap().clone();
+    let bearer = token.as_ref().is_some_and(|t| {
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v == format!("Bearer {t}"))
+    });
     let session = token.is_some_and(|t| {
         let cookie = headers.get(header::COOKIE).and_then(|v| v.to_str().ok());
         let csrf = headers.get("x-csrf-token").and_then(|v| v.to_str().ok());
         cookie == Some(&format!("TOKEN={t}")) && csrf == Some(&format!("csrf-{t}"))
     });
-    if !api_key && !session && !api_token {
+    if !api_key && !session && !api_token && !bearer {
         return reply(StatusCode::UNAUTHORIZED, "{}");
     }
     if method == Method::POST {
@@ -1019,4 +1050,121 @@ async fn public_roots_reject_a_certificate_of_a_private_ca() {
         panic!("a certificate of a private CA is rejected");
     };
     assert!(e.contains("TLS"), "{e}");
+}
+
+fn oauth(secret: &str) -> Secret {
+    Secret::OAuthClient(secret.into())
+}
+
+/// The bodies of the POST requests to `path`.
+fn posts_to(state: &State, path: &str) -> Vec<Bytes> {
+    state
+        .posts
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(p, _)| p == path)
+        .map(|(_, b)| b.clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn an_oauth_client_gets_one_token_and_sends_it_as_bearer() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let t = HttpsTransport::new(
+        credentials(oauth("s3cret")),
+        pinned(&f),
+        HttpsLimits::default(),
+    );
+    let d = device(&f.address, "default");
+    assert_eq!(
+        t.get_status(&d, "/a").await.unwrap(),
+        HttpReply::Body(b"{\"path\":\"/a\"}".to_vec())
+    );
+    let request = json!({"filter": {"or": []}});
+    assert_eq!(
+        t.post_read(&d, READS, READS[0], &request).await.unwrap(),
+        HttpReply::Body(request.to_string().into_bytes())
+    );
+    assert_eq!(f.state.logins.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        f.state.authorization.lock().unwrap().as_deref(),
+        Some("Bearer bear1")
+    );
+    let login: serde_json::Value =
+        serde_json::from_slice(&posts_to(&f.state, OAUTH_TOKEN_PATH)[0]).unwrap();
+    assert_eq!(
+        login,
+        json!({"grant_type": "client_credentials", "client_id": "collector", "client_secret": "s3cret"})
+    );
+    assert_eq!(format!("{:?}", oauth("s3cret")), "OAuthClient(..)");
+}
+
+#[tokio::test]
+async fn a_401_renews_the_token_and_sends_the_same_body_again() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let t = HttpsTransport::new(
+        credentials(oauth("s3cret")),
+        pinned(&f),
+        HttpsLimits::default(),
+    );
+    let d = device(&f.address, "default");
+    let request = json!({"pagination": {"offset": 0, "limit": 100}});
+    assert!(t.post_read(&d, READS, READS[0], &request).await.is_ok());
+    f.state.expire();
+    assert_eq!(
+        t.post_read(&d, READS, READS[0], &request).await.unwrap(),
+        HttpReply::Body(request.to_string().into_bytes())
+    );
+    f.state.expire();
+    assert!(t.get(&d, "/a").await.is_ok());
+    assert_eq!(f.state.logins.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        posts_to(&f.state, READS[0]),
+        [
+            Bytes::from(request.to_string()),
+            Bytes::from(request.to_string())
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_refused_token_request_names_no_secret() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let t = HttpsTransport::new(
+        credentials(oauth("wrong-s3cret")),
+        pinned(&f),
+        HttpsLimits::default(),
+    );
+    let d = device(&f.address, "default");
+    let e = t.get_status(&d, "/a").await.unwrap_err();
+    let text = e.to_string();
+    assert!(
+        matches!(&e, TransportError::Connect(m) if m.contains("401")),
+        "{text}"
+    );
+    assert!(!text.contains("wrong-s3cret") && !format!("{e:?}").contains("wrong-s3cret"));
+    assert_eq!(f.state.starts("/a"), Vec::<Instant>::new());
+}
+
+#[tokio::test]
+async fn a_token_answer_with_no_access_token_is_a_login_error() {
+    let f = serve(rustls::DEFAULT_VERSIONS).await;
+    let mut c = MemoryCredentials::new();
+    c.insert(
+        "lab",
+        Credential {
+            user: "no-token".into(),
+            secret: oauth("s3cret"),
+        },
+    );
+    let t = HttpsTransport::new(Arc::new(c), pinned(&f), HttpsLimits::default());
+    let e = t
+        .get_status(&device(&f.address, "default"), "/a")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&e, TransportError::Connect(m) if m == "the token answer of Equinix has no access_token"),
+        "{e}"
+    );
 }

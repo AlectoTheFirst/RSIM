@@ -26,17 +26,19 @@ pub use db::{
     verify_password,
 };
 pub use resolve::{
-    DEFAULT_CONCURRENCY, DEFAULT_INTERVAL_SECONDS, DEFAULT_PAGED_SECTION_TIMEOUT_SECONDS,
-    DEFAULT_REFRESH_SECONDS, DEFAULT_REQUEST_TIMEOUT_SECONDS, DEFAULT_SECTION_TIMEOUT_SECONDS,
-    DEFAULT_TIMEOUT_SECONDS, Origin, Resolved, ResolvedDevice, ResolvedDevices, ResolvedSettings,
-    default_tls_trust, resolve_device, resolve_settings,
+    DEFAULT_CONCURRENCY, DEFAULT_INTERVAL_SECONDS, DEFAULT_PAGE_SIZE,
+    DEFAULT_PAGED_SECTION_TIMEOUT_SECONDS, DEFAULT_REFRESH_SECONDS,
+    DEFAULT_REQUEST_TIMEOUT_SECONDS, DEFAULT_SECTION_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS,
+    EQUINIX_DEFAULT_SECONDS, Origin, Resolved, ResolvedDevice, ResolvedDevices, ResolvedSettings,
+    default_interval_seconds, default_timeout_seconds, default_tls_trust, resolve_device,
+    resolve_settings,
 };
 pub use secret::{KEY_VAR, MAX_SECRET, Sealed, SecretInput, SecretKey};
 pub use types::{
     Action, AuditPage, AuditRecord, Bindings, COLLECTOR_VENDORS, CaptureBgp, Collection,
     CollectorTransport, Credential, CredentialKind, CredentialSource, DEFAULT_HISTORY_DAYS, Device,
-    EdgeDeviceBinding, FabricPortBinding, Group, Ha, Inventory, JumpHost, NxosJson, Route,
-    Settings, SshAlgorithms, SshMode, TlsTrust, valid_device_name, valid_name,
+    EdgeDeviceBinding, FabricPortBinding, Group, Ha, Inventory, JumpHost, NetworkEdge, NxosJson,
+    Route, Settings, SshAlgorithms, SshMode, TlsTrust, valid_device_name, valid_name,
 };
 
 /// The environment variable of the URL of the inventory database.

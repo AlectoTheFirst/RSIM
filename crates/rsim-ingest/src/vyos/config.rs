@@ -53,6 +53,8 @@ pub struct Interface {
     /// The peers of a WireGuard interface that are not disabled, in name
     /// order.
     pub peers: Vec<WireguardPeer>,
+    /// The text of the `description` option.
+    pub description: Option<(String, Lines)>,
     pub lines: Lines,
 }
 
@@ -499,7 +501,12 @@ fn read_interface(r: &mut Reader, s: &Stanza, name: String, kind: Kind) -> Inter
         }
     }
     peers.sort_by(|a, b| a.name.cmp(&b.name));
+    let description = match s.get("description") {
+        Some(d) => r.text(s, "description").map(|t| (t, Lines::of(d))),
+        None => None,
+    };
     Interface {
+        description,
         name,
         kind,
         addresses,

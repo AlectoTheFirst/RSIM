@@ -10,6 +10,7 @@ mod builders;
 mod chain;
 mod ecmp;
 mod edge_dnat;
+mod equinix_fabric;
 mod hairpin;
 mod helpers;
 mod layer2_site;
@@ -24,6 +25,7 @@ pub use builders::*;
 pub use chain::chain;
 pub use ecmp::ecmp;
 pub use edge_dnat::{EdgeOpts, edge_dnat};
+pub use equinix_fabric::equinix_fabric;
 pub use hairpin::hairpin;
 pub use helpers::*;
 pub use layer2_site::*;
@@ -37,7 +39,7 @@ pub use sdwan_site::{SdwanOpts, sdwan_site};
 use rsim_engine::{Twin, TwinBuilder};
 
 /// The built-in topologies by name, in a fixed order.
-const BUILTIN: [(&str, fn() -> TwinBuilder); 7] = [
+const BUILTIN: [(&str, fn() -> TwinBuilder); 8] = [
     ("mini-enterprise", || mini_enterprise(MiniOpts::default())),
     ("edge-dnat", || edge_dnat(EdgeOpts::default())),
     ("ecmp", ecmp),
@@ -45,6 +47,7 @@ const BUILTIN: [(&str, fn() -> TwinBuilder); 7] = [
     ("hairpin", hairpin),
     ("chain", || chain(10, 20, 100)),
     ("leaf-spine", leaf_spine),
+    ("equinix-fabric", equinix_fabric),
 ];
 
 /// The names of the built-in topologies, in a fixed order.

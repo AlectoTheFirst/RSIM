@@ -35,6 +35,9 @@ pub struct Loaded {
     /// The LLDP and CDP records of a store twin that name a neighbour with
     /// no device in the twin; empty for a hand-built topology of the tests.
     pub seen: Vec<rsim_ingest::links::SeenNeighbour>,
+    /// The circuits of each Equinix account of a store twin; empty for a
+    /// hand-built topology.
+    pub fabric: BTreeMap<String, Vec<rsim_ingest::equinix::CircuitRow>>,
     /// The columns of the tables of the twin, built when a request first
     /// names a table.
     pub tables: crate::tables::TableCache,
@@ -90,6 +93,7 @@ fn fixture(topology: &str) -> Result<Loaded, QueryError> {
         bgp: BTreeMap::new(),
         facts: BTreeMap::new(),
         seen: Vec::new(),
+        fabric: BTreeMap::new(),
         tables: Default::default(),
         source: None,
     })
@@ -144,6 +148,7 @@ pub fn load_store_at(folder: &str, cycle: Option<u64>) -> Result<Loaded, QueryEr
     let bgp = estate.bgp.clone();
     let facts = estate.facts.clone();
     let seen = estate.seen.clone();
+    let fabric = estate.fabric.clone();
     let twin = estate.builder.build().map_err(|errors| {
         let text: Vec<String> = errors.iter().map(ToString::to_string).collect();
         err(format!("the twin does not build: {}", text.join("; ")))
@@ -155,6 +160,7 @@ pub fn load_store_at(folder: &str, cycle: Option<u64>) -> Result<Loaded, QueryEr
         bgp,
         facts,
         seen,
+        fabric,
         tables: Default::default(),
         source: Some(crate::sources::SourceStore::new(store, snap)),
     })

@@ -135,7 +135,9 @@ fn source(vendor: Vendor, t: &Arc<Logged>) -> Arc<dyn Source> {
         Vendor::Nxos => Arc::new(NxosSource::new(t.clone())),
         Vendor::Iosxr => Arc::new(IosxrSource::new(t.clone())),
         Vendor::Iosxe => Arc::new(IosxeSource::new(t.clone())),
-        Vendor::Unifi | Vendor::Velocloud => unreachable!("the BGP tests read the SSH vendors"),
+        Vendor::Unifi | Vendor::Velocloud | Vendor::Equinix => {
+            unreachable!("the BGP tests read the SSH vendors")
+        }
     }
 }
 
@@ -145,7 +147,9 @@ fn base(vendor: Vendor) -> Vec<SectionSpec> {
         Vendor::Nxos => rsim_collect::nxos::sections_with(false, CaptureBgp::Off),
         Vendor::Iosxr => rsim_collect::iosxr::sections_with(CaptureBgp::Off),
         Vendor::Iosxe => rsim_collect::iosxe::sections_with(CaptureBgp::Off),
-        Vendor::Unifi | Vendor::Velocloud => unreachable!("the BGP tests read the SSH vendors"),
+        Vendor::Unifi | Vendor::Velocloud | Vendor::Equinix => {
+            unreachable!("the BGP tests read the SSH vendors")
+        }
     }
 }
 
@@ -181,7 +185,7 @@ fn hash(vendor: Vendor, capture: CaptureBgp, section: &str, answer: &str) -> rsi
         Vendor::Nxos => rsim_collect::nxos::sections_with(false, capture),
         Vendor::Iosxr => rsim_collect::iosxr::sections_with(capture),
         Vendor::Iosxe => rsim_collect::iosxe::sections_with(capture),
-        Vendor::Unifi | Vendor::Velocloud => unreachable!(),
+        Vendor::Unifi | Vendor::Velocloud | Vendor::Equinix => unreachable!(),
     };
     let spec = specs.into_iter().find(|s| s.name == section).unwrap();
     let keys = keys::keys();

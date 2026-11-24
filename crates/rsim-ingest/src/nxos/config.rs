@@ -79,6 +79,8 @@ pub struct Interface {
     pub ip_forward: bool,
     /// True with `fabric forwarding mode anycast-gateway`.
     pub anycast_gateway: bool,
+    /// The text of the `description` line.
+    pub description: Option<(String, Lines)>,
     /// The masked lines of the unhandled options of the interface.
     pub unhandled: Vec<String>,
     pub lines: Lines,
@@ -558,6 +560,14 @@ pub fn read(doc: &Document, table: &Table) -> Config {
     cfg
 }
 
+/// The text of a `description` line.
+pub(crate) fn description_text(line: &str) -> String {
+    line.strip_prefix("description")
+        .unwrap_or(line)
+        .trim()
+        .to_string()
+}
+
 fn interface(r: &mut R, s: &Stanza, name: &str) -> Interface {
     r.mark(s);
     let mut i = Interface {
@@ -634,6 +644,10 @@ fn interface(r: &mut R, s: &Stanza, name: &str) -> Interface {
                 true
             }
             ["hsrp", "version", _] => true,
+            ["description", ..] => {
+                i.description = Some((description_text(&c.key), lines));
+                true
+            }
             ["vpc", "peer-link"] => {
                 i.vpc = Some(VpcPort::PeerLink);
                 true

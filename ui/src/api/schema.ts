@@ -1436,6 +1436,8 @@ export interface components {
             current: components["schemas"]["HeaderJson"];
             original: components["schemas"]["HeaderJson"];
         };
+        /** @description Network Edge */
+        NetworkEdge: "off" | "on";
         /**
          * NewTokenOut
          * @description New API token
@@ -1713,6 +1715,11 @@ export interface components {
             origin: components["schemas"]["Origin"];
             value: components["schemas"]["Ha"];
         };
+        /** @description Resolved setting */
+        Resolved9: {
+            origin: components["schemas"]["Origin"];
+            value: components["schemas"]["NetworkEdge"];
+        };
         /**
          * ResolvedDevice
          * @description Resolved device
@@ -1746,8 +1753,10 @@ export interface components {
             credential: components["schemas"]["Resolved"];
             ha: components["schemas"]["Resolved8"];
             interval_seconds: components["schemas"]["Resolved4"];
+            network_edge: components["schemas"]["Resolved9"];
             nxos_json: components["schemas"]["Resolved5"];
             orchestrator_release: components["schemas"]["Resolved"];
+            page_size: components["schemas"]["Resolved4"];
             paged_section_timeout_seconds: components["schemas"]["Resolved4"];
             refresh_seconds: components["schemas"]["Resolved4"];
             request_timeout_seconds: components["schemas"]["Resolved4"];
@@ -1931,9 +1940,15 @@ export interface components {
              * @description Collection interval
              */
             interval_seconds?: number | null;
+            network_edge?: components["schemas"]["NetworkEdge"] | null;
             nxos_json?: components["schemas"]["NxosJson"] | null;
             /** @description Orchestrator release */
             orchestrator_release?: string | null;
+            /**
+             * Format: uint32
+             * @description Page size
+             */
+            page_size?: number | null;
             /**
              * Format: uint32
              * @description Paged section time limit

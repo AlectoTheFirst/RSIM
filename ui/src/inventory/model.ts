@@ -542,6 +542,8 @@ export interface SettingField {
   transport: Transport | null;
   /** The vendors of the setting; absent for each vendor of the transport. */
   vendors?: readonly string[];
+  /** The vendors of the transport that do not use the setting. */
+  notVendors?: readonly string[];
   /** True for a setting that the collector does not read. */
   unread?: boolean;
 }
@@ -557,20 +559,22 @@ export const SETTING_FIELDS: readonly SettingField[] = [
   { key: "ssh_mode", label: "SSH mode", kind: "choice", choices: ["exec", "shell", "connection"], fallback: "exec", transport: "ssh" },
   { key: "ssh_channels", label: "SSH channels", kind: "number", min: 1, max: I32_MAX, fallback: "1", transport: "ssh", vendors: ["nxos", "iosxr", "iosxe"] },
   { key: "nxos_json", label: "NX-OS JSON", kind: "choice", choices: ["plain", "native"], fallback: "plain", transport: "ssh", vendors: ["nxos"] },
-  { key: "tls_trust", label: "TLS trust", kind: "choice", choices: ["pin", "ca", "public", "none"], fallback: "pin", vendorFallback: { velocloud: "public" }, transport: "https" },
+  { key: "tls_trust", label: "TLS trust", kind: "choice", choices: ["pin", "ca", "public", "none"], fallback: "pin", vendorFallback: { velocloud: "public", equinix: "public" }, transport: "https" },
   { key: "tls_ca_file", label: "TLS CA file", kind: "text", fallback: "none", transport: "https" },
   { key: "capture_bgp", label: "BGP sections", kind: "choice", choices: ["off", "sessions", "all"], fallback: "sessions", transport: null },
-  { key: "interval_seconds", label: "interval", kind: "number", min: 60, max: 86400, unit: "s", fallback: "60", transport: null },
-  { key: "timeout_seconds", label: "device time limit", kind: "number", min: 1, max: 86400, unit: "s", fallback: "45", transport: null },
-  { key: "section_timeout_seconds", label: "section time limit", kind: "number", min: 1, max: 86400, unit: "s", fallback: "20", transport: null },
-  { key: "request_timeout_seconds", label: "request time limit", kind: "number", min: 1, max: 86400, unit: "s", fallback: "60", transport: "https", unread: true },
-  { key: "paged_section_timeout_seconds", label: "paged section time limit", kind: "number", min: 1, max: 86400, unit: "s", fallback: "300", transport: "https", unread: true },
-  { key: "retries", label: "retries", kind: "number", min: 0, max: 10, fallback: "0", transport: null, unread: true },
+  { key: "interval_seconds", label: "interval", kind: "number", min: 60, max: 86400, unit: "s", fallback: "60", vendorFallback: { equinix: "900" }, transport: null },
+  { key: "timeout_seconds", label: "device time limit", kind: "number", min: 1, max: 86400, unit: "s", fallback: "45", vendorFallback: { equinix: "900" }, transport: null },
+  { key: "section_timeout_seconds", label: "section time limit", kind: "number", min: 1, max: 86400, unit: "s", fallback: "20", transport: null, notVendors: ["equinix"] },
+  { key: "request_timeout_seconds", label: "request time limit", kind: "number", min: 1, max: 86400, unit: "s", fallback: "60", transport: "https" },
+  { key: "paged_section_timeout_seconds", label: "paged section time limit", kind: "number", min: 1, max: 86400, unit: "s", fallback: "300", transport: "https", vendors: ["equinix"] },
+  { key: "retries", label: "retries", kind: "number", min: 0, max: 10, fallback: "0", transport: "https", vendors: ["velocloud", "equinix"] },
   { key: "ha", label: "HA", kind: "choice", choices: ["none", "all", "one"], fallback: "none", transport: null, unread: true },
   { key: "orchestrator_release", label: "orchestrator release", kind: "text", fallback: "none", transport: "https", vendors: ["velocloud"] },
   { key: "api_base", label: "API base path", kind: "text", fallback: "/api/sdwan/v2", transport: "https", vendors: ["velocloud"] },
   { key: "concurrency", label: "concurrency", kind: "number", min: 1, max: 16, fallback: "4", transport: "https", vendors: ["velocloud"] },
   { key: "refresh_seconds", label: "module refresh", kind: "number", min: 0, max: 86400, unit: "s", fallback: "1800", transport: "https", vendors: ["velocloud"] },
+  { key: "network_edge", label: "Network Edge", kind: "choice", choices: ["off", "on"], fallback: "off", transport: "https", vendors: ["equinix"] },
+  { key: "page_size", label: "page size", kind: "number", min: 1, max: 1000, fallback: "100", transport: "https", vendors: ["equinix"] },
 ];
 
 /** The text of the default of a setting for a vendor. */
@@ -606,18 +610,19 @@ export function usedSetting(f: SettingField, vendors: Vendors | null, vendor: st
   const t = transportOf(vendors, vendor);
   if (t === null) return true;
   if (f.transport !== null && f.transport !== t) return false;
+  if (f.notVendors?.includes(vendor)) return false;
   return !f.vendors || f.vendors.includes(vendor);
 }
 
 /** The default value of a setting as text, by setting. */
 export type SettingDefaults = Partial<Record<SettingKey, string>>;
 
-/** The defaults that the resolved devices give: the value of each setting whose origin is the default and whose default is the same for each vendor. */
+/** The defaults that the resolved devices give: the value of each setting whose origin is the default, from the devices of the vendors with no default of their own. */
 export function settingDefaults(devices: readonly ResolvedDevice[]): SettingDefaults {
   const out: SettingDefaults = {};
   for (const d of devices) {
     for (const f of SETTING_FIELDS) {
-      if (f.vendorFallback) continue;
+      if (f.vendorFallback?.[d.vendor] !== undefined) continue;
       const r = d.settings[f.key as keyof ResolvedDevice["settings"]];
       if (r && r.origin === "default" && r.value !== null && r.value !== undefined && out[f.key] === undefined) out[f.key] = String(r.value);
     }

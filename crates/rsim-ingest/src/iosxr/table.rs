@@ -70,7 +70,7 @@ const ENTRIES: &[Entry] = &[
     e("interface */service-policy input *", Handled, Subtree),
     e("interface */service-policy output *", Handled, Subtree),
     e("interface */mtu *", Handled, Subtree),
-    e("interface */description ..", Irrelevant, Subtree),
+    e("interface */description ..", Handled, Subtree),
     e("interface */load-interval ..", Irrelevant, Subtree),
     e("interface */negotiation ..", Irrelevant, Subtree),
     e("interface */carrier-delay ..", Irrelevant, Subtree),

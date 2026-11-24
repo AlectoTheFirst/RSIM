@@ -18,7 +18,7 @@ use crate::facts::{self, DeviceFacts};
 use crate::links::{BgpPeerFact, PortAddress, Summary};
 use crate::route_tables::RouteTables;
 use crate::stanza::{Document, read_json};
-use crate::{iosxe, iosxr, nxos, unifi, velocloud, vyos};
+use crate::{equinix, iosxe, iosxr, nxos, unifi, velocloud, vyos};
 
 /// The twin builder of a snapshot, with the coverage, the unread handled
 /// stanzas, the lowering notes, the BGP peers and the facts of each device.
@@ -36,6 +36,8 @@ pub struct Estate {
     /// The LLDP and CDP records that name a neighbour with no device in the
     /// twin.
     pub seen: Vec<crate::links::SeenNeighbour>,
+    /// The circuits of each Equinix account, lowered or not.
+    pub fabric: BTreeMap<String, Vec<equinix::CircuitRow>>,
 }
 
 fn short(h: &Hash) -> String {
@@ -98,6 +100,11 @@ pub enum Input {
     },
     /// A VeloCloud enterprise: each section with its file name.
     Velocloud {
+        name: String,
+        sections: BTreeMap<String, (Vec<u8>, String)>,
+    },
+    /// An Equinix Fabric account: each section with its file name.
+    Equinix {
         name: String,
         sections: BTreeMap<String, (Vec<u8>, String)>,
     },
@@ -205,6 +212,18 @@ pub fn inputs(store: &Store, snap: &Snapshot) -> Result<(Vec<Input>, Vec<String>
                     sections,
                 });
             }
+            "equinix" => {
+                let mut sections = BTreeMap::new();
+                for name in equinix::SECTIONS {
+                    if let Some(x) = section(name)? {
+                        sections.insert(name.to_string(), x);
+                    }
+                }
+                out.push(Input::Equinix {
+                    name: device.clone(),
+                    sections,
+                });
+            }
             other => skipped.push(format!("{device}: vendor {other} not lowered")),
         }
     }
@@ -273,6 +292,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         bgp: BTreeMap::new(),
         facts: BTreeMap::new(),
         seen: Vec::new(),
+        fabric: BTreeMap::new(),
     };
     let mut routers: BTreeMap<String, Router> = BTreeMap::new();
     #[allow(clippy::type_complexity)]
@@ -289,6 +309,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     let mut xe: BTreeMap<String, (iosxe::Config, String, Sections)> = BTreeMap::new();
     let mut sites = Vec::new();
     let mut enterprises: Vec<(String, Sections)> = Vec::new();
+    let mut accounts: Vec<(String, Sections)> = Vec::new();
     // True for each device with a BGP stanza that can hold a neighbour and
     // that is not handled when no route rows are collected.
     let mut bgp_hidden: BTreeMap<String, bool> = BTreeMap::new();
@@ -384,6 +405,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
             }
             Input::Unifi { name, sections } => sites.push((name, sections)),
             Input::Velocloud { name, sections } => enterprises.push((name, sections)),
+            Input::Equinix { name, sections } => accounts.push((name, sections)),
         }
     }
 
@@ -474,13 +496,28 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         summaries.extend(velocloud::summaries(&ent));
         ents.push(ent);
     }
+    // The Equinix accounts: the coverage, and the summary of the gates and
+    // the bindings of the Fabric ports.
+    let mut fabric_accounts: Vec<(String, equinix::Account)> = Vec::new();
+    for (device, sections) in &accounts {
+        let p = velocloud::Parsed::new(sections);
+        let account = equinix::read(device, &p);
+        e.coverage
+            .insert(device.clone(), equinix::coverage::classify(&p));
+        let (sum, notes) = equinix::summary(&account);
+        let n = e.notes.entry(device.clone()).or_default();
+        n.extend(p.notes);
+        n.extend(notes);
+        summaries.insert(device.clone(), sum);
+        fabric_accounts.push((device.clone(), account));
+    }
     for s in summaries.values() {
         next_hops.extend(s.next_hops.iter().copied());
     }
     // The VyOS routers give their summaries too: the ports that can end a
     // link.
     for (d, r) in &routers {
-        summaries.insert(d.clone(), vyos::link_summary(d, &r.cfg, &r.col));
+        summaries.insert(d.clone(), vyos::link_summary(d, &r.file, &r.cfg, &r.col));
     }
     // The MACs of the collected devices: the interfaces of the routers and
     // of the switches, and the UniFi devices. None of them is an endpoint.
@@ -801,6 +838,27 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         }
         for a in low.attachments {
             e.builder.attachment(a);
+        }
+    }
+
+    // The Equinix accounts: the gate and the circuits of each Fabric port,
+    // with the peer of each bound Fabric port.
+    let eq_profile = equinix::profile();
+    for (device, account) in &fabric_accounts {
+        let ext = joined.devices.remove(device).unwrap_or_default();
+        let peers: BTreeMap<String, rsim_core::FunctionId> = ext
+            .peers
+            .iter()
+            .filter_map(|(port, list)| {
+                let uuid = port.strip_prefix("port/")?;
+                Some((uuid.to_string(), list.first()?.target.clone()))
+            })
+            .collect();
+        let low = equinix::lower(account, &eq_profile, &peers);
+        e.fabric.insert(device.clone(), low.circuits);
+        e.notes.entry(device.clone()).or_default().extend(low.notes);
+        for f in low.functions {
+            e.builder.add_arc(f);
         }
     }
 

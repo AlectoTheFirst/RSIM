@@ -36,6 +36,11 @@ pub fn nxos() -> VendorProfile {
     profile("nxos", RuleAction::Deny, "default")
 }
 
+/// An Equinix Fabric account.
+pub fn equinix() -> VendorProfile {
+    profile("equinix", RuleAction::Deny, "default")
+}
+
 /// A generic stateful router: implicit deny at the end of an ACL. The
 /// session lookup undoes a translation before the ACL, so the ACL sees the
 /// reply with the public address.
