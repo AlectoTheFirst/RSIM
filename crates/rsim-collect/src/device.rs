@@ -12,17 +12,19 @@ pub enum Vendor {
     Iosxr,
     Iosxe,
     Velocloud,
+    Equinix,
 }
 
 impl Vendor {
     /// All vendors.
-    pub const ALL: [Vendor; 6] = [
+    pub const ALL: [Vendor; 7] = [
         Vendor::Vyos,
         Vendor::Unifi,
         Vendor::Nxos,
         Vendor::Iosxr,
         Vendor::Iosxe,
         Vendor::Velocloud,
+        Vendor::Equinix,
     ];
 
     pub fn name(self) -> &'static str {
@@ -33,6 +35,7 @@ impl Vendor {
             Vendor::Iosxr => "iosxr",
             Vendor::Iosxe => "iosxe",
             Vendor::Velocloud => "velocloud",
+            Vendor::Equinix => "equinix",
         }
     }
 }
@@ -46,7 +49,8 @@ impl fmt::Display for Vendor {
 /// A device to collect. For UniFi, the device is one site of a console,
 /// and one read of the site gives all its switches and access points. For
 /// VeloCloud, the device is one enterprise of an orchestrator, and one read
-/// of the enterprise gives all its edges.
+/// of the enterprise gives all its edges. For Equinix, the device is one
+/// Fabric account.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Device {
     /// The unique name of the device in the store.
@@ -165,6 +169,13 @@ mod tests {
             .filter(|(_, t)| *t == rsim_inventory::CollectorTransport::Https)
             .map(|(v, _)| *v)
             .collect();
-        assert_eq!(https, [Vendor::Unifi.name(), Vendor::Velocloud.name()]);
+        assert_eq!(
+            https,
+            [
+                Vendor::Equinix.name(),
+                Vendor::Unifi.name(),
+                Vendor::Velocloud.name()
+            ]
+        );
     }
 }

@@ -273,6 +273,7 @@ async fn authenticate(
         Secret::Agent { socket } => agent(handle, &user, socket.clone(), name).await,
         Secret::ApiKey(_) => Err(format!("{name}: an API key is not an SSH credential")),
         Secret::Token(_) => Err(format!("{name}: an API token is not an SSH credential")),
+        Secret::OAuthClient(_) => Err(format!("{name}: an OAuth client is not an SSH credential")),
     }
 }
 

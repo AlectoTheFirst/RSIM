@@ -6,7 +6,10 @@
 //! sections. A device with its own `VIA` or `PROXY` key gets its own route.
 //! Each VeloCloud orchestrator `VELOCLOUD_<NAME>_URL` is the group
 //! `velocloud-<name>` with the credential reference `env:VELOCLOUD_<NAME>`,
-//! and each of its enterprises is a device. A proxy login becomes the
+//! and each of its enterprises is a device. Each Equinix account
+//! `EQUINIX_<NAME>_URL` is the group `equinix-<name>` with the device
+//! `equinix-<name>`, and its credential reference is `env:EQUINIX_<NAME>`
+//! with its own client, else `env:EQUINIX`. A proxy login becomes the
 //! reference `env-url:<key>`, so no secret leaves the env file.
 
 use std::collections::BTreeMap;
@@ -644,6 +647,106 @@ impl Builder<'_> {
     }
 }
 
+impl Builder<'_> {
+    /// The Equinix accounts: one group and one device `equinix-<name>` for
+    /// each `EQUINIX_<NAME>_URL`. The credential is `equinix-<name>` with
+    /// `EQUINIX_<NAME>_CLIENT_ID`, else `equinix` with `EQUINIX_CLIENT_ID`.
+    fn equinix(&mut self) -> Result<(), String> {
+        let env = self.env;
+        for (key, url) in env {
+            let Some(name) = key
+                .strip_prefix("EQUINIX_")
+                .and_then(|k| k.strip_suffix("_URL"))
+            else {
+                continue;
+            };
+            check_section_name(env, "EQUINIX", name)?;
+            let prefix = format!("EQUINIX_{name}");
+            let key = |k: &str| format!("{prefix}_{k}");
+            let id = id_of(name);
+            let group = format!("equinix-{id}");
+            let (credential, reference) = equinix_client(env, name)?;
+            let either = |k: &str| -> Result<Option<u32>, String> {
+                Ok(seconds(env, &key(k))?.or(seconds(env, &format!("EQUINIX_{k}"))?))
+            };
+            let tls = env
+                .get(&key("TLS"))
+                .map(|t| (key("TLS"), t))
+                .or_else(|| env.get("EQUINIX_TLS").map(|t| ("EQUINIX_TLS".into(), t)));
+            let tls_trust = match &tls {
+                None => None,
+                Some((k, t)) => Some(
+                    TlsTrust::parse(t)
+                        .ok_or_else(|| format!("{k} {t} is not public, pin, ca or none"))?,
+                ),
+            };
+            let tls_ca_file = if tls_trust == Some(TlsTrust::Ca) {
+                let k = tls.as_ref().map_or(String::new(), |(k, _)| k.clone());
+                let file = k.strip_suffix("_TLS").unwrap_or(&k).to_string() + "_CA_FILE";
+                Some(
+                    env.get(&file)
+                        .ok_or_else(|| format!("{k}=ca needs {file}"))?
+                        .clone(),
+                )
+            } else {
+                None
+            };
+            let mut g = Settings {
+                credential: Some(credential.clone()),
+                tls_trust,
+                tls_ca_file,
+                timeout_seconds: either("TIMEOUT")?,
+                paged_section_timeout_seconds: either("SECTION_TIMEOUT")?,
+                request_timeout_seconds: either("REQUEST_TIMEOUT")?,
+                ..Settings::default()
+            };
+            if self.has_route_keys("EQUINIX", Some(name)) || self.has_route_keys("EQUINIX", None) {
+                self.route(&group, "EQUINIX", Some(name))?;
+                g.route = Some(group.clone());
+            }
+            self.credential(&credential, CredentialSource::Env, &reference);
+            self.out.groups.push(Group {
+                name: group.clone(),
+                vendor: "equinix".into(),
+                description: None,
+                settings: g,
+            });
+            self.out.devices.push(Device {
+                name: group,
+                group: format!("equinix-{id}"),
+                address: url.trim_end_matches('/').to_string(),
+                site: None,
+                location: None,
+                console_site: None,
+                settings: Settings::default(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// The credential name and the env key prefix of the OAuth client of the
+/// Equinix account `<NAME>`: `equinix-<name>` and `EQUINIX_<NAME>` when
+/// `EQUINIX_<NAME>_CLIENT_ID` is set, else `equinix` and `EQUINIX`. The
+/// prefix needs `<P>_CLIENT_ID` and `<P>_CLIENT_SECRET`.
+pub fn equinix_client(
+    env: &BTreeMap<String, String>,
+    name: &str,
+) -> Result<(String, String), String> {
+    let own = format!("EQUINIX_{name}");
+    let (credential, prefix) = if env.contains_key(&format!("{own}_CLIENT_ID")) {
+        (format!("equinix-{}", id_of(name)), own)
+    } else {
+        ("equinix".to_string(), "EQUINIX".to_string())
+    };
+    for k in ["CLIENT_ID", "CLIENT_SECRET"] {
+        if !env.contains_key(&format!("{prefix}_{k}")) {
+            return Err(format!("{prefix}_{k} is not set"));
+        }
+    }
+    Ok((credential, prefix))
+}
+
 /// The inventory records of an env file. The checks are those of the
 /// collector: a device needs the credential of its vendor, each jump host
 /// of a route needs its address and its credential, and the words and the
@@ -658,6 +761,7 @@ pub fn import(env: &BTreeMap<String, String>) -> Result<Records, String> {
     }
     b.unifi()?;
     b.velocloud()?;
+    b.equinix()?;
     let mut seen: BTreeMap<&str, &Device> = BTreeMap::new();
     for d in &b.out.devices {
         if let Some(first) = seen.insert(&d.name, d) {
@@ -686,6 +790,57 @@ mod tests {
             bindings: Default::default(),
             collection: Default::default(),
         }
+    }
+
+    #[test]
+    fn an_equinix_account_is_a_group_and_a_device() {
+        let env = parse_env(
+            "EQUINIX_PROD_URL=https://api.equinix.com/\nEQUINIX_LAB_URL=https://api.equinix.com\n\
+             EQUINIX_CLIENT_ID=group-id\nEQUINIX_CLIENT_SECRET=fake-secret\n\
+             EQUINIX_LAB_CLIENT_ID=lab-id\nEQUINIX_LAB_CLIENT_SECRET=fake-lab-secret\n\
+             EQUINIX_SECTION_TIMEOUT=600\nEQUINIX_LAB_TLS=ca\nEQUINIX_LAB_CA_FILE=/ca.pem\n\
+             EQUINIX_PROXY=http://192.0.2.9:3128\n",
+        );
+        let r = import(&env).unwrap();
+        let devices: Vec<(&str, &str, &str)> = r
+            .devices
+            .iter()
+            .map(|d| (d.name.as_str(), d.group.as_str(), d.address.as_str()))
+            .collect();
+        assert_eq!(
+            devices,
+            [
+                ("equinix-lab", "equinix-lab", "https://api.equinix.com"),
+                ("equinix-prod", "equinix-prod", "https://api.equinix.com"),
+            ]
+        );
+        let refs: Vec<(&str, Option<&str>)> = r
+            .credentials
+            .iter()
+            .filter(|c| c.source == CredentialSource::Env)
+            .map(|c| (c.name.as_str(), c.key.as_deref()))
+            .collect();
+        assert_eq!(
+            refs,
+            [
+                ("equinix-lab", Some("EQUINIX_LAB")),
+                ("equinix", Some("EQUINIX"))
+            ]
+        );
+        let lab = &r.groups[0].settings;
+        assert_eq!(lab.credential.as_deref(), Some("equinix-lab"));
+        assert_eq!(lab.tls_trust, Some(TlsTrust::Ca));
+        assert_eq!(lab.tls_ca_file.as_deref(), Some("/ca.pem"));
+        assert_eq!(lab.paged_section_timeout_seconds, Some(600));
+        assert_eq!(lab.route.as_deref(), Some("equinix-lab"));
+        let prod = &r.groups[1].settings;
+        assert_eq!(prod.credential.as_deref(), Some("equinix"));
+        assert_eq!(prod.tls_trust, None);
+        assert_eq!(r.groups[1].vendor, "equinix");
+
+        let mut e = env.clone();
+        e.remove("EQUINIX_CLIENT_SECRET");
+        assert_eq!(import(&e).unwrap_err(), "EQUINIX_CLIENT_SECRET is not set");
     }
 
     #[test]

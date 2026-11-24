@@ -121,6 +121,7 @@ fn the_vendors_with_a_collector_need_no_database() {
     assert_eq!(
         words,
         [
+            ("equinix", "https"),
             ("iosxe", "ssh"),
             ("iosxr", "ssh"),
             ("nxos", "ssh"),

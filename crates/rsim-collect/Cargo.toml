@@ -8,13 +8,14 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = ["vyos", "unifi", "nxos", "iosxr", "iosxe", "velocloud"]
+default = ["vyos", "unifi", "nxos", "iosxr", "iosxe", "velocloud", "equinix"]
 vyos = ["ssh"]
 nxos = ["ssh"]
 iosxr = ["ssh"]
 iosxe = ["ssh"]
 unifi = ["https"]
 velocloud = ["https", "dep:blake3"]
+equinix = ["https"]
 ssh = ["dep:russh"]
 https = ["ssh", "dep:ring", "dep:rustls", "dep:tokio-rustls", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:bytes", "dep:httpdate", "dep:webpki-roots"]
 

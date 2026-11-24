@@ -28,7 +28,8 @@ pub use db::{
 pub use resolve::{
     DEFAULT_CONCURRENCY, DEFAULT_INTERVAL_SECONDS, DEFAULT_PAGED_SECTION_TIMEOUT_SECONDS,
     DEFAULT_REFRESH_SECONDS, DEFAULT_REQUEST_TIMEOUT_SECONDS, DEFAULT_SECTION_TIMEOUT_SECONDS,
-    DEFAULT_TIMEOUT_SECONDS, Origin, Resolved, ResolvedDevice, ResolvedDevices, ResolvedSettings,
+    DEFAULT_TIMEOUT_SECONDS, EQUINIX_DEFAULT_SECONDS, Origin, Resolved, ResolvedDevice,
+    ResolvedDevices, ResolvedSettings, default_interval_seconds, default_timeout_seconds,
     default_tls_trust, resolve_device, resolve_settings,
 };
 pub use secret::{KEY_VAR, MAX_SECRET, Sealed, SecretInput, SecretKey};

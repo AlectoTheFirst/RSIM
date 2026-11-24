@@ -142,6 +142,7 @@ words! {
 /// The vendors that have a collector, each with its transport, in name
 /// order.
 pub const COLLECTOR_VENDORS: &[(&str, CollectorTransport)] = &[
+    ("equinix", CollectorTransport::Https),
     ("iosxe", CollectorTransport::Ssh),
     ("iosxr", CollectorTransport::Ssh),
     ("nxos", CollectorTransport::Ssh),

@@ -41,6 +41,7 @@ import {
   newGroupChecked,
   newJumpHostBody,
   usedSetting,
+  fallbackOf,
   parseSetting,
   rebase,
   routeBody,
@@ -59,6 +60,7 @@ import { viewOf, viewSearch } from "../src/page/url";
 
 const VENDORS: Vendors = {
   vendors: [
+    { vendor: "equinix", transport: "https" },
     { vendor: "nxos", transport: "ssh" },
     { vendor: "unifi", transport: "https" },
     { vendor: "vyos", transport: "ssh" },
@@ -336,6 +338,10 @@ describe("edits of the settings", () => {
     expect(usedSetting(field("retries"), VENDORS, "vyos")).toBe(false);
     expect(usedSetting(field("request_timeout_seconds"), VENDORS, "unifi")).toBe(false);
     expect(usedSetting(field("tls_trust"), VENDORS, "othervendor")).toBe(true);
+    expect(usedSetting(field("paged_section_timeout_seconds"), VENDORS, "equinix")).toBe(true);
+    expect(usedSetting(field("paged_section_timeout_seconds"), VENDORS, "unifi")).toBe(false);
+    expect(usedSetting(field("section_timeout_seconds"), VENDORS, "equinix")).toBe(false);
+    expect(fallbackOf(field("interval_seconds"), "equinix")).toBe("900");
     expect(usedSetting(field("tls_trust"), null, "vyos")).toBe(true);
   });
 

@@ -39,6 +39,14 @@
 //! | `VELOCLOUD_<NAME>_RETRIES` | The retries of a read after a 429, from 0 to 10. The default is 0. |
 //! | `VELOCLOUD_<NAME>_REQUEST_TIMEOUT` | The time for one request, in whole seconds from 1 to 86400. The default is 60. |
 //! | `VELOCLOUD_<NAME>_VIA`, `VELOCLOUD_<NAME>_PROXY` | The jump hosts and the proxy to the orchestrator. A jump host needs a pinned host key. |
+//! | `EQUINIX_<NAME>_URL` | The API URL of the Equinix account `<name>`, the device `equinix-<name>`, for example `https://api.equinix.com` |
+//! | `EQUINIX_CLIENT_ID`, `EQUINIX_CLIENT_SECRET` | The OAuth2 client of the Equinix accounts |
+//! | `EQUINIX_<NAME>_CLIENT_ID`, `EQUINIX_<NAME>_CLIENT_SECRET` | The OAuth2 client of one account, used in place of the client of the vendor |
+//! | `EQUINIX_TLS`, `EQUINIX_<NAME>_TLS` | `public` (the default), `pin`, `ca` with `EQUINIX_CA_FILE` or `EQUINIX_<NAME>_CA_FILE`, or `none` |
+//! | `EQUINIX_TIMEOUT`, `EQUINIX_<NAME>_TIMEOUT` | The time for all sections of an account, in whole seconds from 1 to 86400. The default is 900. |
+//! | `EQUINIX_SECTION_TIMEOUT`, `EQUINIX_<NAME>_SECTION_TIMEOUT` | The time for all pages of one section. The default is 300. |
+//! | `EQUINIX_REQUEST_TIMEOUT`, `EQUINIX_<NAME>_REQUEST_TIMEOUT` | The time for one request. The default is 60. |
+//! | `EQUINIX_VIA`, `EQUINIX_<NAME>_VIA`, `EQUINIX_PROXY`, `EQUINIX_<NAME>_PROXY` | The jump hosts and the proxy to the API |
 //! | `JUMP_<NAME>_IP` | The address of the jump host `<name>` |
 //! | `JUMP_<NAME>_USER` | The user on the jump host |
 //! | `JUMP_<NAME>_PASS`, `JUMP_<NAME>_KEY_FILE`, `JUMP_<NAME>_KEY_PASS`, `JUMP_<NAME>_AGENT` | The secret of the jump host, as for VyOS |
@@ -65,13 +73,15 @@
 //! database at the start of each cycle, and the snapshot records the
 //! inventory version. The env file is then optional and gives only the
 //! secrets of the credentials of an env source: `env:<P>` reads `<P>_USER`
-//! with `<P>_PASS`, `<P>_KEY_FILE` and `<P>_KEY_PASS`, or `<P>_AGENT`, and for
-//! an HTTPS device `<P>_API_KEY` or `<P>_USER` with `<P>_PASS`; `env-url:<KEY>`
+//! with `<P>_PASS`, `<P>_KEY_FILE` and `<P>_KEY_PASS`, or `<P>_AGENT`, for
+//! an HTTPS device `<P>_API_KEY` or `<P>_USER` with `<P>_PASS`, and for an
+//! Equinix account `<P>_CLIENT_ID` with `<P>_CLIENT_SECRET`; `env-url:<KEY>`
 //! reads the login in the URL of `<KEY>`. A managed credential has its
 //! sealed secret in the database, which the secret key of the env key
 //! `RSIM_SECRET_KEY`, in the environment or in the env file, opens: a password for SSH, an HTTPS login and a proxy login, a
 //! private key for SSH, and an API key for HTTPS, which a VeloCloud
-//! orchestrator takes as its token; an env credential of a VeloCloud
+//! orchestrator takes as its token. An Equinix account takes a password
+//! credential as its OAuth2 client, with the client id as the user. An env credential of a VeloCloud
 //! orchestrator reads `<P>_TOKEN`. The settings `orchestrator_release`,
 //! `api_base`, `concurrency` and `refresh_seconds` of a VeloCloud device
 //! give its orchestrator; a device with no release fails before any read.
@@ -401,6 +411,96 @@ fn velocloud_env(
             times,
             retries,
             request_timeout,
+        });
+    }
+    Ok(out)
+}
+
+/// An Equinix account of the env file.
+struct EquinixAccount {
+    device: Device,
+    profile: HttpsProfile,
+    times: TimeLimits,
+    request_timeout: Option<Duration>,
+}
+
+/// The time between 2 collections of an Equinix account.
+const EQUINIX_INTERVAL: Duration =
+    Duration::from_secs(rsim_inventory::EQUINIX_DEFAULT_SECONDS as u64);
+
+/// The Equinix accounts of the env file: each `EQUINIX_<NAME>_URL` with the
+/// keys of `<NAME>`, else of the vendor. The OAuth2 client of each is the
+/// credential that `rsim_inventory::env::equinix_client` names.
+fn equinix_env(
+    env: &BTreeMap<String, String>,
+    credentials: &mut MemoryCredentials,
+) -> Result<Vec<EquinixAccount>, String> {
+    let mut out = Vec::new();
+    for (key, url) in env {
+        let Some(name) = key
+            .strip_prefix("EQUINIX_")
+            .and_then(|k| k.strip_suffix("_URL"))
+        else {
+            continue;
+        };
+        let (credential, prefix) = rsim_inventory::env::equinix_client(env, name)?;
+        credentials.insert(
+            &credential,
+            Credential {
+                user: env[&format!("{prefix}_CLIENT_ID")].clone(),
+                secret: Secret::OAuthClient(env[&format!("{prefix}_CLIENT_SECRET")].clone()),
+            },
+        );
+        let pick = |k: &str| {
+            let own = format!("EQUINIX_{name}_{k}");
+            env.get(&own).map(|v| (own, v)).or_else(|| {
+                env.get(&format!("EQUINIX_{k}"))
+                    .map(|v| (format!("EQUINIX_{k}"), v))
+            })
+        };
+        let trust = match pick("TLS") {
+            None => TlsTrust::PublicRoots,
+            Some((_, t)) if t == "public" => TlsTrust::PublicRoots,
+            Some((_, t)) if t == "pin" => TlsTrust::Pin,
+            Some((_, t)) if t == "none" => TlsTrust::NoVerify,
+            Some((k, t)) if t == "ca" => {
+                let file = format!("{}_CA_FILE", k.strip_suffix("_TLS").unwrap_or(&k));
+                TlsTrust::CaBundle(read_file(
+                    env.get(&file)
+                        .ok_or_else(|| format!("{k}=ca needs {file}"))?,
+                )?)
+            }
+            Some((k, t)) => return Err(format!("{k} {t} is not public, pin, ca or none")),
+        };
+        let either = |k: &str| -> Result<Option<Duration>, String> {
+            Ok(seconds(env, &format!("EQUINIX_{name}_{k}"))?
+                .or(seconds(env, &format!("EQUINIX_{k}"))?))
+        };
+        rsim_inventory::env::check_section_name(env, "EQUINIX", name)?;
+        let times = TimeLimits {
+            section: either("SECTION_TIMEOUT")?.unwrap_or(Duration::from_secs(
+                rsim_inventory::DEFAULT_PAGED_SECTION_TIMEOUT_SECONDS.into(),
+            )),
+            device: either("TIMEOUT")?.unwrap_or(EQUINIX_INTERVAL),
+        };
+        let id = format!("equinix-{}", name.to_lowercase().replace('_', "-"));
+        out.push(EquinixAccount {
+            device: Device {
+                id,
+                vendor: Vendor::Equinix,
+                address: url.trim_end_matches('/').to_string(),
+                credential,
+                site: None,
+                capture_bgp: Default::default(),
+                route: route(env, "EQUINIX", Some(name), credentials)?,
+                interval: EQUINIX_INTERVAL,
+            },
+            profile: HttpsProfile {
+                trust,
+                client: None,
+            },
+            times,
+            request_timeout: either("REQUEST_TIMEOUT")?,
         });
     }
     Ok(out)
@@ -762,11 +862,20 @@ fn setup(env: &BTreeMap<String, String>) -> Result<Setup, String> {
             },
         ));
     }
+    for a in equinix_env(env, &mut s.credentials)? {
+        let id = a.device.id.clone();
+        s.https_profiles.push((id.clone(), a.profile));
+        s.times.push((id.clone(), a.times));
+        if let Some(t) = a.request_timeout {
+            s.request_timeouts.push((id, t));
+        }
+        s.devices.push(a.device);
+    }
     if s.devices.is_empty() {
         return Err(
             "the env file has no VYOS_<NAME>_IP, no NXOS_<NAME>_IP, no IOSXR_<NAME>_IP, \
-                    no IOSXE_<NAME>_IP, no UNIFI_CONTROLLER and no VELOCLOUD_<NAME>_URL \
-                    with enterprises"
+                    no IOSXE_<NAME>_IP, no UNIFI_CONTROLLER, no VELOCLOUD_<NAME>_URL \
+                    with enterprises and no EQUINIX_<NAME>_URL"
                 .into(),
         );
     }
@@ -818,6 +927,8 @@ enum Use {
     Https,
     /// HTTPS with a token: a VeloCloud orchestrator.
     Token,
+    /// HTTPS with an OAuth2 client: an Equinix account.
+    OAuth,
 }
 
 impl Use {
@@ -826,13 +937,15 @@ impl Use {
         match vendor {
             Vendor::Unifi => Use::Https,
             Vendor::Velocloud => Use::Token,
+            Vendor::Equinix => Use::OAuth,
             Vendor::Vyos | Vendor::Nxos | Vendor::Iosxr | Vendor::Iosxe => Use::Ssh,
         }
     }
 }
 
-/// The secret of a managed credential for its use: a password for SSH and
-/// an HTTPS login, a private key for SSH, an API key for HTTPS and a token.
+/// The secret of a managed credential for its use: a password for SSH, an
+/// HTTPS login and an OAuth2 client, a private key for SSH, an API key for
+/// HTTPS and a token.
 fn managed_credential(
     secrets: &Secrets,
     c: &rsim_inventory::Credential,
@@ -856,6 +969,16 @@ fn managed_credential(
         (CredentialKind::Password, Use::Token) => {
             Err("a password credential is not a token of a VeloCloud orchestrator".into())
         }
+        (CredentialKind::Password, Use::OAuth) if user.is_empty() => {
+            Err("the OAuth2 client of an Equinix account needs its client id as the user".into())
+        }
+        (CredentialKind::Password, Use::OAuth) => Ok(Credential {
+            user,
+            secret: Secret::OAuthClient(secret.value),
+        }),
+        (CredentialKind::ApiKey, Use::OAuth) => {
+            Err("an api-key credential is not an OAuth2 client of an Equinix account".into())
+        }
         (CredentialKind::SshKey, Use::Ssh) => Ok(Credential {
             user,
             secret: Secret::Key {
@@ -871,7 +994,7 @@ fn managed_credential(
             user: String::new(),
             secret: Secret::Token(secret.value),
         }),
-        (CredentialKind::SshKey, Use::Https | Use::Token) => {
+        (CredentialKind::SshKey, Use::Https | Use::Token | Use::OAuth) => {
             Err("an ssh-key credential is not a credential of HTTPS".into())
         }
         (CredentialKind::ApiKey, Use::Ssh) => {
@@ -882,7 +1005,8 @@ fn managed_credential(
 
 /// The secret of a credential. An env credential of an HTTPS device takes
 /// `<P>_API_KEY` or `<P>_USER` with `<P>_PASS`; of a VeloCloud orchestrator
-/// `<P>_TOKEN`; of an SSH device or a jump host `<P>_USER` with its SSH
+/// `<P>_TOKEN`; of an Equinix account `<P>_CLIENT_ID` with
+/// `<P>_CLIENT_SECRET`; of an SSH device or a jump host `<P>_USER` with its SSH
 /// secret; `env-url` takes the login in the URL of its key; a managed
 /// credential opens its sealed secret.
 fn credential_secret(
@@ -904,6 +1028,16 @@ fn credential_secret(
                     .clone(),
             ),
         }),
+        CredentialSource::Env if used == Use::OAuth => {
+            let get = |k: &str| {
+                env.get(&format!("{p}_{k}"))
+                    .ok_or_else(|| format!("{p}_{k} is not set"))
+            };
+            Ok(Credential {
+                user: get("CLIENT_ID")?.clone(),
+                secret: Secret::OAuthClient(get("CLIENT_SECRET")?.clone()),
+            })
+        }
         CredentialSource::Env if used == Use::Https => {
             match (
                 env.get(&format!("{p}_API_KEY")),
@@ -1101,7 +1235,15 @@ fn setup_from_inventory(
         references.add(&credential, secret, user)?;
         let route = inventory_route(inv, secrets, st.route.value.as_deref(), &mut references)
             .map_err(|e| format!("the device {}: {e}", d.name))?;
-        if st.timeout_seconds.is_set() || st.section_timeout_seconds.is_set() {
+        if vendor == Vendor::Equinix {
+            s.times.push((
+                d.name.clone(),
+                TimeLimits {
+                    section: Duration::from_secs(st.paged_section_timeout_seconds.value.into()),
+                    device: Duration::from_secs(st.timeout_seconds.value.into()),
+                },
+            ));
+        } else if st.timeout_seconds.is_set() || st.section_timeout_seconds.is_set() {
             s.times.push((
                 d.name.clone(),
                 TimeLimits {
@@ -1125,7 +1267,11 @@ fn setup_from_inventory(
                 d.name.clone(),
                 HttpsProfile {
                     trust,
-                    client: client.clone(),
+                    client: if vendor == Vendor::Equinix {
+                        None
+                    } else {
+                        client.clone()
+                    },
                 },
             ));
             s.https_retries.push((d.name.clone(), st.retries.value));
@@ -1749,7 +1895,12 @@ mod tests {
         times.sort_by(|a, b| a.0.cmp(&b.0));
         let https = devices
             .iter()
-            .filter(|d| matches!(d.vendor, Vendor::Unifi | Vendor::Velocloud))
+            .filter(|d| {
+                matches!(
+                    d.vendor,
+                    Vendor::Unifi | Vendor::Velocloud | Vendor::Equinix
+                )
+            })
             .map(|d| {
                 let p = s
                     .https_profiles
@@ -1785,7 +1936,11 @@ mod tests {
              VELOCLOUD_LAB_ENTERPRISES=ent-a, ent-b\nVELOCLOUD_LAB_RELEASE=6.4.0\n\
              VELOCLOUD_LAB_BASE=/api/sdwan/v2/\nVELOCLOUD_LAB_CONCURRENCY=2\n\
              VELOCLOUD_LAB_REFRESH=0\nVELOCLOUD_LAB_RETRIES=3\nVELOCLOUD_LAB_REQUEST_TIMEOUT=90\n\
-             VELOCLOUD_LAB_TIMEOUT=300\n",
+             VELOCLOUD_LAB_TIMEOUT=300\n\
+             EQUINIX_PROD_URL=https://api.equinix.com/\nEQUINIX_LAB_URL=https://api.equinix.com\n\
+             EQUINIX_CLIENT_ID=group-id\nEQUINIX_CLIENT_SECRET=fake-secret\n\
+             EQUINIX_LAB_CLIENT_ID=lab-id\nEQUINIX_LAB_CLIENT_SECRET=fake-lab-secret\n\
+             EQUINIX_LAB_SECTION_TIMEOUT=600\nEQUINIX_LAB_VIA=bastion-a\n",
         );
         let direct = setup(&env).unwrap();
         let (through, notes) = setup_from_inventory(&imported(&env), &Secrets::env(&env)).unwrap();
@@ -1797,7 +1952,38 @@ mod tests {
         assert_eq!(a.3, b.3);
         assert_eq!(a.4, b.4);
         assert_eq!(a.5, b.5);
-        assert_eq!(a.0.len(), 13);
+        assert_eq!(a.0.len(), 15);
+        // The Equinix accounts get the OAuth2 client of the account, else of
+        // the vendor, their interval and their time limits.
+        let lab = a.0.iter().find(|d| d.id == "equinix-lab").unwrap();
+        assert_eq!(lab.vendor, Vendor::Equinix);
+        assert_eq!(lab.interval, Duration::from_secs(900));
+        assert_eq!(lab.route.jumps.len(), 1);
+        assert_eq!(
+            a.1.iter().find(|(n, _)| n == "equinix-lab").unwrap().1,
+            Credential {
+                user: "lab-id".into(),
+                secret: Secret::OAuthClient("fake-lab-secret".into())
+            }
+        );
+        assert_eq!(
+            a.1.iter().find(|(n, _)| n == "equinix").unwrap().1.user,
+            "group-id"
+        );
+        let times = |id: &str| a.4.iter().find(|(d, _)| d == id).unwrap().1;
+        assert_eq!(
+            (times("equinix-lab").section, times("equinix-lab").device),
+            (Duration::from_secs(600), Duration::from_secs(900))
+        );
+        assert_eq!(times("equinix-prod").section, Duration::from_secs(300));
+        assert_eq!(
+            a.5.iter()
+                .find(|(d, _)| d == "equinix-prod")
+                .unwrap()
+                .1
+                .trust,
+            TlsTrust::PublicRoots
+        );
         // The VeloCloud devices get the same orchestrator, API server,
         // retries and request time.
         fn vco<T: Clone>(v: &[(String, T)]) -> Vec<(String, T)> {
@@ -1854,21 +2040,25 @@ mod tests {
             "VYOS_CORE1_IP=10.0.0.1\nVYOS_USER=ro\nVYOS_PASS=p\nVYOS_VIA=bastion\n\
              VYOS_PROXY=socks5://p:q@192.0.2.9:1080\n\
              JUMP_BASTION_IP=192.0.2.20\nJUMP_BASTION_USER=hop\nJUMP_BASTION_PASS=h\n\
-             UNIFI_CONTROLLER=192.0.2.8\nUNIFI_API_KEY=k\n",
+             UNIFI_CONTROLLER=192.0.2.8\nUNIFI_API_KEY=k\n\
+             EQUINIX_PROD_URL=https://api.equinix.com\nEQUINIX_CLIENT_ID=group-id\n\
+             EQUINIX_CLIENT_SECRET=fake-secret\n",
         );
         let direct = setup(&env).unwrap();
         let mut inv = imported(&env);
         let key = SecretKey::parse(&SecretKey::generate().unwrap()).unwrap();
         let mut sealed = BTreeMap::new();
         for c in &mut inv.credentials {
-            let used = if c.name == "unifi" {
-                Use::Https
-            } else {
-                Use::Ssh
+            let used = match c.name.as_str() {
+                "unifi" => Use::Https,
+                "equinix" => Use::OAuth,
+                _ => Use::Ssh,
             };
             let plain = credential_secret(&Secrets::env(&env), c, used).unwrap();
             let (kind, user, value) = match plain.secret {
-                Secret::Password(p) => (CredentialKind::Password, Some(plain.user), p),
+                Secret::Password(p) | Secret::OAuthClient(p) => {
+                    (CredentialKind::Password, Some(plain.user), p)
+                }
                 Secret::ApiKey(k) => (CredentialKind::ApiKey, None, k),
                 _ => panic!("{}: not a password and not an API key", c.name),
             };
@@ -1887,7 +2077,7 @@ mod tests {
             };
             sealed.insert(c.name.clone(), key.seal(&c.name, kind, &input).unwrap());
         }
-        assert_eq!(inv.credentials.len(), 4, "{:?}", inv.credentials);
+        assert_eq!(inv.credentials.len(), 5, "{:?}", inv.credentials);
         let none = BTreeMap::new();
         let managed = Secrets {
             env: &none,
@@ -1924,6 +2114,12 @@ mod tests {
         }
         let e = setup_from_inventory(&api, &managed).err().unwrap();
         assert!(e.contains("not a credential of SSH"), "{e}");
+        let mut api = inv.clone();
+        for g in api.groups.iter_mut().filter(|g| g.vendor == "equinix") {
+            g.settings.credential = Some("unifi".into());
+        }
+        let e = setup_from_inventory(&api, &managed).err().unwrap();
+        assert!(e.contains("not an OAuth2 client"), "{e}");
     }
 
     #[test]

@@ -23,9 +23,21 @@ pub enum Secret {
     /// An API token that HTTPS sends in the header
     /// `Authorization: Token <token>`.
     Token(String),
+    /// The secret of an OAuth2 client, whose id is the user of the
+    /// credential. HTTPS gets a token with the client credentials grant and
+    /// sends it in the header `Authorization: Bearer <token>`.
+    OAuthClient(String),
     /// The keys of an SSH agent at a Unix socket. With no socket, the
     /// socket is the value of `SSH_AUTH_SOCK`.
     Agent { socket: Option<PathBuf> },
+}
+
+impl Secret {
+    /// True for a secret whose HTTPS session comes from a login, which an
+    /// HTTP 401 renews: a password and an OAuth client.
+    pub fn logs_in(&self) -> bool {
+        matches!(self, Secret::Password(_) | Secret::OAuthClient(_))
+    }
 }
 
 impl fmt::Debug for Secret {
@@ -35,6 +47,7 @@ impl fmt::Debug for Secret {
             Secret::Key { .. } => "Key(..)",
             Secret::ApiKey(_) => "ApiKey(..)",
             Secret::Token(_) => "Token(..)",
+            Secret::OAuthClient(_) => "OAuthClient(..)",
             Secret::Agent { .. } => "Agent(..)",
         })
     }
