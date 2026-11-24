@@ -105,16 +105,15 @@ pub struct Route {
 }
 
 impl Route {
-    /// The name of the pin of a host at the end of the first `hops` jumps.
-    /// A host with no jump before it has its address as the name. A host
-    /// behind jumps has the addresses of the jumps and its own address,
-    /// separated by `>`, because the same private address can be behind 2
-    /// different jump hosts.
+    /// The name of the pin of a host at the end of the first `hops` jumps:
+    /// the address of the proxy, the addresses of the jumps and the address
+    /// of the host, separated by `>`. A route with no proxy and no jump
+    /// gives the address of the host alone. The same private address can be
+    /// behind 2 different proxies or jump hosts.
     pub fn pin_name(&self, hops: usize, address: &str) -> String {
-        let mut parts: Vec<&str> = self.jumps[..hops]
-            .iter()
-            .map(|j| j.address.as_str())
-            .collect();
+        let proxy = self.proxy.as_ref().map(Proxy::address);
+        let mut parts: Vec<&str> = proxy.iter().map(String::as_str).collect();
+        parts.extend(self.jumps[..hops].iter().map(|j| j.address.as_str()));
         parts.push(address);
         parts.join(">")
     }
@@ -377,6 +376,29 @@ mod tests {
             r.pin_name(2, "10.0.0.9"),
             "bastion.example>10.0.0.1>10.0.0.9"
         );
+    }
+
+    #[test]
+    fn a_pin_name_has_the_proxy() {
+        let behind = |proxy: &str| Route {
+            proxy: Some(Proxy::parse(proxy).unwrap()),
+            jumps: vec![Jump {
+                address: "198.51.100.1".into(),
+                credential: "j".into(),
+                algorithms: Algorithms::Modern,
+            }],
+        };
+        let a = behind("socks5://192.0.2.9:1080");
+        let b = behind("http://203.0.113.9:3128");
+        assert_eq!(a.pin_name(0, "198.51.100.1"), "192.0.2.9:1080>198.51.100.1");
+        assert_eq!(
+            a.pin_name(1, "198.51.100.7"),
+            "192.0.2.9:1080>198.51.100.1>198.51.100.7"
+        );
+        assert_ne!(a.pin_name(0, "198.51.100.1"), b.pin_name(0, "198.51.100.1"));
+        assert_ne!(a.pin_name(1, "198.51.100.7"), b.pin_name(1, "198.51.100.7"));
+        let direct = Route::default();
+        assert_eq!(direct.pin_name(0, "198.51.100.7"), "198.51.100.7");
     }
 
     #[test]

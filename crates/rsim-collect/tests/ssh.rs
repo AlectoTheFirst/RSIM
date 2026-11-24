@@ -478,6 +478,27 @@ async fn a_failed_command_gives_its_status_and_stderr() {
 }
 
 #[tokio::test]
+async fn the_commands_of_a_transport_share_one_output_limit() {
+    let (server, secret) = key_server();
+    let f = serve(server, Preferred::default()).await;
+    let limits = SshLimits {
+        max_output: 10_000,
+        max_buffered: 1000,
+        ..SshLimits::default()
+    };
+    let t = SshTransport::new(credentials(secret), pinned(&f), limits);
+    let d = device(&f.address);
+    let e = t.run(&d, "big 2000").await.unwrap_err();
+    assert!(
+        matches!(&e, TransportError::Command(m) if m.contains("at one time")),
+        "{e}"
+    );
+    for _ in 0..3 {
+        assert_eq!(t.run(&d, "big 900").await.unwrap().len(), 900);
+    }
+}
+
+#[tokio::test]
 async fn a_closed_connection_is_opened_again() {
     let (server, secret) = key_server();
     let f = serve(server, Preferred::default()).await;
@@ -699,13 +720,20 @@ async fn a_proxy_carries_the_first_connection() {
         (format!("http://pu:pp@{}", http.address), &http.forwards),
         (format!("socks5://{}", socks.address), &socks.forwards),
     ] {
+        let proxy = Proxy::parse(&url).unwrap();
+        let trust = TrustStore::memory(PinPolicy::Strict);
+        trust.pin(
+            PinKind::Ssh,
+            &format!("{}>{}", proxy.address(), f.address),
+            &f.host_key,
+        );
         let t = SshTransport::new(
             credentials(Secret::Password("s3cret".into())),
-            pinned(&f),
+            Arc::new(trust),
             SshLimits::default(),
         );
         let mut d = device(&f.address);
-        d.route.proxy = Some(Proxy::parse(&url).unwrap());
+        d.route.proxy = Some(proxy);
         assert_eq!(t.run(&d, "via").await.unwrap(), b"via");
         assert_eq!(forwards.load(Ordering::SeqCst), 1, "{url}");
     }

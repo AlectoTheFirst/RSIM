@@ -3,6 +3,7 @@
 //! of 3 command modes.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -11,7 +12,9 @@ use russh::{Channel, ChannelMsg, Disconnect};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
 
-use crate::cli::{SHELL_HEIGHT, SHELL_WIDTH, at_prompt, echo_line, output_of, prompt_of, sanitize};
+use crate::cli::{
+    SHELL_HEIGHT, SHELL_WIDTH, at_prompt, echo_line, output_of, prompt_of, sanitize, sanitize_max,
+};
 pub use crate::path::Algorithms;
 use crate::trust::{Credentials, TrustStore, host_port, plain_address};
 use crate::tunnel::{Client, Hop, HopLimits, Tunnel, login, stream};
@@ -74,6 +77,9 @@ pub struct SshLimits {
     pub keepalive: Duration,
     /// The largest output of one command. A larger output is an error.
     pub max_output: usize,
+    /// The largest sum of the outputs that the commands of the transport
+    /// read at one time. A command that passes it is an error.
+    pub max_buffered: usize,
 }
 
 impl Default for SshLimits {
@@ -84,6 +90,7 @@ impl Default for SshLimits {
             idle_timeout: Duration::from_secs(300),
             keepalive: Duration::from_secs(30),
             max_output: 256 << 20,
+            max_buffered: 1 << 30,
         }
     }
 }
@@ -106,6 +113,51 @@ const SHELL_QUIET: Duration = Duration::from_secs(1);
 const PROMPT_TRIES: usize = 3;
 /// The bytes at the end of a shell read in which the prompt can be.
 const PROMPT_TAIL: usize = 4096;
+
+/// The bytes of the outputs that the commands of a transport read at one
+/// time, and their limit.
+struct Buffers {
+    used: AtomicUsize,
+    max: usize,
+}
+
+impl Buffers {
+    fn hold(&self) -> Held<'_> {
+        Held {
+            buffers: self,
+            bytes: 0,
+        }
+    }
+
+    fn error(&self) -> TransportError {
+        TransportError::Command(format!(
+            "the outputs that the transport reads at one time are larger than {} bytes",
+            self.max
+        ))
+    }
+}
+
+/// The bytes of the output of one command in [`Buffers`]. A drop gives
+/// them back.
+struct Held<'a> {
+    buffers: &'a Buffers,
+    bytes: usize,
+}
+
+impl Held<'_> {
+    /// Adds `n` bytes. False if the sum of the transport passes its limit.
+    fn add(&mut self, n: usize) -> bool {
+        self.bytes += n;
+        let used = self.buffers.used.fetch_add(n, Ordering::Relaxed) + n;
+        used <= self.buffers.max
+    }
+}
+
+impl Drop for Held<'_> {
+    fn drop(&mut self) {
+        self.buffers.used.fetch_sub(self.bytes, Ordering::Relaxed);
+    }
+}
 
 /// An interactive shell. `busy` is true from the send of a command until
 /// its prompt. A shell that is busy at the start of a command lost its
@@ -152,6 +204,7 @@ pub struct SshTransport {
     credentials: Arc<dyn Credentials>,
     trust: Arc<TrustStore>,
     limits: SshLimits,
+    buffers: Buffers,
     default_profile: SshProfile,
     profiles: HashMap<String, SshProfile>,
     slots: Mutex<HashMap<String, Slot>>,
@@ -174,6 +227,10 @@ impl SshTransport {
             credentials,
             trust,
             limits,
+            buffers: Buffers {
+                used: AtomicUsize::new(0),
+                max: limits.max_buffered,
+            },
             default_profile: SshProfile::default(),
             profiles: HashMap::new(),
             slots: Mutex::new(HashMap::new()),
@@ -393,6 +450,7 @@ impl SshTransport {
             .await
             .map_err(|e| failed(e.to_string()))?;
         let mut stdout = Vec::new();
+        let mut held = self.buffers.hold();
         let mut stderr = Vec::new();
         let mut status = None;
         let mut ended = false;
@@ -405,6 +463,10 @@ impl SshTransport {
                             "the output is larger than {} bytes",
                             self.limits.max_output
                         )));
+                    }
+                    if !held.add(data.len()) {
+                        let _ = channel.close().await;
+                        return Err(ExecError::Transport(self.buffers.error()));
                     }
                     stdout.extend_from_slice(&data);
                 }
@@ -499,7 +561,7 @@ impl SshTransport {
             }
         }
         let shell = guard.as_mut().expect("the shell is open");
-        let out = shell_command(shell, command, self.limits.max_output).await;
+        let out = shell_command(shell, command, self.limits.max_output, &self.buffers).await;
         conn.touch();
         if out.is_err()
             && let Some(old) = guard.take()
@@ -532,14 +594,14 @@ impl SshTransport {
             prompt: String::new(),
             busy: true,
         };
-        let learn = learn_prompt(&mut shell, self.limits.max_output);
+        let learn = learn_prompt(&mut shell, self.limits.max_output, &self.buffers);
         shell.prompt = tokio::time::timeout(self.limits.handshake_timeout, learn)
             .await
             .map_err(|_| connect(format!("no prompt in {:?}", self.limits.handshake_timeout)))?
             .map_err(|e| connect(e.to_string()))?;
         shell.busy = false;
         for setup in &self.profile(device).shell_setup {
-            let run = shell_command(&mut shell, setup, self.limits.max_output);
+            let run = shell_command(&mut shell, setup, self.limits.max_output, &self.buffers);
             tokio::time::timeout(self.limits.handshake_timeout, run)
                 .await
                 .map_err(|_| connect(format!("the setup command {setup:?} did not end")))?
@@ -606,8 +668,9 @@ fn tail(bytes: &[u8]) -> String {
 
 /// The output up to a line with the form of a prompt, or up to a quiet
 /// time after some output.
-async fn burst(shell: &mut Shell, max: usize) -> Result<String, TransportError> {
+async fn burst(shell: &mut Shell, max: usize, budget: &Buffers) -> Result<String, TransportError> {
     let mut buf = Vec::new();
+    let mut held = budget.hold();
     loop {
         if prompt_of(&tail(&buf)).is_some() {
             break;
@@ -615,9 +678,10 @@ async fn burst(shell: &mut Shell, max: usize) -> Result<String, TransportError> 
         match shell_read(&mut shell.channel, Some(SHELL_QUIET)).await? {
             Some(d) => {
                 if buf.len() + d.len() > max {
-                    return Err(TransportError::Command(format!(
-                        "the output before the prompt is larger than {max} bytes"
-                    )));
+                    return Err(larger_before_prompt(max));
+                }
+                if !held.add(d.len()) {
+                    return Err(budget.error());
                 }
                 buf.extend_from_slice(&d);
             }
@@ -625,14 +689,31 @@ async fn burst(shell: &mut Shell, max: usize) -> Result<String, TransportError> 
             None => {}
         }
     }
-    Ok(sanitize(&String::from_utf8_lossy(&buf)))
+    sanitize_bounded(&buf, max).ok_or_else(|| larger_before_prompt(max))
+}
+
+/// The bytes as text with no terminal bytes. `None` if the result is
+/// longer than `max` bytes and longer than the text.
+fn sanitize_bounded(bytes: &[u8], max: usize) -> Option<String> {
+    let text = String::from_utf8_lossy(bytes);
+    sanitize_max(&text, text.len().max(max))
+}
+
+fn larger_before_prompt(max: usize) -> TransportError {
+    TransportError::Command(format!(
+        "the output before the prompt is larger than {max} bytes"
+    ))
 }
 
 /// Drops the login output, then sends newlines until the device gives the
 /// same prompt twice. A banner line comes only once, so it cannot be the
 /// prompt.
-async fn learn_prompt(shell: &mut Shell, max: usize) -> Result<String, TransportError> {
-    burst(shell, max).await?;
+async fn learn_prompt(
+    shell: &mut Shell,
+    max: usize,
+    budget: &Buffers,
+) -> Result<String, TransportError> {
+    burst(shell, max, budget).await?;
     let mut seen = String::new();
     for _ in 0..PROMPT_TRIES {
         shell
@@ -640,7 +721,7 @@ async fn learn_prompt(shell: &mut Shell, max: usize) -> Result<String, Transport
             .data(&b"\n"[..])
             .await
             .map_err(|e| TransportError::Command(e.to_string()))?;
-        let prompt = prompt_of(&burst(shell, max).await?).unwrap_or_default();
+        let prompt = prompt_of(&burst(shell, max, budget).await?).unwrap_or_default();
         if !prompt.is_empty() && prompt == seen {
             return Ok(prompt);
         }
@@ -656,6 +737,7 @@ async fn shell_command(
     shell: &mut Shell,
     command: &str,
     max: usize,
+    budget: &Buffers,
 ) -> Result<String, TransportError> {
     shell.busy = true;
     shell
@@ -664,15 +746,17 @@ async fn shell_command(
         .await
         .map_err(|e| TransportError::Command(e.to_string()))?;
     let mut buf = Vec::new();
+    let mut held = budget.hold();
     let mut echo = false;
     while !(echo && at_prompt(&tail(&buf), &shell.prompt)) {
         let d = shell_read(&mut shell.channel, None)
             .await?
             .expect("a read with no quiet time gives data");
         if buf.len() + d.len() > max {
-            return Err(TransportError::Command(format!(
-                "the output is larger than {max} bytes"
-            )));
+            return Err(larger(max));
+        }
+        if !held.add(d.len()) {
+            return Err(budget.error());
         }
         buf.extend_from_slice(&d);
         if !echo {
@@ -685,9 +769,13 @@ async fn shell_command(
             .is_some();
         }
     }
+    let text = sanitize_bounded(&buf, max).ok_or_else(|| larger(max))?;
     shell.busy = false;
-    let text = sanitize(&String::from_utf8_lossy(&buf));
     Ok(output_of(&text, command, &shell.prompt))
+}
+
+fn larger(max: usize) -> TransportError {
+    TransportError::Command(format!("the output is larger than {max} bytes"))
 }
 
 impl Ssh for SshTransport {
