@@ -336,7 +336,9 @@ describe("edits of the settings", () => {
     expect(usedSetting(field("nxos_json"), VENDORS, "nxos")).toBe(true);
     expect(usedSetting(field("timeout_seconds"), VENDORS, "unifi")).toBe(true);
     expect(usedSetting(field("retries"), VENDORS, "vyos")).toBe(false);
-    expect(usedSetting(field("request_timeout_seconds"), VENDORS, "unifi")).toBe(false);
+    expect(usedSetting(field("request_timeout_seconds"), VENDORS, "unifi")).toBe(true);
+    expect(usedSetting(field("retries"), VENDORS, "unifi")).toBe(false);
+    expect(usedSetting(field("retries"), VENDORS, "equinix")).toBe(true);
     expect(usedSetting(field("tls_trust"), VENDORS, "othervendor")).toBe(true);
     expect(usedSetting(field("paged_section_timeout_seconds"), VENDORS, "equinix")).toBe(true);
     expect(usedSetting(field("paged_section_timeout_seconds"), VENDORS, "unifi")).toBe(false);

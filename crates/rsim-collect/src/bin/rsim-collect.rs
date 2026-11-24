@@ -1267,10 +1267,10 @@ fn setup_from_inventory(
                 d.name.clone(),
                 HttpsProfile {
                     trust,
-                    client: if vendor == Vendor::Equinix {
-                        None
-                    } else {
+                    client: if vendor == Vendor::Unifi {
                         client.clone()
+                    } else {
+                        None
                     },
                 },
             ));
@@ -1911,6 +1911,38 @@ mod tests {
             })
             .collect();
         (devices, credentials, profiles, native, times, https)
+    }
+
+    #[test]
+    fn only_a_unifi_console_of_the_inventory_gets_the_unifi_client_certificate() {
+        let dir = tempfile::tempdir().unwrap();
+        let cert = dir.path().join("client.pem");
+        let key = dir.path().join("client-key.pem");
+        std::fs::write(&cert, "fake chain").unwrap();
+        std::fs::write(&key, "fake key").unwrap();
+        let env = parse_env(&format!(
+            "UNIFI_CONTROLLER=192.0.2.8\nUNIFI_API_KEY=k\n\
+             VELOCLOUD_LAB_URL=https://198.51.100.10\nVELOCLOUD_LAB_TOKEN=fake-token\n\
+             VELOCLOUD_LAB_ENTERPRISES=ent-a\nVELOCLOUD_LAB_RELEASE=6.4.0\n\
+             UNIFI_CLIENT_CERT={}\nUNIFI_CLIENT_KEY={}\n",
+            cert.display(),
+            key.display()
+        ));
+        let (s, _) = setup_from_inventory(&imported(&env), &Secrets::env(&env)).unwrap();
+        let client = |id: &str| {
+            s.https_profiles
+                .iter()
+                .find(|(d, _)| d == id)
+                .and_then(|(_, p)| p.client.clone())
+        };
+        assert_eq!(
+            client("unifi-default"),
+            Some(ClientCert {
+                chain: "fake chain".into(),
+                key: "fake key".into()
+            })
+        );
+        assert_eq!(client("vco-lab-ent-a"), None);
     }
 
     #[test]
