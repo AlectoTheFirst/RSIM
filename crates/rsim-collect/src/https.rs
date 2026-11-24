@@ -486,6 +486,7 @@ pub struct HttpsTransport {
     default_profile: HttpsProfile,
     profiles: HashMap<String, HttpsProfile>,
     retries: HashMap<String, u32>,
+    request_timeouts: HashMap<String, Duration>,
     api_servers: HashMap<String, ApiServer>,
     servers: Mutex<HashMap<String, Arc<Server>>>,
     consoles: Mutex<HashMap<ConsoleKey, Arc<Console>>>,
@@ -505,6 +506,7 @@ impl HttpsTransport {
             default_profile: HttpsProfile::default(),
             profiles: HashMap::new(),
             retries: HashMap::new(),
+            request_timeouts: HashMap::new(),
             api_servers: HashMap::new(),
             servers: Mutex::new(HashMap::new()),
             consoles: Mutex::new(HashMap::new()),
@@ -521,6 +523,20 @@ impl HttpsTransport {
     pub fn with_retries(mut self, device: &str, retries: u32) -> HttpsTransport {
         self.retries.insert(device.to_string(), retries);
         self
+    }
+
+    /// Sets the time for one request of a device and its response body.
+    pub fn with_request_timeout(mut self, device: &str, timeout: Duration) -> HttpsTransport {
+        self.request_timeouts.insert(device.to_string(), timeout);
+        self
+    }
+
+    /// The time for one request of a device.
+    fn request_timeout(&self, device: &Device) -> Duration {
+        self.request_timeouts
+            .get(&device.id)
+            .copied()
+            .unwrap_or(self.limits.request_timeout)
     }
 
     /// Makes the server at `address` an API server, which the devices with
@@ -724,11 +740,12 @@ impl HttpsTransport {
     }
 
     /// Sends a request on a free connection after the wait of the server,
-    /// and reads the response within the request timeout.
+    /// and reads the response within `timeout`.
     async fn send(
         &self,
         console: &Console,
         request: Request<Full<Bytes>>,
+        timeout: Duration,
     ) -> Result<(StatusCode, header::HeaderMap, Bytes), TransportError> {
         let failed = |e: String| TransportError::Command(e);
         let _permit = console
@@ -759,7 +776,7 @@ impl HttpsTransport {
                 .to_bytes();
             Ok::<_, TransportError>((parts, body))
         };
-        let (parts, body) = tokio::time::timeout(self.limits.request_timeout, exchange)
+        let (parts, body) = tokio::time::timeout(timeout, exchange)
             .await
             .map_err(|_| TransportError::Timeout)??;
         let mut idle = console.idle.lock().expect("the lock is not poisoned");
@@ -829,7 +846,8 @@ impl HttpsTransport {
                     &[],
                     Bytes::from(body.to_string()),
                 )?;
-                let (status, headers, _) = self.send(console, req).await?;
+                let (status, headers, _) =
+                    self.send(console, req, self.limits.request_timeout).await?;
                 if !status.is_success() {
                     return Err(TransportError::Connect(format!(
                         "the login of {} gave HTTP {status}",
@@ -861,6 +879,7 @@ impl HttpsTransport {
         body: Bytes,
     ) -> Result<HttpReply, TransportError> {
         let console = self.console(device)?;
+        let timeout = self.request_timeout(device);
         let mut retries = self
             .retries
             .get(&device.id)
@@ -870,7 +889,7 @@ impl HttpsTransport {
         let mut login_again = matches!(console.credential.secret, Secret::Password(_));
         loop {
             let req = Self::request(&console, method.clone(), path, &headers, body.clone())?;
-            let (status, reply_headers, reply) = self.send(&console, req).await?;
+            let (status, reply_headers, reply) = self.send(&console, req, timeout).await?;
             if status.is_success() {
                 return Ok(HttpReply::Body(reply.to_vec()));
             }
@@ -941,10 +960,11 @@ impl Https for HttpsTransport {
     ) -> BoxFuture<'a, Result<Vec<u8>, TransportError>> {
         Box::pin(async move {
             let console = self.console(device)?;
+            let timeout = self.request_timeout(device);
             let (mut headers, mut generation) = self.login(&console, None).await?;
             for attempt in 0..2 {
                 let req = Self::request(&console, Method::GET, path, &headers, Bytes::new())?;
-                let (status, _, body) = self.send(&console, req).await?;
+                let (status, _, body) = self.send(&console, req, timeout).await?;
                 if status.is_success() {
                     return Ok(body.to_vec());
                 }

@@ -48,6 +48,16 @@ pub const MIGRATIONS: &[(u32, &str, &str)] = &[
         "interval",
         include_str!("../migrations/0005_interval.sql"),
     ),
+    (
+        6,
+        "tls_public",
+        include_str!("../migrations/0006_tls_public.sql"),
+    ),
+    (
+        7,
+        "orchestrator",
+        include_str!("../migrations/0007_orchestrator.sql"),
+    ),
 ];
 
 /// The schema version of this build: the last migration.
@@ -863,7 +873,7 @@ async fn collection(c: &impl GenericClient) -> Result<Collection> {
 }
 
 /// The settings columns, in the order of [`settings_params`].
-const SETTINGS: [&str; 16] = [
+const SETTINGS: [&str; 20] = [
     "credential",
     "route",
     "ssh_algorithms",
@@ -880,6 +890,10 @@ const SETTINGS: [&str; 16] = [
     "retries",
     "ha",
     "interval_seconds",
+    "orchestrator_release",
+    "api_base",
+    "concurrency",
+    "refresh_seconds",
 ];
 
 /// The insert of a record with its settings, or the update of all its
@@ -928,6 +942,10 @@ fn settings_params(s: &Settings) -> Result<Vec<Box<dyn ToSql + Sync + Send>>> {
         Box::new(number("retries", s.retries)?),
         w(s.ha.map(Ha::word)),
         Box::new(number("interval_seconds", s.interval_seconds)?),
+        Box::new(s.orchestrator_release.clone()),
+        Box::new(s.api_base.clone()),
+        Box::new(number("concurrency", s.concurrency)?),
+        Box::new(number("refresh_seconds", s.refresh_seconds)?),
     ])
 }
 
@@ -961,6 +979,10 @@ fn settings(row: &Row) -> Result<Settings> {
         retries: count(row, "retries"),
         ha: word(row, "ha", Ha::parse)?,
         interval_seconds: count(row, "interval_seconds"),
+        orchestrator_release: row.get("orchestrator_release"),
+        api_base: row.get("api_base"),
+        concurrency: count(row, "concurrency"),
+        refresh_seconds: count(row, "refresh_seconds"),
     })
 }
 
@@ -1188,7 +1210,7 @@ mod tests {
         let sql = upsert("devices", &["name", "device_group"]);
         assert!(sql.starts_with("INSERT INTO devices (name, device_group, credential, route,"));
         assert!(sql.contains("VALUES ($1, $2, $3,"));
-        assert!(sql.contains("$18)"));
+        assert!(sql.contains("$22)"));
         assert!(
             sql.contains("ON CONFLICT (name) DO UPDATE SET device_group = EXCLUDED.device_group")
         );

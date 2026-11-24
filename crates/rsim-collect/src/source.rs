@@ -101,6 +101,10 @@ pub trait Source: Send + Sync {
         device: &'a Device,
         timeouts: Timeouts,
     ) -> BoxFuture<'a, Vec<RawSection>>;
+
+    /// Starts a cycle with due devices, before the first fetch of the
+    /// cycle.
+    fn begin_cycle(&self) {}
 }
 
 /// The times of the reads of one device.

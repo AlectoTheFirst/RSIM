@@ -153,6 +153,60 @@ pub const CLIENTS: TableSchema = TableSchema {
     ],
 };
 
+/// The state of each VeloCloud edge of an enterprise.
+pub const VELOCLOUD_EDGE_STATE: TableSchema = TableSchema {
+    name: "velocloud_edge_state",
+    version: 1,
+    columns: &[
+        col("edge", Str, false),
+        col("edge_state", Str, true),
+        col("ha_state", Str, true),
+    ],
+};
+
+/// The state of each WAN link of a VeloCloud edge.
+pub const VELOCLOUD_LINK_STATE: TableSchema = TableSchema {
+    name: "velocloud_link_state",
+    version: 1,
+    columns: &[
+        col("edge", Str, false),
+        col("link", Str, true),
+        col("internal_id", Str, true),
+        col("state", Str, true),
+        col("link_mode", Str, true),
+        col("vpn_state", Str, true),
+        col("backup_state", Str, true),
+    ],
+};
+
+/// The exits of the overlay route table of a VeloCloud enterprise:
+/// `preferred` or `eligible` in the column `selection`.
+pub const VELOCLOUD_ROUTE: TableSchema = TableSchema {
+    name: "velocloud_route",
+    version: 1,
+    columns: &[
+        col("segment", Str, true),
+        col("prefix", Str, false),
+        col("exit_type", Str, true),
+        col("exit_edge", Str, true),
+        col("selection", Str, false),
+        col("state", Str, true),
+        col("cost", U64, true),
+    ],
+};
+
+/// The BGP sessions of the VeloCloud edges of an enterprise.
+pub const VELOCLOUD_BGP_SESSION: TableSchema = TableSchema {
+    name: "velocloud_bgp_session",
+    version: 1,
+    columns: &[
+        col("edge", Str, true),
+        col("neighbour_address", Str, false),
+        col("neighbour_as", Str, true),
+        col("state", Str, true),
+    ],
+};
+
 /// All tables, sorted by name.
 pub const TABLES: &[&TableSchema] = &[
     &ADDRESSES,
@@ -162,6 +216,10 @@ pub const TABLES: &[&TableSchema] = &[
     &MAC_TABLE,
     &NEIGHBOURS,
     &ROUTES,
+    &VELOCLOUD_BGP_SESSION,
+    &VELOCLOUD_EDGE_STATE,
+    &VELOCLOUD_LINK_STATE,
+    &VELOCLOUD_ROUTE,
 ];
 
 /// The schema of a table by name.

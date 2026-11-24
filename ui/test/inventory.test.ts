@@ -115,6 +115,10 @@ function resolved(name: string, group: string, vendor: string, s: Partial<Resolv
     retries: r(0, "default"),
     ha: r("none", "default"),
     interval_seconds: r(60, "default"),
+    orchestrator_release: r(null, "default"),
+    api_base: r(null, "default"),
+    concurrency: r(4, "default"),
+    refresh_seconds: r(1800, "default"),
   };
   return { name, group, vendor, address: "192.0.2.99", site: site ?? null, settings: { ...base, ...s } };
 }
@@ -184,8 +188,9 @@ describe("cells of the settings", () => {
   it("gives the SSH algorithms and mode and the TLS trust, with the defaults for none", () => {
     expect(sshText(null, undefined)).toBe("modern exec");
     expect(sshText("legacy", "shell")).toBe("legacy shell");
-    expect(trustText(null)).toBe("pin");
-    expect(trustText("ca")).toBe("ca");
+    expect(trustText(null, "unifi")).toBe("pin");
+    expect(trustText(null, "velocloud")).toBe("public");
+    expect(trustText("ca", "velocloud")).toBe("ca");
   });
 
   it("prints the SSH cell of a device as an override when the device sets one of its 2 settings", () => {
@@ -353,6 +358,10 @@ describe("edits of the settings", () => {
     expect(inherited(field("ssh_algorithms"), INV.groups[2]!.settings, d)).toEqual({ from: "group", text: "legacy" });
     expect(inherited(field("credential"), null, d)).toEqual({ from: "default", text: "none" });
     expect(settingDefaults([])).toEqual({});
+    const vco = [resolved("v1", "g-vco", "velocloud", { tls_trust: r("public", "default") })];
+    expect(settingDefaults(vco).tls_trust).toBeUndefined();
+    expect(inherited(field("tls_trust"), null, settingDefaults(vco), "velocloud")).toEqual({ from: "default", text: "public" });
+    expect(inherited(field("tls_trust"), null, settingDefaults(vco), "unifi")).toEqual({ from: "default", text: "pin" });
   });
 
   it("clears a setting of a device to inherit, with no other field changed", () => {

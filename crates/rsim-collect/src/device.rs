@@ -11,16 +11,18 @@ pub enum Vendor {
     Nxos,
     Iosxr,
     Iosxe,
+    Velocloud,
 }
 
 impl Vendor {
     /// All vendors.
-    pub const ALL: [Vendor; 5] = [
+    pub const ALL: [Vendor; 6] = [
         Vendor::Vyos,
         Vendor::Unifi,
         Vendor::Nxos,
         Vendor::Iosxr,
         Vendor::Iosxe,
+        Vendor::Velocloud,
     ];
 
     pub fn name(self) -> &'static str {
@@ -30,6 +32,7 @@ impl Vendor {
             Vendor::Nxos => "nxos",
             Vendor::Iosxr => "iosxr",
             Vendor::Iosxe => "iosxe",
+            Vendor::Velocloud => "velocloud",
         }
     }
 }
@@ -41,7 +44,9 @@ impl fmt::Display for Vendor {
 }
 
 /// A device to collect. For UniFi, the device is one site of a console,
-/// and one read of the site gives all its switches and access points.
+/// and one read of the site gives all its switches and access points. For
+/// VeloCloud, the device is one enterprise of an orchestrator, and one read
+/// of the enterprise gives all its edges.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Device {
     /// The unique name of the device in the store.
@@ -52,7 +57,8 @@ pub struct Device {
     /// The name of the credential in the credential source. The store does
     /// not hold credentials.
     pub credential: String,
-    /// The UniFi site. `None` for the other vendors.
+    /// The UniFi site or the VeloCloud enterprise logicalId. `None` for the
+    /// other vendors.
     pub site: Option<String>,
     /// The BGP sections of a router. UniFi has none.
     pub capture_bgp: CaptureBgp,
@@ -159,6 +165,6 @@ mod tests {
             .filter(|(_, t)| *t == rsim_inventory::CollectorTransport::Https)
             .map(|(v, _)| *v)
             .collect();
-        assert_eq!(https, [Vendor::Unifi.name()]);
+        assert_eq!(https, [Vendor::Unifi.name(), Vendor::Velocloud.name()]);
     }
 }

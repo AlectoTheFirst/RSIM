@@ -101,6 +101,8 @@ words! {
         Pin = "pin",
         /// CA bundle
         Ca = "ca",
+        /// Public roots
+        Public = "public",
         /// No check
         None = "none",
     }
@@ -144,6 +146,7 @@ pub const COLLECTOR_VENDORS: &[(&str, CollectorTransport)] = &[
     ("iosxr", CollectorTransport::Ssh),
     ("nxos", CollectorTransport::Ssh),
     ("unifi", CollectorTransport::Https),
+    ("velocloud", CollectorTransport::Https),
     ("vyos", CollectorTransport::Ssh),
 ];
 
@@ -315,6 +318,18 @@ pub struct Settings {
     /// Collection interval
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval_seconds: Option<u32>,
+    /// Orchestrator release
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestrator_release: Option<String>,
+    /// API base path
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_base: Option<String>,
+    /// Concurrency
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<u32>,
+    /// Module refresh
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_seconds: Option<u32>,
 }
 
 /// Device group

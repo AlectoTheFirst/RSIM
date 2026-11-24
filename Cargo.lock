@@ -2804,6 +2804,7 @@ name = "rsim-collect"
 version = "0.1.0"
 dependencies = [
  "arrow-array",
+ "blake3",
  "bytes",
  "clap",
  "criterion",
