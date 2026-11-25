@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rsim_collect::equinix::{
-    Account, DEVICE_PROPERTIES, EDGE_DEVICES, EDGE_LINKS, EquinixSource, PORT_PROPERTIES, PORTS,
-    PortBinding, SEARCH, search_body,
+    Account, DEVICE_PROPERTIES, EDGE_DEVICES, EDGE_LINKS, EdgeBinding, EquinixSource,
+    PORT_PROPERTIES, PORTS, PortBinding, SEARCH, search_body,
 };
 use rsim_collect::fake::FakeTransport;
 use rsim_collect::redact::REDACTED;
@@ -418,6 +418,16 @@ async fn the_bindings_of_the_account_are_a_section_with_no_read() {
             binding("p2", "sw-b", "Ethernet1/49"),
             binding("p1", "sw-a", "Ethernet1/49"),
         ],
+        edge_bindings: vec![
+            EdgeBinding {
+                edge_device: "XX-EDGE-RTR-01".into(),
+                device: "rtr-ne".into(),
+            },
+            EdgeBinding {
+                edge_device: "bbbbbbbb-0000-4000-8000-000000000001".into(),
+                device: "fw-ne".into(),
+            },
+        ],
         ..Account::default()
     };
     let out = fetch(&source(&t, account)).await;
@@ -426,6 +436,8 @@ async fn the_bindings_of_the_account_are_a_section_with_no_read() {
         json!([
             {"device": "sw-a", "fabric_port": "p1", "port": "Ethernet1/49"},
             {"device": "sw-b", "fabric_port": "p2", "port": "Ethernet1/49"},
+            {"device": "rtr-ne", "edge_device": "XX-EDGE-RTR-01"},
+            {"device": "fw-ne", "edge_device": "bbbbbbbb-0000-4000-8000-000000000001"},
         ])
     );
     assert_eq!(t.calls(), 1);

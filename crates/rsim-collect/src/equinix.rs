@@ -144,6 +144,14 @@ pub struct PortBinding {
     pub port: String,
 }
 
+/// The binding of a Network Edge device, by its uuid or its name, to a
+/// device of the store.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct EdgeBinding {
+    pub edge_device: String,
+    pub device: String,
+}
+
 /// The settings of an account.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Account {
@@ -152,6 +160,7 @@ pub struct Account {
     /// The items of one page, from 1 to [`MAX_PAGE_SIZE`].
     pub page_size: u32,
     pub bindings: Vec<PortBinding>,
+    pub edge_bindings: Vec<EdgeBinding>,
 }
 
 impl Default for Account {
@@ -160,19 +169,29 @@ impl Default for Account {
             network_edge: false,
             page_size: DEFAULT_PAGE_SIZE,
             bindings: Vec::new(),
+            edge_bindings: Vec::new(),
         }
     }
 }
 
-/// The section `bindings`: the bindings in order, each an object with
-/// `fabric_port`, `device` and `port`.
-pub fn bindings_section(bindings: &[PortBinding]) -> Vec<u8> {
+/// The section `bindings`: the port bindings in order, each an object with
+/// `fabric_port`, `device` and `port`, then the Network Edge bindings in
+/// order, each an object with `edge_device` and `device`.
+pub fn bindings_section(bindings: &[PortBinding], edges: &[EdgeBinding]) -> Vec<u8> {
     let mut list = bindings.to_vec();
     list.sort();
     list.dedup();
+    let mut edge_list = edges.to_vec();
+    edge_list.sort();
+    edge_list.dedup();
     let items: Vec<Value> = list
         .iter()
         .map(|b| json!({"fabric_port": b.fabric_port, "device": b.device, "port": b.port}))
+        .chain(
+            edge_list
+                .iter()
+                .map(|b| json!({"edge_device": b.edge_device, "device": b.device})),
+        )
         .collect();
     Value::Array(items).to_string().into_bytes()
 }
@@ -492,7 +511,7 @@ impl Source for EquinixSource {
                 .zip(results)
                 .map(|(spec, r)| {
                     let result = if spec.name == "bindings" {
-                        Ok(bindings_section(&account.bindings))
+                        Ok(bindings_section(&account.bindings, &account.edge_bindings))
                     } else {
                         r.map(|items| section_bytes(&items))
                     };
