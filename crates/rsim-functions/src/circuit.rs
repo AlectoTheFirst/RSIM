@@ -272,6 +272,9 @@ pub enum TagOp {
     /// Pop the outer tag of a frame with 2 tags whose outer tag is this
     /// tag.
     Pop(VlanTag),
+    /// Pop the tag of a frame with exactly this one tag. The frame leaves
+    /// untagged.
+    Untag(VlanTag),
 }
 
 /// Pushes or pops one VLAN tag on a port, for example the service tag of
@@ -350,6 +353,41 @@ impl NetFunction for TagStack {
                             t.text(),
                             self.port
                         ),
+                        ctx,
+                        state,
+                    ),
+                );
+                push_nonempty(
+                    &mut out,
+                    self.meta.unknown(
+                        s.uncertain,
+                        ReasonCode::UnknownAttribute,
+                        "frame tags not known",
+                        ctx,
+                        state,
+                    ),
+                );
+            }
+            TagOp::Untag(t) => {
+                let (two, one) = input.split_inner_vlan();
+                let s = one.split(&Tags::one(t).predicate());
+                push_nonempty(
+                    &mut out,
+                    self.meta.forward(
+                        s.matched.pop_vlan(),
+                        &self.next,
+                        ReasonCode::Classified,
+                        format!("pop {} on port {}", t.text(), self.port),
+                        ctx.clone(),
+                        state,
+                    ),
+                );
+                push_nonempty(
+                    &mut out,
+                    self.meta.unknown(
+                        s.unmatched.union(&two),
+                        ReasonCode::UnknownAttribute,
+                        format!("frame tags not only {} on port {}", t.text(), self.port),
                         ctx,
                         state,
                     ),
