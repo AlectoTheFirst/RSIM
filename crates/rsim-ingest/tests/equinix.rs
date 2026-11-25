@@ -174,7 +174,7 @@ fn far_sink(l: &CircuitLeg) -> String {
 
 #[test]
 fn a_circuit_with_one_tag_at_each_end_goes_to_the_link_peer_of_the_far_port() {
-    let peers = BTreeMap::from([("p2".to_string(), FunctionId::new("sw-b/port/1/in"))]);
+    let peers = BTreeMap::from([("port/p2".to_string(), FunctionId::new("sw-b/port/1/in"))]);
     let l = lowered(&peers);
     assert_eq!(verdict(&l, "c-same"), Verdict::Lowered);
     let a = leg(&l, "p1", "c-same");

@@ -11,7 +11,7 @@ use serde_json::Value;
 
 use crate::stanza::read_json;
 use crate::velocloud::json::J;
-use crate::{iosxe, iosxr, unifi, velocloud, vyos};
+use crate::{equinix, iosxe, iosxr, unifi, velocloud, vyos};
 
 /// Why a fact is not known.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -233,6 +233,7 @@ pub fn sections(vendor: &str) -> &'static [&'static str] {
         "iosxr" => &["version", "inventory"],
         "unifi" => &["devices"],
         "velocloud" => &["edges", "edges_v2"],
+        "equinix" => &["edge_devices", "bindings"],
         _ => &[],
     }
 }
@@ -333,7 +334,18 @@ pub fn device(
                 Identity::all(Reason::NotCollected)
             }
         }
-        "equinix" => Identity::all(Reason::NotCollected),
+        "equinix" => {
+            let mut out = vec![(
+                name.to_string(),
+                facts(Identity::all(Reason::NotCollected), address),
+            )];
+            out.extend(
+                equinix_edge_devices(name, sections)
+                    .into_iter()
+                    .map(|(d, id)| (d, facts(id, Fact::Unknown(Reason::NotCollected)))),
+            );
+            return out;
+        }
         _ => Identity::all(Reason::NotRead),
     };
     vec![(name.to_string(), facts(id, address))]
@@ -522,6 +534,30 @@ fn unifi_devices(bytes: &[u8], file: &str) -> Vec<(String, Identity, Fact)> {
                 },
                 Fact::of(s("ip"), span),
             ))
+        })
+        .collect()
+}
+
+/// The facts of the twin device of each Network Edge device of an Equinix
+/// account that no binding names and that has an interface with a name:
+/// the `deviceTypeCode` as the platform and
+/// the `version` as the OS version, each with the lines of the device.
+fn equinix_edge_devices(account: &str, sections: &Sections) -> Vec<(String, Identity)> {
+    let p = velocloud::Parsed::new(sections);
+    let a = equinix::read(account, &p);
+    let (bound, _) = equinix::edge::bound(&a);
+    a.edge_devices
+        .iter()
+        .filter(|d| !bound.contains_key(&d.uuid) && !d.interfaces.is_empty())
+        .map(|d| {
+            (
+                equinix::edge::twin_device(account, d),
+                Identity {
+                    platform: Fact::named(d.model.as_deref(), d.span.clone()),
+                    os_version: Fact::named(d.version.as_deref(), d.span.clone()),
+                    serial: Fact::Unknown(Reason::NotCollected),
+                },
+            )
         })
         .collect()
 }
