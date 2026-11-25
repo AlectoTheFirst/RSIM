@@ -311,13 +311,25 @@ fn edge_account() -> BTreeMap<String, (Vec<u8>, String)> {
 }
 
 #[test]
-fn a_path_to_a_network_edge_device_with_no_binding_crosses_the_circuit_and_is_unknown() {
+fn a_path_through_a_network_edge_device_with_no_binding_crosses_the_circuit_and_is_unknown() {
+    // The route of sw-a to 198.51.100.0/24 has the Network Edge device as
+    // its next hop.
+    let mut col = collected("sw-a", 100, ("192.0.2.10", H1), ("192.0.2.30", NE_MAC));
+    col.routes.push(RouteRow {
+        vrf: "default".into(),
+        prefix: "198.51.100.0/24".into(),
+        protocol: "static".into(),
+        selected: true,
+        next_hop: Some("192.0.2.30".into()),
+        interface: Some("Vlan100".into()),
+        span: row_span("sw-a", "routes", "b1", 1),
+    });
     let e = assemble(vec![
         Input::Nxos {
             name: "sw-a".into(),
             config: switch("sw-a", 100, "192.0.2.1").into_bytes(),
             file: "sw-a/config".into(),
-            collected: collected("sw-a", 100, ("192.0.2.10", H1), ("192.0.2.30", NE_MAC)),
+            collected: col,
             sections: sections("sw-a", 100),
         },
         Input::Equinix {
@@ -332,7 +344,7 @@ fn a_path_to_a_network_edge_device_with_no_binding_crosses_the_circuit_and_is_un
         "{:?}",
         t.devices()
     );
-    let a = run(&t, "192.0.2.10", "192.0.2.30");
+    let a = run(&t, "192.0.2.10", "198.51.100.5");
     let s = steps(&a);
     assert_eq!(
         a.branches()
