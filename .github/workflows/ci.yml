@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths-ignore: ['**.md']
   pull_request:
-    paths-ignore: ['**.md']
 
 permissions:
   contents: read
@@ -41,6 +40,8 @@ jobs:
       RSIM_UI_REQUIRED: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.22.2
@@ -76,6 +77,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Build the images with no push
         run: |
           for target in rsim rsim-collect; do
@@ -86,6 +89,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Lint and render the chart with the Helm of the runner
         run: |
           helm version
@@ -99,8 +104,37 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-audit@0.23.0
       - name: Advisories of the locked dependencies
         run: cargo audit
+
+  secrets:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # Each checksum is the SHA-256 of the archive in the gitleaks release. A pull
+      # request run scans the commits from the base commit to HEAD. Every other run
+      # scans the history of every fetched ref.
+      - name: Scan commits for secrets
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          sum=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          curl --fail --silent --show-error --location \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            -o "$RUNNER_TEMP/gitleaks.tar.gz"
+          echo "$sum  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+          if [ -n "$BASE" ]; then
+            "$RUNNER_TEMP/gitleaks" git --config .gitleaks.toml --redact --no-banner --log-opts="$BASE..HEAD"
+          else
+            "$RUNNER_TEMP/gitleaks" git --config .gitleaks.toml --redact --no-banner
+          fi
