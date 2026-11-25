@@ -323,17 +323,17 @@ impl Collector {
         if !self.requested.is_empty() {
             return now;
         }
-        let devices: Vec<Device> = self
-            .inventory
-            .devices()
-            .into_iter()
-            .filter(|d| !self.manual.contains(&d.id))
-            .collect();
-        let limit = now.saturating_add(u64::try_from(WAKE_LIMIT.as_millis()).unwrap_or(u64::MAX));
-        let ids: BTreeSet<&str> = devices.iter().map(|d| d.id.as_str()).collect();
+        let all = self.inventory.devices();
+        let ids: BTreeSet<&str> = all.iter().map(|d| d.id.as_str()).collect();
         if self.state.keys().any(|d| !ids.contains(d.as_str())) {
             return now;
         }
+        let devices: Vec<Device> = all
+            .iter()
+            .filter(|d| !self.manual.contains(&d.id))
+            .cloned()
+            .collect();
+        let limit = now.saturating_add(u64::try_from(WAKE_LIMIT.as_millis()).unwrap_or(u64::MAX));
         self.scheduler
             .next_due(&devices)
             .map_or(limit, |t| t.min(limit))
@@ -869,6 +869,8 @@ mod tests {
         let r = c.run_cycle().await.unwrap();
         assert_eq!(r.due, 1);
         assert_eq!(devices(&t), ["manual1"]);
+        let now = c.now_ms();
+        assert!(c.next_wake(now) > now);
 
         // The request is used once.
         tokio::time::advance(Duration::from_secs(1)).await;

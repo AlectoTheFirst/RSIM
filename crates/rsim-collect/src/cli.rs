@@ -15,6 +15,9 @@ pub const SHELL_HEIGHT: u32 = 1000;
 const ECHO_LINES: usize = 20;
 /// The longest prompt.
 const PROMPT_MAX: usize = 63;
+/// The longest output of [`CliRules::apply`] after the removal of the
+/// terminal bytes. A longer output has its own length as the limit.
+const SANITIZED_MAX: usize = 64 << 20;
 
 /// Removes the bytes of a terminal from command output. A cursor move to
 /// the right (`ESC [ n C`) becomes n spaces, at most [`SHELL_WIDTH`]. The
@@ -22,8 +25,16 @@ const PROMPT_MAX: usize = 63;
 /// line feed. A carriage return becomes a line feed. Each line loses its
 /// trailing white space.
 pub fn sanitize(text: &str) -> String {
+    sanitize_max(text, usize::MAX).expect("the text has no limit")
+}
+
+/// [`sanitize`] with a limit. `None` if the text with its cursor moves
+/// as spaces is longer than `max` bytes.
+pub fn sanitize_max(text: &str, max: usize) -> Option<String> {
     let text = if text.contains('\x1b') {
-        esc_other(&osc(&csi(text)))
+        esc_other(&osc(&csi(text, max)?))
+    } else if text.len() > max {
+        return None;
     } else {
         text.to_string()
     };
@@ -42,7 +53,7 @@ pub fn sanitize(text: &str) -> String {
             out.push_str(line);
         }
     }
-    out
+    Some(out)
 }
 
 fn is_control(c: char) -> bool {
@@ -50,23 +61,27 @@ fn is_control(c: char) -> bool {
 }
 
 /// The CSI sequences: `ESC [`, parameters, intermediates and a final byte.
-fn csi(text: &str) -> String {
-    let b: Vec<char> = text.chars().collect();
-    let mut out = String::with_capacity(text.len());
+/// `None` if the output is longer than `max` bytes. Each byte of a
+/// sequence is ASCII, so each cut is at a character boundary.
+fn csi(text: &str, max: usize) -> Option<String> {
+    let b = text.as_bytes();
+    let mut out = String::with_capacity(text.len().min(max));
+    let mut kept = 0;
     let mut i = 0;
     while i < b.len() {
-        if b[i] == '\x1b' && b.get(i + 1) == Some(&'[') {
+        if b[i] == 0x1b && b.get(i + 1) == Some(&b'[') {
             let mut j = i + 2;
-            while j < b.len() && (b[j].is_ascii_digit() || b[j] == ';' || b[j] == '?') {
+            while j < b.len() && (b[j].is_ascii_digit() || b[j] == b';' || b[j] == b'?') {
                 j += 1;
             }
             let params_end = j;
-            while j < b.len() && (' '..='/').contains(&b[j]) {
+            while j < b.len() && (b' '..=b'/').contains(&b[j]) {
                 j += 1;
             }
-            if j < b.len() && ('@'..='~').contains(&b[j]) {
-                if b[j] == 'C' {
-                    let params: String = b[i + 2..params_end].iter().collect();
+            if j < b.len() && (b'@'..=b'~').contains(&b[j]) {
+                out.push_str(&text[kept..i]);
+                if b[j] == b'C' {
+                    let params = &text[i + 2..params_end];
                     let n = if !params.is_empty() && params.bytes().all(|c| c.is_ascii_digit()) {
                         params
                             .parse::<u64>()
@@ -75,60 +90,71 @@ fn csi(text: &str) -> String {
                     } else {
                         1
                     };
-                    out.extend(std::iter::repeat_n(' ', n as usize));
+                    let n = n as usize;
+                    if out.len().saturating_add(n) > max {
+                        return None;
+                    }
+                    out.extend(std::iter::repeat_n(' ', n));
                 }
                 i = j + 1;
+                kept = i;
                 continue;
             }
         }
-        out.push(b[i]);
         i += 1;
     }
-    out
+    out.push_str(&text[kept..]);
+    (out.len() <= max).then_some(out)
 }
 
 /// The OSC sequences: `ESC ]` up to a BEL, an `ESC \`, the next escape or
 /// the end.
 fn osc(text: &str) -> String {
-    let b: Vec<char> = text.chars().collect();
+    let b = text.as_bytes();
     let mut out = String::with_capacity(text.len());
+    let mut kept = 0;
     let mut i = 0;
     while i < b.len() {
-        if b[i] == '\x1b' && b.get(i + 1) == Some(&']') {
+        if b[i] == 0x1b && b.get(i + 1) == Some(&b']') {
+            out.push_str(&text[kept..i]);
             let mut j = i + 2;
-            while j < b.len() && b[j] != '\x07' && b[j] != '\x1b' {
+            while j < b.len() && b[j] != 0x07 && b[j] != 0x1b {
                 j += 1;
             }
-            if j < b.len() && b[j] == '\x07' {
+            if j < b.len() && b[j] == 0x07 {
                 j += 1;
-            } else if j + 1 < b.len() && b[j] == '\x1b' && b[j + 1] == '\\' {
+            } else if j + 1 < b.len() && b[j] == 0x1b && b[j + 1] == b'\\' {
                 j += 2;
             }
             i = j;
+            kept = j;
             continue;
         }
-        out.push(b[i]);
         i += 1;
     }
+    out.push_str(&text[kept..]);
     out
 }
 
 /// The other 2-byte escape sequences.
 fn esc_other(text: &str) -> String {
-    let b: Vec<char> = text.chars().collect();
+    let b = text.as_bytes();
     let mut out = String::with_capacity(text.len());
+    let mut kept = 0;
     let mut i = 0;
     while i < b.len() {
-        if b[i] == '\x1b'
+        if b[i] == 0x1b
             && let Some(&n) = b.get(i + 1)
-            && (('@'..='Z').contains(&n) || ('\\'..='_').contains(&n))
+            && ((b'@'..=b'Z').contains(&n) || (b'\\'..=b'_').contains(&n))
         {
+            out.push_str(&text[kept..i]);
             i += 2;
+            kept = i;
             continue;
         }
-        out.push(b[i]);
         i += 1;
     }
+    out.push_str(&text[kept..]);
     out
 }
 
@@ -319,9 +345,17 @@ impl CliRules {
     pub fn apply(&self, sections: &mut [RawSection], banner_each: bool) {
         if self.sanitize {
             for s in sections.iter_mut() {
-                if let Ok(bytes) = &mut s.result {
-                    *bytes = sanitize(&String::from_utf8_lossy(bytes)).into_bytes();
-                }
+                let Ok(bytes) = &s.result else { continue };
+                let text = String::from_utf8_lossy(bytes);
+                let max = text.len().max(SANITIZED_MAX);
+                let clean = sanitize_max(&text, max);
+                drop(text);
+                s.result = match clean {
+                    Some(text) => Ok(text.into_bytes()),
+                    None => Err(TransportError::Command(format!(
+                        "the output without terminal bytes is larger than {max} bytes"
+                    ))),
+                };
             }
         }
         for s in sections.iter_mut() {
@@ -378,6 +412,19 @@ mod tests {
         assert_eq!(sanitize("line1\r\nline2\rline3"), "line1\nline2\nline3");
         assert_eq!(sanitize("a\x08\x00b\tc  \n  \n"), "ab\tc\n\n");
         assert_eq!(sanitize("x\x1b[2"), "x[2");
+        assert_eq!(
+            sanitize("\u{e9}\x1b[2C\u{fc}\x1b]0;\u{e8}\x07!"),
+            "\u{e9}  \u{fc}!"
+        );
+    }
+
+    #[test]
+    fn sanitize_max_stops_at_the_limit() {
+        let moves = "\x1b[511Cx".repeat(100);
+        assert_eq!(sanitize_max(&moves, 1000), None);
+        assert_eq!(sanitize_max(&moves, 51_200).map(|t| t.len()), Some(51_200));
+        assert_eq!(sanitize_max("abcd", 3), None);
+        assert_eq!(sanitize_max("abc", 3).as_deref(), Some("abc"));
     }
 
     #[test]

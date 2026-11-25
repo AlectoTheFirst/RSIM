@@ -36,6 +36,9 @@ impl From<Walk> for StoreError {
 pub struct Store {
     dir: PathBuf,
     keys: Keys,
+    /// The file `LOCK` of a store opened to write. The store holds a shared
+    /// lock on it, and [`Store::prune`] holds an exclusive lock.
+    lock: Option<fs::File>,
 }
 
 /// The state of all devices at one snapshot.
@@ -175,7 +178,8 @@ pub(crate) fn cycle_name(cycle: u64) -> String {
 
 impl Store {
     /// Opens the store in `dir` and makes its directories if they do not
-    /// exist.
+    /// exist. The store holds a shared lock on the file `LOCK` until it is
+    /// dropped. The open waits while a prune holds the exclusive lock.
     pub fn open(dir: impl Into<PathBuf>, keys: Keys) -> Result<Store, StoreError> {
         let dir = dir.into();
         for sub in ["blobs", "devices", "snapshots"] {
@@ -186,7 +190,20 @@ impl Store {
             let p = dir.join("tables").join(t.name);
             fs::create_dir_all(&p).map_err(|e| StoreError::io(&p, e))?;
         }
-        Ok(Store { dir, keys })
+        let p = dir.join("LOCK");
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&p)
+            .map_err(|e| StoreError::io(&p, e))?;
+        lock.lock_shared().map_err(|e| StoreError::io(&p, e))?;
+        Ok(Store {
+            dir,
+            keys,
+            lock: Some(lock),
+        })
     }
 
     /// Opens an existing store in `dir` to read it. It writes nothing.
@@ -199,7 +216,16 @@ impl Store {
                 dir.display()
             )));
         }
-        Ok(Store { dir, keys })
+        Ok(Store {
+            dir,
+            keys,
+            lock: None,
+        })
+    }
+
+    /// The lock file of a store opened to write.
+    pub(crate) fn lock_file(&self) -> Option<&fs::File> {
+        self.lock.as_ref()
     }
 
     pub fn dir(&self) -> &Path {

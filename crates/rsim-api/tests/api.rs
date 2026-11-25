@@ -752,7 +752,7 @@ fn a_real_server_answers_on_a_loopback_port() {
     use std::io::{Read, Write};
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
-        .enable_io()
+        .enable_all()
         .build()
         .unwrap();
     let listener = rt
@@ -807,6 +807,44 @@ fn a_real_server_answers_on_a_loopback_port() {
     ));
     assert!(r.starts_with("HTTP/1.1 200"), "{r}");
     assert!(r.contains("server-timing: engine;dur="), "{r}");
+    for probe in ["/healthz", "/readyz"] {
+        let r = ask(format!(
+            "GET {probe} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
+        ));
+        assert!(r.starts_with("HTTP/1.1 200"), "{r}");
+        assert!(r.ends_with("ok\n"), "{r}");
+    }
+    rt.shutdown_background();
+}
+
+#[test]
+#[allow(clippy::disallowed_types)]
+fn a_real_server_closes_a_connection_with_an_incomplete_request_head() {
+    use std::io::{Read, Write};
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let listener = rt
+        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    let s = std::sync::Arc::new(State::new(Settings {
+        listen: addr,
+        store: None,
+        allow_origins: Vec::new(),
+        max_body: 1024,
+        public_origins: Vec::new(),
+        trusted_proxies: Vec::new(),
+    }));
+    rt.spawn(rsim_api::server::serve(listener, s));
+    let mut c = std::net::TcpStream::connect(addr).unwrap();
+    let wait = rsim_api::server::HEADER_READ_TIMEOUT + std::time::Duration::from_secs(10);
+    c.set_read_timeout(Some(wait)).unwrap();
+    c.write_all(b"GET /healthz HTTP/1.1\r\n").unwrap();
+    let mut out = Vec::new();
+    c.read_to_end(&mut out).unwrap();
     rt.shutdown_background();
 }
 

@@ -548,9 +548,20 @@ async fn a_proxy_carries_the_connections_to_a_console() {
     let http = route::http_proxy(None).await;
     let socks = route::socks5_proxy().await;
     for (scheme, p) in [("http", &http), ("socks5", &socks)] {
-        let t = HttpsTransport::new(credentials(password()), pinned(&f), HttpsLimits::default());
+        let proxy = Proxy::parse(&format!("{scheme}://{}", p.address)).unwrap();
+        let trust = TrustStore::memory(PinPolicy::Strict);
+        trust.pin(
+            PinKind::Tls,
+            &format!("{}>{}", proxy.address(), f.address),
+            &f.pin,
+        );
+        let t = HttpsTransport::new(
+            credentials(password()),
+            Arc::new(trust),
+            HttpsLimits::default(),
+        );
         let mut d = device(&f.address, "default");
-        d.route.proxy = Some(Proxy::parse(&format!("{scheme}://{}", p.address)).unwrap());
+        d.route.proxy = Some(proxy);
         for path in ["/a", "/b"] {
             assert_eq!(
                 t.get(&d, path).await.unwrap(),

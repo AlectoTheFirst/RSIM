@@ -234,12 +234,17 @@ enum Aggregates {
 }
 
 /// The state of the source across cycles: the modules of each edge, the
-/// `getAggregates` answer of each orchestrator in the current cycle and
-/// the workers of each orchestrator. The source of each cycle shares one.
+/// `getAggregates` answer of each orchestrator and token in the current
+/// cycle and the workers of each orchestrator. The source of each cycle
+/// shares one.
+/// The `getAggregates` answer of each pair of an orchestrator address and a
+/// token identity.
+type AggregatesByToken = HashMap<(String, String), Arc<OnceCell<Aggregates>>>;
+
 #[derive(Debug, Default)]
 pub struct VelocloudMemory {
     devices: Mutex<HashMap<String, Edges>>,
-    aggregates: Mutex<HashMap<String, Arc<OnceCell<Aggregates>>>>,
+    aggregates: Mutex<AggregatesByToken>,
     workers: Mutex<HashMap<String, (usize, Arc<Semaphore>)>>,
 }
 
@@ -337,12 +342,13 @@ impl VelocloudMemory {
         e.1.clone()
     }
 
-    /// The `getAggregates` answer of an orchestrator in the current cycle.
-    fn aggregates(&self, address: &str) -> Arc<OnceCell<Aggregates>> {
+    /// The `getAggregates` answer of an orchestrator and a token in the
+    /// current cycle.
+    fn aggregates(&self, address: &str, token_id: &str) -> Arc<OnceCell<Aggregates>> {
         self.aggregates
             .lock()
             .expect("the lock is not poisoned")
-            .entry(address.to_string())
+            .entry((address.to_string(), token_id.to_string()))
             .or_default()
             .clone()
     }
@@ -888,7 +894,10 @@ impl Run<'_> {
     }
 
     async fn aggregates(&self) -> Result<Aggregates, String> {
-        let cell = self.source.memory.aggregates(&self.device.address);
+        let cell = self
+            .source
+            .memory
+            .aggregates(&self.device.address, &self.orch.token_id);
         cell.get_or_try_init(|| async {
             Ok::<_, String>(match self.portal(AGGREGATES, json!({})).await? {
                 Portal::Answer(v) => Aggregates::Answer(v),

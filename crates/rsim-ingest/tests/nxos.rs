@@ -1613,3 +1613,86 @@ fn a_direct_route_with_an_address_of_the_switch_as_next_hop_is_connected() {
         "{steps:#?}"
     );
 }
+
+#[test]
+fn a_vlan_filter_makes_the_ports_and_the_svi_of_its_vlans_unknown() {
+    let config = format!(
+        "{}\nvlan access-map BLOCK 10\n  match ip address WEB\n  action drop\nvlan filter BLOCK vlan-list 10\n",
+        String::from_utf8(CONFIG.to_vec()).unwrap()
+    );
+    let e = estate_of(config.as_bytes(), collected());
+    let notes = &e.notes["leaf1"];
+    assert!(
+        has(notes, "Ethernet1/6: VLAN 10 with a line not lowered"),
+        "{notes:#?}"
+    );
+    let t = e.builder.build().expect("the twin builds");
+    let (verdict, steps) = only(&run(
+        &t,
+        "Vlan30",
+        "192.0.2.130",
+        "192.0.2.10",
+        PROTO_TCP,
+        443,
+    ));
+    assert_eq!(verdict, VerdictKind::Unknown, "{steps:#?}");
+    assert!(has(&steps, "vlan filter"), "{steps:#?}");
+}
+
+#[test]
+fn a_tagged_native_vlan_makes_a_trunk_unknown() {
+    let config = format!(
+        "{}\nvlan dot1Q tag native\n",
+        String::from_utf8(CONFIG.to_vec()).unwrap()
+    );
+    let e = estate_of(config.as_bytes(), collected());
+    let notes = &e.notes["leaf1"];
+    assert!(
+        has(notes, "Ethernet1/11: vlan dot1Q tag native not lowered"),
+        "{notes:#?}"
+    );
+}
+
+/// The gateways of the route of `prefix` in the route lookups of a twin in
+/// a VRF.
+fn gateways(t: &Twin, vrf: &str, prefix: &str) -> std::collections::BTreeSet<Option<IpAddr>> {
+    let p: rsim_core::Prefix = prefix.parse().unwrap();
+    let mut out = std::collections::BTreeSet::new();
+    for f in t.functions() {
+        let any: &dyn std::any::Any = f.as_ref();
+        let Some(rl) = any.downcast_ref::<RouteLookup>() else {
+            continue;
+        };
+        if let Some(r) = rl.tables.get(&VrfId::new(vrf)).and_then(|fib| fib.get(&p)) {
+            out.extend(r.next_hops().iter().map(|h| h.gateway));
+        }
+    }
+    out
+}
+
+#[test]
+fn config_static_routes_of_one_prefix_keep_the_lowest_preference_and_each_equal_next_hop() {
+    let text = String::from_utf8(CONFIG.to_vec()).unwrap();
+    let start = text.find("router ospf 1\n").unwrap();
+    let end = text.find("ip nat inside source static").unwrap();
+    let config = format!(
+        "{}{}\nip route 0.0.0.0/0 192.0.2.9 250\nip route 203.0.113.64/26 192.0.2.9\nip route 203.0.113.64/26 192.0.2.140\nip route 198.51.100.0/30 192.0.2.9\n",
+        &text[..start],
+        &text[end..]
+    );
+    let t = estate_of(config.as_bytes(), Collected::default())
+        .builder
+        .build()
+        .expect("the twin builds");
+    assert_eq!(
+        gateways(&t, "default", "0.0.0.0/0"),
+        [Some(ip("198.51.100.2"))].into_iter().collect()
+    );
+    assert_eq!(
+        gateways(&t, "default", "203.0.113.64/26"),
+        [Some(ip("192.0.2.9")), Some(ip("192.0.2.140"))]
+            .into_iter()
+            .collect()
+    );
+    assert_eq!(kinds(&t, "default")["198.51.100.0/30"], "connected");
+}

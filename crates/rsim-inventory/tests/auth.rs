@@ -189,10 +189,25 @@ async fn the_name_limit_and_the_client_limit_hold_each_alone() {
         return;
     };
     let go = |a: Attempt| matches!(a, Attempt::Go(_));
-    // 5 attempts on one name from 5 addresses reach the name limit.
+    // 5 attempts on one name from one address reach the client limit.
     for i in 0..5 {
+        assert!(
+            go(db.begin_sign_in("admin", "192.0.2.50").await.unwrap()),
+            "{i}"
+        );
+    }
+    let a = db.begin_sign_in("admin", "192.0.2.50").await.unwrap();
+    assert!(
+        matches!(a, Attempt::Wait(w) if (1..=900).contains(&w)),
+        "{a:?}"
+    );
+    // Another address can still try the name.
+    assert!(go(db.begin_sign_in("admin", "192.0.2.51").await.unwrap()));
+    // 44 more attempts, at most 5 from each address, reach the 50 of the
+    // name limit.
+    for i in 0..44 {
         let a = db
-            .begin_sign_in("admin", &format!("198.51.100.{i}"))
+            .begin_sign_in("admin", &format!("198.51.100.{}", i / 5))
             .await
             .unwrap();
         assert!(go(a), "{i}");
@@ -202,6 +217,10 @@ async fn the_name_limit_and_the_client_limit_hold_each_alone() {
         matches!(a, Attempt::Wait(w) if (1..=900).contains(&w)),
         "{a:?}"
     );
+    assert!(go(db
+        .begin_sign_in("other", "198.51.100.200")
+        .await
+        .unwrap()));
     // 5 attempts from one address on 5 names reach the client limit.
     for i in 0..5 {
         let a = db

@@ -1,6 +1,8 @@
 //! The collected state of a device: the rows of the tables of the snapshot
 //! store.
 
+use std::collections::BTreeMap;
+
 use arrow_array::cast::AsArray;
 use arrow_array::types::UInt64Type;
 use arrow_array::{Array, RecordBatch};
@@ -119,79 +121,120 @@ impl Cols<'_> {
     }
 }
 
+/// The rows of a table, grouped by device: of all devices, or of the
+/// device `only`.
 fn rows<T>(
     store: &Store,
     snapshot: &Snapshot,
     table: &TableSchema,
-    device: &str,
-    f: impl Fn(&Cols, usize) -> Option<T>,
-) -> Result<Vec<T>, StoreError> {
-    let mut out = Vec::new();
+    only: Option<&str>,
+    f: impl Fn(&str, &Cols, usize) -> Option<T>,
+) -> Result<BTreeMap<String, Vec<T>>, StoreError> {
+    let mut out: BTreeMap<String, Vec<T>> = BTreeMap::new();
     for (d, batch) in store.read_table(snapshot, table)? {
-        if d != device {
+        if only.is_some_and(|x| x != d) {
             continue;
         }
         let cols = Cols { batch: &batch };
-        out.extend((0..batch.num_rows()).filter_map(|i| f(&cols, i)));
+        let found: Vec<T> = (0..batch.num_rows())
+            .filter_map(|i| f(d.as_str(), &cols, i))
+            .collect();
+        out.entry(d).or_default().extend(found);
     }
     Ok(out)
 }
 
 /// Reads the collected state of a device at a snapshot.
 pub fn read(store: &Store, snapshot: &Snapshot, device: &str) -> Result<Collected, StoreError> {
-    Ok(Collected {
-        addresses: rows(store, snapshot, &ADDRESSES, device, |c, i| {
-            Some(AddressRow {
-                interface: c.s("interface", i)?,
-                prefix: c.s("prefix", i)?,
-                span: c.span(device, ADDRESSES.name, i),
-            })
-        })?,
-        routes: rows(store, snapshot, &ROUTES, device, |c, i| {
-            Some(RouteRow {
-                vrf: c.s("vrf", i)?,
-                prefix: c.s("prefix", i)?,
-                protocol: c.s("protocol", i)?,
-                selected: c.b("selected", i).unwrap_or(false),
-                next_hop: c.s("next_hop", i),
-                interface: c.s("interface", i),
-                span: c.span(device, ROUTES.name, i),
-            })
-        })?,
-        neighbours: rows(store, snapshot, &NEIGHBOURS, device, |c, i| {
-            Some(NeighbourRow {
-                interface: c.s("interface", i)?,
-                ip: c.s("ip", i)?,
-                mac: c.s("mac", i),
-                state: c.s("state", i),
-                span: c.span(device, NEIGHBOURS.name, i),
-            })
-        })?,
-        links: rows(store, snapshot, &LINKS, device, |c, i| {
-            Some(LinkRow {
-                interface: c.s("interface", i)?,
-                mac: c.s("mac", i),
-                parent: c.s("parent", i),
-                vlan: c.u("vlan", i),
-                span: c.span(device, LINKS.name, i),
-            })
-        })?,
-        speeds: rows(store, snapshot, &LINK_SPEEDS, device, |c, i| {
-            Some(SpeedRow {
-                interface: c.s("interface", i)?,
-                mbps: c.u("mbps", i),
-                duplex: c.s("duplex", i),
-                span: c.span(device, LINK_SPEEDS.name, i),
-            })
-        })?,
-        macs: rows(store, snapshot, &MAC_TABLE, device, |c, i| {
-            Some(MacRow {
-                vlan: c.u("vlan", i)?,
-                mac: c.s("mac", i)?,
-                port: c.s("port", i),
-                kind: c.s("kind", i),
-                span: c.span(device, MAC_TABLE.name, i),
-            })
-        })?,
-    })
+    let mut all = collect(store, snapshot, Some(device))?;
+    Ok(all.remove(device).unwrap_or_default())
+}
+
+/// Reads the collected state of each device at a snapshot. Each table is
+/// read once. A device with none of the tables has no entry.
+pub fn read_all(
+    store: &Store,
+    snapshot: &Snapshot,
+) -> Result<BTreeMap<String, Collected>, StoreError> {
+    collect(store, snapshot, None)
+}
+
+fn collect(
+    store: &Store,
+    snapshot: &Snapshot,
+    only: Option<&str>,
+) -> Result<BTreeMap<String, Collected>, StoreError> {
+    let mut out: BTreeMap<String, Collected> = BTreeMap::new();
+    let addresses = rows(store, snapshot, &ADDRESSES, only, |d, c, i| {
+        Some(AddressRow {
+            interface: c.s("interface", i)?,
+            prefix: c.s("prefix", i)?,
+            span: c.span(d, ADDRESSES.name, i),
+        })
+    })?;
+    for (d, v) in addresses {
+        out.entry(d).or_default().addresses = v;
+    }
+    let routes = rows(store, snapshot, &ROUTES, only, |d, c, i| {
+        Some(RouteRow {
+            vrf: c.s("vrf", i)?,
+            prefix: c.s("prefix", i)?,
+            protocol: c.s("protocol", i)?,
+            selected: c.b("selected", i).unwrap_or(false),
+            next_hop: c.s("next_hop", i),
+            interface: c.s("interface", i),
+            span: c.span(d, ROUTES.name, i),
+        })
+    })?;
+    for (d, v) in routes {
+        out.entry(d).or_default().routes = v;
+    }
+    let neighbours = rows(store, snapshot, &NEIGHBOURS, only, |d, c, i| {
+        Some(NeighbourRow {
+            interface: c.s("interface", i)?,
+            ip: c.s("ip", i)?,
+            mac: c.s("mac", i),
+            state: c.s("state", i),
+            span: c.span(d, NEIGHBOURS.name, i),
+        })
+    })?;
+    for (d, v) in neighbours {
+        out.entry(d).or_default().neighbours = v;
+    }
+    let links = rows(store, snapshot, &LINKS, only, |d, c, i| {
+        Some(LinkRow {
+            interface: c.s("interface", i)?,
+            mac: c.s("mac", i),
+            parent: c.s("parent", i),
+            vlan: c.u("vlan", i),
+            span: c.span(d, LINKS.name, i),
+        })
+    })?;
+    for (d, v) in links {
+        out.entry(d).or_default().links = v;
+    }
+    let speeds = rows(store, snapshot, &LINK_SPEEDS, only, |d, c, i| {
+        Some(SpeedRow {
+            interface: c.s("interface", i)?,
+            mbps: c.u("mbps", i),
+            duplex: c.s("duplex", i),
+            span: c.span(d, LINK_SPEEDS.name, i),
+        })
+    })?;
+    for (d, v) in speeds {
+        out.entry(d).or_default().speeds = v;
+    }
+    let macs = rows(store, snapshot, &MAC_TABLE, only, |d, c, i| {
+        Some(MacRow {
+            vlan: c.u("vlan", i)?,
+            mac: c.s("mac", i)?,
+            port: c.s("port", i),
+            kind: c.s("kind", i),
+            span: c.span(d, MAC_TABLE.name, i),
+        })
+    })?;
+    for (d, v) in macs {
+        out.entry(d).or_default().macs = v;
+    }
+    Ok(out)
 }

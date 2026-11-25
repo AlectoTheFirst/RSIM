@@ -39,9 +39,11 @@ pub const SESSION_MAX: &str = "7 days";
 /// The lifetime of the session cookie in seconds: the longest life of a
 /// session.
 pub const SESSION_MAX_SECONDS: u64 = 7 * 24 * 3600;
-/// The failed sign-ins of one user name or one client address that the
-/// window accepts.
+/// The failed sign-ins of one client address that the window accepts.
 pub const SIGN_IN_FAILURES: i64 = 5;
+/// The failed sign-ins of one user name from all client addresses that the
+/// window accepts.
+pub const SIGN_IN_NAME_FAILURES: i64 = 50;
 /// The window of the failed sign-ins.
 pub const SIGN_IN_WINDOW: &str = "15 minutes";
 /// The shortest password.
@@ -325,20 +327,21 @@ async fn sign_in_wait(
     let sql = format!(
         "SELECT ceil(extract(epoch FROM (at + interval '{SIGN_IN_WINDOW}' - now())))::bigint
          FROM login_failures
-         WHERE {{col}} = $1 AND at > now() - interval '{SIGN_IN_WINDOW}'
-         ORDER BY at DESC OFFSET $2 LIMIT 1"
+         WHERE ($1::text IS NULL OR name = $1) AND ($2::text IS NULL OR client = $2)
+           AND at > now() - interval '{SIGN_IN_WINDOW}'
+         ORDER BY at DESC OFFSET $3 LIMIT 1"
     );
+    let name = valid_user_name(name).then_some(name);
+    let checks: [(Option<&str>, Option<&str>, i64); 2] = [
+        (name, None, SIGN_IN_NAME_FAILURES),
+        (None, Some(client_addr), SIGN_IN_FAILURES),
+    ];
     let mut wait: Option<i64> = None;
-    for (col, value) in [("name", name), ("client", client_addr)] {
-        if col == "name" && !valid_user_name(value) {
+    for (n, client, limit) in checks {
+        if n.is_none() && client.is_none() {
             continue;
         }
-        let row = c
-            .query_opt(
-                &sql.replace("{col}", col),
-                &[&value, &(SIGN_IN_FAILURES - 1)],
-            )
-            .await?;
+        let row = c.query_opt(&sql, &[&n, &client, &(limit - 1)]).await?;
         if let Some(r) = row {
             let s: i64 = r.get(0);
             wait = Some(wait.map_or(s, |w| w.max(s)));
@@ -437,9 +440,9 @@ impl Db {
         .transpose()
     }
 
-    /// The seconds to wait before the next sign-in of a user name or a
-    /// client address, or `None` when the attempts of both are below the
-    /// limit of the window.
+    /// The seconds to wait before the next sign-in of a user name from a
+    /// client address, or `None` when the attempts of the name and the
+    /// attempts of the address are below their limits of the window.
     pub async fn sign_in_wait(&self, name: &str, client_addr: &str) -> Result<Option<u64>> {
         let mut slot = self.client.lock().await;
         let client = self.client(&mut slot).await?;

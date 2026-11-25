@@ -597,6 +597,47 @@ fn the_largest_limit_after_a_cursor_gives_the_rest_of_the_rows() {
 }
 
 #[test]
+fn a_page_has_at_most_max_rows_rows_and_a_cursor_for_the_rest() {
+    let def = table::table("fib").unwrap();
+    let rows: Vec<Vec<Value>> = (0..MAX_ROWS + 3)
+        .map(|i| {
+            vec![
+                json!(format!("r{i:05}")),
+                json!("default"),
+                json!(format!("192.0.2.{}/32", i % 256)),
+                json!("static"),
+                json!("route"),
+                json!(["eth0"]),
+                json!([]),
+            ]
+        })
+        .collect();
+    let f = frame_of(def, &rows);
+    for sel in [
+        Selection::default(),
+        Selection {
+            limit: Some(usize::MAX),
+            ..Selection::default()
+        },
+        Selection {
+            sort: Some(vec!["-device".into()]),
+            ..Selection::default()
+        },
+    ] {
+        let p = show(def, &f, &sel).unwrap();
+        assert_eq!(p.rows.len(), MAX_ROWS);
+        assert_eq!(p.total, MAX_ROWS + 3);
+        assert_eq!(p.next, Some(format!("o{MAX_ROWS}")));
+        let rest = Selection {
+            cursor: p.next,
+            ..sel
+        };
+        let p = show(def, &f, &rest).unwrap();
+        assert_eq!((p.rows.len(), p.next), (3, None));
+    }
+}
+
+#[test]
 fn unique_and_summarize_count_values() {
     let def = table::table("fib").unwrap();
     let f = frame_of(def, &fib_rows());

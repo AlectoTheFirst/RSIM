@@ -1,5 +1,7 @@
 //! The read of the Fabric ports and the connections of an account.
 
+use std::collections::BTreeMap;
+
 use rsim_core::SourceSpan;
 
 use crate::velocloud::json::{J, Parsed};
@@ -22,6 +24,8 @@ pub struct Port {
     /// The cross connect ids: sorted, unique, uppercase, and cut at the
     /// first `-`, as in HST.
     pub cross_connects: Vec<String>,
+    /// The reason when the repeated items of the port differ.
+    pub conflict: Option<String>,
     pub span: SourceSpan,
 }
 
@@ -135,9 +139,45 @@ fn cross_connects(p: J<'_>) -> Vec<String> {
     ids
 }
 
+/// The first item of each port uuid, in the order of the items. A port whose
+/// items differ in a field other than the span gets a conflict and a note.
+fn unique(ports: Vec<Port>, notes: &mut Vec<String>) -> Vec<Port> {
+    let mut out: Vec<Port> = Vec::new();
+    // The count of the items of each port of `out`, and whether they differ.
+    let mut items: Vec<(usize, bool)> = Vec::new();
+    let mut at: BTreeMap<String, usize> = BTreeMap::new();
+    for p in ports {
+        match at.get(&p.uuid) {
+            Some(&i) => {
+                let first = &out[i];
+                let same = Port {
+                    span: first.span.clone(),
+                    ..p
+                } == *first;
+                items[i].0 += 1;
+                items[i].1 |= !same;
+            }
+            None => {
+                at.insert(p.uuid.clone(), out.len());
+                out.push(p);
+                items.push((1, false));
+            }
+        }
+    }
+    for (p, (n, differ)) in out.iter_mut().zip(items) {
+        if differ {
+            let r = format!("the {n} items of the Fabric port {} differ", p.uuid);
+            notes.push(r.clone());
+            p.conflict = Some(r);
+        }
+    }
+    out
+}
+
 /// Reads the Fabric ports, the connections and the bindings of the sections
 /// of an account. An item with no `uuid` is left out with a note, and so is
-/// a binding with no Fabric port, device or port.
+/// a binding with no Fabric port, device or port. A port has one entry for
+/// each uuid.
 pub fn read(device: &str, p: &Parsed) -> Account {
     let mut a = Account {
         device: device.to_string(),
@@ -166,10 +206,12 @@ pub fn read(device: &str, p: &Parsed) -> Account {
             bandwidth: x.int("bandwidth").filter(|b| *b > 0),
             lag: x.obj("lag").and_then(|l| l.text("name")),
             cross_connects: cross_connects(x),
+            conflict: None,
             span: x.span(),
             uuid,
         });
     }
+    a.ports = unique(std::mem::take(&mut a.ports), &mut a.notes);
     for (n, x) in p
         .root("connections")
         .map(J::rows)

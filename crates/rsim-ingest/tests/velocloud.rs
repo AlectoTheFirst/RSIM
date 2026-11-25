@@ -679,26 +679,47 @@ fn a_rule_with_no_id_takes_its_place_in_its_own_list() {
 fn the_overlay_rows_hold_the_preferred_exits_of_the_edges() {
     let e = ent(&base());
     let t = e.overlay.as_ref().unwrap();
-    let rows: Vec<(String, &str, u32, &ExitKind)> = t
+    let rows: Vec<(String, Option<&str>, u32, &ExitKind)> = t
         .rows
         .iter()
-        .map(|r| (r.prefix.to_string(), r.edge.as_str(), r.segment, &r.kind))
+        .map(|r| (r.prefix.to_string(), r.edge.as_deref(), r.segment, &r.kind))
         .collect();
     assert_eq!(
         rows,
         [
-            ("10.20.20.0/24".to_string(), "e-hub", 1, &ExitKind::Learned),
-            ("10.10.10.0/24".to_string(), "e-br", 1, &ExitKind::Connected),
-            ("10.30.30.0/24".to_string(), "e-br", 0, &ExitKind::Static),
             (
-                "10.40.40.0/24".to_string(),
-                "e-hub",
+                "10.20.20.0/24".to_string(),
+                Some("e-hub"),
+                1,
+                &ExitKind::Learned
+            ),
+            (
+                "10.10.10.0/24".to_string(),
+                Some("e-br"),
                 1,
                 &ExitKind::Connected
             ),
-            ("2001:db8::/32".to_string(), "e-br", 1, &ExitKind::Connected),
+            (
+                "10.30.30.0/24".to_string(),
+                Some("e-br"),
+                9,
+                &ExitKind::Static
+            ),
+            (
+                "10.40.40.0/24".to_string(),
+                Some("e-hub"),
+                1,
+                &ExitKind::Connected
+            ),
+            (
+                "2001:db8::/32".to_string(),
+                Some("e-br"),
+                1,
+                &ExitKind::Connected
+            ),
         ]
     );
+    assert_eq!(t.rows[1].edge_id, Some(1));
     assert_eq!(t.rows[0].next_hop, Some(ip("10.9.8.2")));
     assert_eq!(t.rows[0].cost, Some(20));
     assert_eq!(t.rows[0].protocol.as_deref(), Some("BGP"));
@@ -718,6 +739,21 @@ fn the_overlay_rows_hold_the_preferred_exits_of_the_edges() {
     let mut m = base();
     m.remove("route_table");
     assert_eq!(ent(&m).overlay, None);
+}
+
+#[test]
+fn an_overlay_row_whose_edge_id_is_not_in_the_listing_has_no_edge() {
+    let mut m = base();
+    let exit = &mut m.get_mut("route_table").unwrap()["subnets"][0]["preferredExits"][0];
+    exit.as_object_mut().unwrap().remove("edgeLogicalId");
+    exit["edgeId"] = json!(99);
+    let e = ent(&m);
+    let t = e.overlay.as_ref().unwrap();
+    assert_eq!(t.rows[0].prefix, pfx("10.20.20.0/24"));
+    assert_eq!(t.rows[0].edge, None);
+    assert_eq!(t.rows[0].edge_id, Some(99));
+    assert_eq!(t.rows[0].class("e-br"), RouteClass::NotKnown);
+    assert_eq!(t.counts.no_edge, 1);
 }
 
 #[test]

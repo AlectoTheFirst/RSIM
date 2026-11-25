@@ -8,7 +8,7 @@ use std::sync::Arc;
 use rsim_core::{
     AddrField, Branch, Context, ContextAttr, DdError, Destination, DeviceId, FlowState, FunctionId,
     FunctionKind, Header, HeaderField, InterfaceId, NetFunction, Outcome, PacketSet, QosView,
-    Reason, ReasonCode, RibGuardFlag, TraceStep, Verdict,
+    Reason, ReasonCode, RibGuardFlag, SourceSpan, TraceStep, Verdict,
 };
 
 use crate::answer::{
@@ -81,6 +81,11 @@ pub struct ExecOptions {
     /// The maximum number of runs of one query. When a query has this
     /// number of runs, a part over the node budget does not split again.
     pub max_runs: usize,
+    /// The maximum number of branches of one query, over the forward walks
+    /// and the reply walks. A branch to a next function past this limit,
+    /// and a part of the input that starts after it, end as `Unknown` with
+    /// the reason `StepBudget`.
+    pub max_branches: usize,
 }
 
 impl Default for ExecOptions {
@@ -90,6 +95,7 @@ impl Default for ExecOptions {
             max_steps: 10_000,
             node_budget: Some(1_000_000),
             max_runs: 256,
+            max_branches: 100_000,
         }
     }
 }
@@ -148,6 +154,16 @@ struct StateKey {
     state: FlowState,
 }
 
+/// The runs and the branches of one query so far.
+#[derive(Default)]
+struct Count {
+    runs: usize,
+    branches: usize,
+}
+
+/// The index of a resolved part and the spans of its attachment records.
+type SpanGroup = (usize, BTreeSet<SourceSpan>);
+
 /// One finished run with its summary parts and its replies. A reply holds
 /// the index of its forward branch in the run.
 struct RunOut {
@@ -175,15 +191,19 @@ impl<'t> Executor<'t> {
 
     pub fn run(&self, q: &Query) -> Result<Answer, ExecError> {
         let mut outs = Vec::new();
-        let mut runs = 0;
+        let mut count = Count::default();
         for (set, ingress) in self.resolve(q)? {
             if set.is_empty() {
                 continue;
             }
             match &ingress {
-                Ingress::Found { function, .. } => {
+                Ingress::Found { function, .. } if count.branches < self.opts.max_branches => {
                     let start = function.clone();
-                    self.run_part(&set, &ingress, &start, q, &mut outs, &mut runs)?;
+                    self.run_part(&set, &ingress, &start, q, &mut outs, &mut count)?;
+                }
+                Ingress::Found { .. } => {
+                    let v = Verdict::Unknown(self.branch_limit());
+                    outs.push(ended(&set, ingress.clone(), v));
                 }
                 Ingress::NotFound(r) => {
                     outs.push(ended(&set, ingress.clone(), Verdict::Unknown(r.clone())));
@@ -213,9 +233,47 @@ impl<'t> Executor<'t> {
         let part = q
             .packets
             .partition_by_prefix(AddrField::Src, self.twin.ingress_table());
-        let mut out = Vec::new();
+        let mut out: Vec<(PacketSet, Ingress)> = Vec::new();
+        // The attachment parts with the same device, interface and function
+        // join into one part, at the index of the first of them, with the
+        // spans of all of their records.
+        let mut groups: BTreeMap<(DeviceId, InterfaceId, FunctionId), SpanGroup> = BTreeMap::new();
         for (p, cands, set) in part.matched {
-            out.push((set, crate::twin::ingress_of(&p, cands)));
+            let ingress = crate::twin::ingress_of(&p, cands);
+            let Ingress::Found {
+                device,
+                interface,
+                function,
+                basis: IngressBasis::Attachment(spans),
+            } = &ingress
+            else {
+                out.push((set, ingress));
+                continue;
+            };
+            let key = (device.clone(), interface.clone(), function.clone());
+            match groups.get_mut(&key) {
+                Some((i, seen)) => {
+                    let new: Vec<SourceSpan> = spans
+                        .iter()
+                        .filter(|s| seen.insert((*s).clone()))
+                        .cloned()
+                        .collect();
+                    let (joined, first) = &mut out[*i];
+                    *joined = joined.union(&set);
+                    if let Ingress::Found {
+                        basis: IngressBasis::Attachment(all),
+                        ..
+                    } = first
+                    {
+                        all.extend(new);
+                    }
+                }
+                None => {
+                    let seen = spans.iter().cloned().collect();
+                    groups.insert(key, (out.len(), seen));
+                    out.push((set, ingress));
+                }
+            }
         }
         out.push((
             part.unmatched,
@@ -245,16 +303,20 @@ impl<'t> Executor<'t> {
         start: &FunctionId,
         q: &Query,
         outs: &mut Vec<RunOut>,
-        runs: &mut usize,
+        count: &mut Count,
     ) -> Result<(), ExecError> {
-        *runs += 1;
+        count.runs += 1;
+        let branches = count.branches;
         // Each run has a new arena, so a query that runs again gives the
         // same answer.
         let s = input.copy_to(&self.twin.run_arena(self.opts.node_budget));
-        let r = fault_of(&s).and_then(|()| self.try_run(&s, ingress, start, q, FlowState::new()));
+        let (state, n) = (FlowState::new(), &mut count.branches);
+        let r = fault_of(&s).and_then(|()| self.try_run(&s, ingress, start, q, state, n));
         match r {
             Ok(out) => outs.push(out),
             Err(Stop::Fault(DdError::NodeBudget { budget })) => {
+                // The branches of the dropped run do not count.
+                count.branches = branches;
                 // The arena of the input can have the fault of a run, so
                 // the split then works on a copy in an arena with no budget.
                 let input = if input.arena().fault().is_some() {
@@ -263,18 +325,18 @@ impl<'t> Executor<'t> {
                     input.clone()
                 };
                 let input = &input;
-                let split = if *runs < self.opts.max_runs {
+                let split = if count.runs < self.opts.max_runs {
                     input.split_on_first_bit()
                 } else {
                     None
                 };
                 match split {
                     Some((a, b)) => {
-                        self.run_part(&a, ingress, start, q, outs, runs)?;
-                        self.run_part(&b, ingress, start, q, outs, runs)?;
+                        self.run_part(&a, ingress, start, q, outs, count)?;
+                        self.run_part(&b, ingress, start, q, outs, count)?;
                     }
                     None => {
-                        let detail = if *runs < self.opts.max_runs {
+                        let detail = if count.runs < self.opts.max_runs {
                             format!("one original request over the node budget {budget}")
                         } else {
                             format!(
@@ -305,6 +367,7 @@ impl<'t> Executor<'t> {
         start: &FunctionId,
         q: &Query,
         state: FlowState,
+        branches: &mut usize,
     ) -> Result<RunOut, Stop> {
         let f = self
             .twin
@@ -314,7 +377,7 @@ impl<'t> Executor<'t> {
         if !req.is_empty() {
             return Err(ExecError::StartRequiresContext(start.clone(), req).into());
         }
-        let nodes = self.walk(start, s.clone(), state)?;
+        let nodes = self.walk(start, s.clone(), state, branches)?;
         let parts = aggregate(&nodes).map_err(ExecError::Aggregation)?;
         fault_of(s)?;
         if self.opts.check_contract {
@@ -327,7 +390,7 @@ impl<'t> Executor<'t> {
             body: RunBody::Walked(nodes),
         };
         let replies = if q.reply {
-            self.replies(&run, q.mode)?
+            self.replies(&run, q.mode, branches)?
         } else {
             Vec::new()
         };
@@ -341,7 +404,12 @@ impl<'t> Executor<'t> {
     /// Builds the reply of each delivered branch of a run and runs it from
     /// the interface that delivered the forward packets, with the flow state
     /// of that branch.
-    fn replies(&self, run: &Run, mode: Mode) -> Result<Vec<(usize, ReplyResult)>, Stop> {
+    fn replies(
+        &self,
+        run: &Run,
+        mode: Mode,
+        branches: &mut usize,
+    ) -> Result<Vec<(usize, ReplyResult)>, Stop> {
         let mut out = Vec::new();
         for b in run.branches(0) {
             let Verdict::Deliver(d) = b.verdict else {
@@ -366,7 +434,8 @@ impl<'t> Executor<'t> {
                                     reply: false,
                                     mode,
                                 };
-                                let o = self.try_run(&rs, &ing, f, &q, b.state.clone())?;
+                                let o =
+                                    self.try_run(&rs, &ing, f, &q, b.state.clone(), branches)?;
                                 ReplyResult::Ran(Box::new(assemble(mode, &rs, vec![o])))
                             }
                             None => {
@@ -383,6 +452,14 @@ impl<'t> Executor<'t> {
             out.push((b.index, result));
         }
         Ok(out)
+    }
+
+    /// The reason of a branch past [`ExecOptions::max_branches`].
+    fn branch_limit(&self) -> Reason {
+        Reason::new(
+            ReasonCode::StepBudget,
+            format!("branch limit {} reached", self.opts.max_branches),
+        )
     }
 
     /// Applies one function and opens a frame for its branches.
@@ -430,8 +507,8 @@ impl<'t> Executor<'t> {
     }
 
     /// Follows every branch from the start function, depth first, in the
-    /// order of the branches. The walk uses an explicit stack, so a long
-    /// path does not use the call stack.
+    /// order of the branches, and adds each branch to `branches`. The walk
+    /// uses an explicit stack, so a long path does not use the call stack.
     #[allow(
         clippy::mutable_key_type,
         reason = "the order of a packet set uses its edge and its arena address, which do not change"
@@ -441,6 +518,7 @@ impl<'t> Executor<'t> {
         start: &FunctionId,
         packets: PacketSet,
         state: FlowState,
+        branches: &mut usize,
     ) -> Result<Vec<ExecNode>, Stop> {
         let mut nodes = Vec::new();
         let mut visited = BTreeSet::new();
@@ -458,6 +536,7 @@ impl<'t> Executor<'t> {
                 stack.pop();
                 continue;
             };
+            *branches += 1;
             let parent = top.node;
             let step = trace_step(top.f.as_ref(), &top.key.packets, &b);
             fault_of(&top.key.packets)?;
@@ -485,6 +564,8 @@ impl<'t> Executor<'t> {
                             )),
                             b,
                         )
+                    } else if *branches > self.opts.max_branches {
+                        terminal(step, Verdict::Unknown(self.branch_limit()), b)
                     } else {
                         let next = next.clone();
                         let child =

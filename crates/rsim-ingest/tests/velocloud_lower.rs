@@ -254,6 +254,21 @@ fn candidates_with_the_same_result_give_that_result() {
 }
 
 #[test]
+fn a_route_of_an_overlay_exit_with_an_edge_id_not_in_the_listing_is_unknown() {
+    let mut m = base();
+    open_firewall(&mut m);
+    no_lan_bgp(&mut m);
+    let exit = &mut m.get_mut("route_table").unwrap()["subnets"][0]["preferredExits"][0];
+    exit.as_object_mut().unwrap().remove("edgeLogicalId");
+    exit["edgeId"] = json!(99);
+    let t = twin(&m);
+    let a = run(&t, "10.20.20.1");
+    let v = a.verdict().expect("one result");
+    assert!(matches!(v, Verdict::Unknown(_)), "{v:?}");
+    assert!(detail(v).contains("edge 99 not known"), "{v:?}");
+}
+
+#[test]
 fn candidates_with_different_results_are_unknown() {
     let mut m = base();
     open_firewall(&mut m);

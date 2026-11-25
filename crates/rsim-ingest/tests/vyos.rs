@@ -74,6 +74,44 @@ fn a_state_option_with_no_state_names_makes_the_rule_unhandled() {
 }
 
 #[test]
+fn a_nat_interface_in_the_leaf_form_makes_the_rule_unhandled() {
+    let config = edited(|v| {
+        put(
+            v,
+            &["nat", "source", "rule", "100", "outbound-interface"],
+            serde_json::json!("pppoe0"),
+        );
+    });
+    let cfg = vyos::read(&read_json(&config).unwrap());
+    let snat = cfg.source_nat.iter().find(|r| r.number == 100).unwrap();
+    assert_eq!(snat.matches.outbound_interface, None);
+    assert_eq!(snat.unhandled, ["outbound-interface"]);
+}
+
+#[test]
+fn a_vif_of_a_disabled_interface_is_disabled() {
+    let config = edited(|v| {
+        put(
+            v,
+            &["interfaces", "ethernet", "eth0", "disable"],
+            serde_json::json!({}),
+        );
+    });
+    let cfg = vyos::read(&read_json(&config).unwrap());
+    let disabled = |n: &str| {
+        cfg.interfaces
+            .iter()
+            .find(|i| i.name == n)
+            .unwrap()
+            .disabled
+    };
+    assert!(disabled("eth0"));
+    assert!(disabled("eth0.10"));
+    assert!(disabled("eth0.110"));
+    assert!(!disabled("eth1"));
+}
+
+#[test]
 fn a_group_has_the_members_of_its_include_and_each_family_has_its_own_groups() {
     use serde_json::json;
     let config = edited(|v| {
@@ -1326,5 +1364,86 @@ mod twin {
             detail,
             "route 198.51.100.128/26 (bgp) in VRF default, next hop not resolved: 198.51.100.200"
         );
+    }
+
+    fn main_fib_prefixes(t: &Twin) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        for f in t.functions() {
+            let any: &dyn std::any::Any = f.as_ref();
+            if let Some(rl) = any.downcast_ref::<rsim_functions::RouteLookup>()
+                && let Some(fib) = rl.tables.get(&rsim_core::VrfId::new("default"))
+            {
+                for (p, _) in fib.entries() {
+                    out.insert(p.to_string());
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn a_disabled_interface_has_no_local_route() {
+        let (t, _) = build();
+        assert!(main_fib_prefixes(&t).contains("192.0.2.254/32"));
+        let config = super::edited(|v| {
+            super::put(
+                v,
+                &["interfaces", "dummy", "dum0", "disable"],
+                serde_json::json!({}),
+            );
+        });
+        let (t, _) = build_from(&config);
+        assert!(!main_fib_prefixes(&t).contains("192.0.2.254/32"));
+    }
+
+    #[test]
+    fn a_destination_nat_rule_matches_only_ipv4_packets() {
+        let config = super::edited(|v| {
+            super::put(
+                v,
+                &["nat", "destination", "rule", "10"],
+                serde_json::json!({
+                    "protocol": "tcp",
+                    "destination": {"port": "443"},
+                    "translation": {"address": "192.0.2.50"}
+                }),
+            );
+        });
+        let (t, _) = build_from(&config);
+        let mut found = false;
+        for f in t.functions() {
+            let any: &dyn std::any::Any = f.as_ref();
+            if let Some(d) = any.downcast_ref::<rsim_functions::DestinationNat>() {
+                match &d.rules[0].body {
+                    rsim_functions::RuleBody::Handled { predicate, .. } => {
+                        assert_eq!(
+                            predicate.upper.src_ip,
+                            rsim_core::AddrCond::In(vec!["0.0.0.0/0".parse::<Prefix>().unwrap()])
+                        );
+                    }
+                    b => panic!("{b:?}"),
+                }
+                found = true;
+            }
+        }
+        assert!(found);
+    }
+
+    #[test]
+    fn a_state_option_of_a_policy_route_rule_gives_match_bounds() {
+        let config = super::edited(|v| {
+            super::put(
+                v,
+                &["policy", "route", "PBR-LAN", "rule", "20", "state"],
+                serde_json::json!("new"),
+            );
+        });
+        let (_, notes) = build_from(&config);
+        assert!(
+            notes.contains(&"PBR-LAN/20: match bounds for state".to_string()),
+            "{notes:?}"
+        );
+        let (_, notes) = build();
+        assert!(!notes.iter().any(|n| n.contains("for state")), "{notes:?}");
     }
 }

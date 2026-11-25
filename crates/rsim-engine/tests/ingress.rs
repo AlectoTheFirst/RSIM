@@ -141,6 +141,35 @@ fn in_set_mode_each_part_has_its_own_ingress() {
 }
 
 #[test]
+fn the_attachment_parts_of_one_interface_share_one_run_with_the_spans_of_all_records() {
+    let span = |line| SourceSpan::line("r1.arp", line);
+    let mut b = ecmp();
+    for (addr, line) in [("10.1.0.77", 1), ("10.1.0.78", 2)] {
+        b.attachment(AttachmentRecord {
+            address: ip(addr),
+            device: "r1".into(),
+            interface: "eth0".into(),
+            kind: AttachmentKind::Neighbour,
+            host: format!("host-{addr}"),
+            provenance: vec![span(line)],
+        });
+    }
+    let t = b.build().unwrap();
+    let arena = t.arena(None);
+    let s = PacketSet::single(&arena, &web("10.1.0.77"))
+        .union(&PacketSet::single(&arena, &web("10.1.0.78")));
+    let a = run(&t, &Query::set(s));
+    let Ingress::Found {
+        basis: IngressBasis::Attachment(spans),
+        ..
+    } = only_ingress(&a)
+    else {
+        panic!("{:?}", a.runs)
+    };
+    assert_eq!(*spans, [span(1), span(2)]);
+}
+
+#[test]
 fn the_reply_starts_at_the_interface_that_delivered_the_packets() {
     let t = twin();
     let a = run(&t, &Query::path(&t, &web("10.1.0.10")));

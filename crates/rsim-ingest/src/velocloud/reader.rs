@@ -464,7 +464,7 @@ pub struct Enterprise {
     pub name: Option<String>,
     /// The Global Segment first, then by name.
     pub segments: Vec<Segment>,
-    /// The edges, by logicalId.
+    /// The edges, sorted by logicalId, with one edge for each logicalId.
     pub edges: Vec<Edge>,
     pub clusters: Vec<Cluster>,
     pub object_groups: ObjectGroups,
@@ -477,7 +477,10 @@ pub struct Enterprise {
 
 impl Enterprise {
     pub fn edge(&self, logical_id: &str) -> Option<&Edge> {
-        self.edges.iter().find(|e| e.logical_id == logical_id)
+        self.edges
+            .binary_search_by(|e| e.logical_id.as_str().cmp(logical_id))
+            .ok()
+            .map(|i| &self.edges[i])
     }
 }
 

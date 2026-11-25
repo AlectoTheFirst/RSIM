@@ -34,6 +34,8 @@ pub fn title(code: &str) -> &'static str {
         "method_not_allowed" => "Method not allowed",
         "too_large" => "Body too large",
         "too_many_queries" => "Too many queries",
+        "too_many_probes" => "Too many probes",
+        "request_timeout" => "Request too slow",
         "forbidden_origin" => "Origin not allowed",
         "forbidden_host" => "Host not allowed",
         "store" => "Store not readable",

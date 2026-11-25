@@ -1,11 +1,13 @@
 //! The join of the links on hand-built summaries, with no vendor config.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
-use rsim_core::{FunctionId, Mac, SourceSpan};
+use rsim_core::{FunctionId, Mac, Prefix, PrefixTable, SourceSpan};
+use rsim_functions::HostMac;
 use rsim_ingest::links::{
     AddressPeer, Binding, FabricPortName, Neighbour, PortAddress, PortVlans, Summary, Transit,
-    cable_ids, join, names_fabric_port,
+    TunnelSummary, cable_ids, join, names_fabric_port,
 };
 
 fn mac(s: &str) -> Mac {
@@ -843,4 +845,87 @@ fn an_operator_binding_wins_over_a_description() {
     let (p, _) = peers(&devices);
     assert_eq!(p["sw-b:e2"], ["acct/port/fp-a/in"]);
     assert!(!p.contains_key("sw-a:e1"), "{p:?}");
+}
+
+/// Adds the edge access port `port` in the VLAN `vlan` to `s`, with an ARP
+/// row of `addr` and the MAC table row of the MAC `m` on that port.
+fn host_on(s: &mut Summary, port: &str, vlan: u16, addr: &str, m: &str) {
+    s.ports.insert(
+        port.to_string(),
+        Some(PortVlans {
+            native: Some(vlan),
+            edge: true,
+            ..PortVlans::default()
+        }),
+    );
+    let m = mac(m);
+    let row = u32::try_from(s.arp.len() + 1).unwrap();
+    let ip = addr.parse().unwrap();
+    s.arp.push((vlan, ip, m, SourceSpan::line("arp", row)));
+    let at = (port.to_string(), SourceSpan::line("macs", row));
+    s.macs.insert((vlan, m), at);
+}
+
+/// The MAC of the host table entry of `addr`.
+fn host_mac(hosts: &impl PrefixTable<HostMac>, addr: &str) -> Option<Mac> {
+    let p = Prefix::host(addr.parse().unwrap());
+    hosts.get(&p).map(|h| h.mac)
+}
+
+#[test]
+fn the_endpoints_of_one_vlan_share_one_host_table() {
+    let ports = [("p1", "00:00:5e:00:53:01"), ("p2", "00:00:5e:00:53:02")];
+    let mut sw = device("sw", &ports, &[], false);
+    host_on(&mut sw, "p1", 10, "192.0.2.41", "00:00:5e:00:53:41");
+    host_on(&mut sw, "p2", 10, "192.0.2.42", "00:00:5e:00:53:42");
+    let devices = BTreeMap::from([("sw".to_string(), sw)]);
+    let j = join(&devices, &BTreeSet::new(), &BTreeSet::new());
+    let e = &j.devices["sw"].endpoints;
+    assert_eq!(e.len(), 2);
+    assert!(Arc::ptr_eq(&e[0].hosts, &e[1].hosts));
+    let t = &*e[0].hosts;
+    assert_eq!(host_mac(t, "192.0.2.41"), Some(mac("00:00:5e:00:53:41")));
+    assert_eq!(host_mac(t, "192.0.2.42"), Some(mac("00:00:5e:00:53:42")));
+}
+
+/// A switch `name` with the tunnel end `addr` that knows `peer`, and the
+/// segment identifier `segment` on the VLAN of the host `host`.
+fn vtep(name: &str, addr: &str, peer: &str, segment: u32, host: (u16, &str, &str)) -> Summary {
+    let mut s = device(name, &[("p1", "00:00:5e:00:53:01")], &[], false);
+    let (vlan, ip, m) = host;
+    host_on(&mut s, "p1", vlan, ip, m);
+    s.tunnel = Some(TunnelSummary {
+        address: Some(addr.parse().unwrap()),
+        peers: BTreeSet::from([peer.parse().unwrap()]),
+        segments: BTreeMap::from([(vlan, segment)]),
+    });
+    s
+}
+
+#[test]
+fn one_segment_on_2_tunnel_ends_joins_their_host_tables() {
+    let a = (10, "192.0.2.41", "00:00:5e:00:53:41");
+    let b = (20, "192.0.2.42", "00:00:5e:00:53:42");
+    let c = (10, "192.0.2.43", "00:00:5e:00:53:43");
+    let devices = BTreeMap::from([
+        (
+            "leaf1".to_string(),
+            vtep("leaf1", "198.51.100.1", "198.51.100.2", 10010, a),
+        ),
+        (
+            "leaf2".to_string(),
+            vtep("leaf2", "198.51.100.2", "198.51.100.1", 10010, b),
+        ),
+        (
+            "leaf3".to_string(),
+            vtep("leaf3", "198.51.100.3", "198.51.100.1", 10020, c),
+        ),
+    ]);
+    let j = join(&devices, &BTreeSet::new(), &BTreeSet::new());
+    let hosts = |d: &str| Arc::clone(&j.devices[d].endpoints[0].hosts);
+    let (h1, h2, h3) = (hosts("leaf1"), hosts("leaf2"), hosts("leaf3"));
+    assert_eq!(host_mac(&*h1, b.1), Some(mac(b.2)));
+    assert_eq!(host_mac(&*h2, a.1), Some(mac(a.2)));
+    assert_eq!(host_mac(&*h1, c.1), None);
+    assert_eq!(host_mac(&*h3, a.1), None);
 }

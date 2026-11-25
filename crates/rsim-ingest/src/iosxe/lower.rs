@@ -396,19 +396,23 @@ pub fn lower(
         &groups,
         &sum,
         ext,
-        &unlowered(cfg, &active),
+        &unlowered(cfg, &st, &active),
     );
     edges(&mut l, device, &active);
     (l.out, sum)
 }
 
-/// The lowered sub-interfaces whose frames the hand-off of their port does
-/// not lower: a sub-interface of a native VLAN takes the frames of its VLAN
-/// and the untagged frames, and a sub-interface with no dot1q VLAN that the
-/// handlers read can take the frames of each VLAN of no other sub-interface
-/// and the untagged frames.
-fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
-    active
+/// The interfaces whose frames the hand-off of their port does not lower.
+/// A lowered sub-interface of a native VLAN takes the frames of its VLAN
+/// and the untagged frames, and a lowered sub-interface with no dot1q VLAN
+/// that the handlers read can take the frames of each VLAN of no other
+/// sub-interface and the untagged frames. A layer 3 interface that is not
+/// shut, not down in `show interfaces` and not lowered, with an address
+/// that the config does not state, an IPv6 address or an unhandled line,
+/// takes the frames of its VLAN, and the untagged frames for a port, a
+/// native VLAN or a sub-interface with no dot1q VLAN that the handlers read.
+fn unlowered(cfg: &Config, st: &State, active: &[Port]) -> Vec<Unlowered> {
+    let mut out: Vec<Unlowered> = active
         .iter()
         .filter(|p| p.i.name.contains('.') && p.dot1q.is_none())
         .map(|p| {
@@ -423,6 +427,7 @@ fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
                     name: p.i.name.clone(),
                     vlan: Some(v),
                     routed: true,
+                    tagged: true,
                     untagged: true,
                     reason: format!("native VLAN of {} not lowered", p.i.name),
                     lines,
@@ -431,13 +436,38 @@ fn unlowered(cfg: &Config, active: &[Port]) -> Vec<Unlowered> {
                     name: p.i.name.clone(),
                     vlan: None,
                     routed: true,
+                    tagged: true,
                     untagged: true,
                     reason: format!("dot1q VLAN of {} not read", p.i.name),
                     lines: p.i.lines,
                 },
             }
         })
-        .collect()
+        .collect();
+    let states = st.l3.interfaces.as_ref().and_then(|x| x.as_ref().ok());
+    for i in &cfg.interfaces {
+        let s = states.and_then(|m| m.get(&i.name));
+        let skip = i.admin_up == Some(false) || i.switchport == Some(true);
+        if skip || i.channel_group.is_some() || s.and_then(|s| s.oper_up) == Some(false) {
+            continue;
+        }
+        let lowered = active.iter().any(|p| p.i.name == i.name);
+        let l3 = i.dynamic_address.is_some() || !i.ipv6.is_empty() || !i.unhandled.is_empty();
+        if lowered || !l3 {
+            continue;
+        }
+        let sub = i.name.contains('.');
+        out.push(Unlowered {
+            name: i.name.clone(),
+            vlan: i.dot1q.map(|d| d.0),
+            routed: true,
+            tagged: sub,
+            untagged: !sub || i.dot1q.is_none_or(|d| d.1),
+            reason: format!("{} not lowered", i.name),
+            lines: i.lines,
+        });
+    }
+    out
 }
 
 /// Whether the section `arp_vrfs` gives the ARP table of a VRF other than

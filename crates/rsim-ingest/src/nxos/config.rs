@@ -235,6 +235,8 @@ pub struct StaticRoute {
     pub prefix: String,
     pub interface: Option<String>,
     pub next_hop: Option<String>,
+    /// The preference of the route, 1 if the line states none.
+    pub preference: u8,
     /// The words that the lowering does not read, for example `vrf`.
     pub unhandled: Vec<String>,
     pub lines: Lines,
@@ -303,6 +305,11 @@ pub struct Config {
     pub vlans: Vec<(u16, u16)>,
     /// The VLANs with a line that the lowering does not read.
     pub unknown_vlans: Vec<(u16, u16)>,
+    /// The masked `vlan filter` lines with their VLANs, 1-4094 if the list
+    /// cannot be read.
+    pub vlan_filters: Vec<(String, Vec<(u16, u16)>)>,
+    /// The masked `vlan dot1q tag native` line.
+    pub native_tagging: Option<String>,
     /// The VNI of each VLAN with `vn-segment`.
     pub segments: BTreeMap<u16, (u32, Lines)>,
     /// The NVE interface.
@@ -530,6 +537,18 @@ pub fn read(doc: &Document, table: &Table) -> Config {
                     }
                 }
                 cfg.vlans.extend(ranges);
+            }
+            ["vlan", "filter", rest @ ..] => {
+                let ranges = match rest {
+                    [_, "vlan-list", list] => vlan_list(list),
+                    _ => None,
+                }
+                .unwrap_or_else(|| vec![(1, 4094)]);
+                cfg.unknown_vlans.extend(ranges.iter().copied());
+                cfg.vlan_filters.push((table.report_key(&s.key), ranges));
+            }
+            ["vlan", dot1q, "tag", "native", ..] if dot1q.eq_ignore_ascii_case("dot1q") => {
+                cfg.native_tagging = Some(table.report_key(&s.key));
             }
             ["system", "default", "switchport"] => {
                 r.mark(s);
@@ -1049,9 +1068,11 @@ pub(crate) fn static_route(vrf: &str, w: &[&str], lines: Lines) -> StaticRoute {
         prefix: String::new(),
         interface: None,
         next_hop: None,
+        preference: 1,
         unhandled: Vec::new(),
         lines,
     };
+    let mut preference = None;
     let mut i = 0;
     match w {
         [p, m, ..] if !p.contains('/') => {
@@ -1073,7 +1094,13 @@ pub(crate) fn static_route(vrf: &str, w: &[&str], lines: Lines) -> StaticRoute {
             a if a.parse::<std::net::Ipv4Addr>().is_ok() && r.next_hop.is_none() => {
                 r.next_hop = Some(a.to_string());
             }
-            n if n.parse::<u8>().is_ok() && (r.next_hop.is_some() || r.interface.is_some()) => {}
+            n if preference.is_none()
+                && r.unhandled.is_empty()
+                && (r.next_hop.is_some() || r.interface.is_some())
+                && n.parse::<u8>().is_ok_and(|v| v > 0) =>
+            {
+                preference = n.parse::<u8>().ok();
+            }
             n if n.chars().next().is_some_and(char::is_alphabetic)
                 && n.chars().any(|c| c.is_ascii_digit())
                 && r.interface.is_none()
@@ -1084,6 +1111,9 @@ pub(crate) fn static_route(vrf: &str, w: &[&str], lines: Lines) -> StaticRoute {
             other => r.unhandled.push(other.to_string()),
         }
         i += 1;
+    }
+    if let Some(p) = preference {
+        r.preference = p;
     }
     r
 }
@@ -1234,10 +1264,18 @@ mod tests {
         let r = static_route("default", &words("10.0.0.0/8 192.0.2.9 name core 5"), s);
         assert_eq!(r.prefix, "10.0.0.0/8");
         assert_eq!(r.next_hop.as_deref(), Some("192.0.2.9"));
+        assert_eq!(r.preference, 5);
         assert!(r.unhandled.is_empty());
         let r = static_route("default", &words("0.0.0.0/0 Ethernet1/2 198.51.100.2"), s);
         assert_eq!(r.interface.as_deref(), Some("Ethernet1/2"));
         assert_eq!(r.next_hop.as_deref(), Some("198.51.100.2"));
+        assert_eq!(r.preference, 1);
+        let r = static_route("default", &words("10.0.0.0/8 192.0.2.9 250 7"), s);
+        assert_eq!(r.preference, 250);
+        assert_eq!(r.unhandled, ["7"]);
+        let r = static_route("default", &words("10.0.0.0/8 192.0.2.9 track 5"), s);
+        assert_eq!(r.preference, 1);
+        assert_eq!(r.unhandled, ["track", "5"]);
         let r = static_route("default", &words("10.0.0.0/8 192.0.2.9 vrf RED"), s);
         assert_eq!(r.unhandled, ["vrf", "RED"]);
         let r = static_route("default", &words("192.0.2.128/25 Null0"), s);

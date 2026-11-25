@@ -114,6 +114,15 @@ pub enum Input {
 pub fn inputs(store: &Store, snap: &Snapshot) -> Result<(Vec<Input>, Vec<String>), StoreError> {
     let mut out = Vec::new();
     let mut skipped = Vec::new();
+    let mut states = if snap
+        .devices
+        .values()
+        .any(|m| matches!(m.vendor.as_str(), "vyos" | "nxos" | "iosxr" | "iosxe"))
+    {
+        collected::read_all(store, snap)?
+    } else {
+        BTreeMap::new()
+    };
     for (device, m) in &snap.devices {
         let section = |name: &str| -> Result<Option<(Vec<u8>, String)>, StoreError> {
             match m.section(name).and_then(|s| s.blob) {
@@ -130,7 +139,7 @@ pub fn inputs(store: &Store, snap: &Snapshot) -> Result<(Vec<Input>, Vec<String>
                     name: device.clone(),
                     config,
                     file,
-                    collected: collected::read(store, snap, device)?,
+                    collected: states.remove(device).unwrap_or_default(),
                 }),
                 None => skipped.push(format!("{device}: no config section")),
             },
@@ -146,7 +155,7 @@ pub fn inputs(store: &Store, snap: &Snapshot) -> Result<(Vec<Input>, Vec<String>
                         name: device.clone(),
                         config,
                         file,
-                        collected: collected::read(store, snap, device)?,
+                        collected: states.remove(device).unwrap_or_default(),
                         sections,
                     })
                 }
@@ -164,7 +173,7 @@ pub fn inputs(store: &Store, snap: &Snapshot) -> Result<(Vec<Input>, Vec<String>
                         name: device.clone(),
                         config,
                         file,
-                        collected: collected::read(store, snap, device)?,
+                        collected: states.remove(device).unwrap_or_default(),
                         sections,
                     })
                 }
@@ -182,7 +191,7 @@ pub fn inputs(store: &Store, snap: &Snapshot) -> Result<(Vec<Input>, Vec<String>
                         name: device.clone(),
                         config,
                         file,
-                        collected: collected::read(store, snap, device)?,
+                        collected: states.remove(device).unwrap_or_default(),
                         sections,
                     })
                 }

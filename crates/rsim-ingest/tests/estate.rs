@@ -768,3 +768,160 @@ fn a_bgp_stanza_that_can_hold_a_neighbour_makes_the_bgp_config_not_read() {
         assert!(!hides_peers(p), "{p}");
     }
 }
+
+/// The estate with each replacement `(section, from, to)` in its UniFi
+/// section.
+fn estate_replacing_all(changes: &[(&str, &str, &str)]) -> Estate {
+    estate_with(
+        |n, b| {
+            let mut s = String::from_utf8(b).unwrap();
+            for (_, from, to) in changes.iter().filter(|c| c.0 == n) {
+                assert!(s.contains(*from), "{from}");
+                s = s.replace(*from, to);
+            }
+            s.into_bytes()
+        },
+        Vec::new(),
+    )
+}
+
+/// The estate with h9 at 192.0.2.52 on port 4 of sw1 and h1 on port 2,
+/// both in LAN, with `isolation` on both ports.
+fn two_lan_hosts(isolation: bool) -> Estate {
+    let port2 =
+        format!(r#"{{"port_idx": 2, "isolation": {isolation}, "up": true, "enable": true,"#);
+    let port4 = format!(
+        r#"{{"port_idx": 4, "isolation": {isolation}, "up": true, "enable": true, "forward": "native", "native_networkconf_id": "n-lan", "stp_state": "forwarding"}}"#
+    );
+    estate_replacing_all(&[
+        (
+            "devices",
+            r#"{"port_idx": 2, "up": true, "enable": true,"#,
+            port2.as_str(),
+        ),
+        (
+            "devices",
+            r#"{"port_idx": 4, "up": false, "enable": true, "forward": "native", "native_networkconf_id": "n-lan", "stp_state": "disabled"}"#,
+            port4.as_str(),
+        ),
+        (
+            "clients",
+            r#""name": "h9", "network_id": "n-lan", "is_wired": true, "sw_mac": "00:00:5e:00:53:a1", "sw_port": 2}"#,
+            r#""name": "h9", "ip": "192.0.2.52", "network_id": "n-lan", "is_wired": true, "sw_mac": "00:00:5e:00:53:a1", "sw_port": 4}"#,
+        ),
+    ])
+}
+
+#[test]
+fn a_host_on_an_isolated_port_reaches_no_host_on_another_isolated_port() {
+    let t = two_lan_hosts(false).builder.build().unwrap();
+    let a = run(&t, "192.0.2.50", "192.0.2.52", 443);
+    assert_eq!(
+        a.verdict(),
+        Some(&Verdict::Deliver(Destination::Endpoint(EndpointId::new(
+            "h9-005353"
+        ))))
+    );
+    let t = two_lan_hosts(true).builder.build().unwrap();
+    let a = run(&t, "192.0.2.50", "192.0.2.52", 443);
+    match a.verdict() {
+        Some(Verdict::Drop(r)) => {
+            assert_eq!(r.code, ReasonCode::Denied);
+            assert!(r.detail.contains("isolated"), "{}", r.detail);
+        }
+        v => panic!("{v:?}"),
+    }
+    // The uplink port is not isolated.
+    let a = run(&t, "192.0.2.50", "198.18.0.1", 443);
+    assert!(
+        matches!(a.verdict(), Some(Verdict::Exit(_))),
+        "{:?}",
+        a.verdict()
+    );
+}
+
+#[test]
+fn a_disabled_network_is_in_no_bridge_domain() {
+    let e = estate_replacing(
+        "networks",
+        r#""vlan": 110, "vlan_enabled": true"#,
+        r#""vlan": 110, "vlan_enabled": true, "enabled": false"#,
+    );
+    let notes = &e.notes["site1"];
+    assert!(
+        notes
+            .iter()
+            .any(|n| n == "client g1: network of its port not known"),
+        "{notes:?}"
+    );
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.50", "192.0.2.70", 443);
+    assert!(
+        !matches!(a.verdict(), Some(Verdict::Deliver(_))),
+        "{:?}",
+        a.verdict()
+    );
+}
+
+/// The start of the entry of port 3 of sw1, the uplink port of ap1, with
+/// its `forward` field.
+const PORT3: &str = r#""port_idx": 3, "up": true, "enable": true, "forward": "customize", "#;
+
+#[test]
+fn a_port_with_no_forward_mode_carries_only_its_native_network() {
+    let e = estate_replacing(
+        "devices",
+        PORT3,
+        r#""port_idx": 3, "up": true, "enable": true, "#,
+    );
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
+    assert!(
+        !matches!(a.verdict(), Some(Verdict::Deliver(_))),
+        "{:?}",
+        a.verdict()
+    );
+}
+
+#[test]
+fn the_tagged_vlan_management_of_a_port_sets_its_tagged_networks() {
+    for (mgmt, delivered) in [
+        (r#""tagged_vlan_mgmt": "block_all", "#, false),
+        (r#""tagged_vlan_mgmt": "auto", "#, true),
+        (
+            r#""tagged_vlan_mgmt": "custom", "tagged_networkconf_ids": ["n-guest"], "#,
+            true,
+        ),
+        (
+            r#""tagged_vlan_mgmt": "custom", "tagged_networkconf_ids": ["n-lan"], "#,
+            false,
+        ),
+    ] {
+        let e = estate_replacing("devices", PORT3, &format!("{PORT3}{mgmt}"));
+        let t = e.builder.build().unwrap();
+        let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
+        assert_eq!(
+            matches!(a.verdict(), Some(Verdict::Deliver(_))),
+            delivered,
+            "{mgmt}: {:?}",
+            a.verdict()
+        );
+    }
+}
+
+#[test]
+fn the_uplink_port_of_an_access_point_with_no_forward_mode_carries_each_network() {
+    let e = estate_replacing(
+        "devices",
+        r#""name": "ap1", "type": "uap", "#,
+        r#""name": "ap1", "type": "uap", "port_table": [{"port_idx": 1, "up": true}], "#,
+    );
+    let t = e.builder.build().unwrap();
+    let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
+    assert_eq!(
+        a.verdict(),
+        Some(&Verdict::Deliver(Destination::Endpoint(EndpointId::new(
+            "h1-005351"
+        ))))
+    );
+}

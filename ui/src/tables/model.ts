@@ -229,13 +229,13 @@ export function apiUrl(twin: string, s: TablesState, def: TableDef | null): stri
 
 /** The request of a state as an rsim command. */
 export function tableCommand(topology: string, s: TablesState, def: TableDef | null): string {
-  const args = ["rsim", topology, s.table, s.verb];
+  const args = ["rsim", topology, shellWord(s.table), s.verb];
   if (s.verb === "describe") return args.join(" ");
   if (s.verb === "lpm") args.push(shellWord(s.address));
   for (const [k, v] of apiParams(s, def)) {
     if (s.verb === "lpm" && k === "address") continue;
     if (k === "ascending") args.push("--ascending");
-    else args.push(`--${k}`, shellWord(v));
+    else args.push(shellWord(`--${k}`), shellWord(v));
   }
   return args.join(" ");
 }

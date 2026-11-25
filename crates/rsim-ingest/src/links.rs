@@ -9,6 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
+use std::sync::Arc;
 
 use rsim_core::{FunctionId, Mac, Prefix, PrefixTable, SourceSpan, TriePrefixTable};
 use rsim_functions::{HostMac, LinkEnd};
@@ -516,7 +517,9 @@ pub struct Placed {
     pub addrs: Vec<(IpAddr, SourceSpan)>,
     /// The spans of the MAC table rows on the way to the port.
     pub spans: Vec<SourceSpan>,
-    pub hosts: TriePrefixTable<HostMac>,
+    /// The host table of the VLAN. The endpoints with the same SVIs share
+    /// one table.
+    pub hosts: Arc<TriePrefixTable<HostMac>>,
     pub local: Vec<Prefix>,
     pub gateway: Option<HostMac>,
 }
@@ -1661,6 +1664,18 @@ fn place(
     // The VLANs of the switches that a tunnel joins into one segment: the
     // same segment identifier on 2 tunnel ends that know each other.
     let mut tunnelled: BTreeMap<(String, u16), BTreeSet<(String, u16)>> = BTreeMap::new();
+    // The VLANs of each segment identifier of each switch with a tunnel end.
+    let by_segment: BTreeMap<&String, BTreeMap<u32, Vec<u16>>> = switches
+        .iter()
+        .filter_map(|(s, sum)| {
+            let t = sum.tunnel.as_ref()?;
+            let mut m: BTreeMap<u32, Vec<u16>> = BTreeMap::new();
+            for (v, id) in &t.segments {
+                m.entry(*id).or_default().push(*v);
+            }
+            Some((s, m))
+        })
+        .collect();
     for (s, a) in switches {
         let Some(ta) = &a.tunnel else { continue };
         for (s2, b) in switches {
@@ -1673,14 +1688,15 @@ fn place(
             if !know {
                 continue;
             }
+            let Some(vlans_b) = by_segment.get(s2) else {
+                continue;
+            };
             for (v, id) in &ta.segments {
-                for (v2, id2) in &tb.segments {
-                    if id == id2 {
-                        tunnelled
-                            .entry((s.clone(), *v))
-                            .or_default()
-                            .insert((s2.clone(), *v2));
-                    }
+                for v2 in vlans_b.get(id).into_iter().flatten() {
+                    tunnelled
+                        .entry((s.clone(), *v))
+                        .or_default()
+                        .insert((s2.clone(), *v2));
                 }
             }
         }
@@ -1723,24 +1739,39 @@ fn place(
         }
         keep.push((id, dev, port, m, a));
     }
+    // The merged host table of each set of switches with an SVI.
+    let mut merged: BTreeMap<BTreeSet<(String, u16)>, Arc<TriePrefixTable<HostMac>>> =
+        BTreeMap::new();
     for (id, dev, port, m, a) in keep {
         // The host table, the networks and the gateway of the first switch
         // with an SVI, with the endpoints of all of them.
         let Some((s, v)) = a.svis.iter().next().cloned() else {
             continue;
         };
-        let info = switches[&s].vlans.get(&v).cloned().unwrap_or_default();
-        let mut table = hosts.get(&(s.clone(), v)).cloned().unwrap_or_default();
-        let joined = tunnelled.get(&(s, v)).cloned().unwrap_or_default();
-        for (s2, v2) in a.svis.iter().skip(1).chain(joined.iter()) {
-            if let Some(t) = hosts.get(&(s2.clone(), *v2)) {
-                for (p, h) in t.entries() {
-                    if table.get(&p).is_none() {
-                        table.insert(p, h.clone());
+        let (local, gateway) = switches[&s]
+            .vlans
+            .get(&v)
+            .map(|x| (x.local.clone(), x.gateway.clone()))
+            .unwrap_or_default();
+        let table = match merged.get(&a.svis) {
+            Some(t) => Arc::clone(t),
+            None => {
+                let mut table = hosts.get(&(s.clone(), v)).cloned().unwrap_or_default();
+                let joined = tunnelled.get(&(s, v));
+                for (s2, v2) in a.svis.iter().skip(1).chain(joined.into_iter().flatten()) {
+                    if let Some(t) = hosts.get(&(s2.clone(), *v2)) {
+                        for (p, h) in t.entries() {
+                            if table.get(&p).is_none() {
+                                table.insert(p, h.clone());
+                            }
+                        }
                     }
                 }
+                let t = Arc::new(table);
+                merged.insert(a.svis.clone(), Arc::clone(&t));
+                t
             }
-        }
+        };
         out.devices.entry(dev).or_default().endpoints.push(Placed {
             id,
             port,
@@ -1748,8 +1779,8 @@ fn place(
             addrs: a.addrs,
             spans: a.spans,
             hosts: table,
-            local: info.local,
-            gateway: info.gateway,
+            local,
+            gateway,
         });
     }
 }
