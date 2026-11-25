@@ -710,6 +710,7 @@ fn claim_command(cli: &Cli, args: &[String]) -> ExitCode {
         return usage_error("`claim run` needs a claim; `claim list` lists them");
     };
     let mut devices = None;
+    let mut min = None;
     let mut query = serde_json::Map::new();
     let mut rest = args[4..].iter();
     while let Some(a) = rest.next() {
@@ -728,6 +729,13 @@ fn claim_command(cli: &Cli, args: &[String]) -> ExitCode {
                 devices = Some(v.split(',').map(str::to_string).collect::<Vec<_>>());
                 continue;
             }
+            "min" => {
+                let Ok(n) = v.parse::<u64>() else {
+                    return usage_error(&format!("--min {v} is not a number"));
+                };
+                min = Some(n);
+                continue;
+            }
             "tcp_flags" => serde_json::Value::from(v.split(',').collect::<Vec<_>>()),
             _ => match v.parse::<u64>() {
                 Ok(n) if !["source.ip", "destination.ip", "ingress"].contains(&flag) => {
@@ -743,6 +751,7 @@ fn claim_command(cli: &Cli, args: &[String]) -> ExitCode {
         claim: name.clone(),
         devices,
         query: (!query.is_empty()).then_some(query),
+        min,
     };
     let r = commands::load(&twin).and_then(|t| rsim_cli::claims::run(&twin, &t, &a));
     let code = match &r {

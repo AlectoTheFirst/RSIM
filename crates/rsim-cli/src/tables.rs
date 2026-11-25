@@ -14,7 +14,10 @@ use rsim_contract::table::{
     self, Selection, SummarizeOut, TableDef, TableOut, TablesOut, UniqueOut,
 };
 use rsim_core::{FunctionId, SourceSpan};
-use rsim_functions::{OverlaySelect, RouteLookup, TunnelState, VcmpEncap};
+use rsim_functions::{
+    Egress, Ingress, LinkEnd, LinkFacts, OverlaySelect, PortEgress, PortIngress, RouteLookup,
+    TunnelState, VcmpEncap,
+};
 use rsim_ingest::facts::{DeviceFacts, Reason};
 use rsim_ingest::links::{AsnValue, BgpPeerFact, PeerSource};
 use serde_json::{Value, json};
@@ -227,9 +230,149 @@ fn build(t: &Loaded, def: &'static TableDef) -> Result<Frame, String> {
                 b.push_values(&row);
             }
         }
+        "links" => {
+            let mtu = collected_mtu(t)?;
+            for l in twin_links(t) {
+                let (local, remote) = l.mtu(&mtu);
+                let mut all = spans(&l.spans);
+                all.extend(local.iter().chain(remote.iter()).map(|(_, s)| s.clone()));
+                let speed = |e: Option<&LinkEnd>| e.and_then(|e| e.speed_mbps);
+                let int = |v: Option<u64>| v.map_or(Cell::Null, Cell::Integer);
+                b.push(&[
+                    l.device.as_deref().map_or(Cell::Null, Cell::Text),
+                    Cell::Text(&l.interface),
+                    l.peer_device.as_deref().map_or(Cell::Null, Cell::Text),
+                    l.peer_interface.as_deref().map_or(Cell::Null, Cell::Text),
+                    int(local.and_then(|m| m.0)),
+                    int(remote.and_then(|m| m.0)),
+                    int(speed(l.facts.as_ref().map(|f| &f.local))),
+                    int(speed(l.facts.as_ref().and_then(|f| f.remote.as_ref()))),
+                    Cell::List(&all),
+                ]);
+            }
+        }
         _ => {}
     }
     Ok(b.finish(&key_text))
+}
+
+/// The MTU of each interface in the collected `links` rows of a store
+/// twin, with the span of the row, by device and interface.
+pub type Mtus = BTreeMap<(String, String), MtuRow>;
+
+/// The collected MTU of an interface and the span of its row.
+pub type MtuRow = (Option<u64>, String);
+
+/// A link of the twin: an egress interface and the ingress function at the
+/// far end of its link.
+pub struct TwinLink {
+    /// The egress function.
+    pub function: FunctionId,
+    pub device: Option<String>,
+    pub interface: String,
+    /// The ingress function at the far end.
+    pub peer: FunctionId,
+    pub peer_device: Option<String>,
+    /// The interface or the port of the ingress function at the far end;
+    /// none for another kind of function.
+    pub peer_interface: Option<String>,
+    pub facts: Option<LinkFacts>,
+    pub spans: Vec<SourceSpan>,
+}
+
+impl TwinLink {
+    /// The collected MTU rows of the 2 ends.
+    pub fn mtu<'a>(&self, mtu: &'a Mtus) -> (Option<&'a MtuRow>, Option<&'a MtuRow>) {
+        let get = |d: Option<&String>, i: Option<&String>| {
+            d.zip(i).and_then(|(d, i)| mtu.get(&(d.clone(), i.clone())))
+        };
+        (
+            get(self.device.as_ref(), Some(&self.interface)),
+            get(self.peer_device.as_ref(), self.peer_interface.as_ref()),
+        )
+    }
+}
+
+/// The links of the twin in the order of the functions: each `Egress` with
+/// a peer, and each peer of each `PortEgress`.
+pub fn twin_links(t: &Loaded) -> Vec<TwinLink> {
+    let far = |id: &FunctionId| -> (Option<String>, Option<String>) {
+        let Some(f) = t.function(id) else {
+            return (None, None);
+        };
+        let any: &dyn Any = f.as_ref();
+        let interface = if let Some(i) = any.downcast_ref::<Ingress>() {
+            Some(i.interface.to_string())
+        } else {
+            any.downcast_ref::<PortIngress>()
+                .map(|p| p.port.to_string())
+        };
+        (f.device().map(|d| d.to_string()), interface)
+    };
+    let mut out = Vec::new();
+    for f in t.functions() {
+        let any: &dyn Any = f.as_ref();
+        let device = f.device().map(|d| d.to_string());
+        if let Some(e) = any.downcast_ref::<Egress>() {
+            if let Some(l) = &e.link
+                && let Some(peer) = &l.peer
+            {
+                let (peer_device, peer_interface) = far(peer);
+                out.push(TwinLink {
+                    function: f.id().clone(),
+                    device,
+                    interface: e.interface.to_string(),
+                    peer: peer.clone(),
+                    peer_device,
+                    peer_interface,
+                    facts: l.facts.clone(),
+                    spans: l.provenance.clone(),
+                });
+            }
+        } else if let Some(p) = any.downcast_ref::<PortEgress>() {
+            for peer in &p.peers {
+                let (peer_device, peer_interface) = far(&peer.target);
+                out.push(TwinLink {
+                    function: f.id().clone(),
+                    device: device.clone(),
+                    interface: p.port.to_string(),
+                    peer: peer.target.clone(),
+                    peer_device,
+                    peer_interface,
+                    facts: peer.link.clone(),
+                    spans: f.provenance().to_vec(),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// The collected MTU of each interface of a store twin; empty for a twin
+/// with no store.
+pub fn collected_mtu(t: &Loaded) -> Result<Mtus, String> {
+    let mut out = Mtus::new();
+    let Some(src) = &t.source else {
+        return Ok(out);
+    };
+    let batches = src
+        .store
+        .read_table(&src.snapshot, &rsim_store::LINKS)
+        .map_err(|e| e.to_string())?;
+    for (device, batch) in &batches {
+        for row in 0..batch.num_rows() {
+            let Some(interface) = store_value(batch, "interface", row).text() else {
+                continue;
+            };
+            let mtu = match store_value(batch, "mtu", row) {
+                Owned::Integer(n) => Some(n),
+                _ => None,
+            };
+            out.entry((device.clone(), interface))
+                .or_insert_with(|| (mtu, row_span(device, "links", batch, row)));
+        }
+    }
+    Ok(out)
 }
 
 /// A value of a store table.

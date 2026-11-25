@@ -1,8 +1,13 @@
-//! The tables of the collected state: the registry rows against the store
-//! schemas, and the rows of a store twin.
+//! The tables of the collected state and the table `links`: the registry
+//! rows against the store schemas, the rows of a store twin and of a
+//! hand-built twin, and the claim `path-mtu`.
 
+use rsim_cli::claims::path_mtu;
 use rsim_cli::commands;
+use rsim_cli::tables::{Mtus, TwinLink};
+use rsim_contract::claim::{ClaimArgs, ClaimResult};
 use rsim_contract::table::{self, ColumnType, Selection};
+use rsim_core::FunctionId;
 use rsim_store::ColType;
 use serde_json::{Value, json};
 
@@ -124,5 +129,105 @@ fn a_hand_built_twin_has_no_collected_rows() {
     let t = commands::load("mini-enterprise").unwrap();
     for name in ["interfaces", "routes", "mac", "arp"] {
         assert!(rows("mini-enterprise", &t, name).is_empty(), "{name}");
+    }
+}
+
+#[test]
+fn the_links_of_a_hand_built_twin_have_both_ends() {
+    let t = commands::load("leaf-spine").unwrap();
+    let links = rows("leaf-spine", &t, "links");
+    let row = links
+        .iter()
+        .find(|r| r[0] == "leaf1" && r[1] == "eth1")
+        .expect("the link leaf1 eth1");
+    assert_eq!(row[2], "spine1");
+    assert_eq!(row[3], "eth1");
+    assert_eq!(row[4], Value::Null);
+    assert_eq!(row[5], Value::Null);
+}
+
+fn link(device: &str, interface: &str, peer: &str, peer_interface: &str) -> TwinLink {
+    TwinLink {
+        function: FunctionId::new(format!("{device}/out/{interface}")),
+        device: Some(device.into()),
+        interface: interface.into(),
+        peer: FunctionId::new(format!("{peer}/in/{peer_interface}")),
+        peer_device: Some(peer.into()),
+        peer_interface: Some(peer_interface.into()),
+        facts: None,
+        spans: Vec::new(),
+    }
+}
+
+fn mtus(rows: &[(&str, &str, Option<u64>)]) -> Mtus {
+    rows.iter()
+        .map(|(d, i, m)| {
+            (
+                (d.to_string(), i.to_string()),
+                (*m, format!("{d}/links@b:1-1")),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn path_mtu_refutes_a_mismatch_and_an_end_below_the_minimum() {
+    let l = link("r1", "eth0", "r2", "eth1");
+    let e = path_mtu(
+        &l,
+        &mtus(&[("r1", "eth0", Some(1500)), ("r2", "eth1", Some(9000))]),
+        None,
+    );
+    assert_eq!(
+        (e.result, e.reason.as_str()),
+        (ClaimResult::Refuted, "mismatch")
+    );
+    assert_eq!(e.detail, "MTU 1500 and 9000");
+    assert_eq!(e.subject, "r1/out/eth0 to r2/in/eth1");
+
+    let both = mtus(&[("r1", "eth0", Some(1500)), ("r2", "eth1", Some(1500))]);
+    let e = path_mtu(&l, &both, Some(9000));
+    assert_eq!(
+        (e.result, e.reason.as_str()),
+        (ClaimResult::Refuted, "below_minimum")
+    );
+    assert_eq!(e.detail, "MTU 1500 is below 9000");
+    assert_eq!(
+        path_mtu(&l, &both, Some(1500)).result,
+        ClaimResult::Confirmed
+    );
+    assert_eq!(path_mtu(&l, &both, None).result, ClaimResult::Confirmed);
+
+    let one = mtus(&[("r1", "eth0", Some(9000)), ("r2", "eth1", None)]);
+    let e = path_mtu(&l, &one, Some(1500));
+    assert_eq!(
+        (e.result, e.reason.as_str()),
+        (ClaimResult::Unknown, "not_collected")
+    );
+    let e = path_mtu(&l, &one, Some(9216));
+    assert_eq!(e.result, ClaimResult::Refuted);
+    assert_eq!(e.provenance, ["r1/links@b:1-1", "r2/links@b:1-1"]);
+}
+
+#[test]
+fn path_mtu_on_a_store_twin_with_no_collected_mtu_is_unknown() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-cli-path-mtu");
+    #[allow(clippy::disallowed_methods)]
+    let _ = std::fs::remove_dir_all(&dir);
+    fixture_store::write(&dir);
+    let topology = format!("store:{}", dir.display());
+    let t = commands::load(&topology).unwrap();
+    let a = ClaimArgs {
+        topology: topology.clone(),
+        claim: "path-mtu".into(),
+        devices: None,
+        query: None,
+        min: Some(1500),
+    };
+    let o = rsim_cli::claims::run(&topology, &t, &a).unwrap();
+    assert_eq!(o.result, ClaimResult::Unknown);
+    assert!(!o.evidence.is_empty());
+    for e in &o.evidence {
+        assert_eq!(e.reason, "not_collected", "{}", e.subject);
     }
 }

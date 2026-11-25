@@ -7591,6 +7591,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Minimum MTU",
+            "in": "query",
+            "name": "min",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7961,6 +7970,15 @@
             "in": "path",
             "name": "claim",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Minimum MTU",
+            "in": "query",
+            "name": "min",
+            "required": false,
             "schema": {
               "type": "string"
             }

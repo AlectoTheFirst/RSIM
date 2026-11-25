@@ -295,6 +295,16 @@ impl State {
 
 /// The parameters of a request as a map; a name that is given twice keeps
 /// its last value.
+/// The parameter `min` of a claim, the minimum MTU.
+fn min_mtu(p: &BTreeMap<&str, &str>) -> Result<Option<u64>, Problem> {
+    p.get("min")
+        .map(|v| {
+            v.parse::<u64>()
+                .map_err(|_| problem(422, "invalid_query", format!("min {v} is not a number")))
+        })
+        .transpose()
+}
+
 fn params(req: &Request) -> BTreeMap<&str, &str> {
     req.query
         .iter()
@@ -932,6 +942,7 @@ fn twin_route(
                 claim: claim.to_string(),
                 devices: None,
                 query: Some(m),
+                min: min_mtu(&p)?,
             };
             Ok(json_response(&claims::run(top, l, &a).map_err(err)?))
         }
@@ -998,6 +1009,7 @@ fn twin_route(
                     .get("device")
                     .map(|d| d.split(',').map(str::to_string).collect()),
                 query: None,
+                min: min_mtu(&p)?,
             };
             Ok(json_response(&claims::run(top, l, &a).map_err(err)?))
         }

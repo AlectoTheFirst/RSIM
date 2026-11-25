@@ -3981,6 +3981,8 @@ export interface operations {
             query?: {
                 /** @description Devices */
                 device?: string;
+                /** @description Minimum MTU */
+                min?: string;
             };
             header?: never;
             path: {
@@ -4158,7 +4160,10 @@ export interface operations {
     };
     runQueryClaim: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Minimum MTU */
+                min?: string;
+            };
             header?: never;
             path: {
                 twin: string;
