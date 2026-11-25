@@ -4,3 +4,10 @@
 
 [extend]
 useDefault = true
+
+[[allowlists]]
+description = "the name of the cipher in the doc comment of the sealed secrets"
+condition = "AND"
+paths = ['''^crates/rsim-inventory/src/secret\.rs$''']
+regexTarget = "line"
+regexes = ['''//! secrets: ChaCha20-Poly1305 with a random nonce''']
