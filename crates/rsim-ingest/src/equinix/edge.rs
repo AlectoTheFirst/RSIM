@@ -462,33 +462,32 @@ pub fn groups(
 }
 
 /// The functions of the twin device of each Network Edge device that no
-/// binding names: a sink for each interface of an account port.
+/// binding names: a sink for each interface.
 pub fn unbound_devices(
     account: &Account,
     profile: &VendorProfile,
-    ports: &BTreeMap<String, EdgePort>,
     bound: &BTreeMap<String, String>,
 ) -> Vec<Arc<dyn NetFunction>> {
     let mut out = Vec::new();
-    let mut done: BTreeSet<(String, String)> = BTreeSet::new();
-    for e in ports.values() {
-        if bound.contains_key(&e.device) {
-            continue;
-        }
-        let Some(d) = account.edge_devices.iter().find(|d| d.uuid == e.device) else {
-            continue;
-        };
-        if !done.insert((e.device.clone(), e.interface.clone())) {
-            continue;
-        }
+    for d in account
+        .edge_devices
+        .iter()
+        .filter(|d| !bound.contains_key(&d.uuid))
+    {
         let twin = twin_device(&account.device, d);
-        out.push(sink(
-            &twin,
-            profile,
-            &format!("{}/in", e.interface),
-            &format!("the Network Edge device {} is not collected", d.name),
-            &d.span,
-        ));
+        let mut done: BTreeSet<&str> = BTreeSet::new();
+        for i in &d.interfaces {
+            if !done.insert(i.name.as_str()) {
+                continue;
+            }
+            out.push(sink(
+                &twin,
+                profile,
+                &format!("{}/in", i.name),
+                &format!("the Network Edge device {} is not collected", d.name),
+                &d.span,
+            ));
+        }
     }
     out
 }

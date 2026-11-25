@@ -129,9 +129,13 @@ pub fn summary(account: &Account) -> Summaries {
             .iter()
             .filter(|l| !l.port_based && l.near.inner.is_none())
         {
+            // A leg to a Network Edge interface gives no transit.
             let rsim_functions::FarEnd::Port { port, tags, .. } = &leg.far else {
                 continue;
             };
+            if !port.as_str().starts_with("port/") {
+                continue;
+            }
             let here = format!("port/{uuid}");
             if tags.inner.is_some() || here.as_str() >= port.as_str() {
                 continue;

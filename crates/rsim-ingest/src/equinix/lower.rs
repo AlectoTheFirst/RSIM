@@ -725,12 +725,8 @@ pub fn lower(
     }
     let (bound, notes) = edge::bound(account);
     out.notes.extend(notes);
-    out.functions.extend(edge::unbound_devices(
-        account,
-        profile,
-        &out.edge_ports,
-        &bound,
-    ));
+    out.functions
+        .extend(edge::unbound_devices(account, profile, &bound));
     out.bound = bound;
     for (f, r, span) in &sinks {
         out.functions.push(sink(device, profile, f, r, span));

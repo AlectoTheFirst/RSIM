@@ -539,7 +539,8 @@ fn unifi_devices(bytes: &[u8], file: &str) -> Vec<(String, Identity, Fact)> {
 }
 
 /// The facts of the twin device of each Network Edge device of an Equinix
-/// account that no binding names: the `deviceTypeCode` as the platform and
+/// account that no binding names and that has an interface with a name:
+/// the `deviceTypeCode` as the platform and
 /// the `version` as the OS version, each with the lines of the device.
 fn equinix_edge_devices(account: &str, sections: &Sections) -> Vec<(String, Identity)> {
     let p = velocloud::Parsed::new(sections);
@@ -547,7 +548,7 @@ fn equinix_edge_devices(account: &str, sections: &Sections) -> Vec<(String, Iden
     let (bound, _) = equinix::edge::bound(&a);
     a.edge_devices
         .iter()
-        .filter(|d| !bound.contains_key(&d.uuid))
+        .filter(|d| !bound.contains_key(&d.uuid) && !d.interfaces.is_empty())
         .map(|d| {
             (
                 equinix::edge::twin_device(account, d),

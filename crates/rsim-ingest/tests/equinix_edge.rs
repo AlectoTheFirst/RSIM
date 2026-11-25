@@ -4,9 +4,13 @@
 
 use std::collections::BTreeMap;
 
-use rsim_core::{FunctionId, Mac};
+use rsim_core::{
+    Branch, Context, FieldValue, FlowState, FunctionId, Header, Mac, Outcome, PROTO_TCP, PacketSet,
+};
+use rsim_engine::{Twin, check_partition};
 use rsim_functions::FarEnd;
 use rsim_ingest::equinix::{self, Lowered, Verdict};
+use rsim_ingest::estate::{Input, assemble};
 use rsim_ingest::links::Summary;
 use rsim_ingest::velocloud::Parsed;
 use serde_json::{Value, json};
@@ -141,16 +145,19 @@ fn sections(m: &[(&str, Value)]) -> BTreeMap<String, (Vec<u8>, String)> {
         .collect()
 }
 
-fn account(bindings: Value) -> equinix::Account {
-    let p = Parsed::new(&sections(&[
+fn account_sections(bindings: Value) -> BTreeMap<String, (Vec<u8>, String)> {
+    sections(&[
         ("ports", port()),
         ("connections", json!([])),
         ("edge_devices", edge_devices()),
         ("edge_links", edge_links()),
         ("edge_connections", edge_connections()),
         ("bindings", bindings),
-    ]));
-    equinix::read(ACCT, &p)
+    ])
+}
+
+fn account(bindings: Value) -> equinix::Account {
+    equinix::read(ACCT, &Parsed::new(&account_sections(bindings)))
 }
 
 fn lowered(peers: &BTreeMap<String, FunctionId>) -> Lowered {
@@ -433,4 +440,134 @@ fn each_path_of_the_network_edge_sections_is_classified() {
     ]));
     let cov = equinix::coverage::classify(&p);
     assert!(cov.unhandled.is_empty(), "{:#?}", cov.unhandled);
+}
+
+/// The twin of the account alone.
+fn twin() -> Twin {
+    let e = assemble(vec![Input::Equinix {
+        name: ACCT.into(),
+        sections: account_sections(json!([])),
+    }]);
+    e.builder.build().expect("the twin builds")
+}
+
+/// One frame to the MAC `dst`, untagged or with the VLAN `tag`.
+fn frame(t: &Twin, dst: &str, tag: Option<u16>) -> PacketSet {
+    let mut h = Header::request(
+        "192.0.2.10".parse().unwrap(),
+        "192.0.2.20".parse().unwrap(),
+        PROTO_TCP,
+    )
+    .untagged();
+    h.dst_mac = FieldValue::Known(dst.parse().unwrap());
+    let s = PacketSet::single(&t.arena(None), &h);
+    match tag {
+        Some(v) => s.push_vlan(v, 0x8100).done,
+        None => s,
+    }
+}
+
+fn apply(t: &Twin, f: &str, input: &PacketSet, ctx: &Context) -> Vec<Branch> {
+    let func = t
+        .function(&fid(f))
+        .unwrap_or_else(|| panic!("{f} is not in the twin"));
+    let out = func.apply(input, ctx, &FlowState::default());
+    check_partition(input, &out).unwrap();
+    out
+}
+
+fn outcome(b: &Branch) -> String {
+    match &b.outcome {
+        Outcome::Forward(next) => next.to_string(),
+        o => format!("{o:?}"),
+    }
+}
+
+/// The branches after the functions `fs` in order, each on the forwarded
+/// packets and the context of the step before it.
+fn walk(t: &Twin, fs: &[String], input: PacketSet) -> Vec<Branch> {
+    let mut packets = input;
+    let mut ctx = Context::default();
+    let mut out = Vec::new();
+    for f in fs {
+        out = apply(t, f, &packets, &ctx);
+        let Some(b) = out
+            .iter()
+            .find(|b| matches!(b.outcome, Outcome::Forward(_)))
+        else {
+            break;
+        };
+        packets = b.packets.clone();
+        ctx = b.ctx.clone();
+    }
+    out
+}
+
+#[test]
+fn a_member_gate_passes_an_untagged_frame_and_makes_a_tagged_frame_unknown() {
+    let t = twin();
+    let gate = format!("{ACCT}/ne-{HUB}/2/in");
+    let untagged = apply(
+        &t,
+        &gate,
+        &frame(&t, "00:00:5e:00:53:32", None),
+        &Context::default(),
+    );
+    assert_eq!(
+        untagged.iter().map(outcome).collect::<Vec<_>>(),
+        [format!("{ACCT}/ne-{HUB}/2/ingress")]
+    );
+    let tagged = apply(
+        &t,
+        &gate,
+        &frame(&t, "00:00:5e:00:53:32", Some(100)),
+        &Context::default(),
+    );
+    assert_eq!(tagged.iter().map(outcome).collect::<Vec<_>>(), ["Unknown"]);
+}
+
+#[test]
+fn a_frame_crosses_a_group_of_2_members_to_the_member_with_its_mac_or_by_the_flood() {
+    let t = twin();
+    let fs: Vec<String> = [
+        format!("ne-{HUB}/2/in"),
+        format!("ne-{HUB}/2/ingress"),
+        "link-group/g-pair/mac".to_string(),
+    ]
+    .iter()
+    .map(|f| format!("{ACCT}/{f}"))
+    .collect();
+    let out = walk(&t, &fs, frame(&t, "00:00:5e:00:53:32", None));
+    assert_eq!(
+        out.iter().map(outcome).collect::<Vec<_>>(),
+        [format!("{ACCT}/ne-{RTR}/6/out")]
+    );
+    let mut flood = fs.clone();
+    flood.push(format!("{ACCT}/link-group/g-pair/unknown"));
+    let out = walk(&t, &flood, frame(&t, "00:00:5e:00:53:99", None));
+    assert_eq!(
+        out.iter().map(outcome).collect::<Vec<_>>(),
+        [format!("{ACCT}/link-group/g-pair/flood")]
+    );
+}
+
+#[test]
+fn a_frame_to_a_mac_of_no_member_of_a_larger_group_is_unknown() {
+    let t = twin();
+    let fs: Vec<String> = [
+        format!("ne-{RTR}/7/in"),
+        format!("ne-{RTR}/7/ingress"),
+        "link-group/g-four/mac".to_string(),
+        "link-group/g-four/unknown".to_string(),
+    ]
+    .iter()
+    .map(|f| format!("{ACCT}/{f}"))
+    .collect();
+    let out = walk(&t, &fs, frame(&t, "00:00:5e:00:53:99", None));
+    assert_eq!(out.iter().map(outcome).collect::<Vec<_>>(), ["Unknown"]);
+    let out = walk(&t, &fs, frame(&t, "ff:ff:ff:ff:ff:ff", None));
+    assert_eq!(
+        out.iter().map(outcome).collect::<Vec<_>>(),
+        [format!("{ACCT}/link-group/g-four/flood")]
+    );
 }

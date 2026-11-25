@@ -9,9 +9,15 @@ use rsim_functions::{PortTranslation, RuleAction, UnzonedInterface, VendorProfil
 ///   `ACTIVE`. `DEPROVISIONED`, `DELETED` and `CANCELLED` end a circuit.
 /// - The handled circuit type is `EVPL_VC`.
 /// - The link protocols `UNTAGGED` and `NULL` are port-based.
+/// - A `VD` end with no link protocol carries untagged frames on its
+///   Network Edge interface.
+/// - The handled state of a device link group is `PROVISIONED`.
+/// - A device link group of more than 2 members sends a frame to the member
+///   with its destination MAC and floods a broadcast frame.
 ///
-/// The values come from HST `reasoner/_constants.py` and the decisions of
-/// the owner. No capture of an account confirms them.
+/// The values come from HST `reasoner/_constants.py`, the HST fixtures in
+/// `tests/test_equinix_network_edge.py` and the decisions of the owner. No
+/// capture of an account confirms them.
 pub fn profile() -> VendorProfile {
     VendorProfile {
         name: "equinix".to_string(),
