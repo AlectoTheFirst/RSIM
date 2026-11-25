@@ -262,3 +262,100 @@ fn the_bound_ports_are_not_edge_ports_and_the_twin_is_the_same_from_2_runs() {
     assert_eq!(fabric.len(), 1);
     assert_eq!(fabric[0].verdict, rsim_ingest::equinix::Verdict::Lowered);
 }
+
+const NE_MAC: &str = "00:00:5e:00:53:31";
+const NE: &str = "bbbbbbbb-0000-4000-8000-0000000000f1";
+
+/// An account with the Fabric port `p1` bound to `sw-a` and a circuit from
+/// VLAN 100 on `p1` to the interface `eth0` of the Network Edge device
+/// `lab-fw`, which no binding names.
+fn edge_account() -> BTreeMap<String, (Vec<u8>, String)> {
+    [
+        (
+            "ports",
+            json!([{"uuid": "p1", "name": "lab-p1", "state": "ACTIVE",
+                    "encapsulation": {"type": "DOT1Q"}}]),
+        ),
+        ("connections", json!([])),
+        (
+            "edge_devices",
+            json!([{"uuid": NE, "name": "lab-fw", "status": "PROVISIONED",
+                    "interfaces": [{"id": 1, "name": "eth0", "type": "DATA",
+                                    "macAddress": NE_MAC}]}]),
+        ),
+        ("edge_links", json!([])),
+        (
+            "edge_connections",
+            json!([{"uuid": "c-ne", "type": "EVPL_VC", "state": "ACTIVE",
+                    "aSide": {"accessPoint": {"type": "COLO", "port": {"uuid": "p1"},
+                              "linkProtocol": {"type": "DOT1Q", "vlanTag": 100}}},
+                    "zSide": {"accessPoint": {"type": "VD", "interface": {"id": 1},
+                              "virtualDevice": {"uuid": NE}}}}]),
+        ),
+        (
+            "bindings",
+            json!([{"fabric_port": "p1", "device": "sw-a", "port": "Ethernet1/49"}]),
+        ),
+    ]
+    .into_iter()
+    .map(|(k, v)| {
+        (
+            k.to_string(),
+            (
+                serde_json::to_vec_pretty(&v).unwrap(),
+                format!("{ACCT}/{k}@b1"),
+            ),
+        )
+    })
+    .collect()
+}
+
+#[test]
+fn a_path_to_a_network_edge_device_with_no_binding_crosses_the_circuit_and_is_unknown() {
+    let e = assemble(vec![
+        Input::Nxos {
+            name: "sw-a".into(),
+            config: switch("sw-a", 100, "192.0.2.1").into_bytes(),
+            file: "sw-a/config".into(),
+            collected: collected("sw-a", 100, ("192.0.2.10", H1), ("192.0.2.30", NE_MAC)),
+            sections: sections("sw-a", 100),
+        },
+        Input::Equinix {
+            name: ACCT.into(),
+            sections: edge_account(),
+        },
+    ]);
+    let t = e.builder.build().expect("the twin builds");
+    let twin = format!("{ACCT}-ne-{NE}");
+    assert!(
+        t.devices().iter().any(|d| d.to_string() == twin),
+        "{:?}",
+        t.devices()
+    );
+    let a = run(&t, "192.0.2.10", "192.0.2.30");
+    let s = steps(&a);
+    assert_eq!(
+        a.branches()
+            .iter()
+            .map(|b| b.verdict.kind())
+            .collect::<Vec<_>>(),
+        [VerdictKind::Unknown],
+        "{s:#?}"
+    );
+    assert!(
+        s.iter().any(|x| x.contains(&format!(
+            "from port port/p1 VLAN 100 to port ne-{NE}/1 VLAN 100"
+        ))),
+        "{s:#?}"
+    );
+    assert!(
+        s.iter()
+            .any(|x| x.contains(&format!("pop VLAN 100 on port ne-{NE}/1"))),
+        "{s:#?}"
+    );
+    assert!(
+        s.iter()
+            .any(|x| x.contains("the Network Edge device lab-fw is not collected")),
+        "{s:#?}"
+    );
+}

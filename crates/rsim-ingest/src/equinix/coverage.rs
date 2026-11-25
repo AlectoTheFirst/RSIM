@@ -109,6 +109,7 @@ const EDGE_DEVICES: Rows = &[
     ("*/metroCode", H, S),
     ("*/redundancyType", H, S),
     ("*/sshIpAddress", I, S),
+    ("*/vendorConfig", I, S),
     ("*/interfaces", H, N),
     ("*/interfaces/*", H, N),
     ("*/interfaces/*/id", H, S),
