@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use rsim_core::{FunctionId, Mac, NetFunction};
+use rsim_core::{FunctionId, Mac};
 use rsim_functions::FarEnd;
 use rsim_ingest::equinix::{self, Lowered, Verdict};
 use rsim_ingest::links::Summary;
