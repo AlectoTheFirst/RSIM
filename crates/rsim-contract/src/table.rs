@@ -52,6 +52,15 @@ pub struct TableDef {
     pub verbs: &'static [&'static str],
     /// Needed data
     pub needs: &'static str,
+    /// The store tables of a table of the collected state, the first table
+    /// first. The rows of 1 store table are the rows of the table. With 2 or
+    /// more store tables, a row is a distinct value of the key, a column has
+    /// the value of the first store table with that column, and a list
+    /// column has the values of each row of the key. Empty for a table of
+    /// the twin.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub collected: &'static [&'static str],
 }
 
 impl TableDef {
@@ -80,6 +89,18 @@ const fn refers(mut c: Column, table: &'static str, column: &'static str) -> Col
     c.refers_to = Some((table, column));
     c
 }
+
+const fn unit(mut c: Column, unit: &'static str) -> Column {
+    c.unit = Some(unit);
+    c
+}
+
+const PROVENANCE: Column = col(
+    "provenance",
+    ColumnType::List,
+    "source_span",
+    "Source spans",
+);
 
 const DEVICE: Column = refers(
     col("device", ColumnType::Text, "device", "Device"),
@@ -143,6 +164,7 @@ pub const TABLES: &[TableDef] = &[
         ],
         verbs: BASE_VERBS,
         needs: "the twin and a store snapshot for the facts",
+        collected: &[],
     },
     TableDef {
         name: "functions",
@@ -161,6 +183,7 @@ pub const TABLES: &[TableDef] = &[
         ],
         verbs: BASE_VERBS,
         needs: "the twin",
+        collected: &[],
     },
     TableDef {
         name: "endpoints",
@@ -172,6 +195,7 @@ pub const TABLES: &[TableDef] = &[
         ],
         verbs: BASE_VERBS,
         needs: "the twin",
+        collected: &[],
     },
     TableDef {
         name: "attachments",
@@ -190,6 +214,7 @@ pub const TABLES: &[TableDef] = &[
         ],
         verbs: BASE_VERBS,
         needs: "the twin",
+        collected: &[],
     },
     TableDef {
         name: "edge-interfaces",
@@ -202,6 +227,7 @@ pub const TABLES: &[TableDef] = &[
         ],
         verbs: BASE_VERBS,
         needs: "the twin",
+        collected: &[],
     },
     TableDef {
         name: "fib",
@@ -232,6 +258,7 @@ pub const TABLES: &[TableDef] = &[
         ],
         verbs: &["show", "summarize", "unique", "top", "lpm"],
         needs: "the twin",
+        collected: &[],
     },
     TableDef {
         name: "coverage",
@@ -245,6 +272,7 @@ pub const TABLES: &[TableDef] = &[
         ],
         verbs: BASE_VERBS,
         needs: "a twin of a store snapshot",
+        collected: &[],
     },
     TableDef {
         name: "neighbours",
@@ -265,6 +293,7 @@ pub const TABLES: &[TableDef] = &[
         ],
         verbs: BASE_VERBS,
         needs: "a twin of a store snapshot with an LLDP or CDP section",
+        collected: &[],
     },
     TableDef {
         name: "fabric-connections",
@@ -289,6 +318,7 @@ pub const TABLES: &[TableDef] = &[
         ],
         verbs: BASE_VERBS,
         needs: "a twin of a store snapshot with an Equinix account",
+        collected: &[],
     },
     TableDef {
         name: "bgp-sessions",
@@ -374,6 +404,7 @@ pub const TABLES: &[TableDef] = &[
         ],
         verbs: BASE_VERBS,
         needs: "a twin of a store snapshot with a BGP config or a BGP session section",
+        collected: &[],
     },
     TableDef {
         name: "sdwan-paths",
@@ -414,6 +445,93 @@ pub const TABLES: &[TableDef] = &[
         ],
         verbs: BASE_VERBS,
         needs: "the twin",
+        collected: &[],
+    },
+    TableDef {
+        name: "interfaces",
+        description: "Interfaces",
+        key: &["device", "interface"],
+        columns: &[
+            DEVICE,
+            col("interface", ColumnType::Text, "interface", "Interface"),
+            col("mac", ColumnType::Text, "mac", "MAC address"),
+            unit(col("mtu", ColumnType::Integer, "mtu", "MTU"), "bytes"),
+            col("admin_up", ColumnType::Boolean, "admin_state", "Admin up"),
+            col(
+                "oper_state",
+                ColumnType::Text,
+                "oper_state",
+                "Operational state",
+            ),
+            col("parent", ColumnType::Text, "interface", "Parent"),
+            col("vlan", ColumnType::Integer, "vlan", "VLAN"),
+            unit(col("mbps", ColumnType::Integer, "speed", "Speed"), "Mbit/s"),
+            col("duplex", ColumnType::Text, "duplex", "Duplex"),
+            col("prefix", ColumnType::List, "prefix", "Addresses"),
+            PROVENANCE,
+        ],
+        verbs: BASE_VERBS,
+        needs: "a twin of a store snapshot with collected links, speeds or addresses",
+        collected: &["links", "link_speeds", "addresses"],
+    },
+    TableDef {
+        name: "routes",
+        description: "Collected routes",
+        key: &[
+            "device",
+            "vrf",
+            "prefix",
+            "protocol",
+            "next_hop",
+            "interface",
+        ],
+        columns: &[
+            DEVICE,
+            col("vrf", ColumnType::Text, "vrf", "VRF"),
+            col("prefix", ColumnType::Prefix, "prefix", "Prefix"),
+            col("protocol", ColumnType::Text, "route_protocol", "Protocol"),
+            col("selected", ColumnType::Boolean, "selected", "Selected"),
+            col("distance", ColumnType::Integer, "distance", "Distance"),
+            col("metric", ColumnType::Integer, "metric", "Metric"),
+            col("next_hop", ColumnType::Text, "next_hop", "Next hop"),
+            col("interface", ColumnType::Text, "interface", "Interface"),
+            PROVENANCE,
+        ],
+        verbs: &["show", "summarize", "unique", "top", "lpm"],
+        needs: "a twin of a store snapshot with collected routes",
+        collected: &["routes"],
+    },
+    TableDef {
+        name: "mac",
+        description: "MAC table",
+        key: &["device", "vlan", "mac", "port"],
+        columns: &[
+            DEVICE,
+            col("vlan", ColumnType::Integer, "vlan", "VLAN"),
+            col("mac", ColumnType::Text, "mac", "MAC address"),
+            col("port", ColumnType::Text, "interface", "Port"),
+            col("kind", ColumnType::Text, "mac_kind", "Kind"),
+            PROVENANCE,
+        ],
+        verbs: BASE_VERBS,
+        needs: "a twin of a store snapshot with a collected MAC table",
+        collected: &["mac_table"],
+    },
+    TableDef {
+        name: "arp",
+        description: "ARP and neighbour discovery",
+        key: &["device", "interface", "ip"],
+        columns: &[
+            DEVICE,
+            col("interface", ColumnType::Text, "interface", "Interface"),
+            col("ip", ColumnType::Address, "address", "Address"),
+            col("mac", ColumnType::Text, "mac", "MAC address"),
+            col("state", ColumnType::Text, "neighbour_state", "State"),
+            PROVENANCE,
+        ],
+        verbs: BASE_VERBS,
+        needs: "a twin of a store snapshot with a collected ARP or neighbour table",
+        collected: &["neighbours"],
     },
 ];
 
