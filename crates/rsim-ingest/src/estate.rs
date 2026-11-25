@@ -505,19 +505,23 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         summaries.extend(velocloud::summaries(&ent));
         ents.push(ent);
     }
-    // The Equinix accounts: the coverage, and the summary of the gates and
-    // the bindings of the Fabric ports.
+    // The Equinix accounts: the coverage, the summary of the gates and the
+    // bindings of the Fabric ports and the Network Edge interfaces, and the
+    // summary of each Network Edge device that no binding names.
     let mut fabric_accounts: Vec<(String, equinix::Account)> = Vec::new();
+    let mut fabric_macs: Vec<(String, Vec<equinix::MacBinding>)> = Vec::new();
     for (device, sections) in &accounts {
         let p = velocloud::Parsed::new(sections);
         let account = equinix::read(device, &p);
         e.coverage
             .insert(device.clone(), equinix::coverage::classify(&p));
-        let (sum, notes) = equinix::summary(&account);
+        let sums = equinix::summary(&account);
         let n = e.notes.entry(device.clone()).or_default();
         n.extend(p.notes);
-        n.extend(notes);
-        summaries.insert(device.clone(), sum);
+        n.extend(sums.notes);
+        summaries.insert(device.clone(), sums.account);
+        summaries.extend(sums.devices);
+        fabric_macs.push((device.clone(), sums.macs));
         fabric_accounts.push((device.clone(), account));
     }
     for s in summaries.values() {
@@ -654,6 +658,14 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     for (d, (_, col, _, _)) in &switches {
         if let Some(s) = summaries.get_mut(d) {
             s.next_hop_vrfs = hop_vrfs(&col.routes);
+        }
+    }
+    // The Network Edge interfaces of the bound devices, by MAC.
+    for (device, macs) in &fabric_macs {
+        let (bindings, notes) = equinix::mac_bindings(macs, &summaries);
+        e.notes.entry(device.clone()).or_default().extend(notes);
+        if let Some(s) = summaries.get_mut(device) {
+            s.bindings.extend(bindings);
         }
     }
     let mut joined = crate::links::join(&summaries, &next_hops, &device_macs);
@@ -858,10 +870,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         let peers: BTreeMap<String, rsim_core::FunctionId> = ext
             .peers
             .iter()
-            .filter_map(|(port, list)| {
-                let uuid = port.strip_prefix("port/")?;
-                Some((uuid.to_string(), list.first()?.target.clone()))
-            })
+            .filter_map(|(port, list)| Some((port.clone(), list.first()?.target.clone())))
             .collect();
         let low = equinix::lower(account, &eq_profile, &peers);
         e.fabric.insert(device.clone(), low.circuits);

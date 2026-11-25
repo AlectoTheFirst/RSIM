@@ -7,16 +7,18 @@
 //! the ingress function of the link peer of the far port, or to a sink
 //! with the reason of an end that the twin does not follow.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use rsim_core::bits::TPID_8021Q;
 use rsim_core::{FunctionId, Match, NetFunction, ObjectId, PortId, RulePredicate, SourceSpan};
 use rsim_functions::{
-    AclMatch, Circuit, CircuitLeg, FarEnd, Meta, Rule, RuleAction, Tags, VendorProfile, VlanTag,
+    AclMatch, Circuit, CircuitLeg, FarEnd, Meta, Rule, RuleAction, TagOp, TagStack, Tags,
+    VendorProfile, VlanTag,
 };
 
-use super::reader::{Account, Connection, End, EndKind, Port};
+use super::edge::{self, EdgePort};
+use super::reader::{Account, Connection, EdgeDevice, EdgeInterface, End, EndKind, Port};
 
 /// The circuit states that end a circuit, from HST `ENDED_CIRCUIT_STATES`.
 pub const ENDED_STATES: &[&str] = &["DEPROVISIONED", "DELETED", "CANCELLED"];
@@ -60,11 +62,15 @@ pub struct PortPlan {
 }
 
 /// The functions of an account, the plan of each Fabric port by uuid, the
-/// circuits and the notes.
+/// account port of each Network Edge interface that a circuit or a device
+/// link group uses, the device of the store of each bound Network Edge
+/// device by uuid, the circuits and the notes.
 #[derive(Default)]
 pub struct Lowered {
     pub functions: Vec<Arc<dyn NetFunction>>,
     pub ports: BTreeMap<String, PortPlan>,
+    pub edge_ports: BTreeMap<String, EdgePort>,
+    pub bound: BTreeMap<String, String>,
     pub circuits: Vec<CircuitRow>,
     pub notes: Vec<String>,
 }
@@ -83,7 +89,11 @@ enum Spec {
 #[derive(Clone, Debug)]
 enum At<'a> {
     Port(&'a Port, Spec),
-    /// The end is not on a Fabric port of the account, for this reason.
+    /// An untagged end on an interface of a Network Edge device of the
+    /// account, with the reason when the end is not handled.
+    Edge(&'a EdgeDevice, &'a EdgeInterface, Option<String>),
+    /// The end is not on a Fabric port or a Network Edge interface of the
+    /// account, for this reason.
     Away(String),
 }
 
@@ -192,7 +202,7 @@ fn end_text(e: &End, ports: &BTreeMap<&str, &Port>) -> String {
             None => format!("port {u}{}", tags(e)),
         },
         EndKind::ServiceProfile(n) => format!("service profile {n}"),
-        EndKind::Device(u) => format!("Network Edge device {u}{}", tags(e)),
+        EndKind::Device { device, .. } => format!("Network Edge device {device}{}", tags(e)),
         EndKind::Other(t) => format!("end type {t}"),
         EndKind::Missing => "no end".to_string(),
     }
@@ -212,6 +222,7 @@ fn at<'a>(
     e: &End,
     by_uuid: &BTreeMap<&str, &'a Port>,
     states: &BTreeMap<&str, Result<u16, String>>,
+    edges: &'a [EdgeDevice],
 ) -> At<'a> {
     match &e.kind {
         EndKind::Port(u) => match (by_uuid.get(u.as_str()), states.get(u.as_str())) {
@@ -220,9 +231,31 @@ fn at<'a>(
             _ => At::Away("the far end is outside the account".to_string()),
         },
         EndKind::ServiceProfile(n) => At::Away(format!("the far end is the service profile {n}")),
-        EndKind::Device(_) => {
-            At::Away("the far end is a Network Edge device, which is not lowered".to_string())
-        }
+        EndKind::Device {
+            device,
+            interface,
+            interface_id,
+        } => match edges.iter().find(|d| d.uuid == *device) {
+            None if edges.is_empty() => {
+                At::Away("the Network Edge devices of the account are not collected".to_string())
+            }
+            None => At::Away("the far end is outside the account".to_string()),
+            Some(d) => match d.interface(interface.as_deref(), interface_id.as_deref()) {
+                None => At::Away(format!(
+                    "the end names no interface of the Network Edge device {}",
+                    d.name
+                )),
+                Some(i) => {
+                    let bad = e.protocol.as_ref().map(|t| {
+                        format!(
+                            "the link protocol {t} on the Network Edge device {} is not handled",
+                            d.name
+                        )
+                    });
+                    At::Edge(d, i, bad)
+                }
+            },
+        },
         EndKind::Other(t) => At::Away(format!("the end type {t} is not handled")),
         EndKind::Missing => At::Away("an end has no type or no port".to_string()),
     }
@@ -268,9 +301,20 @@ fn tag_key(s: &Spec) -> Option<Option<Tags>> {
     }
 }
 
+/// The leg of a circuit from a Fabric port to a Network Edge interface.
+struct EdgeLeg<'a> {
+    port: String,
+    device: &'a EdgeDevice,
+    tags: Tags,
+    fabric: &'a Port,
+    circuit: String,
+    spans: Vec<SourceSpan>,
+}
+
 /// Lowers an account. `peers` gives the ingress function of the link peer
-/// of each Fabric port by uuid. A far port with no peer sends the frames to
-/// a sink.
+/// of each port of the account by its name, `port/<uuid>` for a Fabric port
+/// and `ne-<device uuid>/<interface>` for a Network Edge interface. A port
+/// with no peer sends the frames to a sink.
 pub fn lower(
     account: &Account,
     profile: &VendorProfile,
@@ -307,7 +351,10 @@ pub fn lower(
             verdict: Verdict::Lowered,
             spans: items.iter().map(|x| x.span.clone()).collect(),
         };
-        let ends = [at(&c.a, &by_uuid, &states), at(&c.z, &by_uuid, &states)];
+        let ends = [
+            at(&c.a, &by_uuid, &states, &account.edge_devices),
+            at(&c.z, &by_uuid, &states, &account.edge_devices),
+        ];
         let mut plan = Plan {
             row,
             ends,
@@ -347,6 +394,20 @@ pub fn lower(
                 | [At::Port(_, Spec::Tags(_)), At::Port(_, Spec::PortBased)] => {
                     Some("the circuit has a port-based end and a tagged end".to_string())
                 }
+                [At::Edge(..), At::Edge(..)] => {
+                    Some("a circuit between 2 Network Edge interfaces is not handled".to_string())
+                }
+                [At::Edge(_, _, Some(r)), _] | [_, At::Edge(_, _, Some(r))] => Some(r.clone()),
+                [At::Port(_, Spec::PortBased), At::Edge(..)]
+                | [At::Edge(..), At::Port(_, Spec::PortBased)] => {
+                    Some("the circuit has a port-based end and a Network Edge end".to_string())
+                }
+                [At::Port(_, Spec::Tags(t)), At::Edge(..)]
+                | [At::Edge(..), At::Port(_, Spec::Tags(t))]
+                    if t.inner.is_some() =>
+                {
+                    Some("the circuit has 2 tags at one end and a Network Edge end".to_string())
+                }
                 [At::Away(r), _] | [_, At::Away(r)] => {
                     if r.ends_with("outside the account") {
                         out.notes.push(format!("{uuid}: {r}"));
@@ -358,6 +419,39 @@ pub fn lower(
         };
         plan.reason = reason;
         plans.push(plan);
+    }
+
+    // A Network Edge interface with more than one circuit, or with a
+    // circuit and a device link group, makes each of its circuits unknown.
+    let group_ports = edge::group_ports(account);
+    let mut edge_claims: BTreeMap<String, (String, Vec<usize>)> = BTreeMap::new();
+    for (i, plan) in plans.iter().enumerate() {
+        if plan.row.verdict == Verdict::Ended {
+            continue;
+        }
+        for e in &plan.ends {
+            if let At::Edge(d, f, _) = e {
+                edge_claims
+                    .entry(edge::port_name(d, f))
+                    .or_insert_with(|| (format!("{} {}", d.name, f.name), Vec::new()))
+                    .1
+                    .push(i);
+            }
+        }
+    }
+    for (port, (text, list)) in &edge_claims {
+        if list.len() < 2 && !group_ports.contains(port) {
+            continue;
+        }
+        let r = format!(
+            "the Network Edge interface {text} is in more than one circuit or device link group"
+        );
+        for i in list {
+            if plans[*i].reason.is_none() {
+                out.notes.push(format!("{}: {r}", plans[*i].row.uuid));
+                plans[*i].reason = Some(r.clone());
+            }
+        }
     }
 
     // Two legs with the same tags on one port, or a port-based leg with
@@ -400,6 +494,10 @@ pub fn lower(
     let mut legs: BTreeMap<&str, Vec<CircuitLeg>> = BTreeMap::new();
     let mut unbound: BTreeMap<&str, &Port> = BTreeMap::new();
     let mut sinks: Vec<(String, String, SourceSpan)> = Vec::new();
+    let mut edge_legs: Vec<EdgeLeg<'_>> = Vec::new();
+    // The reason of each Network Edge interface of a circuit that is
+    // unknown, with the span of the circuit.
+    let mut edge_unknown: BTreeMap<String, (String, SourceSpan)> = BTreeMap::new();
     for plan in &mut plans {
         if plan.row.verdict == Verdict::Ended {
             continue;
@@ -425,7 +523,7 @@ pub fn lower(
                         Spec::Tags(t) => *t,
                         _ => near,
                     };
-                    let peer = match peers.get(&q.uuid) {
+                    let peer = match peers.get(&format!("port/{}", q.uuid)) {
                         Some(f) => f.clone(),
                         None => {
                             unbound.insert(q.uuid.as_str(), q);
@@ -437,6 +535,23 @@ pub fn lower(
                         tags,
                         peer,
                     }
+                }
+                (None, At::Edge(d, f, _)) => {
+                    let port = edge::port_name(d, f);
+                    let far = FarEnd::Port {
+                        port: PortId::new(&port),
+                        tags: near,
+                        peer: fid(device, &format!("{port}/out")),
+                    };
+                    edge_legs.push(EdgeLeg {
+                        port,
+                        device: *d,
+                        tags: near,
+                        fabric: p,
+                        circuit: uuid.clone(),
+                        spans: plan.row.spans.clone(),
+                    });
+                    far
                 }
                 _ => {
                     used_sink = true;
@@ -455,6 +570,25 @@ pub fn lower(
             plan.row.verdict = Verdict::Unknown(r.clone());
             if used_sink {
                 sinks.push((sink_f, r.clone(), plan.row.spans[0].clone()));
+            }
+            for e in &plan.ends {
+                if let At::Edge(d, f, _) = e {
+                    let port = edge::port_name(d, f);
+                    out.edge_ports.insert(
+                        port.clone(),
+                        EdgePort {
+                            device: d.uuid.clone(),
+                            interface: f.name.clone(),
+                            mac: f.mac,
+                            span: d.span.clone(),
+                        },
+                    );
+                    if !group_ports.contains(&port) {
+                        edge_unknown
+                            .entry(port)
+                            .or_insert_with(|| (r.clone(), plan.row.spans[0].clone()));
+                    }
+                }
             }
         }
     }
@@ -510,6 +644,94 @@ pub fn lower(
             },
         );
     }
+    // The Network Edge interface of each circuit: the push of the tag of
+    // the Fabric end and the circuit at the entry, and the pop of the tag
+    // at the exit.
+    for l in &edge_legs {
+        let Some(f) = l
+            .device
+            .interfaces
+            .iter()
+            .find(|i| edge::port_name(l.device, i) == l.port)
+        else {
+            continue;
+        };
+        let e = EdgePort {
+            device: l.device.uuid.clone(),
+            interface: f.name.clone(),
+            mac: f.mac,
+            span: l.device.span.clone(),
+        };
+        let span = l.spans[0].clone();
+        let entry = format!("{}/in", l.port);
+        let circuit = format!("{}/circuit", l.port);
+        let exit = format!("{}/out", l.port);
+        out.functions.push(Arc::new(TagStack {
+            meta: Meta::new(fid(device, &entry), device, profile).with_span(span.clone()),
+            port: PortId::new(&l.port),
+            op: TagOp::Push(l.tags.outer),
+            next: fid(device, &circuit),
+        }));
+        let q = l.fabric;
+        let peer = match peers.get(&format!("port/{}", q.uuid)) {
+            Some(f) => f.clone(),
+            None => {
+                unbound.insert(q.uuid.as_str(), q);
+                fid(device, &format!("port/{}/unbound", q.uuid))
+            }
+        };
+        out.functions.push(Arc::new(Circuit {
+            meta: Meta::new(fid(device, &circuit), device, profile).with_span(span.clone()),
+            port: PortId::new(&l.port),
+            legs: vec![CircuitLeg {
+                circuit: l.circuit.clone(),
+                near: l.tags,
+                far: FarEnd::Port {
+                    port: PortId::new(format!("port/{}", q.uuid)),
+                    tags: l.tags,
+                    peer,
+                },
+                spans: l.spans.clone(),
+                port_based: false,
+            }],
+        }));
+        let next = edge::peer_of(
+            device,
+            profile,
+            &l.port,
+            &e,
+            &l.device.name,
+            peers,
+            &mut out.functions,
+        );
+        out.functions.push(Arc::new(TagStack {
+            meta: Meta::new(fid(device, &exit), device, profile).with_span(span),
+            port: PortId::new(&l.port),
+            op: TagOp::Untag(l.tags.outer),
+            next,
+        }));
+        out.edge_ports.insert(l.port.clone(), e);
+    }
+    for (port, (r, span)) in &edge_unknown {
+        out.functions
+            .push(sink(device, profile, &format!("{port}/in"), r, span));
+    }
+    let circuit_ports: BTreeSet<String> = out.edge_ports.keys().cloned().collect();
+    let groups = edge::groups(account, profile, peers, &circuit_ports);
+    out.functions.extend(groups.functions);
+    out.notes.extend(groups.notes);
+    for (port, e) in groups.ports {
+        out.edge_ports.entry(port).or_insert(e);
+    }
+    let (bound, notes) = edge::bound(account);
+    out.notes.extend(notes);
+    out.functions.extend(edge::unbound_devices(
+        account,
+        profile,
+        &out.edge_ports,
+        &bound,
+    ));
+    out.bound = bound;
     for (f, r, span) in &sinks {
         out.functions.push(sink(device, profile, f, r, span));
     }
