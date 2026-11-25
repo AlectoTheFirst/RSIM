@@ -2,9 +2,9 @@
 //! rows against the store schemas, the rows of a store twin and of a
 //! hand-built twin, and the claim `path-mtu`.
 
-use rsim_cli::claims::path_mtu;
+use rsim_cli::claims::{end_mtu, path_mtu};
 use rsim_cli::commands;
-use rsim_cli::tables::{Mtus, TwinLink};
+use rsim_cli::tables::{Mtus, OpenEnd, TwinLink};
 use rsim_contract::claim::{ClaimArgs, ClaimResult};
 use rsim_contract::table::{self, ColumnType, Selection};
 use rsim_core::FunctionId;
@@ -94,6 +94,7 @@ fn the_collected_tables_of_a_store_twin() {
         assert_eq!(r[0], "r1");
     }
     assert_eq!(interfaces[0][2], "00:00:5e:00:53:01");
+    assert_eq!(interfaces[0][3], 1500);
     assert_eq!(interfaces[0][4], true);
     assert_eq!(interfaces[1][6], "eth0");
     assert_eq!(interfaces[3][2], Value::Null);
@@ -209,8 +210,10 @@ fn path_mtu_refutes_a_mismatch_and_an_end_below_the_minimum() {
     assert_eq!(e.provenance, ["r1/links@b:1-1", "r2/links@b:1-1"]);
 }
 
+/// The MTU of an interface of r1 comes from the collected `links` row of
+/// the interface. The far ends of r1 have no collected MTU.
 #[test]
-fn path_mtu_on_a_store_twin_with_no_collected_mtu_is_unknown() {
+fn path_mtu_on_a_store_twin_reads_the_collected_mtu() {
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-cli-path-mtu");
     #[allow(clippy::disallowed_methods)]
     let _ = std::fs::remove_dir_all(&dir);
@@ -226,8 +229,33 @@ fn path_mtu_on_a_store_twin_with_no_collected_mtu_is_unknown() {
     };
     let o = rsim_cli::claims::run(&topology, &t, &a).unwrap();
     assert_eq!(o.result, ClaimResult::Unknown);
-    assert!(!o.evidence.is_empty());
-    for e in &o.evidence {
-        assert_eq!(e.reason, "not_collected", "{}", e.subject);
-    }
+    let r1 = o
+        .evidence
+        .iter()
+        .find(|e| e.provenance.iter().any(|p| p.starts_with("r1/links@")))
+        .expect("a row with the collected MTU of an interface of r1");
+    assert!(
+        r1.expected.as_ref().is_some_and(|x| x["mtu"] == 1500)
+            || r1.observed.as_ref().is_some_and(|x| x["mtu"] == 1500),
+        "{r1:?}"
+    );
+}
+
+#[test]
+fn path_mtu_compares_an_egress_with_no_far_end_with_the_minimum() {
+    let e = OpenEnd {
+        function: FunctionId::new("r1/out/pppoe0"),
+        device: Some("r1".into()),
+        interface: "pppoe0".into(),
+        spans: Vec::new(),
+    };
+    let m = mtus(&[("r1", "pppoe0", Some(1492))]);
+    let r = end_mtu(&e, &m, 1500);
+    assert_eq!(
+        (r.result, r.reason.as_str()),
+        (ClaimResult::Refuted, "below_minimum")
+    );
+    assert_eq!(r.detail, "MTU 1492 is below 1500");
+    assert_eq!(end_mtu(&e, &m, 1492).result, ClaimResult::Confirmed);
+    assert_eq!(end_mtu(&e, &mtus(&[]), 1500).result, ClaimResult::Unknown);
 }

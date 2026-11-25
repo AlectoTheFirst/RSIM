@@ -348,6 +348,43 @@ pub fn twin_links(t: &Loaded) -> Vec<TwinLink> {
     out
 }
 
+/// An egress interface of the twin with no far end: an `Egress` with no
+/// peer, or a `PortEgress` with no peer.
+pub struct OpenEnd {
+    pub function: FunctionId,
+    pub device: Option<String>,
+    pub interface: String,
+    pub spans: Vec<SourceSpan>,
+}
+
+/// The egress interfaces of the twin with no far end, in the order of the
+/// functions.
+pub fn open_ends(t: &Loaded) -> Vec<OpenEnd> {
+    let mut out = Vec::new();
+    for f in t.functions() {
+        let any: &dyn Any = f.as_ref();
+        let interface = if let Some(e) = any.downcast_ref::<Egress>() {
+            e.link
+                .as_ref()
+                .is_none_or(|l| l.peer.is_none())
+                .then(|| e.interface.to_string())
+        } else if let Some(p) = any.downcast_ref::<PortEgress>() {
+            p.peers.is_empty().then(|| p.port.to_string())
+        } else {
+            None
+        };
+        if let Some(interface) = interface {
+            out.push(OpenEnd {
+                function: f.id().clone(),
+                device: f.device().map(|d| d.to_string()),
+                interface,
+                spans: f.provenance().to_vec(),
+            });
+        }
+    }
+    out
+}
+
 /// The collected MTU of each interface of a store twin; empty for a twin
 /// with no store.
 pub fn collected_mtu(t: &Loaded) -> Result<Mtus, String> {

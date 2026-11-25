@@ -168,6 +168,40 @@ pub fn path_mtu(
     }
 }
 
+/// The row of `path-mtu` for an egress interface with no far end: refuted
+/// if its MTU is below `min`, confirmed if its MTU is known, else unknown.
+pub fn end_mtu(e: &crate::tables::OpenEnd, mtu: &crate::tables::Mtus, min: u64) -> Evidence {
+    let row = e
+        .device
+        .as_ref()
+        .and_then(|d| mtu.get(&(d.clone(), e.interface.clone())));
+    let v = row.and_then(|m| m.0);
+    let (result, reason, detail) = match v {
+        Some(v) if v < min => (
+            ClaimResult::Refuted,
+            "below_minimum",
+            format!("MTU {v} is below {min}"),
+        ),
+        Some(_) => (ClaimResult::Confirmed, "match", String::new()),
+        None => (
+            ClaimResult::Unknown,
+            "not_collected",
+            "the MTU of the interface is not collected".to_string(),
+        ),
+    };
+    let mut provenance = spans(&e.spans);
+    provenance.extend(row.map(|(_, s)| s.clone()));
+    Evidence {
+        subject: e.function.to_string(),
+        result,
+        expected: Some(json!({"min": min})),
+        observed: Some(json!({"mtu": v})),
+        reason: reason.into(),
+        detail,
+        provenance,
+    }
+}
+
 /// The functions of the branches of an answer and of its replies.
 fn path_functions(a: &Answer, out: &mut BTreeSet<String>) {
     for b in a.branches() {
@@ -767,6 +801,13 @@ pub fn run(topology: &str, t: &Loaded, args: &ClaimArgs) -> Result<ClaimOut, Que
             for l in crate::tables::twin_links(t) {
                 if t.function(&l.function).is_some_and(|f| keep(f.as_ref())) {
                     evidence.push(path_mtu(&l, &mtu, args.min));
+                }
+            }
+            if let Some(min) = args.min {
+                for e in crate::tables::open_ends(t) {
+                    if t.function(&e.function).is_some_and(|f| keep(f.as_ref())) {
+                        evidence.push(end_mtu(&e, &mtu, min));
+                    }
                 }
             }
         }
