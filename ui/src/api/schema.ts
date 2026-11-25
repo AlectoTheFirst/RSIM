@@ -782,6 +782,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/twins/{twin}/tables/{table}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Table difference */
+        get: operations["diffTable"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/twins/{twin}/tables/{table}/lpm": {
         parameters: {
             query?: never;
@@ -1234,6 +1251,23 @@ export interface components {
              */
             settings: components["schemas"]["Settings"];
             site?: string | null;
+        };
+        /** @description Change counts */
+        DiffCounts: {
+            /** Format: uint */
+            added: number;
+            /** Format: uint */
+            changed: number;
+            /** Format: uint */
+            removed: number;
+        };
+        /** @description Changed row */
+        DiffRow: {
+            /** @description The row of `against` for a changed row. */
+            before?: unknown[] | null;
+            change: components["schemas"]["RowChange"];
+            /** @description The row of the twin; the row of `against` for a removed row. */
+            row: unknown[];
         };
         /**
          * EdgeDeviceBinding
@@ -1849,6 +1883,11 @@ export interface components {
             /** Format: uint64 */
             version: number;
         };
+        /**
+         * @description Row change
+         * @enum {string}
+         */
+        RowChange: "added" | "removed" | "changed";
         /** @description Secret */
         SecretInput: {
             /** @description Passphrase */
@@ -2173,6 +2212,30 @@ export interface components {
             needs: string;
             /** @description Verbs */
             verbs: string[];
+        };
+        /**
+         * TableDiffOut
+         * @description Table difference
+         */
+        TableDiffOut: {
+            /** @description Compared twin */
+            against: components["schemas"]["TwinJson"];
+            columns: string[];
+            counts: components["schemas"]["DiffCounts"];
+            kind: string;
+            /** @description Next cursor */
+            next_cursor?: string | null;
+            rows: components["schemas"]["DiffRow"][];
+            /** Format: uint32 */
+            rsim_json: number;
+            table: string;
+            topology: string;
+            /**
+             * Format: uint
+             * @description Total changed rows
+             */
+            total: number;
+            twin: components["schemas"]["TwinJson"];
         };
         /**
          * TableOut
@@ -4252,6 +4315,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SourceLinesOut"];
+                };
+            };
+            /** @description Problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    diffTable: {
+        parameters: {
+            query?: {
+                /** @description Compared twin */
+                against?: string;
+                /** @description Columns */
+                columns?: string;
+                /** @description Page size */
+                limit?: string;
+                /** @description Cursor */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                twin: string;
+                table: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableDiffOut"];
                 };
             };
             /** @description Problem */
