@@ -65,6 +65,15 @@ const SIDE: Rows = &[
     ("accessPoint/profile/type", I, S),
     ("accessPoint/profile/href", I, S),
     ("accessPoint/location", I, S),
+    ("accessPoint/interface", H, N),
+    ("accessPoint/interface/uuid", H, S),
+    ("accessPoint/interface/id", H, S),
+    ("accessPoint/interface/type", I, S),
+    ("accessPoint/virtualDevice", H, N),
+    ("accessPoint/virtualDevice/uuid", H, S),
+    ("accessPoint/virtualDevice/name", I, S),
+    ("accessPoint/virtualDevice/type", I, S),
+    ("accessPoint/virtualDevice/href", I, S),
 ];
 
 const CONNECTIONS: Rows = &[
@@ -86,8 +95,63 @@ const CONNECTIONS: Rows = &[
     ("*/operation/opStatusChangedAt", I, S),
 ];
 
-/// The classification table of a section. The Network Edge sections have
-/// no entry, so each of their stanzas is unhandled.
+const EDGE_DEVICES: Rows = &[
+    ("*", H, N),
+    ("*/uuid", H, S),
+    ("*/name", H, S),
+    ("*/hostName", H, S),
+    ("*/deviceTypeCode", H, S),
+    ("*/deviceTypeVendor", H, S),
+    ("*/deviceTypeCategory", H, S),
+    ("*/status", H, S),
+    ("*/version", H, S),
+    ("*/ibx", H, S),
+    ("*/metroCode", H, S),
+    ("*/redundancyType", H, S),
+    ("*/sshIpAddress", I, S),
+    ("*/vendorConfig", I, S),
+    ("*/interfaces", H, N),
+    ("*/interfaces/*", H, N),
+    ("*/interfaces/*/id", H, S),
+    ("*/interfaces/*/name", H, S),
+    ("*/interfaces/*/type", H, S),
+    ("*/interfaces/*/uuid", H, S),
+    ("*/interfaces/*/macAddress", H, S),
+    ("*/interfaces/*/status", I, S),
+    ("*/interfaces/*/assignedType", I, S),
+    ("*/licenseStatus", I, S),
+    ("*/licenseType", I, S),
+    ("*/throughput", I, S),
+    ("*/core", I, S),
+    ("*/deviceSerialNo", I, S),
+    ("*/accountNumber", I, S),
+    ("*/notifications", I, S),
+    ("*/purchaseOrderNumber", I, S),
+];
+
+const EDGE_LINKS: Rows = &[
+    ("*", H, N),
+    ("*/uuid", H, S),
+    ("*/groupName", H, S),
+    ("*/status", H, S),
+    ("*/redundancyType", H, S),
+    ("*/metroLinks", H, N),
+    ("*/metroLinks/*", H, N),
+    ("*/metroLinks/*/throughput", H, S),
+    ("*/metroLinks/*/throughputUnit", H, S),
+    ("*/metroLinks/*/metroCode", I, S),
+    ("*/linkDevices", H, N),
+    ("*/linkDevices/*", H, N),
+    ("*/linkDevices/*/deviceUuid", H, S),
+    ("*/linkDevices/*/interfaceId", H, S),
+    ("*/linkDevices/*/interfaceName", I, S),
+    ("*/linkDevices/*/status", I, S),
+    ("*/href", I, S),
+    ("*/changeLog", I, S),
+    ("*/project", I, S),
+];
+
+/// The classification table of a section.
 pub fn table(section: &str) -> Table {
     let mut t = Table::new(&[]);
     match section {
@@ -96,7 +160,17 @@ pub fn table(section: &str) -> Table {
                 t.push(p, *s, *r);
             }
         }
-        "connections" => {
+        "edge_devices" => {
+            for (p, s, r) in EDGE_DEVICES {
+                t.push(p, *s, *r);
+            }
+        }
+        "edge_links" => {
+            for (p, s, r) in EDGE_LINKS {
+                t.push(p, *s, *r);
+            }
+        }
+        "connections" | "edge_connections" => {
             for (p, s, r) in CONNECTIONS {
                 t.push(p, *s, *r);
             }
@@ -113,7 +187,7 @@ pub fn table(section: &str) -> Table {
         }
         "bindings" => {
             t.push("*", H, N);
-            for k in ["fabric_port", "device", "port"] {
+            for k in ["fabric_port", "device", "port", "edge_device"] {
                 t.push(&format!("*/{k}"), H, S);
             }
         }

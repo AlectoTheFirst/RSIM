@@ -1,8 +1,9 @@
-//! The read of the Fabric ports and the connections of an account.
+//! The read of the Fabric ports, the connections, the Network Edge devices
+//! and the device link groups of an account.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use rsim_core::SourceSpan;
+use rsim_core::{Mac, SourceSpan};
 
 use crate::velocloud::json::{J, Parsed};
 
@@ -36,8 +37,15 @@ pub enum EndKind {
     Port(String),
     /// An `SP` end with the name of its service profile, else its uuid.
     ServiceProfile(String),
-    /// A `VD` end on a Network Edge device.
-    Device(String),
+    /// A `VD` end on an interface of a Network Edge device.
+    Device {
+        /// The uuid of the device.
+        device: String,
+        /// The uuid of the interface.
+        interface: Option<String>,
+        /// The id of the interface.
+        interface_id: Option<String>,
+    },
     /// Another type.
     Other(String),
     /// An end with no type, or a `COLO` end with no port uuid.
@@ -79,13 +87,94 @@ pub struct Binding {
     pub span: SourceSpan,
 }
 
-/// The ports, the connections and the bindings of an account.
+/// A binding of a Network Edge device to a device of the store.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EdgeBinding {
+    /// The uuid, the name or the host name of the Network Edge device.
+    pub edge_device: String,
+    pub device: String,
+    pub span: SourceSpan,
+}
+
+/// An interface of a Network Edge device.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EdgeInterface {
+    pub id: Option<String>,
+    pub uuid: Option<String>,
+    pub name: String,
+    /// `type`, for example `DATA` or `SSH`.
+    pub kind: Option<String>,
+    pub mac: Option<Mac>,
+}
+
+/// A Network Edge device.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EdgeDevice {
+    pub uuid: String,
+    /// The name, else the host name, else the uuid.
+    pub name: String,
+    pub host_name: Option<String>,
+    pub vendor: Option<String>,
+    /// `deviceTypeCode`.
+    pub model: Option<String>,
+    /// `deviceTypeCategory`.
+    pub category: Option<String>,
+    pub status: Option<String>,
+    pub version: Option<String>,
+    pub ibx: Option<String>,
+    pub metro: Option<String>,
+    /// `redundancyType`.
+    pub redundancy: Option<String>,
+    /// The interfaces with a name.
+    pub interfaces: Vec<EdgeInterface>,
+    pub span: SourceSpan,
+}
+
+impl EdgeDevice {
+    /// The interface with the uuid `uuid`, else with the id `id`.
+    pub fn interface(&self, uuid: Option<&str>, id: Option<&str>) -> Option<&EdgeInterface> {
+        uuid.and_then(|u| {
+            self.interfaces
+                .iter()
+                .find(|i| i.uuid.as_deref() == Some(u))
+        })
+        .or_else(|| id.and_then(|n| self.interfaces.iter().find(|i| i.id.as_deref() == Some(n))))
+    }
+}
+
+/// A member of a device link group: the uuid of its device and the id of
+/// its interface.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LinkMember {
+    pub device: String,
+    pub interface_id: String,
+}
+
+/// A device link group.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkGroup {
+    pub uuid: String,
+    pub name: Option<String>,
+    pub status: Option<String>,
+    /// The members, sorted and unique.
+    pub members: Vec<LinkMember>,
+    /// The smallest `metroLinks[].throughput` with the unit `Mbps`.
+    pub bandwidth_mbps: Option<i64>,
+    pub span: SourceSpan,
+}
+
+/// The ports, the connections, the Network Edge devices, the device link
+/// groups and the bindings of an account.
 #[derive(Clone, Debug, Default)]
 pub struct Account {
     pub device: String,
     pub ports: Vec<Port>,
+    /// The items of `connections`, then the items of `edge_connections`.
     pub connections: Vec<Connection>,
     pub bindings: Vec<Binding>,
+    pub edge_devices: Vec<EdgeDevice>,
+    pub link_groups: Vec<LinkGroup>,
+    pub edge_bindings: Vec<EdgeBinding>,
     pub notes: Vec<String>,
 }
 
@@ -105,11 +194,17 @@ fn end(j: Option<J<'_>>) -> End {
                     .unwrap_or_default(),
             )
         }
-        Some("VD") => EndKind::Device(
-            ap.and_then(|a| a.obj("virtualDevice"))
-                .and_then(|d| d.text("uuid"))
-                .unwrap_or_default(),
-        ),
+        Some("VD") => {
+            let interface = ap.and_then(|a| a.obj("interface"));
+            EndKind::Device {
+                device: ap
+                    .and_then(|a| a.obj("virtualDevice"))
+                    .and_then(|d| d.text("uuid"))
+                    .unwrap_or_default(),
+                interface: interface.and_then(|i| i.text("uuid")),
+                interface_id: interface.and_then(|i| i.text("id")),
+            }
+        }
         Some(t) => EndKind::Other(t.to_string()),
         None => EndKind::Missing,
     };
@@ -212,29 +307,33 @@ pub fn read(device: &str, p: &Parsed) -> Account {
         });
     }
     a.ports = unique(std::mem::take(&mut a.ports), &mut a.notes);
-    for (n, x) in p
-        .root("connections")
-        .map(J::rows)
-        .unwrap_or_default()
-        .into_iter()
-        .enumerate()
-    {
-        let Some(uuid) = x.text("uuid") else {
-            a.notes
-                .push(format!("connections: item {} has no uuid", n + 1));
-            continue;
-        };
-        a.connections.push(Connection {
-            uuid,
-            name: x.text("name"),
-            kind: x.text("type"),
-            state: x.text("state"),
-            bandwidth: x.int("bandwidth").filter(|b| *b > 0),
-            a: end(x.obj("aSide")),
-            z: end(x.obj("zSide")),
-            span: x.span(),
-        });
+    for section in ["connections", "edge_connections"] {
+        for (n, x) in p
+            .root(section)
+            .map(J::rows)
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+        {
+            let Some(uuid) = x.text("uuid") else {
+                a.notes
+                    .push(format!("{section}: item {} has no uuid", n + 1));
+                continue;
+            };
+            a.connections.push(Connection {
+                uuid,
+                name: x.text("name"),
+                kind: x.text("type"),
+                state: x.text("state"),
+                bandwidth: x.int("bandwidth").filter(|b| *b > 0),
+                a: end(x.obj("aSide")),
+                z: end(x.obj("zSide")),
+                span: x.span(),
+            });
+        }
     }
+    a.edge_devices = edge_devices(p, &mut a.notes);
+    a.link_groups = link_groups(p, &mut a.notes);
     for (n, x) in p
         .root("bindings")
         .map(J::rows)
@@ -242,6 +341,19 @@ pub fn read(device: &str, p: &Parsed) -> Account {
         .into_iter()
         .enumerate()
     {
+        if let Some(edge_device) = x.text("edge_device") {
+            match x.text("device") {
+                Some(device) => a.edge_bindings.push(EdgeBinding {
+                    edge_device,
+                    device,
+                    span: x.span(),
+                }),
+                None => a
+                    .notes
+                    .push(format!("bindings: item {} is not complete", n + 1)),
+            }
+            continue;
+        }
         match (x.text("fabric_port"), x.text("device"), x.text("port")) {
             (Some(fabric_port), Some(device), Some(port)) => a.bindings.push(Binding {
                 fabric_port,
@@ -255,4 +367,114 @@ pub fn read(device: &str, p: &Parsed) -> Account {
         }
     }
     a
+}
+
+/// The Network Edge devices of `edge_devices`, one for each uuid. An item
+/// with no uuid and a repeated uuid are left out with a note.
+fn edge_devices(p: &Parsed, notes: &mut Vec<String>) -> Vec<EdgeDevice> {
+    let mut out: Vec<EdgeDevice> = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    for (n, x) in p
+        .root("edge_devices")
+        .map(J::rows)
+        .unwrap_or_default()
+        .into_iter()
+        .enumerate()
+    {
+        let Some(uuid) = x.text("uuid") else {
+            notes.push(format!("edge_devices: item {} has no uuid", n + 1));
+            continue;
+        };
+        if !seen.insert(uuid.clone()) {
+            notes.push(format!(
+                "edge_devices: the Network Edge device {uuid} is in more than one item"
+            ));
+            continue;
+        }
+        let interfaces = x
+            .list("interfaces")
+            .into_iter()
+            .filter_map(|i| {
+                Some(EdgeInterface {
+                    name: i.text("name")?,
+                    id: i.text("id"),
+                    uuid: i.text("uuid"),
+                    kind: i.text("type"),
+                    mac: i.str("macAddress").and_then(|m| m.trim().parse().ok()),
+                })
+            })
+            .collect();
+        let host_name = x.text("hostName");
+        out.push(EdgeDevice {
+            name: x
+                .text("name")
+                .or_else(|| host_name.clone())
+                .unwrap_or_else(|| uuid.clone()),
+            host_name,
+            vendor: x.text("deviceTypeVendor"),
+            model: x.text("deviceTypeCode"),
+            category: x.text("deviceTypeCategory"),
+            status: x.text("status"),
+            version: x.text("version"),
+            ibx: x.text("ibx"),
+            metro: x.text("metroCode"),
+            redundancy: x.text("redundancyType"),
+            interfaces,
+            span: x.span(),
+            uuid,
+        });
+    }
+    out
+}
+
+/// The device link groups of `edge_links`. An item with no uuid and a
+/// member with no device or interface id are left out with a note.
+fn link_groups(p: &Parsed, notes: &mut Vec<String>) -> Vec<LinkGroup> {
+    let mut out = Vec::new();
+    for (n, x) in p
+        .root("edge_links")
+        .map(J::rows)
+        .unwrap_or_default()
+        .into_iter()
+        .enumerate()
+    {
+        let Some(uuid) = x.text("uuid") else {
+            notes.push(format!("edge_links: item {} has no uuid", n + 1));
+            continue;
+        };
+        let mut members: Vec<LinkMember> = Vec::new();
+        for (k, m) in x.list("linkDevices").into_iter().enumerate() {
+            match (m.text("deviceUuid"), m.text("interfaceId")) {
+                (Some(device), Some(interface_id)) => members.push(LinkMember {
+                    device,
+                    interface_id,
+                }),
+                _ => notes.push(format!(
+                    "edge_links: member {} of the device link group {uuid} has no device or interface id",
+                    k + 1
+                )),
+            }
+        }
+        members.sort();
+        members.dedup();
+        let bandwidth_mbps = x
+            .list("metroLinks")
+            .into_iter()
+            .filter(|l| {
+                l.str("throughputUnit")
+                    .is_some_and(|u| u.eq_ignore_ascii_case("mbps"))
+            })
+            .filter_map(|l| l.int("throughput"))
+            .filter(|t| *t > 0)
+            .min();
+        out.push(LinkGroup {
+            name: x.text("groupName"),
+            status: x.text("status"),
+            members,
+            bandwidth_mbps,
+            span: x.span(),
+            uuid,
+        });
+    }
+    out
 }

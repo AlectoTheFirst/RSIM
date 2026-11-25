@@ -262,3 +262,185 @@ fn the_bound_ports_are_not_edge_ports_and_the_twin_is_the_same_from_2_runs() {
     assert_eq!(fabric.len(), 1);
     assert_eq!(fabric[0].verdict, rsim_ingest::equinix::Verdict::Lowered);
 }
+
+const NE_MAC: &str = "00:00:5e:00:53:31";
+const NE: &str = "bbbbbbbb-0000-4000-8000-0000000000f1";
+
+/// An account with the Fabric port `p1` bound to `sw-a` and a circuit from
+/// VLAN 100 on `p1` to the interface `eth0` of the Network Edge device
+/// `lab-fw`, which no binding names.
+fn edge_account() -> BTreeMap<String, (Vec<u8>, String)> {
+    [
+        (
+            "ports",
+            json!([{"uuid": "p1", "name": "lab-p1", "state": "ACTIVE",
+                    "encapsulation": {"type": "DOT1Q"}}]),
+        ),
+        ("connections", json!([])),
+        (
+            "edge_devices",
+            json!([{"uuid": NE, "name": "lab-fw", "status": "PROVISIONED",
+                    "interfaces": [{"id": 1, "name": "eth0", "type": "DATA",
+                                    "macAddress": NE_MAC}]}]),
+        ),
+        ("edge_links", json!([])),
+        (
+            "edge_connections",
+            json!([{"uuid": "c-ne", "type": "EVPL_VC", "state": "ACTIVE",
+                    "aSide": {"accessPoint": {"type": "COLO", "port": {"uuid": "p1"},
+                              "linkProtocol": {"type": "DOT1Q", "vlanTag": 100}}},
+                    "zSide": {"accessPoint": {"type": "VD", "interface": {"id": 1},
+                              "virtualDevice": {"uuid": NE}}}}]),
+        ),
+        (
+            "bindings",
+            json!([{"fabric_port": "p1", "device": "sw-a", "port": "Ethernet1/49"}]),
+        ),
+    ]
+    .into_iter()
+    .map(|(k, v)| {
+        (
+            k.to_string(),
+            (
+                serde_json::to_vec_pretty(&v).unwrap(),
+                format!("{ACCT}/{k}@b1"),
+            ),
+        )
+    })
+    .collect()
+}
+
+#[test]
+fn a_path_through_a_network_edge_device_with_no_binding_crosses_the_circuit_and_is_unknown() {
+    // The route of sw-a to 198.51.100.0/24 has the Network Edge device as
+    // its next hop.
+    let mut col = collected("sw-a", 100, ("192.0.2.10", H1), ("192.0.2.30", NE_MAC));
+    col.routes.push(RouteRow {
+        vrf: "default".into(),
+        prefix: "198.51.100.0/24".into(),
+        protocol: "static".into(),
+        selected: true,
+        next_hop: Some("192.0.2.30".into()),
+        interface: Some("Vlan100".into()),
+        span: row_span("sw-a", "routes", "b1", 1),
+    });
+    let e = assemble(vec![
+        Input::Nxos {
+            name: "sw-a".into(),
+            config: switch("sw-a", 100, "192.0.2.1").into_bytes(),
+            file: "sw-a/config".into(),
+            collected: col,
+            sections: sections("sw-a", 100),
+        },
+        Input::Equinix {
+            name: ACCT.into(),
+            sections: edge_account(),
+        },
+    ]);
+    let t = e.builder.build().expect("the twin builds");
+    let twin = format!("{ACCT}-ne-{NE}");
+    assert!(
+        t.devices().iter().any(|d| d.to_string() == twin),
+        "{:?}",
+        t.devices()
+    );
+    let a = run(&t, "192.0.2.10", "198.51.100.5");
+    let s = steps(&a);
+    assert_eq!(
+        a.branches()
+            .iter()
+            .map(|b| b.verdict.kind())
+            .collect::<Vec<_>>(),
+        [VerdictKind::Unknown],
+        "{s:#?}"
+    );
+    assert!(
+        s.iter().any(|x| x.contains(&format!(
+            "from port port/p1 VLAN 100 to port ne-{NE}/1 VLAN 100"
+        ))),
+        "{s:#?}"
+    );
+    assert!(
+        s.iter()
+            .any(|x| x.contains(&format!("pop VLAN 100 on port ne-{NE}/1"))),
+        "{s:#?}"
+    );
+    assert!(
+        s.iter()
+            .any(|x| x.contains("the Network Edge device lab-fw is not collected")),
+        "{s:#?}"
+    );
+}
+
+#[test]
+fn a_path_through_a_bound_network_edge_device_reaches_the_port_with_its_mac() {
+    let mut col = collected("sw-a", 100, ("192.0.2.10", H1), ("192.0.2.30", NE_MAC));
+    col.routes.push(RouteRow {
+        vrf: "default".into(),
+        prefix: "198.51.100.0/24".into(),
+        protocol: "static".into(),
+        selected: true,
+        next_hop: Some("192.0.2.30".into()),
+        interface: Some("Vlan100".into()),
+        span: row_span("sw-a", "routes", "b1", 1),
+    });
+    let mut account = edge_account();
+    account.insert(
+        "bindings".into(),
+        (
+            serde_json::to_vec_pretty(&json!([
+                {"fabric_port": "p1", "device": "sw-a", "port": "Ethernet1/49"},
+                {"edge_device": "LAB-FW", "device": "r1"},
+            ]))
+            .unwrap(),
+            format!("{ACCT}/bindings@b1"),
+        ),
+    );
+    let router = Collected {
+        links: vec![LinkRow {
+            interface: "eth1".into(),
+            mac: Some(NE_MAC.into()),
+            parent: None,
+            vlan: None,
+            span: row_span("r1", "links", "b4", 0),
+        }],
+        ..Collected::default()
+    };
+    let e = assemble(vec![
+        Input::Nxos {
+            name: "sw-a".into(),
+            config: switch("sw-a", 100, "192.0.2.1").into_bytes(),
+            file: "sw-a/config".into(),
+            collected: col,
+            sections: sections("sw-a", 100),
+        },
+        Input::Vyos {
+            name: "r1".into(),
+            config: include_bytes!("fixtures/vyos/r1-config.json").to_vec(),
+            file: "r1/config".into(),
+            collected: router,
+        },
+        Input::Equinix {
+            name: ACCT.into(),
+            sections: account,
+        },
+    ]);
+    let notes = e.notes.get(ACCT).cloned().unwrap_or_default();
+    assert!(!notes.iter().any(|n| n.contains("MAC")), "{notes:#?}");
+    let t = e.builder.build().expect("the twin builds");
+    assert!(
+        !t.devices()
+            .iter()
+            .any(|d| d.to_string() == format!("{ACCT}-ne-{NE}")),
+        "{:?}",
+        t.devices()
+    );
+    let a = run(&t, "192.0.2.10", "198.51.100.5");
+    let s = steps(&a);
+    assert!(
+        s.iter()
+            .any(|x| x.contains(&format!("pop VLAN 100 on port ne-{NE}/1"))),
+        "{s:#?}"
+    );
+    assert!(s.iter().any(|x| x.starts_with("r1/handoff/eth1")), "{s:#?}");
+}
