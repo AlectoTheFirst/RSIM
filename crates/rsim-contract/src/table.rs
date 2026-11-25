@@ -609,6 +609,52 @@ pub struct TableOut {
     pub next_cursor: Option<String>,
 }
 
+/// Row change
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RowChange {
+    Added,
+    Removed,
+    Changed,
+}
+
+/// Changed row
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DiffRow {
+    pub change: RowChange,
+    /// The row of the twin; the row of `against` for a removed row.
+    pub row: Vec<Value>,
+    /// The row of `against` for a changed row.
+    pub before: Option<Vec<Value>>,
+}
+
+/// Change counts
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DiffCounts {
+    pub added: usize,
+    pub removed: usize,
+    pub changed: usize,
+}
+
+/// Table difference
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct TableDiffOut {
+    pub rsim_json: u32,
+    pub kind: String,
+    pub topology: String,
+    pub twin: TwinJson,
+    /// Compared twin
+    pub against: TwinJson,
+    pub table: String,
+    pub columns: Vec<String>,
+    pub counts: DiffCounts,
+    pub rows: Vec<DiffRow>,
+    /// Total changed rows
+    pub total: usize,
+    /// Next cursor
+    pub next_cursor: Option<String>,
+}
+
 /// Distinct values
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct UniqueOut {
