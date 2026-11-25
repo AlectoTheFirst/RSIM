@@ -25,12 +25,12 @@ Complete:
 - the snapshot store `rsim-store` and the collector `rsim-collect` with the SSH and HTTPS transports
 - the collection and the ingestion of VyOS, UniFi, NX-OS, IOS-XR and IOS-XE, with one link join for all vendors
 - the collection and the ingestion of VeloCloud SD-WAN
+- the collection and the ingestion of the Equinix Fabric ports, circuits and Network Edge devices, with the bindings in the link join
 - EVPN, VXLAN and the anycast gateway on NX-OS
 - the Rust TextFSM engine `rsim-textfsm`
 - the BGP sessions, the BGP neighbour config and the claims `bgp-peers-up` and `bgp-peers-agree`
 - the collection interval of each device and the retention of the snapshot history
-
-Next vendor: Equinix Fabric.
+- the manual collection of a device or a group
 
 Open: the snapshot view.
 
