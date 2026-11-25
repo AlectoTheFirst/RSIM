@@ -545,7 +545,7 @@ pub fn lower(
                     };
                     edge_legs.push(EdgeLeg {
                         port,
-                        device: *d,
+                        device: d,
                         tags: near,
                         fabric: p,
                         circuit: uuid.clone(),

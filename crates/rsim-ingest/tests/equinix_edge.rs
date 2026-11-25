@@ -161,11 +161,11 @@ fn ids(l: &Lowered) -> Vec<String> {
     l.functions.iter().map(|f| f.id().to_string()).collect()
 }
 
-fn verdict(l: &Lowered, uuid: &str) -> Verdict {
+fn verdict(l: &Lowered, circuit: &str) -> Verdict {
     l.circuits
         .iter()
-        .find(|c| c.uuid == uuid)
-        .unwrap_or_else(|| panic!("{uuid} is not in the rows"))
+        .find(|c| c.uuid == circuit)
+        .unwrap_or_else(|| panic!("{circuit} is not in the rows"))
         .verdict
         .clone()
 }
