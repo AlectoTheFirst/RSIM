@@ -622,7 +622,7 @@ pub enum RowChange {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DiffRow {
     pub change: RowChange,
-    /// The row of the twin; the row of `against` for a removed row.
+    /// The row of the twin, or the row of `against` for a removed row.
     pub row: Vec<Value>,
     /// The row of `against` for a changed row.
     pub before: Option<Vec<Value>>,

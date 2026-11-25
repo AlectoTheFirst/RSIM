@@ -1266,7 +1266,7 @@ export interface components {
             /** @description The row of `against` for a changed row. */
             before?: unknown[] | null;
             change: components["schemas"]["RowChange"];
-            /** @description The row of the twin; the row of `against` for a removed row. */
+            /** @description The row of the twin, or the row of `against` for a removed row. */
             row: unknown[];
         };
         /**

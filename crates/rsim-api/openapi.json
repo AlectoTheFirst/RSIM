@@ -1105,7 +1105,7 @@
             "$ref": "#/components/schemas/RowChange"
           },
           "row": {
-            "description": "The row of the twin; the row of `against` for a removed row.",
+            "description": "The row of the twin, or the row of `against` for a removed row.",
             "items": true,
             "type": "array"
           }
