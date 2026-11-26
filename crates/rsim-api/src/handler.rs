@@ -256,6 +256,15 @@ impl State {
         }
     }
 
+    /// The twin of the parameter `against`: a twin that the server holds,
+    /// resolved as a path segment.
+    fn held(&self, segment: &str) -> Result<Arc<Loaded>, Problem> {
+        Ok(match self.twin(segment)? {
+            Resolved::Twin(r) => r.loaded,
+            Resolved::Redirect(t) => t,
+        })
+    }
+
     fn remember(&self, text: &str) -> String {
         let id = qid::of(text);
         if id.starts_with('h') {
@@ -792,6 +801,7 @@ fn twin_route(
             method(req, "GET")?;
             let reserved: &[&str] = match *verb {
                 "top" => &["column", "count", "ascending"],
+                "diff" => &["against"],
                 "lpm" => &["column", "address"],
                 _ => &[],
             };
@@ -839,6 +849,19 @@ fn twin_route(
                     )
                     .map_err(err)?,
                 )),
+                "diff" => {
+                    let against = get("against").ok_or_else(|| {
+                        problem(
+                            422,
+                            "invalid_query",
+                            "the parameter against is missing".into(),
+                        )
+                    })?;
+                    let other = state.held(&against)?;
+                    Ok(json_response(
+                        &tables::diff(top, l, &other, table, &sel).map_err(err)?,
+                    ))
+                }
                 _ => Err(problem(
                     404,
                     "not_found",

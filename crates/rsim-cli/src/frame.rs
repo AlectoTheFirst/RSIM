@@ -24,7 +24,9 @@ use arrow_array::{
     Array, ArrayRef, BooleanArray, DictionaryArray, StringArray, UInt32Array, UInt64Array,
 };
 use rayon::prelude::*;
-use rsim_contract::table::{ColumnSummary, ColumnType, Selection, TableDef};
+use rsim_contract::table::{
+    ColumnSummary, ColumnType, DiffCounts, DiffRow, RowChange, Selection, TableDef,
+};
 use serde_json::Value;
 
 /// The number of rows of one chunk of a parallel scan.
@@ -750,6 +752,219 @@ fn page_of(
         total,
         next: (end < total).then(|| format!("o{end}")),
     }
+}
+
+/// A change of a row between the frames `before` and `after` of 1 table,
+/// with the row numbers in each frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Change {
+    Added(u32),
+    Removed(u32),
+    Changed(u32, u32),
+}
+
+/// The text of each slot of a column: slot 0 has the text `null`, and a
+/// value has the text of [`key_ranks`].
+fn slot_texts(
+    c: &FrameColumn,
+    key_text: &(dyn Fn(&str) -> Option<String> + Sync),
+    null: &str,
+) -> Vec<String> {
+    let n = c.slots() - 1;
+    let mut t = Vec::with_capacity(n + 1);
+    t.push(null.to_string());
+    for e in 0..n {
+        t.push(match c.kind {
+            Kind::Text => {
+                let s = c.text(e);
+                key_text(s).unwrap_or_else(|| s.to_string())
+            }
+            Kind::Integer => c.integer(e).to_string(),
+            Kind::Boolean => c.boolean(e).to_string(),
+            Kind::List => list_json(c.data.values(), e),
+        });
+    }
+    t
+}
+
+/// The ids of the slots of 1 column in 2 frames: equal texts have equal
+/// ids, and the ids are in the order of the texts.
+fn joint_ids(a: &[String], b: &[String]) -> (Vec<u32>, Vec<u32>) {
+    let mut all: Vec<&str> = a.iter().chain(b).map(String::as_str).collect();
+    all.sort_unstable();
+    all.dedup();
+    let id = |t: &String| all.binary_search(&t.as_str()).unwrap_or(0) as u32;
+    (a.iter().map(id).collect(), b.iter().map(id).collect())
+}
+
+/// The changes from the frame `before` to the frame `after`, in key order.
+/// A key matches the rows with equal key values; a column with the semantic
+/// type `source_span` is not compared. In a key with rows on both sides,
+/// each row of `before` pairs with a row of `after` with equal values. If 1
+/// row is left on each side, it is changed; else each row left in `before`
+/// is removed and each row left in `after` is added.
+pub fn diff(
+    def: &TableDef,
+    before: &Frame,
+    after: &Frame,
+    key_text: &(dyn Fn(&str) -> Option<String> + Sync),
+) -> Vec<Change> {
+    let keys: Vec<usize> = def
+        .key
+        .iter()
+        .filter_map(|k| def.columns.iter().position(|c| c.name == *k))
+        .collect();
+    let values: Vec<usize> = (0..def.columns.len())
+        .filter(|i| !keys.contains(i) && def.columns[*i].semantic != "source_span")
+        .collect();
+    // For each column: its index and the ids of its slots in each frame.
+    type Ids = Vec<(usize, Vec<u32>, Vec<u32>)>;
+    let ids = |cols: &[usize], null: &str| -> Ids {
+        cols.iter()
+            .map(|i| {
+                let a = slot_texts(&before.columns[*i], key_text, null);
+                let b = slot_texts(&after.columns[*i], key_text, null);
+                let (x, y) = joint_ids(&a, &b);
+                (*i, x, y)
+            })
+            .collect()
+    };
+    let kid = ids(&keys, "null");
+    // A null value is not equal to the text `null`.
+    let vid = ids(&values, "\0");
+    // The ids of a row of `before` (side 0) or `after` (side 1).
+    let id = |ids: &Ids, side: usize, row: usize| -> Vec<u32> {
+        ids.iter()
+            .map(|(c, x, y)| {
+                if side == 0 {
+                    x[before.columns[*c].slot(row)]
+                } else {
+                    y[after.columns[*c].slot(row)]
+                }
+            })
+            .collect()
+    };
+    let (na, nb) = (before.len(), after.len());
+    let mut out = Vec::new();
+    let (mut i, mut j) = (0, 0);
+    while i < na || j < nb {
+        let o = if i == na {
+            Ordering::Greater
+        } else if j == nb {
+            Ordering::Less
+        } else {
+            id(&kid, 0, i).cmp(&id(&kid, 1, j))
+        };
+        match o {
+            Ordering::Less => {
+                out.push(Change::Removed(i as u32));
+                i += 1;
+            }
+            Ordering::Greater => {
+                out.push(Change::Added(j as u32));
+                j += 1;
+            }
+            Ordering::Equal => {
+                let k = id(&kid, 0, i);
+                let mut ie = i + 1;
+                while ie < na && id(&kid, 0, ie) == k {
+                    ie += 1;
+                }
+                let mut je = j + 1;
+                while je < nb && id(&kid, 1, je) == k {
+                    je += 1;
+                }
+                let bv: Vec<Vec<u32>> = (j..je).map(|r| id(&vid, 1, r)).collect();
+                let mut used = vec![false; bv.len()];
+                let mut left_a = Vec::new();
+                for r in i..ie {
+                    let v = id(&vid, 0, r);
+                    match (0..bv.len()).find(|x| !used[*x] && bv[*x] == v) {
+                        Some(x) => used[x] = true,
+                        None => left_a.push(r as u32),
+                    }
+                }
+                let left_b: Vec<u32> = (0..bv.len())
+                    .filter(|x| !used[*x])
+                    .map(|x| (j + x) as u32)
+                    .collect();
+                if let ([a], [b]) = (left_a.as_slice(), left_b.as_slice()) {
+                    out.push(Change::Changed(*a, *b));
+                } else {
+                    out.extend(left_a.into_iter().map(Change::Removed));
+                    out.extend(left_b.into_iter().map(Change::Added));
+                }
+                i = ie;
+                j = je;
+            }
+        }
+    }
+    out
+}
+
+/// One page of the changes of a table, with the counts of all changes.
+pub struct DiffPage {
+    pub columns: Vec<String>,
+    pub rows: Vec<DiffRow>,
+    pub counts: DiffCounts,
+    pub total: usize,
+    pub next: Option<String>,
+}
+
+/// The page of the changes from `before` to `after`, with at most
+/// [`MAX_ROWS`] rows. The selection takes only `columns`, `limit` and
+/// `cursor`.
+pub fn diff_page(
+    def: &TableDef,
+    before: &Frame,
+    after: &Frame,
+    sel: &Selection,
+    key_text: &(dyn Fn(&str) -> Option<String> + Sync),
+) -> Result<DiffPage, String> {
+    if !sel.filters.is_empty() || !sel.typed.is_empty() || sel.sort.is_some() {
+        return Err("a difference takes only columns, limit and cursor".into());
+    }
+    let (names, idx) = projection(def, sel)?;
+    let changes = diff(def, before, after, key_text);
+    let mut counts = DiffCounts::default();
+    for c in &changes {
+        match c {
+            Change::Added(_) => counts.added += 1,
+            Change::Removed(_) => counts.removed += 1,
+            Change::Changed(..) => counts.changed += 1,
+        }
+    }
+    let total = changes.len();
+    let (start, end) = bounds(sel, total)?;
+    let row =
+        |f: &Frame, r: u32| -> Vec<Value> { idx.iter().map(|i| f.value(r as usize, *i)).collect() };
+    let rows = changes[start..end]
+        .iter()
+        .map(|c| match *c {
+            Change::Added(b) => DiffRow {
+                change: RowChange::Added,
+                row: row(after, b),
+                before: None,
+            },
+            Change::Removed(a) => DiffRow {
+                change: RowChange::Removed,
+                row: row(before, a),
+                before: None,
+            },
+            Change::Changed(a, b) => DiffRow {
+                change: RowChange::Changed,
+                row: row(after, b),
+                before: Some(row(before, a)),
+            },
+        })
+        .collect();
+    Ok(DiffPage {
+        columns: names,
+        rows,
+        counts,
+        total,
+        next: (end < total).then(|| format!("o{end}")),
+    })
 }
 
 /// The page of the rows that match the filters, in the order of the

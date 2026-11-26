@@ -11,7 +11,7 @@ use arrow_array::cast::AsArray;
 use arrow_array::types::UInt64Type;
 use arrow_array::{Array, RecordBatch};
 use rsim_contract::table::{
-    self, Selection, SummarizeOut, TableDef, TableOut, TablesOut, UniqueOut,
+    self, Selection, SummarizeOut, TableDef, TableDiffOut, TableOut, TablesOut, UniqueOut,
 };
 use rsim_core::{FunctionId, SourceSpan};
 use rsim_functions::{
@@ -762,6 +762,33 @@ fn rows_out(topology: &str, t: &Loaded, d: &TableDef, p: frame::Page) -> TableOu
         total: p.total,
         next_cursor: p.next,
     }
+}
+
+/// The changes of the rows of a table from the twin `against` to the twin
+/// `t`, in key order. A column of source spans is not compared.
+pub fn diff(
+    topology: &str,
+    t: &Loaded,
+    against: &Loaded,
+    name: &str,
+    sel: &Selection,
+) -> Result<TableDiffOut, QueryError> {
+    let d = def(name)?;
+    let p =
+        frame::diff_page(d, frame(against, d)?, frame(t, d)?, sel, &key_text).map_err(invalid)?;
+    Ok(TableDiffOut {
+        rsim_json: VERSION,
+        kind: "table_diff".into(),
+        topology: topology.to_string(),
+        twin: t.identity.clone(),
+        against: against.identity.clone(),
+        table: d.name.to_string(),
+        columns: p.columns,
+        counts: p.counts,
+        rows: p.rows,
+        total: p.total,
+        next_cursor: p.next,
+    })
 }
 
 /// The verb `show`: the selected rows.

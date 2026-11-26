@@ -1064,6 +1064,58 @@
         "title": "Device",
         "type": "object"
       },
+      "DiffCounts": {
+        "description": "Change counts",
+        "properties": {
+          "added": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "changed": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "removed": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "added",
+          "removed",
+          "changed"
+        ],
+        "type": "object"
+      },
+      "DiffRow": {
+        "description": "Changed row",
+        "properties": {
+          "before": {
+            "description": "The row of `against` for a changed row.",
+            "items": true,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "change": {
+            "$ref": "#/components/schemas/RowChange"
+          },
+          "row": {
+            "description": "The row of the twin, or the row of `against` for a removed row.",
+            "items": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "change",
+          "row"
+        ],
+        "type": "object"
+      },
       "EdgeDeviceBinding": {
         "additionalProperties": false,
         "description": "Edge device binding",
@@ -3235,6 +3287,15 @@
         "title": "RoutesOut",
         "type": "object"
       },
+      "RowChange": {
+        "description": "Row change",
+        "enum": [
+          "added",
+          "removed",
+          "changed"
+        ],
+        "type": "string"
+      },
       "SecretInput": {
         "additionalProperties": false,
         "description": "Secret",
@@ -4438,6 +4499,74 @@
           "verbs",
           "needs"
         ],
+        "type": "object"
+      },
+      "TableDiffOut": {
+        "description": "Table difference",
+        "properties": {
+          "against": {
+            "$ref": "#/components/schemas/TwinJson",
+            "description": "Compared twin"
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/DiffCounts"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "next_cursor": {
+            "description": "Next cursor",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/DiffRow"
+            },
+            "type": "array"
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "table": {
+            "type": "string"
+          },
+          "topology": {
+            "type": "string"
+          },
+          "total": {
+            "description": "Total changed rows",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "twin": {
+            "$ref": "#/components/schemas/TwinJson"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "topology",
+          "twin",
+          "against",
+          "table",
+          "columns",
+          "counts",
+          "rows",
+          "total"
+        ],
+        "title": "TableDiffOut",
         "type": "object"
       },
       "TableOut": {
@@ -8154,6 +8283,100 @@
           }
         ],
         "summary": "Source lines"
+      }
+    },
+    "/v1/twins/{twin}/tables/{table}/diff": {
+      "get": {
+        "operationId": "diffTable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Compared twin",
+            "in": "query",
+            "name": "against",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Columns",
+            "in": "query",
+            "name": "columns",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiffOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "Table difference"
       }
     },
     "/v1/twins/{twin}/tables/{table}/lpm": {

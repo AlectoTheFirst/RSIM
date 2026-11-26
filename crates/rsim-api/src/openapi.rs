@@ -8,7 +8,7 @@ use rsim_contract::claim::{ClaimOut, ClaimsOut};
 use rsim_contract::json::{PathAnswerOut, PathBriefOut, SetAnswerOut, SetBriefOut, StepOut};
 use rsim_contract::schema;
 use rsim_contract::source::SourceLinesOut;
-use rsim_contract::table::{SummarizeOut, TableOut, TablesOut, UniqueOut};
+use rsim_contract::table::{SummarizeOut, TableDiffOut, TableOut, TablesOut, UniqueOut};
 use rsim_contract::topology::TopologyOut;
 
 use crate::handler::contract_version;
@@ -142,6 +142,20 @@ pub const ROUTES: &[Route] = &[
         query: &[("address", "Address"), ("column", "Prefix column")],
         body: &[],
         ok: (200, &[schema::<TableOut>]),
+    },
+    Route {
+        method: "get",
+        path: "/v1/twins/{twin}/tables/{table}/diff",
+        id: "diffTable",
+        summary: "Table difference",
+        query: &[
+            ("against", "Compared twin"),
+            ("columns", "Columns"),
+            ("limit", "Page size"),
+            ("cursor", "Cursor"),
+        ],
+        body: &[],
+        ok: (200, &[schema::<TableDiffOut>]),
     },
     Route {
         method: "get",
