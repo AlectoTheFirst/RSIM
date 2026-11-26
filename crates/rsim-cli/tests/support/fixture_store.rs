@@ -101,7 +101,7 @@ pub fn write(dir: &Path) {
         vec![
             s(i),
             s("00:00:5e:00:53:01"),
-            Cell::Null,
+            Cell::U64(1500),
             Cell::Bool(true),
             Cell::Null,
             parent.map_or(Cell::Null, s),

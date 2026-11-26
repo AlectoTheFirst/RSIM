@@ -119,6 +119,89 @@ pub(crate) fn speed_duplex(subject: String, facts: Option<&LinkFacts>) -> Eviden
     }
 }
 
+/// The row of `path-mtu` for a link: refuted if the 2 ends have different
+/// MTUs or an end is below `min`, confirmed if both MTUs are known, else
+/// unknown.
+pub fn path_mtu(
+    l: &crate::tables::TwinLink,
+    mtu: &crate::tables::Mtus,
+    min: Option<u64>,
+) -> Evidence {
+    let (local, remote) = l.mtu(mtu);
+    let (a, b) = (local.and_then(|m| m.0), remote.and_then(|m| m.0));
+    let mut refuted = Vec::new();
+    let mut reason = "below_minimum";
+    if let (Some(a), Some(b)) = (a, b)
+        && a != b
+    {
+        refuted.push(format!("MTU {a} and {b}"));
+        reason = "mismatch";
+    }
+    if let Some(m) = min {
+        let mut low: Vec<u64> = [a, b].into_iter().flatten().filter(|v| *v < m).collect();
+        low.dedup();
+        for v in low {
+            refuted.push(format!("MTU {v} is below {m}"));
+        }
+    }
+    let (result, reason, detail) = if !refuted.is_empty() {
+        (ClaimResult::Refuted, reason, refuted.join("; "))
+    } else if a.is_some() && b.is_some() {
+        (ClaimResult::Confirmed, "match", String::new())
+    } else {
+        (
+            ClaimResult::Unknown,
+            "not_collected",
+            "the MTU of an end is not collected".to_string(),
+        )
+    };
+    let mut provenance = spans(&l.spans);
+    provenance.extend(local.iter().chain(remote.iter()).map(|(_, s)| s.clone()));
+    Evidence {
+        subject: format!("{} to {}", l.function, l.peer),
+        result,
+        expected: Some(json!({"mtu": a, "min": min})),
+        observed: Some(json!({"mtu": b})),
+        reason: reason.into(),
+        detail,
+        provenance,
+    }
+}
+
+/// The row of `path-mtu` for an egress interface with no far end: refuted
+/// if its MTU is below `min`, confirmed if its MTU is known, else unknown.
+pub fn end_mtu(e: &crate::tables::OpenEnd, mtu: &crate::tables::Mtus, min: u64) -> Evidence {
+    let row = e
+        .device
+        .as_ref()
+        .and_then(|d| mtu.get(&(d.clone(), e.interface.clone())));
+    let v = row.and_then(|m| m.0);
+    let (result, reason, detail) = match v {
+        Some(v) if v < min => (
+            ClaimResult::Refuted,
+            "below_minimum",
+            format!("MTU {v} is below {min}"),
+        ),
+        Some(_) => (ClaimResult::Confirmed, "match", String::new()),
+        None => (
+            ClaimResult::Unknown,
+            "not_collected",
+            "the MTU of the interface is not collected".to_string(),
+        ),
+    };
+    let mut provenance = spans(&e.spans);
+    provenance.extend(row.map(|(_, s)| s.clone()));
+    Evidence {
+        subject: e.function.to_string(),
+        result,
+        expected: Some(json!({"min": min})),
+        observed: Some(json!({"mtu": v})),
+        reason: reason.into(),
+        detail,
+        provenance,
+    }
+}
+
 /// The functions of the branches of an answer and of its replies.
 fn path_functions(a: &Answer, out: &mut BTreeSet<String>) {
     for b in a.branches() {
@@ -710,6 +793,22 @@ pub fn run(topology: &str, t: &Loaded, args: &ClaimArgs) -> Result<ClaimOut, Que
         "no-unknown" => {
             if let Some(a) = &answer {
                 no_unknown(a, "", &mut evidence);
+            }
+        }
+        "path-mtu" => {
+            let mtu = crate::tables::collected_mtu(t)
+                .map_err(|e| QueryError::new(ErrorCode::Store, e))?;
+            for l in crate::tables::twin_links(t) {
+                if t.function(&l.function).is_some_and(|f| keep(f.as_ref())) {
+                    evidence.push(path_mtu(&l, &mtu, args.min));
+                }
+            }
+            if let Some(min) = args.min {
+                for e in crate::tables::open_ends(t) {
+                    if t.function(&e.function).is_some_and(|f| keep(f.as_ref())) {
+                        evidence.push(end_mtu(&e, &mtu, min));
+                    }
+                }
             }
         }
         "bgp-peers-up" => (evidence, detail) = bgp_peers_up(&t.bgp, &in_scope),

@@ -533,6 +533,40 @@ pub const TABLES: &[TableDef] = &[
         needs: "a twin of a store snapshot with a collected ARP or neighbour table",
         collected: &["neighbours"],
     },
+    TableDef {
+        name: "links",
+        description: "Links",
+        key: &["device", "interface", "peer_device", "peer_interface"],
+        columns: &[
+            DEVICE,
+            col("interface", ColumnType::Text, "interface", "Interface"),
+            refers(
+                col("peer_device", ColumnType::Text, "device", "Peer device"),
+                "devices",
+                "device",
+            ),
+            col(
+                "peer_interface",
+                ColumnType::Text,
+                "interface",
+                "Peer interface",
+            ),
+            unit(col("mtu", ColumnType::Integer, "mtu", "MTU"), "bytes"),
+            unit(
+                col("peer_mtu", ColumnType::Integer, "mtu", "Peer MTU"),
+                "bytes",
+            ),
+            unit(col("mbps", ColumnType::Integer, "speed", "Speed"), "Mbit/s"),
+            unit(
+                col("peer_mbps", ColumnType::Integer, "speed", "Peer speed"),
+                "Mbit/s",
+            ),
+            PROVENANCE,
+        ],
+        verbs: BASE_VERBS,
+        needs: "the twin, and for the MTU a store snapshot with collected links",
+        collected: &[],
+    },
 ];
 
 /// The table of a name.

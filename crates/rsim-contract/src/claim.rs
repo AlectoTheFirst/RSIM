@@ -39,6 +39,12 @@ pub const CLAIMS: &[ClaimDef] = &[
         reads: &["speed and duplex of both link ends"],
     },
     ClaimDef {
+        name: "path-mtu",
+        description: "Same MTU on both link ends, at least the minimum",
+        scopes: &["twin", "devices", "query"],
+        reads: &["MTU of both link ends"],
+    },
+    ClaimDef {
         name: "no-unknown",
         description: "No Unknown branch",
         scopes: &["query"],
@@ -150,6 +156,9 @@ pub struct ClaimArgs {
     pub devices: Option<Vec<String>>,
     /// Path query
     pub query: Option<Map<String, Value>>,
+    /// Minimum MTU
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<u64>,
 }
 
 #[cfg(test)]
