@@ -191,6 +191,35 @@ fn a_step_and_a_claim_have_urls_below_their_query() {
 }
 
 #[test]
+fn a_query_and_a_claim_have_a_difference_against_a_held_twin() {
+    let s = state(None);
+    let stored: Value = serde_json::from_str(
+        &golden()
+            .into_iter()
+            .find(|(n, _)| n == "leaf-spine.json")
+            .unwrap()
+            .1,
+    )
+    .unwrap();
+    let q = make_query(&s, &stored);
+    let d = json(&get(&s, &format!("{q}/diff?against=builtin.leaf-spine")));
+    assert_eq!(d["kind"], "query_diff");
+    assert_eq!(
+        d["diff"]["counts"],
+        json!({"added": 0, "removed": 0, "changed": 0})
+    );
+    let c = json(&get(
+        &s,
+        "/v1/twins/builtin.leaf-spine/claims/path-mtu/diff?against=builtin.ecmp",
+    ));
+    assert_eq!(c["kind"], "claim_diff");
+    assert_eq!(c["against"]["id"], "builtin.ecmp");
+    assert!(c["counts"]["added"].as_u64().unwrap() > 0, "{c}");
+    let r = get(&s, "/v1/twins/builtin.leaf-spine/claims/path-mtu/diff");
+    assert_eq!(r.status, 422);
+}
+
+#[test]
 fn an_equal_etag_gives_304() {
     let s = state(None);
     let r = get(&s, "/v1/twins/builtin.ecmp/tables/devices/rows");
@@ -499,6 +528,33 @@ fn a_newer_snapshot_of_the_store_builds_in_the_background_and_keeps_the_previous
     assert_eq!(after, vec!["r1".to_string()]);
     // The previous snapshot still answers.
     assert_eq!(get(&s, &held).status, 200);
+    // The differences between the 2 held twins.
+    let d = json(&get(
+        &s,
+        &format!("/v1/twins/{second}/tables/devices/diff?against={first}"),
+    ));
+    // The console site1 gives the devices ap1, gw1 and sw1.
+    let removed: Vec<&Value> = d["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["change"] == "removed")
+        .map(|r| &r["row"][0])
+        .collect();
+    assert_eq!(removed, ["ap1", "gw1", "sw1"], "{d}");
+    assert_eq!(d["counts"], json!({"added": 0, "removed": 3, "changed": 0}));
+    let r = get(&s, &format!("{location}/diff?against={first}"));
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
+    assert_eq!(json(&r)["kind"], "query_diff");
+    let c = json(&get(
+        &s,
+        &format!("/v1/twins/{second}/claims/path-mtu/diff?against={first}"),
+    ));
+    assert_eq!(c["kind"], "claim_diff");
+    // The ETag of a difference against the alias holds the twin of the alias.
+    let alias = format!("/v1/twins/{second}/tables/devices/diff?against=store");
+    let tag = get(&s, &alias).header("etag").unwrap().to_string();
+    assert!(tag.starts_with(&format!("\"{second}.{second}.")), "{tag}");
     let later = format!("/v1/twins/{}/tables/devices/rows", next_second(&second));
     assert_eq!(get(&s, &later).status, 404);
     assert_eq!(json(&get(&s, "/v1/twins/builtin.ecmp")), builtin);
@@ -537,6 +593,9 @@ fn a_newer_snapshot_of_the_store_builds_in_the_background_and_keeps_the_previous
     let entry = store_entry(&s);
     assert_eq!(entry["held"], third.as_str(), "{entry}");
     assert_eq!(entry["previous"], second.as_str());
+    let mut again = req("GET", &alias);
+    again.headers.insert("if-none-match".into(), tag);
+    assert_eq!(handle(&s, &again).status, 200);
     let gone = get(&s, &held);
     assert_eq!(gone.status, 410);
     assert_eq!(json(&gone)["code"], "snapshot_replaced");

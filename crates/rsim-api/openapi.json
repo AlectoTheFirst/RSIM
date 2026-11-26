@@ -88,6 +88,41 @@
         ],
         "type": "object"
       },
+      "AnswerDiff": {
+        "description": "Answer difference",
+        "properties": {
+          "added_parts": {
+            "description": "The summary parts of the twin that `against` does not have.",
+            "items": {
+              "$ref": "#/components/schemas/PartJson"
+            },
+            "type": "array"
+          },
+          "branches": {
+            "items": {
+              "$ref": "#/components/schemas/BranchChange"
+            },
+            "type": "array"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/DiffCounts"
+          },
+          "removed_parts": {
+            "description": "The summary parts of `against` that the twin does not have.",
+            "items": {
+              "$ref": "#/components/schemas/PartJson"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "added_parts",
+          "removed_parts",
+          "counts",
+          "branches"
+        ],
+        "type": "object"
+      },
       "AnswerJson": {
         "properties": {
           "branches": {
@@ -369,6 +404,54 @@
         ],
         "type": "object"
       },
+      "BranchChange": {
+        "description": "Changed branch",
+        "properties": {
+          "before": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BranchSide"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The branch of `against` for a changed branch."
+          },
+          "branch": {
+            "$ref": "#/components/schemas/BranchSide",
+            "description": "The branch of the twin, or the branch of `against` for a removed branch."
+          },
+          "change": {
+            "$ref": "#/components/schemas/RowChange"
+          },
+          "first_step": {
+            "description": "The index of the first step that differs, for a changed branch.",
+            "format": "uint",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplyChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The change of the reply, for a changed branch."
+          }
+        },
+        "required": [
+          "change",
+          "branch"
+        ],
+        "type": "object"
+      },
       "BranchJson": {
         "properties": {
           "delay": {
@@ -398,6 +481,44 @@
           "packets",
           "delay",
           "steps"
+        ],
+        "type": "object"
+      },
+      "BranchSide": {
+        "description": "Branch of one twin",
+        "properties": {
+          "delay": {
+            "$ref": "#/components/schemas/DelayJson"
+          },
+          "index": {
+            "description": "Branch index",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "packets": {
+            "$ref": "#/components/schemas/PacketSetJson"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TraceStepJson"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The step at `first_step`, if the branch has it."
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/VerdictJson"
+          }
+        },
+        "required": [
+          "index",
+          "verdict",
+          "packets",
+          "delay"
         ],
         "type": "object"
       },
@@ -452,6 +573,67 @@
           "scopes",
           "reads"
         ],
+        "type": "object"
+      },
+      "ClaimDiffOut": {
+        "description": "Claim difference",
+        "properties": {
+          "against": {
+            "$ref": "#/components/schemas/TwinJson",
+            "description": "Compared twin"
+          },
+          "before": {
+            "$ref": "#/components/schemas/ClaimResult",
+            "description": "Result of the compared twin"
+          },
+          "claim": {
+            "type": "string"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/DiffCounts"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ClaimResult"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceChange"
+            },
+            "type": "array"
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "scope": {
+            "description": "Scope",
+            "type": "string"
+          },
+          "topology": {
+            "type": "string"
+          },
+          "twin": {
+            "$ref": "#/components/schemas/TwinJson"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "topology",
+          "twin",
+          "against",
+          "claim",
+          "scope",
+          "result",
+          "before",
+          "counts",
+          "rows"
+        ],
+        "title": "ClaimDiffOut",
         "type": "object"
       },
       "ClaimOut": {
@@ -1274,6 +1456,34 @@
           "reason",
           "detail",
           "provenance"
+        ],
+        "type": "object"
+      },
+      "EvidenceChange": {
+        "description": "Changed evidence row",
+        "properties": {
+          "before": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Evidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The row of `against` for a changed row."
+          },
+          "change": {
+            "$ref": "#/components/schemas/RowChange"
+          },
+          "row": {
+            "$ref": "#/components/schemas/Evidence",
+            "description": "The row of the twin, or the row of `against` for a removed row."
+          }
+        },
+        "required": [
+          "change",
+          "row"
         ],
         "type": "object"
       },
@@ -2538,6 +2748,47 @@
         ],
         "type": "object"
       },
+      "QueryDiffOut": {
+        "description": "Query difference",
+        "properties": {
+          "against": {
+            "$ref": "#/components/schemas/TwinJson",
+            "description": "Compared twin"
+          },
+          "diff": {
+            "$ref": "#/components/schemas/AnswerDiff"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "qid": {
+            "description": "Query identifier",
+            "type": "string"
+          },
+          "rsim_json": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "topology": {
+            "type": "string"
+          },
+          "twin": {
+            "$ref": "#/components/schemas/TwinJson"
+          }
+        },
+        "required": [
+          "rsim_json",
+          "kind",
+          "topology",
+          "twin",
+          "against",
+          "qid",
+          "diff"
+        ],
+        "title": "QueryDiffOut",
+        "type": "object"
+      },
       "QueryEcho": {
         "description": "Query input",
         "properties": {
@@ -2839,6 +3090,35 @@
         "required": [
           "forward_branch",
           "ran"
+        ],
+        "type": "object"
+      },
+      "ReplyChange": {
+        "description": "Reply change",
+        "properties": {
+          "before_ran": {
+            "description": "Reply ran on the compared twin",
+            "type": "boolean"
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnswerDiff"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The difference of the 2 reply answers, if both replies have an answer."
+          },
+          "ran": {
+            "description": "Reply ran",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ran",
+          "before_ran"
         ],
         "type": "object"
       },
@@ -7768,6 +8048,91 @@
         "summary": "Claim"
       }
     },
+    "/v1/twins/{twin}/claims/{claim}/diff": {
+      "get": {
+        "operationId": "diffClaim",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "claim",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Compared twin",
+            "in": "query",
+            "name": "against",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Devices",
+            "in": "query",
+            "name": "device",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Minimum MTU",
+            "in": "query",
+            "name": "min",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDiffOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "Claim difference"
+      }
+    },
     "/v1/twins/{twin}/coverage": {
       "get": {
         "operationId": "getCoverage",
@@ -8148,6 +8513,73 @@
           }
         ],
         "summary": "Query claim"
+      }
+    },
+    "/v1/twins/{twin}/queries/{qid}/diff": {
+      "get": {
+        "operationId": "diffQuery",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "qid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Compared twin",
+            "in": "query",
+            "name": "against",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryDiffOut"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "Query difference"
       }
     },
     "/v1/twins/{twin}/queries/{qid}/topology": {

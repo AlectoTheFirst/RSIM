@@ -6,6 +6,7 @@
 pub mod args;
 pub mod claims;
 pub mod commands;
+pub mod diff;
 pub mod error;
 pub mod frame;
 pub mod json;

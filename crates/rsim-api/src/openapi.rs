@@ -5,6 +5,7 @@ use serde_json::{Map, Value, json};
 
 use rsim_contract::args::{PathQueryArgs, SetQueryArgs};
 use rsim_contract::claim::{ClaimOut, ClaimsOut};
+use rsim_contract::diff::{ClaimDiffOut, QueryDiffOut};
 use rsim_contract::json::{PathAnswerOut, PathBriefOut, SetAnswerOut, SetBriefOut, StepOut};
 use rsim_contract::schema;
 use rsim_contract::source::SourceLinesOut;
@@ -233,6 +234,19 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         method: "get",
+        path: "/v1/twins/{twin}/claims/{claim}/diff",
+        id: "diffClaim",
+        summary: "Claim difference",
+        query: &[
+            ("against", "Compared twin"),
+            ("device", "Devices"),
+            ("min", "Minimum MTU"),
+        ],
+        body: &[],
+        ok: (200, &[schema::<ClaimDiffOut>]),
+    },
+    Route {
+        method: "get",
         path: "/v1/twins/{twin}/topology",
         id: "getTopology",
         summary: "Topology",
@@ -256,6 +270,15 @@ pub const ROUTES: &[Route] = &[
         query: &[("format", "Format")],
         body: &[],
         ok: (200, &[schema::<TopologyOut>]),
+    },
+    Route {
+        method: "get",
+        path: "/v1/twins/{twin}/queries/{qid}/diff",
+        id: "diffQuery",
+        summary: "Query difference",
+        query: &[("against", "Compared twin")],
+        body: &[],
+        ok: (200, &[schema::<QueryDiffOut>]),
     },
     Route {
         method: "post",
