@@ -166,6 +166,7 @@ pub fn load_store_at(folder: &str, cycle: Option<u64>) -> Result<Loaded, QueryEr
         facts,
         seen,
         fabric,
+        mtu,
         tables: Default::default(),
         source: Some(crate::sources::SourceStore::new(store, snap)),
     })
