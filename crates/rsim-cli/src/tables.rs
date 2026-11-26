@@ -7,6 +7,9 @@ use std::fmt::Write;
 use std::net::IpAddr;
 use std::sync::OnceLock;
 
+use arrow_array::cast::AsArray;
+use arrow_array::types::UInt64Type;
+use arrow_array::{Array, RecordBatch};
 use rsim_contract::table::{
     self, Selection, SummarizeOut, TableDef, TableOut, TablesOut, UniqueOut,
 };
@@ -49,7 +52,7 @@ pub fn def(name: &str) -> Result<&'static TableDef, QueryError> {
 
 /// The columns of each table of a twin, built when a request first names
 /// the table and kept with the twin.
-pub struct TableCache(Vec<OnceLock<Frame>>);
+pub struct TableCache(Vec<OnceLock<Result<Frame, String>>>);
 
 impl Default for TableCache {
     fn default() -> Self {
@@ -57,13 +60,17 @@ impl Default for TableCache {
     }
 }
 
-/// The columns of a table of a loaded twin.
-pub fn frame<'a>(t: &'a Loaded, def: &'static TableDef) -> &'a Frame {
+/// The columns of a table of a loaded twin, or the error `store` if a
+/// store table of the table is not readable.
+pub fn frame<'a>(t: &'a Loaded, def: &'static TableDef) -> Result<&'a Frame, QueryError> {
     let i = table::TABLES
         .iter()
         .position(|d| d.name == def.name)
         .expect("a table of the catalog");
-    t.tables.0[i].get_or_init(|| build(t, def))
+    t.tables.0[i]
+        .get_or_init(|| build(t, def))
+        .as_ref()
+        .map_err(|e| QueryError::new(ErrorCode::Store, e.clone()))
 }
 
 /// The text by which a prefix sorts in the key order: its family, its
@@ -79,8 +86,12 @@ pub fn key_text(s: &str) -> Option<String> {
 }
 
 /// All rows of a table as columns, in key order.
-fn build(t: &Loaded, def: &'static TableDef) -> Frame {
+fn build(t: &Loaded, def: &'static TableDef) -> Result<Frame, String> {
     let mut b = FrameBuilder::new(def);
+    if !def.collected.is_empty() {
+        collected_rows(t, def, &mut b)?;
+        return Ok(b.finish(&key_text));
+    }
     match def.name {
         "devices" => {
             let mut names: BTreeSet<String> = t.devices().iter().map(ToString::to_string).collect();
@@ -218,7 +229,153 @@ fn build(t: &Loaded, def: &'static TableDef) -> Frame {
         }
         _ => {}
     }
-    b.finish(&key_text)
+    Ok(b.finish(&key_text))
+}
+
+/// A value of a store table.
+enum Owned {
+    Null,
+    Text(String),
+    Integer(u64),
+    Boolean(bool),
+    List(Vec<String>),
+}
+
+impl Owned {
+    fn cell(&self) -> Cell<'_> {
+        match self {
+            Owned::Null => Cell::Null,
+            Owned::Text(s) => Cell::Text(s),
+            Owned::Integer(n) => Cell::Integer(*n),
+            Owned::Boolean(v) => Cell::Boolean(*v),
+            Owned::List(v) => Cell::List(v),
+        }
+    }
+
+    /// The value as text, for a key and for a list column; none for null.
+    fn text(&self) -> Option<String> {
+        match self {
+            Owned::Null | Owned::List(_) => None,
+            Owned::Text(s) => Some(s.clone()),
+            Owned::Integer(n) => Some(n.to_string()),
+            Owned::Boolean(v) => Some(v.to_string()),
+        }
+    }
+}
+
+/// The value of the column `name` in a row of a store table: null if the
+/// table has no such column or the cell is null.
+fn store_value(batch: &RecordBatch, name: &str, row: usize) -> Owned {
+    let Some(c) = batch.column_by_name(name) else {
+        return Owned::Null;
+    };
+    if c.is_null(row) {
+        return Owned::Null;
+    }
+    if let Some(a) = c.as_string_opt::<i32>() {
+        Owned::Text(a.value(row).to_string())
+    } else if let Some(a) = c.as_primitive_opt::<UInt64Type>() {
+        Owned::Integer(a.value(row))
+    } else if let Some(a) = c.as_boolean_opt() {
+        Owned::Boolean(a.value(row))
+    } else {
+        Owned::Null
+    }
+}
+
+/// The source span of a row of a store table, as text.
+fn row_span(device: &str, table: &str, batch: &RecordBatch, row: usize) -> String {
+    let blob = store_value(batch, "blob", row).text().unwrap_or_default();
+    let index = match store_value(batch, "index", row) {
+        Owned::Integer(n) => n,
+        _ => 0,
+    };
+    spans(&[rsim_ingest::collected::row_span(
+        device, table, &blob, index,
+    )])
+    .remove(0)
+}
+
+/// The rows of a table of the collected state, read from the store tables
+/// of its registry row (`TableDef::collected`). A twin with no store has no
+/// rows.
+fn collected_rows(t: &Loaded, def: &TableDef, b: &mut FrameBuilder) -> Result<(), String> {
+    let Some(src) = &t.source else {
+        return Ok(());
+    };
+    let mut tables = Vec::new();
+    for name in def.collected {
+        let schema =
+            rsim_store::table(name).ok_or_else(|| format!("{name} is not a store table"))?;
+        let batches = src
+            .store
+            .read_table(&src.snapshot, schema)
+            .map_err(|e| e.to_string())?;
+        tables.push((*name, batches));
+    }
+    if let [(name, batches)] = tables.as_slice() {
+        for (device, batch) in batches {
+            for row in 0..batch.num_rows() {
+                let values: Vec<Owned> = def
+                    .columns
+                    .iter()
+                    .map(|c| match c.name {
+                        "device" => Owned::Text(device.clone()),
+                        "provenance" => Owned::List(vec![row_span(device, name, batch, row)]),
+                        n => store_value(batch, n, row),
+                    })
+                    .collect();
+                let cells: Vec<Cell> = values.iter().map(Owned::cell).collect();
+                b.push(&cells);
+            }
+        }
+        return Ok(());
+    }
+    // 2 or more store tables: the rows of each distinct key, in the order
+    // of the store tables.
+    let key: Vec<&str> = def.key.iter().copied().filter(|k| *k != "device").collect();
+    type Rows<'a> = Vec<(&'a str, &'a RecordBatch, usize)>;
+    let mut by_key: BTreeMap<(String, Vec<Option<String>>), Rows<'_>> = BTreeMap::new();
+    for (name, batches) in &tables {
+        for (device, batch) in batches {
+            for row in 0..batch.num_rows() {
+                let k = key
+                    .iter()
+                    .map(|c| store_value(batch, c, row).text())
+                    .collect();
+                by_key
+                    .entry((device.clone(), k))
+                    .or_default()
+                    .push((*name, batch, row));
+            }
+        }
+    }
+    for ((device, _), rows) in &by_key {
+        let values: Vec<Owned> = def
+            .columns
+            .iter()
+            .map(|c| match (c.name, c.kind) {
+                ("device", _) => Owned::Text(device.clone()),
+                ("provenance", _) => Owned::List(
+                    rows.iter()
+                        .map(|(name, batch, row)| row_span(device, name, batch, *row))
+                        .collect(),
+                ),
+                (n, table::ColumnType::List) => Owned::List(
+                    rows.iter()
+                        .filter_map(|(_, batch, row)| store_value(batch, n, *row).text())
+                        .collect(),
+                ),
+                (n, _) => rows
+                    .iter()
+                    .find(|(_, batch, _)| batch.column_by_name(n).is_some())
+                    .map_or(Owned::Null, |(_, batch, row)| store_value(batch, n, *row)),
+            })
+            .collect();
+        let cells: Vec<Cell> = values.iter().map(Owned::cell).collect();
+        b.push(&cells);
+    }
+    Ok(())
 }
 
 /// The row of a device: its facts, each with its reason, or with no facts
@@ -435,7 +592,7 @@ pub fn show(
     sel: &Selection,
 ) -> Result<TableOut, QueryError> {
     let d = def(name)?;
-    let p = frame::show(d, frame(t, d), sel).map_err(invalid)?;
+    let p = frame::show(d, frame(t, d)?, sel).map_err(invalid)?;
     Ok(rows_out(topology, t, d, p))
 }
 
@@ -472,7 +629,7 @@ pub fn lpm(
     sel: &Selection,
 ) -> Result<TableOut, QueryError> {
     let d = def(name)?;
-    let p = frame::lpm(d, frame(t, d), sel, column, address).map_err(invalid)?;
+    let p = frame::lpm(d, frame(t, d)?, sel, column, address).map_err(invalid)?;
     Ok(rows_out(topology, t, d, p))
 }
 
@@ -485,7 +642,7 @@ pub fn unique(
     sel: &Selection,
 ) -> Result<UniqueOut, QueryError> {
     let d = def(name)?;
-    let rows = frame::unique(d, frame(t, d), sel, columns).map_err(invalid)?;
+    let rows = frame::unique(d, frame(t, d)?, sel, columns).map_err(invalid)?;
     let mut cols = columns.to_vec();
     cols.push("count".into());
     Ok(UniqueOut {
@@ -507,7 +664,7 @@ pub fn summarize(
     sel: &Selection,
 ) -> Result<SummarizeOut, QueryError> {
     let d = def(name)?;
-    let (total, columns) = frame::summarize(d, frame(t, d), sel).map_err(invalid)?;
+    let (total, columns) = frame::summarize(d, frame(t, d)?, sel).map_err(invalid)?;
     Ok(SummarizeOut {
         rsim_json: VERSION,
         kind: "table_summary".into(),
