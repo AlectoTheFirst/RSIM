@@ -38,6 +38,9 @@ pub struct Estate {
     pub seen: Vec<crate::links::SeenNeighbour>,
     /// The circuits of each Equinix account, lowered or not.
     pub fabric: BTreeMap<String, Vec<equinix::CircuitRow>>,
+    /// The MTU of the interfaces of the IOS-XR, IOS-XE, UniFi and VeloCloud
+    /// devices.
+    pub mtu: crate::mtu::Mtus,
 }
 
 fn short(h: &Hash) -> String {
@@ -302,6 +305,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         facts: BTreeMap::new(),
         seen: Vec::new(),
         fabric: BTreeMap::new(),
+        mtu: BTreeMap::new(),
     };
     let mut routers: BTreeMap<String, Router> = BTreeMap::new();
     #[allow(clippy::type_complexity)]
@@ -503,6 +507,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
             );
         }
         summaries.extend(velocloud::summaries(&ent));
+        e.mtu.extend(velocloud::mtus(&ent));
         ents.push(ent);
     }
     // The Equinix accounts: the coverage, the summary of the gates and the
@@ -543,11 +548,26 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 .filter_map(|l| nxos::state::mac(l.mac.as_deref()?)),
         );
     }
-    for (cfg, _, sections) in xr.values() {
-        device_macs.extend(iosxr::device_macs(cfg, sections));
-    }
-    for (cfg, _, sections) in xe.values() {
-        device_macs.extend(iosxe::device_macs(cfg, sections));
+    let ios = xr
+        .iter()
+        .map(|(d, (cfg, _, sections))| (d, iosxr::interface_states(cfg, sections)))
+        .chain(
+            xe.iter()
+                .map(|(d, (cfg, _, sections))| (d, iosxe::interface_states(cfg, sections))),
+        );
+    for (device, states) in ios {
+        for (name, s) in states {
+            device_macs.extend(s.mac);
+            if let Some(bytes) = s.mtu {
+                e.mtu.insert(
+                    (device.clone(), name),
+                    crate::mtu::InterfaceMtu {
+                        bytes,
+                        span: s.span,
+                    },
+                );
+            }
+        }
     }
     for (_, col, _, _) in switches.values() {
         device_macs.extend(
@@ -607,6 +627,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     }
     for (_, site, files) in &parsed {
         summaries.extend(unifi::link_summary(site, files));
+        e.mtu.extend(unifi::mtus(site, files));
     }
     // The BGP peers and the local addresses of each router and switch.
     let mut peers = Peers {

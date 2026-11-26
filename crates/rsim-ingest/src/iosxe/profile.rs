@@ -196,3 +196,8 @@ pub const STATIC_CODES: &[&str] = &["S", "U"];
 /// route. No document or device confirms the value for IOS-XE. A collected
 /// route resolves the way the device shows it.
 pub const COMPUTED_THROUGH_DEFAULT: bool = true;
+
+/// The encapsulations of `show interfaces` whose MTU is the layer 3 MTU:
+/// the MTU of IOS-XE holds no Ethernet header and no 802.1Q tag. Not
+/// confirmed against a device.
+pub const MTU_ENCAPSULATIONS: &[&str] = &["ARPA", "802.1Q Virtual LAN"];

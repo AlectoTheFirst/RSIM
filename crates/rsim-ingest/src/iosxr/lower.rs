@@ -225,8 +225,12 @@ pub(crate) fn error<T>(s: &Section<T>) -> Option<&str> {
     }
 }
 
-/// The MACs of the interfaces of a router in `show interfaces`.
-pub fn device_macs(cfg: &Config, sections: &BTreeMap<String, (Vec<u8>, String)>) -> BTreeSet<Mac> {
+/// The state of each interface of a router in `show interfaces`; empty if
+/// the section is not in the snapshot or its template does not parse it.
+pub fn interface_states(
+    cfg: &Config,
+    sections: &BTreeMap<String, (Vec<u8>, String)>,
+) -> BTreeMap<String, state::IfState> {
     let only: BTreeMap<String, (Vec<u8>, String)> = sections
         .iter()
         .filter(|(k, _)| k.as_str() == "interfaces")
@@ -235,7 +239,6 @@ pub fn device_macs(cfg: &Config, sections: &BTreeMap<String, (Vec<u8>, String)>)
     state::read(&only, &super::names(cfg))
         .interfaces
         .and_then(Result::ok)
-        .map(|m| m.values().filter_map(|s| s.mac).collect())
         .unwrap_or_default()
 }
 

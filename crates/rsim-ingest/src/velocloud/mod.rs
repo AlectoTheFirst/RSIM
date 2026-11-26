@@ -32,6 +32,41 @@ pub const SECTIONS: &[&str] = &[
     "bgp_sessions",
 ];
 
+/// The MTU of the WAN interface of each WAN link of each edge, from the
+/// `MTU` of its WAN module row. A link that is not known gives none, and an
+/// interface whose links give different MTUs has none.
+pub fn mtus(ent: &Enterprise) -> crate::mtu::Mtus {
+    let mut out = crate::mtu::Mtus::new();
+    let mut differ = std::collections::BTreeSet::new();
+    for e in &ent.edges {
+        for l in e.links.iter().filter(|l| l.ambiguous.is_none()) {
+            let (Some(interface), Some((bytes, span))) = (&l.interface, &l.mtu) else {
+                continue;
+            };
+            let key = (e.device.clone(), interface.clone());
+            match out.get(&key) {
+                Some(m) if m.bytes != *bytes => {
+                    differ.insert(key);
+                }
+                Some(_) => {}
+                None => {
+                    out.insert(
+                        key,
+                        crate::mtu::InterfaceMtu {
+                            bytes: *bytes,
+                            span: span.clone(),
+                        },
+                    );
+                }
+            }
+        }
+    }
+    for k in &differ {
+        out.remove(k);
+    }
+    out
+}
+
 /// The twin device of an edge of the store device of an enterprise.
 pub fn device_name(store_device: &str, edge: &str) -> String {
     format!("{store_device}/edge/{edge}")

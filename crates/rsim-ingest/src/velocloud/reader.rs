@@ -267,6 +267,8 @@ pub struct WanLink {
     /// link: the rows share the logicalId and none has the `internalId` of
     /// the WAN module. The link is then not known.
     pub ambiguous: Option<usize>,
+    /// The `MTU` of the WAN module row, with the span of the value.
+    pub mtu: Option<(u64, SourceSpan)>,
     pub spans: Vec<SourceSpan>,
 }
 
@@ -1309,6 +1311,9 @@ fn links(
             vpn_state: st.and_then(|s| s.text("vpnState")),
             backup_state: st.and_then(|s| s.text("backupState")),
             ambiguous,
+            mtu: wan_row
+                .and_then(|w| w.get("MTU"))
+                .and_then(|m| Some((m.v.as_u64().filter(|v| *v > 0)?, m.span()))),
             spans,
             logical_id: lid,
         });

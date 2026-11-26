@@ -61,6 +61,7 @@ fn loaded() -> Loaded {
         facts: BTreeMap::new(),
         seen: estate.seen,
         fabric: estate.fabric,
+        mtu: estate.mtu,
         tables: Default::default(),
         source: None,
     }

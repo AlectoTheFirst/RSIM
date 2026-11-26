@@ -918,6 +918,47 @@ pub fn link_summary(site: &Site, files: &Files) -> BTreeMap<String, crate::links
     out
 }
 
+/// The largest Ethernet frame with the FCS of a port of a UniFi device with
+/// the flag `jumboframe_enabled` off. Not confirmed against a device.
+pub const FRAME_BYTES: u64 = 1518;
+
+/// The largest Ethernet frame with the FCS of a port of a UniFi device with
+/// the flag `jumboframe_enabled` on. Not confirmed against a device.
+pub const JUMBO_FRAME_BYTES: u64 = 9216;
+
+/// The bytes of a frame with the FCS on top of the layer 3 packet: the
+/// Ethernet header and the FCS.
+pub const FRAME_OVERHEAD_BYTES: u64 = 18;
+
+/// The MTU of each port of each device of a site with the flag
+/// `jumboframe_enabled`, with the span of the device record.
+pub fn mtus(site: &Site, files: &Files) -> crate::mtu::Mtus {
+    let mut out = crate::mtu::Mtus::new();
+    for d in &site.devices {
+        let Some(jumbo) = d.jumbo else {
+            continue;
+        };
+        let span = SourceSpan::row(
+            &files.devices,
+            u32::try_from(d.index + 1).unwrap_or(u32::MAX),
+        );
+        for p in ports(d) {
+            out.insert(
+                (device_name(d), format!("port/{}", p.idx)),
+                crate::mtu::InterfaceMtu {
+                    bytes: if jumbo {
+                        JUMBO_FRAME_BYTES
+                    } else {
+                        FRAME_BYTES
+                    } - FRAME_OVERHEAD_BYTES,
+                    span: span.clone(),
+                },
+            );
+        }
+    }
+    out
+}
+
 /// The endpoint name of a client: its name and the end of its MAC.
 pub fn endpoint_id(c: &Client) -> String {
     let tail: String = c.mac.chars().filter(|x| *x != ':').skip(6).collect();

@@ -13,8 +13,8 @@ use rsim_core::{Prefix, SourceSpan};
 use rsim_core::Mac;
 
 use super::profile::{
-    ARP_OWN_AGE, ARP_VRF_FAILED, ARP_VRF_LINE, DEFAULT_VRF, HSRP_LOCAL, PLATFORM,
-    ROUTE_FLAGS_NOT_LOWERED, STATE_ADMIN_DOWN, STATE_DOWN, STATE_UP, STP_FORWARDING,
+    ARP_OWN_AGE, ARP_VRF_FAILED, ARP_VRF_LINE, DEFAULT_VRF, HSRP_LOCAL, MTU_ENCAPSULATIONS,
+    PLATFORM, ROUTE_FLAGS_NOT_LOWERED, STATE_ADMIN_DOWN, STATE_DOWN, STATE_UP, STP_FORWARDING,
     STP_MST_HEADER, STP_NOT_FORWARDING, TABLE_HEADERS, VRF_HEADER,
 };
 use crate::collected::MacRow;
@@ -370,6 +370,11 @@ fn interfaces(p: &Parsed, names: &Names) -> BTreeMap<String, IfState> {
                 } else {
                     None
                 },
+                mtu: MTU_ENCAPSULATIONS
+                    .contains(&p.text(r, "ENCAPSULATION").trim())
+                    .then(|| p.text(r, "MTU").trim().parse().ok())
+                    .flatten()
+                    .filter(|m: &u64| *m > 0),
                 span,
             },
         );

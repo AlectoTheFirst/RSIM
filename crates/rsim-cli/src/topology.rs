@@ -837,6 +837,7 @@ mod tests {
             facts: BTreeMap::new(),
             seen: Vec::new(),
             fabric: BTreeMap::new(),
+            mtu: BTreeMap::new(),
             tables: Default::default(),
             source: None,
         }
@@ -880,6 +881,7 @@ mod tests {
             facts: BTreeMap::new(),
             seen: Vec::new(),
             fabric: BTreeMap::new(),
+            mtu: BTreeMap::new(),
             tables: Default::default(),
             source: None,
         }

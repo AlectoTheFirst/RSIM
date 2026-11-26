@@ -988,3 +988,42 @@ fn the_masked_lines_of_each_fixture_show_no_secret() {
         assert!(text.lines().count() > 0);
     }
 }
+
+#[test]
+fn the_wan_module_mtu_of_a_link_is_the_mtu_of_its_interface() {
+    let mut m = base();
+    m.get_mut("edge_modules").unwrap()["e-br"]["WAN"]["data"]["links"][1]["MTU"] = json!(1400);
+    let e = ent(&m);
+    let dia = &e.edge("e-br").unwrap().links[0];
+    assert_eq!(dia.interface.as_deref(), Some("GE2"));
+    assert_eq!(dia.mtu.as_ref().map(|m| m.0), Some(1400));
+    let mtu = rsim_ingest::velocloud::mtus(&e);
+    let br = rsim_ingest::velocloud::device_name(STORE, "e-br");
+    let at = |i: &str| mtu.get(&(br.clone(), i.to_string())).map(|m| m.bytes);
+    assert_eq!(at("GE1"), Some(1500));
+    assert_eq!(at("GE2"), Some(1400));
+    let span = &mtu[&(br.clone(), "GE2".to_string())].span;
+    assert_eq!(&*span.file, format!("{STORE}/edge_modules@b1"));
+}
+
+#[test]
+fn two_links_of_one_interface_with_different_mtus_give_no_mtu() {
+    let mut m = base();
+    let links = &mut m.get_mut("edge_modules").unwrap()["e-br"]["WAN"]["data"]["links"];
+    links[1]["MTU"] = json!(1400);
+    let mut e = ent(&m);
+    for l in &mut e
+        .edges
+        .iter_mut()
+        .find(|e| e.logical_id == "e-br")
+        .unwrap()
+        .links
+    {
+        l.interface = Some("GE1".into());
+    }
+    let br = rsim_ingest::velocloud::device_name(STORE, "e-br");
+    assert_eq!(
+        rsim_ingest::velocloud::mtus(&e).get(&(br, "GE1".to_string())),
+        None
+    );
+}

@@ -10,7 +10,10 @@ use std::sync::OnceLock;
 use rsim_core::{Mac, Prefix, SourceSpan};
 use rsim_textfsm::{Field, Library, Traced};
 
-use super::profile::{ARP_OWN, BACKUP_MARK, PLATFORM, STATE_ADMIN_DOWN, STATE_DOWN, STATE_UP};
+use super::profile::{
+    ARP_OWN, BACKUP_MARK, DOT1Q_TAG_BYTES, ENCAP_ARPA, ENCAP_DOT1Q, ETHERNET_HEADER_BYTES,
+    PLATFORM, STATE_ADMIN_DOWN, STATE_DOWN, STATE_UP,
+};
 use crate::links::Neighbour;
 use crate::nxos::names::Names;
 use crate::nxos::state::{mac, neighbour_name};
@@ -39,6 +42,9 @@ pub struct IfState {
     /// The speed in Mbit/s and the duplex, if the record prints them.
     pub speed_mbps: Option<u64>,
     pub full_duplex: Option<bool>,
+    /// The layer 3 MTU in bytes, for an Ethernet interface whose record
+    /// prints a nonzero MTU.
+    pub mtu: Option<u64>,
     pub span: SourceSpan,
 }
 
@@ -311,11 +317,29 @@ fn interfaces(p: &Parsed, names: &Names) -> BTreeMap<String, IfState> {
                     "half" | "half-duplex" => Some(false),
                     _ => None,
                 },
+                mtu: layer3_mtu(
+                    p.text(r, "MTU"),
+                    p.text(r, "ENCAPSULATION"),
+                    p.text(r, "VLAN_ID"),
+                ),
                 span,
             },
         );
     }
     out
+}
+
+/// The layer 3 MTU of a record of `show interfaces`: the printed MTU less
+/// the Ethernet header, and less one 802.1Q tag for a sub-interface with
+/// one VLAN. Another encapsulation and an MTU of 0 give `None`.
+fn layer3_mtu(mtu: &str, encapsulation: &str, vlan: &str) -> Option<u64> {
+    let printed: u64 = mtu.trim().parse().ok()?;
+    let overhead = match encapsulation.trim() {
+        ENCAP_ARPA => ETHERNET_HEADER_BYTES,
+        ENCAP_DOT1Q if !vlan.trim().is_empty() => ETHERNET_HEADER_BYTES + DOT1Q_TAG_BYTES,
+        _ => return None,
+    };
+    printed.checked_sub(overhead).filter(|m| *m > 0)
 }
 
 fn vrfs(p: &Parsed, names: &Names) -> Vec<VrfMembers> {

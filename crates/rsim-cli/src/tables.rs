@@ -256,11 +256,11 @@ fn build(t: &Loaded, def: &'static TableDef) -> Result<Frame, String> {
     Ok(b.finish(&key_text))
 }
 
-/// The MTU of each interface in the collected `links` rows of a store
-/// twin, with the span of the row, by device and interface.
+/// The collected MTU of each interface, with the span of its value, by
+/// device and interface.
 pub type Mtus = BTreeMap<(String, String), MtuRow>;
 
-/// The collected MTU of an interface and the span of its row.
+/// The collected MTU of an interface and the span of its value.
 pub type MtuRow = (Option<u64>, String);
 
 /// A link of the twin: an egress interface and the ingress function at the
@@ -385,29 +385,34 @@ pub fn open_ends(t: &Loaded) -> Vec<OpenEnd> {
     out
 }
 
-/// The collected MTU of each interface of a store twin; empty for a twin
-/// with no store.
+/// The collected MTU of each interface of a twin: the `links` rows of its
+/// store, then the MTU of the devices with no `links` rows (`Loaded::mtu`).
 pub fn collected_mtu(t: &Loaded) -> Result<Mtus, String> {
     let mut out = Mtus::new();
-    let Some(src) = &t.source else {
-        return Ok(out);
-    };
-    let batches = src
-        .store
-        .read_table(&src.snapshot, &rsim_store::LINKS)
-        .map_err(|e| e.to_string())?;
-    for (device, batch) in &batches {
-        for row in 0..batch.num_rows() {
-            let Some(interface) = store_value(batch, "interface", row).text() else {
-                continue;
-            };
-            let mtu = match store_value(batch, "mtu", row) {
-                Owned::Integer(n) => Some(n),
-                _ => None,
-            };
-            out.entry((device.clone(), interface))
-                .or_insert_with(|| (mtu, row_span(device, "links", batch, row)));
+    if let Some(src) = &t.source {
+        let batches = src
+            .store
+            .read_table(&src.snapshot, &rsim_store::LINKS)
+            .map_err(|e| e.to_string())?;
+        for (device, batch) in &batches {
+            for row in 0..batch.num_rows() {
+                let Some(interface) = store_value(batch, "interface", row).text() else {
+                    continue;
+                };
+                let mtu = match store_value(batch, "mtu", row) {
+                    Owned::Integer(n) => Some(n),
+                    _ => None,
+                };
+                out.entry((device.clone(), interface))
+                    .or_insert_with(|| (mtu, row_span(device, "links", batch, row)));
+            }
         }
+    }
+    for (key, m) in &t.mtu {
+        out.entry(key.clone()).or_insert_with(|| {
+            let span = spans(std::slice::from_ref(&m.span)).remove(0);
+            (Some(m.bytes), span)
+        });
     }
     Ok(out)
 }
@@ -903,6 +908,7 @@ mod tests {
             facts: BTreeMap::new(),
             seen: Vec::new(),
             fabric: BTreeMap::new(),
+            mtu: BTreeMap::new(),
             tables: Default::default(),
             source: None,
         }
