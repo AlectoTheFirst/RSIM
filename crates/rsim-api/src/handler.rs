@@ -6,10 +6,10 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use rsim_cli::commands::{self, Loaded};
-use rsim_cli::{ErrorCode, QueryError, args, claims, tables};
+use rsim_cli::{ErrorCode, QueryError, args, claims, diff, tables};
 use rsim_contract::args::Form;
 use rsim_contract::claim::ClaimArgs;
-use rsim_contract::json::{VERSION, to_text};
+use rsim_contract::json::{AnswerJson, VERSION, to_text};
 use rsim_contract::table::{Selection, TableOut};
 use rsim_contract::twin::TwinJson;
 use rsim_ingest::coverage::State as CoverageState;
@@ -256,13 +256,25 @@ impl State {
         }
     }
 
-    /// The twin of the parameter `against`: a twin that the server holds,
-    /// resolved as a path segment.
-    fn held(&self, segment: &str) -> Result<Arc<Loaded>, Problem> {
+    /// The topology and the twin of the parameter `against`: a twin that
+    /// the server holds, resolved as a path segment.
+    fn held(&self, segment: &str) -> Result<(String, Arc<Loaded>), Problem> {
         Ok(match self.twin(segment)? {
-            Resolved::Twin(r) => r.loaded,
-            Resolved::Redirect(t) => t,
+            Resolved::Twin(r) => (r.topology, r.loaded),
+            Resolved::Redirect(t) => (rsim_mcp::tools::STORE.to_string(), t),
         })
+    }
+
+    /// The twin of the required parameter `against`.
+    fn against(&self, p: &BTreeMap<&str, &str>) -> Result<(String, Arc<Loaded>), Problem> {
+        let a = p.get("against").ok_or_else(|| {
+            problem(
+                422,
+                "invalid_query",
+                "the parameter against is missing".into(),
+            )
+        })?;
+        self.held(a)
     }
 
     fn remember(&self, text: &str) -> String {
@@ -685,15 +697,22 @@ fn route(
                     });
                 }
             };
-            let etag = format!("{}.{contract}", t.loaded.identity.id);
-            if let Some(res) = not_modified(req, &etag) {
+            // The ETag of a request with `against` holds the compared twin.
+            // A request whose `against` names no held twin gets no ETag.
+            let etag = match params(req).get("against") {
+                None => Some(format!("{}.{contract}", t.loaded.identity.id)),
+                Some(a) => state
+                    .held(a)
+                    .ok()
+                    .map(|(_, o)| format!("{}.{}.{contract}", t.loaded.identity.id, o.identity.id)),
+            };
+            if let Some(res) = etag.as_deref().and_then(|e| not_modified(req, e)) {
                 return Ok(res);
             }
             let res = twin_route(state, req, &t, rest)?;
-            Ok(if res.status == 200 && req.method == "GET" {
-                cached(req, etag, res)
-            } else {
-                res
+            Ok(match etag {
+                Some(e) if res.status == 200 && req.method == "GET" => cached(req, e, res),
+                _ => res,
             })
         }
         _ => Err(not_found()),
@@ -850,14 +869,7 @@ fn twin_route(
                     .map_err(err)?,
                 )),
                 "diff" => {
-                    let against = get("against").ok_or_else(|| {
-                        problem(
-                            422,
-                            "invalid_query",
-                            "the parameter against is missing".into(),
-                        )
-                    })?;
-                    let other = state.held(&against)?;
+                    let (_, other) = state.against(&p)?;
                     Ok(json_response(
                         &tables::diff(top, l, &other, table, &sel).map_err(err)?,
                     ))
@@ -953,6 +965,33 @@ fn twin_route(
             }
             Ok(json_response(&o))
         }
+        ["queries", q, "diff"] => {
+            method(req, "GET")?;
+            let (other_top, other) = state.against(&p)?;
+            let m = state.recall(q)?;
+            let answer = |top: &str, tw: &Loaded| -> Result<AnswerJson, Problem> {
+                let (a, set) = query_args(m.clone(), top)?;
+                Ok(if set {
+                    commands::set(&args::set_query(&a, &[]).map_err(err)?, tw)
+                        .map_err(err)?
+                        .answer
+                } else {
+                    commands::path(&args::query(&a, &[]).map_err(err)?, tw)
+                        .map_err(err)?
+                        .answer
+                })
+            };
+            let before = answer(&other_top, &other)?;
+            let after = answer(top, l)?;
+            Ok(json_response(&diff::query(
+                top,
+                q,
+                &l.identity,
+                &other.identity,
+                &before,
+                &after,
+            )))
+        }
         ["queries", q, "claims", claim] => {
             method(req, "GET")?;
             let mut m = state.recall(q)?;
@@ -1022,6 +1061,24 @@ fn twin_route(
         ["batch"] => {
             method(req, "POST")?;
             batch(state, req, t)
+        }
+        ["claims", claim, "diff"] => {
+            method(req, "GET")?;
+            let (other_top, other) = state.against(&p)?;
+            let a = |top: &str| -> Result<ClaimArgs, Problem> {
+                Ok(ClaimArgs {
+                    topology: top.to_string(),
+                    claim: claim.to_string(),
+                    devices: p
+                        .get("device")
+                        .map(|d| d.split(',').map(str::to_string).collect()),
+                    query: None,
+                    min: min_mtu(&p)?,
+                })
+            };
+            let before = claims::run(&other_top, &other, &a(&other_top)?).map_err(err)?;
+            let after = claims::run(top, l, &a(top)?).map_err(err)?;
+            Ok(json_response(&diff::claim(&before, after)))
         }
         ["claims", claim] => {
             method(req, "GET")?;

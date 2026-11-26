@@ -30,6 +30,8 @@ The table `devices` has one row for each device with a function and each device 
 
 `tables::diff` gives the changes of the rows of a table from the twin `against` to a twin (`frame::diff`): a merge walk on the 2 frames in key order, with joint ids of the distinct values of each column. A column with the semantic type `source_span` is not compared. In a key with rows on both sides, each row pairs with a row of equal values; 1 row left on each side is changed, and other rows left are removed or added. The answer `table_diff` has the counts and a page of rows, each with `change` and, for a changed row, `before`. It takes only `columns`, `limit` and `cursor`.
 
+`rsim-cli/src/diff.rs` gives the difference of a query answer and of a claim from the twin `against` to a twin, with the types in `rsim-contract/src/diff.rs`. The field `provenance` is not compared at any depth. The evidence rows of a claim pair by `subject` with the rule of `frame::diff`. A summary part is added or removed. The branches of an answer pair by the choice, the key and the label of each alternative and by the flood and the port of each flood copy on their steps. In 1 group, the branches with equal values and equal replies are not changes, the other branches pair in index order as changed branches, and the branches left are removed or added. A changed branch has `first_step`, the index of the first step that differs, with that step of each side, and `reply`, with the difference of the 2 reply answers when both have one.
+
 A claim answer has the field `detail` for what the claim leaves out of its rows.
 
 The BGP claims `bgp-peers-up` and `bgp-peers-agree` read `Loaded::bgp` with the far end of each neighbour from the join; a neighbour with `shutdown` gives no row in either claim, a neighbour whose peer is outside the twin gives no row in `bgp-peers-agree`, the detail counts them, and a scope with no row has the detail `no BGP neighbour in scope`.
@@ -59,6 +61,7 @@ The stored JSON answers of the CLI tests are in `crates/rsim-cli/tests/golden/`.
 | BGP claim tests on hand-built summaries | `cargo test -p rsim-cli --test bgp_claims`. `RSIM_BLESS=1` writes the stored answers `claim-bgp-*.json`. |
 | Tables of the collected state | `cargo test -p rsim-cli --test collected_tables` |
 | Table difference tests | `cargo test -p rsim-cli --test table_diff` |
+| Query and claim difference tests | `cargo test -p rsim-cli --test answer_diff` |
 | Equinix table tests | `cargo test -p rsim-cli --test equinix` |
 | VeloCloud topology, table and fact tests | `cargo test -p rsim-cli --test velocloud` |
 | Scale benchmark | `RSIM_SCALE_PERCENT=1 cargo bench -p rsim-cli --bench scale`: a generated estate at 1 % of 10,000 routers, 1,000 firewalls with 60,000 rules and 60,000 endpoints. It prints the heap and the build time of the twin, the time of a path query and of a set query, and the time and peak heap of the `fib` table request. `RSIM_SCALE_PHASES` selects the parts (`twin`, `path`, `set`, `table`, `fulltable`), `RSIM_SCALE_FILL=0` keeps only the routes of the estate, and `RSIM_SCALE_CAP_GIB` (default 12) stops the run at that live heap. `RSIM_SCALE_PERCENT=100` with `RSIM_SCALE_PHASES=twin,path,set` needs about 3 GB; the `table` part needs a peak of about 14.9 GiB on top of the 2.6 GiB twin at 100 %, so it runs only up to 50 % on a 16 GB machine. |

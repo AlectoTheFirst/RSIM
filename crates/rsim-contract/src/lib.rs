@@ -5,6 +5,7 @@
 
 pub mod args;
 pub mod claim;
+pub mod diff;
 pub mod error;
 pub mod json;
 pub mod query;
