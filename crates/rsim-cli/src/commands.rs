@@ -38,6 +38,9 @@ pub struct Loaded {
     /// The circuits of each Equinix account of a store twin; empty for a
     /// hand-built topology.
     pub fabric: BTreeMap<String, Vec<rsim_ingest::equinix::CircuitRow>>,
+    /// The MTU of the interfaces of the IOS-XR, IOS-XE, UniFi and VeloCloud
+    /// devices of a store twin; empty for a hand-built topology.
+    pub mtu: rsim_ingest::mtu::Mtus,
     /// The columns of the tables of the twin, built when a request first
     /// names a table.
     pub tables: crate::tables::TableCache,
@@ -94,6 +97,7 @@ fn fixture(topology: &str) -> Result<Loaded, QueryError> {
         facts: BTreeMap::new(),
         seen: Vec::new(),
         fabric: BTreeMap::new(),
+        mtu: BTreeMap::new(),
         tables: Default::default(),
         source: None,
     })
@@ -149,6 +153,7 @@ pub fn load_store_at(folder: &str, cycle: Option<u64>) -> Result<Loaded, QueryEr
     let facts = estate.facts.clone();
     let seen = estate.seen.clone();
     let fabric = estate.fabric.clone();
+    let mtu = estate.mtu.clone();
     let twin = estate.builder.build().map_err(|errors| {
         let text: Vec<String> = errors.iter().map(ToString::to_string).collect();
         err(format!("the twin does not build: {}", text.join("; ")))

@@ -925,3 +925,35 @@ fn the_uplink_port_of_an_access_point_with_no_forward_mode_carries_each_network(
         ))))
     );
 }
+
+#[test]
+fn the_jumbo_frame_flag_of_a_unifi_device_gives_the_mtu_of_its_ports() {
+    let jumbo = |on: bool| {
+        estate_with(
+            move |n, b| {
+                if n == "devices" {
+                    String::from_utf8(b)
+                        .unwrap()
+                        .replace(
+                            "\"name\": \"sw1\",",
+                            &format!("\"name\": \"sw1\", \"jumboframe_enabled\": {on},"),
+                        )
+                        .into_bytes()
+                } else {
+                    b
+                }
+            },
+            Vec::new(),
+        )
+    };
+    let key = |port: &str| ("sw1".to_string(), port.to_string());
+    let on = jumbo(true);
+    assert_eq!(on.mtu[&key("port/1")].bytes, 9198);
+    assert_eq!(on.mtu[&key("port/4")].bytes, 9198);
+    assert_eq!(&*on.mtu[&key("port/1")].span.file, "site1/devices#row");
+    assert_eq!(jumbo(false).mtu[&key("port/2")].bytes, 1500);
+    assert!(
+        estate().mtu.keys().all(|(d, _)| d != "sw1"),
+        "no flag, no MTU"
+    );
+}

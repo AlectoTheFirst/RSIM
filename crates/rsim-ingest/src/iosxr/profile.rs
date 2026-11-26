@@ -117,3 +117,17 @@ pub const STATIC_CODES: &[&str] = &["S", "U"];
 /// device confirms it. A collected route resolves the way the device shows
 /// it.
 pub const COMPUTED_THROUGH_DEFAULT: bool = false;
+
+/// The bytes of the Ethernet header that the MTU of `show interfaces`
+/// holds on top of the layer 3 packet, for the encapsulation `ARPA`. Not
+/// confirmed against a device.
+pub const ETHERNET_HEADER_BYTES: u64 = 14;
+
+/// The bytes of one 802.1Q tag that the MTU of `show interfaces` holds on
+/// top of the Ethernet header, for the encapsulation `802.1Q Virtual LAN`
+/// with one VLAN. Not confirmed against a device.
+pub const DOT1Q_TAG_BYTES: u64 = 4;
+
+/// The encapsulation words of `show interfaces`.
+pub const ENCAP_ARPA: &str = "ARPA";
+pub const ENCAP_DOT1Q: &str = "802.1Q Virtual LAN";

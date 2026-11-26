@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 use crate::coverage::Table;
 use crate::stanza::{Document, read_indented};
 pub use config::{Config, read};
-pub use lower::{device_macs, lower};
+pub use lower::{interface_states, lower};
 pub use mask::mask;
 pub use profile::profile;
 pub use state::rib_vrfs;

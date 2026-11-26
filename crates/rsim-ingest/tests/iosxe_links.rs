@@ -1976,3 +1976,28 @@ fn a_show_vrrp_that_the_template_cannot_read_leaves_the_brief_form_to_decide() {
     };
     assert_eq!(to_vip(&twin_of(e)), to_vip(&twin_of(routers())));
 }
+
+#[test]
+fn the_mtu_of_show_interfaces_is_the_layer_3_mtu() {
+    let e = routers();
+    let mtu = |device: &str, interface: &str| {
+        e.mtu
+            .get(&(device.to_string(), interface.to_string()))
+            .map(|m| m.bytes)
+    };
+    assert_eq!(mtu("edge1", "GigabitEthernet0/0/0"), Some(1500));
+    assert_eq!(mtu("edge1", "GigabitEthernet0/0/1.100"), Some(1500));
+    assert_eq!(mtu("edge1", "Loopback0"), None, "encapsulation LOOPBACK");
+    assert_eq!(mtu("pe1", "Bundle-Ether10"), Some(9202), "9216 less 14");
+    assert_eq!(mtu("pe1", "Bundle-Ether20"), Some(1500), "1514 less 14");
+    assert_eq!(mtu("pe1", "Bundle-Ether20.100"), Some(1500), "1518 less 18");
+    assert_eq!(mtu("pe1", "GigabitEthernet0/0/0/3"), Some(1500));
+    assert_eq!(mtu("pe1", "Loopback0"), None, "encapsulation Loopback");
+    let m = &e.mtu[&("pe1".to_string(), "Bundle-Ether20.100".to_string())];
+    assert_eq!(&*m.span.file, "pe1/interfaces");
+    assert!(
+        m.span.first_line <= 27 && 27 <= m.span.last_line,
+        "{:?}",
+        m.span
+    );
+}

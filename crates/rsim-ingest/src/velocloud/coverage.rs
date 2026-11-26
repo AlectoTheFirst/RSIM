@@ -465,7 +465,7 @@ pub fn table(section: &str) -> Table {
                 ("*/WAN/data/links/*/mplsNetwork", H, S),
                 ("*/WAN/data/links/*/upstreamMbps", I, N),
                 ("*/WAN/data/links/*/downstreamMbps", I, N),
-                ("*/WAN/data/links/*/MTU", I, N),
+                ("*/WAN/data/links/*/MTU", H, N),
                 ("*/controlPlane", H, N),
                 ("*/controlPlane/version", I, N),
                 ("*/controlPlane/type", I, N),

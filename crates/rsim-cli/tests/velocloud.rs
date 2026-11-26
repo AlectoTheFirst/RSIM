@@ -109,6 +109,7 @@ fn loaded_with(m: &BTreeMap<String, Value>, estate: Vec<Input>) -> Loaded {
         facts,
         seen: estate.seen,
         fabric: estate.fabric,
+        mtu: estate.mtu,
         tables: Default::default(),
         source: None,
     }
@@ -444,4 +445,21 @@ fn the_drawing_of_a_path_to_the_hub_has_the_tunnel_through_each_transport_networ
         .map(|n| (n.id.as_str(), n.kind.as_str()))
         .collect();
     assert_eq!(kinds.get(PUBLIC), Some(&"network"));
+}
+
+#[test]
+fn the_links_table_has_the_wan_module_mtu_of_a_wan_interface() {
+    let t = loaded(&base());
+    let out = table(&t, "links");
+    let row = out
+        .rows
+        .iter()
+        .find(|r| cell(&out, r, "device") == BR && cell(&out, r, "interface") == "GE1")
+        .expect("a link of GE1 of e-br");
+    assert_eq!(cell(&out, row, "mtu"), &json!(1500));
+    let (_, span) = &rsim_cli::tables::collected_mtu(&t).unwrap()[&(BR.to_string(), "GE1".into())];
+    assert!(
+        span.starts_with(&format!("{STORE}/edge_modules@b1:")),
+        "{span}"
+    );
 }

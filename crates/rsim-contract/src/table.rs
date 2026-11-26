@@ -564,7 +564,7 @@ pub const TABLES: &[TableDef] = &[
             PROVENANCE,
         ],
         verbs: BASE_VERBS,
-        needs: "the twin, and for the MTU a store snapshot with collected links",
+        needs: "the twin, and for the MTU a store snapshot",
         collected: &[],
     },
 ];

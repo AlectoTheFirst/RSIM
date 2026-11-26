@@ -13,7 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
-use rsim_core::{InterfaceId, Mac, ObjectId, SourceSpan, VrfId};
+use rsim_core::{InterfaceId, ObjectId, SourceSpan, VrfId};
 use rsim_functions::{
     DestinationNat, DeviceDelivery, LinkEnd, LocalInput, RouteLookup, SessionCommit, SessionLookup,
     SourceNat, StateActions, VendorProfile,
@@ -72,8 +72,13 @@ const VRRP_DETAIL_RULES: GroupRules = GroupRules {
     no_vmac: "none in show vrrp",
 };
 
-/// The MACs of the interfaces of a router or a switch in `show interfaces`.
-pub fn device_macs(cfg: &Config, sections: &BTreeMap<String, (Vec<u8>, String)>) -> BTreeSet<Mac> {
+/// The state of each interface of a router or a switch in `show
+/// interfaces`; empty if the section is not in the snapshot or its template
+/// does not parse it.
+pub fn interface_states(
+    cfg: &Config,
+    sections: &BTreeMap<String, (Vec<u8>, String)>,
+) -> BTreeMap<String, crate::iosxr::state::IfState> {
     let only: BTreeMap<String, (Vec<u8>, String)> = sections
         .iter()
         .filter(|(k, _)| k.as_str() == "interfaces")
@@ -83,7 +88,6 @@ pub fn device_macs(cfg: &Config, sections: &BTreeMap<String, (Vec<u8>, String)>)
         .l3
         .interfaces
         .and_then(Result::ok)
-        .map(|m| m.values().filter_map(|s| s.mac).collect())
         .unwrap_or_default()
 }
 

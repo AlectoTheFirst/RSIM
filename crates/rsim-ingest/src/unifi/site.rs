@@ -122,6 +122,8 @@ pub struct Device {
     pub uplink_full_duplex: Option<bool>,
     pub uplink_media: Option<String>,
     pub vaps: Vec<Vap>,
+    /// The flag `jumboframe_enabled` of the device record.
+    pub jumbo: Option<bool>,
     pub index: usize,
 }
 
@@ -308,6 +310,7 @@ pub fn read(networks: &Value, wlans: &Value, devices: &Value, clients: &Value) -
                     .and_then(Value::as_bool),
                 uplink_media: up.and_then(|u| s(u, "media")),
                 vaps,
+                jumbo: x.get("jumboframe_enabled").and_then(Value::as_bool),
                 index,
             })
         })
