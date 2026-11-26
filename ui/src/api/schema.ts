@@ -663,6 +663,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/twins/{twin}/claims/{claim}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Claim difference */
+        get: operations["diffClaim"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/twins/{twin}/coverage": {
         parameters: {
             query?: never;
@@ -740,6 +757,23 @@ export interface paths {
         };
         /** Query claim */
         get: operations["runQueryClaim"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/twins/{twin}/queries/{qid}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Query difference */
+        get: operations["diffQuery"];
         put?: never;
         post?: never;
         delete?: never;
@@ -929,6 +963,15 @@ export interface components {
             replies: components["schemas"]["ReplyBriefJson"][];
             summary: components["schemas"]["PartJson"][];
         };
+        /** @description Answer difference */
+        AnswerDiff: {
+            /** @description The summary parts of the twin that `against` does not have. */
+            added_parts: components["schemas"]["PartJson"][];
+            branches: components["schemas"]["BranchChange"][];
+            counts: components["schemas"]["DiffCounts"];
+            /** @description The summary parts of `against` that the twin does not have. */
+            removed_parts: components["schemas"]["PartJson"][];
+        };
         AnswerJson: {
             branches: components["schemas"]["BranchJson"][];
             ingress: components["schemas"]["IngressJson"][];
@@ -1017,12 +1060,40 @@ export interface components {
             steps: components["schemas"]["StepLineJson"][];
             verdict: components["schemas"]["VerdictJson"];
         };
+        /** @description Changed branch */
+        BranchChange: {
+            /** @description The branch of `against` for a changed branch. */
+            before?: components["schemas"]["BranchSide"] | null;
+            /** @description The branch of the twin, or the branch of `against` for a removed branch. */
+            branch: components["schemas"]["BranchSide"];
+            change: components["schemas"]["RowChange"];
+            /**
+             * Format: uint
+             * @description The index of the first step that differs, for a changed branch.
+             */
+            first_step?: number | null;
+            /** @description The change of the reply, for a changed branch. */
+            reply?: components["schemas"]["ReplyChange"] | null;
+        };
         BranchJson: {
             delay: components["schemas"]["DelayJson"];
             /** Format: uint */
             index: number;
             packets: components["schemas"]["PacketSetJson"];
             steps: components["schemas"]["TraceStepJson"][];
+            verdict: components["schemas"]["VerdictJson"];
+        };
+        /** @description Branch of one twin */
+        BranchSide: {
+            delay: components["schemas"]["DelayJson"];
+            /**
+             * Format: uint
+             * @description Branch index
+             */
+            index: number;
+            packets: components["schemas"]["PacketSetJson"];
+            /** @description The step at `first_step`, if the branch has it. */
+            step?: components["schemas"]["TraceStepJson"] | null;
             verdict: components["schemas"]["VerdictJson"];
         };
         /** @description BGP sections */
@@ -1035,6 +1106,27 @@ export interface components {
             reads: string[];
             /** @description Scopes */
             scopes: string[];
+        };
+        /**
+         * ClaimDiffOut
+         * @description Claim difference
+         */
+        ClaimDiffOut: {
+            /** @description Compared twin */
+            against: components["schemas"]["TwinJson"];
+            /** @description Result of the compared twin */
+            before: components["schemas"]["ClaimResult"];
+            claim: string;
+            counts: components["schemas"]["DiffCounts"];
+            kind: string;
+            result: components["schemas"]["ClaimResult"];
+            rows: components["schemas"]["EvidenceChange"][];
+            /** Format: uint32 */
+            rsim_json: number;
+            /** @description Scope */
+            scope: string;
+            topology: string;
+            twin: components["schemas"]["TwinJson"];
         };
         /**
          * ClaimOut
@@ -1307,6 +1399,14 @@ export interface components {
             result: components["schemas"]["ClaimResult"];
             /** @description Subject */
             subject: string;
+        };
+        /** @description Changed evidence row */
+        EvidenceChange: {
+            /** @description The row of `against` for a changed row. */
+            before?: components["schemas"]["Evidence"] | null;
+            change: components["schemas"]["RowChange"];
+            /** @description The row of the twin, or the row of `against` for a removed row. */
+            row: components["schemas"]["Evidence"];
         };
         /**
          * FabricPortBinding
@@ -1678,6 +1778,22 @@ export interface components {
             queue: components["schemas"]["AttrJson"];
             traffic_class: components["schemas"]["AttrJson"];
         };
+        /**
+         * QueryDiffOut
+         * @description Query difference
+         */
+        QueryDiffOut: {
+            /** @description Compared twin */
+            against: components["schemas"]["TwinJson"];
+            diff: components["schemas"]["AnswerDiff"];
+            kind: string;
+            /** @description Query identifier */
+            qid: string;
+            /** Format: uint32 */
+            rsim_json: number;
+            topology: string;
+            twin: components["schemas"]["TwinJson"];
+        };
         /** @description Query input */
         QueryEcho: {
             "destination.ip": string;
@@ -1743,6 +1859,15 @@ export interface components {
             /** Format: uint */
             forward_branch: number;
             not_run_reason?: string | null;
+            ran: boolean;
+        };
+        /** @description Reply change */
+        ReplyChange: {
+            /** @description Reply ran on the compared twin */
+            before_ran: boolean;
+            /** @description The difference of the 2 reply answers, if both replies have an answer. */
+            diff?: components["schemas"]["AnswerDiff"] | null;
+            /** @description Reply ran */
             ran: boolean;
         };
         ReplyJson: {
@@ -4076,6 +4201,45 @@ export interface operations {
             };
         };
     };
+    diffClaim: {
+        parameters: {
+            query?: {
+                /** @description Compared twin */
+                against?: string;
+                /** @description Devices */
+                device?: string;
+                /** @description Minimum MTU */
+                min?: string;
+            };
+            header?: never;
+            path: {
+                twin: string;
+                claim: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaimDiffOut"];
+                };
+            };
+            /** @description Problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     getCoverage: {
         parameters: {
             query?: {
@@ -4244,6 +4408,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClaimOut"];
+                };
+            };
+            /** @description Problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    diffQuery: {
+        parameters: {
+            query?: {
+                /** @description Compared twin */
+                against?: string;
+            };
+            header?: never;
+            path: {
+                twin: string;
+                qid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueryDiffOut"];
                 };
             };
             /** @description Problem */

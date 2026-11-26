@@ -533,14 +533,16 @@ fn a_newer_snapshot_of_the_store_builds_in_the_background_and_keeps_the_previous
         &s,
         &format!("/v1/twins/{second}/tables/devices/diff?against={first}"),
     ));
-    assert!(
-        d["rows"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|r| r["change"] == "removed" && r["row"][0] == "site1"),
-        "{d}"
-    );
+    // The console site1 gives the devices ap1, gw1 and sw1.
+    let removed: Vec<&Value> = d["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["change"] == "removed")
+        .map(|r| &r["row"][0])
+        .collect();
+    assert_eq!(removed, ["ap1", "gw1", "sw1"], "{d}");
+    assert_eq!(d["counts"], json!({"added": 0, "removed": 3, "changed": 0}));
     let r = get(&s, &format!("{location}/diff?against={first}"));
     assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
     assert_eq!(json(&r)["kind"], "query_diff");
