@@ -313,6 +313,48 @@ fn a_route_keeps_the_spans_of_its_lsas_and_the_interface_of_its_next_hop() {
     );
 }
 
+/// R1 reaches the LAN of R1 and R3 at cost 10 on its own link and through
+/// R2. R3 has the next hops of both paths, and the LAN is not a route.
+#[test]
+fn a_network_at_equal_cost_on_the_own_link_and_through_a_router_keeps_both_next_hops() {
+    let c = calc(
+        vec![
+            router(
+                R1,
+                vec![
+                    p2p(R2, "192.0.2.1", 5),
+                    transit("192.0.2.67", "192.0.2.65", 10),
+                ],
+                AREA_0,
+            ),
+            router(
+                R2,
+                vec![
+                    p2p(R1, "192.0.2.2", 5),
+                    transit("192.0.2.67", "192.0.2.66", 5),
+                ],
+                AREA_0,
+            ),
+            router(
+                R3,
+                vec![transit("192.0.2.67", "192.0.2.67", 5), stub(R3, MASK_32, 1)],
+                AREA_0,
+            ),
+            network("192.0.2.67", R3, MASK_26, &[R1, R2, R3], AREA_0),
+        ],
+        R1,
+    );
+    assert_eq!(
+        rows(&c),
+        [row(
+            "198.51.100.3/32",
+            "intra-area",
+            11,
+            &["192.0.2.2", "192.0.2.67"]
+        )]
+    );
+}
+
 /// R2 is the area border router: it has a second router LSA in area 1,
 /// where R4 is, and originates summary LSAs into both areas.
 fn two_areas() -> Vec<Lsa> {
