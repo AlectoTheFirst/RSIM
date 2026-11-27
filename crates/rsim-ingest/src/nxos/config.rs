@@ -574,6 +574,7 @@ pub fn read(doc: &Document, table: &Table) -> Config {
             _ => {}
         }
     }
+    super::ospf_config::parse(doc, &cfg.interfaces, "", &mut r.read);
     cfg.read = r.read;
     cfg.dynamic_vrfs = super::table::dynamic_vrfs(doc);
     cfg
