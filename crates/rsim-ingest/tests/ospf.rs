@@ -8,9 +8,9 @@ use std::collections::BTreeMap;
 
 use rsim_core::SourceSpan;
 use rsim_ingest::bgp::{Collected, Outcome};
-use rsim_ingest::ospf::{self, DeviceOspf, OspfSections, V2, V3};
+use rsim_ingest::ospf::{self, CONFIG, DeviceOspf, OspfSections, V2, V3};
 use rsim_routing::Platform;
-use rsim_routing::ospf::{Calculation, LsaType, OspfProfile, Version, compute};
+use rsim_routing::ospf::{Body, Calculation, LsaType, OspfProfile, Version, compute};
 
 const VENDORS: [&str; 4] = ["nxos", "iosxe", "iosxr", "vyos"];
 
@@ -31,11 +31,13 @@ fn fixture(vendor: &str, name: &str) -> Vec<u8> {
     std::fs::read(&p).unwrap_or_else(|e| panic!("{p}: {e}"))
 }
 
-/// Each OSPF section of a vendor as a fresh read of its fixture.
+/// Each OSPF section of a vendor as a fresh read of its fixture, with the
+/// running config of IOS-XE.
 fn sections(vendor: &str) -> OspfSections {
     V2.names()
         .into_iter()
         .chain(V3.names())
+        .chain((vendor == "iosxe").then_some(CONFIG))
         .map(|n| {
             (
                 n.to_string(),
@@ -340,4 +342,145 @@ fn the_sections_of_each_vendor() {
     assert_eq!(ospf::sections("nxos").len(), 20);
     assert_eq!(ospf::sections("iosxe").len(), 21);
     assert!(ospf::sections("unifi").is_empty());
+}
+
+/// The sections of a vendor with the first `from` of a section replaced by
+/// `to`.
+fn edited(vendor: &str, name: &str, from: &str, to: &str) -> OspfSections {
+    let mut s = sections(vendor);
+    let text = String::from_utf8(fixture(vendor, name)).unwrap();
+    let new = text.replacen(from, to, 1);
+    assert_ne!(text, new, "{vendor} {name}");
+    s.insert(
+        name.into(),
+        Collected::Fresh(new.into_bytes(), format!("r1/{name}")),
+    );
+    s
+}
+
+fn count(d: &DeviceOspf, version: Version, lsa_type: LsaType) -> usize {
+    d.of(version, "default")
+        .flat_map(|db| db.lsas.values())
+        .filter(|l| l.lsa_type == lsa_type)
+        .count()
+}
+
+fn detail(d: &DeviceOspf, version: Version) -> String {
+    d.outcomes[&version].detail.clone().unwrap_or_default()
+}
+
+#[test]
+fn an_intra_area_prefix_with_no_metric_makes_its_lsa_not_read() {
+    let s = edited(
+        "iosxr",
+        "ospfv3_lsdb_intra_area_prefix",
+        "Prefix Length: 128, Options: None, Metric: 0",
+        "Prefix Length: 128, Options: None",
+    );
+    let d = ospf::read("iosxr", &s);
+    assert_eq!(d.outcomes[&Version::V3].outcome, Outcome::Partial);
+    assert!(detail(&d, Version::V3).contains("prefix 2001:DB8:FF::1 has no metric"));
+    assert_eq!(count(&d, Version::V3, LsaType::IntraAreaPrefix), 5);
+}
+
+#[test]
+fn an_ospfv3_inter_area_router_lsa_with_no_destination_router_is_not_read() {
+    let s = edited(
+        "iosxr",
+        "ospfv3_lsdb_inter_area_router",
+        "Destination Router ID: 198.51.100.4",
+        "",
+    );
+    let d = ospf::read("iosxr", &s);
+    assert_eq!(d.outcomes[&Version::V3].outcome, Outcome::Partial);
+    assert!(detail(&d, Version::V3).contains("no destination router"));
+    assert_eq!(count(&d, Version::V3, LsaType::AsbrSummary), 0);
+}
+
+#[test]
+fn an_nxos_e_bit_is_not_read_as_a_metric_type() {
+    let s = edited(
+        "nxos",
+        "ospf_lsdb_external",
+        "\"metrictype\": \"1\"",
+        "\"ebit\": \"1\"",
+    );
+    let d = ospf::read("nxos", &s);
+    let db = d.of(Version::V2, "default").next().unwrap();
+    let ext = db
+        .lsas
+        .values()
+        .find(|l| l.lsa_type == LsaType::External)
+        .unwrap();
+    assert!(matches!(
+        ext.body,
+        Body::External {
+            metric_type: None,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_prefix_row_with_no_prefix_makes_its_lsa_not_read() {
+    let s = edited(
+        "nxos",
+        "ospfv3_lsdb_intra_area_prefix",
+        "\"prefix\": \"2001:db8:ff::1/128\"",
+        "\"pfx\": \"2001:db8:ff::1/128\"",
+    );
+    let d = ospf::read("nxos", &s);
+    assert_eq!(d.outcomes[&Version::V3].outcome, Outcome::Partial);
+    assert!(detail(&d, Version::V3).contains("a prefix row has no prefix"));
+    assert_eq!(count(&d, Version::V3, LsaType::IntraAreaPrefix), 5);
+}
+
+#[test]
+fn an_attached_router_row_with_no_router_makes_its_lsa_not_read() {
+    let s = edited(
+        "nxos",
+        "ospf_lsdb_network",
+        "\"rtr\": \"198.51.100.2\"",
+        "\"name\": \"198.51.100.2\"",
+    );
+    let d = ospf::read("nxos", &s);
+    assert_eq!(d.outcomes[&Version::V2].outcome, Outcome::Partial);
+    assert!(detail(&d, Version::V2).contains("an attached router row has no router"));
+    assert_eq!(count(&d, Version::V2, LsaType::Network), 0);
+}
+
+#[test]
+fn an_iosxe_process_with_no_fresh_config_has_a_vrf_that_is_not_read() {
+    for config in [
+        None,
+        Some(Collected::Failed("rejected: % Permission denied".into())),
+    ] {
+        let mut s = sections("iosxe");
+        s.remove(CONFIG);
+        if let Some(c) = config {
+            s.insert(CONFIG.into(), c);
+        }
+        let d = ospf::read("iosxe", &s);
+        let o = &d.outcomes[&Version::V2];
+        assert_eq!(o.outcome, Outcome::Partial);
+        assert_eq!(detail(&d, Version::V2), "VRF not read: process 1");
+        assert_eq!(d.outcomes[&Version::V3].outcome, Outcome::Complete);
+        assert_eq!(count(&d, Version::V2, LsaType::Router), 5);
+    }
+}
+
+#[test]
+fn an_iosxe_process_with_a_superbackbone_vrf_needs_no_config() {
+    let mut s = edited(
+        "iosxe",
+        "ospf",
+        " Supports only single TOS(TOS0) routes",
+        " Connected to MPLS VPN Superbackbone, VRF RED\n Supports only single TOS(TOS0) routes",
+    );
+    s.remove(CONFIG);
+    let d = ospf::read("iosxe", &s);
+    let o = &d.outcomes[&Version::V2];
+    assert_eq!(o.outcome, Outcome::Complete, "{:?}", o.detail);
+    assert!(o.scope.covers("RED", "ipv4"));
+    assert_eq!(d.of(Version::V2, "RED").count(), 1);
 }
