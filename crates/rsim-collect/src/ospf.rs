@@ -65,7 +65,9 @@ macro_rules! cisco {
 
 /// The age, the sequence number and the checksum of each LSA.
 const CISCO_LSDB: &[&str] = cisco!["LS age:", "LS Seq Number:", "Checksum:"];
-/// The SPF runs, the counts and the checksum sums of the process.
+/// The SPF runs, the counts, the checksum sums and the elapsed times of
+/// the process. An elapsed time is `00:00:22`, `1d02h`, `1w6d`, `1y2w` or
+/// `5h12m`.
 const CISCO_PROCESS: &[&str] = cisco![
     "SPF algorithm",
     "Number of ",
@@ -74,12 +76,17 @@ const CISCO_PROCESS: &[&str] = cisco![
     "Flood list length",
     "~#:#:#",
     "~#:#:#.#",
+    "~#d#h",
+    "~#w#d",
+    "~#y#w",
+    "~#h#m",
 ];
 /// The timers and the counts of the interfaces.
 const CISCO_INTERFACES: &[&str] = cisco![
     "Hello due in",
     "Index ",
     "Last flood scan",
+    "LS Ack List",
     "Next ",
     "Neighbor Count",
     "Adjacent neighbor count",
@@ -129,35 +136,43 @@ const NXOS_STATE: &[&str] = &[
     "/*/*/*/*/*/*/uptime",
 ];
 
+/// The FRR OSPFv2 patterns below the answer of each VRF, and below the VRF
+/// name in the answer of a named VRF.
+macro_rules! frr_v2 {
+    ($($p:literal),* $(,)?) => {
+        &[$(concat!("/*/answer/", $p)),*, $(concat!("/*/answer/*/", $p)),*]
+    };
+}
+
 /// The age, the sequence number and the checksum of each FRR OSPFv2 LSA in
 /// the answer of each VRF.
-const FRR_V2_LSDB: &[&str] = &[
-    "/*/answer/*/areas/*/*/lsaAge",
-    "/*/answer/*/areas/*/*/lsaSeqNumber",
-    "/*/answer/*/areas/*/*/checksum",
-    "/*/answer/asExternalLinkStates/*/lsaAge",
-    "/*/answer/asExternalLinkStates/*/lsaSeqNumber",
-    "/*/answer/asExternalLinkStates/*/checksum",
+const FRR_V2_LSDB: &[&str] = frr_v2![
+    "*/areas/*/*/lsaAge",
+    "*/areas/*/*/lsaSeqNumber",
+    "*/areas/*/*/checksum",
+    "asExternalLinkStates/*/lsaAge",
+    "asExternalLinkStates/*/lsaSeqNumber",
+    "asExternalLinkStates/*/checksum",
 ];
 /// The timers and the counters of the FRR OSPFv2 process, interfaces and
 /// neighbours of each VRF.
-const FRR_V2_STATE: &[&str] = &[
-    "/*/answer/*Msecs",
-    "/*/answer/*Msec",
-    "/*/answer/spf*",
-    "/*/answer/lsa*",
-    "/*/answer/*Count*",
-    "/*/answer/areas/*/spf*",
-    "/*/answer/areas/*/lsa*",
-    "/*/answer/areas/*/*Count*",
-    "/*/answer/areas/*/*Number*",
-    "/*/answer/interfaces/*/timer*",
-    "/*/answer/interfaces/*/*Msecs",
-    "/*/answer/interfaces/*/*Count*",
-    "/*/answer/neighbors/*/*/*Msecs",
-    "/*/answer/neighbors/*/*/*Timer*",
-    "/*/answer/neighbors/*/*/*Count*",
-    "/*/answer/neighbors/*/*/upTime*",
+const FRR_V2_STATE: &[&str] = frr_v2![
+    "*Msecs",
+    "*Msec",
+    "spf*",
+    "lsa*",
+    "*Count*",
+    "areas/*/spf*",
+    "areas/*/lsa*",
+    "areas/*/*Count*",
+    "areas/*/*Number*",
+    "interfaces/*/timer*",
+    "interfaces/*/*Msecs",
+    "interfaces/*/*Count*",
+    "neighbors/*/*/*Msecs",
+    "neighbors/*/*/*Timer*",
+    "neighbors/*/*/*Count*",
+    "neighbors/*/*/upTime*",
 ];
 /// The age, the sequence number, the checksum and the duration of each FRR
 /// OSPFv3 LSA in its scope list.

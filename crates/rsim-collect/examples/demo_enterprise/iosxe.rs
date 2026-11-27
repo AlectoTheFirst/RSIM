@@ -474,7 +474,7 @@ fn line(r: &Route, pad: &str) -> String {
                 Kind::Ebgp => 20,
                 _ => 200,
             };
-            let metric = if k == Kind::Ospf { r.metric + 1 } else { 0 };
+            let metric = if k == Kind::Ospf { r.metric } else { 0 };
             for (n, p) in r.paths.iter().enumerate() {
                 let nh = p.next_hop.expect("a next hop");
                 let tail = match (k, &p.iface) {
@@ -777,4 +777,30 @@ pub fn render(
         vrfs.insert(v.to_string(), arp_rows(dev, t, d, v));
     }
     (out, vrfs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::route::Path;
+    use super::*;
+
+    #[test]
+    fn an_ospf_route_shows_the_metric_of_the_calculation() {
+        let r = Route {
+            vrf: "default".to_string(),
+            prefix: (Ipv4Addr::new(198, 51, 100, 0), 24),
+            kind: Kind::Ospf,
+            metric: 20,
+            paths: vec![Path {
+                next_hop: Some(Ipv4Addr::new(192, 0, 2, 1)),
+                iface: Some("GigabitEthernet1".to_string()),
+                vxlan: None,
+            }],
+        };
+        assert!(
+            line(&r, "").contains("[110/20] via 192.0.2.1"),
+            "{}",
+            line(&r, "")
+        );
+    }
 }

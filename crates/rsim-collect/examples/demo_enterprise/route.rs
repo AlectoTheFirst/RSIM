@@ -294,13 +294,13 @@ fn ribs(e: &Estate) -> Vec<Vec<Route>> {
             });
         }
     }
-    // The OSPF routes of each OSPF router come from the calculation over its
-    // database. A route of another kind with a lower distance stays.
+    // A route of the OSPF calculation over the database of an OSPF router
+    // replaces the routes of its prefix, unless a route has a lower distance.
+    // A route to a prefix that the calculation does not give stays.
     for (d, rib) in out.iter_mut().enumerate() {
         let Some(computed) = super::ospf::routes(e, d, e.devs[d].os) else {
             continue;
         };
-        rib.retain(|r| !(r.vrf == "default" && r.kind == Kind::Ospf));
         for c in computed {
             let held = rib
                 .iter()
@@ -641,5 +641,41 @@ pub fn tables(e: &Estate) -> Tables {
         arp: arp(e),
         macs: macs(e),
         stp: stp(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The address of the interface `Loopback0` of a device.
+    fn loopback(e: &Estate, name: &str) -> Ipv4Addr {
+        e.devs
+            .iter()
+            .find(|d| d.name == name)
+            .and_then(|d| d.ifaces.iter().find(|i| i.name == "Loopback0"))
+            .and_then(|i| i.addr)
+            .unwrap_or_else(|| panic!("{name}: no Loopback0"))
+            .0
+    }
+
+    #[test]
+    fn an_ospf_router_keeps_a_route_that_the_ospf_calculation_does_not_give() {
+        let e = super::super::build::estate(1);
+        let t = tables(&e);
+        let d = e.devs.iter().position(|x| x.name == "fra-core1").unwrap();
+        let far = loopback(&e, "par-core1");
+        assert!(
+            super::super::ospf::routes(&e, d, e.devs[d].os)
+                .unwrap()
+                .iter()
+                .all(|r| r.prefix != (far, 32))
+        );
+        assert!(
+            t.ribs[d]
+                .iter()
+                .any(|r| r.vrf == "default" && r.prefix == (far, 32)),
+            "fra-core1 has no route to {far}/32"
+        );
     }
 }
