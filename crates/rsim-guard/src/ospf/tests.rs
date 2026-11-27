@@ -952,3 +952,29 @@ fn the_router_and_network_lsas_of_a_left_out_process_are_not_computed() {
         ]
     );
 }
+
+#[test]
+fn an_own_gap_of_the_built_database_makes_an_lsa_of_its_router_not_computed() {
+    let mut built = db(Version::V2, Vec::new());
+    built.router_id = Some(ip(R1));
+    built
+        .own_gaps
+        .push(gap(LsaType::External, None, R1, GapReach::External));
+    let collected = db(
+        Version::V2,
+        vec![external(
+            LsaType::External,
+            None,
+            "203.0.113.0/24",
+            R1,
+            20,
+            2,
+            None,
+        )],
+    );
+    let rows = compare_databases(&built, &collected);
+    assert_eq!(
+        categories(&rows),
+        vec![("203.0.113.0/24 from 198.51.100.1", Category::NotComputed)]
+    );
+}

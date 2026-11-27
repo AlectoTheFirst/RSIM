@@ -334,6 +334,9 @@ pub struct Database {
     /// of the database. [`compute`] adds these gaps to the gaps of the
     /// calculation.
     pub gaps: Vec<Gap>,
+    /// The LSAs that the build of the twin leaves out for the router of the
+    /// database itself. [`compute`] does not read these gaps.
+    pub own_gaps: Vec<Gap>,
     /// The facts of the read of the database.
     pub notes: Vec<Note>,
 }
@@ -350,6 +353,7 @@ impl Database {
             neighbors: Vec::new(),
             lsas: BTreeMap::new(),
             gaps: Vec::new(),
+            own_gaps: Vec::new(),
             notes: Vec::new(),
         }
     }

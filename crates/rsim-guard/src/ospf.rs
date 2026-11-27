@@ -499,7 +499,7 @@ fn lone_networks(
 /// prefixes.
 ///
 /// A collected LSA with no built LSA of its key is not computed if a gap of
-/// `built.gaps` with its advertising router and its area reaches its type or
+/// `built.gaps` or `built.own_gaps` with its advertising router and its area reaches its type or
 /// its prefix, and the row holds the detail of the gap as its reason. A row
 /// that is not computed is outside the match rate.
 pub fn compare_databases(built: &Database, collected: &Database) -> Vec<LsaRow> {
@@ -557,7 +557,9 @@ pub fn compare_databases(built: &Database, collected: &Database) -> Vec<LsaRow> 
                 }
                 (Some(_), None) => (Category::OnlyBuilt, Vec::new()),
                 (None, c) => {
-                    reason = c.and_then(|c| not_computed(&built.gaps, k, c));
+                    let gaps: Vec<Gap> =
+                        built.gaps.iter().chain(&built.own_gaps).cloned().collect();
+                    reason = c.and_then(|c| not_computed(&gaps, k, c));
                     if reason.is_some() {
                         (Category::NotComputed, Vec::new())
                     } else {

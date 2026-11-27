@@ -35,7 +35,8 @@
 //!   router in an area into its summary LSAs of the other areas.
 //! - LSAs that the builder leaves out are gaps of each database of their
 //!   flooding scope (`Database::gaps`): the AS for an AS-external LSA, the
-//!   area for a summary or an NSSA LSA.
+//!   area for a summary or an NSSA LSA. In the database of the router that
+//!   leaves them out, they are in `Database::own_gaps`.
 //! - The LSAs have no sequence number and no age.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -1759,9 +1760,14 @@ impl<'a> Builder<'a> {
         {
             db.gaps.extend(gaps.iter().cloned());
         }
-        db.gaps.retain(|g| Some(g.lsid) != p.rid);
-        db.gaps.sort();
-        db.gaps.dedup();
+        let (own, others): (Vec<Gap>, Vec<Gap>) =
+            db.gaps.drain(..).partition(|g| Some(g.lsid) == p.rid);
+        db.gaps = others;
+        db.own_gaps = own;
+        for list in [&mut db.gaps, &mut db.own_gaps] {
+            list.sort();
+            list.dedup();
+        }
         db
     }
 
