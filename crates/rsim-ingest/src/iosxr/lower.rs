@@ -32,6 +32,7 @@ use crate::nxos::lower::{L, iface_addr};
 use crate::resolve::{Origin, Path, Resolver, Target, through_default};
 use crate::route_tables::{TABLE_NOT_COLLECTED, route_kind};
 use crate::vyos::Lowered;
+use rsim_routing::{Candidate, Platform, install};
 
 /// The protocol word of the shared ACL functions for all IPv4 protocols.
 const SHARED_ALL_IP: &str = "ip";
@@ -126,6 +127,10 @@ pub(crate) struct Hops<'a> {
     /// The flag of the vendor profile: true if the next hop of a computed
     /// route resolves through a default route.
     pub(crate) computed_through_default: bool,
+    /// The static routes of the config and the routing defaults, for the
+    /// computed route table of the RIB guard.
+    pub(crate) config_statics: &'a [nxos::config::StaticRoute],
+    pub(crate) platform: Platform,
 }
 
 fn port(i: &Interface) -> nxos::config::Interface {
@@ -350,6 +355,8 @@ pub fn lower(
         dynamic: &cfg.dynamic_vrfs,
         resolver: &resolver,
         computed_through_default: super::profile::COMPUTED_THROUGH_DEFAULT,
+        config_statics: &cfg.static_routes,
+        platform: Platform::Iosxr,
     };
     let mut tables = BTreeMap::new();
     for v in &vrfs {
@@ -1263,6 +1270,7 @@ pub(crate) fn fib(
     hops: &Hops,
 ) -> Fib {
     let mut t = Fib::new();
+    let mut compared = false;
     let all: Prefix = "0.0.0.0/0".parse().expect("a valid prefix");
     let unknown_all = |spans: Vec<SourceSpan>| Route::new(RouteKind::Static, Vec::new(), spans);
     // A VRF with a dynamic routing protocol and no route of the section.
@@ -1321,6 +1329,7 @@ pub(crate) fn fib(
                 );
             } else {
                 routes(l, &mut t, vrf, rib, &mine, hops);
+                compared = true;
             }
         }
     }
@@ -1347,7 +1356,118 @@ pub(crate) fn fib(
     }
     let v6: Prefix = "::/0".parse().expect("a valid prefix");
     t.insert(v6, Route::new(RouteKind::Static, Vec::new(), Vec::new()));
+    if compared && let Some(rib) = rib {
+        guard(l, &mut t, vrf, active, rib, hops);
+    }
     t
+}
+
+/// The RIB guard of a VRF: the computed route table of the connected,
+/// local and static routes of the config against the collected route table
+/// `t`, whose routes it marks. The class of a collected route comes from the
+/// code of its first path that is not a backup path.
+fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &Hops) {
+    let hop = |l: &L, iface: &str, gw: Option<IpAddr>| RouteNextHop {
+        interface: InterfaceId::new(iface),
+        gateway: gw,
+        next: l.id(hops.next),
+    };
+    let zero = hops.platform.distance(rsim_routing::Origin::Connected);
+    let mut cands = Vec::new();
+    let mine: Vec<&Port> = active.iter().filter(|p| p.vrf() == vrf).collect();
+    for p in &mine {
+        for a in &p.i.addresses {
+            if let Some((ip, len)) = iface_addr(&a.prefix) {
+                let span = vec![l.span(a.lines)];
+                cands.push(Candidate {
+                    prefix: Prefix::host(ip),
+                    distance: zero,
+                    route: Route::new(RouteKind::Local, Vec::new(), span.clone()),
+                });
+                if len < 32 {
+                    cands.push(Candidate {
+                        prefix: Prefix::new(ip, len),
+                        distance: zero,
+                        route: Route::new(
+                            RouteKind::Connected,
+                            vec![hop(l, &p.i.name, None)],
+                            span,
+                        ),
+                    });
+                }
+            }
+        }
+    }
+    for r in hops.config_statics.iter().filter(|r| r.vrf == vrf) {
+        let Ok(p) = r.prefix.parse::<Prefix>() else {
+            continue;
+        };
+        let span = vec![l.span(r.lines)];
+        let gw = r.next_hop.as_deref().and_then(|g| g.parse::<IpAddr>().ok());
+        let route = if r
+            .interface
+            .as_deref()
+            .is_some_and(|i| i.eq_ignore_ascii_case("null0"))
+        {
+            Route::new(RouteKind::Null, Vec::new(), span)
+        } else {
+            let iface = r.interface.clone().or_else(|| {
+                let gw = gw?;
+                mine.iter()
+                    .find(|p| {
+                        p.i.addresses.iter().any(|a| {
+                            iface_addr(&a.prefix).is_some_and(|(ip, len)| {
+                                len < 32 && Prefix::new(ip, len).contains(gw)
+                            })
+                        })
+                    })
+                    .map(|p| p.i.name.clone())
+            });
+            match iface {
+                Some(i) if r.unhandled.is_empty() => {
+                    Route::new(RouteKind::Static, vec![hop(l, &i, gw)], span)
+                }
+                _ => Route::unknown(
+                    RouteKind::Static,
+                    format!("static route {p} in VRF {vrf}, next hop not known"),
+                    span,
+                ),
+            }
+        };
+        cands.push(Candidate {
+            prefix: p,
+            distance: r.preference,
+            route,
+        });
+    }
+    let computed = install(cands);
+    let mut by_prefix: BTreeMap<Prefix, Vec<&RoutePath>> = BTreeMap::new();
+    for p in rib.paths.iter().filter(|p| p.vrf == vrf) {
+        by_prefix.entry(p.prefix).or_default().push(p);
+    }
+    let mut routes = BTreeMap::new();
+    for (prefix, paths) in &by_prefix {
+        let Some(head) = primary(paths).first().copied() else {
+            continue;
+        };
+        let c = code(&head.protocol);
+        let class = if c == CONNECTED_CODE || c == LOCAL_CODE || c == "S" {
+            rsim_guard::Class::Compared
+        } else {
+            let name = route_kind(c, hops.learned, hops.statics).name();
+            rsim_guard::Class::NotComputed(format!("{name} not computed"))
+        };
+        routes.insert(
+            *prefix,
+            rsim_guard::CollectedRoute {
+                protocol: head.protocol.clone(),
+                class,
+            },
+        );
+    }
+    let rows = rsim_guard::compare(vrf, &computed, t, &routes);
+    rsim_guard::mark(t, &rows);
+    l.out.guard.extend(rows);
 }
 
 /// The routes of the route table section for the resolution of a next hop:

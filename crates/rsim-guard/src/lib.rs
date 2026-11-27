@@ -127,7 +127,7 @@ pub fn compare(
             category,
             protocol,
             computed: mine.map(View::of),
-            collected: theirs.map(|(_, r)| View::of(r)),
+            collected: theirs.as_ref().map(|(_, r)| View::of(r)),
             fields,
             reason,
             spans: theirs
@@ -136,7 +136,7 @@ pub fn compare(
                 .chain(mine.iter().flat_map(|r| r.spans.iter().cloned()))
                 .collect(),
         };
-        let out = match (mine, theirs) {
+        let out = match (mine, theirs.as_ref()) {
             (None, None) => continue,
             (Some(m), None) => row(
                 Category::OnlyComputed,

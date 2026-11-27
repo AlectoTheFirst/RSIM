@@ -20,6 +20,8 @@ use rsim_functions::{
     ZoneRole, ZoneScope,
 };
 
+use rsim_routing::{Candidate, Platform, install};
+
 use crate::collected::Collected;
 use crate::resolve::{Origin, Path, Resolver, Target, through_default};
 use crate::route_tables::{TABLE_NOT_COLLECTED, route_kind};
@@ -28,6 +30,25 @@ use crate::vyos::config::{Action, Config, Family, Interface, Kind, Lines, RuleMa
 /// The default VRF. It is the only VRF with a route table, so the packets
 /// of an interface in another VRF are unknown at the route lookup.
 const VRF: &str = "default";
+
+/// The routing defaults of VyOS: FRR with its traditional profile.
+const PLATFORM: Platform = Platform::FrrTraditional;
+
+/// The guard class of a collected route of the protocol word `word`: the
+/// connected, local and static routes are compared, and each other route is
+/// not computed.
+fn guard_route(word: &str) -> rsim_guard::CollectedRoute {
+    let class = match word {
+        "connected" | "local" | "static" => rsim_guard::Class::Compared,
+        "kernel" => rsim_guard::Class::NotComputed("kernel route".into()),
+        "table" => rsim_guard::Class::NotComputed("route of another table".into()),
+        other => rsim_guard::Class::NotComputed(format!("{other} not computed")),
+    };
+    rsim_guard::CollectedRoute {
+        protocol: word.to_string(),
+        class,
+    }
+}
 
 /// The zone of an interface that is in no firewall zone.
 pub const NO_ZONE: &str = "(no zone)";
@@ -43,6 +64,8 @@ pub struct Lowered {
     /// The parts that lowering could not change into a definite function,
     /// with the reason.
     pub notes: Vec<String>,
+    /// The RIB guard rows of each VRF with collected route rows.
+    pub guard: Vec<rsim_guard::Row>,
 }
 
 struct L<'a> {
@@ -905,21 +928,64 @@ impl L<'_> {
         }
     }
 
-    fn connected(&self, t: &mut Fib, addrs: &Addrs) {
+    /// The connected routes of the addresses.
+    fn connected(&self, addrs: &Addrs) -> Vec<Candidate> {
+        let mut out = Vec::new();
         for (iface, list) in addrs {
             for (a, len, span) in list {
                 if *len < max_len(*a) {
-                    t.insert(
-                        Prefix::new(*a, *len),
-                        Route::new(
+                    out.push(Candidate {
+                        prefix: Prefix::new(*a, *len),
+                        distance: PLATFORM.distance(rsim_routing::Origin::Connected),
+                        route: Route::new(
                             RouteKind::Connected,
                             vec![self.hop(iface, None)],
                             span.iter().cloned().collect(),
                         ),
-                    );
+                    });
                 }
             }
         }
+        out
+    }
+
+    /// The connected routes and the static routes of the main table.
+    fn config_candidates(&mut self, addrs: &Addrs) -> Vec<Candidate> {
+        let mut out = self.connected(addrs);
+        let statics: Vec<_> = self
+            .cfg
+            .static_routes
+            .iter()
+            .filter(|r| r.table.is_none())
+            .cloned()
+            .collect();
+        for r in &statics {
+            out.extend(self.static_route(r, addrs));
+        }
+        out
+    }
+
+    /// The RIB guard of the main VRF: the computed route table of the
+    /// connected, static and local routes against the collected route table
+    /// `t`, whose routes it marks.
+    fn guard(&mut self, t: &mut Fib, col: &Collected, addrs: &Addrs, locals: &[(Prefix, Route)]) {
+        let mut cands = self.config_candidates(addrs);
+        cands.extend(locals.iter().map(|(p, r)| Candidate {
+            prefix: *p,
+            distance: PLATFORM.distance(rsim_routing::Origin::Connected),
+            route: r.clone(),
+        }));
+        let computed = install(cands);
+        let mut routes = BTreeMap::new();
+        for r in col.routes.iter().filter(|r| r.selected && r.vrf == VRF) {
+            let Ok(p) = r.prefix.parse::<Prefix>() else {
+                continue;
+            };
+            routes.entry(p).or_insert_with(|| guard_route(&r.protocol));
+        }
+        let rows = rsim_guard::compare(VRF, &computed, t, &routes);
+        rsim_guard::mark(t, &rows);
+        self.out.guard.extend(rows);
     }
 
     /// The main FIB: the collected route rows of the main VRF, or else the
@@ -932,18 +998,10 @@ impl L<'_> {
             .iter()
             .filter(|r| r.selected && r.vrf == VRF)
             .collect();
-        if !col.routes.iter().any(|r| r.vrf == VRF) {
-            self.connected(&mut t, addrs);
-            let statics: Vec<_> = self
-                .cfg
-                .static_routes
-                .iter()
-                .filter(|r| r.table.is_none())
-                .cloned()
-                .collect();
-            for r in &statics {
-                self.static_route(&mut t, r, addrs);
-            }
+        let collected = col.routes.iter().any(|r| r.vrf == VRF);
+        if !collected {
+            let cands = self.config_candidates(addrs);
+            t = install(cands);
             // A routing protocol can add a longer route for each address,
             // so only the connected and the local routes stay definite.
             let protocols = self.cfg.routing_protocols.clone();
@@ -1037,13 +1095,15 @@ impl L<'_> {
         for (p, r) in locals {
             t.insert(*p, r.clone());
         }
+        if collected {
+            self.guard(&mut t, col, addrs, locals);
+        }
         t
     }
 
     /// The FIB of a policy route table: its static routes and the local
     /// routes.
     fn table_fib(&mut self, table: &str, addrs: &Addrs, locals: &[(Prefix, Route)]) -> Fib {
-        let mut t = Fib::new();
         let statics: Vec<_> = self
             .cfg
             .static_routes
@@ -1051,39 +1111,67 @@ impl L<'_> {
             .filter(|r| r.table.as_deref() == Some(table))
             .cloned()
             .collect();
+        let mut cands = Vec::new();
         for r in &statics {
-            self.static_route(&mut t, r, addrs);
+            cands.extend(self.static_route(r, addrs));
         }
+        let mut t = install(cands);
         for (p, r) in locals {
             t.insert(*p, r.clone());
         }
         t
     }
 
-    fn static_route(&mut self, t: &mut Fib, r: &crate::vyos::config::StaticRoute, addrs: &Addrs) {
+    /// The candidates of a static route: one for each next hop, with the
+    /// distance of the next hop, else 1. A route that is not fully lowered
+    /// is one unknown candidate, so its packets are unknown and do not fall
+    /// to a shorter prefix.
+    fn static_route(
+        &mut self,
+        r: &crate::vyos::config::StaticRoute,
+        addrs: &Addrs,
+    ) -> Vec<Candidate> {
         let Ok(p) = r.prefix.parse::<Prefix>() else {
             self.note(format!("static route {}: prefix not valid", r.prefix));
-            return;
+            return Vec::new();
         };
         let span = vec![self.span(r.lines)];
-        // A route that is not fully lowered stays in the table with no next
-        // hop, so its packets are unknown and do not fall to a shorter
-        // prefix.
-        let unknown = Route::new(RouteKind::Static, Vec::new(), span.clone());
+        let static_distance = PLATFORM.distance(rsim_routing::Origin::Static);
+        let distance_of = |key: &str| r.distances.get(key).copied().unwrap_or(static_distance);
+        let first = r
+            .distances
+            .values()
+            .min()
+            .copied()
+            .unwrap_or(static_distance);
+        let unknown = vec![Candidate {
+            prefix: p,
+            distance: first,
+            route: Route::new(RouteKind::Static, Vec::new(), span.clone()),
+        }];
         if !r.unhandled.is_empty() {
             self.note(format!(
                 "static route {}: options not lowered: {}",
                 r.prefix,
                 r.unhandled.join(", ")
             ));
-            t.insert(p, unknown);
-            return;
+            return unknown;
         }
+        let mut out = Vec::new();
         if r.blackhole {
-            t.insert(p, Route::new(RouteKind::Null, Vec::new(), span));
-            return;
+            out.push(Candidate {
+                prefix: p,
+                distance: distance_of("blackhole"),
+                route: Route::new(RouteKind::Null, Vec::new(), span.clone()),
+            });
         }
-        let mut hops: Vec<RouteNextHop> = r.interfaces.iter().map(|i| self.hop(i, None)).collect();
+        for i in &r.interfaces {
+            out.push(Candidate {
+                prefix: p,
+                distance: distance_of(&format!("interface {i}")),
+                route: Route::new(RouteKind::Static, vec![self.hop(i, None)], span.clone()),
+            });
+        }
         for g in &r.gateways {
             let iface = g.parse::<IpAddr>().ok().and_then(|gw| {
                 addrs
@@ -1096,23 +1184,25 @@ impl L<'_> {
                     .map(|(i, _)| (i, gw))
             });
             match iface {
-                Some((i, gw)) => hops.push(self.hop(i, Some(gw))),
+                Some((i, gw)) => out.push(Candidate {
+                    prefix: p,
+                    distance: distance_of(&format!("next-hop {g}")),
+                    route: Route::new(RouteKind::Static, vec![self.hop(i, Some(gw))], span.clone()),
+                }),
                 None => {
                     self.note(format!(
                         "static route {}: gateway {g} is on no connected network",
                         r.prefix
                     ));
-                    t.insert(p, unknown);
-                    return;
+                    return unknown;
                 }
             }
         }
-        if hops.is_empty() {
+        if out.is_empty() {
             self.note(format!("static route {}: no next hop", r.prefix));
-            t.insert(p, unknown);
-            return;
+            return unknown;
         }
-        t.insert(p, Route::new(RouteKind::Static, hops, span));
+        out
     }
 
     /// The rules of the zone policy: the forward rules and the rules to the

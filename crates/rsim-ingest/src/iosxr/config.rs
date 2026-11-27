@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::profile::DEFAULT_VRF;
 use crate::coverage::{State, Table};
 pub use crate::nxos::config::Lines;
 use crate::nxos::config::{Acl, AclAction, mask_len};
@@ -104,6 +105,9 @@ pub struct Config {
     pub dynamic_vrfs: BTreeMap<String, Vec<(u32, u32)>>,
     /// The BGP processes, neighbours and listen ranges.
     pub bgp: crate::bgp_peers::BgpConfig,
+    /// The IPv4 static routes of `router static`, for the computed route
+    /// table.
+    pub static_routes: Vec<crate::nxos::config::StaticRoute>,
     /// The first line of each stanza that a handler read.
     pub read: BTreeSet<u32>,
 }
@@ -170,12 +174,89 @@ pub fn read(doc: &Document, table: &Table) -> Config {
                 let table = r.table;
                 cfg.bgp = super::bgp::read(s, &mut r.read, &|k| table.report_key(k));
             }
+            ["router", "static"] => cfg.static_routes = router_static(s),
             _ => {}
         }
     }
     cfg.read = r.read;
     cfg.dynamic_vrfs = super::table::dynamic_vrfs(doc);
     cfg
+}
+
+/// The IPv4 static routes of `router static`: the `address-family ipv4
+/// unicast` stanza of the default VRF and of each `vrf` stanza.
+fn router_static(s: &Stanza) -> Vec<crate::nxos::config::StaticRoute> {
+    let mut out = Vec::new();
+    let mut family = |vrf: &str, af: &Stanza| {
+        for c in af.children() {
+            out.push(static_line(vrf, &words(&c.key), lines_of(c)));
+        }
+    };
+    for c in s.children() {
+        match words(&c.key).as_slice() {
+            ["address-family", "ipv4", "unicast"] => family(DEFAULT_VRF, c),
+            ["vrf", v] => {
+                for af in c.children() {
+                    if words(&af.key).as_slice() == ["address-family", "ipv4", "unicast"] {
+                        family(v, af);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// One route line of `router static`: the prefix, then the interface, the
+/// next hop and the distance, each optional, and `tag <n>` and
+/// `description <text>`. Each other word is unhandled.
+fn static_line(vrf: &str, w: &[&str], lines: Lines) -> crate::nxos::config::StaticRoute {
+    let mut r = crate::nxos::config::StaticRoute {
+        vrf: vrf.to_string(),
+        prefix: String::new(),
+        interface: None,
+        next_hop: None,
+        preference: 1,
+        unhandled: Vec::new(),
+        lines,
+    };
+    let Some((prefix, rest)) = ipv4_prefix(w) else {
+        r.unhandled
+            .push(format!("prefix {}", w.first().unwrap_or(&"")));
+        return r;
+    };
+    r.prefix = prefix;
+    let mut distance = None;
+    let mut i = 0;
+    while let Some(word) = rest.get(i) {
+        match *word {
+            "tag" => i += 1,
+            "description" => break,
+            a if a.parse::<std::net::Ipv4Addr>().is_ok() && r.next_hop.is_none() => {
+                r.next_hop = Some(a.to_string());
+            }
+            n if distance.is_none()
+                && (r.next_hop.is_some() || r.interface.is_some())
+                && n.parse::<u8>().is_ok_and(|v| v > 0) =>
+            {
+                distance = n.parse::<u8>().ok();
+            }
+            n if n.chars().next().is_some_and(char::is_alphabetic)
+                && n.chars().any(|c| c.is_ascii_digit())
+                && r.interface.is_none()
+                && r.next_hop.is_none() =>
+            {
+                r.interface = Some(n.to_string());
+            }
+            other => r.unhandled.push(other.to_string()),
+        }
+        i += 1;
+    }
+    if let Some(d) = distance {
+        r.preference = d;
+    }
+    r
 }
 
 /// An IPv4 address with a dotted mask or a prefix length, as
