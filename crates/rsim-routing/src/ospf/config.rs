@@ -68,6 +68,10 @@ pub struct OspfInterface {
     pub area: AreaId,
     /// The address and the prefix length of the interface.
     pub address: Option<(IpAddr, u8)>,
+    /// The secondary addresses with their prefix lengths. The router
+    /// advertises the network of each one as a stub network of the
+    /// interface.
+    pub secondaries: Vec<(IpAddr, u8)>,
     /// The cost of the config. `None` takes the reference bandwidth over
     /// `bandwidth_kbps`.
     pub cost: Option<u32>,

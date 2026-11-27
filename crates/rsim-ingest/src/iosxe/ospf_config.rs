@@ -706,13 +706,17 @@ fn run(file: &str, doc: &Document, cfg: &Config, table: &Table) -> (RouterConfig
                     .unhandled
                     .push((format!("{key}/{line}"), lsp.clone()));
             }
+            let mut secs = Vec::new();
             let address = match version {
                 Version::V2 => {
                     for a in i.addresses.iter().filter(|a| a.secondary) {
-                        b.process.unhandled.push((
-                            format!("{key}/ip address {} secondary", a.prefix),
-                            SourceSpan::new(file, a.lines.first, a.lines.last),
-                        ));
+                        match crate::ospf::inputs::address(&a.prefix) {
+                            Some(x) => secs.push(x),
+                            None => b.process.unhandled.push((
+                                format!("{key}/ip address {} secondary", a.prefix),
+                                SourceSpan::new(file, a.lines.first, a.lines.last),
+                            )),
+                        }
                     }
                     primary(i).map(|(a, l)| (IpAddr::V4(a), l))
                 }
@@ -740,6 +744,7 @@ fn run(file: &str, doc: &Document, cfg: &Config, table: &Table) -> (RouterConfig
                 name: i.name.clone(),
                 area,
                 address,
+                secondaries: secs,
                 cost: set.cost,
                 bandwidth_kbps: lines.bandwidth,
                 network,
@@ -1183,7 +1188,6 @@ router ospf 1
                 "interface GigabitEthernet1/ip ospf message-digest-key <secret>",
                 "interface GigabitEthernet1/ip ospf network point-to-multipoint",
                 "interface GigabitEthernet1/bandwidth inherit",
-                "interface GigabitEthernet1/ip address 198.51.100.1/24 secondary",
             ]
         );
         assert!(p.unhandled.iter().all(|(_, s)| &*s.file == "r1"));

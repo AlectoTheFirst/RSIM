@@ -599,6 +599,7 @@ fn interface(
         name: link.name.clone(),
         area,
         address,
+        secondaries: Vec::new(),
         cost: set.and_then(|s| s.cost),
         bandwidth_kbps: set.and_then(|s| s.bandwidth_kbps),
         network: set.and_then(|s| s.network).unwrap_or(link.network),

@@ -652,6 +652,7 @@ fn interface(
         }
     }
     let mut addr = None;
+    let mut secs = Vec::new();
     if let Some(i) = config {
         match version {
             Version::V2 => {
@@ -659,9 +660,14 @@ fn interface(
                     if !a.secondary && addr.is_none() {
                         addr = address(&a.prefix);
                     } else if a.secondary && secondaries {
-                        let span = r.lines(a.lines.first, a.lines.last);
-                        p.unhandled
-                            .push((format!("ip address {} secondary", a.prefix), span));
+                        match address(&a.prefix) {
+                            Some(x) => secs.push(x),
+                            None => {
+                                let span = r.lines(a.lines.first, a.lines.last);
+                                p.unhandled
+                                    .push((format!("ip address {} secondary", a.prefix), span));
+                            }
+                        }
                     }
                 }
             }
@@ -697,6 +703,7 @@ fn interface(
         name: name.to_string(),
         area,
         address: addr,
+        secondaries: secs,
         cost: l.cost,
         bandwidth_kbps: common.bandwidth,
         network: l.network.unwrap_or_else(|| default_network(name)),
@@ -1091,14 +1098,14 @@ mod tests {
                     m("ip ospf authentication-key 3 FAKEOSPFKEY"),
                     one("ip ospf authentication-key")
                 ),
-                (
-                    "ip address 198.51.100.65/26 secondary".to_string(),
-                    one("ip address 198.51.100.65/26")
-                ),
                 (m("ip ospf cost high"), one("ip ospf cost high")),
             ]
         );
-        assert_eq!(p.unhandled.len(), 8);
+        assert_eq!(p.unhandled.len(), 7);
+        assert_eq!(
+            interface(p, "Ethernet1/1").secondaries,
+            [(ip("198.51.100.65"), 26)]
+        );
         assert!(p.unhandled.iter().all(|(l, _)| !l.contains("FAKEOSPFKEY")));
         let last = p.unhandled.last().unwrap();
         assert!(last.0.starts_with("interface Ethernet1/5"));

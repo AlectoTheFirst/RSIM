@@ -877,6 +877,16 @@ impl<'a> Builder<'a> {
                     });
                 }
             }
+            for (a, l) in &f.cfg.secondaries {
+                if a.is_ipv4() != (version == Version::V2) {
+                    continue;
+                }
+                let p = Prefix::new(*a, *l);
+                match version {
+                    Version::V2 => links.push(stub(p, f.cost)),
+                    Version::V3 => prefixes.push((p, f.cost)),
+                }
+            }
             if let Link::Transit { dr, members } = &f.link
                 && *dr == (pi, ii)
             {

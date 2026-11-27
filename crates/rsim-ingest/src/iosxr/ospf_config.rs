@@ -716,11 +716,17 @@ pub fn router_config(cfg: &Config, file: &str) -> RouterConfig {
             for oi in &a.interfaces {
                 let s = oi.settings.over(&a.settings.over(&p.settings));
                 let i = find(&oi.name);
+                let mut secs = Vec::new();
                 let address = match (i, p.version) {
                     (Some(i), Version::V2) => {
                         for x in i.addresses.iter().filter(|x| x.secondary) {
-                            unhandled
-                                .push((format!("ipv4 address {} secondary", x.prefix), x.lines));
+                            match prefix::<Ipv4Addr>(&x.prefix) {
+                                Some((a, l)) => secs.push((IpAddr::V4(a), l)),
+                                None => unhandled.push((
+                                    format!("ipv4 address {} secondary", x.prefix),
+                                    x.lines,
+                                )),
+                            }
                         }
                         i.addresses
                             .iter()
@@ -757,6 +763,7 @@ pub fn router_config(cfg: &Config, file: &str) -> RouterConfig {
                     name: oi.name.clone(),
                     area: a.id,
                     address,
+                    secondaries: secs,
                     cost: s.cost,
                     bandwidth_kbps: i.and_then(|i| i.bandwidth.map(|b| b.0)),
                     network,

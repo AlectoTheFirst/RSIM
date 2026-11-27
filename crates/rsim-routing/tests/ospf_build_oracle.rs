@@ -185,6 +185,7 @@ fn inputs(c: &Case) -> BTreeMap<String, RouterInput> {
         for seg in &c.segments {
             for p in seg.ports.iter().filter(|p| p.router == r) {
                 interfaces.push(OspfInterface {
+                    secondaries: Vec::new(),
                     name: p.name.clone(),
                     area: BACKBONE,
                     address: Some((IpAddr::V4(p.address), seg.prefix.len())),
@@ -204,6 +205,7 @@ fn inputs(c: &Case) -> BTreeMap<String, RouterInput> {
         }
         if let Some(cost) = c.loopbacks[r] {
             interfaces.push(OspfInterface {
+                secondaries: Vec::new(),
                 name: "lo0".to_string(),
                 area: BACKBONE,
                 address: Some((IpAddr::V4(rid(r)), 32)),

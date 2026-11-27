@@ -26,8 +26,10 @@ fn pfx(s: &str) -> Prefix {
 }
 
 fn iface(name: &str, area: AreaId, addr: &str, network: NetworkType) -> OspfInterface {
+    secondaries: Vec::new(),
     let (a, len) = addr.split_once('/').unwrap();
     OspfInterface {
+        secondaries: Vec::new(),
         name: name.to_string(),
         area,
         address: Some((a.parse::<IpAddr>().unwrap(), len.parse().unwrap())),
@@ -42,14 +44,17 @@ fn iface(name: &str, area: AreaId, addr: &str, network: NetworkType) -> OspfInte
 }
 
 fn p2p(name: &str, area: AreaId, addr: &str) -> OspfInterface {
+    secondaries: Vec::new(),
     iface(name, area, addr, NetworkType::PointToPoint)
 }
 
 fn lan(name: &str, area: AreaId, addr: &str) -> OspfInterface {
+    secondaries: Vec::new(),
     iface(name, area, addr, NetworkType::Broadcast)
 }
 
 fn lo(area: AreaId, addr: &str) -> OspfInterface {
+    secondaries: Vec::new(),
     let mut f = iface("lo0", area, addr, NetworkType::Loopback);
     f.cost = None;
     f
