@@ -1,0 +1,22 @@
+{
+  "TABLE_ctx": {
+    "ROW_ctx": [
+      {
+        "TABLE_area": {
+          "ROW_area": [
+            {
+              "aid": "0.0.0.0"
+            },
+            {
+              "aid": "0.0.0.1",
+              "nssa": "true"
+            }
+          ]
+        },
+        "cname": "default",
+        "ptag": "1",
+        "rid": "198.51.100.1"
+      }
+    ]
+  }
+}

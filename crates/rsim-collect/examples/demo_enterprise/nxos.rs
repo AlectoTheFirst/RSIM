@@ -28,7 +28,7 @@ pub fn short(name: &str) -> String {
     }
 }
 
-fn pretty(v: &Value) -> String {
+pub fn pretty(v: &Value) -> String {
     let mut s = serde_json::to_string_pretty(v).expect("JSON");
     s.push('\n');
     s
@@ -205,7 +205,12 @@ fn config(e: &Estate, d: usize) -> String {
                     let _ = writeln!(s, "  ip address {a}/{l}");
                 }
                 if i.ospf {
-                    s.push_str("  ip ospf network point-to-point\n  ip router ospf UNDERLAY area 0.0.0.0\n");
+                    let _ = writeln!(s, "  ip ospf cost {}", i.ospf_cost);
+                    s.push_str("  ip ospf network point-to-point\n");
+                    if i.ospf_passive {
+                        s.push_str("  ip ospf passive-interface\n");
+                    }
+                    s.push_str("  ip router ospf UNDERLAY area 0.0.0.0\n");
                 }
                 s.push_str("  no shutdown\n");
             }
@@ -217,7 +222,11 @@ fn config(e: &Estate, d: usize) -> String {
                     let _ = writeln!(s, "  ip address {a}/{l} secondary");
                 }
                 if i.ospf {
-                    s.push_str("  ip router ospf UNDERLAY area 0.0.0.0\n");
+                    let _ = writeln!(
+                        s,
+                        "  ip ospf cost {}\n  ip router ospf UNDERLAY area 0.0.0.0",
+                        i.ospf_cost
+                    );
                 }
             }
             Mode::Mgmt => {
@@ -839,5 +848,6 @@ pub fn render(e: &Estate, t: &Tables, d: usize) -> BTreeMap<&'static str, String
         "bgp_sessions",
         bgp_sessions(dev).unwrap_or_else(|| NO_FEATURE.to_string()),
     );
+    super::ospf::nxos(e, d, &t.redistributed, &mut out);
     out
 }

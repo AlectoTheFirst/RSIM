@@ -1,0 +1,120 @@
+{
+  "TABLE_ctx": {
+    "ROW_ctx": [
+      {
+        "TABLE_area": {
+          "ROW_area": [
+            {
+              "TABLE_lsdb": {
+                "ROW_lsdb": [
+                  {
+                    "TABLE_link": {
+                      "ROW_link": [
+                        {
+                          "intf_id": "1",
+                          "metric": "10",
+                          "nbr_intf_id": "1",
+                          "nbr_rid": "198.51.100.2",
+                          "type": "p2p"
+                        }
+                      ]
+                    },
+                    "advrouter": "198.51.100.1",
+                    "age": "100",
+                    "lsid": "0",
+                    "seqno": "0x80000001"
+                  },
+                  {
+                    "TABLE_link": {
+                      "ROW_link": [
+                        {
+                          "intf_id": "1",
+                          "metric": "10",
+                          "nbr_intf_id": "1",
+                          "nbr_rid": "198.51.100.1",
+                          "type": "p2p"
+                        },
+                        {
+                          "intf_id": "2",
+                          "metric": "10",
+                          "nbr_intf_id": "2",
+                          "nbr_rid": "198.51.100.3",
+                          "type": "transit"
+                        }
+                      ]
+                    },
+                    "advrouter": "198.51.100.2",
+                    "age": "100",
+                    "lsid": "0",
+                    "seqno": "0x80000001"
+                  },
+                  {
+                    "TABLE_link": {
+                      "ROW_link": [
+                        {
+                          "intf_id": "2",
+                          "metric": "10",
+                          "nbr_intf_id": "2",
+                          "nbr_rid": "198.51.100.3",
+                          "type": "transit"
+                        }
+                      ]
+                    },
+                    "advrouter": "198.51.100.3",
+                    "age": "100",
+                    "lsid": "0",
+                    "seqno": "0x80000001"
+                  }
+                ]
+              },
+              "aid": "0.0.0.0"
+            },
+            {
+              "TABLE_lsdb": {
+                "ROW_lsdb": [
+                  {
+                    "TABLE_link": {
+                      "ROW_link": [
+                        {
+                          "intf_id": "3",
+                          "metric": "10",
+                          "nbr_intf_id": "1",
+                          "nbr_rid": "198.51.100.4",
+                          "type": "p2p"
+                        }
+                      ]
+                    },
+                    "advrouter": "198.51.100.1",
+                    "age": "100",
+                    "lsid": "0",
+                    "seqno": "0x80000001"
+                  },
+                  {
+                    "TABLE_link": {
+                      "ROW_link": [
+                        {
+                          "intf_id": "1",
+                          "metric": "10",
+                          "nbr_intf_id": "3",
+                          "nbr_rid": "198.51.100.1",
+                          "type": "p2p"
+                        }
+                      ]
+                    },
+                    "advrouter": "198.51.100.4",
+                    "age": "100",
+                    "lsid": "0",
+                    "seqno": "0x80000001"
+                  }
+                ]
+              },
+              "aid": "0.0.0.1"
+            }
+          ]
+        },
+        "cname": "default",
+        "ptag": "1"
+      }
+    ]
+  }
+}

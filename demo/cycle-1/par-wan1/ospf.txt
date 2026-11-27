@@ -1,0 +1,6 @@
+Mon Nov  2 08:00:00.000 UTC
+ Routing Process "ospf CORE" with ID 10.27.0.1
+ Supports only single TOS(TOS0) routes
+ Area BACKBONE(0)
+    Number of interfaces in this area is 6
+

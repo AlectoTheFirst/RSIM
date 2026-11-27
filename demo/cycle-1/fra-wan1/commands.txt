@@ -9,3 +9,23 @@ arp.txt	show arp vrf all
 inventory.txt	show inventory
 hsrp.txt	show hsrp
 bgp_sessions.txt	show bgp summary
+ospf.txt	show ospf
+ospf_interfaces.txt	show ospf interface
+ospf_neighbors.txt	show ospf neighbor
+ospf_lsdb_router.txt	show ospf database router detail
+ospf_lsdb_network.txt	show ospf database network detail
+ospf_lsdb_summary.txt	show ospf database summary detail
+ospf_lsdb_asbr_summary.txt	show ospf database asbr-summary detail
+ospf_lsdb_external.txt	show ospf database external detail
+ospf_lsdb_nssa_external.txt	show ospf database nssa-external detail
+ospfv3.txt	show ospfv3
+ospfv3_interfaces.txt	show ospfv3 interface
+ospfv3_neighbors.txt	show ospfv3 neighbor
+ospfv3_lsdb_router.txt	show ospfv3 database router
+ospfv3_lsdb_network.txt	show ospfv3 database network
+ospfv3_lsdb_inter_area_prefix.txt	show ospfv3 database inter-area-prefix
+ospfv3_lsdb_inter_area_router.txt	show ospfv3 database inter-area-router
+ospfv3_lsdb_external.txt	show ospfv3 database external
+ospfv3_lsdb_nssa.txt	show ospfv3 database nssa-external
+ospfv3_lsdb_link.txt	show ospfv3 database link
+ospfv3_lsdb_intra_area_prefix.txt	show ospfv3 database prefix

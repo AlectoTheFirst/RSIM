@@ -104,6 +104,7 @@ impl Builder {
             vlans: Vec::new(),
             l3vni: None,
             bgp: None,
+            ospf_redistribute_bgp: false,
             vpc_domain: None,
             vpc_peer: None,
             vtep: None,
@@ -165,6 +166,7 @@ impl Builder {
             i.addr = Some((addr, 31));
             i.routing = Some((cost.0, proto));
             i.ospf = ospf;
+            i.ospf_cost = cost.0;
         }
         self.link(a, pa, b, pb);
         (x, y)
@@ -276,6 +278,7 @@ pub fn estate(cycle: usize) -> Estate {
                 router_id: ip(10, s * 10 + 7, 0, u8::try_from(k + 1).expect("2")),
                 neighbors: Vec::new(),
             });
+            b.e.devs[w].ospf_redistribute_bgp = true;
             b.mgmt(w, "MgmtEth0/RP0/CPU0/0", "MGMT");
         }
         let (w1, w2) = (wans[site][0], wans[site][1]);
@@ -602,6 +605,7 @@ pub fn estate(cycle: usize) -> Estate {
             i.addr = Some((ip(10, s * 10 + 2, 250, 1 + u8::try_from(k).expect("2")), 29));
             i.routing = Some((10, Proto::Ospf));
             i.ospf = true;
+            i.ospf_cost = 10;
         }
         let campus_vlans = [MGMT_VLAN, USERS, PRINTERS];
         for a in 0..ACCESS[site] {
@@ -761,6 +765,33 @@ pub fn estate(cycle: usize) -> Estate {
         b.neighbor(f, nbr(TENANT, pa, FABRIC_AS[1], &pname));
         b.neighbor(p, nbr(TENANT, fa, FABRIC_AS[0], &fname));
     }
+    passive_ospf(&mut b.e);
     b.e.check();
     b.e
+}
+
+/// Makes each other interface of the default VRF with an address on an
+/// OSPF router a passive OSPF interface with the cost 1. On NX-OS only a
+/// routed port or a loopback runs OSPF.
+fn passive_ospf(e: &mut Estate) {
+    for dev in &mut e.devs {
+        if !dev.ifaces.iter().any(|i| i.ospf && i.vrf == "default") {
+            continue;
+        }
+        let os = dev.os;
+        for i in &mut dev.ifaces {
+            let nxos_ok = matches!(i.mode, Mode::Routed | Mode::Loopback);
+            if i.ospf
+                || i.vrf != "default"
+                || i.mode == Mode::Mgmt
+                || i.addr.is_none()
+                || (os == Os::Nxos && !nxos_ok)
+            {
+                continue;
+            }
+            i.ospf = true;
+            i.ospf_cost = 1;
+            i.ospf_passive = true;
+        }
+    }
 }

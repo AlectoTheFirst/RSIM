@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
-use rsim_core::{PrefixTable, SourceSpan};
+use rsim_core::{Prefix, PrefixTable, SourceSpan};
 use rsim_engine::TwinBuilder;
 use rsim_store::{Hash, Snapshot, Store, StoreError};
 use serde_json::Value;
@@ -16,6 +16,7 @@ use crate::collected::{self, Collected};
 use crate::coverage::{Coverage, Table, classify};
 use crate::facts::{self, DeviceFacts};
 use crate::links::{BgpPeerFact, PortAddress, Summary};
+use crate::ospf::inputs as ospf_inputs;
 use crate::route_tables::RouteTables;
 use crate::stanza::{Document, read_json};
 use crate::{equinix, iosxe, iosxr, nxos, unifi, velocloud, vyos};
@@ -41,6 +42,12 @@ pub struct Estate {
     /// The MTU of the interfaces of the IOS-XR, IOS-XE, UniFi and VeloCloud
     /// devices.
     pub mtu: crate::mtu::Mtus,
+    /// The RIB guard rows of each device with collected route rows, by
+    /// twin device.
+    pub guard: BTreeMap<String, Vec<rsim_guard::Row>>,
+    /// The OSPF database guard rows of each device with a built and a
+    /// collected database, by twin device.
+    pub ospf_guard: BTreeMap<String, Vec<rsim_guard::ospf::LsaRow>>,
 }
 
 fn short(h: &Hash) -> String {
@@ -271,7 +278,25 @@ pub fn session_inputs(
 
 /// Builds the twin of the devices of a snapshot.
 pub fn build(store: &Store, snap: &Snapshot) -> Result<Estate, StoreError> {
-    let (inputs, skipped) = inputs(store, snap)?;
+    let (mut inputs, skipped) = inputs(store, snap)?;
+    let mut ospf = crate::ospf::of_snapshot(store, snap)?;
+    for i in &mut inputs {
+        match i {
+            Input::Vyos {
+                name, collected, ..
+            }
+            | Input::Nxos {
+                name, collected, ..
+            }
+            | Input::Iosxr {
+                name, collected, ..
+            }
+            | Input::Iosxe {
+                name, collected, ..
+            } => collected.ospf = ospf.remove(name.as_str()),
+            _ => {}
+        }
+    }
     let sessions = session_inputs(store, snap)?;
     let mut e = assemble_with(inputs, &sessions);
     e.facts = facts::of_snapshot(store, snap)?;
@@ -296,6 +321,9 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
 /// NX-OS switch, each IOS-XR router, each IOS-XE device and each VeloCloud
 /// edge is lowered with its links.
 pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSections>) -> Estate {
+    // The OSPF databases of each IOS-XR and IOS-XE device, for its final
+    // lowering.
+    let mut ios_ospf: BTreeMap<String, crate::ospf::DeviceOspf> = BTreeMap::new();
     let mut e = Estate {
         builder: TwinBuilder::new(),
         coverage: BTreeMap::new(),
@@ -306,6 +334,8 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         seen: Vec::new(),
         fabric: BTreeMap::new(),
         mtu: BTreeMap::new(),
+        guard: BTreeMap::new(),
+        ospf_guard: BTreeMap::new(),
     };
     let mut routers: BTreeMap<String, Router> = BTreeMap::new();
     #[allow(clippy::type_complexity)]
@@ -326,6 +356,8 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     // True for each device with a BGP stanza that can hold a neighbour and
     // that is not handled when no route rows are collected.
     let mut bgp_hidden: BTreeMap<String, bool> = BTreeMap::new();
+    // The input of the OSPF database builder of each router.
+    let mut ospf_in: BTreeMap<String, rsim_routing::ospf::build::RouterInput> = BTreeMap::new();
     for input in inputs {
         match input {
             Input::Vyos {
@@ -352,6 +384,40 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 let bare = vyos::table(&RouteTables::uniform(false, vyos::dynamic_vrfs(&doc)));
                 bgp_hidden.insert(name.clone(), peers_hidden(&doc, &bare));
                 let cfg = vyos::read(&doc);
+                let ifaces: Vec<ospf_inputs::Iface> = cfg
+                    .interfaces
+                    .iter()
+                    .map(|i| ospf_inputs::Iface {
+                        name: i.name.clone(),
+                        vrf: i.vrf.clone().unwrap_or_else(|| "default".into()),
+                        up: !i.disabled,
+                        loopback: matches!(
+                            i.kind,
+                            vyos::config::Kind::Loopback | vyos::config::Kind::Dummy
+                        ),
+                        addresses: i
+                            .addresses
+                            .iter()
+                            .filter_map(|a| ospf_inputs::address(a))
+                            .collect(),
+                    })
+                    .collect();
+                let statics: Vec<(String, Prefix)> = cfg
+                    .static_routes
+                    .iter()
+                    .filter(|r| r.table.is_none())
+                    .filter_map(|r| Some(("default".to_string(), r.prefix.parse().ok()?)))
+                    .collect();
+                ospf_in.insert(
+                    name.clone(),
+                    ospf_inputs::router_input(
+                        vyos::ospf_config::read(&doc, &file),
+                        rsim_routing::Platform::FrrTraditional,
+                        &ifaces,
+                        &statics,
+                        collected_defaults(&col),
+                    ),
+                );
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
                     .insert(name.clone(), vyos::unread(&doc, &table, &cfg.read));
@@ -373,6 +439,24 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 let bare = nxos::table(&RouteTables::uniform(false, nxos::dynamic_vrfs(&doc)));
                 bgp_hidden.insert(name.clone(), peers_hidden(&doc, &bare));
                 let cfg = nxos::read(&doc, &table);
+                ospf_in.insert(
+                    name.clone(),
+                    ospf_inputs::router_input(
+                        nxos::ospf_config::read(&doc, &cfg, &file),
+                        rsim_routing::Platform::Nxos,
+                        &cisco_ifaces(cfg.interfaces.iter().map(|i| {
+                            (
+                                i.name.as_str(),
+                                i.vrf.clone(),
+                                i.admin_up != Some(false),
+                                i.addresses.iter().map(|a| a.prefix.as_str()).collect(),
+                                i.ipv6.iter().map(|(a, _)| a.as_str()).collect(),
+                            )
+                        })),
+                        &cisco_statics(&cfg.static_routes),
+                        collected_defaults(&col),
+                    ),
+                );
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
                     .insert(name.clone(), nxos::unread(&doc, &table, &cfg.read));
@@ -383,8 +467,11 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 config,
                 file,
                 sections,
-                ..
+                collected,
             } => {
+                if let Some(o) = collected.ospf {
+                    ios_ospf.insert(name.clone(), o);
+                }
                 let doc = iosxr::read_text(&config);
                 let tables =
                     RouteTables::new(iosxr::rib_vrfs(&sections), iosxr::dynamic_vrfs(&doc));
@@ -392,6 +479,24 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 let bare = iosxr::table(&RouteTables::uniform(false, iosxr::dynamic_vrfs(&doc)));
                 bgp_hidden.insert(name.clone(), peers_hidden(&doc, &bare));
                 let cfg = iosxr::read(&doc, &table);
+                ospf_in.insert(
+                    name.clone(),
+                    ospf_inputs::router_input(
+                        iosxr::ospf_router_config(&cfg, &file),
+                        rsim_routing::Platform::Iosxr,
+                        &cisco_ifaces(cfg.interfaces.iter().map(|i| {
+                            (
+                                i.name.as_str(),
+                                i.vrf.as_ref().map(|v| v.0.clone()),
+                                !i.shutdown,
+                                i.addresses.iter().map(|a| a.prefix.as_str()).collect(),
+                                i.ipv6.iter().map(|(a, _)| a.as_str()).collect(),
+                            )
+                        })),
+                        &cisco_statics(&cfg.static_routes),
+                        BTreeSet::new(),
+                    ),
+                );
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
                     .insert(name.clone(), iosxr::unread(&doc, &table, &cfg.read));
@@ -402,8 +507,11 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 config,
                 file,
                 sections,
-                ..
+                collected,
             } => {
+                if let Some(o) = collected.ospf {
+                    ios_ospf.insert(name.clone(), o);
+                }
                 let doc = iosxe::read_text(&config);
                 let tables =
                     RouteTables::new(iosxe::rib_vrfs(&sections), iosxe::dynamic_vrfs(&doc));
@@ -411,6 +519,24 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 let bare = iosxe::table(&RouteTables::uniform(false, iosxe::dynamic_vrfs(&doc)));
                 bgp_hidden.insert(name.clone(), peers_hidden(&doc, &bare));
                 let cfg = iosxe::read(&doc, &table);
+                ospf_in.insert(
+                    name.clone(),
+                    ospf_inputs::router_input(
+                        iosxe::router_config(&file, &doc, &cfg, &table),
+                        rsim_routing::Platform::Iosxe,
+                        &cisco_ifaces(cfg.interfaces.iter().map(|i| {
+                            (
+                                i.name.as_str(),
+                                i.vrf.as_ref().map(|v| v.0.clone()),
+                                i.admin_up != Some(false),
+                                i.addresses.iter().map(|a| a.prefix.as_str()).collect(),
+                                i.ipv6.iter().map(|(a, _)| a.as_str()).collect(),
+                            )
+                        })),
+                        &cisco_statics(&cfg.static_routes),
+                        BTreeSet::new(),
+                    ),
+                );
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
                     .insert(name.clone(), iosxe::unread(&doc, &table, &cfg.read));
@@ -421,6 +547,47 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
             Input::Equinix { name, sections } => accounts.push((name, sections)),
         }
     }
+
+    // The OSPF databases of the twin from the router configs. The collected
+    // database of each device is the reference of the database guard, and
+    // the built databases take its place for the computed routes.
+    let built = rsim_routing::ospf::build::build(&ospf_in);
+    for (device, n) in &built.notes {
+        e.notes
+            .entry(device.clone())
+            .or_default()
+            .push(format!("{} {}: {}", n.kind, n.subject, n.detail));
+    }
+    let mut by_device: BTreeMap<String, Vec<rsim_routing::ospf::Database>> = BTreeMap::new();
+    for ((device, ..), db) in built.databases {
+        by_device.entry(device).or_default().push(db);
+    }
+    let mut ospf_rows: BTreeMap<String, Vec<rsim_guard::ospf::LsaRow>> = BTreeMap::new();
+    let mut swap = |device: &str, slot: &mut Option<crate::ospf::DeviceOspf>| {
+        let mine = by_device.remove(device).unwrap_or_default();
+        if let Some(collected) = slot.as_ref() {
+            let rows = ospf_guard(&mine, collected);
+            if !rows.is_empty() {
+                ospf_rows.insert(device.to_string(), rows);
+            }
+        }
+        *slot = Some(crate::ospf::DeviceOspf::built(mine));
+    };
+    for (device, r) in routers.iter_mut() {
+        swap(device, &mut r.col.ospf);
+    }
+    for (device, (_, col, _, _)) in switches.iter_mut() {
+        swap(device, &mut col.ospf);
+    }
+    let ios: Vec<String> = xr.keys().chain(xe.keys()).cloned().collect();
+    for device in ios {
+        let mut slot = ios_ospf.remove(&device);
+        swap(&device, &mut slot);
+        if let Some(o) = slot {
+            ios_ospf.insert(device, o);
+        }
+    }
+    e.ospf_guard = ospf_rows;
 
     // The next hops of the routes of the routers: the collected route table
     // and the static routes.
@@ -824,6 +991,9 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
             &twin_addresses,
         );
         e.notes.entry(device.clone()).or_default().extend(low.notes);
+        if !low.guard.is_empty() {
+            e.guard.insert(device.clone(), low.guard);
+        }
         for f in low.functions {
             e.builder.add_arc(f);
         }
@@ -837,6 +1007,9 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         let ext = joined.devices.remove(device).unwrap_or_default();
         let (low, _) = nxos::lower(device, file, &nx_profile, cfg, col, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
+        if !low.guard.is_empty() {
+            e.guard.insert(device.clone(), low.guard);
+        }
         for f in low.functions {
             e.builder.add_arc(f);
         }
@@ -854,8 +1027,13 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     // The IOS-XR routers, with their links.
     for (device, (cfg, file, sections)) in &xr {
         let ext = joined.devices.remove(device).unwrap_or_default();
+        let mut ext = ext;
+        ext.ospf = ios_ospf.remove(device);
         let (low, _) = iosxr::lower(device, file, &xr_profile, cfg, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
+        if !low.guard.is_empty() {
+            e.guard.insert(device.clone(), low.guard);
+        }
         for f in low.functions {
             e.builder.add_arc(f);
         }
@@ -867,8 +1045,13 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     // The IOS-XE routers and switches, with their links and endpoints.
     for (device, (cfg, file, sections)) in &xe {
         let ext = joined.devices.remove(device).unwrap_or_default();
+        let mut ext = ext;
+        ext.ospf = ios_ospf.remove(device);
         let (low, _) = iosxe::lower(device, file, &xe_profile, cfg, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
+        if !low.guard.is_empty() {
+            e.guard.insert(device.clone(), low.guard);
+        }
         for f in low.functions {
             e.builder.add_arc(f);
         }
@@ -1154,4 +1337,78 @@ pub fn unifi_profile() -> rsim_functions::VendorProfile {
             1,
         )],
     }
+}
+
+/// The interfaces of an NX-OS, IOS-XR or IOS-XE config for the OSPF
+/// database builder: the name, the VRF, the admin state, the IPv4 address
+/// texts and the IPv6 address lines.
+fn cisco_ifaces<'a>(
+    list: impl Iterator<Item = (&'a str, Option<String>, bool, Vec<&'a str>, Vec<&'a str>)>,
+) -> Vec<ospf_inputs::Iface> {
+    list.map(|(name, vrf, up, v4, v6)| ospf_inputs::Iface {
+        name: name.to_string(),
+        vrf: vrf.unwrap_or_else(|| "default".into()),
+        up,
+        loopback: ospf_inputs::loopback_name(name),
+        addresses: v4
+            .into_iter()
+            .filter_map(ospf_inputs::address)
+            .chain(
+                v6.into_iter().filter_map(|a| {
+                    ospf_inputs::address(a.split_whitespace().next().unwrap_or(""))
+                }),
+            )
+            .collect(),
+    })
+    .collect()
+}
+
+/// The prefixes of the static routes of an NX-OS, IOS-XR or IOS-XE config by
+/// VRF.
+fn cisco_statics(routes: &[nxos::config::StaticRoute]) -> Vec<(String, Prefix)> {
+    routes
+        .iter()
+        .filter_map(|r| Some((r.vrf.clone(), r.prefix.parse().ok()?)))
+        .collect()
+}
+
+/// The VRFs whose collected route table has a selected default route that
+/// is not from OSPF.
+fn collected_defaults(col: &Collected) -> BTreeSet<String> {
+    col.routes
+        .iter()
+        .filter(|r| r.selected && (r.prefix == "0.0.0.0/0" || r.prefix == "::/0"))
+        .filter(|r| !r.protocol.starts_with("ospf"))
+        .map(|r| r.vrf.clone())
+        .collect()
+}
+
+/// The database guard rows of a device: each built database against the
+/// collected database of the same VRF, version and process, else the one
+/// collected database of the same VRF and version. A version whose
+/// collected sections are not read in full is not compared.
+fn ospf_guard(
+    built: &[rsim_routing::ospf::Database],
+    collected: &crate::ospf::DeviceOspf,
+) -> Vec<rsim_guard::ospf::LsaRow> {
+    use crate::bgp::Outcome;
+    let mut rows = Vec::new();
+    for b in built {
+        let complete = matches!(
+            collected.outcomes.get(&b.version).map(|o| o.outcome),
+            Some(Outcome::Complete | Outcome::CompleteEmpty)
+        );
+        if !complete {
+            continue;
+        }
+        let same: Vec<&rsim_routing::ospf::Database> = collected.of(b.version, &b.vrf).collect();
+        let pick = same
+            .iter()
+            .find(|c| c.process == b.process)
+            .or_else(|| (same.len() == 1).then(|| &same[0]));
+        if let Some(c) = pick {
+            rows.extend(rsim_guard::ospf::compare_databases(b, c));
+        }
+    }
+    rows
 }

@@ -1,0 +1,34 @@
+{
+  "areaScopedLinkStateDb": [
+    {
+      "areaId": "0.0.0.0",
+      "lsa": [
+        {
+          "advertisingRouter": "198.51.100.1",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkStateId": "0.0.0.1",
+          "lsSequenceNumber": 2147483649,
+          "metric": 10,
+          "prefix": "2001:db8:14::/64"
+        }
+      ]
+    },
+    {
+      "areaId": "0.0.0.1",
+      "lsa": [
+        {
+          "advertisingRouter": "198.51.100.1",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkStateId": "0.0.0.1",
+          "lsSequenceNumber": 2147483649,
+          "metric": 10,
+          "prefix": "2001:db8:ff::2/128"
+        }
+      ]
+    }
+  ]
+}

@@ -501,6 +501,14 @@ pub fn sections_with(native_json: bool, capture: CaptureBgp) -> Vec<SectionSpec>
             optional: s.optional,
         })
         .collect();
+    out.extend(crate::ospf::nxos().into_iter().map(|s| SectionSpec {
+        command: if native_json {
+            native(&s.command)
+        } else {
+            s.command.clone()
+        },
+        ..s
+    }));
     out.sort_by_key(|s| DERIVED.contains(&s.name));
     out
 }

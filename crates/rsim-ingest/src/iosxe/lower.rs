@@ -35,6 +35,7 @@ use crate::nxos;
 use crate::nxos::config::{FhrpKind, Lines, NatRole};
 use crate::nxos::lower::L;
 use crate::vyos::Lowered;
+use rsim_routing::Platform;
 
 /// The words of `show standby brief`.
 const HSRP_RULES: GroupRules = GroupRules {
@@ -330,6 +331,9 @@ pub fn lower(
             dynamic: &cfg.dynamic_vrfs,
             resolver: &resolver,
             computed_through_default: super::profile::COMPUTED_THROUGH_DEFAULT,
+            config_statics: &cfg.static_routes,
+            ospf: ext.ospf.as_ref(),
+            platform: Platform::Iosxe,
         };
         let t = fib(&mut l, v, &active, rib, &vips, &hops);
         let has_hops = t.groups().iter().any(|g| !g.next_hops.is_empty());

@@ -31,6 +31,8 @@ pub struct Route {
     pub vrf: String,
     pub prefix: (Ipv4Addr, u8),
     pub kind: Kind,
+    /// The OSPF route is a route of an AS-external LSA.
+    pub external: bool,
     pub metric: u32,
     pub paths: Vec<Path>,
 }
@@ -65,6 +67,7 @@ pub struct Tables {
     pub arp: Vec<Vec<Arp>>,
     pub macs: Vec<Vec<MacEntry>>,
     pub stp: Vec<BTreeMap<u16, Vec<StpPort>>>,
+    pub redistributed: super::ospf::Redistributed,
 }
 
 type Node = (usize, String);
@@ -174,6 +177,7 @@ fn own_routes(e: &Estate, d: usize) -> Vec<Route> {
                     vrf: i.vrf.clone(),
                     prefix: (network(*a, *l), *l),
                     kind: Kind::Connected,
+                    external: false,
                     metric: 0,
                     paths: vec![Path {
                         next_hop: None,
@@ -190,6 +194,7 @@ fn own_routes(e: &Estate, d: usize) -> Vec<Route> {
                 } else {
                     Kind::Local
                 },
+                external: false,
                 metric: 0,
                 paths: vec![Path {
                     next_hop: None,
@@ -213,6 +218,7 @@ fn own_routes(e: &Estate, d: usize) -> Vec<Route> {
             vrf: s.vrf.clone(),
             prefix: s.prefix,
             kind: Kind::Static,
+            external: false,
             metric: 0,
             paths: vec![Path {
                 next_hop: Some(s.next_hop),
@@ -224,8 +230,20 @@ fn own_routes(e: &Estate, d: usize) -> Vec<Route> {
     out
 }
 
-/// The route tables of all devices.
-fn ribs(e: &Estate) -> Vec<Vec<Route>> {
+/// The administrative distance of a kind of route.
+fn distance(k: Kind) -> u8 {
+    match k {
+        Kind::Connected | Kind::Local => 0,
+        Kind::Static => 1,
+        Kind::Ebgp => 20,
+        Kind::Ospf => 110,
+        Kind::Ibgp => 200,
+    }
+}
+
+/// The route tables of all devices from the shortest paths over the routing
+/// adjacencies, with the kind of the first edge of each path.
+fn shortest(e: &Estate) -> Vec<Vec<Route>> {
     let edges = edges(e);
     let owned = owned(e);
     let mut reverse: BTreeMap<Node, Vec<(Node, u32)>> = BTreeMap::new();
@@ -274,6 +292,7 @@ fn ribs(e: &Estate) -> Vec<Vec<Route>> {
                 vrf: n.1.clone(),
                 prefix: *prefix,
                 kind: k,
+                external: false,
                 metric: *c,
                 paths: paths
                     .into_iter()
@@ -283,12 +302,43 @@ fn ribs(e: &Estate) -> Vec<Vec<Route>> {
             });
         }
     }
+    out
+}
+
+/// The route tables of all devices, and the prefixes that each router
+/// redistributes from BGP into OSPF.
+fn ribs(e: &Estate) -> (Vec<Vec<Route>>, super::ospf::Redistributed) {
+    let mut out = shortest(e);
+    let redistributed = super::ospf::redistributed(e, &out);
+    // A route of the OSPF calculation over the database of an OSPF router
+    // replaces the routes of its prefix, unless a route has a lower distance.
+    // An OSPF route of the default VRF to a prefix that the calculation does
+    // not give is left out.
+    for (d, rib) in out.iter_mut().enumerate() {
+        let Some(computed) = super::ospf::routes(e, d, e.devs[d].os, &redistributed) else {
+            continue;
+        };
+        let given: BTreeSet<(Ipv4Addr, u8)> = computed.iter().map(|c| c.prefix).collect();
+        rib.retain(|r| !(r.vrf == "default" && r.kind == Kind::Ospf && !given.contains(&r.prefix)));
+        for c in computed {
+            let held = rib
+                .iter()
+                .filter(|r| r.vrf == "default" && r.prefix == c.prefix)
+                .map(|r| distance(r.kind))
+                .min();
+            if held.is_some_and(|h| h < distance(Kind::Ospf)) {
+                continue;
+            }
+            rib.retain(|r| !(r.vrf == "default" && r.prefix == c.prefix));
+            rib.push(c);
+        }
+    }
     for r in &mut out {
         r.sort_by(|a, b| {
             (&a.vrf, a.prefix.0, a.prefix.1, a.kind).cmp(&(&b.vrf, b.prefix.0, b.prefix.1, b.kind))
         });
     }
-    out
+    (out, redistributed)
 }
 
 /// The layer 2 port of a port: the port channel of a member.
@@ -605,10 +655,108 @@ fn arp(e: &Estate) -> Vec<Vec<Arp>> {
 }
 
 pub fn tables(e: &Estate) -> Tables {
+    let (ribs, redistributed) = ribs(e);
     Tables {
-        ribs: ribs(e),
+        ribs,
+        redistributed,
         arp: arp(e),
         macs: macs(e),
         stp: stp(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The address of the interface `Loopback0` of a device.
+    fn loopback(e: &Estate, name: &str) -> Ipv4Addr {
+        e.devs
+            .iter()
+            .find(|d| d.name == name)
+            .and_then(|d| d.ifaces.iter().find(|i| i.name == "Loopback0"))
+            .and_then(|i| i.addr)
+            .unwrap_or_else(|| panic!("{name}: no Loopback0"))
+            .0
+    }
+
+    /// The default-VRF prefixes of each device.
+    fn prefixes(ribs: &[Vec<Route>]) -> Vec<BTreeSet<(Ipv4Addr, u8)>> {
+        ribs.iter()
+            .map(|rib| {
+                rib.iter()
+                    .filter(|r| r.vrf == "default")
+                    .map(|r| r.prefix)
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_campus_core_has_the_routes_of_the_other_site_and_of_the_fabric_as_external_ospf_routes() {
+        let e = super::super::build::estate(1);
+        let t = tables(&e);
+        let d = e.devs.iter().position(|x| x.name == "fra-core1").unwrap();
+        for prefix in [(loopback(&e, "par-core1"), 32), (ip(10, 11, 10, 0), 24)] {
+            let r = t.ribs[d]
+                .iter()
+                .find(|r| r.vrf == "default" && r.prefix == prefix)
+                .unwrap_or_else(|| panic!("fra-core1 has no route to {prefix:?}"));
+            assert_eq!((r.kind, r.external, r.metric), (Kind::Ospf, true, 20));
+        }
+    }
+
+    #[test]
+    fn each_ospf_route_of_the_default_vrf_is_a_route_of_the_ospf_calculation() {
+        let e = super::super::build::estate(1);
+        let t = tables(&e);
+        for (d, rib) in t.ribs.iter().enumerate() {
+            let Some(computed) = super::super::ospf::routes(&e, d, e.devs[d].os, &t.redistributed)
+            else {
+                continue;
+            };
+            for r in rib
+                .iter()
+                .filter(|r| r.vrf == "default" && r.kind == Kind::Ospf)
+            {
+                assert!(
+                    computed.iter().any(|c| c.prefix == r.prefix),
+                    "{}: {:?}",
+                    e.devs[d].name,
+                    r.prefix
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_ospf_calculation_leaves_no_prefix_of_the_default_vrf_out() {
+        for cycle in 1..=super::super::CYCLES {
+            let e = super::super::build::estate(cycle);
+            let before = prefixes(&shortest(&e));
+            let after = prefixes(&ribs(&e).0);
+            for (d, (b, a)) in before.iter().zip(&after).enumerate() {
+                let lost: Vec<_> = b.difference(a).collect();
+                assert!(lost.is_empty(), "{}: {lost:?}", e.devs[d].name);
+            }
+        }
+    }
+
+    #[test]
+    fn a_wan_router_redistributes_its_ebgp_prefixes_and_no_other_router_redistributes() {
+        let e = super::super::build::estate(1);
+        let t = tables(&e);
+        for (d, dev) in e.devs.iter().enumerate() {
+            assert_eq!(
+                t.redistributed.contains_key(&d),
+                dev.role == Role::Wan,
+                "{}",
+                dev.name
+            );
+        }
+        let w = e.devs.iter().position(|x| x.name == "fra-wan1").unwrap();
+        let list = &t.redistributed[&w];
+        assert!(list.contains(&(ip(10, 11, 10, 0), 24)), "{list:?}");
+        assert!(list.iter().all(|p| p.1 > 0));
     }
 }

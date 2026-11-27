@@ -1,0 +1,77 @@
+{
+  "TABLE_ctx": {
+    "ROW_ctx": [
+      {
+        "TABLE_intf": {
+          "ROW_intf": [
+            {
+              "addr": "10.10.0.1",
+              "area": "0.0.0.0",
+              "cost": "1",
+              "ifname": "loopback0",
+              "masklen": "32"
+            },
+            {
+              "addr": "10.10.100.0",
+              "area": "0.0.0.0",
+              "cost": "10",
+              "ifname": "Ethernet1/1",
+              "masklen": "31"
+            },
+            {
+              "addr": "10.10.100.4",
+              "area": "0.0.0.0",
+              "cost": "10",
+              "ifname": "Ethernet1/2",
+              "masklen": "31"
+            },
+            {
+              "addr": "10.10.100.8",
+              "area": "0.0.0.0",
+              "cost": "10",
+              "ifname": "Ethernet1/3",
+              "masklen": "31"
+            },
+            {
+              "addr": "10.10.100.12",
+              "area": "0.0.0.0",
+              "cost": "10",
+              "ifname": "Ethernet1/4",
+              "masklen": "31"
+            },
+            {
+              "addr": "10.10.100.16",
+              "area": "0.0.0.0",
+              "cost": "10",
+              "ifname": "Ethernet1/5",
+              "masklen": "31"
+            },
+            {
+              "addr": "10.10.100.20",
+              "area": "0.0.0.0",
+              "cost": "10",
+              "ifname": "Ethernet1/6",
+              "masklen": "31"
+            },
+            {
+              "addr": "10.10.100.24",
+              "area": "0.0.0.0",
+              "cost": "10",
+              "ifname": "Ethernet1/7",
+              "masklen": "31"
+            },
+            {
+              "addr": "10.10.100.28",
+              "area": "0.0.0.0",
+              "cost": "10",
+              "ifname": "Ethernet1/8",
+              "masklen": "31"
+            }
+          ]
+        },
+        "cname": "default",
+        "ptag": "UNDERLAY"
+      }
+    ]
+  }
+}

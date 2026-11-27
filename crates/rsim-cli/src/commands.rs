@@ -41,6 +41,10 @@ pub struct Loaded {
     /// The MTU of the interfaces of the IOS-XR, IOS-XE, UniFi and VeloCloud
     /// devices of a store twin; empty for a hand-built topology.
     pub mtu: rsim_ingest::mtu::Mtus,
+    /// The RIB guard rows of each device with collected route rows.
+    pub guard: BTreeMap<String, Vec<rsim_guard::Row>>,
+    /// The OSPF database guard rows of each device.
+    pub ospf_guard: BTreeMap<String, Vec<rsim_guard::ospf::LsaRow>>,
     /// The columns of the tables of the twin, built when a request first
     /// names a table.
     pub tables: crate::tables::TableCache,
@@ -98,6 +102,8 @@ fn fixture(topology: &str) -> Result<Loaded, QueryError> {
         seen: Vec::new(),
         fabric: BTreeMap::new(),
         mtu: BTreeMap::new(),
+        guard: BTreeMap::new(),
+        ospf_guard: BTreeMap::new(),
         tables: Default::default(),
         source: None,
     })
@@ -154,6 +160,8 @@ pub fn load_store_at(folder: &str, cycle: Option<u64>) -> Result<Loaded, QueryEr
     let seen = estate.seen.clone();
     let fabric = estate.fabric.clone();
     let mtu = estate.mtu.clone();
+    let guard = estate.guard.clone();
+    let ospf_guard = estate.ospf_guard.clone();
     let twin = estate.builder.build().map_err(|errors| {
         let text: Vec<String> = errors.iter().map(ToString::to_string).collect();
         err(format!("the twin does not build: {}", text.join("; ")))
@@ -167,6 +175,8 @@ pub fn load_store_at(folder: &str, cycle: Option<u64>) -> Result<Loaded, QueryEr
         seen,
         fabric,
         mtu,
+        guard,
+        ospf_guard,
         tables: Default::default(),
         source: Some(crate::sources::SourceStore::new(store, snap)),
     })

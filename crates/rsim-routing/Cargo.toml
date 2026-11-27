@@ -1,0 +1,15 @@
+[package]
+name = "rsim-routing"
+description = "The routing calculation of rsim: the route table of each device and VRF from the connected routes, the static routes and the routing protocols, with the administrative distance."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rsim-core = { workspace = true }
+rsim-functions = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,42 @@
+{
+  "TABLE_ctx": {
+    "ROW_ctx": [
+      {
+        "TABLE_intf": {
+          "ROW_intf": [
+            {
+              "addr": "10.10.0.15",
+              "area": "0.0.0.0",
+              "cost": "1",
+              "ifname": "loopback0",
+              "masklen": "32"
+            },
+            {
+              "addr": "10.10.1.15",
+              "area": "0.0.0.0",
+              "cost": "1",
+              "ifname": "loopback1",
+              "masklen": "32"
+            },
+            {
+              "addr": "10.10.100.17",
+              "area": "0.0.0.0",
+              "cost": "10",
+              "ifname": "Ethernet1/49",
+              "masklen": "31"
+            },
+            {
+              "addr": "10.10.100.19",
+              "area": "0.0.0.0",
+              "cost": "10",
+              "ifname": "Ethernet1/50",
+              "masklen": "31"
+            }
+          ]
+        },
+        "cname": "default",
+        "ptag": "UNDERLAY"
+      }
+    ]
+  }
+}

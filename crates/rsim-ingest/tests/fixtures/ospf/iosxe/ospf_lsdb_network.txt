@@ -1,0 +1,16 @@
+
+            OSPF Router with ID (198.51.100.1) (Process ID 1)
+
+                Net Link States (Area 0)
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Network Links
+  Link State ID: 192.0.2.67
+  Advertising Router: 198.51.100.3
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Network Mask: /26
+        Attached Router: 198.51.100.3
+        Attached Router: 198.51.100.2

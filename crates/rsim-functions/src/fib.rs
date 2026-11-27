@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use rsim_core::{
-    AddrField, GroupPartition, PacketSet, Prefix, PrefixTable, ReasonCode, SetSpec, SourceSpan,
-    TriePrefixTable,
+    AddrField, GroupPartition, PacketSet, Prefix, PrefixTable, ReasonCode, RibGuardFlag, SetSpec,
+    SourceSpan, TriePrefixTable,
 };
 
 use crate::routing::{Route, RouteKind, RouteNextHop, RouteProtocol};
@@ -40,6 +40,7 @@ struct Entry {
     group: u32,
     span: Span,
     protocol: Option<RouteProtocol>,
+    guard: RibGuardFlag,
 }
 
 /// The summary of a trie node: the number of entries in its subtree and
@@ -103,6 +104,8 @@ pub struct GroupRoutes<'a> {
     /// The protocol of each route of the sample that a routing protocol
     /// gave.
     pub protocols: Vec<Option<RouteProtocol>>,
+    /// The RIB guard result of each route of the sample.
+    pub guards: Vec<RibGuardFlag>,
     /// The provenance of the routes of the sample.
     pub spans: Vec<SourceSpan>,
     pub packets: PacketSet,
@@ -159,6 +162,7 @@ impl Fib {
             group,
             span,
             protocol,
+            guard: RibGuardFlag::NotChecked,
         };
         let id = match self.trie.get(&prefix) {
             Some(i) => {
@@ -178,6 +182,21 @@ impl Fib {
         } else {
             self.extra_spans.insert(id, rest);
         }
+    }
+
+    /// Sets the RIB guard result of the route of `prefix`. A route that a
+    /// later insert replaces gets `NotChecked`.
+    pub fn set_guard(&mut self, prefix: &Prefix, flag: RibGuardFlag) {
+        if let Some(i) = self.trie.get(prefix) {
+            self.entries[*i as usize].guard = flag;
+        }
+    }
+
+    /// The RIB guard result of the route of `prefix`.
+    pub fn guard(&self, prefix: &Prefix) -> Option<RibGuardFlag> {
+        self.trie
+            .get(prefix)
+            .map(|i| self.entries[*i as usize].guard)
     }
 
     pub fn len(&self) -> usize {
@@ -404,6 +423,10 @@ impl Fib {
                     protocols: routes
                         .iter()
                         .map(|(_, id)| self.entries[*id as usize].protocol)
+                        .collect(),
+                    guards: routes
+                        .iter()
+                        .map(|(_, id)| self.entries[*id as usize].guard)
                         .collect(),
                     sample: routes.into_iter().map(|(p, _)| p).collect(),
                     packets: g.packets,

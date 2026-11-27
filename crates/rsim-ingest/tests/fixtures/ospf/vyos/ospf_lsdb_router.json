@@ -1,0 +1,144 @@
+{
+  "default": {
+    "answer": {
+      "routerId": "198.51.100.1",
+      "routerLinkStates": {
+        "areas": {
+          "0.0.0.0": [
+            {
+              "advertisedRouter": "198.51.100.1",
+              "checksum": "1a2b",
+              "lsId": "198.51.100.1",
+              "lsaAge": 100,
+              "lsaSeqNumber": "80000001",
+              "routerLinks": {
+                "link0": {
+                  "linkData": "192.0.2.1",
+                  "linkId": "198.51.100.2",
+                  "linkType": "a Point-to-Point connection to another router",
+                  "metric": 10
+                },
+                "link1": {
+                  "linkData": "255.255.255.252",
+                  "linkId": "192.0.2.0",
+                  "linkType": "Stub Network",
+                  "metric": 10
+                },
+                "link2": {
+                  "linkData": "255.255.255.255",
+                  "linkId": "198.51.100.1",
+                  "linkType": "Stub Network",
+                  "metric": 1
+                }
+              }
+            },
+            {
+              "advertisedRouter": "198.51.100.2",
+              "checksum": "1a2b",
+              "lsId": "198.51.100.2",
+              "lsaAge": 100,
+              "lsaSeqNumber": "80000001",
+              "routerLinks": {
+                "link0": {
+                  "linkData": "192.0.2.2",
+                  "linkId": "198.51.100.1",
+                  "linkType": "a Point-to-Point connection to another router",
+                  "metric": 10
+                },
+                "link1": {
+                  "linkData": "255.255.255.252",
+                  "linkId": "192.0.2.0",
+                  "linkType": "Stub Network",
+                  "metric": 10
+                },
+                "link2": {
+                  "linkData": "192.0.2.66",
+                  "linkId": "192.0.2.67",
+                  "linkType": "a Transit Network",
+                  "metric": 10
+                },
+                "link3": {
+                  "linkData": "255.255.255.255",
+                  "linkId": "198.51.100.2",
+                  "linkType": "Stub Network",
+                  "metric": 1
+                }
+              }
+            },
+            {
+              "advertisedRouter": "198.51.100.3",
+              "checksum": "1a2b",
+              "lsId": "198.51.100.3",
+              "lsaAge": 100,
+              "lsaSeqNumber": "80000001",
+              "routerLinks": {
+                "link0": {
+                  "linkData": "192.0.2.67",
+                  "linkId": "192.0.2.67",
+                  "linkType": "a Transit Network",
+                  "metric": 10
+                },
+                "link1": {
+                  "linkData": "255.255.255.255",
+                  "linkId": "198.51.100.3",
+                  "linkType": "Stub Network",
+                  "metric": 1
+                }
+              }
+            }
+          ],
+          "0.0.0.1": [
+            {
+              "advertisedRouter": "198.51.100.1",
+              "checksum": "1a2b",
+              "lsId": "198.51.100.1",
+              "lsaAge": 100,
+              "lsaSeqNumber": "80000001",
+              "routerLinks": {
+                "link0": {
+                  "linkData": "192.0.2.9",
+                  "linkId": "198.51.100.4",
+                  "linkType": "a Point-to-Point connection to another router",
+                  "metric": 10
+                },
+                "link1": {
+                  "linkData": "255.255.255.252",
+                  "linkId": "192.0.2.8",
+                  "linkType": "Stub Network",
+                  "metric": 10
+                }
+              }
+            },
+            {
+              "advertisedRouter": "198.51.100.4",
+              "checksum": "1a2b",
+              "lsId": "198.51.100.4",
+              "lsaAge": 100,
+              "lsaSeqNumber": "80000001",
+              "routerLinks": {
+                "link0": {
+                  "linkData": "192.0.2.10",
+                  "linkId": "198.51.100.1",
+                  "linkType": "a Point-to-Point connection to another router",
+                  "metric": 10
+                },
+                "link1": {
+                  "linkData": "255.255.255.252",
+                  "linkId": "192.0.2.8",
+                  "linkType": "Stub Network",
+                  "metric": 10
+                },
+                "link2": {
+                  "linkData": "255.255.255.255",
+                  "linkId": "198.51.100.4",
+                  "linkType": "Stub Network",
+                  "metric": 1
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

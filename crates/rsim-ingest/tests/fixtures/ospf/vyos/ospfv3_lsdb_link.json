@@ -1,0 +1,76 @@
+{
+  "interfaceScopedLinkStateDb": [
+    {
+      "areaId": "0.0.0.0",
+      "interface": "eth0",
+      "lsa": [
+        {
+          "advertisingRouter": "198.51.100.1",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkLocalAddress": "fe80::1",
+          "linkStateId": "0.0.0.1",
+          "lsSequenceNumber": 2147483649,
+          "prefix": [
+            {
+              "prefix": "2001:db8:12::/64",
+              "prefixOption": "--|--|--|--"
+            }
+          ]
+        },
+        {
+          "advertisingRouter": "198.51.100.2",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkLocalAddress": "fe80::2",
+          "linkStateId": "0.0.0.1",
+          "lsSequenceNumber": 2147483649,
+          "prefix": [
+            {
+              "prefix": "2001:db8:12::/64",
+              "prefixOption": "--|--|--|--"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "areaId": "0.0.0.1",
+      "interface": "eth1",
+      "lsa": [
+        {
+          "advertisingRouter": "198.51.100.1",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkLocalAddress": "fe80::1",
+          "linkStateId": "0.0.0.3",
+          "lsSequenceNumber": 2147483649,
+          "prefix": [
+            {
+              "prefix": "2001:db8:14::/64",
+              "prefixOption": "--|--|--|--"
+            }
+          ]
+        },
+        {
+          "advertisingRouter": "198.51.100.4",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkLocalAddress": "fe80::4",
+          "linkStateId": "0.0.0.1",
+          "lsSequenceNumber": 2147483649,
+          "prefix": [
+            {
+              "prefix": "2001:db8:14::/64",
+              "prefixOption": "--|--|--|--"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

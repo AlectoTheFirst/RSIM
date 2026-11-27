@@ -1,0 +1,103 @@
+
+            OSPFv3 Router with ID (198.51.100.1) (Process ID 1)
+
+                Intra Area Prefix Link States (Area 0)
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Intra-Area-Prefix-LSA
+  Link State ID: 0
+  Advertising Router: 198.51.100.1
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Referenced LSA Type: 2001
+  Referenced Link State ID: 0
+  Referenced Advertising Router: 198.51.100.1
+  Number of Prefixes: 2
+  Prefix Address: 2001:DB8:12::
+  Prefix Length: 64, Options: None, Metric: 10
+  Prefix Address: 2001:DB8:FF::1
+  Prefix Length: 128, Options: None, Metric: 0
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Intra-Area-Prefix-LSA
+  Link State ID: 0
+  Advertising Router: 198.51.100.2
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Referenced LSA Type: 2001
+  Referenced Link State ID: 0
+  Referenced Advertising Router: 198.51.100.2
+  Number of Prefixes: 2
+  Prefix Address: 2001:DB8:12::
+  Prefix Length: 64, Options: None, Metric: 10
+  Prefix Address: 2001:DB8:FF::2
+  Prefix Length: 128, Options: None, Metric: 0
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Intra-Area-Prefix-LSA
+  Link State ID: 0
+  Advertising Router: 198.51.100.3
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Referenced LSA Type: 2001
+  Referenced Link State ID: 0
+  Referenced Advertising Router: 198.51.100.3
+  Number of Prefixes: 1
+  Prefix Address: 2001:DB8:FF::3
+  Prefix Length: 128, Options: None, Metric: 0
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Intra-Area-Prefix-LSA
+  Link State ID: 1002
+  Advertising Router: 198.51.100.3
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Referenced LSA Type: 2002
+  Referenced Link State ID: 2
+  Referenced Advertising Router: 198.51.100.3
+  Number of Prefixes: 1
+  Prefix Address: 2001:DB8:23::
+  Prefix Length: 64, Options: None, Metric: 0
+
+
+                Intra Area Prefix Link States (Area 1)
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Intra-Area-Prefix-LSA
+  Link State ID: 0
+  Advertising Router: 198.51.100.1
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Referenced LSA Type: 2001
+  Referenced Link State ID: 0
+  Referenced Advertising Router: 198.51.100.1
+  Number of Prefixes: 1
+  Prefix Address: 2001:DB8:14::
+  Prefix Length: 64, Options: None, Metric: 10
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Intra-Area-Prefix-LSA
+  Link State ID: 0
+  Advertising Router: 198.51.100.4
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Referenced LSA Type: 2001
+  Referenced Link State ID: 0
+  Referenced Advertising Router: 198.51.100.4
+  Number of Prefixes: 2
+  Prefix Address: 2001:DB8:14::
+  Prefix Length: 64, Options: None, Metric: 10
+  Prefix Address: 2001:DB8:FF::4
+  Prefix Length: 128, Options: None, Metric: 0

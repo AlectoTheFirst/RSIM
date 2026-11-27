@@ -149,7 +149,7 @@ fn config_body(dev: &Dev) -> String {
                     if i.mode == Mode::Routed {
                         s.push_str(" ip ospf network point-to-point\n");
                     }
-                    s.push_str(" ip ospf 1 area 0\n");
+                    let _ = writeln!(s, " ip ospf 1 area 0\n ip ospf cost {}", i.ospf_cost);
                 }
                 if !sw && i.mode == Mode::Routed {
                     s.push_str(" negotiation auto\n");
@@ -173,7 +173,7 @@ fn config_body(dev: &Dev) -> String {
         for i in dev
             .ifaces
             .iter()
-            .filter(|i| i.ospf && i.mode != Mode::Loopback)
+            .filter(|i| i.ospf && !i.ospf_passive && i.mode != Mode::Loopback)
         {
             let _ = writeln!(s, " no passive-interface {}", i.name);
         }
@@ -452,6 +452,7 @@ fn line(r: &Route, pad: &str) -> String {
         (Kind::Static, true) => "S*".to_string(),
         (Kind::Static, false) => "S".to_string(),
         (Kind::Ospf, true) => "O*E2".to_string(),
+        (Kind::Ospf, false) if r.external => "O E2".to_string(),
         (Kind::Ospf, false) => "O".to_string(),
         (Kind::Ebgp | Kind::Ibgp, true) => "B*".to_string(),
         (Kind::Ebgp | Kind::Ibgp, false) => "B".to_string(),
@@ -474,7 +475,7 @@ fn line(r: &Route, pad: &str) -> String {
                 Kind::Ebgp => 20,
                 _ => 200,
             };
-            let metric = if k == Kind::Ospf { r.metric + 1 } else { 0 };
+            let metric = if k == Kind::Ospf { r.metric } else { 0 };
             for (n, p) in r.paths.iter().enumerate() {
                 let nh = p.next_hop.expect("a next hop");
                 let tail = match (k, &p.iface) {
@@ -770,10 +771,47 @@ pub fn render(
     out.insert("hsrp_detail", hsrp_detail(dev));
     out.insert("vrrp_detail", String::new());
     out.insert("bgp_sessions", bgp_summary(dev));
+    super::ospf::cisco(e, d, "", "1", &t.redistributed, &mut out);
     let mut vrfs = BTreeMap::new();
     if dev.ifaces.iter().any(|i| i.mode == Mode::Mgmt) {
         let v = mgmt_vrf(dev);
         vrfs.insert(v.to_string(), arp_rows(dev, t, d, v));
     }
     (out, vrfs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::route::Path;
+    use super::*;
+
+    #[test]
+    fn an_ospf_route_shows_the_metric_of_the_calculation() {
+        let r = Route {
+            vrf: "default".to_string(),
+            prefix: (Ipv4Addr::new(198, 51, 100, 0), 24),
+            kind: Kind::Ospf,
+            external: false,
+            metric: 20,
+            paths: vec![Path {
+                next_hop: Some(Ipv4Addr::new(192, 0, 2, 1)),
+                iface: Some("GigabitEthernet1".to_string()),
+                vxlan: None,
+            }],
+        };
+        assert!(
+            line(&r, "").contains("[110/20] via 192.0.2.1"),
+            "{}",
+            line(&r, "")
+        );
+        let e2 = Route {
+            external: true,
+            ..r
+        };
+        assert!(
+            line(&e2, "      ").starts_with("O E2      198.51.100.0/24 [110/20]"),
+            "{}",
+            line(&e2, "      ")
+        );
+    }
 }

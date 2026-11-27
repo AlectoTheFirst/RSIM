@@ -1,0 +1,28 @@
+{
+  "TABLE_ctx": {
+    "ROW_ctx": [
+      {
+        "TABLE_intf": {
+          "ROW_intf": [
+            {
+              "area": "0.0.0.0",
+              "cost": "10",
+              "if_id": "1",
+              "ifname": "Ethernet1/1",
+              "linklocal": "fe80::1"
+            },
+            {
+              "area": "0.0.0.1",
+              "cost": "10",
+              "if_id": "3",
+              "ifname": "Ethernet1/2",
+              "linklocal": "fe80::1"
+            }
+          ]
+        },
+        "cname": "default",
+        "ptag": "1"
+      }
+    ]
+  }
+}

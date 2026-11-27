@@ -7,6 +7,7 @@ use crate::id::{FunctionId, PortId};
 use crate::outcome::{Outcome, Reason};
 use crate::packet_set::PacketSet;
 use crate::provenance::SourceSpan;
+use crate::trace::RibGuardFlag;
 
 /// How a device uses the alternatives of one decision point.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -73,6 +74,9 @@ pub struct Branch {
     /// A statement that the collected data does not prove and on which the
     /// result of the branch depends.
     pub assumption: Option<String>,
+    /// The RIB guard result of the routes that decided a route lookup
+    /// branch. `None` for each other branch.
+    pub rib_guard: Option<RibGuardFlag>,
     /// The source spans of the part of the function that decided this
     /// branch, for example one rule. Empty if the whole function decided it.
     pub spans: Vec<SourceSpan>,
@@ -100,6 +104,7 @@ impl Branch {
             flood_copy: None,
             rate_condition: None,
             assumption: None,
+            rib_guard: None,
             spans: Vec::new(),
         }
     }
@@ -111,6 +116,11 @@ impl Branch {
 
     pub fn with_alternative(mut self, a: Alternative) -> Self {
         self.alternative = Some(a);
+        self
+    }
+
+    pub fn with_rib_guard(mut self, f: RibGuardFlag) -> Self {
+        self.rib_guard = Some(f);
         self
     }
 

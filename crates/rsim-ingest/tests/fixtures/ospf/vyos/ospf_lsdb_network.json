@@ -1,0 +1,29 @@
+{
+  "default": {
+    "answer": {
+      "networkLinkStates": {
+        "areas": {
+          "0.0.0.0": [
+            {
+              "advertisedRouter": "198.51.100.3",
+              "attachedRouters": {
+                "198.51.100.2": {
+                  "attachedRouterId": "198.51.100.2"
+                },
+                "198.51.100.3": {
+                  "attachedRouterId": "198.51.100.3"
+                }
+              },
+              "checksum": "1a2b",
+              "lsId": "192.0.2.67",
+              "lsaAge": 100,
+              "lsaSeqNumber": "80000001",
+              "networkMask": 26
+            }
+          ]
+        }
+      },
+      "routerId": "198.51.100.1"
+    }
+  }
+}

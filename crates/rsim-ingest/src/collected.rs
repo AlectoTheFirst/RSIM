@@ -82,6 +82,8 @@ pub struct Collected {
     pub links: Vec<LinkRow>,
     pub speeds: Vec<SpeedRow>,
     pub macs: Vec<MacRow>,
+    /// The OSPF databases of the device, if its vendor reads OSPF.
+    pub ospf: Option<crate::ospf::DeviceOspf>,
 }
 
 /// The row span of a row: the device, the table, the blob of its section

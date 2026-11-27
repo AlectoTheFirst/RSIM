@@ -1,0 +1,16 @@
+{
+  "neighbors": [
+    {
+      "deadTime": "00:00:35",
+      "interfaceName": "eth0",
+      "neighborId": "198.51.100.2",
+      "state": "Full"
+    },
+    {
+      "deadTime": "00:00:35",
+      "interfaceName": "eth1",
+      "neighborId": "198.51.100.4",
+      "state": "Full"
+    }
+  ]
+}

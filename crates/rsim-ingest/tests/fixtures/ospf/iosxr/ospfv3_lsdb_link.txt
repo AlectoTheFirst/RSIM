@@ -1,0 +1,64 @@
+Thu Nov 26 10:00:00.000 UTC
+
+            OSPFv3 Router with ID (198.51.100.1) (Process ID 1)
+
+                Link (Type-8) Link States (Area 0)
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Link-LSA (Interface: GigabitEthernet0/0/0/0)
+  Link State ID: 1
+  Advertising Router: 198.51.100.1
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Router Priority: 1
+  Link Local Address: FE80::1
+  Number of Prefixes: 1
+  Prefix Address: 2001:DB8:12::
+  Prefix Length: 64, Options: None
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Link-LSA (Interface: GigabitEthernet0/0/0/0)
+  Link State ID: 1
+  Advertising Router: 198.51.100.2
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Router Priority: 1
+  Link Local Address: FE80::2
+  Number of Prefixes: 1
+  Prefix Address: 2001:DB8:12::
+  Prefix Length: 64, Options: None
+
+
+                Link (Type-8) Link States (Area 1)
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Link-LSA (Interface: GigabitEthernet0/0/0/1)
+  Link State ID: 3
+  Advertising Router: 198.51.100.1
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Router Priority: 1
+  Link Local Address: FE80::1
+  Number of Prefixes: 1
+  Prefix Address: 2001:DB8:14::
+  Prefix Length: 64, Options: None
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Link-LSA (Interface: GigabitEthernet0/0/0/1)
+  Link State ID: 1
+  Advertising Router: 198.51.100.4
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Router Priority: 1
+  Link Local Address: FE80::4
+  Number of Prefixes: 1
+  Prefix Address: 2001:DB8:14::
+  Prefix Length: 64, Options: None

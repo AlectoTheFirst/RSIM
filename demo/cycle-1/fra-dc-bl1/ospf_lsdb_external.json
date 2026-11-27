@@ -1,0 +1,13 @@
+{
+  "TABLE_ctx": {
+    "ROW_ctx": [
+      {
+        "TABLE_lsdb": {
+          "ROW_lsdb": []
+        },
+        "cname": "default",
+        "ptag": "UNDERLAY"
+      }
+    ]
+  }
+}

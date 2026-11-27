@@ -288,6 +288,8 @@ fn main() {
             seen: Vec::new(),
             fabric: BTreeMap::new(),
             mtu: BTreeMap::new(),
+            guard: BTreeMap::new(),
+            ospf_guard: BTreeMap::new(),
             tables: Default::default(),
             source: None,
         };

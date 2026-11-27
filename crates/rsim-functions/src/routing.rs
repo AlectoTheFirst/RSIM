@@ -7,8 +7,8 @@ use rsim_core::{
     AddrCond, AddrField, Alternative, AlternativeKind, Attr, Branch, Context, ContextAttr,
     Dependency, Destination, FieldValue, FlowState, FunctionId, FunctionKind, InterfaceId, Mac,
     Match, NeighbourTarget, NetFunction, NextHop, ObjectId, Outcome, PacketSet, Prefix,
-    PrefixTable, Reason, ReasonCode, Rewrite, RulePredicate, SourceSpan, Tri, TriePrefixTable,
-    VrfId,
+    PrefixTable, Reason, ReasonCode, Rewrite, RibGuardFlag, RulePredicate, SourceSpan, Tri,
+    TriePrefixTable, VrfId,
 };
 
 use crate::common::{Meta, push_nonempty};
@@ -293,6 +293,22 @@ impl RouteLookup {
         ctx: &Context,
         state: &FlowState,
     ) {
+        let flag = group_guard(&g);
+        let start = out.len();
+        self.group_branches(out, vrf, g, ctx, state);
+        for b in &mut out[start..] {
+            b.rib_guard = Some(flag);
+        }
+    }
+
+    fn group_branches(
+        &self,
+        out: &mut Vec<Branch>,
+        vrf: &VrfId,
+        g: GroupRoutes<'_>,
+        ctx: &Context,
+        state: &FlowState,
+    ) {
         let list: Vec<String> = g
             .sample
             .iter()
@@ -421,6 +437,25 @@ impl RouteLookup {
             }
             out.push(b);
         }
+    }
+}
+
+/// The RIB guard result of a group. It is `DiffersFromCollected` if a route
+/// of the sample differs. It is `MatchesCollected` if the sample holds each
+/// route of the group and each route matches. Else it is `NotChecked`.
+fn group_guard(g: &GroupRoutes<'_>) -> RibGuardFlag {
+    if g.guards.contains(&RibGuardFlag::DiffersFromCollected) {
+        return RibGuardFlag::DiffersFromCollected;
+    }
+    let whole = g.exact && g.count == g.guards.len() && !g.guards.is_empty();
+    if whole
+        && g.guards
+            .iter()
+            .all(|f| *f == RibGuardFlag::MatchesCollected)
+    {
+        RibGuardFlag::MatchesCollected
+    } else {
+        RibGuardFlag::NotChecked
     }
 }
 

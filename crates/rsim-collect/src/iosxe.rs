@@ -283,6 +283,7 @@ pub fn sections_with(capture: CaptureBgp) -> Vec<SectionSpec> {
             BGP_ROUTES,
         ));
     }
+    out.extend(crate::ospf::iosxe());
     out.sort_by_key(|s| DERIVED.contains(&s.name));
     out
 }

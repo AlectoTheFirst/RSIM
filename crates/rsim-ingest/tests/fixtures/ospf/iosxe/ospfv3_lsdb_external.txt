@@ -1,0 +1,17 @@
+
+            OSPFv3 Router with ID (198.51.100.1) (Process ID 1)
+
+                Type-5 AS External Link States
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: AS External Link
+  Link State ID: 1
+  Advertising Router: 198.51.100.3
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Metric Type: 1 (Comparable directly to link state metric)
+  Metric: 20
+  Prefix Address: 2001:DB8:98::
+  Prefix Length: 64, Options: None

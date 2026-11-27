@@ -291,6 +291,20 @@ fn build(t: &Loaded, def: &'static TableDef) -> Built {
                 }
             }
         }
+        "rib-guard" => {
+            for (device, rows) in &t.guard {
+                for r in rows {
+                    b.push_values(&guard_row(device, r));
+                }
+            }
+        }
+        "ospf-guard" => {
+            for (device, rows) in &t.ospf_guard {
+                for r in rows {
+                    b.push_values(&ospf_guard_row(device, r));
+                }
+            }
+        }
         "sdwan-paths" => {
             for row in sdwan_rows(t) {
                 b.push_values(&row);
@@ -730,6 +744,52 @@ fn sdwan_rows(t: &Loaded) -> Vec<Vec<Value>> {
     rows
 }
 
+/// The row of one LSA of the OSPF database guard.
+fn ospf_guard_row(device: &str, r: &rsim_guard::ospf::LsaRow) -> Vec<Value> {
+    let text = |v: &Option<String>| v.as_ref().map_or(Value::Null, |v| json!(v));
+    let mut spans_all = r.built_spans.clone();
+    spans_all.extend(r.collected_spans.iter().cloned());
+    vec![
+        json!(device),
+        json!(r.vrf),
+        json!(r.version.name()),
+        r.area.map_or(Value::Null, |a| json!(a.to_string())),
+        json!(r.lsa_type.name(r.version)),
+        json!(r.key),
+        json!(r.category.name()),
+        json!(r.fields),
+        text(&r.built),
+        text(&r.collected),
+        text(&r.reason),
+        json!(spans(&spans_all)),
+    ]
+}
+
+/// The row of one route of the RIB guard.
+fn guard_row(device: &str, r: &rsim_guard::Row) -> Vec<Value> {
+    let kind = |v: &Option<rsim_guard::View>| v.as_ref().map_or(Value::Null, |v| json!(v.kind));
+    let hops =
+        |v: &Option<rsim_guard::View>| v.as_ref().map_or_else(|| json!([]), |v| json!(v.next_hops));
+    vec![
+        json!(device),
+        json!(r.vrf),
+        json!(r.prefix.to_string()),
+        json!(r.category.name()),
+        json!(r.protocol),
+        kind(&r.computed),
+        hops(&r.computed),
+        kind(&r.collected),
+        hops(&r.collected),
+        json!(r.fields),
+        if r.reason.is_empty() {
+            Value::Null
+        } else {
+            json!(r.reason)
+        },
+        json!(spans(&r.spans)),
+    ]
+}
+
 /// The row of a BGP peer fact.
 fn bgp_row(f: &BgpPeerFact) -> Vec<Value> {
     let opt = |v: Option<String>| v.map_or(Value::Null, Value::from);
@@ -984,6 +1044,8 @@ mod tests {
             seen: Vec::new(),
             fabric: BTreeMap::new(),
             mtu: BTreeMap::new(),
+            guard: BTreeMap::new(),
+            ospf_guard: BTreeMap::new(),
             tables: Default::default(),
             source: None,
         }

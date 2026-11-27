@@ -1,0 +1,28 @@
+{
+  "eth0": {
+    "areaId": "0.0.0.0",
+    "attachedToArea": true,
+    "cost": 10,
+    "interfaceId": 1,
+    "internetAddress": [
+      {
+        "address": "fe80::1/64",
+        "type": "inet6"
+      }
+    ],
+    "status": "up"
+  },
+  "eth1": {
+    "areaId": "0.0.0.1",
+    "attachedToArea": true,
+    "cost": 10,
+    "interfaceId": 3,
+    "internetAddress": [
+      {
+        "address": "fe80::1/64",
+        "type": "inet6"
+      }
+    ],
+    "status": "up"
+  }
+}

@@ -47,12 +47,13 @@ pub fn profile() -> VendorProfile {
     }
 }
 
-/// The protocol words of a route of FRR, `show ip route json`, that a
-/// routing protocol gave. Each word that is not here and not in
-/// [`STATIC_WORDS`] is a learned route of another protocol.
+/// The protocol words of a route of FRR, `show ip route json` and `show ipv6
+/// route json`, that a routing protocol gave. Each word that is not here and
+/// not in [`STATIC_WORDS`] is a learned route of another protocol.
 pub const LEARNED_WORDS: &[(&str, RouteProtocol)] = &[
     ("bgp", RouteProtocol::Bgp),
     ("ospf", RouteProtocol::Ospf),
+    ("ospf6", RouteProtocol::Ospf),
     ("isis", RouteProtocol::Isis),
     ("eigrp", RouteProtocol::Eigrp),
     ("rip", RouteProtocol::Rip),

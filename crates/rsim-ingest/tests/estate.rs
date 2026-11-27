@@ -98,6 +98,7 @@ fn estate_from(
             span: row_span("r1", "link_speeds", "b5", 0),
         }],
         macs: Vec::new(),
+        ospf: None,
     };
     let sections: BTreeMap<String, (Vec<u8>, String)> =
         ["networks", "wlans", "devices", "clients", "port_profiles"]
@@ -956,4 +957,116 @@ fn the_jumbo_frame_flag_of_a_unifi_device_gives_the_mtu_of_its_ports() {
         estate().mtu.keys().all(|(d, _)| d != "sw1"),
         "no flag, no MTU"
     );
+}
+
+#[test]
+fn the_rib_guard_compares_the_connected_routes_and_leaves_the_kernel_route_out() {
+    let e = estate();
+    let rows = &e.guard["r1"];
+    let category = |p: &str| {
+        let r = rows
+            .iter()
+            .find(|r| r.prefix.to_string() == p)
+            .unwrap_or_else(|| panic!("{p} not in the guard"));
+        (r.category, r.reason.clone())
+    };
+    use rsim_guard::Category;
+    assert_eq!(category("192.0.2.0/26"), (Category::Match, String::new()));
+    assert_eq!(
+        category("0.0.0.0/0"),
+        (Category::NotComputed, "kernel route".to_string())
+    );
+    assert_eq!(category("203.0.113.128/25").0, Category::OnlyComputed);
+    let t = e.builder.build().expect("the twin builds");
+    let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
+    let branches = a.branches();
+    let step = branches[0]
+        .steps
+        .iter()
+        .find(|s| s.function.as_str() == "r1/route")
+        .unwrap();
+    assert_eq!(step.rib_guard, rsim_core::RibGuardFlag::MatchesCollected);
+}
+
+#[test]
+fn a_static_route_of_a_higher_distance_installs_only_when_the_better_route_is_absent() {
+    let config = String::from_utf8(VYOS.to_vec()).unwrap().replacen(
+        "\"static\": {\n      \"table\"",
+        r#""static": {"route": {"198.51.100.0/24": {"next-hop": {"192.0.2.2": {}, "192.0.2.3": {"distance": "200"}}}}, "table""#,
+        1,
+    );
+    let e = estate_from(
+        config.as_bytes(),
+        |_, b| b,
+        vec![RouteRow {
+            next_hop: Some("192.0.2.2".into()),
+            ..route("198.51.100.0/24", "static", "eth0.10")
+        }],
+        Vec::new(),
+    );
+    let r = e.guard["r1"]
+        .iter()
+        .find(|r| r.prefix.to_string() == "198.51.100.0/24")
+        .unwrap();
+    assert_eq!(r.category, rsim_guard::Category::Match, "{r:?}");
+    assert_eq!(
+        r.computed.as_ref().unwrap().next_hops,
+        ["192.0.2.2@eth0.10"]
+    );
+}
+
+#[test]
+fn a_static_route_whose_gateway_resolves_only_through_the_kernel_default_route_is_not_computed() {
+    let config = String::from_utf8(VYOS.to_vec()).unwrap().replacen(
+        "\"static\": {\n      \"table\"",
+        r#""static": {"route": {"198.51.100.0/24": {"next-hop": {"203.0.113.5": {}, "192.0.2.3": {"distance": "200"}}}}, "table""#,
+        1,
+    );
+    let e = estate_from(
+        config.as_bytes(),
+        |_, b| b,
+        vec![RouteRow {
+            next_hop: Some("192.0.2.3".into()),
+            ..route("198.51.100.0/24", "static", "eth0.10")
+        }],
+        Vec::new(),
+    );
+    let r = e.guard["r1"]
+        .iter()
+        .find(|r| r.prefix.to_string() == "198.51.100.0/24")
+        .unwrap();
+    assert_eq!(r.category, rsim_guard::Category::NotComputed, "{r:?}");
+    assert!(r.reason.contains("kernel route"), "{r:?}");
+}
+
+#[test]
+fn a_dhcpv6_route_is_seeded_and_an_ospf6_route_has_the_kind_ospf() {
+    let config = String::from_utf8(VYOS.to_vec()).unwrap().replacen(
+        r#""eth2": {"description""#,
+        r#""eth2": {"address": "dhcpv6", "description""#,
+        1,
+    );
+    let e = estate_from(
+        config.as_bytes(),
+        |_, b| b,
+        vec![
+            route("2001:db8:1::/64", "connected", "eth2"),
+            route("2001:db8:5::/64", "ospf6", "eth0"),
+        ],
+        Vec::new(),
+    );
+    let row = |p: &str| {
+        e.guard["r1"]
+            .iter()
+            .find(|r| r.prefix.to_string() == p)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(
+        row("2001:db8:1::/64").category,
+        rsim_guard::Category::Seeded
+    );
+    let o = row("2001:db8:5::/64");
+    assert_eq!(o.category, rsim_guard::Category::NotComputed);
+    assert_eq!(o.collected.unwrap().kind, "ospf");
 }

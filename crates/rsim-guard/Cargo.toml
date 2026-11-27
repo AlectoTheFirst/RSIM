@@ -1,0 +1,16 @@
+[package]
+name = "rsim-guard"
+description = "The RIB guard of rsim: the comparison of the computed route table and of the built OSPF database with the collected state, with the match rate."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rsim-core = { workspace = true }
+rsim-functions = { workspace = true }
+rsim-routing = { workspace = true }
+
+[lints]
+workspace = true

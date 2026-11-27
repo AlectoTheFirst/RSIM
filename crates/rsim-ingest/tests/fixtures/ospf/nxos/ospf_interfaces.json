@@ -1,0 +1,28 @@
+{
+  "TABLE_ctx": {
+    "ROW_ctx": [
+      {
+        "TABLE_intf": {
+          "ROW_intf": [
+            {
+              "addr": "192.0.2.1",
+              "area": "0.0.0.0",
+              "cost": "10",
+              "ifname": "Ethernet1/1",
+              "masklen": "30"
+            },
+            {
+              "addr": "192.0.2.9",
+              "area": "0.0.0.1",
+              "cost": "10",
+              "ifname": "Ethernet1/2",
+              "masklen": "30"
+            }
+          ]
+        },
+        "cname": "default",
+        "ptag": "1"
+      }
+    ]
+  }
+}

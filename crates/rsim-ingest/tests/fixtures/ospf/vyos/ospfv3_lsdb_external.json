@@ -1,0 +1,20 @@
+{
+  "asScopedLinkStateDb": [
+    {
+      "lsa": [
+        {
+          "advertisingRouter": "198.51.100.3",
+          "age": 100,
+          "bits": "---",
+          "checksum": 6699,
+          "forwardingAddressPresent": false,
+          "length": 40,
+          "linkStateId": "0.0.0.1",
+          "lsSequenceNumber": 2147483649,
+          "metric": 20,
+          "prefix": "2001:db8:98::/64"
+        }
+      ]
+    }
+  ]
+}

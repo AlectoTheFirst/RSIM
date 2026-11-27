@@ -215,6 +215,7 @@ const ENTRIES: &[Entry] = &[
 pub fn table(tables: &RouteTables) -> Table {
     let mut t = Table::new(ENTRIES);
     super::bgp::push_entries(&mut t, tables);
+    super::ospf_config::push_entries(&mut t);
     t.push("protocols/bgp", tables.routing(DEFAULT_VRF), Subtree);
     tables.push_vrfs(&mut t, &["vrf", "name", VRF, "protocols", "bgp"]);
     for kind in KINDS {

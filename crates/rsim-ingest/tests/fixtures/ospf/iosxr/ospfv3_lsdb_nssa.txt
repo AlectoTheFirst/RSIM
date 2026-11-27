@@ -1,0 +1,18 @@
+Thu Nov 26 10:00:00.000 UTC
+
+            OSPFv3 Router with ID (198.51.100.1) (Process ID 1)
+
+                Type-7 AS External Link States (Area 1)
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: NSSA External Link
+  Link State ID: 1
+  Advertising Router: 198.51.100.4
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Metric Type: 2 (Larger than any link state path)
+  Metric: 20
+  Prefix Address: 2001:DB8:99::
+  Prefix Length: 64, Options: None

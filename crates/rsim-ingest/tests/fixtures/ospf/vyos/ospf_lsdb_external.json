@@ -1,0 +1,20 @@
+{
+  "default": {
+    "answer": {
+      "asExternalLinkStates": [
+        {
+          "advertisedRouter": "198.51.100.3",
+          "checksum": "1a2b",
+          "forwardAddress": "0.0.0.0",
+          "lsId": "203.0.113.64",
+          "lsaAge": 100,
+          "lsaSeqNumber": "80000001",
+          "metric": 20,
+          "metricType": "E1",
+          "networkMask": 26
+        }
+      ],
+      "routerId": "198.51.100.1"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+GigabitEthernet1 is up, line protocol is up
+  Internet Address 192.0.2.1/30, Area 0, Attached via Interface Enable
+  Process ID 1, Router ID 198.51.100.1, Network Type POINT_TO_POINT, Cost: 10
+  Transmit Delay is 1 sec, State POINT_TO_POINT
+  Timer intervals configured, Hello 10, Dead 40, Wait 40, Retransmit 5
+    Hello due in 00:00:03
+GigabitEthernet2 is up, line protocol is up
+  Internet Address 192.0.2.9/30, Area 1, Attached via Interface Enable
+  Process ID 1, Router ID 198.51.100.1, Network Type POINT_TO_POINT, Cost: 10
+  Transmit Delay is 1 sec, State POINT_TO_POINT
+  Timer intervals configured, Hello 10, Dead 40, Wait 40, Retransmit 5
+    Hello due in 00:00:03

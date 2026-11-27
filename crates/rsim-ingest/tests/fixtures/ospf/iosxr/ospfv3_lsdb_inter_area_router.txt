@@ -1,0 +1,17 @@
+Thu Nov 26 10:00:00.000 UTC
+
+            OSPFv3 Router with ID (198.51.100.1) (Process ID 1)
+
+                Inter Area Router Link States (Area 0)
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Inter Area Router Links
+  Link State ID: 4
+  Advertising Router: 198.51.100.1
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Options: (V6-Bit, E-Bit, R-bit, DC-Bit)
+  Metric: 10
+  Destination Router ID: 198.51.100.4

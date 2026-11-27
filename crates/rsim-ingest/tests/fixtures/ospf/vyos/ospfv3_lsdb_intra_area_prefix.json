@@ -1,0 +1,137 @@
+{
+  "areaScopedLinkStateDb": [
+    {
+      "areaId": "0.0.0.0",
+      "lsa": [
+        {
+          "advertisingRouter": "198.51.100.1",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkStateId": "0.0.0.0",
+          "lsSequenceNumber": 2147483649,
+          "prefix": [
+            {
+              "metric": 10,
+              "prefix": "2001:db8:12::/64",
+              "prefixOption": "--|--|--|--"
+            },
+            {
+              "metric": 0,
+              "prefix": "2001:db8:ff::1/128",
+              "prefixOption": "--|--|--|--"
+            }
+          ],
+          "reference": "Router",
+          "referenceAdv": "198.51.100.1",
+          "referenceId": "0.0.0.0"
+        },
+        {
+          "advertisingRouter": "198.51.100.2",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkStateId": "0.0.0.0",
+          "lsSequenceNumber": 2147483649,
+          "prefix": [
+            {
+              "metric": 10,
+              "prefix": "2001:db8:12::/64",
+              "prefixOption": "--|--|--|--"
+            },
+            {
+              "metric": 0,
+              "prefix": "2001:db8:ff::2/128",
+              "prefixOption": "--|--|--|--"
+            }
+          ],
+          "reference": "Router",
+          "referenceAdv": "198.51.100.2",
+          "referenceId": "0.0.0.0"
+        },
+        {
+          "advertisingRouter": "198.51.100.3",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkStateId": "0.0.0.0",
+          "lsSequenceNumber": 2147483649,
+          "prefix": [
+            {
+              "metric": 0,
+              "prefix": "2001:db8:ff::3/128",
+              "prefixOption": "--|--|--|--"
+            }
+          ],
+          "reference": "Router",
+          "referenceAdv": "198.51.100.3",
+          "referenceId": "0.0.0.0"
+        },
+        {
+          "advertisingRouter": "198.51.100.3",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkStateId": "0.0.3.234",
+          "lsSequenceNumber": 2147483649,
+          "prefix": [
+            {
+              "metric": 0,
+              "prefix": "2001:db8:23::/64",
+              "prefixOption": "--|--|--|--"
+            }
+          ],
+          "reference": "Network",
+          "referenceAdv": "198.51.100.3",
+          "referenceId": "0.0.0.2"
+        }
+      ]
+    },
+    {
+      "areaId": "0.0.0.1",
+      "lsa": [
+        {
+          "advertisingRouter": "198.51.100.1",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkStateId": "0.0.0.0",
+          "lsSequenceNumber": 2147483649,
+          "prefix": [
+            {
+              "metric": 10,
+              "prefix": "2001:db8:14::/64",
+              "prefixOption": "--|--|--|--"
+            }
+          ],
+          "reference": "Router",
+          "referenceAdv": "198.51.100.1",
+          "referenceId": "0.0.0.0"
+        },
+        {
+          "advertisingRouter": "198.51.100.4",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkStateId": "0.0.0.0",
+          "lsSequenceNumber": 2147483649,
+          "prefix": [
+            {
+              "metric": 10,
+              "prefix": "2001:db8:14::/64",
+              "prefixOption": "--|--|--|--"
+            },
+            {
+              "metric": 0,
+              "prefix": "2001:db8:ff::4/128",
+              "prefixOption": "--|--|--|--"
+            }
+          ],
+          "reference": "Router",
+          "referenceAdv": "198.51.100.4",
+          "referenceId": "0.0.0.0"
+        }
+      ]
+    }
+  ]
+}

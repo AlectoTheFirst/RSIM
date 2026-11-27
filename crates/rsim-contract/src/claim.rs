@@ -66,6 +66,16 @@ pub const CLAIMS: &[ClaimDef] = &[
             "BGP session sections",
         ],
     },
+    ClaimDef {
+        name: "rib-fib-agree",
+        description: "Computed routes agree with the collected routes",
+        scopes: &["twin", "devices"],
+        reads: &[
+            "connected and static routes of the config",
+            "OSPF databases",
+            "collected route tables",
+        ],
+    },
 ];
 
 /// The claim of a name.

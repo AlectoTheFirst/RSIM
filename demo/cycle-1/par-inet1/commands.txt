@@ -17,4 +17,24 @@ vlans.txt	show vlan brief
 hsrp_detail.txt	show standby
 vrrp_detail.txt	show vrrp
 bgp_sessions.txt	show ip bgp summary
+ospf.txt	show ip ospf
+ospf_interfaces.txt	show ip ospf interface
+ospf_neighbors.txt	show ip ospf neighbor
+ospf_lsdb_router.txt	show ip ospf database router
+ospf_lsdb_network.txt	show ip ospf database network
+ospf_lsdb_summary.txt	show ip ospf database summary
+ospf_lsdb_asbr_summary.txt	show ip ospf database asbr-summary
+ospf_lsdb_external.txt	show ip ospf database external
+ospf_lsdb_nssa_external.txt	show ip ospf database nssa-external
+ospfv3.txt	show ipv6 ospf
+ospfv3_interfaces.txt	show ipv6 ospf interface
+ospfv3_neighbors.txt	show ipv6 ospf neighbor
+ospfv3_lsdb_router.txt	show ipv6 ospf database router
+ospfv3_lsdb_network.txt	show ipv6 ospf database network
+ospfv3_lsdb_inter_area_prefix.txt	show ipv6 ospf database inter-area prefix
+ospfv3_lsdb_inter_area_router.txt	show ipv6 ospf database inter-area router
+ospfv3_lsdb_external.txt	show ipv6 ospf database external
+ospfv3_lsdb_nssa.txt	show ipv6 ospf database nssa-external
+ospfv3_lsdb_link.txt	show ipv6 ospf database link
+ospfv3_lsdb_intra_area_prefix.txt	show ipv6 ospf database prefix
 arp_vrfs.Mgmt-intf.txt	show ip arp vrf Mgmt-intf

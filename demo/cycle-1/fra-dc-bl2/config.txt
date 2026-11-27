@@ -58,11 +58,13 @@ vpc domain 109
 
 interface loopback0
   ip address 10.10.0.22/32
+  ip ospf cost 1
   ip router ospf UNDERLAY area 0.0.0.0
 
 interface loopback1
   ip address 10.10.1.22/32
   ip address 10.10.2.9/32 secondary
+  ip ospf cost 1
   ip router ospf UNDERLAY area 0.0.0.0
 
 interface Ethernet1/49
@@ -70,6 +72,7 @@ interface Ethernet1/49
   no switchport
   mtu 9216
   ip address 10.10.100.29/31
+  ip ospf cost 10
   ip ospf network point-to-point
   ip router ospf UNDERLAY area 0.0.0.0
   no shutdown
@@ -79,6 +82,7 @@ interface Ethernet1/50
   no switchport
   mtu 9216
   ip address 10.10.100.31/31
+  ip ospf cost 10
   ip ospf network point-to-point
   ip router ospf UNDERLAY area 0.0.0.0
   no shutdown
