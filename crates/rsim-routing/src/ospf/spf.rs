@@ -18,8 +18,8 @@
 //!   router originates into the same area for the same prefix is an active
 //!   area range, and the copy of another border router is ignored.
 //! - RFC 2328 16.4 and RFC 3101 2.5 give the external routes from the
-//!   AS-external LSAs and, in each attached NSSA, the NSSA LSAs. The P bit of
-//!   an NSSA LSA is taken as set.
+//!   AS-external LSAs and, in each attached NSSA, the NSSA LSAs. The
+//!   calculation does not read the P bit of an NSSA LSA.
 //! - A virtual link of the calculating router is not computed (16.3). It
 //!   is a gap of the backbone from the cost of the link.
 
@@ -1367,7 +1367,8 @@ fn externals(
 
 /// The OSPF routes that the router `router_id` computes from its database
 /// `db`, with the defaults of `profile`. A database with no router LSA of
-/// the router gives no route and a gap.
+/// the router gives no route and a gap. The gaps of the calculation include
+/// the gaps of the database.
 pub fn compute(db: &Database, router_id: RouterId, profile: &OspfProfile) -> Calculation {
     let cx = Cx {
         db,
@@ -1411,6 +1412,7 @@ pub fn compute(db: &Database, router_id: RouterId, profile: &OspfProfile) -> Cal
             Reach::All,
         );
         calc.gaps = out.gap_list();
+        calc.gaps.extend(db.gaps.iter().cloned());
         calc.notes = out.notes;
         return calc;
     }
@@ -1448,7 +1450,8 @@ pub fn compute(db: &Database, router_id: RouterId, profile: &OspfProfile) -> Cal
     }
     externals(&cx, &mut out, &attached, &mut table, &routers);
 
-    let gaps = out.gap_list();
+    let mut gaps = out.gap_list();
+    gaps.extend(db.gaps.iter().cloned());
     let all = gaps.iter().find(|g| g.reach == GapReach::All);
     let bound = gaps
         .iter()
@@ -1463,9 +1466,13 @@ pub fn compute(db: &Database, router_id: RouterId, profile: &OspfProfile) -> Cal
         }
         let gap = all.or_else(|| match e.path_type {
             PathType::IntraArea => bound.filter(|(b, _)| e.cost >= *b).map(|(_, g)| g),
-            _ => bound.map(|(_, g)| g).or_else(|| {
-                gaps.iter()
-                    .find(|g| matches!(&g.reach, GapReach::Prefixes(p) if p.contains(&prefix)))
+            path_type => bound.map(|(_, g)| g).or_else(|| {
+                gaps.iter().find(|g| match &g.reach {
+                    GapReach::Prefixes(p) => p.contains(&prefix),
+                    GapReach::InterArea => true,
+                    GapReach::External => path_type != PathType::InterArea,
+                    GapReach::All | GapReach::FromCost(_) => false,
+                })
             }),
         });
         calc.routes.push(Route {

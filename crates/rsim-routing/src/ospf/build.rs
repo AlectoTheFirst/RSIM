@@ -14,8 +14,17 @@
 //!   routes of each attached area into its other areas, and the summary LSAs
 //!   of its inter-area routes of the backbone into its other areas. It
 //!   computes these routes with [`compute`] on the LSAs of one area.
-//! - The process with an unhandled line originates no LSA, so the
-//!   calculation of each other router sees a gap.
+//! - An ASBR in an NSSA that originates no AS-external LSA sets the P bit
+//!   of its NSSA LSAs and gives them a forwarding address (RFC 3101 2.3 and
+//!   2.4). The NSSA border router with the highest router ID translates the
+//!   NSSA LSAs of its routes with the P bit into AS-external LSAs with the
+//!   same forwarding address (RFC 3101 3.1 and 3.2).
+//! - The process with an unhandled line, or with an active interface with no
+//!   address of its version, originates no LSA, so the calculation of each
+//!   neighbour sees a gap.
+//! - LSAs that the builder leaves out are gaps of each database of their
+//!   flooding scope (`Database::gaps`): the AS for an AS-external LSA, the
+//!   area for a summary or an NSSA LSA.
 //! - The LSAs have no sequence number and no age.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -25,7 +34,7 @@ use rsim_core::{Prefix, SourceSpan};
 
 use super::config::{Area, NetworkType, OspfInterface, Process, RouterConfig, Source};
 use super::{
-    AreaId, AreaType, BACKBONE, Body, Database, GapReach, Interface, LinkKind, Lsa, LsaKey,
+    AreaId, AreaType, BACKBONE, Body, Database, Gap, GapReach, Interface, LinkKind, Lsa, LsaKey,
     LsaType, Neighbor, Note, OspfProfile, PathType, Reference, RouterId, RouterLink, Version,
     compute,
 };
@@ -54,7 +63,8 @@ pub struct RouterInput {
     pub connected: BTreeMap<String, Vec<Prefix>>,
     /// By VRF: the prefixes of the static routes for redistribution.
     pub statics: BTreeMap<String, Vec<Prefix>>,
-    /// The VRFs whose route table has a default route.
+    /// The VRFs whose route table has a default route that is not from
+    /// OSPF.
     pub default_route: BTreeSet<String>,
     /// By VRF: the IPv4 addresses of the interfaces for the router ID rule.
     /// The rule also reads the addresses of the OSPF interfaces.
@@ -256,6 +266,10 @@ impl UnionFind {
 struct Ext {
     metric: u32,
     metric_type: u8,
+    /// True for a connected route. The next hop of a static route or of the
+    /// default route is not known, and the forwarding address of its NSSA
+    /// LSA is not known.
+    connected: bool,
     span: SourceSpan,
 }
 
@@ -264,6 +278,8 @@ struct Ext {
 struct AbrView {
     intra: BTreeMap<AreaId, BTreeMap<Prefix, u32>>,
     asbrs: BTreeMap<AreaId, BTreeMap<RouterId, u32>>,
+    /// The areas whose intra-area routes depend on a gap of the database.
+    incomplete: BTreeSet<AreaId>,
 }
 
 type Store = BTreeMap<LsaKey, Lsa>;
@@ -281,6 +297,12 @@ struct Builder<'a> {
     as_store: BTreeMap<usize, Store>,
     link_store: BTreeMap<Ref, Lsa>,
     asbrs: BTreeSet<usize>,
+    /// The gaps of each area instance and of each AS.
+    area_gaps: BTreeMap<usize, Vec<Gap>>,
+    as_gaps: BTreeMap<usize, Vec<Gap>>,
+    /// The NSSA LSAs with the P bit, by area instance, advertising router and
+    /// prefix.
+    p_bit: BTreeSet<(usize, RouterId, Prefix)>,
 }
 
 fn family_ok(version: Version, a: IpAddr) -> bool {
@@ -400,6 +422,9 @@ impl<'a> Builder<'a> {
             as_store: BTreeMap::new(),
             link_store: BTreeMap::new(),
             asbrs: BTreeSet::new(),
+            area_gaps: BTreeMap::new(),
+            as_gaps: BTreeMap::new(),
+            p_bit: BTreeSet::new(),
         };
         for (device, input) in routers {
             for cfg in &input.config.processes {
@@ -412,6 +437,46 @@ impl<'a> Builder<'a> {
     fn note(&mut self, pi: usize, kind: &str, detail: String) {
         let subject = self.procs[pi].subject();
         self.notes[pi].push(Note::new(kind, subject, detail));
+    }
+
+    fn stated(
+        &self,
+        pi: usize,
+        lsa_type: LsaType,
+        area: Option<AreaId>,
+        reach: GapReach,
+        detail: String,
+    ) -> Gap {
+        Gap {
+            lsa_type,
+            lsid: self.procs[pi].rid.unwrap_or(Ipv4Addr::UNSPECIFIED),
+            area,
+            detail,
+            reach,
+        }
+    }
+
+    /// Adds a gap to the area instance of a process in `area`.
+    fn area_gap(
+        &mut self,
+        pi: usize,
+        area: AreaId,
+        lsa_type: LsaType,
+        reach: GapReach,
+        detail: String,
+    ) {
+        let Some(inst) = self.inst(pi, area) else {
+            return;
+        };
+        let gap = self.stated(pi, lsa_type, Some(area), reach, detail);
+        self.area_gaps.entry(inst).or_default().push(gap);
+    }
+
+    /// Adds a gap of AS-external LSAs to the AS of a process.
+    fn as_gap(&mut self, pi: usize, reach: GapReach, detail: String) {
+        let gap = self.stated(pi, LsaType::External, None, reach, detail);
+        let as_id = self.as_of(pi);
+        self.as_gaps.entry(as_id).or_default().push(gap);
     }
 
     fn add_process(&mut self, device: &str, input: &'a RouterInput, cfg: &'a Process) {
@@ -442,6 +507,7 @@ impl<'a> Builder<'a> {
         let mut order: Vec<&OspfInterface> = cfg.interfaces.iter().collect();
         order.sort_by(|a, b| a.name.cmp(&b.name));
         let mut ifs = Vec::new();
+        let mut no_address = Vec::new();
         for (i, f) in order.iter().copied().enumerate() {
             if !f.up {
                 continue;
@@ -458,6 +524,9 @@ impl<'a> Builder<'a> {
                 }
                 _ => (None, None),
             };
+            if addr.is_none() && !loopback && !f.passive {
+                no_address.push(f.name.clone());
+            }
             let cost = if loopback {
                 loopback_cost(input.platform, version, f.cost)
             } else if let Some(c) = f.cost {
@@ -515,13 +584,26 @@ impl<'a> Builder<'a> {
                 ),
             ));
         }
+        let family = match version {
+            Version::V2 => "IPv4 address",
+            Version::V3 => "global IPv6 address",
+        };
+        for name in &no_address {
+            notes.push(Note::new(
+                "ospf-no-address",
+                subject.clone(),
+                format!(
+                    "the active interface {name} has no {family}, its neighbours are not known, and each LSA of the process is left out"
+                ),
+            ));
+        }
         self.procs.push(Proc {
             key,
             input,
             cfg,
             profile,
             rid,
-            left_out: !cfg.unhandled.is_empty(),
+            left_out: !cfg.unhandled.is_empty() || !no_address.is_empty(),
             ifs,
         });
         self.notes.push(notes);
@@ -918,12 +1000,14 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// The external routes of a process by prefix.
-    fn externals(&mut self, pi: usize) -> BTreeMap<Prefix, Ext> {
+    /// The external routes of a process by prefix, and the reach and the
+    /// text of each gap of the external LSAs that the process leaves out.
+    fn externals(&mut self, pi: usize) -> (BTreeMap<Prefix, Ext>, Vec<(GapReach, String)>) {
         let p = &self.procs[pi];
         let version = p.version();
         let vrf = &p.cfg.vrf;
         let platform = p.input.platform;
+        let rid = p.rid.unwrap_or(Ipv4Addr::UNSPECIFIED);
         let own: BTreeSet<Prefix> = p
             .cfg
             .interfaces
@@ -937,6 +1021,7 @@ impl<'a> Builder<'a> {
         };
         let mut out: BTreeMap<Prefix, Ext> = BTreeMap::new();
         let mut notes = Vec::new();
+        let mut left = Vec::new();
         for r in &p.cfg.redistribute {
             let list = match &r.source {
                 Source::Connected => p.input.connected.get(vrf),
@@ -951,6 +1036,10 @@ impl<'a> Builder<'a> {
                         format!(
                             "the redistribution of {word} is not evaluated, and its external LSAs are left out"
                         ),
+                    ));
+                    left.push((
+                        GapReach::External,
+                        format!("the external LSAs of the redistribution of {word} by {rid} are left out"),
                     ));
                     continue;
                 }
@@ -972,12 +1061,21 @@ impl<'a> Builder<'a> {
                         text.join(", ")
                     ),
                 ));
+                if !prefixes.is_empty() {
+                    left.push((
+                        GapReach::Prefixes(prefixes),
+                        format!(
+                            "the external LSAs of the redistribution of {word} with the route-map {map} by {rid} are left out"
+                        ),
+                    ));
+                }
                 continue;
             }
             for prefix in prefixes {
                 out.entry(prefix).or_insert(Ext {
                     metric: r.metric.unwrap_or(redistribute_metric(platform, &r.source)),
                     metric_type: r.metric_type.unwrap_or(2),
+                    connected: r.source == Source::Connected,
                     span: r.span.clone(),
                 });
             }
@@ -990,6 +1088,12 @@ impl<'a> Builder<'a> {
                         "the default route with the route-map {map} is not evaluated, and its external LSA is left out"
                     ),
                 ));
+                left.push((
+                    GapReach::Prefixes(vec![default_prefix(version)]),
+                    format!(
+                        "the external LSA of the default route with the route-map {map} by {rid} is left out"
+                    ),
+                ));
             } else if d.always || p.input.default_route.contains(vrf) {
                 out.insert(
                     default_prefix(version),
@@ -998,6 +1102,7 @@ impl<'a> Builder<'a> {
                             .metric
                             .unwrap_or(default_originate_metric(platform, d.always)),
                         metric_type: d.metric_type.unwrap_or(2),
+                        connected: false,
                         span: d.span.clone(),
                     },
                 );
@@ -1006,17 +1111,42 @@ impl<'a> Builder<'a> {
         for (kind, detail) in notes {
             self.note(pi, kind, detail);
         }
-        out
+        (out, left)
     }
 
-    /// The AS-external LSAs and the NSSA LSAs.
+    /// The forwarding address of the NSSA LSAs with the P bit of a process
+    /// in an NSSA (RFC 3101 2.3): an address of an up OSPF interface of the
+    /// process in the area, of a loopback first, then of a stub link, then of
+    /// another interface. Of 2 addresses of one class, the higher is taken.
+    /// The order in a class is not confirmed by a vendor document.
+    fn nssa_forwarding_address(&self, pi: usize, area: AreaId) -> Option<IpAddr> {
+        self.procs[pi]
+            .ifs
+            .iter()
+            .filter(|f| f.cfg.area == area)
+            .filter_map(|f| {
+                let class = if f.cfg.network == NetworkType::Loopback {
+                    2
+                } else if matches!(f.link, Link::Stub) {
+                    1
+                } else {
+                    0
+                };
+                f.addr.map(|a| (class, a))
+            })
+            .max()
+            .map(|(_, a)| a)
+    }
+
+    /// The AS-external LSAs and the NSSA LSAs, and the gaps of the external
+    /// LSAs that the processes leave out.
     fn originate_externals(&mut self) {
         for pi in 0..self.procs.len() {
             if !self.procs[pi].originates() {
                 continue;
             }
-            let exts = self.externals(pi);
-            if exts.is_empty() {
+            let (exts, left) = self.externals(pi);
+            if exts.is_empty() && left.is_empty() {
                 continue;
             }
             let p = &self.procs[pi];
@@ -1037,7 +1167,7 @@ impl<'a> Builder<'a> {
                 );
                 continue;
             }
-            let lsa = |lsa_type, area, prefix: Prefix, e: &Ext| {
+            let lsa = |lsa_type, area, prefix: Prefix, e: &Ext, forwarding: Option<IpAddr>| {
                 new_lsa(
                     lsa_type,
                     area,
@@ -1047,7 +1177,7 @@ impl<'a> Builder<'a> {
                         prefix,
                         metric: e.metric,
                         metric_type: Some(e.metric_type),
-                        forwarding: None,
+                        forwarding,
                     },
                     e.span.clone(),
                 )
@@ -1057,28 +1187,226 @@ impl<'a> Builder<'a> {
                 self.asbrs.insert(pi);
                 let as_id = self.as_of(pi);
                 let store = self.as_store.entry(as_id).or_default();
+                let mut as_lost = Vec::new();
                 for (prefix, e) in &exts {
-                    if !add_prefix_lsa(store, version, lsa(LsaType::External, None, *prefix, e)) {
-                        lost.push(*prefix);
+                    if !add_prefix_lsa(
+                        store,
+                        version,
+                        lsa(LsaType::External, None, *prefix, e, None),
+                    ) {
+                        as_lost.push(*prefix);
                     }
+                }
+                if !as_lost.is_empty() {
+                    self.as_gap(
+                        pi,
+                        GapReach::Prefixes(as_lost.clone()),
+                        format!(
+                            "the external LSAs of {rid} with a taken link-state ID are left out"
+                        ),
+                    );
+                }
+                lost.extend(as_lost);
+                for (reach, detail) in &left {
+                    self.as_gap(pi, reach.clone(), detail.clone());
                 }
             }
             for a in nssas {
                 let Some(inst) = self.inst(pi, a) else {
                     continue;
                 };
+                let p_bit = !normal;
+                let forwarding = if p_bit {
+                    self.nssa_forwarding_address(pi, a)
+                } else {
+                    None
+                };
+                if p_bit && forwarding.is_none() {
+                    self.note(
+                        pi,
+                        "ospf-nssa-no-forwarding-address",
+                        format!("the process has no address in the NSSA {a}, and it originates no NSSA LSA into it"),
+                    );
+                    continue;
+                }
                 let store = self.area_store.entry(inst).or_default();
+                let mut area_lost = Vec::new();
+                let mut fa_unknown = Vec::new();
                 for (prefix, e) in &exts {
                     if !add_prefix_lsa(
                         store,
                         version,
-                        lsa(LsaType::NssaExternal, Some(a), *prefix, e),
+                        lsa(LsaType::NssaExternal, Some(a), *prefix, e, forwarding),
                     ) {
-                        lost.push(*prefix);
+                        area_lost.push(*prefix);
+                        continue;
                     }
+                    if p_bit {
+                        self.p_bit.insert((inst, rid, *prefix));
+                        if !e.connected {
+                            fa_unknown.push(*prefix);
+                        }
+                    }
+                }
+                if !area_lost.is_empty() {
+                    self.area_gap(
+                        pi,
+                        a,
+                        LsaType::NssaExternal,
+                        GapReach::Prefixes(area_lost.clone()),
+                        format!("the NSSA LSAs of {rid} with a taken link-state ID are left out"),
+                    );
+                }
+                lost.extend(area_lost);
+                if !fa_unknown.is_empty() {
+                    self.area_gap(
+                        pi,
+                        a,
+                        LsaType::NssaExternal,
+                        GapReach::Prefixes(fa_unknown),
+                        format!(
+                            "the next hops of the static and default routes of {rid} are not known, and the forwarding addresses of their NSSA LSAs are not known"
+                        ),
+                    );
+                }
+                for (reach, detail) in &left {
+                    self.area_gap(pi, a, LsaType::NssaExternal, reach.clone(), detail.clone());
                 }
             }
             self.lsid_notes(pi, lost);
+        }
+    }
+
+    /// RFC 3101 3.1 and 3.2: the NSSA border router with the highest router
+    /// ID in each NSSA translates the NSSA LSAs of its routes with the P bit
+    /// into AS-external LSAs. It does not translate a prefix that an ASBR
+    /// also originates in an AS-external LSA, and that prefix is a gap. The
+    /// gaps of the NSSA in the calculation of the translator are gaps of the
+    /// AS.
+    fn translate_nssa(&mut self) {
+        let mut borders: BTreeMap<usize, Vec<(RouterId, usize, AreaId)>> = BTreeMap::new();
+        for (pi, p) in self.procs.iter().enumerate() {
+            let Some(rid) = p.rid else { continue };
+            let areas = p.areas();
+            if !areas.contains(&BACKBONE) || areas.len() < 2 {
+                continue;
+            }
+            for a in areas {
+                if p.area_type(a) != AreaType::Nssa {
+                    continue;
+                }
+                if let Some(inst) = self.inst(pi, a) {
+                    borders.entry(inst).or_default().push((rid, pi, a));
+                }
+            }
+        }
+        let originated: BTreeSet<(usize, Prefix)> = self
+            .as_store
+            .iter()
+            .flat_map(|(as_id, store)| {
+                let as_id = *as_id;
+                store
+                    .values()
+                    .filter_map(|l| prefix_of(&l.body))
+                    .map(move |x| (as_id, x))
+            })
+            .collect();
+        for (inst, list) in borders {
+            let Some(&(rid, pi, a)) = list.iter().max() else {
+                continue;
+            };
+            if self.procs[pi].left_out {
+                self.as_gap(
+                    pi,
+                    GapReach::External,
+                    format!(
+                        "the NSSA translator {rid} of area {a} is left out, and its AS-external LSAs are not known"
+                    ),
+                );
+                continue;
+            }
+            let version = self.procs[pi].version();
+            let db = self.assemble(pi, &BTreeSet::from([a]), false);
+            let calc = compute(&db, rid, &self.procs[pi].profile);
+            let as_id = self.as_of(pi);
+            let mut wide = false;
+            let mut prefixes: BTreeSet<Prefix> = BTreeSet::new();
+            for g in &calc.gaps {
+                match &g.reach {
+                    GapReach::Prefixes(p) => prefixes.extend(p.iter().copied()),
+                    _ => wide = true,
+                }
+            }
+            let mut lsas = Vec::new();
+            for r in &calc.routes {
+                if r.lsa_type != Some(LsaType::NssaExternal) || r.unknown.is_some() {
+                    continue;
+                }
+                let Some(adv) = r.advertising_router else {
+                    continue;
+                };
+                if !self.p_bit.contains(&(inst, adv, r.prefix)) {
+                    continue;
+                }
+                if originated.contains(&(as_id, r.prefix)) {
+                    prefixes.insert(r.prefix);
+                    continue;
+                }
+                let Some(source) = self.area_store.get(&inst).and_then(|s| {
+                    s.values().find(|l| {
+                        l.lsa_type == LsaType::NssaExternal
+                            && l.adv_router == adv
+                            && prefix_of(&l.body) == Some(r.prefix)
+                    })
+                }) else {
+                    continue;
+                };
+                let mut body = source.body.clone();
+                if let Body::External { prefix, .. } = &mut body {
+                    *prefix = r.prefix;
+                }
+                lsas.push(new_lsa(
+                    LsaType::External,
+                    None,
+                    Ipv4Addr::UNSPECIFIED,
+                    rid,
+                    body,
+                    source.span.clone(),
+                ));
+            }
+            let mut lost = Vec::new();
+            if !lsas.is_empty() {
+                self.asbrs.insert(pi);
+                let store = self.as_store.entry(as_id).or_default();
+                for l in lsas {
+                    let prefix = prefix_of(&l.body);
+                    if !add_prefix_lsa(store, version, l)
+                        && let Some(prefix) = prefix
+                    {
+                        lost.push(prefix);
+                    }
+                }
+            }
+            prefixes.extend(lost.iter().copied());
+            self.lsid_notes(pi, lost);
+            if wide {
+                self.as_gap(
+                    pi,
+                    GapReach::External,
+                    format!(
+                        "the routes of the NSSA LSAs of area {a} at the translator {rid} depend on a gap of the database, and its AS-external LSAs are not known"
+                    ),
+                );
+            }
+            if !prefixes.is_empty() {
+                self.as_gap(
+                    pi,
+                    GapReach::Prefixes(prefixes.into_iter().collect()),
+                    format!(
+                        "the translation of the NSSA LSAs of area {a} by {rid} is not known for these prefixes"
+                    ),
+                );
+            }
         }
     }
 
@@ -1186,6 +1514,20 @@ impl<'a> Builder<'a> {
                 db.insert(l.clone());
             }
         }
+        for a in areas {
+            if let Some(gaps) = self.inst(pi, *a).and_then(|i| self.area_gaps.get(&i)) {
+                db.gaps.extend(gaps.iter().cloned());
+            }
+        }
+        if externals
+            && normal
+            && let Some(gaps) = self.as_gaps.get(&self.as_of(pi))
+        {
+            db.gaps.extend(gaps.iter().cloned());
+        }
+        db.gaps.retain(|g| Some(g.lsid) != p.rid);
+        db.gaps.sort();
+        db.gaps.dedup();
         db
     }
 
@@ -1212,6 +1554,7 @@ impl<'a> Builder<'a> {
                 .iter()
                 .any(|g| matches!(g.reach, GapReach::All | GapReach::FromCost(_)))
             {
+                view.incomplete.insert(area);
                 notes.push((
                     "ospf-summary-incomplete",
                     format!(
@@ -1299,6 +1642,16 @@ impl<'a> Builder<'a> {
                 lost.push(prefix);
             }
         }
+        if !lost.is_empty() {
+            let rid = self.procs[pi].rid.unwrap_or(Ipv4Addr::UNSPECIFIED);
+            self.area_gap(
+                pi,
+                area,
+                LsaType::Summary,
+                GapReach::Prefixes(lost.clone()),
+                format!("the summary LSAs of {rid} with a taken link-state ID are left out"),
+            );
+        }
         self.lsid_notes(pi, lost);
     }
 
@@ -1315,9 +1668,15 @@ impl<'a> Builder<'a> {
             let p = &self.procs[pi];
             let span = p.cfg.span.clone();
             let mut out: Vec<(AreaId, Vec<Lsa>)> = Vec::new();
+            let mut incomplete = Vec::new();
             for b in p.areas() {
                 let kind = p.area_type(b);
                 let mut prefixes: BTreeMap<Prefix, (u32, SourceSpan)> = BTreeMap::new();
+                if (kind == AreaType::Normal || !p.no_summary(b))
+                    && view.incomplete.iter().any(|a| *a != b)
+                {
+                    incomplete.push(b);
+                }
                 if kind == AreaType::Normal || !p.no_summary(b) {
                     for (a, routes) in &view.intra {
                         if *a == b {
@@ -1369,6 +1728,18 @@ impl<'a> Builder<'a> {
             for (b, lsas) in out {
                 self.add_summaries(pi, b, lsas);
             }
+            let rid = self.procs[pi].rid.unwrap_or(Ipv4Addr::UNSPECIFIED);
+            for b in incomplete {
+                self.area_gap(
+                    pi,
+                    b,
+                    LsaType::Summary,
+                    GapReach::InterArea,
+                    format!(
+                        "the summary LSAs of {rid} into area {b} of the routes behind a gap of the database are left out"
+                    ),
+                );
+            }
         }
         for (pi, view) in &views {
             self.inter_area_summaries(*pi, view);
@@ -1399,6 +1770,15 @@ impl<'a> Builder<'a> {
             .filter(|q| self.as_of(**q) == as_id)
             .filter_map(|q| self.procs[*q].rid)
             .collect();
+        let mut wide = false;
+        let mut gap_prefixes: BTreeSet<Prefix> = BTreeSet::new();
+        for g in &calc.gaps {
+            match &g.reach {
+                GapReach::Prefixes(x) => gap_prefixes.extend(x.iter().copied()),
+                GapReach::External => {}
+                GapReach::All | GapReach::FromCost(_) | GapReach::InterArea => wide = true,
+            }
+        }
         let mut notes = Vec::new();
         let mut routes: Vec<(Prefix, u32)> = Vec::new();
         for r in &calc.routes {
@@ -1424,6 +1804,7 @@ impl<'a> Builder<'a> {
             .collect();
         let span = p.cfg.span.clone();
         let mut out = Vec::new();
+        let mut gap_areas = Vec::new();
         for b in p.areas() {
             if b == BACKBONE {
                 continue;
@@ -1432,6 +1813,7 @@ impl<'a> Builder<'a> {
             if kind != AreaType::Normal && p.no_summary(b) {
                 continue;
             }
+            gap_areas.push(b);
             let mut lsas: Vec<Lsa> = routes
                 .iter()
                 .map(|(prefix, c)| self.summary(pi, b, *prefix, *c, span.clone()))
@@ -1448,44 +1830,32 @@ impl<'a> Builder<'a> {
         for (b, lsas) in out {
             self.add_summaries(pi, b, lsas);
         }
+        for b in gap_areas {
+            if wide {
+                self.area_gap(
+                    pi,
+                    b,
+                    LsaType::Summary,
+                    GapReach::InterArea,
+                    format!(
+                        "the inter-area routes of the backbone at {rid} depend on a gap of the database, and its summary LSAs into area {b} are not known"
+                    ),
+                );
+            }
+            if !gap_prefixes.is_empty() {
+                self.area_gap(
+                    pi,
+                    b,
+                    LsaType::Summary,
+                    GapReach::Prefixes(gap_prefixes.iter().copied().collect()),
+                    format!(
+                        "the summary LSAs of {rid} into area {b} of these prefixes are not known"
+                    ),
+                );
+            }
+        }
         for detail in notes {
             self.note(pi, "ospf-summary-unknown", detail);
-        }
-    }
-
-    /// A note on each area border router of an NSSA with NSSA LSAs.
-    fn nssa_notes(&mut self) {
-        let mut out = Vec::new();
-        for (pi, p) in self.procs.iter().enumerate() {
-            if !p.abr() {
-                continue;
-            }
-            for a in p.areas() {
-                if p.area_type(a) != AreaType::Nssa {
-                    continue;
-                }
-                let Some(store) = self.inst(pi, a).and_then(|i| self.area_store.get(&i)) else {
-                    continue;
-                };
-                let prefixes: Vec<String> = store
-                    .values()
-                    .filter(|l| l.lsa_type == LsaType::NssaExternal)
-                    .filter_map(|l| prefix_of(&l.body))
-                    .map(|x| x.to_string())
-                    .collect();
-                if !prefixes.is_empty() {
-                    out.push((
-                        pi,
-                        format!(
-                            "the NSSA LSAs of area {a} are not translated into AS-external LSAs: {}",
-                            prefixes.join(", ")
-                        ),
-                    ));
-                }
-            }
-        }
-        for (pi, detail) in out {
-            self.note(pi, "ospf-nssa-not-translated", detail);
         }
     }
 
@@ -1518,7 +1888,7 @@ pub fn build(routers: &BTreeMap<String, RouterInput>) -> Built {
     b.scopes();
     b.originate_intra();
     b.originate_externals();
+    b.translate_nssa();
     b.originate_summaries();
-    b.nssa_notes();
     b.finish()
 }

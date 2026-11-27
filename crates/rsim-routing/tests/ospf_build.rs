@@ -10,8 +10,8 @@ use rsim_routing::ospf::config::{
     Area, DefaultOriginate, NetworkType, OspfInterface, Process, Redistribute, RouterConfig, Source,
 };
 use rsim_routing::ospf::{
-    AreaId, AreaType, BACKBONE, Body, Calculation, Database, LinkKind, Lsa, LsaType, NextHop,
-    OspfProfile, PathType, Reference, RouterLink, Version, compute,
+    AreaId, AreaType, BACKBONE, Body, Calculation, Database, GapReach, LinkKind, Lsa, LsaType,
+    NextHop, OspfProfile, PathType, Reference, RouterLink, Version, compute,
 };
 
 const AREA1: AreaId = Ipv4Addr::new(0, 0, 0, 1);
@@ -517,19 +517,14 @@ fn redistribute(source: Source, metric: Option<u32>, metric_type: Option<u8>) ->
     }
 }
 
-/// The chain with r4 as an ASBR.
-fn asbr_chain(area2: AreaType) -> Built {
+/// The chain with r4 as an ASBR of its connected and static routes.
+fn asbr_routers(area2: AreaType) -> Vec<(&'static str, RouterInput)> {
     let mut rs = chain(area2, false);
     let r4 = &mut rs[3].1;
     let p = &mut r4.config.processes[0];
     p.redistribute = vec![
         redistribute(Source::Connected, None, None),
         redistribute(Source::Static, Some(50), Some(1)),
-        Redistribute {
-            route_map: Some("ONLY".to_string()),
-            ..redistribute(Source::Static, None, None)
-        },
-        redistribute(Source::Bgp, None, None),
     ];
     r4.connected.insert(
         "default".to_string(),
@@ -543,7 +538,11 @@ fn asbr_chain(area2: AreaType) -> Built {
         "default".to_string(),
         vec![pfx("0.0.0.0/0"), pfx("203.0.113.128/25")],
     );
-    twin(rs)
+    rs
+}
+
+fn asbr_chain(area2: AreaType) -> Built {
+    twin(asbr_routers(area2))
 }
 
 #[test]
@@ -590,16 +589,51 @@ fn an_asbr_gives_external_lsas_and_the_area_border_routers_give_asbr_summaries()
         )
     );
     assert!(c.route(pfx("0.0.0.0/0")).is_none());
+    assert!(c.gaps.is_empty());
+    assert!(c.absent_gap(pfx("0.0.0.0/0")).is_none());
+}
+
+#[test]
+fn left_out_external_lsas_are_gaps_of_each_database_of_the_as() {
+    let mut rs = asbr_routers(AreaType::Normal);
+    let p = &mut rs[3].1.config.processes[0];
+    p.redistribute[0].route_map = Some("ONLY".to_string());
+    p.default_originate = Some(DefaultOriginate {
+        always: true,
+        metric: None,
+        metric_type: None,
+        route_map: Some("DEFAULT".to_string()),
+        span: SourceSpan::line("default", 1),
+    });
+    let built = twin(rs.clone());
     let k = kinds(&built, "r4");
-    assert_eq!(
-        k.iter()
-            .filter(|k| *k == "ospf-redistribute-unknown")
-            .count(),
-        2
-    );
-    assert!(built.notes.iter().any(|(_, n)| {
-        n.kind == "ospf-redistribute-unknown" && n.detail.contains("203.0.113.128/25")
-    }));
+    assert!(k.contains(&"ospf-redistribute-unknown".to_string()));
+    assert!(k.contains(&"ospf-default-unknown".to_string()));
+    for device in ["r1", "r2", "r3"] {
+        let d = db(&built, device, Version::V2);
+        assert_eq!(d.gaps.len(), 2, "the gaps of {device}");
+        assert!(
+            d.gaps
+                .iter()
+                .all(|g| g.lsa_type == LsaType::External && g.lsid == ip("203.0.113.4"))
+        );
+    }
+    let c = calc(&built, "r1", "203.0.113.1");
+    assert!(c.route(pfx("198.51.100.128/25")).is_none());
+    assert!(c.absent_gap(pfx("198.51.100.128/25")).is_some());
+    assert!(c.absent_gap(pfx("0.0.0.0/0")).is_some());
+    assert!(c.absent_gap(pfx("198.51.100.0/25")).is_none());
+    assert_eq!(route(&c, "203.0.113.128/25").0, PathType::External1);
+
+    rs[3].1.config.processes[0]
+        .redistribute
+        .push(redistribute(Source::Bgp, None, None));
+    let built = twin(rs);
+    let c = calc(&built, "r1", "203.0.113.1");
+    let r = c.route(pfx("203.0.113.128/25")).unwrap();
+    assert!(r.unknown.as_ref().is_some_and(|u| u.contains("bgp")));
+    assert!(c.absent_gap(pfx("198.51.100.0/25")).is_some());
+    assert_eq!(route(&c, "203.0.113.4/32").0, PathType::InterArea);
 }
 
 #[test]
@@ -641,12 +675,20 @@ fn default_information_originate_needs_always_or_a_default_route() {
 }
 
 #[test]
-fn an_asbr_in_an_nssa_gives_nssa_lsas_and_no_as_external_lsas() {
+fn an_asbr_in_an_nssa_gives_nssa_lsas_with_a_forwarding_address_and_the_nssa_border_router_translates_them()
+ {
     let built = asbr_chain(AreaType::Nssa);
     let d4 = db(&built, "r4", Version::V2);
     let nssa = find(d4, LsaType::NssaExternal, "203.0.113.4");
     assert_eq!(nssa.len(), 2);
     assert!(nssa.iter().all(|l| l.area == Some(AREA2)));
+    assert!(nssa.iter().all(|l| matches!(
+        l.body,
+        Body::External {
+            forwarding: Some(fa),
+            ..
+        } if fa == IpAddr::V4(ip("203.0.113.4"))
+    )));
     assert!(find(d4, LsaType::External, "203.0.113.4").is_empty());
     assert!(
         find(
@@ -656,7 +698,6 @@ fn an_asbr_in_an_nssa_gives_nssa_lsas_and_no_as_external_lsas() {
         )
         .is_empty()
     );
-    assert!(kinds(&built, "r3").contains(&"ospf-nssa-not-translated".to_string()));
     let c = compute(d4, ip("203.0.113.4"), &OspfProfile::of(Platform::Iosxe));
     assert_eq!(route(&c, "203.0.113.1/32").1, 31);
     let c = compute(
@@ -665,6 +706,139 @@ fn an_asbr_in_an_nssa_gives_nssa_lsas_and_no_as_external_lsas() {
         &OspfProfile::of(Platform::Iosxe),
     );
     assert_eq!(route(&c, "198.51.100.128/25").0, PathType::External2);
+    let translated = find(
+        db(&built, "r1", Version::V2),
+        LsaType::External,
+        "203.0.113.3",
+    );
+    assert_eq!(translated.len(), 1);
+    assert_eq!(
+        translated[0].body,
+        Body::External {
+            prefix: pfx("198.51.100.128/25"),
+            metric: 20,
+            metric_type: Some(2),
+            forwarding: Some(IpAddr::V4(ip("203.0.113.4"))),
+        }
+    );
+    let c = calc(&built, "r1", "203.0.113.1");
+    assert_eq!(
+        route(&c, "198.51.100.128/25"),
+        (
+            PathType::External2,
+            20,
+            vec!["192.0.2.2 on eth0".to_string()]
+        )
+    );
+    assert!(
+        c.route(pfx("203.0.113.128/25")).is_none(),
+        "the forwarding address of the NSSA LSA of a static route is not known"
+    );
+    assert!(c.absent_gap(pfx("203.0.113.128/25")).is_some());
+}
+
+#[test]
+fn the_nssa_border_router_with_the_highest_router_id_translates_and_a_border_asbr_clears_the_p_bit()
+{
+    let mut rs = asbr_routers(AreaType::Nssa);
+    rs[1].1.config.processes[0]
+        .interfaces
+        .push(p2p("eth2", BACKBONE, "192.0.2.13/30"));
+    rs[3].1.config.processes[0]
+        .interfaces
+        .push(p2p("eth1", AREA2, "192.0.2.17/30"));
+    let mut r5 = process(
+        Version::V2,
+        Some("203.0.113.5"),
+        vec![
+            p2p("eth0", BACKBONE, "192.0.2.14/30"),
+            p2p("eth1", AREA2, "192.0.2.18/30"),
+        ],
+    );
+    r5.areas.get_mut(&AREA2).unwrap().kind = AreaType::Nssa;
+    r5.redistribute = vec![redistribute(Source::Connected, None, None)];
+    let mut r5 = router(Platform::Iosxe, vec![r5]);
+    r5.connected
+        .insert("default".to_string(), vec![pfx("198.51.100.0/25")]);
+    rs.push(("r5", r5));
+    let built = twin(rs);
+    let d4 = db(&built, "r4", Version::V2);
+    let own = find(d4, LsaType::NssaExternal, "203.0.113.5");
+    assert_eq!(own.len(), 1);
+    assert!(matches!(
+        own[0].body,
+        Body::External {
+            forwarding: None,
+            ..
+        }
+    ));
+    let d1 = db(&built, "r1", Version::V2);
+    assert!(find(d1, LsaType::External, "203.0.113.3").is_empty());
+    let prefixes: Vec<Prefix> = find(d1, LsaType::External, "203.0.113.5")
+        .into_iter()
+        .filter_map(|l| match l.body {
+            Body::External { prefix, .. } => Some(prefix),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        prefixes,
+        vec![pfx("198.51.100.0/25"), pfx("198.51.100.128/25")]
+    );
+}
+
+#[test]
+fn a_gap_behind_an_area_border_router_is_a_gap_of_the_routers_of_the_other_areas() {
+    let mut rs = chain(AreaType::Normal, false);
+    rs[3].1.config.processes[0].unhandled.push((
+        "area 2 virtual-link 203.0.113.3".to_string(),
+        SourceSpan::line("process", 9),
+    ));
+    let built = twin(rs);
+    let d1 = db(&built, "r1", Version::V2);
+    assert!(
+        d1.gaps
+            .iter()
+            .any(|g| g.lsa_type == LsaType::Summary && g.reach == GapReach::InterArea)
+    );
+    let c = calc(&built, "r1", "203.0.113.1");
+    assert!(c.route(pfx("203.0.113.4/32")).is_none());
+    assert!(c.absent_gap(pfx("203.0.113.4/32")).is_some());
+    assert!(c.route(pfx("192.0.2.4/30")).unwrap().unknown.is_some());
+}
+
+#[test]
+fn an_active_interface_with_no_address_leaves_out_the_router_and_its_neighbours_see_a_gap() {
+    let mut rs = chain(AreaType::Normal, false);
+    rs[2].1.config.processes[0].interfaces[1].address = None;
+    let built = twin(rs);
+    assert!(kinds(&built, "r3").contains(&"ospf-no-address".to_string()));
+    let d2 = db(&built, "r2", Version::V2);
+    assert!(d2.lsas.values().all(|l| l.adv_router != ip("203.0.113.3")));
+    let c = calc(&built, "r2", "203.0.113.2");
+    assert!(
+        c.gaps
+            .iter()
+            .any(|g| g.lsa_type == LsaType::Router && g.lsid == ip("203.0.113.3"))
+    );
+    assert!(c.absent_gap(pfx("203.0.113.4/32")).is_some());
+    let c = calc(&built, "r1", "203.0.113.1");
+    assert!(c.absent_gap(pfx("203.0.113.4/32")).is_some());
+
+    let built = twin(vec![(
+        "r1",
+        v3_router(
+            "203.0.113.1",
+            vec![
+                p2p("eth0", BACKBONE, "fe80::1/64"),
+                lo(BACKBONE, "2001:db8:ffff::1/128"),
+            ],
+            &[("eth0", "fe80::1")],
+        ),
+    )]);
+    assert!(kinds(&built, "r1").contains(&"ospf-no-address".to_string()));
+    let d = db(&built, "r1", Version::V3);
+    assert!(d.lsas.values().all(|l| l.adv_router != ip("203.0.113.1")));
 }
 
 #[test]

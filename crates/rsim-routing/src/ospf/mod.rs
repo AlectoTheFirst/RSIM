@@ -330,6 +330,10 @@ pub struct Database {
     pub interfaces: Vec<Interface>,
     pub neighbors: Vec<Neighbor>,
     pub lsas: BTreeMap<LsaKey, Lsa>,
+    /// The LSAs that the build of the twin leaves out in the flooding scope
+    /// of the database. [`compute`] adds these gaps to the gaps of the
+    /// calculation.
+    pub gaps: Vec<Gap>,
     /// The facts of the read of the database.
     pub notes: Vec<Note>,
 }
@@ -345,6 +349,7 @@ impl Database {
             interfaces: Vec::new(),
             neighbors: Vec::new(),
             lsas: BTreeMap::new(),
+            gaps: Vec::new(),
             notes: Vec::new(),
         }
     }
@@ -504,7 +509,7 @@ pub struct Route {
 }
 
 /// The routes that a gap makes unknown.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GapReach {
     /// Each route. The database has no router LSA of the calculating
     /// router.
@@ -518,13 +523,21 @@ pub enum GapReach {
     /// The inter-area and external routes of the prefixes, and the
     /// prefixes with no route.
     Prefixes(Vec<Prefix>),
+    /// Each inter-area and external route, and each prefix with no route.
+    /// The prefixes of the left-out summary LSAs are not known.
+    InterArea,
+    /// Each external route, and each prefix with no route. The prefixes of
+    /// the left-out external LSAs are not known.
+    External,
 }
 
 /// An LSA that the calculation needs and that the database does not hold,
-/// or a virtual link of the calculating router. The calculation does not
-/// compute a virtual link of the calculating router, and the gap of the link
-/// is on the router LSA of the calculating router in the backbone.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// a virtual link of the calculating router, or LSAs that the build of the
+/// twin leaves out. The calculation does not compute a virtual link of the
+/// calculating router, and the gap of the link is on the router LSA of the
+/// calculating router in the backbone. The link-state ID of a gap of the
+/// build is the router that leaves out the LSAs.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Gap {
     pub lsa_type: LsaType,
     pub lsid: Ipv4Addr,
@@ -558,10 +571,13 @@ impl Calculation {
 
     /// The gap that makes a prefix with no route unknown: a gap of the
     /// shortest path tree, the missing router LSA of the calculating
-    /// router, or a gap of that prefix.
+    /// router, left-out LSAs of prefixes that are not known, or a gap of
+    /// that prefix.
     pub fn absent_gap(&self, prefix: Prefix) -> Option<&Gap> {
         self.gaps.iter().find(|g| match &g.reach {
-            GapReach::All | GapReach::FromCost(_) => true,
+            GapReach::All | GapReach::FromCost(_) | GapReach::InterArea | GapReach::External => {
+                true
+            }
             GapReach::Prefixes(p) => p.contains(&prefix),
         })
     }
