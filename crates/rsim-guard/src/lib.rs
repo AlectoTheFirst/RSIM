@@ -1,6 +1,8 @@
 //! The RIB guard: the comparison of the computed route table of a device
 //! and VRF with its collected route table.
 
+pub mod ospf;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use rsim_core::{Prefix, RibGuardFlag, SourceSpan};

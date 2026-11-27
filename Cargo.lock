@@ -2887,6 +2887,7 @@ version = "0.1.0"
 dependencies = [
  "rsim-core",
  "rsim-functions",
+ "rsim-routing",
 ]
 
 [[package]]
