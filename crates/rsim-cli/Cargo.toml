@@ -18,6 +18,7 @@ rsim-contract.workspace = true
 rsim-core.workspace = true
 rsim-engine.workspace = true
 rsim-functions.workspace = true
+rsim-guard.workspace = true
 rsim-ingest.workspace = true
 rsim-store.workspace = true
 rsim-topologies = { workspace = true, optional = true }

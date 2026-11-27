@@ -2795,6 +2795,7 @@ dependencies = [
  "rsim-core",
  "rsim-engine",
  "rsim-functions",
+ "rsim-guard",
  "rsim-ingest",
  "rsim-store",
  "rsim-topologies",
