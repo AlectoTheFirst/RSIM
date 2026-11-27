@@ -4,6 +4,7 @@ pub mod bgp;
 pub mod config;
 pub mod lower;
 pub mod mask;
+pub mod ospf_config;
 pub(crate) mod profile;
 mod table;
 
