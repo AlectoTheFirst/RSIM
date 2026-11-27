@@ -170,16 +170,17 @@ fn a_disabled_next_hop_is_left_out_and_another_next_hop_option_is_unhandled() {
         put(
             v,
             &["protocols", "static", "route", "198.20.0.0/16"],
-            json!({"next-hop": {"192.0.2.42": {"distance": "10"}}}),
+            json!({"next-hop": {"192.0.2.42": {"distance": "10", "bfd": {}}}}),
         );
     });
     let cfg = vyos::read(&read_json(&config).unwrap());
     let r = |p: &str| cfg.static_routes.iter().find(|r| r.prefix == p).unwrap();
     assert_eq!(r("198.18.0.0/15").gateways, ["192.0.2.41"]);
     assert!(r("198.18.0.0/15").unhandled.is_empty());
+    assert_eq!(r("198.20.0.0/16").unhandled, ["next-hop 192.0.2.42 bfd"]);
     assert_eq!(
-        r("198.20.0.0/16").unhandled,
-        ["next-hop 192.0.2.42 distance"]
+        r("198.20.0.0/16").distances.get("next-hop 192.0.2.42"),
+        Some(&10)
     );
 }
 
