@@ -424,6 +424,7 @@ pub fn read(doc: &Document) -> Config {
         }
     }
     c.bgp = super::bgp::read(root, &mut r.read);
+    super::ospf_config::mark(root, &mut r.read);
     c.read = r.read;
     c
 }
