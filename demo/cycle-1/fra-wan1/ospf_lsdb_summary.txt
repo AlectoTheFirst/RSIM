@@ -1,0 +1,6 @@
+Mon Nov  2 08:00:00.000 UTC
+
+            OSPF Router with ID (10.17.0.1) (Process ID CORE)
+
+                Summary Net Link States (Area 0)
+

@@ -1,0 +1,5 @@
+ Routing Process "ospf 1" with ID 10.16.255.1
+ Supports only single TOS(TOS0) routes
+ Area BACKBONE(0)
+    Number of interfaces in this area is 3
+

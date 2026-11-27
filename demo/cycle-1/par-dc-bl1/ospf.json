@@ -1,0 +1,18 @@
+{
+  "TABLE_ctx": {
+    "ROW_ctx": [
+      {
+        "TABLE_area": {
+          "ROW_area": [
+            {
+              "aid": "0.0.0.0"
+            }
+          ]
+        },
+        "cname": "default",
+        "ptag": "UNDERLAY",
+        "rid": "10.20.0.21"
+      }
+    ]
+  }
+}

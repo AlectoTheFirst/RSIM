@@ -1,0 +1,20 @@
+{
+  "TABLE_ctx": {
+    "ROW_ctx": [
+      {
+        "TABLE_area": {
+          "ROW_area": [
+            {
+              "TABLE_lsdb": {
+                "ROW_lsdb": []
+              },
+              "aid": "0.0.0.0"
+            }
+          ]
+        },
+        "cname": "default",
+        "ptag": "UNDERLAY"
+      }
+    ]
+  }
+}

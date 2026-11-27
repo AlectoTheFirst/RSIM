@@ -1,0 +1,18 @@
+Mon Nov  2 08:00:00.000 UTC
+
+            OSPF Router with ID (10.17.0.2) (Process ID CORE)
+
+                Net Link States (Area 0)
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Network Links
+  Link State ID: 10.12.250.2 (address of Designated Router)
+  Advertising Router: 10.18.255.2
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Network Mask: /29
+        Attached Router: 10.18.255.1
+        Attached Router: 10.18.255.2
+

@@ -1,0 +1,50 @@
+{
+  "TABLE_ctx": {
+    "ROW_ctx": [
+      {
+        "TABLE_nbr": {
+          "ROW_nbr": [
+            {
+              "addr": "10.20.100.3",
+              "intf": "Ethernet1/1",
+              "rid": "10.20.0.11",
+              "state": "FULL"
+            },
+            {
+              "addr": "10.20.100.7",
+              "intf": "Ethernet1/2",
+              "rid": "10.20.0.12",
+              "state": "FULL"
+            },
+            {
+              "addr": "10.20.100.11",
+              "intf": "Ethernet1/3",
+              "rid": "10.20.0.13",
+              "state": "FULL"
+            },
+            {
+              "addr": "10.20.100.15",
+              "intf": "Ethernet1/4",
+              "rid": "10.20.0.14",
+              "state": "FULL"
+            },
+            {
+              "addr": "10.20.100.19",
+              "intf": "Ethernet1/5",
+              "rid": "10.20.0.21",
+              "state": "FULL"
+            },
+            {
+              "addr": "10.20.100.23",
+              "intf": "Ethernet1/6",
+              "rid": "10.20.0.22",
+              "state": "FULL"
+            }
+          ]
+        },
+        "cname": "default",
+        "ptag": "UNDERLAY"
+      }
+    ]
+  }
+}

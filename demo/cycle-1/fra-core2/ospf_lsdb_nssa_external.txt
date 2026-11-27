@@ -1,0 +1,5 @@
+
+            OSPF Router with ID (10.18.255.2) (Process ID 1)
+
+                Type-7 AS External Link States (Area 0)
+
