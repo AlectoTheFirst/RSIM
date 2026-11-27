@@ -978,7 +978,8 @@ fn the_rib_guard_compares_the_connected_routes_and_leaves_the_kernel_route_out()
     assert_eq!(category("203.0.113.128/25").0, Category::OnlyComputed);
     let t = e.builder.build().expect("the twin builds");
     let a = run(&t, "192.0.2.70", "192.0.2.50", 8123);
-    let step = a.branches()[0]
+    let branches = a.branches();
+    let step = branches[0]
         .steps
         .iter()
         .find(|s| s.function.as_str() == "r1/route")
