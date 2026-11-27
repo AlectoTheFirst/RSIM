@@ -8,6 +8,7 @@
 //! router, candidates by cost, vertex kind and ID, routes by prefix and
 //! next hops by gateway and interface.
 
+pub mod build;
 mod change;
 pub mod config;
 mod spf;
