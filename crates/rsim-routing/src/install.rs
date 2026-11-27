@@ -1,5 +1,5 @@
-//! The install stage: the route of each prefix from its candidates, by the
-//! administrative distance.
+//! The install stage. It selects the route of each prefix from its
+//! candidates by the administrative distance.
 
 use std::collections::BTreeMap;
 
@@ -22,9 +22,9 @@ fn unknown(r: &Route) -> bool {
 }
 
 /// The route table of the candidates. For each prefix, the candidates of
-/// the lowest distance give the route: one unknown candidate makes the
-/// route unknown, candidates of one kind give one route with all their
-/// next hops, and candidates of more than one kind give an unknown route.
+/// the lowest distance give the route. One unknown candidate makes the
+/// route unknown. Candidates of one kind give one route with all their next
+/// hops. Candidates of more than one kind give an unknown route.
 pub fn install(candidates: Vec<Candidate>) -> Fib {
     let mut by_prefix: BTreeMap<Prefix, Vec<Candidate>> = BTreeMap::new();
     for c in candidates {

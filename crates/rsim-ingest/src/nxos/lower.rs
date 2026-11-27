@@ -1611,9 +1611,9 @@ impl L<'_> {
 /// The routing defaults of NX-OS.
 const PLATFORM: Platform = Platform::Nxos;
 
-/// The guard class of a collected route of the `clientname` word `word`:
-/// the connected, local and static routes are compared, and each other
-/// route is not computed.
+/// The guard class of a collected route of the `clientname` word `word`.
+/// The connected, local and static routes are compared. Each other route is
+/// not computed.
 fn guard_route(word: &str) -> rsim_guard::CollectedRoute {
     let w = super::profile::protocol_word(word);
     let class = match w {

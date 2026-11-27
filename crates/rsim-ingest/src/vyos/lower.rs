@@ -34,9 +34,9 @@ const VRF: &str = "default";
 /// The routing defaults of VyOS: FRR with its traditional profile.
 const PLATFORM: Platform = Platform::FrrTraditional;
 
-/// The guard class of a collected route of the protocol word `word`: the
-/// connected, local and static routes are compared, and each other route is
-/// not computed.
+/// The guard class of a collected route of the protocol word `word`. The
+/// connected, local and static routes are compared. Each other route is not
+/// computed.
 fn guard_route(word: &str) -> rsim_guard::CollectedRoute {
     let class = match word {
         "connected" | "local" | "static" => rsim_guard::Class::Compared,

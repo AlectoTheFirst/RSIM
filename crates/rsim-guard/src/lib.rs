@@ -6,8 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use rsim_core::{Prefix, RibGuardFlag, SourceSpan};
 use rsim_functions::{Fib, Route, RouteKind};
 
-/// The class of a collected route: compared with the computed route, or not
-/// computed with the reason.
+/// The class of a collected route in the guard.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Class {
     Compared,
@@ -16,8 +15,7 @@ pub enum Class {
     Seeded,
 }
 
-/// A collected route of one prefix: the protocol word of the device and the
-/// class.
+/// A collected route of one prefix with the protocol word of the device.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CollectedRoute {
     pub protocol: String,
@@ -49,8 +47,8 @@ impl Category {
     }
 }
 
-/// One side of a route of the guard: the kind, the next hops as
-/// `gateway@interface` or `interface`, and the reason of an unknown route.
+/// One side of a route of the guard. A next hop is `gateway@interface`, or
+/// `interface` with no gateway.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct View {
     pub kind: String,
@@ -93,7 +91,7 @@ pub struct Row {
     pub protocol: String,
     pub computed: Option<View>,
     pub collected: Option<View>,
-    /// The fields that differ: `kind` and `next_hops`.
+    /// The fields that differ, `kind` or `next_hops`.
     pub fields: Vec<&'static str>,
     pub reason: String,
     pub spans: Vec<SourceSpan>,
@@ -241,9 +239,9 @@ impl Counts {
         c
     }
 
-    /// The rows of the match rate: the matches and the rows that differ,
-    /// that only the computed table holds and that only the collected table
-    /// holds. The not computed and the seeded rows are outside the rate.
+    /// The number of rows of the match rate. These are the matches, the
+    /// differences and the routes of only one table. The rows that are not
+    /// computed and the seeded rows are outside the rate.
     pub fn compared(&self) -> usize {
         self.matched + self.differ + self.only_computed + self.only_collected
     }

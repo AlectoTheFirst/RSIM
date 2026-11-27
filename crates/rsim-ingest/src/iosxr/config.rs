@@ -183,7 +183,7 @@ pub fn read(doc: &Document, table: &Table) -> Config {
     cfg
 }
 
-/// The IPv4 static routes of `router static`: the `address-family ipv4
+/// The IPv4 static routes of `router static`, from the `address-family ipv4
 /// unicast` stanza of the default VRF and of each `vrf` stanza.
 fn router_static(s: &Stanza) -> Vec<crate::nxos::config::StaticRoute> {
     let mut out = Vec::new();
@@ -208,9 +208,9 @@ fn router_static(s: &Stanza) -> Vec<crate::nxos::config::StaticRoute> {
     out
 }
 
-/// One route line of `router static`: the prefix, then the interface, the
-/// next hop and the distance, each optional, and `tag <n>` and
-/// `description <text>`. Each other word is unhandled.
+/// One route line of `router static`. The prefix comes first. The
+/// interface, the next hop, the distance, `tag <n>` and `description
+/// <text>` are optional. Each other word is unhandled.
 fn static_line(vrf: &str, w: &[&str], lines: Lines) -> crate::nxos::config::StaticRoute {
     let mut r = crate::nxos::config::StaticRoute {
         vrf: vrf.to_string(),
