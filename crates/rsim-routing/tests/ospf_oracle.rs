@@ -189,7 +189,8 @@ fn random_case(rng: &mut Rng, externals: bool) -> Case {
     }
 
     for s in 0..rng.below(5) {
-        let members = rng.pick(n, 2 + rng.below(n.min(6) - 1));
+        let size = 2 + rng.below(n.min(6) - 1);
+        let members = rng.pick(n, size);
         let base = 16 * s as u8;
         let subnet = Ipv4Addr::new(198, 51, 100, base);
         let addr = |j: usize| Ipv4Addr::new(198, 51, 100, base + 1 + j as u8);
