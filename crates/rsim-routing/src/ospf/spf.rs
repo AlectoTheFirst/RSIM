@@ -20,7 +20,8 @@
 //! - RFC 2328 16.4 and RFC 3101 2.5 give the external routes from the
 //!   AS-external LSAs and, in each attached NSSA, the NSSA LSAs. The P bit of
 //!   an NSSA LSA is taken as set.
-//! - A virtual link of the calculating router is not computed (16.3).
+//! - A virtual link of the calculating router is not computed (16.3). It
+//!   is a gap of the backbone from the cost of the link.
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
@@ -190,11 +191,15 @@ struct GapEntry {
     prefixes: BTreeSet<Prefix>,
 }
 
+/// The key of a gap: the type, the link-state ID, true for no area, and
+/// the area.
+type GapKey = (LsaType, Ipv4Addr, bool, AreaId);
+
 /// The gaps by type, link-state ID and area, each listed once, and the
 /// notes of the calculation.
 #[derive(Default)]
 struct Out {
-    gaps: BTreeMap<(LsaType, Ipv4Addr, bool, AreaId), GapEntry>,
+    gaps: BTreeMap<GapKey, GapEntry>,
     notes: Vec<Note>,
 }
 
@@ -223,6 +228,15 @@ impl Out {
             Reach::Cost(c) => e.bound = Some(e.bound.map_or(c, |b| b.min(c))),
             Reach::Prefixes(p) => e.prefixes.extend(p),
         }
+    }
+
+    /// The gaps that reach only prefixes, with their prefixes.
+    fn prefix_gaps(&self) -> Vec<(GapKey, Vec<Prefix>)> {
+        self.gaps
+            .iter()
+            .filter(|(_, e)| !e.all && e.bound.is_none())
+            .map(|(k, e)| (*k, e.prefixes.iter().copied().collect()))
+            .collect()
     }
 
     fn note(&mut self, kind: &str, subject: String, detail: String) {
@@ -573,14 +587,24 @@ fn spf(cx: &Cx<'_>, out: &mut Out, area: AreaId) -> Tree {
                     let next = cost.saturating_add(link.metric);
                     match link.kind {
                         LinkKind::Stub => {}
-                        LinkKind::Virtual if rid == root => out.note(
-                            "ospf-virtual-link-not-modeled",
-                            format!("{area}/{}", link.id),
-                            format!(
-                                "the virtual link of router {root} to {} in area {area} is not computed",
-                                link.id
-                            ),
-                        ),
+                        LinkKind::Virtual if rid == root => {
+                            out.note(
+                                "ospf-virtual-link-not-modeled",
+                                format!("{area}/{}", link.id),
+                                format!(
+                                    "the virtual link of router {root} to {} in area {area} is not computed",
+                                    link.id
+                                ),
+                            );
+                            out.gap(
+                                version,
+                                LsaType::Router,
+                                root,
+                                Some(area),
+                                &format!("the virtual link to {} is not computed", link.id),
+                                Reach::Cost(next),
+                            );
+                        }
                         LinkKind::Transit => {
                             let Some(key) = cx.net_key(link) else {
                                 out.note(
@@ -621,7 +645,10 @@ fn spf(cx: &Cx<'_>, out: &mut Out, area: AreaId) -> Tree {
                                     LsaType::Router,
                                     link.id,
                                     Some(area),
-                                    &format!("named by a {} link of router {rid}", link.kind.name()),
+                                    &format!(
+                                        "named by a {} link of router {rid}",
+                                        link.kind.name()
+                                    ),
                                     Reach::Cost(next),
                                 );
                                 continue;
@@ -1079,7 +1106,11 @@ impl Resolver {
 
 /// The internal distance, the next hops and the ASBR class of the path to
 /// the ASBR or to the forwarding address of an external LSA (RFC 2328 16.4
-/// step 3 with RFC 3101 2.5), or `None` when the LSA is not usable.
+/// step 3 with RFC 3101 2.5), or `None` when the LSA is not usable. An ASBR
+/// whose router LSA the database holds and that the calculation does not
+/// reach makes the LSA not usable. A gap of `prefix_gaps` with a prefix that
+/// can give the route of the forwarding address also reaches `prefix`.
+#[allow(clippy::too_many_arguments)]
 fn external_path(
     cx: &Cx<'_>,
     out: &mut Out,
@@ -1088,6 +1119,7 @@ fn external_path(
     forwarding: Option<IpAddr>,
     resolver: &Resolver,
     routers: &RouterTable,
+    prefix_gaps: &[(GapKey, Vec<Prefix>)],
 ) -> Option<(u32, Hops, u8)> {
     let nssa = lsa.lsa_type == LsaType::NssaExternal;
     let db = cx.db;
@@ -1108,7 +1140,13 @@ fn external_path(
             })
             .unwrap_or_default();
         if paths.is_empty() {
-            if entries.is_none_or(BTreeMap::is_empty) {
+            let adv = lsa.adv_router;
+            let known = cx.index.routers.keys().any(|(_, r)| *r == adv)
+                || db
+                    .lsas
+                    .values()
+                    .any(|l| matches!(l.body, Body::AsbrSummary { router, .. } if router == adv));
+            if !known && entries.is_none_or(BTreeMap::is_empty) {
                 out.gap(
                     db.version,
                     LsaType::Router,
@@ -1125,7 +1163,19 @@ fn external_path(
         }
         return Some(pick(&paths, cx.rfc1583()));
     };
-    let (net, entry) = resolver.lookup(fa)?;
+    let found = resolver.lookup(fa);
+    for (key, gap_prefixes) in prefix_gaps {
+        let covers = gap_prefixes.iter().any(|m| {
+            m.contains(fa)
+                && found.is_none_or(|(net, e)| {
+                    m.len() > net.len() || (m == net && e.path_type == PathType::InterArea)
+                })
+        });
+        if covers && let Some(e) = out.gaps.get_mut(key) {
+            e.prefixes.insert(prefix);
+        }
+    }
+    let (net, entry) = found?;
     if entry.path_type == PathType::IntraArea {
         let paths: Vec<RouterPath> = entry
             .by_area
@@ -1224,6 +1274,7 @@ fn externals(
     routers: &RouterTable,
 ) {
     let resolver = Resolver::new(table);
+    let prefix_gaps = out.prefix_gaps();
     let mut candidates: Vec<&Lsa> = cx
         .db
         .lsas
@@ -1253,7 +1304,7 @@ fn externals(
         }
         let fa = forwarding.filter(|a| !a.is_unspecified());
         let Some((distance, hops, asbr_class)) =
-            external_path(cx, out, lsa, *prefix, fa, &resolver, routers)
+            external_path(cx, out, lsa, *prefix, fa, &resolver, routers, &prefix_gaps)
         else {
             continue;
         };

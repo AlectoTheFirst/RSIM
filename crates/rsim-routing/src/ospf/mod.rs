@@ -509,14 +509,19 @@ pub enum GapReach {
     All,
     /// The intra-area routes with a cost of at least the bound, and each
     /// inter-area and external route. The gap is a vertex of the shortest
-    /// path tree, and the bound is the cost at which the tree meets it.
+    /// path tree, and the bound is the cost at which the tree meets it. For
+    /// a virtual link of the calculating router, the bound is the cost of
+    /// the link.
     FromCost(u32),
     /// The inter-area and external routes of the prefixes, and the
     /// prefixes with no route.
     Prefixes(Vec<Prefix>),
 }
 
-/// An LSA that the calculation needs and that the database does not hold.
+/// An LSA that the calculation needs and that the database does not hold,
+/// or a virtual link of the calculating router. The calculation does not
+/// compute a virtual link of the calculating router, and the gap of the link
+/// is on the router LSA of the calculating router in the backbone.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Gap {
     pub lsa_type: LsaType,

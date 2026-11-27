@@ -502,6 +502,7 @@ struct Features {
     direct_and_indirect: usize,
     type_2_routes: usize,
     ecmp_externals: usize,
+    unreachable_asbrs: usize,
 }
 
 /// The routes of `root` over a single-area database.
@@ -608,6 +609,7 @@ fn oracle(db: &Database, root: Ipv4Addr, features: &mut Features) -> Table {
         };
         let distance = g.d(s, t);
         if distance == INF {
+            features.unreachable_asbrs += 1;
             continue;
         }
         let hops = g.first_hops(s, t, &iface).0;
@@ -764,9 +766,7 @@ fn run_cases(seed: u64, cases: u64, externals: bool) -> Features {
         let got = answers(&calc);
         let problem = if expected != got {
             difference(&expected, &got)
-        } else if !externals
-            && (!calc.gaps.is_empty() || calc.routes.iter().any(|r| r.unknown.is_some()))
-        {
+        } else if !calc.gaps.is_empty() || calc.routes.iter().any(|r| r.unknown.is_some()) {
             format!("gaps {:?}", calc.gaps)
         } else {
             String::new()
@@ -805,6 +805,7 @@ fn random_external_lsas_give_the_external_routes_of_the_oracle() {
     let f = run_cases(SEED ^ 0xE87E_4AA1, EXTERNAL_CASES, true);
     assert!(f.type_2_routes > 0);
     assert!(f.ecmp_externals > 0);
+    assert!(f.unreachable_asbrs > 0);
 }
 
 // The examples of RFC 2328. The RFC gives names and no addresses. The tests
