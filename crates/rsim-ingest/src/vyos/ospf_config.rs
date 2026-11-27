@@ -236,10 +236,32 @@ fn walk<'s>(
     }
 }
 
-/// Marks the read lines of each OSPF process in `read`: the handled lines
-/// with no line of an entry of `Process::unhandled`.
+/// Marks the read lines of each OSPF process in `read`. A read line is a
+/// handled line with no line of an entry of `Process::unhandled`.
 pub(crate) fn mark(root: &Stanza, read: &mut BTreeSet<u32>) {
     build(root, "", read);
+}
+
+/// An address source of an interface whose address the config does not
+/// hold, with the version that it affects, the words, and the first and the
+/// last line.
+#[derive(Clone, Debug)]
+struct Unheld {
+    version: Version,
+    words: String,
+    first_line: u32,
+    last_line: u32,
+}
+
+impl Unheld {
+    fn new(version: Version, words: String, s: &Stanza) -> Self {
+        Self {
+            version,
+            words,
+            first_line: s.first_line,
+            last_line: s.last_line,
+        }
+    }
 }
 
 /// An interface of the config with the facts that OSPF reads.
@@ -248,9 +270,8 @@ struct Link {
     name: String,
     /// The static addresses with their prefix length.
     addresses: Vec<(IpAddr, u8)>,
-    /// The `dhcp` and `dhcpv6` values of `address`, with the words and the
-    /// first and the last line of each.
-    dynamic: Vec<(String, String, u32, u32)>,
+    /// The address sources whose address the config does not hold.
+    unheld: Vec<Unheld>,
     disabled: bool,
     vrf: String,
     /// The network type that FRR takes for the interface kind.
@@ -262,11 +283,13 @@ struct Link {
 /// point-to-point, and broadcast for each other interface. A tunnel is
 /// point-to-point if it has a remote address and is not a layer 2 GRE
 /// tunnel. An OpenVPN interface is point-to-point unless its device type
-/// is `tap`.
+/// is `tap`. A `vti` interface is an xfrm interface with only the flag
+/// `IFF_NOARP`, so FRR takes broadcast. The network type of a `vti`
+/// interface is not confirmed on a device.
 fn default_network(kind: &str, s: &Stanza) -> NetworkType {
     match kind {
         "loopback" => NetworkType::Loopback,
-        "pppoe" | "sstpc" | "wireguard" | "vti" => NetworkType::PointToPoint,
+        "pppoe" | "sstpc" | "wireguard" => NetworkType::PointToPoint,
         "openvpn" => {
             if s.get("device-type").and_then(Stanza::text) == Some("tap") {
                 NetworkType::Broadcast
@@ -295,29 +318,84 @@ fn address(t: &str) -> Option<(IpAddr, u8)> {
     Some((a.parse().ok()?, l.parse().ok()?))
 }
 
-/// The address values that a DHCP client sets.
-const DYNAMIC: [&str; 2] = ["dhcp", "dhcpv6"];
+/// The address sources of the interface stanza `s` of the kind `kind`
+/// whose address the peer or the server sets: the `source-interface` line
+/// of a PPPoE interface, an SSTP client, and the `mode client` line of an
+/// OpenVPN interface.
+fn peer_set(kind: &str, s: &Stanza, path: &str) -> Vec<Unheld> {
+    match kind {
+        "pppoe" => {
+            let (w, line) = match s.get("source-interface") {
+                Some(x) => (words(&[path, "source-interface"], x), x),
+                None => (path.to_string(), s),
+            };
+            vec![Unheld::new(Version::V2, w, line)]
+        }
+        "sstpc" => vec![Unheld::new(Version::V2, path.to_string(), s)],
+        "openvpn" => match s.get("mode") {
+            Some(x) if x.text() == Some("client") => [Version::V2, Version::V3]
+                .into_iter()
+                .map(|v| Unheld::new(v, format!("{path} mode client"), x))
+                .collect(),
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    }
+}
 
 /// The link of the interface stanza `s`. `path` is the words of the
-/// stanza.
-fn link(s: &Stanza, name: String, path: &str, network: NetworkType, parent_disabled: bool) -> Link {
+/// stanza. Adds the interfaces of the `dhcpv6-options pd <n> interface
+/// <name>` lines of an interface that is not disabled to `delegated`, with
+/// the name and the line.
+fn link(
+    s: &Stanza,
+    name: String,
+    path: &str,
+    network: NetworkType,
+    parent_disabled: bool,
+    delegated: &mut Vec<(String, Unheld)>,
+) -> Link {
     let values = s.get("address").map(values).unwrap_or_default();
+    let mut unheld: Vec<Unheld> = values
+        .iter()
+        .filter_map(|(t, x)| {
+            let version = match *t {
+                "dhcp" => Version::V2,
+                "dhcpv6" => Version::V3,
+                _ => return None,
+            };
+            Some(Unheld::new(version, format!("{path} address {t}"), x))
+        })
+        .collect();
+    if let Some(x) = s.at(&["ipv6", "address", "autoconf"]) {
+        unheld.push(Unheld::new(
+            Version::V3,
+            format!("{path} ipv6 address autoconf"),
+            x,
+        ));
+    }
+    let disabled = parent_disabled || s.get("disable").is_some();
+    if !disabled {
+        for pd in s
+            .at(&["dhcpv6-options", "pd"])
+            .map(Stanza::children)
+            .unwrap_or_default()
+        {
+            for i in pd
+                .get("interface")
+                .map(Stanza::children)
+                .unwrap_or_default()
+            {
+                let words = format!("{path} dhcpv6-options pd {} interface {}", pd.key, i.key);
+                delegated.push((i.key.clone(), Unheld::new(Version::V3, words, i)));
+            }
+        }
+    }
     Link {
         name,
         addresses: values.iter().filter_map(|(t, _)| address(t)).collect(),
-        dynamic: values
-            .iter()
-            .filter(|(t, _)| DYNAMIC.contains(t))
-            .map(|(t, x)| {
-                (
-                    (*t).to_string(),
-                    format!("{path} address {t}"),
-                    x.first_line,
-                    x.last_line,
-                )
-            })
-            .collect(),
-        disabled: parent_disabled || s.get("disable").is_some(),
+        unheld,
+        disabled,
         vrf: s
             .get("vrf")
             .and_then(Stanza::text)
@@ -335,22 +413,24 @@ fn links(root: &Stanza) -> Vec<Link> {
     let Some(ifs) = root.get("interfaces") else {
         return out;
     };
+    let mut delegated: Vec<(String, Unheld)> = Vec::new();
     for kind in ifs.children() {
         for i in kind.children() {
             let network = default_network(&kind.key, i);
             let path = format!("interfaces {} {}", kind.key, i.key);
-            let parent = link(i, i.key.clone(), &path, network, false);
+            let mut parent = link(i, i.key.clone(), &path, network, false, &mut delegated);
+            parent.unheld.extend(peer_set(&kind.key, i, &path));
             let disabled = parent.disabled;
             out.push(parent);
             for v in i.get("vif").map(Stanza::children).unwrap_or_default() {
                 let name = format!("{}.{}", i.key, v.key);
                 let words = format!("{path} vif {}", v.key);
-                out.push(link(v, name, &words, network, disabled));
+                out.push(link(v, name, &words, network, disabled, &mut delegated));
             }
             for s in i.get("vif-s").map(Stanza::children).unwrap_or_default() {
                 let name = format!("{}.{}", i.key, s.key);
                 let words = format!("{path} vif-s {}", s.key);
-                let outer = link(s, name.clone(), &words, network, disabled);
+                let outer = link(s, name.clone(), &words, network, disabled, &mut delegated);
                 let outer_disabled = outer.disabled;
                 out.push(outer);
                 for c in s.get("vif-c").map(Stanza::children).unwrap_or_default() {
@@ -360,9 +440,15 @@ fn links(root: &Stanza) -> Vec<Link> {
                         &format!("{words} vif-c {}", c.key),
                         network,
                         outer_disabled,
+                        &mut delegated,
                     ));
                 }
             }
+        }
+    }
+    for (name, u) in delegated {
+        for l in out.iter_mut().filter(|l| l.name == name) {
+            l.unheld.push(u.clone());
         }
     }
     out
@@ -463,27 +549,41 @@ impl Reader<'_> {
         }
     }
 
-    fn area(&mut self, a: &Stanza) -> Area {
+    /// The area of the stanza `a`, with the `area-type` stanza if it sets
+    /// the type. An `area-type` stanza with 2 or more types is unhandled.
+    fn area<'s>(&mut self, a: &'s Stanza) -> (Area, Option<&'s Stanza>) {
         let mut area = Area {
             kind: AreaType::Normal,
             no_summary: false,
             default_cost: None,
             span: self.span(a),
         };
+        let Some(at) = a.get("area-type") else {
+            return (area, None);
+        };
         let path = format!("area {} area-type", a.key);
-        for t in a.get("area-type").map(Stanza::children).unwrap_or_default() {
-            area.kind = match (t.key.as_str(), self.version) {
-                ("normal", Version::V2) => AreaType::Normal,
-                ("stub", _) => AreaType::Stub,
-                ("nssa", _) => AreaType::Nssa,
-                _ => continue,
-            };
-            area.no_summary = t.get("no-summary").is_some();
-            if self.version == Version::V2 {
-                area.default_cost = self.value(t, "default-cost", &format!("{path} {}", t.key));
+        let types: Vec<(AreaType, &Stanza)> = at
+            .children()
+            .iter()
+            .filter_map(|t| match (t.key.as_str(), self.version) {
+                ("normal", Version::V2) => Some((AreaType::Normal, t)),
+                ("stub", _) => Some((AreaType::Stub, t)),
+                ("nssa", _) => Some((AreaType::Nssa, t)),
+                _ => None,
+            })
+            .collect();
+        let &[(kind, t)] = &types[..] else {
+            if types.len() > 1 {
+                self.bad(path, at);
             }
+            return (area, None);
+        };
+        area.kind = kind;
+        area.no_summary = t.get("no-summary").is_some();
+        if self.version == Version::V2 {
+            area.default_cost = self.value(t, "default-cost", &format!("{path} {}", t.key));
         }
-        area
+        (area, Some(at))
     }
 
     fn settings(&mut self, i: &Stanza) -> Settings {
@@ -571,18 +671,22 @@ fn global_ipv6(link: &Link) -> Option<(IpAddr, u8)> {
         .find(|(a, _)| matches!(a, IpAddr::V6(v6) if v6.segments()[0] & 0xffc0 != 0xfe80))
 }
 
-/// The unhandled entries of the DHCP addresses of a link that a process of
-/// `version` can take: `dhcp` for OSPFv2 and `dhcpv6` for OSPFv3. The
-/// config does not hold the leased address.
-fn dynamic(link: &Link, version: Version, file: &str) -> Vec<(String, SourceSpan)> {
-    let key = match version {
-        Version::V2 => "dhcp",
-        Version::V3 => "dhcpv6",
-    };
-    link.dynamic
+/// The unhandled entries of the address sources of a link whose address
+/// the config does not hold, for a process of `version`. A disabled link
+/// has no entries.
+fn unheld(link: &Link, version: Version, file: &str) -> Vec<(String, SourceSpan)> {
+    if link.disabled {
+        return Vec::new();
+    }
+    link.unheld
         .iter()
-        .filter(|(t, ..)| t == key)
-        .map(|(_, w, f, l)| (w.clone(), SourceSpan::new(file, *f, *l)))
+        .filter(|u| u.version == version)
+        .map(|u| {
+            (
+                u.words.clone(),
+                SourceSpan::new(file, u.first_line, u.last_line),
+            )
+        })
         .collect()
 }
 
@@ -647,12 +751,39 @@ fn process(
     // The interfaces of `area <a> interface <name>`, with the area, the
     // words of the line and the span of the value.
     let mut listed: BTreeMap<String, (AreaId, String, SourceSpan)> = BTreeMap::new();
+    // The `area-type` stanza that set the type of each area, with the key
+    // of its area.
+    let mut typed: BTreeMap<AreaId, (&str, &Stanza)> = BTreeMap::new();
     for a in s.get("area").map(Stanza::children).unwrap_or_default() {
         let Some(id) = area_id(&a.key) else {
             r.bad(format!("area {}", a.key), a);
             continue;
         };
-        areas.insert(id, r.area(a));
+        let (area, at) = r.area(a);
+        if let Some(old) = areas.get_mut(&id) {
+            if let Some(at) = at {
+                match typed.get(&id) {
+                    None => {
+                        old.kind = area.kind;
+                        old.no_summary = area.no_summary;
+                        old.default_cost = area.default_cost;
+                    }
+                    Some(&(key, prev)) => {
+                        let differ = (old.kind, old.no_summary, old.default_cost)
+                            != (area.kind, area.no_summary, area.default_cost);
+                        if differ {
+                            r.bad(format!("area {key} area-type"), prev);
+                            r.bad(format!("area {} area-type", a.key), at);
+                        }
+                    }
+                }
+            }
+        } else {
+            areas.insert(id, area);
+        }
+        if let Some(at) = at {
+            typed.entry(id).or_insert((a.key.as_str(), at));
+        }
         match version {
             Version::V2 => {
                 for (t, x) in a.get("network").map(values).unwrap_or_default() {
@@ -671,9 +802,14 @@ fn process(
             Version::V3 => {
                 for (t, x) in a.get("interface").map(values).unwrap_or_default() {
                     let words = format!("area {} interface {t}", a.key);
-                    listed
-                        .entry(t.to_string())
-                        .or_insert((id, words, r.span(x)));
+                    let span = r.span(x);
+                    match listed.get(t).map(|l| l.0) {
+                        Some(other) if other != id => r.unhandled.push((words, span)),
+                        Some(_) => {}
+                        None => {
+                            listed.insert(t.to_string(), (id, words, span));
+                        }
+                    }
                 }
             }
         }
@@ -700,15 +836,23 @@ fn process(
         }
     }
     for (name, (area, words, span)) in &listed {
-        own.entry(name.clone())
-            .or_insert_with(|| (*area, span.clone(), words.clone(), span.clone()));
+        match own.get(name).map(|o| o.0) {
+            Some(other) if other != *area => r.unhandled.push((words.clone(), span.clone())),
+            Some(_) => {}
+            None => {
+                own.insert(
+                    name.clone(),
+                    (*area, span.clone(), words.clone(), span.clone()),
+                );
+            }
+        }
     }
     for (name, (area, span, words, line)) in &own {
         let Some(link) = links.iter().find(|l| l.name == *name && l.vrf == vrf) else {
             r.unhandled.push((words.clone(), line.clone()));
             continue;
         };
-        r.unhandled.extend(dynamic(link, version, file));
+        r.unhandled.extend(unheld(link, version, file));
         let set = settings.get(name);
         let addresses: Vec<Option<(IpAddr, u8)>> = match version {
             Version::V2 => {
@@ -739,8 +883,8 @@ fn process(
             if own.contains_key(&l.name) {
                 continue;
             }
-            if !networks.is_empty() && !l.disabled {
-                r.unhandled.extend(dynamic(l, version, file));
+            if !networks.is_empty() {
+                r.unhandled.extend(unheld(l, version, file));
             }
             for &(ip, len) in &l.addresses {
                 let covering: Vec<usize> = networks
@@ -788,6 +932,7 @@ fn process(
     let default_originate = r.default_originate(s);
     let mut unhandled = r.unhandled;
     unhandled.sort_by(|a, b| (a.1.first_line, &a.0).cmp(&(b.1.first_line, &b.0)));
+    unhandled.dedup();
     Process {
         version,
         vrf: vrf.to_string(),
@@ -1432,5 +1577,239 @@ mod tests {
         );
         assert_eq!(p.areas[&area("0")].default_cost, None);
         assert_eq!(unhandled(&p), ["area 0 area-type stub default-cost 5"]);
+    }
+
+    #[test]
+    fn an_ospfv3_line_that_puts_an_interface_in_a_second_area_is_unhandled() {
+        let json = r#"{
+              "interfaces": {"ethernet": {
+                "eth1": {"address": "2001:db8:0:1::1/64"},
+                "eth2": {"address": "2001:db8:0:2::1/64"},
+                "eth3": {"address": "2001:db8:0:3::1/64"}
+              }},
+              "protocols": {"ospfv3": {
+                "area": {
+                  "0": {
+                    "interface": "eth1"
+                  },
+                  "0.0.0.0": {
+                    "interface": "eth3"
+                  },
+                  "1": {
+                    "interface": "eth1"
+                  },
+                  "2": {
+                    "interface": "eth2"
+                  }
+                },
+                "interface": {
+                  "eth2": {
+                    "area": "0"
+                  },
+                  "eth3": {
+                    "area": "0"
+                  }
+                }
+              }}
+            }"#;
+        let p = one(json);
+        assert_eq!(
+            unhandled(&p),
+            ["area 1 interface eth1", "area 2 interface eth2"]
+        );
+        for name in ["eth1", "eth2", "eth3"] {
+            assert_eq!(iface(&p, name).area, area("0"));
+        }
+        assert_eq!(p.interfaces.len(), 3);
+        check_coverage(json);
+    }
+
+    #[test]
+    fn an_address_that_the_peer_sets_is_unhandled_where_a_network_line_can_cover_it() {
+        let p = one(r#"{
+              "interfaces": {
+                "ethernet": {"eth0": {"address": "192.0.2.1/24"}},
+                "openvpn": {
+                  "vtun0": {"mode": "client"},
+                  "vtun1": {"mode": "site-to-site"}
+                },
+                "pppoe": {
+                  "pppoe0": {"source-interface": "eth0"},
+                  "pppoe1": {"source-interface": "eth0", "disable": {}}
+                },
+                "sstpc": {"sstpc0": {"server": "vpn.example.com"}}
+              },
+              "protocols": {"ospf": {"area": {"0": {"network": "192.0.2.0/24"}}}}
+            }"#);
+        let names: Vec<&str> = p.interfaces.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["eth0"]);
+        assert_eq!(
+            unhandled(&p),
+            [
+                "interfaces openvpn vtun0 mode client",
+                "interfaces pppoe pppoe0 source-interface eth0",
+                "interfaces sstpc sstpc0",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_named_interface_with_an_address_that_the_config_does_not_hold_is_unhandled() {
+        let cfg = read(
+            &doc(r#"{
+              "interfaces": {
+                "ethernet": {
+                  "eth0": {
+                    "address": "192.0.2.1/24",
+                    "dhcpv6-options": {"pd": {"0": {
+                      "interface": {"eth1": {"address": "1"}}
+                    }}}
+                  },
+                  "eth1": {"address": "192.0.2.65/26"},
+                  "eth2": {
+                    "address": "192.0.2.129/26",
+                    "ipv6": {"address": {"autoconf": {}}}
+                  },
+                  "eth3": {"vif": {"10": {
+                    "dhcpv6-options": {"pd": {"0": {
+                      "interface": {"eth4.20": {}}
+                    }}}
+                  }}},
+                  "eth4": {"vif": {"20": {"address": "192.0.2.193/27"}}},
+                  "eth5": {
+                    "disable": {},
+                    "dhcpv6-options": {"pd": {"0": {
+                      "interface": {"eth6": {}}
+                    }}}
+                  },
+                  "eth6": {"address": "192.0.2.225/28"}
+                },
+                "openvpn": {"vtun0": {"mode": "client"}},
+                "pppoe": {"pppoe0": {"source-interface": "eth0"}},
+                "sstpc": {"sstpc0": {"server": "vpn.example.com"}}
+              },
+              "protocols": {
+                "ospf": {"interface": {
+                  "eth1": {"area": "0"},
+                  "eth2": {"area": "0"},
+                  "vtun0": {"area": "0"},
+                  "pppoe0": {"area": "0"},
+                  "sstpc0": {"area": "0"}
+                }},
+                "ospfv3": {"interface": {
+                  "eth1": {"area": "0"},
+                  "eth2": {"area": "0"},
+                  "eth4.20": {"area": "0"},
+                  "eth6": {"area": "0"},
+                  "vtun0": {"area": "0"},
+                  "pppoe0": {"area": "0"}
+                }}
+              }
+            }"#),
+            FILE,
+        );
+        assert_eq!(
+            unhandled(&cfg.processes[0]),
+            [
+                "interfaces openvpn vtun0 mode client",
+                "interfaces pppoe pppoe0 source-interface eth0",
+                "interfaces sstpc sstpc0",
+            ]
+        );
+        assert_eq!(
+            unhandled(&cfg.processes[1]),
+            [
+                "interfaces ethernet eth0 dhcpv6-options pd 0 interface eth1",
+                "interfaces ethernet eth2 ipv6 address autoconf",
+                "interfaces ethernet eth3 vif 10 dhcpv6-options pd 0 interface eth4.20",
+                "interfaces openvpn vtun0 mode client",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_disabled_named_interface_with_a_dhcp_address_is_not_unhandled() {
+        let p = one(r#"{
+              "interfaces": {"ethernet": {"eth1": {"address": "dhcp", "disable": {}}}},
+              "protocols": {"ospf": {"interface": {"eth1": {"area": "0"}}}}
+            }"#);
+        assert_eq!(unhandled(&p), Vec::<&str>::new());
+        assert!(!iface(&p, "eth1").up);
+    }
+
+    #[test]
+    fn area_0_and_area_0_0_0_0_are_one_area() {
+        let json = r#"{
+              "interfaces": {"ethernet": {"eth0": {"address": "192.0.2.1/24"}}},
+              "protocols": {"ospf": {"area": {
+                "0": {
+                  "network": "192.0.2.0/24"
+                },
+                "0.0.0.0": {
+                  "area-type": {"stub": {"no-summary": {}}}
+                },
+                "00": {
+                  "area-type": {"stub": {"no-summary": {}}}
+                }
+              }}}
+            }"#;
+        let p = one(json);
+        assert_eq!(unhandled(&p), Vec::<&str>::new());
+        assert_eq!(p.areas.len(), 1);
+        let a0 = &p.areas[&area("0")];
+        assert_eq!((a0.kind, a0.no_summary), (AreaType::Stub, true));
+        assert_eq!(iface(&p, "eth0").area, area("0"));
+        check_coverage(json);
+    }
+
+    #[test]
+    fn the_area_types_of_2_stanzas_of_one_area_that_differ_are_unhandled() {
+        let json = r#"{
+              "interfaces": {"ethernet": {"eth0": {"address": "192.0.2.1/24"}}},
+              "protocols": {"ospf": {"area": {
+                "0": {
+                  "network": "192.0.2.0/24",
+                  "area-type": {"stub": {}}
+                },
+                "0.0.0.0": {
+                  "area-type": {"nssa": {}}
+                }
+              }}}
+            }"#;
+        let p = one(json);
+        assert_eq!(
+            unhandled(&p),
+            ["area 0 area-type", "area 0.0.0.0 area-type"]
+        );
+        assert_eq!(p.areas.len(), 1);
+        check_coverage(json);
+    }
+
+    #[test]
+    fn an_area_with_2_area_types_is_unhandled() {
+        let json = r#"{
+              "protocols": {"ospf": {"area": {
+                "1": {
+                  "area-type": {
+                    "stub": {"default-cost": "10"},
+                    "nssa": {}
+                  }
+                }
+              }}}
+            }"#;
+        let p = one(json);
+        assert_eq!(unhandled(&p), ["area 1 area-type"]);
+        let a1 = &p.areas[&area("1")];
+        assert_eq!((a1.kind, a1.default_cost), (AreaType::Normal, None));
+        check_coverage(json);
+    }
+
+    #[test]
+    fn a_vti_interface_is_broadcast() {
+        let p = one(r#"{
+              "interfaces": {"vti": {"vti0": {"address": "192.0.2.1/30"}}},
+              "protocols": {"ospf": {"area": {"0": {"network": "192.0.2.0/24"}}}}
+            }"#);
+        assert_eq!(iface(&p, "vti0").network, NetworkType::Broadcast);
     }
 }

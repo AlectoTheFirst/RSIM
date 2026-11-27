@@ -20,8 +20,9 @@ pub use lower::{
 pub use profile::profile;
 pub use table::{dynamic_vrfs, table};
 
-/// The paths of the handled stanzas that no handler read. A correct handler
-/// set gives an empty list.
+/// The paths of the handled stanzas that no handler read. An OSPF line that
+/// the OSPF reader puts into `Process::unhandled` is not read. A correct
+/// handler set gives an empty list for a config with no such line.
 pub fn unread(doc: &Document, table: &Table, read: &BTreeSet<u32>) -> Vec<String> {
     crate::coverage::unread(doc, table, read)
 }
