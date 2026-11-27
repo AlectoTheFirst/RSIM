@@ -60,8 +60,8 @@ fn the_coverage_shares_of_the_fixture() {
         &doc,
         &iosxr::table(&RouteTables::uniform(true, Default::default())),
     );
-    assert_eq!(cov.lines[&State::Handled], 114);
-    assert_eq!(cov.lines[&State::Irrelevant], 128);
+    assert_eq!(cov.lines[&State::Handled], 120);
+    assert_eq!(cov.lines[&State::Irrelevant], 122);
     assert_eq!(cov.lines[&State::Unhandled], 5);
     assert!(cov.share(State::Unhandled) < 0.05);
 }
@@ -89,7 +89,6 @@ fn without_a_route_table_the_routing_protocols_and_policies_are_unhandled() {
     for p in [
         "router bgp */vrf */address-family ../redistribute connected",
         "router bgp */bgp router-id 203.0.113.1",
-        "router ospf ..",
         "router static ..",
         "route-policy ..",
         "end-policy",

@@ -46,6 +46,8 @@ pub struct Interface {
     /// The bundle of a member port, from `bundle id`.
     pub bundle: Option<(u32, Lines)>,
     pub mtu: Option<(u32, Lines)>,
+    /// The `bandwidth` of the interface in kb/s.
+    pub bandwidth: Option<(u64, Lines)>,
     /// The text of the `description` line.
     pub description: Option<(String, Lines)>,
     /// The masked lines of the options that the handlers do not read: the
@@ -108,6 +110,9 @@ pub struct Config {
     /// The IPv4 static routes of `router static`, for the computed route
     /// table.
     pub static_routes: Vec<crate::nxos::config::StaticRoute>,
+    /// The OSPFv2 and OSPFv3 processes of `router ospf` and `router
+    /// ospfv3`.
+    pub ospf: Vec<super::ospf_config::OspfProcess>,
     /// The first line of each stanza that a handler read.
     pub read: BTreeSet<u32>,
 }
@@ -175,6 +180,11 @@ pub fn read(doc: &Document, table: &Table) -> Config {
                 cfg.bgp = super::bgp::read(s, &mut r.read, &|k| table.report_key(k));
             }
             ["router", "static"] => cfg.static_routes = router_static(s),
+            ["router", "ospf" | "ospfv3", _] => {
+                let table = r.table;
+                cfg.ospf
+                    .extend(super::ospf_config::read(s, &mut r.read, table));
+            }
             _ => {}
         }
     }
@@ -375,6 +385,13 @@ fn interface(r: &mut R, s: &Stanza, name: &str) -> Interface {
             ["mtu", n] => {
                 match n.parse() {
                     Ok(n) => i.mtu = Some((n, lines)),
+                    Err(_) => unreadable = true,
+                }
+                true
+            }
+            ["bandwidth", n] => {
+                match n.parse() {
+                    Ok(n) => i.bandwidth = Some((n, lines)),
                     Err(_) => unreadable = true,
                 }
                 true
