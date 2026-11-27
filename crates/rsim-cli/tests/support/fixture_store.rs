@@ -72,8 +72,20 @@ pub const TIME: u64 = 1_795_356_312_000;
 /// Writes the data folder of `rsim-collect` in `dir`: the store keys in
 /// `keys` and the store in `store`, with one snapshot at [`TIME`], or at the
 /// second after the newest snapshot of a store that has one.
-#[allow(clippy::disallowed_methods)]
 pub fn write(dir: &Path) {
+    write_with(dir, false);
+}
+
+/// Writes the data folder of [`write`], with the MAC table and the ARP
+/// table of `r1`: the MAC address `02:00:00:00:00:10` of `198.51.100.10`
+/// on `eth0.10` in VLAN 10, and the MAC address of `eth0` on `eth0`.
+#[allow(dead_code)]
+pub fn write_l2(dir: &Path) {
+    write_with(dir, true);
+}
+
+#[allow(clippy::disallowed_methods)]
+fn write_with(dir: &Path, l2: bool) {
     std::fs::create_dir_all(dir).unwrap();
     let store = Store::open(dir.join("store"), keys(dir)).unwrap();
     let mut e = Os;
@@ -108,6 +120,43 @@ pub fn write(dir: &Path) {
             Cell::Null,
         ]
     };
+    let mut l2_tables = BTreeMap::new();
+    if l2 {
+        let mac_table = put(b"mac_table");
+        let neighbours = put(b"neighbours");
+        l2_tables.insert(
+            "mac_table".to_string(),
+            vec![(
+                mac_table,
+                vec![
+                    vec![
+                        Cell::U64(10),
+                        s("02:00:00:00:00:10"),
+                        s("eth0.10"),
+                        s("dynamic"),
+                    ],
+                    vec![
+                        Cell::U64(10),
+                        s("00:00:5e:00:53:01"),
+                        s("eth0"),
+                        s("static"),
+                    ],
+                ],
+            )],
+        );
+        l2_tables.insert(
+            "neighbours".to_string(),
+            vec![(
+                neighbours,
+                vec![vec![
+                    s("eth0.10"),
+                    s("198.51.100.10"),
+                    s("02:00:00:00:00:10"),
+                    s("reachable"),
+                ]],
+            )],
+        );
+    }
     let r1 = DeviceUpdate {
         device: "r1".into(),
         vendor: "vyos".into(),
@@ -151,7 +200,10 @@ pub fn write(dir: &Path) {
                 "addresses".to_string(),
                 vec![(addresses, vec![vec![s("pppoe0"), s("203.0.113.10/32")]])],
             ),
-        ]),
+        ])
+        .into_iter()
+        .chain(l2_tables)
+        .collect(),
         management_address: Some("192.0.2.254".into()),
     };
     let mut sections = Vec::new();

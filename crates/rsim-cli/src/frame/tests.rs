@@ -884,3 +884,49 @@ fn an_equality_filter_on_a_text_column_with_many_values_finds_each_value() {
         }
     }
 }
+
+#[test]
+fn the_parts_of_the_devices_in_key_order_give_the_answers_of_1_frame() {
+    let mut g = Gen(0x5851_f42d_4c95_7f2d);
+    let devices = ["r2", "r10", "10.0.0.0/8", "sw1", "a b"];
+    for name in ["interfaces", "routes", "mac", "arp"] {
+        let def = table::table(name).unwrap();
+        for n in [0, 1, 7, 60, 400] {
+            let rows: Vec<Vec<Value>> = (0..n)
+                .map(|_| {
+                    let mut r: Vec<Value> =
+                        def.columns.iter().map(|c| value(&mut g, c.kind)).collect();
+                    r[0] = json!(g.pick(&devices));
+                    r
+                })
+                .collect();
+            let full = frame_of(def, &rows);
+            let mut by: BTreeMap<String, Vec<Vec<Value>>> = BTreeMap::new();
+            for r in &rows {
+                by.entry(r[0].as_str().unwrap().to_string())
+                    .or_default()
+                    .push(r.clone());
+            }
+            let mut groups: Vec<(String, Vec<Vec<Value>>)> = by.into_iter().collect();
+            groups.sort_by_key(|(d, _)| crate::tables::key_text(d).unwrap_or_else(|| d.clone()));
+            let parts: Vec<Frame> = groups.iter().map(|(_, r)| frame_of(def, r)).collect();
+            let refs: Vec<&Frame> = parts.iter().collect();
+            let joined = concat(def, &refs);
+            assert_eq!(joined.len(), full.len());
+            for _ in 0..40 {
+                let sel = selection(&mut g, def, n);
+                assert_eq!(
+                    show(def, &joined, &sel).map(page_parts),
+                    show(def, &full, &sel).map(page_parts),
+                    "{name} show {sel:?}"
+                );
+                let names = vec![column(&mut g, def)];
+                assert_eq!(
+                    unique(def, &joined, &sel, &names),
+                    unique(def, &full, &sel, &names),
+                    "{name} unique {sel:?}"
+                );
+            }
+        }
+    }
+}

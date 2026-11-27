@@ -14,8 +14,9 @@ use serde_json::{Value, json};
 #[path = "support/fixture_store.rs"]
 mod fixture_store;
 
-/// Each column of a table of the collected state, other than `device` and
-/// `provenance`, is a column of 1 of its store tables with a matching type.
+/// Each column of a table of the collected state, other than `device`,
+/// `provenance` and the join columns, is a column of 1 of its store tables
+/// with a matching type. Each join column is a column of its table.
 /// With 2 or more store tables, each store table has each key column.
 #[test]
 fn each_collected_column_is_a_store_column() {
@@ -33,8 +34,15 @@ fn each_collected_column_is_a_store_column() {
             .iter()
             .map(|n| rsim_store::table(n).unwrap_or_else(|| panic!("{} names {n}", d.name)))
             .collect();
+        let joined = rsim_cli::tables::JOINED
+            .iter()
+            .find(|(n, _)| *n == d.name)
+            .map_or(&[][..], |(_, c)| c);
+        for j in joined {
+            assert!(d.column(j).is_some(), "{} has no join column {j}", d.name);
+        }
         for c in d.columns {
-            if c.name == "device" || c.name == "provenance" {
+            if c.name == "device" || c.name == "provenance" || joined.contains(&c.name) {
                 continue;
             }
             let found = schemas
@@ -99,10 +107,14 @@ fn the_collected_tables_of_a_store_twin() {
     assert_eq!(interfaces[1][6], "eth0");
     assert_eq!(interfaces[3][2], Value::Null);
     assert_eq!(interfaces[3][10], json!(["203.0.113.10/32"]));
-    let span = interfaces[3][11][0].as_str().unwrap();
+    let span = interfaces[3][14][0].as_str().unwrap();
     assert!(span.starts_with("r1/addresses@"), "{span}");
-    let span = interfaces[0][11][0].as_str().unwrap();
+    let span = interfaces[0][14][0].as_str().unwrap();
     assert!(span.starts_with("r1/links@"), "{span}");
+    // Each interface has a far end or the reason that it has none.
+    for r in &interfaces {
+        assert_ne!(r[11].is_null(), r[13].is_null(), "{r}");
+    }
 
     // The routes of r1 in the numeric order of the prefixes.
     let routes = rows(&topology, &t, "routes");
@@ -119,6 +131,11 @@ fn the_collected_tables_of_a_store_twin() {
     assert_eq!(routes[0][3], "kernel");
     assert_eq!(routes[0][4], true);
     assert_eq!(routes[0][8], "pppoe0");
+    // A route with no next hop has no next hop device and no reason.
+    assert_eq!(
+        (&routes[0][9], &routes[0][10]),
+        (&Value::Null, &Value::Null)
+    );
 
     // The store has no MAC table and no ARP table.
     assert!(rows(&topology, &t, "mac").is_empty());
@@ -258,4 +275,81 @@ fn path_mtu_compares_an_egress_with_no_far_end_with_the_minimum() {
     assert_eq!(r.detail, "MTU 1492 is below 1500");
     assert_eq!(end_mtu(&e, &m, 1492).result, ClaimResult::Confirmed);
     assert_eq!(end_mtu(&e, &mtus(&[]), 1500).result, ClaimResult::Unknown);
+}
+
+/// The value of the column `name` of a row of a table answer.
+fn cell<'a>(columns: &[String], row: &'a [Value], name: &str) -> &'a Value {
+    &row[columns.iter().position(|c| c == name).unwrap()]
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)]
+fn the_join_columns_of_a_store_twin_resolve_the_host_the_addresses_and_the_vlan() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-cli-joins");
+    let _ = std::fs::remove_dir_all(&dir);
+    fixture_store::write_l2(&dir);
+    let topology = format!("store:{}", dir.display());
+    let t = commands::load(&topology).unwrap();
+
+    let mac = rsim_cli::tables::show(&topology, &t, "mac", &Selection::default()).unwrap();
+    assert_eq!(mac.rows.len(), 2);
+    for r in &mac.rows {
+        let c = |n: &str| cell(&mac.columns, r, n);
+        // Each join has a value or the reason that it has none.
+        for (v, why) in [
+            ("host", "host_reason"),
+            ("peer_device", "peer_reason"),
+            ("bridge_domain", "bridge_domain_reason"),
+        ] {
+            assert_ne!(c(v).is_null(), c(why).is_null(), "{v} {r:?}");
+        }
+        match c("mac").as_str().unwrap() {
+            // The MAC address of the interface eth0 of r1.
+            "00:00:5e:00:53:01" => {
+                assert_eq!(*c("host"), "r1");
+                assert_eq!(c("ip"), &Value::Null);
+                assert_eq!(*c("ip_reason"), "not_found");
+            }
+            "02:00:00:00:00:10" => {
+                assert_eq!(c("ip"), &json!(["198.51.100.10"]));
+                assert_eq!(c("ip_reason"), &Value::Null);
+            }
+            m => panic!("{m}"),
+        }
+    }
+
+    let arp = rsim_cli::tables::show(&topology, &t, "arp", &Selection::default()).unwrap();
+    assert_eq!(arp.rows.len(), 1);
+    let r = &arp.rows[0];
+    let c = |n: &str| cell(&arp.columns, r, n);
+    // The links row of eth0.10 has no VLAN.
+    assert_eq!(
+        (c("vlan"), c("vlan_reason")),
+        (&Value::Null, &json!("not_found"))
+    );
+    assert_ne!(c("host").is_null(), c("host_reason").is_null());
+    assert_ne!(c("access_device").is_null(), c("access_reason").is_null());
+    assert_eq!(c("access_device").is_null(), c("access_port").is_null());
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)]
+fn two_twins_of_the_same_rows_share_the_frame_of_each_device() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-cli-parts");
+    let _ = std::fs::remove_dir_all(&dir);
+    fixture_store::write_l2(&dir);
+    let topology = format!("store:{}", dir.display());
+    let a = commands::load(&topology).unwrap();
+    let b = commands::load(&topology).unwrap();
+    for name in ["interfaces", "routes", "mac", "arp"] {
+        let pa = rsim_cli::tables::parts(&a, name).unwrap();
+        let pb = rsim_cli::tables::parts(&b, name).unwrap();
+        assert_eq!(pa.len(), 1, "{name}");
+        assert!(std::sync::Arc::ptr_eq(&pa[0], &pb[0]), "{name}");
+        assert_eq!(
+            rows(&topology, &a, name),
+            rows(&topology, &b, name),
+            "{name}"
+        );
+    }
 }

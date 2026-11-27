@@ -353,7 +353,7 @@ fn fill2(f: &mut Frame, def: &TableDef, value: &str, why: &str, rows: &[Join]) {
 
 /// Fills the join columns of a frame of a collected table.
 fn fill_joins(t: &Loaded, def: &'static TableDef, f: &mut Frame) -> Result<(), String> {
-    if !matches!(def.name, "mac" | "arp" | "interfaces" | "routes") {
+    if !super::JOINED.iter().any(|(n, _)| *n == def.name) {
         return Ok(());
     }
     let j = joins(t)?;

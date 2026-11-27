@@ -55,6 +55,60 @@ pub fn def(name: &str) -> Result<&'static TableDef, QueryError> {
     })
 }
 
+/// The join columns of each table of the collected state: columns from the
+/// facts of the twin and of all devices, which no store table holds. A join
+/// value is null with its reason `not_found` or `ambiguous` when it finds no
+/// value or 2 or more values.
+pub const JOINED: &[(&str, &[&str])] = &[
+    (
+        "interfaces",
+        &["peer_device", "peer_interface", "peer_reason"],
+    ),
+    ("routes", &["next_hop_device", "next_hop_device_reason"]),
+    (
+        "mac",
+        &[
+            "host",
+            "host_reason",
+            "ip",
+            "ip_reason",
+            "peer_device",
+            "peer_interface",
+            "peer_reason",
+            "bridge_domain",
+            "bridge_domain_reason",
+        ],
+    ),
+    (
+        "arp",
+        &[
+            "host",
+            "host_reason",
+            "vlan",
+            "vlan_reason",
+            "access_device",
+            "access_port",
+            "access_reason",
+        ],
+    ),
+];
+
+/// The frames of the rows of each device that a table of the collected
+/// state of a twin is made of, in the key order of the devices.
+pub fn parts(t: &Loaded, name: &str) -> Result<Vec<Arc<Frame>>, QueryError> {
+    let d = def(name)?;
+    frame(t, d)?;
+    let i = table::TABLES
+        .iter()
+        .position(|x| x.name == d.name)
+        .expect("a table of the catalog");
+    Ok(t.tables.0[i]
+        .get()
+        .and_then(|b| b.as_ref().ok())
+        .map(|(_, p)| p.clone())
+        .unwrap_or_default())
+}
+
 /// A table of a twin: its columns, and for a table of the collected state
 /// the frames of the rows of each device that it is made of.
 type Built = Result<(Frame, Vec<Arc<Frame>>), String>;
