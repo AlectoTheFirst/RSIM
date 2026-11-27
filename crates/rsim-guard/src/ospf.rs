@@ -101,13 +101,31 @@ impl Entry {
 /// and the key text.
 type EntryKey = (bool, AreaId, LsaType, String);
 
+/// The identity of an OSPFv3 network: the area, and the router ID and the
+/// interface ID of the designated router.
+type NetKey = (Option<AreaId>, RouterId, u32);
+
 /// The lookups of one database that map a value that depends on the
 /// designated router to a value that does not.
 struct Index<'a> {
     db: &'a Database,
+    /// The key texts of the OSPFv3 networks that map to a network of the
+    /// other database with another designated router.
+    names: BTreeMap<NetKey, String>,
+    /// The area and the router of each OSPFv3 router LSA whose links have
+    /// an interface ID in both databases.
+    with_ids: BTreeSet<(Option<AreaId>, RouterId)>,
 }
 
-impl Index<'_> {
+impl<'a> Index<'a> {
+    fn new(db: &'a Database) -> Index<'a> {
+        Index {
+            db,
+            names: BTreeMap::new(),
+            with_ids: BTreeSet::new(),
+        }
+    }
+
     fn lsas(&self) -> impl Iterator<Item = &Lsa> {
         self.db.lsas.values().filter(|l| !l.expired())
     }
@@ -145,32 +163,13 @@ impl Index<'_> {
         }
     }
 
-    /// The attached routers of an OSPFv3 network LSA in order.
-    fn v3_attached(&self, area: Option<AreaId>, dr: RouterId, id: u32) -> Option<Vec<RouterId>> {
-        self.lsas()
-            .find(|l| {
-                l.lsa_type == LsaType::Network
-                    && l.area == area
-                    && l.adv_router == dr
-                    && u32::from(l.lsid) == id
-            })
-            .and_then(|l| match &l.body {
-                Body::Network { attached, .. } => {
-                    let mut a = attached.clone();
-                    a.sort();
-                    a.dedup();
-                    Some(a)
-                }
-                _ => None,
-            })
-    }
-
-    /// The text of an OSPFv3 transit network: its attached routers, else the
-    /// designated router and its interface ID.
+    /// The key text of an OSPFv3 network: the prefixes of a network that
+    /// maps to the other database, else the designated router and its
+    /// interface ID.
     fn v3_network(&self, area: Option<AreaId>, dr: RouterId, id: u32) -> String {
-        match self.v3_attached(area, dr, id) {
-            Some(a) => format!("network of {}", join_ids(&a)),
-            None => format!("network dr {dr} interface {id}"),
+        match self.names.get(&(area, dr, id)) {
+            Some(name) => name.clone(),
+            None => format!("dr {dr} interface {id}"),
         }
     }
 
@@ -195,7 +194,44 @@ impl Index<'_> {
         out
     }
 
-    fn link_text(&self, area: Option<AreaId>, l: &RouterLink) -> String {
+    /// The OSPFv3 networks of the network LSAs, each with its prefixes.
+    fn v3_networks(&self) -> BTreeMap<NetKey, Vec<Prefix>> {
+        if self.db.version != Version::V3 {
+            return BTreeMap::new();
+        }
+        self.lsas()
+            .filter(|l| l.lsa_type == LsaType::Network)
+            .map(|l| {
+                let id = u32::from(l.lsid);
+                (
+                    (l.area, l.adv_router, id),
+                    self.v3_network_prefixes(l.area, l.adv_router, id),
+                )
+            })
+            .collect()
+    }
+
+    /// The area and the router of each OSPFv3 router LSA with a link that
+    /// has no interface ID.
+    fn v3_without_ids(&self) -> BTreeSet<(Option<AreaId>, RouterId)> {
+        self.lsas()
+            .filter(|l| match &l.body {
+                Body::Router { links } => links.iter().any(|k| k.interface_id.is_none()),
+                _ => false,
+            })
+            .map(|l| (l.area, l.adv_router))
+            .collect()
+    }
+
+    /// The area and the router of each OSPFv3 router LSA.
+    fn v3_routers(&self) -> BTreeSet<(Option<AreaId>, RouterId)> {
+        self.lsas()
+            .filter(|l| l.lsa_type == LsaType::Router)
+            .map(|l| (l.area, l.adv_router))
+            .collect()
+    }
+
+    fn link_text(&self, area: Option<AreaId>, adv: RouterId, l: &RouterLink) -> String {
         match self.db.version {
             Version::V2 => {
                 let id = match l.kind {
@@ -210,7 +246,13 @@ impl Index<'_> {
                     (LinkKind::Transit, Some(n)) => self.v3_network(area, l.id, n),
                     _ => l.id.to_string(),
                 };
-                format!("{} {to} metric {}", l.kind.name(), l.metric)
+                let text = format!("{} {to} metric {}", l.kind.name(), l.metric);
+                match l.interface_id {
+                    Some(i) if self.with_ids.contains(&(area, adv)) => {
+                        format!("{text} on interface {i}")
+                    }
+                    _ => text,
+                }
             }
         }
     }
@@ -224,29 +266,35 @@ impl Index<'_> {
                 adv.to_string(),
                 vec![(
                     "links",
-                    links.iter().map(|l| self.link_text(lsa.area, l)).collect(),
+                    links
+                        .iter()
+                        .map(|l| self.link_text(lsa.area, adv, l))
+                        .collect(),
                 )],
             ),
             Body::Network { attached, .. } => {
-                let key = match self.db.version {
-                    Version::V2 => match Index::v2_subnet(lsa) {
-                        Some(p) => p.to_string(),
-                        None => format!("{} from {adv} with no usable mask", lsa.lsid),
-                    },
+                let attached = ("attached", attached.iter().map(|r| r.to_string()).collect());
+                match self.db.version {
+                    Version::V2 => {
+                        let key = match Index::v2_subnet(lsa) {
+                            Some(p) => p.to_string(),
+                            None => format!("{} from {adv} with no usable mask", lsa.lsid),
+                        };
+                        (key, vec![attached])
+                    }
                     Version::V3 => {
                         let id = u32::from(lsa.lsid);
-                        let prefixes = self.v3_network_prefixes(lsa.area, adv, id);
-                        if prefixes.is_empty() {
-                            format!("dr {adv} interface {id}")
-                        } else {
-                            join_prefixes(&prefixes)
-                        }
+                        let prefixes = self
+                            .v3_network_prefixes(lsa.area, adv, id)
+                            .iter()
+                            .map(|p| p.to_string())
+                            .collect();
+                        (
+                            self.v3_network(lsa.area, adv, id),
+                            vec![attached, ("prefixes", prefixes)],
+                        )
                     }
-                };
-                (
-                    key,
-                    vec![("attached", attached.iter().map(|r| r.to_string()).collect())],
-                )
+                }
             }
             Body::Summary { prefix, metric } => (
                 format!("{prefix} from {adv}"),
@@ -331,19 +379,27 @@ impl Index<'_> {
     }
 }
 
-fn join_ids(ids: &[RouterId]) -> String {
-    ids.iter()
-        .map(|r| r.to_string())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 fn join_prefixes(prefixes: &[Prefix]) -> String {
     prefixes
         .iter()
         .map(|p| p.to_string())
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The OSPFv3 networks of `nets` with prefixes and with no network of the
+/// same identity in `other`, grouped by the area and the prefixes.
+fn lone_networks(
+    nets: &BTreeMap<NetKey, Vec<Prefix>>,
+    other: &BTreeMap<NetKey, Vec<Prefix>>,
+) -> BTreeMap<(Option<AreaId>, Vec<Prefix>), Vec<NetKey>> {
+    let mut out: BTreeMap<(Option<AreaId>, Vec<Prefix>), Vec<NetKey>> = BTreeMap::new();
+    for (k, prefixes) in nets {
+        if !prefixes.is_empty() && !other.contains_key(k) {
+            out.entry((k.0, prefixes.clone())).or_default().push(*k);
+        }
+    }
+    out
 }
 
 /// The rows of the comparison of the database that the twin builds for a
@@ -354,18 +410,57 @@ fn join_prefixes(prefixes: &[Prefix]) -> String {
 /// The key of a router LSA is its advertising router, and its links compare
 /// as a set of kind, link ID, link data and metric. The link ID of an
 /// OSPFv2 transit link is the subnet of the network LSA of the designated
-/// router. The neighbour of an OSPFv3 transit link is the set of the
-/// attached routers of the network LSA. The key of an OSPFv2 network LSA is
-/// its subnet, and the key of an OSPFv3 network LSA is the set of prefixes
-/// of the intra-area-prefix LSAs that refer to it. A network LSA compares
-/// its attached routers as a set. The key of a summary, an NSSA or an
-/// external LSA is the prefix and the advertising router, and the LSA
-/// compares the metric, the metric type and the forwarding address. An
-/// intra-area-prefix LSA compares its prefixes with their metrics, and a
-/// link LSA compares its prefixes.
+/// router. An OSPFv3 link also compares its interface ID if each link of
+/// the router LSAs of the router has one in both databases.
+///
+/// The key of an OSPFv2 network LSA is its subnet. The key of an OSPFv3
+/// network is the router ID and the interface ID of the designated router.
+/// The network LSA, the transit links to it and the intra-area-prefix LSA
+/// that refers to it use this key. An OSPFv3 network with another
+/// designated router in the other database has the key of its prefixes if
+/// each database has exactly 1 such network with these prefixes in the
+/// area. Else the network shows in only 1 database. A network LSA compares
+/// its attached routers as a set, and an OSPFv3 network LSA also compares
+/// the prefixes of the intra-area-prefix LSAs that refer to it.
+///
+/// The key of a summary LSA is the prefix and the advertising router, and
+/// the key of an ASBR-summary LSA is the router and the advertising router.
+/// These LSAs compare the metric. The key of an NSSA or an external LSA is
+/// the prefix and the advertising router, and the LSA compares the metric,
+/// the metric type and the forwarding address. An intra-area-prefix LSA
+/// compares its prefixes with their metrics, and a link LSA compares its
+/// prefixes.
 pub fn compare_databases(built: &Database, collected: &Database) -> Vec<LsaRow> {
-    let mine = Index { db: built }.entries();
-    let theirs = Index { db: collected }.entries();
+    let mut b = Index::new(built);
+    let mut c = Index::new(collected);
+    let without_ids: BTreeSet<_> = b
+        .v3_without_ids()
+        .union(&c.v3_without_ids())
+        .copied()
+        .collect();
+    let with_ids: BTreeSet<_> = b
+        .v3_routers()
+        .union(&c.v3_routers())
+        .filter(|k| !without_ids.contains(k))
+        .copied()
+        .collect();
+    b.with_ids = with_ids.clone();
+    c.with_ids = with_ids;
+    let b_nets = b.v3_networks();
+    let c_nets = c.v3_networks();
+    let b_lone = lone_networks(&b_nets, &c_nets);
+    let c_lone = lone_networks(&c_nets, &b_nets);
+    for (k, bs) in &b_lone {
+        if let (Some(cs), [bk]) = (c_lone.get(k), bs.as_slice())
+            && let [ck] = cs.as_slice()
+        {
+            let name = join_prefixes(&k.1);
+            b.names.insert(*bk, name.clone());
+            c.names.insert(*ck, name);
+        }
+    }
+    let mine = b.entries();
+    let theirs = c.entries();
     let keys: BTreeSet<&EntryKey> = mine.keys().chain(theirs.keys()).collect();
     keys.into_iter()
         .map(|k| {

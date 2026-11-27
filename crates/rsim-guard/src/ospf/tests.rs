@@ -494,24 +494,38 @@ fn link_lsa(adv: &str, interface: &str, prefixes: &[&str]) -> Lsa {
     )
 }
 
+/// The OSPFv3 LSAs of 2 routers on one transit link with `dr` as the
+/// designated router with the interface ID `id`, the network prefix `net`
+/// and the attached routers `attached`.
+fn v3_lsas(
+    dr: &str,
+    id: u32,
+    metric: u32,
+    link_prefix: &str,
+    net: &str,
+    attached: &[&str],
+) -> Vec<Lsa> {
+    vec![
+        router(
+            A0,
+            R1,
+            vec![v3_link(LinkKind::Transit, dr, metric, 3, id)],
+            1,
+        ),
+        router(A0, R2, vec![v3_link(LinkKind::Transit, dr, 10, 4, id)], 2),
+        v3_network(dr, id, attached),
+        iap(Reference::Network(id), dr, dr, 1, &[(net, 0)]),
+        iap(Reference::Router, R1, R1, 2, &[("2001:db8:ff::1/128", 0)]),
+        link_lsa(R2, "eth0", &[link_prefix]),
+    ]
+}
+
 /// The OSPFv3 database of 2 routers on one transit link with `dr` as the
 /// designated router with the interface ID `id`.
 fn v3_segment(dr: &str, id: u32, metric: u32, link_prefix: &str) -> Database {
     db(
         Version::V3,
-        vec![
-            router(
-                A0,
-                R1,
-                vec![v3_link(LinkKind::Transit, dr, metric, 3, id)],
-                1,
-            ),
-            router(A0, R2, vec![v3_link(LinkKind::Transit, dr, 10, 4, id)], 2),
-            v3_network(dr, id, &[R1, R2]),
-            iap(Reference::Network(id), dr, dr, 1, &[("2001:db8:1::/64", 0)]),
-            iap(Reference::Router, R1, R1, 2, &[("2001:db8:ff::1/128", 0)]),
-            link_lsa(R2, "eth0", &[link_prefix]),
-        ],
+        v3_lsas(dr, id, metric, link_prefix, "2001:db8:1::/64", &[R1, R2]),
     )
 }
 
@@ -528,17 +542,123 @@ fn ospfv3_lsas_match_with_a_different_designated_router_and_interface_ids() {
             ("2001:db8:1::/64", Category::Match),
             ("198.51.100.2 on eth0", Category::Match),
             (R1, Category::Match),
-            ("network of 198.51.100.1 198.51.100.2", Category::Match),
+            ("2001:db8:1::/64", Category::Match),
         ]
     );
     assert!(rows.iter().all(|r| r.version == Version::V3));
     assert_eq!(
         rows[0].built.as_deref(),
-        Some("links transit network of 198.51.100.1 198.51.100.2 metric 10")
+        Some("links transit 2001:db8:1::/64 metric 10 on interface 3")
+    );
+    assert_eq!(
+        rows[2].built.as_deref(),
+        Some("attached 198.51.100.1, 198.51.100.2; prefixes 2001:db8:1::/64")
     );
     assert_eq!(
         rows[5].built.as_deref(),
         Some("prefixes 2001:db8:1::/64 metric 0")
+    );
+}
+
+#[test]
+fn an_ospfv3_network_with_the_same_designated_router_compares_the_attached_routers_and_the_prefixes()
+ {
+    let built = v3_segment(R1, 3, 10, "2001:db8:1::/64");
+    let collected = db(
+        Version::V3,
+        v3_lsas(
+            R1,
+            3,
+            10,
+            "2001:db8:1::/64",
+            "2001:db8:2::/64",
+            &[R1, R2, R3],
+        ),
+    );
+    let rows = compare_databases(&built, &collected);
+    let net = "dr 198.51.100.1 interface 3";
+    assert_eq!(
+        categories(&rows),
+        vec![
+            (R1, Category::Match),
+            (R2, Category::Match),
+            (net, Category::Differ),
+            ("198.51.100.2 on eth0", Category::Match),
+            (R1, Category::Match),
+            (net, Category::Differ),
+        ]
+    );
+    assert_eq!(
+        rows[0].built.as_deref(),
+        Some("links transit dr 198.51.100.1 interface 3 metric 10 on interface 3")
+    );
+    assert_eq!(rows[2].fields, vec!["attached", "prefixes"]);
+    assert_eq!(
+        rows[2].collected.as_deref(),
+        Some("attached 198.51.100.1, 198.51.100.2, 198.51.100.3; prefixes 2001:db8:2::/64")
+    );
+    assert_eq!(rows[5].lsa_type, LsaType::IntraAreaPrefix);
+    assert_eq!(rows[5].fields, vec!["prefixes"]);
+}
+
+#[test]
+fn an_ospfv3_network_with_another_designated_router_and_other_prefixes_shows_in_one_database() {
+    let built = v3_segment(R1, 3, 10, "2001:db8:1::/64");
+    let collected = db(
+        Version::V3,
+        v3_lsas(R2, 4, 10, "2001:db8:1::/64", "2001:db8:2::/64", &[R1, R2]),
+    );
+    let rows = compare_databases(&built, &collected);
+    let mine = "dr 198.51.100.1 interface 3";
+    let theirs = "dr 198.51.100.2 interface 4";
+    assert_eq!(
+        categories(&rows),
+        vec![
+            (R1, Category::Differ),
+            (R2, Category::Differ),
+            (mine, Category::OnlyBuilt),
+            (theirs, Category::OnlyCollected),
+            ("198.51.100.2 on eth0", Category::Match),
+            (R1, Category::Match),
+            (mine, Category::OnlyBuilt),
+            (theirs, Category::OnlyCollected),
+        ]
+    );
+    assert_eq!(
+        rows[0].collected.as_deref(),
+        Some("links transit dr 198.51.100.2 interface 4 metric 10 on interface 3")
+    );
+}
+
+#[test]
+fn parallel_ospfv3_links_stay_apart_by_the_interface_id_where_both_databases_have_it() {
+    let p2p = |own: Option<u32>| RouterLink {
+        interface_id: own,
+        neighbor_interface_id: own.map(|i| i + 2),
+        ..link(LinkKind::PointToPoint, R2, None, 10)
+    };
+    let built = db(
+        Version::V3,
+        vec![router(A0, R1, vec![p2p(Some(5)), p2p(Some(6))], 1)],
+    );
+    let collected = db(Version::V3, vec![router(A0, R1, vec![p2p(Some(5))], 1)]);
+    let rows = compare_databases(&built, &collected);
+    assert_eq!(categories(&rows), vec![(R1, Category::Differ)]);
+    assert_eq!(rows[0].fields, vec!["links"]);
+    assert_eq!(
+        rows[0].built.as_deref(),
+        Some(
+            "links point-to-point 198.51.100.2 metric 10 on interface 5, \
+             point-to-point 198.51.100.2 metric 10 on interface 6"
+        )
+    );
+
+    let collected = db(Version::V3, vec![router(A0, R1, vec![p2p(None)], 1)]);
+    let rows = compare_databases(&built, &collected);
+    assert_eq!(categories(&rows), vec![(R1, Category::Match)]);
+    assert_eq!(
+        rows[0].built.as_deref(),
+        Some("links point-to-point 198.51.100.2 metric 10")
     );
 }
 
