@@ -597,6 +597,9 @@ fn an_asbr_gives_external_lsas_and_the_area_border_routers_give_asbr_summaries()
             .count(),
         2
     );
+    assert!(built.notes.iter().any(|(_, n)| {
+        n.kind == "ospf-redistribute-unknown" && n.detail.contains("203.0.113.128/25")
+    }));
 }
 
 #[test]
@@ -839,4 +842,224 @@ fn the_build_is_deterministic() {
     let a = asbr_chain(AreaType::Normal);
     let b = asbr_chain(AreaType::Normal);
     assert_eq!(a, b);
+}
+
+#[test]
+fn a_stub_area_gets_no_as_external_lsa_and_no_asbr_summary() {
+    let mut rs = chain(AreaType::Normal, false);
+    for r in [0, 1] {
+        rs[r].1.config.processes[0]
+            .areas
+            .get_mut(&AREA1)
+            .unwrap()
+            .kind = AreaType::Stub;
+    }
+    let r4 = &mut rs[3].1;
+    r4.config.processes[0].redistribute = vec![redistribute(Source::Connected, None, None)];
+    r4.connected
+        .insert("default".to_string(), vec![pfx("198.51.100.128/25")]);
+    let built = twin(rs);
+    let d1 = db(&built, "r1", Version::V2);
+    assert!(
+        d1.lsas
+            .values()
+            .all(|l| !matches!(l.lsa_type, LsaType::External | LsaType::AsbrSummary))
+    );
+    assert_eq!(
+        summaries(d1, "203.0.113.2").get(&pfx("0.0.0.0/0")),
+        Some(&1)
+    );
+    assert_eq!(
+        find(
+            db(&built, "r2", Version::V2),
+            LsaType::External,
+            "203.0.113.4"
+        )
+        .len(),
+        1
+    );
+}
+
+#[test]
+fn two_prefixes_with_one_network_address_get_the_link_state_ids_of_rfc_2328_appendix_e() {
+    let mut r = v2("203.0.113.1", vec![p2p("eth0", BACKBONE, "192.0.2.1/30")]);
+    r.config.processes[0].redistribute = vec![redistribute(Source::Static, None, None)];
+    r.statics.insert(
+        "default".to_string(),
+        vec![pfx("198.51.100.0/24"), pfx("198.51.100.0/25")],
+    );
+    let built = twin(vec![("r1", r)]);
+    let ids: Vec<(Ipv4Addr, Prefix)> = find(
+        db(&built, "r1", Version::V2),
+        LsaType::External,
+        "203.0.113.1",
+    )
+    .into_iter()
+    .filter_map(|l| match l.body {
+        Body::External { prefix, .. } => Some((l.lsid, prefix)),
+        _ => None,
+    })
+    .collect();
+    assert_eq!(
+        ids,
+        vec![
+            (ip("198.51.100.0"), pfx("198.51.100.0/24")),
+            (ip("198.51.100.127"), pfx("198.51.100.0/25")),
+        ]
+    );
+}
+
+#[test]
+fn an_as_external_lsa_reaches_only_the_routers_of_the_same_as() {
+    let mut r9 = v2("203.0.113.9", vec![p2p("eth0", BACKBONE, "192.0.2.13/30")]);
+    r9.config.processes[0].default_originate = Some(DefaultOriginate {
+        always: true,
+        metric: None,
+        metric_type: None,
+        route_map: None,
+        span: SourceSpan::line("default", 1),
+    });
+    let built = twin(vec![
+        (
+            "r1",
+            v2("203.0.113.1", vec![p2p("eth0", BACKBONE, "192.0.2.1/30")]),
+        ),
+        (
+            "r2",
+            v2("203.0.113.2", vec![p2p("eth0", BACKBONE, "192.0.2.2/30")]),
+        ),
+        ("r9", r9),
+    ]);
+    assert!(
+        find(
+            db(&built, "r1", Version::V2),
+            LsaType::External,
+            "203.0.113.9"
+        )
+        .is_empty()
+    );
+    assert_eq!(
+        find(
+            db(&built, "r9", Version::V2),
+            LsaType::External,
+            "203.0.113.9"
+        )
+        .len(),
+        1
+    );
+}
+
+#[test]
+fn ospfv3_area_border_routers_and_asbrs_give_inter_area_prefix_inter_area_router_and_as_external_lsas()
+ {
+    let ll = |s: &str| {
+        [
+            ("eth0", format!("fe80::{s}0")),
+            ("eth1", format!("fe80::{s}1")),
+        ]
+    };
+    let make = |rid: &str, n: &str, interfaces: Vec<OspfInterface>| {
+        let l = ll(n);
+        v3_router(
+            rid,
+            interfaces,
+            &[(l[0].0, l[0].1.as_str()), (l[1].0, l[1].1.as_str())],
+        )
+    };
+    let mut r4 = make(
+        "203.0.113.4",
+        "4",
+        vec![
+            p2p("eth0", AREA2, "2001:db8:0:3::2/64"),
+            lo(AREA2, "2001:db8:ffff::4/128"),
+        ],
+    );
+    r4.config.processes[0].redistribute = vec![redistribute(Source::Connected, None, None)];
+    r4.connected.insert(
+        "default".to_string(),
+        vec![pfx("2001:db8:ffff::4/128"), pfx("2001:db8:abcd::/48")],
+    );
+    let built = twin(vec![
+        (
+            "r1",
+            make(
+                "203.0.113.1",
+                "1",
+                vec![
+                    p2p("eth0", AREA1, "2001:db8:0:1::1/64"),
+                    lo(AREA1, "2001:db8:ffff::1/128"),
+                ],
+            ),
+        ),
+        (
+            "r2",
+            make(
+                "203.0.113.2",
+                "2",
+                vec![
+                    p2p("eth0", AREA1, "2001:db8:0:1::2/64"),
+                    p2p("eth1", BACKBONE, "2001:db8:0:2::1/64"),
+                ],
+            ),
+        ),
+        (
+            "r3",
+            make(
+                "203.0.113.3",
+                "3",
+                vec![
+                    p2p("eth0", BACKBONE, "2001:db8:0:2::2/64"),
+                    p2p("eth1", AREA2, "2001:db8:0:3::1/64"),
+                ],
+            ),
+        ),
+        ("r4", r4),
+    ]);
+    let d1 = db(&built, "r1", Version::V3);
+    let ids: Vec<(Ipv4Addr, Prefix, u32)> = find(d1, LsaType::Summary, "203.0.113.2")
+        .into_iter()
+        .filter_map(|l| match l.body {
+            Body::Summary { prefix, metric } => Some((l.lsid, prefix, metric)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        ids,
+        vec![
+            (Ipv4Addr::from(0), pfx("2001:db8:0:2::/64"), 10),
+            (Ipv4Addr::from(1), pfx("2001:db8:0:3::/64"), 20),
+            (Ipv4Addr::from(2), pfx("2001:db8:ffff::4/128"), 20),
+        ]
+    );
+    let asbr = find(d1, LsaType::AsbrSummary, "203.0.113.2");
+    assert_eq!(asbr.len(), 1);
+    assert_eq!(asbr[0].lsid, ip("203.0.113.4"));
+    let ext = find(d1, LsaType::External, "203.0.113.4");
+    assert_eq!(ext.len(), 1);
+    assert_eq!(ext[0].lsid, Ipv4Addr::from(0));
+    let c = compute(d1, ip("203.0.113.1"), &OspfProfile::of(Platform::Iosxe));
+    let hop = NextHop {
+        gateway: "fe80::20".parse().unwrap(),
+        interface: Some("eth0".to_string()),
+    };
+    let r = c.route(pfx("2001:db8:ffff::4/128")).unwrap();
+    assert_eq!(
+        (
+            r.path_type,
+            r.metric,
+            r.unknown.clone(),
+            r.next_hops.clone()
+        ),
+        (PathType::InterArea, 30, None, vec![hop.clone()])
+    );
+    let r = c.route(pfx("2001:db8:abcd::/48")).unwrap();
+    assert_eq!(
+        (
+            r.path_type,
+            r.metric,
+            r.unknown.clone(),
+            r.next_hops.clone()
+        ),
+        (PathType::External2, 20, None, vec![hop])
+    );
 }

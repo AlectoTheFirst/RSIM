@@ -394,8 +394,10 @@ fn oracle(c: &Case, root: usize) -> BTreeMap<Prefix, (u32, BTreeSet<NextHop>)> {
 fn the_routes_of_the_built_database_match_the_shortest_paths_of_the_config_graph() {
     let mut rng = Rng(SEED);
     let profile = OspfProfile::of(Platform::Iosxe);
+    let (mut routes, mut ecmp, mut transit) = (0, 0, 0);
     for i in 0..CASES {
         let c = case(&mut rng);
+        transit += c.segments.iter().filter(|s| s.transit()).count();
         let built = build(&inputs(&c));
         for r in 0..c.routers {
             let key = (
@@ -419,6 +421,8 @@ fn the_routes_of_the_built_database_match_the_shortest_paths_of_the_config_graph
                 })
                 .collect();
             let want = oracle(&c, r);
+            routes += want.len();
+            ecmp += want.values().filter(|(_, h)| h.len() > 1).count();
             assert_eq!(
                 got, want,
                 "case {i} router r{r}: the routes differ\nsegments: {:#?}\nloopbacks: {:?}",
@@ -426,4 +430,5 @@ fn the_routes_of_the_built_database_match_the_shortest_paths_of_the_config_graph
             );
         }
     }
+    assert!(routes > 0 && ecmp > 0 && transit > 0);
 }
