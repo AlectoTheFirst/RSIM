@@ -18,6 +18,7 @@ import {
   cellText,
   columnWidths,
   deviceFunctions,
+  exportUrl,
   filterCellText,
   hiddenSelection,
   nextPage,
@@ -136,6 +137,14 @@ describe("API parameters", () => {
       ["column", "prefix"],
     ]);
     expect(apiUrl("t", { ...base, verb: "describe" }, FIB)).toBeNull();
+  });
+
+  it("exports the filtered rows in the order of the sort with the columns that are not hidden", () => {
+    expect(exportUrl("t", { ...base, sort: ["-prefix"], cursor: "o200", hide: ["kind"] }, FIB, "csv")).toBe(
+      `/v1/twins/t/tables/fib/export?device=r1%2Cr2&sort=-prefix&columns=${encodeURIComponent(FIB.columns.map((c) => c.name).filter((c) => c !== "kind").join(","))}&format=csv`,
+    );
+    expect(exportUrl("t", base, FIB, "parquet")).toBe("/v1/twins/t/tables/fib/export?device=r1%2Cr2&format=parquet");
+    expect(exportUrl("t", base, null, "csv")).toBeNull();
   });
 
   it("writes the request as an rsim command", () => {

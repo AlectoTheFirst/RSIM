@@ -436,7 +436,17 @@ fn page_parts(p: Page) -> (Vec<String>, Vec<Vec<Value>>, usize, Option<String>) 
 #[test]
 fn the_selection_on_columns_gives_the_answer_of_the_selection_on_json_rows() {
     let mut g = Gen(0x9e37_79b9_7f4a_7c15);
-    for name in ["fib", "bgp-sessions", "coverage", "devices", "neighbours"] {
+    for name in [
+        "fib",
+        "bgp-sessions",
+        "coverage",
+        "devices",
+        "neighbours",
+        "interfaces",
+        "routes",
+        "mac",
+        "arp",
+    ] {
         let def = table::table(name).unwrap();
         for round in 0..62 {
             // The last rounds have tables of many chunks of a parallel scan.
@@ -474,6 +484,29 @@ fn the_selection_on_columns_gives_the_answer_of_the_selection_on_json_rows() {
                     .map(|m| (m.len(), oracle::summarize(def, &m)));
                 let got = summarize(def, &frame, &sel);
                 assert_eq!(as_json(got), as_json(want), "{name} summarize {sel:?}");
+
+                let all = Selection {
+                    limit: None,
+                    cursor: None,
+                    ..sel.clone()
+                };
+                let want = oracle::filter(def, &keyed, &all)
+                    .and_then(|m| oracle::page(def, m, &all))
+                    .map(|p| (p.0, p.1));
+                let got = export(def, &frame, &all).map(|e| {
+                    let rows: Vec<Vec<Value>> = e
+                        .rows
+                        .iter()
+                        .map(|r| {
+                            e.index
+                                .iter()
+                                .map(|i| frame.value(*r as usize, *i))
+                                .collect()
+                        })
+                        .collect();
+                    (e.columns, rows)
+                });
+                assert_eq!(got, want, "{name} export {all:?}");
 
                 let column = g.pick(&["prefix", "range", "device", "nope"]);
                 let address = g.pick(&["10.0.0.7", "10.0.1.1", "2001:db8::5", "8.8.8.8", "ten"]);
@@ -663,4 +696,191 @@ fn lpm_gives_the_longest_prefix_that_contains_the_address() {
     let r = lpm(def, &f, &all, "prefix", "198.51.100.1").unwrap();
     assert!(r.rows.is_empty());
     assert!(lpm(def, &f, &all, "device", "10.0.0.7").is_err());
+}
+
+#[test]
+fn an_export_takes_no_limit_and_no_cursor() {
+    let def = table::table("fib").unwrap();
+    let f = frame_of(def, &fib_rows());
+    for sel in [
+        Selection {
+            limit: Some(1),
+            ..Selection::default()
+        },
+        Selection {
+            cursor: Some("o1".into()),
+            ..Selection::default()
+        },
+    ] {
+        assert_eq!(
+            export(def, &f, &sel).err().as_deref(),
+            Some("an export takes no limit and no cursor")
+        );
+    }
+}
+
+#[test]
+fn the_csv_export_quotes_a_field_with_a_comma_a_quote_or_no_text() {
+    let def = table::table("fib").unwrap();
+    let mut rows = fib_rows();
+    rows[0][3] = json!("a,\"b\"");
+    rows[1][3] = json!("");
+    rows[2][3] = Value::Null;
+    let f = frame_of(def, &rows);
+    let sel = Selection {
+        columns: Some(vec![
+            "device".into(),
+            "prefix".into(),
+            "kind".into(),
+            "next_hops".into(),
+        ]),
+        ..Selection::default()
+    };
+    let e = export(def, &f, &sel).unwrap();
+    let text = String::from_utf8(csv(&f, &e)).unwrap();
+    assert_eq!(
+        text,
+        "device,prefix,kind,next_hops\r\n\
+         r1,10.0.0.0/16,static,\"[\"\"10.0.0.9@eth0\"\"]\"\r\n\
+         r1,10.0.0.0/24,\"a,\"\"b\"\"\",\"[\"\"10.0.0.1@eth0\"\"]\"\r\n\
+         r1,10.0.1.0/24,\"\",\"[\"\"eth1\"\"]\"\r\n\
+         r2,192.0.2.0/24,,\"[\"\"192.0.2.1@eth0\"\"]\"\r\n"
+    );
+}
+
+#[test]
+fn the_parquet_export_reads_back_with_the_values_and_the_nulls_of_the_rows() {
+    use arrow_array::cast::AsArray;
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+    let def = table::table("fib").unwrap();
+    let mut rows = fib_rows();
+    rows[2][3] = Value::Null;
+    let f = frame_of(def, &rows);
+    let sel = Selection {
+        sort: Some(vec!["-prefix".into()]),
+        ..Selection::default()
+    };
+    let e = export(def, &f, &sel).unwrap();
+    let bytes = parquet(&f, &e).unwrap();
+    let reader = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(bytes))
+        .unwrap()
+        .build()
+        .unwrap();
+    let batches: Vec<_> = reader.map(Result::unwrap).collect();
+    let n: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(n, 4);
+    let b = &batches[0];
+    let schema = b.schema();
+    let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+    let want: Vec<&str> = def.columns.iter().map(|c| c.name).collect();
+    assert_eq!(names, want);
+    let prefixes: Vec<Option<&str>> = b.column(2).as_string::<i32>().iter().collect();
+    assert_eq!(
+        prefixes,
+        [
+            Some("192.0.2.0/24"),
+            Some("10.0.1.0/24"),
+            Some("10.0.0.0/24"),
+            Some("10.0.0.0/16")
+        ]
+    );
+    let kinds: Vec<Option<&str>> = b.column(3).as_string::<i32>().iter().collect();
+    assert_eq!(kinds[0], None);
+    let hops = b.column(5).as_list::<i32>();
+    assert_eq!(hops.value(0).as_string::<i32>().value(0), "192.0.2.1@eth0");
+}
+
+#[test]
+fn an_index_gives_the_rows_of_a_device_a_mac_address_and_a_prefix() {
+    let def = table::table("mac").unwrap();
+    let rows: Vec<Vec<Value>> = (0..400)
+        .map(|i| {
+            vec![
+                json!(format!("sw{}", i % 7)),
+                json!(10 + i % 3),
+                json!(format!("02:00:00:00:00:{:02x}", i % 40)),
+                json!(format!("eth{}", i % 5)),
+                json!("dynamic"),
+                json!([]),
+            ]
+        })
+        .collect();
+    let f = frame_of(def, &rows);
+    let sel = Selection {
+        filters: [
+            ("device".to_string(), vec!["sw3".to_string()]),
+            ("mac".to_string(), vec!["02:00:00:00:00:0a".to_string()]),
+        ]
+        .into(),
+        ..Selection::default()
+    };
+    let p = plan(def, &f, &sel).unwrap();
+    assert!(p.candidates.is_some());
+    let got = show(def, &f, &sel).unwrap();
+    // i % 7 == 3 and i % 40 == 10: i = 10 + 40k with (10 + 40k) % 7 == 3.
+    let want = (0..400).filter(|i| i % 7 == 3 && i % 40 == 10).count();
+    assert_eq!(got.total, want);
+    assert!(got.rows.iter().all(|r| r[0] == json!("sw3")));
+
+    let def = table::table("arp").unwrap();
+    let rows: Vec<Vec<Value>> = (0..300)
+        .map(|i| {
+            vec![
+                json!("r1"),
+                json!("eth0"),
+                json!(format!("198.51.{}.{}", i / 100, i % 100)),
+                json!("02:00:00:00:00:01"),
+                json!("reachable"),
+                json!([]),
+            ]
+        })
+        .collect();
+    let f = frame_of(def, &rows);
+    let sel = Selection {
+        typed: [("ip.in_prefix".to_string(), "198.51.1.0/24".to_string())].into(),
+        ..Selection::default()
+    };
+    assert_eq!(show(def, &f, &sel).unwrap().total, 100);
+}
+
+#[test]
+fn an_equality_filter_on_a_text_column_with_many_values_finds_each_value() {
+    let def = table::table("mac").unwrap();
+    let rows: Vec<Vec<Value>> = (0..500)
+        .map(|i| {
+            vec![
+                json!(format!("sw{}", i % 3)),
+                json!(10),
+                json!(format!("02:00:00:00:{:02x}:{:02x}", i % 7, i % 90)),
+                json!(format!("eth{}", i % 60)),
+                if i % 11 == 0 {
+                    Value::Null
+                } else {
+                    json!("dynamic")
+                },
+                json!([]),
+            ]
+        })
+        .collect();
+    let f = frame_of(def, &rows);
+    for want in [
+        vec!["eth7".to_string()],
+        vec!["eth7".to_string(), "eth59".to_string(), "eth60".to_string()],
+        vec!["02:00:00:00:03:0a".to_string()],
+        vec!["nope".to_string()],
+    ] {
+        for column in ["port", "mac"] {
+            let i = def.columns.iter().position(|c| c.name == column).unwrap();
+            let n = rows
+                .iter()
+                .filter(|r| r[i].as_str().is_some_and(|v| want.iter().any(|w| w == v)))
+                .count();
+            let sel = Selection {
+                filters: [(column.to_string(), want.clone())].into(),
+                ..Selection::default()
+            };
+            assert_eq!(show(def, &f, &sel).unwrap().total, n, "{column} {want:?}");
+        }
+    }
 }

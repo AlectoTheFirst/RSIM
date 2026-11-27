@@ -1051,6 +1051,22 @@ fn a_path_query_on_a_store_crosses_layer_2_and_the_router() {
 }
 
 #[test]
+fn a_table_export_writes_the_csv_bytes_of_the_library() {
+    let o = rsim(&["leaf-spine", "fib", "export", "--device", "leaf1"]);
+    assert_eq!(o.status.code(), Some(0));
+    let twin = commands::load("leaf-spine").unwrap();
+    let mut sel = rsim_contract::table::Selection::default();
+    sel.filters.insert("device".into(), vec!["leaf1".into()]);
+    let (lib, _) = rsim_cli::tables::export(&twin, "fib", "csv", &sel).unwrap();
+    assert_eq!(o.stdout, lib);
+    assert!(stdout(&o).starts_with("device,"));
+
+    let o = rsim(&["leaf-spine", "fib", "export", "--as", "parquet"]);
+    assert_eq!(o.status.code(), Some(0));
+    assert!(o.stdout.starts_with(b"PAR1"));
+}
+
+#[test]
 fn a_table_query_gives_rows_pages_and_the_bytes_of_the_library() {
     let o = rsim(&[
         "leaf-spine",

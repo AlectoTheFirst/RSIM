@@ -107,7 +107,7 @@ const DEVICE: Column = refers(
     "devices",
     "device",
 );
-const BASE_VERBS: &[&str] = &["show", "summarize", "unique", "top"];
+const BASE_VERBS: &[&str] = &["show", "summarize", "unique", "top", "export"];
 
 /// The tables, in a fixed order.
 pub const TABLES: &[TableDef] = &[
@@ -256,7 +256,7 @@ pub const TABLES: &[TableDef] = &[
                 "Source spans",
             ),
         ],
-        verbs: &["show", "summarize", "unique", "top", "lpm"],
+        verbs: &["show", "summarize", "unique", "top", "lpm", "export"],
         needs: "the twin",
         collected: &[],
     },
@@ -497,7 +497,7 @@ pub const TABLES: &[TableDef] = &[
             col("interface", ColumnType::Text, "interface", "Interface"),
             PROVENANCE,
         ],
-        verbs: &["show", "summarize", "unique", "top", "lpm"],
+        verbs: &["show", "summarize", "unique", "top", "lpm", "export"],
         needs: "a twin of a store snapshot with collected routes",
         collected: &["routes"],
     },

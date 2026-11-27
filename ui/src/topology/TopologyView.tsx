@@ -9,6 +9,7 @@ import { MenuButton } from "../page/Menu";
 import { Chip } from "../page/Pill";
 import { Segmented } from "../page/Segmented";
 import { toast } from "../page/notes";
+import { saveFile } from "../page/save";
 import { DeviceField, SiteField } from "./DeviceField";
 import { EXPORTS, exportParams, vendorsOf } from "./draw";
 import { LAYERS, type Layer, type MapGraph, buildGraph } from "./graph";
@@ -61,14 +62,6 @@ async function vendorsOfDevices(twin: string, devices: readonly string[]): Promi
   } catch {
     return new Map();
   }
-}
-
-/** Saves the topology of the scope in a file form of the API. */
-function saveFile(url: string, name: string) {
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
 }
 
 export function TopologyView(props: TopologyProps) {

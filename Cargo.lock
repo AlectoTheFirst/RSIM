@@ -2783,9 +2783,12 @@ version = "0.1.0"
 dependencies = [
  "arrow-array",
  "arrow-ord",
+ "arrow-schema",
  "boon",
+ "bytes",
  "clap",
  "getrandom 0.4.3",
+ "parquet",
  "rayon",
  "rsim-cli",
  "rsim-contract",

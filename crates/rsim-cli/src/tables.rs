@@ -796,6 +796,30 @@ pub fn diff(
     })
 }
 
+/// The verb `export`: all selected rows as the bytes of a file of the
+/// format `csv` or `parquet`, with its media type.
+pub fn export(
+    t: &Loaded,
+    name: &str,
+    format: &str,
+    sel: &Selection,
+) -> Result<(Vec<u8>, &'static str), QueryError> {
+    let d = def(name)?;
+    let f = frame(t, d)?;
+    if !["csv", "parquet"].contains(&format) {
+        return Err(QueryError::new(
+            ErrorCode::InvalidQuery,
+            format!("format {format} is not csv or parquet"),
+        ));
+    }
+    let e = frame::export(d, f, sel).map_err(invalid)?;
+    if format == "csv" {
+        return Ok((frame::csv(f, &e), "text/csv; charset=utf-8"));
+    }
+    let bytes = frame::parquet(f, &e).map_err(|e| QueryError::new(ErrorCode::Internal, e))?;
+    Ok((bytes, "application/vnd.apache.parquet"))
+}
+
 /// The verb `show`: the selected rows.
 pub fn show(
     topology: &str,

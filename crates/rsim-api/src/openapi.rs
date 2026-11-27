@@ -146,6 +146,19 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         method: "get",
+        path: "/v1/twins/{twin}/tables/{table}/export",
+        id: "exportTable",
+        summary: "Table export",
+        query: &[
+            ("format", "File format"),
+            ("columns", "Columns"),
+            ("sort", "Sort order"),
+        ],
+        body: &[],
+        ok: (200, &[]),
+    },
+    Route {
+        method: "get",
         path: "/v1/twins/{twin}/tables/{table}/diff",
         id: "diffTable",
         summary: "Table difference",
@@ -371,6 +384,13 @@ fn security(g: crate::auth::Gate) -> Value {
 }
 
 /// The OpenAPI document.
+/// The operations whose success is a file, with the media types of the
+/// file.
+const FILES: &[(&str, &[&str])] = &[(
+    "exportTable",
+    &["text/csv", "application/vnd.apache.parquet"],
+)];
+
 pub fn document() -> Value {
     let mut components = Map::new();
     let mut paths = Map::new();
@@ -386,7 +406,19 @@ pub fn document() -> Value {
         params.extend(r.query.iter().map(|(name, d)| {
             json!({"name": name, "in": "query", "required": false, "description": d, "schema": {"type": "string"}})
         }));
-        let success = if r.ok.1.is_empty() {
+        let files = FILES.iter().find(|(id, _)| *id == r.id).map(|f| f.1);
+        let success = if let Some(media) = files {
+            let content: Map<String, Value> = media
+                .iter()
+                .map(|m| {
+                    (
+                        m.to_string(),
+                        json!({"schema": {"type": "string", "format": "binary"}}),
+                    )
+                })
+                .collect();
+            json!({"description": "Success", "content": content})
+        } else if r.ok.1.is_empty() {
             json!({"description": "Success"})
         } else {
             json!({

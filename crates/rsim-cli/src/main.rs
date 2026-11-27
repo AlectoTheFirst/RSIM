@@ -583,7 +583,7 @@ fn table_command(cli: &Cli, args: &[String]) -> ExitCode {
                     );
                 }
                 Some("cursor") => sel.cursor = Some(flag_value(&mut rest, "cursor")?.clone()),
-                Some(k @ ("column" | "count")) => {
+                Some(k @ ("column" | "count" | "as")) => {
                     opts.insert(k.to_string(), flag_value(&mut rest, k)?.clone());
                 }
                 Some("ascending") => {
@@ -666,6 +666,16 @@ fn table_command(cli: &Cli, args: &[String]) -> ExitCode {
             }
             t
         }),
+        "export" => {
+            let format = opts.get("as").map_or("csv", String::as_str);
+            match tables::export(&loaded, &table, format, &sel) {
+                Ok((bytes, _)) => {
+                    let _ = std::io::stdout().lock().write_all(&bytes);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => emit::<()>(cli, Err(e), |_| String::new()),
+            }
+        }
         "describe" => emit(cli, tables::def(&table), |d| {
             d.columns
                 .iter()
@@ -673,7 +683,7 @@ fn table_command(cli: &Cli, args: &[String]) -> ExitCode {
                 .collect()
         }),
         v => usage_error(&format!(
-            "{v} is not a verb; the verbs are show, summarize, unique, top, lpm and describe"
+            "{v} is not a verb; the verbs are show, summarize, unique, top, lpm, export and describe"
         )),
     }
 }
