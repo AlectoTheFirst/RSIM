@@ -144,7 +144,7 @@ impl TwinJson {
     pub fn scenario(time_ms: u64, layers: Vec<String>) -> TwinJson {
         let base = snapshot_name(time_ms);
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-        for b in layers.iter().flat_map(|l| l.bytes().chain([b'\n'])) {
+        for b in layers.iter().flat_map(|l| l.bytes().chain(*b"\n")) {
             hash ^= u64::from(b);
             hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
         }
