@@ -46,14 +46,18 @@ pub struct Entry {
     pub reach: Reach,
 }
 
+/// A check of the key of a stanza.
+pub type Check = fn(&str) -> bool;
+
 /// A classification table. For each stanza, the entry with the longest path
-/// that matches the stanza decides. A stanza with no entry is unhandled.
+/// that matches the stanza decides. A stanza with no entry is unhandled. An
+/// entry with a check matches only a stanza whose key passes the check.
 ///
 /// The mask of a table changes each key that a report prints in full, for
 /// example to hide a secret.
 #[derive(Clone, Debug)]
 pub struct Table {
-    entries: Vec<(Vec<String>, State, Reach)>,
+    entries: Vec<(Vec<String>, State, Reach, Option<Check>)>,
     mask: Option<fn(&str) -> String>,
 }
 
@@ -85,8 +89,12 @@ impl Table {
 
     /// Adds an entry.
     pub fn push(&mut self, path: &str, state: State, reach: Reach) {
-        self.entries
-            .push((path.split('/').map(str::to_string).collect(), state, reach));
+        self.entries.push((
+            path.split('/').map(str::to_string).collect(),
+            state,
+            reach,
+            None,
+        ));
     }
 
     /// Adds an entry with its segments as a list.
@@ -95,18 +103,33 @@ impl Table {
             levels.iter().map(|l| (*l).to_string()).collect(),
             state,
             reach,
+            None,
+        ));
+    }
+
+    /// Adds an entry with its segments as a list. The entry matches only a
+    /// stanza whose key at the last segment gives true from `check`.
+    pub fn push_checked(&mut self, levels: &[&str], state: State, reach: Reach, check: Check) {
+        self.entries.push((
+            levels.iter().map(|l| (*l).to_string()).collect(),
+            state,
+            reach,
+            Some(check),
         ));
     }
 
     /// The state of the stanza at `path`.
     pub fn state(&self, path: &[&str]) -> State {
         let mut best: Option<(usize, usize, State)> = None;
-        for (pattern, state, reach) in &self.entries {
+        for (pattern, state, reach, check) in &self.entries {
             let fits = match reach {
                 Reach::Node => pattern.len() == path.len(),
                 Reach::Subtree => pattern.len() <= path.len(),
             };
             if !fits || !pattern.iter().zip(path).all(|(p, k)| matches(p, k)) {
+                continue;
+            }
+            if check.is_some_and(|c| !c(path[pattern.len() - 1])) {
                 continue;
             }
             let exact = pattern.iter().map(|p| literal_words(p)).sum();
@@ -237,19 +260,22 @@ fn walk<'a>(
 /// The path of an unhandled stanza for the report. At each level, the
 /// most literal segment of the table that matches the key with the same
 /// levels before it takes the place of the key, so that `*` stands for each
-/// name and number. A level that no segment matches keeps its key.
+/// name and number. The last segment of an entry with a check matches only
+/// a key that passes the check. A level that no segment matches keeps its
+/// key.
 fn generalize(path: &[&str], table: &Table) -> String {
     let mut out: Vec<String> = Vec::with_capacity(path.len());
     for (i, key) in path.iter().enumerate() {
         let best = table
             .entries
             .iter()
-            .filter(|(p, _, _)| {
+            .filter(|(p, _, _, check)| {
                 p.len() > i
                     && matches(&p[i], key)
                     && p[..i].iter().zip(path).all(|(a, b)| matches(a, b))
+                    && (p.len() > i + 1 || check.is_none_or(|c| c(key)))
             })
-            .map(|(p, _, _)| &p[i])
+            .map(|(p, _, _, _)| &p[i])
             .max_by_key(|seg| (literal_words(seg), std::cmp::Reverse(seg.as_str())));
         out.push(match best {
             Some(seg) if seg == "*" || is_words(seg) => seg.clone(),
@@ -385,6 +411,18 @@ mod tests {
         );
         assert_eq!(cov.lines[&Irrelevant], 4);
         assert_eq!(cov.lines.values().sum::<u32>(), doc.lines);
+    }
+
+    #[test]
+    fn an_entry_with_a_check_matches_only_a_key_that_passes_the_check() {
+        let mut t = Table::new(&[e("router ..", Irrelevant, Subtree)]);
+        t.push_checked(&["router ..", "cost *"], Handled, Subtree, |k| {
+            k != "cost 0"
+        });
+        assert_eq!(t.state(&["router 1", "cost 5"]), Handled);
+        assert_eq!(t.state(&["router 1", "cost 0"]), Irrelevant);
+        assert_eq!(generalize(&["router 1", "cost 0"], &t), "router ../cost 0");
+        assert_eq!(generalize(&["router 1", "cost 5"], &t), "router ../cost *");
     }
 
     #[test]
