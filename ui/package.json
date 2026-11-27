@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "description": "The browser UI of rsim, served by rsim-api.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "scripts": {
     "api": "openapi-typescript ../crates/rsim-api/openapi.json --output src/api/schema.ts && node scripts/fields.mjs",
     "api:check": "openapi-typescript ../crates/rsim-api/openapi.json --check --output src/api/schema.ts && node scripts/fields.mjs --check",
