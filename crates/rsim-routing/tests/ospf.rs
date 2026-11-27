@@ -533,6 +533,156 @@ fn a_forwarding_address_resolves_through_the_computed_routes() {
         c.route(pfx("203.0.113.192/26")).is_none(),
         "no intra-area or inter-area route covers the forwarding address"
     );
+    assert!(c.gaps.is_empty());
+    assert!(c.absent_gap(pfx("203.0.113.192/26")).is_none());
+}
+
+#[test]
+fn a_gap_that_can_give_the_route_of_a_forwarding_address_makes_the_external_route_unknown() {
+    let mut lsas = single_area();
+    lsas.extend([
+        summary("198.51.100.160/27", 5, "198.51.100.8", AREA_0),
+        summary("198.51.100.192/27", 5, "198.51.100.8", AREA_0),
+        summary("198.51.100.224/27", 5, "198.51.100.8", AREA_0),
+        summary("198.51.100.224/27", 5, R2, AREA_0),
+        external("203.0.113.0/26", 20, R2, 2, Some("198.51.100.138")),
+        external("203.0.113.64/26", 20, R2, 2, Some("198.51.100.170")),
+        external("203.0.113.128/26", 20, R2, 2, Some("198.51.100.200")),
+        external("203.0.113.192/26", 20, R2, 2, Some("198.51.100.230")),
+    ]);
+    let c = calc(lsas, R1);
+    assert_eq!(c.gaps.len(), 1);
+    assert_eq!(
+        c.gaps[0].reach,
+        GapReach::Prefixes(
+            [
+                "198.51.100.160/27",
+                "198.51.100.192/27",
+                "198.51.100.224/27",
+                "203.0.113.64/26",
+                "203.0.113.128/26",
+                "203.0.113.192/26",
+            ]
+            .map(pfx)
+            .to_vec()
+        )
+    );
+    assert!(
+        route(&c, "203.0.113.0/26").unknown.is_none(),
+        "the gap has no prefix that holds the forwarding address"
+    );
+    assert!(
+        route(&c, "203.0.113.64/26").unknown.is_some(),
+        "the gap has a longer prefix than the intra-area route of the forwarding address"
+    );
+    assert!(c.route(pfx("203.0.113.128/26")).is_none());
+    assert!(
+        c.absent_gap(pfx("203.0.113.128/26")).is_some(),
+        "only the gap has a prefix that holds the forwarding address"
+    );
+    assert_eq!(
+        route(&c, "198.51.100.224/27").path_type,
+        PathType::InterArea
+    );
+    assert!(
+        route(&c, "203.0.113.192/26").unknown.is_some(),
+        "the gap has the prefix of the inter-area route of the forwarding address"
+    );
+}
+
+#[test]
+fn an_unreachable_asbr_with_a_router_lsa_is_ignored_and_is_not_a_gap() {
+    let mut lsas = single_area();
+    lsas.extend([
+        router(ASBR, vec![p2p(R2, "192.0.2.13", 1)], AREA_0),
+        external("203.0.113.0/26", 1, ASBR, 2, None),
+        external("203.0.113.0/26", 30, R3, 2, None),
+        external("203.0.113.64/26", 1, ASBR, 2, None),
+    ]);
+    let c = calc(lsas, R1);
+    assert!(c.gaps.is_empty());
+    let r = route(&c, "203.0.113.0/26");
+    assert_eq!(
+        (r.metric, r.advertising_router, r.unknown.is_none()),
+        (30, Some(ip(R3)), true)
+    );
+    assert!(c.route(pfx("203.0.113.64/26")).is_none());
+    assert!(c.absent_gap(pfx("203.0.113.64/26")).is_none());
+}
+
+#[test]
+fn a_virtual_link_of_the_calculating_router_is_a_gap_of_the_backbone() {
+    let c = calc(
+        vec![
+            router(
+                R1,
+                vec![
+                    link(LinkKind::Virtual, R2, "192.0.2.1", 20),
+                    stub(R1, MASK_32, 1),
+                ],
+                AREA_0,
+            ),
+            router(
+                R2,
+                vec![
+                    link(LinkKind::Virtual, R1, "192.0.2.2", 20),
+                    stub("198.51.100.128", MASK_26, 1),
+                ],
+                AREA_0,
+            ),
+            router(
+                R1,
+                vec![p2p(R2, "192.0.2.1", 10), stub("192.0.2.0", MASK_30, 10)],
+                AREA_1,
+            ),
+            router(
+                R2,
+                vec![
+                    p2p(R1, "192.0.2.2", 10),
+                    stub("192.0.2.0", MASK_30, 10),
+                    stub(R2, MASK_32, 1),
+                    stub("192.0.2.32", MASK_27, 15),
+                ],
+                AREA_1,
+            ),
+            summary("203.0.113.0/26", 5, R2, AREA_1),
+        ],
+        R1,
+    );
+    assert_eq!(c.gaps.len(), 1);
+    let g = &c.gaps[0];
+    assert_eq!(
+        (g.lsa_type, g.lsid, g.area, &g.reach),
+        (
+            LsaType::Router,
+            ip(R1),
+            Some(ip(AREA_0)),
+            &GapReach::FromCost(20)
+        )
+    );
+    assert_eq!(
+        g.detail,
+        format!("router LSA {R1} in area {AREA_0}, the virtual link to {R2} is not computed")
+    );
+    assert!(
+        c.notes
+            .iter()
+            .any(|n| n.kind == "ospf-virtual-link-not-modeled")
+    );
+    let got: Vec<(String, bool)> = c
+        .routes
+        .iter()
+        .map(|r| (r.prefix.to_string(), r.unknown.is_some()))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("192.0.2.32/27".to_string(), true),
+            ("198.51.100.2/32".to_string(), false),
+            ("203.0.113.0/26".to_string(), true),
+        ]
+    );
+    assert!(c.absent_gap(pfx("198.51.100.128/26")).is_some());
 }
 
 #[test]
