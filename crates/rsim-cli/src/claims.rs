@@ -332,14 +332,10 @@ fn states(f: &BgpPeerFact) -> Vec<String> {
     f.sessions.iter().map(|r| r.state.clone()).collect()
 }
 
-/// The rows of the claim `bgp-peers-up` on the devices that `keep`
-/// selects: one for each configured neighbour and each dynamic peer of a
-/// listen range, a peer outside the twin included, and the detail of the
-/// claim. A neighbour with shutdown gives no row.
-/// The rows of the RIB guard of the devices that `keep` selects, one for
-/// each route, and the detail with the match rate: a match confirms, a
-/// difference or a route of only one table refutes, and a route that is not
-/// computed or that is a seed is unknown.
+/// The evidence rows of the RIB guard of the devices that `keep` selects,
+/// one for each route, and the detail with the match rate. A match is
+/// confirmed. A difference and a route of only one table are refuted. A
+/// route that is not computed and a seed are unknown.
 pub fn rib_fib_agree(
     guard: &BTreeMap<String, Vec<rsim_guard::Row>>,
     keep: &dyn Fn(&str) -> bool,
@@ -393,6 +389,10 @@ pub fn rib_fib_agree(
     (evidence, detail)
 }
 
+/// The rows of the claim `bgp-peers-up` on the devices that `keep`
+/// selects: one for each configured neighbour and each dynamic peer of a
+/// listen range, a peer outside the twin included, and the detail of the
+/// claim. A neighbour with shutdown gives no row.
 pub fn bgp_peers_up(bgp: &BgpFacts, keep: &dyn Fn(&str) -> bool) -> (Vec<Evidence>, String) {
     let mut left = LeftOut::default();
     let mut out = Vec::new();
