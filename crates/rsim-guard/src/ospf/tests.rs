@@ -631,6 +631,65 @@ fn an_ospfv3_network_with_another_designated_router_and_other_prefixes_shows_in_
 }
 
 #[test]
+fn an_ospfv3_network_with_another_designated_router_and_the_same_prefixes_compares_the_attached_routers()
+ {
+    let built = v3_segment(R1, 3, 10, "2001:db8:1::/64");
+    let collected = db(
+        Version::V3,
+        v3_lsas(
+            R2,
+            4,
+            10,
+            "2001:db8:1::/64",
+            "2001:db8:1::/64",
+            &[R1, R2, R3],
+        ),
+    );
+    let rows = compare_databases(&built, &collected);
+    assert_eq!(
+        categories(&rows),
+        vec![
+            (R1, Category::Match),
+            (R2, Category::Match),
+            ("2001:db8:1::/64", Category::Differ),
+            ("198.51.100.2 on eth0", Category::Match),
+            (R1, Category::Match),
+            ("2001:db8:1::/64", Category::Match),
+        ]
+    );
+    assert_eq!(rows[2].fields, vec!["attached"]);
+}
+
+#[test]
+fn two_ospfv3_networks_with_the_same_prefixes_do_not_map_to_another_designated_router() {
+    let mut lsas = v3_lsas(R1, 3, 10, "2001:db8:1::/64", "2001:db8:1::/64", &[R1, R2]);
+    lsas.push(v3_network(R3, 9, &[R3]));
+    lsas.push(iap(
+        Reference::Network(9),
+        R3,
+        R3,
+        5,
+        &[("2001:db8:1::/64", 0)],
+    ));
+    let built = db(Version::V3, lsas);
+    let collected = v3_segment(R2, 4, 10, "2001:db8:1::/64");
+    let rows = compare_databases(&built, &collected);
+    let networks: Vec<(&str, Category)> = rows
+        .iter()
+        .filter(|r| r.lsa_type == LsaType::Network)
+        .map(|r| (r.key.as_str(), r.category))
+        .collect();
+    assert_eq!(
+        networks,
+        vec![
+            ("dr 198.51.100.1 interface 3", Category::OnlyBuilt),
+            ("dr 198.51.100.2 interface 4", Category::OnlyCollected),
+            ("dr 198.51.100.3 interface 9", Category::OnlyBuilt),
+        ]
+    );
+}
+
+#[test]
 fn parallel_ospfv3_links_stay_apart_by_the_interface_id_where_both_databases_have_it() {
     let p2p = |own: Option<u32>| RouterLink {
         interface_id: own,
