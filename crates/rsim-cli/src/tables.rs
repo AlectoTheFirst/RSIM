@@ -5,7 +5,7 @@ use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::net::IpAddr;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use arrow_array::cast::AsArray;
 use arrow_array::types::UInt64Type;
@@ -26,6 +26,8 @@ use crate::commands::Loaded;
 use crate::error::{ErrorCode, QueryError};
 use crate::frame::{self, Cell, Frame, FrameBuilder};
 use crate::json::{VERSION, snake};
+
+mod collected;
 
 fn spans(s: &[SourceSpan]) -> Vec<String> {
     s.iter()
@@ -53,13 +55,23 @@ pub fn def(name: &str) -> Result<&'static TableDef, QueryError> {
     })
 }
 
+/// A table of a twin: its columns, and for a table of the collected state
+/// the frames of the rows of each device that it is made of.
+type Built = Result<(Frame, Vec<Arc<Frame>>), String>;
+
 /// The columns of each table of a twin, built when a request first names
-/// the table and kept with the twin.
-pub struct TableCache(Vec<OnceLock<Result<Frame, String>>>);
+/// the table and kept with the twin, and the facts of the join columns.
+pub struct TableCache(
+    Vec<OnceLock<Built>>,
+    OnceLock<Result<collected::Joins, String>>,
+);
 
 impl Default for TableCache {
     fn default() -> Self {
-        TableCache(table::TABLES.iter().map(|_| OnceLock::new()).collect())
+        TableCache(
+            table::TABLES.iter().map(|_| OnceLock::new()).collect(),
+            OnceLock::new(),
+        )
     }
 }
 
@@ -73,6 +85,7 @@ pub fn frame<'a>(t: &'a Loaded, def: &'static TableDef) -> Result<&'a Frame, Que
     t.tables.0[i]
         .get_or_init(|| build(t, def))
         .as_ref()
+        .map(|(f, _)| f)
         .map_err(|e| QueryError::new(ErrorCode::Store, e.clone()))
 }
 
@@ -89,12 +102,11 @@ pub fn key_text(s: &str) -> Option<String> {
 }
 
 /// All rows of a table as columns, in key order.
-fn build(t: &Loaded, def: &'static TableDef) -> Result<Frame, String> {
-    let mut b = FrameBuilder::new(def);
+fn build(t: &Loaded, def: &'static TableDef) -> Built {
     if !def.collected.is_empty() {
-        collected_rows(t, def, &mut b)?;
-        return Ok(b.finish(&key_text));
+        return collected::build(t, def);
     }
+    let mut b = FrameBuilder::new(def);
     match def.name {
         "devices" => {
             let mut names: BTreeSet<String> = t.devices().iter().map(ToString::to_string).collect();
@@ -253,7 +265,7 @@ fn build(t: &Loaded, def: &'static TableDef) -> Result<Frame, String> {
         }
         _ => {}
     }
-    Ok(b.finish(&key_text))
+    Ok((b.finish(&key_text), Vec::new()))
 }
 
 /// The collected MTU of each interface, with the span of its value, by
@@ -481,24 +493,10 @@ fn row_span(device: &str, table: &str, batch: &RecordBatch, row: usize) -> Strin
     .remove(0)
 }
 
-/// The rows of a table of the collected state, read from the store tables
-/// of its registry row (`TableDef::collected`). A twin with no store has no
-/// rows.
-fn collected_rows(t: &Loaded, def: &TableDef, b: &mut FrameBuilder) -> Result<(), String> {
-    let Some(src) = &t.source else {
-        return Ok(());
-    };
-    let mut tables = Vec::new();
-    for name in def.collected {
-        let schema =
-            rsim_store::table(name).ok_or_else(|| format!("{name} is not a store table"))?;
-        let batches = src
-            .store
-            .read_table(&src.snapshot, schema)
-            .map_err(|e| e.to_string())?;
-        tables.push((*name, batches));
-    }
-    if let [(name, batches)] = tables.as_slice() {
+/// Adds the rows of a table of the collected state from the rows of its
+/// store tables (`TableDef::collected`), in the order of the store tables.
+fn rows_of(def: &TableDef, tables: &[(&str, Vec<(String, RecordBatch)>)], b: &mut FrameBuilder) {
+    if let [(name, batches)] = tables {
         for (device, batch) in batches {
             for row in 0..batch.num_rows() {
                 let values: Vec<Owned> = def
@@ -514,14 +512,14 @@ fn collected_rows(t: &Loaded, def: &TableDef, b: &mut FrameBuilder) -> Result<()
                 b.push(&cells);
             }
         }
-        return Ok(());
+        return;
     }
     // 2 or more store tables: the rows of each distinct key, in the order
     // of the store tables.
     let key: Vec<&str> = def.key.iter().copied().filter(|k| *k != "device").collect();
     type Rows<'a> = Vec<(&'a str, &'a RecordBatch, usize)>;
     let mut by_key: BTreeMap<(String, Vec<Option<String>>), Rows<'_>> = BTreeMap::new();
-    for (name, batches) in &tables {
+    for (name, batches) in tables {
         for (device, batch) in batches {
             for row in 0..batch.num_rows() {
                 let k = key
@@ -560,7 +558,6 @@ fn collected_rows(t: &Loaded, def: &TableDef, b: &mut FrameBuilder) -> Result<()
         let cells: Vec<Cell> = values.iter().map(Owned::cell).collect();
         b.push(&cells);
     }
-    Ok(())
 }
 
 /// The row of a device: its facts, each with its reason, or with no facts

@@ -444,12 +444,27 @@ impl Store {
         snapshot: &Snapshot,
         table: &TableSchema,
     ) -> Result<Vec<(String, RecordBatch)>, StoreError> {
+        self.read_table_of(snapshot, table, |_| true)
+    }
+
+    /// The rows in one table of the devices of the snapshot that `keep`
+    /// takes, sorted by device. Only the table files of those devices are
+    /// read.
+    pub fn read_table_of(
+        &self,
+        snapshot: &Snapshot,
+        table: &TableSchema,
+        keep: impl Fn(&str) -> bool,
+    ) -> Result<Vec<(String, RecordBatch)>, StoreError> {
         let mut files: BTreeMap<u64, RecordBatch> = BTreeMap::new();
         let mut out = Vec::new();
         for (device, m) in &snapshot.devices {
             let Some(r) = m.tables.get(table.name) else {
                 continue;
             };
+            if !keep(device) {
+                continue;
+            }
             if r.version != table.version {
                 return Err(StoreError::SchemaVersion {
                     table: table.name.to_string(),
