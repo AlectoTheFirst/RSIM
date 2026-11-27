@@ -427,14 +427,23 @@ impl FrameColumn {
         })
     }
 
-    /// The mask of the slots whose value is inside `p`: an address or a
-    /// prefix of the family of `p`, with a length of at least the length of
-    /// `p` and its network in `p`.
+    /// The mask of the slots whose value is inside `p`.
     fn inside_mask(&self, p: Prefix) -> Vec<bool> {
         let mut mask = vec![false; self.slots()];
+        for s in self.inside_slots(p) {
+            mask[s as usize] = true;
+        }
+        mask
+    }
+
+    /// The slots whose value is inside `p`, in slot order: an address or a
+    /// prefix of the family of `p`, with a length of at least the length of
+    /// `p` and its network in `p`.
+    fn inside_slots(&self, p: Prefix) -> Vec<u32> {
+        let mut out = Vec::new();
         let t = self.trie();
         let Some(root) = t.walk_root(!p.is_ipv4()) else {
-            return mask;
+            return out;
         };
         let mut stack = vec![root];
         while let Some(n) = stack.pop() {
@@ -446,13 +455,12 @@ impl FrameColumn {
             if let Some((_, e, slots)) = w.entry
                 && e.len() >= p.len()
             {
-                for s in slots {
-                    mask[*s as usize] = true;
-                }
+                out.extend_from_slice(slots);
             }
             stack.extend(w.children.into_iter().flatten());
         }
-        mask
+        out.sort_unstable();
+        out
     }
 
     /// The slots of the prefixes with a `/` that contain `addr`, each with
@@ -557,22 +565,27 @@ impl FrameColumn {
         }
     }
 
-    /// The mask of the slots of a text column whose text is one of `vs`,
-    /// from the distinct values in the order of their text, built at the
-    /// first call.
-    fn equal_mask(&self, vs: &[String]) -> Vec<bool> {
+    /// The slots of a text column whose text is one of `vs`, in slot
+    /// order, from the distinct values in the order of their text, built at
+    /// the first call.
+    fn equal_slots(&self, vs: &[String]) -> Vec<u32> {
         let sorted = self.sorted.get_or_init(|| {
             let mut v: Vec<u32> = (0..self.slots() as u32 - 1).collect();
             v.par_sort_unstable_by(|a, b| self.text(*a as usize).cmp(self.text(*b as usize)));
             v
         });
-        let mut mask = vec![false; self.slots()];
-        for want in vs {
-            if let Ok(i) = sorted.binary_search_by(|e| self.text(*e as usize).cmp(want.as_str())) {
-                mask[sorted[i] as usize + 1] = true;
-            }
-        }
-        mask
+        let mut slots: Vec<u32> = vs
+            .iter()
+            .filter_map(|want| {
+                let i = sorted
+                    .binary_search_by(|e| self.text(*e as usize).cmp(want.as_str()))
+                    .ok()?;
+                Some(sorted[i] + 1)
+            })
+            .collect();
+        slots.sort_unstable();
+        slots.dedup();
+        slots
     }
 
     /// The ranks of the slots for a sort: null first, numbers by their
@@ -719,10 +732,40 @@ impl Cond<'_> {
     }
 }
 
+/// The slots of a column that a filter keeps: a flag for each slot, or the
+/// kept slots in slot order.
+enum Mask {
+    Dense(Vec<bool>),
+    Sparse(Vec<u32>),
+}
+
+impl Mask {
+    #[inline]
+    fn has(&self, slot: usize) -> bool {
+        match self {
+            Mask::Dense(m) => m[slot],
+            Mask::Sparse(v) => v.binary_search(&(slot as u32)).is_ok(),
+        }
+    }
+
+    /// The kept slots, in slot order.
+    fn kept(&self) -> Vec<usize> {
+        match self {
+            Mask::Dense(m) => m
+                .iter()
+                .enumerate()
+                .filter(|(_, ok)| **ok)
+                .map(|(s, _)| s)
+                .collect(),
+            Mask::Sparse(v) => v.iter().map(|s| *s as usize).collect(),
+        }
+    }
+}
+
 /// The filters of a selection as one mask of slots for each filtered
 /// column, and the sort keys.
 struct Plan {
-    masks: Vec<(usize, Vec<bool>)>,
+    masks: Vec<(usize, Mask)>,
     sort: Vec<(usize, bool)>,
     /// The ranges of rows that hold each matching row, from an index.
     candidates: Option<Vec<(u32, u32)>>,
@@ -776,31 +819,41 @@ fn plan(def: &TableDef, frame: &Frame, sel: &Selection) -> Result<Plan, String> 
         };
         sort.push((index(def, name)?, desc));
     }
-    let masks: Vec<(usize, Vec<bool>)> = conds
+    let masks: Vec<(usize, Mask)> = conds
         .into_iter()
         .map(|(i, cs)| {
             let col = &frame.columns[i];
+            if let [Cond::Eq(vs)] = cs.as_slice()
+                && col.kind == Kind::Text
+                && col.slots() > CHUNK
+            {
+                return (i, Mask::Sparse(col.equal_slots(vs)));
+            }
+            if let [Cond::InPrefix(p)] = cs.as_slice()
+                && col.prefixes
+            {
+                return (i, Mask::Sparse(col.inside_slots(to_prefix(*p))));
+            }
             // The masks of the conditions that the prefix table evaluates.
             let indexed: Vec<Option<Vec<bool>>> = cs
                 .iter()
                 .map(|c| match c {
                     Cond::InPrefix(p) if col.prefixes => Some(col.inside_mask(to_prefix(*p))),
-                    Cond::Eq(vs) if col.kind == Kind::Text && col.slots() > CHUNK => {
-                        Some(col.equal_mask(vs))
-                    }
                     _ => None,
                 })
                 .collect();
-            let mask = (0..col.slots())
-                .into_par_iter()
-                .with_min_len(CHUNK)
-                .map(|s| {
-                    cs.iter().zip(&indexed).all(|(c, m)| match m {
-                        Some(m) => m[s],
-                        None => col.any(s, &|t, n| c.holds(t, n)),
+            let mask = Mask::Dense(
+                (0..col.slots())
+                    .into_par_iter()
+                    .with_min_len(CHUNK)
+                    .map(|s| {
+                        cs.iter().zip(&indexed).all(|(c, m)| match m {
+                            Some(m) => m[s],
+                            None => col.any(s, &|t, n| c.holds(t, n)),
+                        })
                     })
-                })
-                .collect();
+                    .collect(),
+            );
             (i, mask)
         })
         .collect();
@@ -813,42 +866,34 @@ fn plan(def: &TableDef, frame: &Frame, sel: &Selection) -> Result<Plan, String> 
 }
 
 /// The number of rows of the slots of a mask.
-fn mask_rows(col: &FrameColumn, mask: &[bool]) -> usize {
-    col.counts
-        .iter()
-        .zip(mask)
-        .filter(|(_, ok)| **ok)
-        .map(|(c, _)| c)
-        .sum()
+fn mask_rows(col: &FrameColumn, mask: &Mask) -> usize {
+    mask.kept().into_iter().map(|s| col.counts[s]).sum()
 }
 
 /// The ranges of rows that hold each matching row, from the index with the
 /// fewest rows: the row range of each device of the mask of the column
-/// `device`, or the rows of each MAC address of the mask of a column of the
-/// semantic type `mac` when they are at most a quarter of the rows. None if
-/// no index applies.
-fn candidates(
-    def: &TableDef,
-    frame: &Frame,
-    masks: &[(usize, Vec<bool>)],
-) -> Option<Vec<(u32, u32)>> {
+/// `device`, or the rows of each value of a sparse mask or of the mask of a
+/// column of the semantic type `mac` when they are at most a quarter of the
+/// rows. None if no index applies.
+fn candidates(def: &TableDef, frame: &Frame, masks: &[(usize, Mask)]) -> Option<Vec<(u32, u32)>> {
     let mut best: Option<(usize, Vec<(u32, u32)>)> = None;
     if let Some(d) = frame.device
         && let Some((_, m)) = masks.iter().find(|(i, _)| *i == d)
         && let Some(ranges) = frame.ranges()
     {
         let mut rs: Vec<(u32, u32)> = m
-            .iter()
-            .enumerate()
-            .filter(|(s, ok)| **ok && ranges[*s].0 < ranges[*s].1)
-            .map(|(s, _)| ranges[s])
+            .kept()
+            .into_iter()
+            .map(|s| ranges[s])
+            .filter(|r| r.0 < r.1)
             .collect();
         rs.sort_unstable();
         best = Some((mask_rows(&frame.columns[d], m), rs));
     }
     for (i, m) in masks {
         let col = &frame.columns[*i];
-        if def.columns[*i].semantic != "mac" || col.kind != Kind::Text {
+        let sparse = matches!(m, Mask::Sparse(_));
+        if !sparse && (def.columns[*i].semantic != "mac" || col.kind != Kind::Text) {
             continue;
         }
         let n = mask_rows(col, m);
@@ -857,10 +902,9 @@ fn candidates(
         }
         let (offsets, rows) = col.postings();
         let mut hit: Vec<u32> = m
-            .iter()
-            .enumerate()
-            .filter(|(_, ok)| **ok)
-            .flat_map(|(s, _)| {
+            .kept()
+            .into_iter()
+            .flat_map(|s| {
                 rows[offsets[s] as usize..offsets[s + 1] as usize]
                     .iter()
                     .copied()
@@ -877,7 +921,7 @@ impl Plan {
     fn matches(&self, frame: &Frame, row: usize) -> bool {
         self.masks
             .iter()
-            .all(|(i, m)| m[frame.columns[*i].slot(row)])
+            .all(|(i, m)| m.has(frame.columns[*i].slot(row)))
     }
 
     /// The matching rows that `keep` takes, as a parallel scan of the
@@ -1302,11 +1346,9 @@ pub fn lpm(
     let col = &frame.columns[i];
     // The length of the prefix of each slot that contains the address.
     let hit = col.containing(addr);
-    let mut mask = vec![false; col.slots()];
-    for s in hit.keys() {
-        mask[*s] = true;
-    }
-    plan.masks.push((i, mask));
+    let mut kept: Vec<u32> = hit.keys().map(|s| *s as u32).collect();
+    kept.sort_unstable();
+    plan.masks.push((i, Mask::Sparse(kept)));
     let rows = plan.rows(frame);
     let best = rows
         .iter()
