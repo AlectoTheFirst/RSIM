@@ -322,6 +322,10 @@ struct Answer {
 
 type Table = BTreeMap<Prefix, Answer>;
 
+/// The rank of an external path: the metric type, the first cost and the
+/// second cost. The lower rank is preferred.
+type Rank = (u8, u64, u64);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Vx {
     Router(Ipv4Addr),
@@ -386,16 +390,16 @@ impl<'a> Graph<'a> {
                             });
                         }
                     }
-                    LinkKind::Transit => {
-                        if networks.get(&l.id).is_some_and(|(_, att)| att.contains(&r)) {
-                            edges.push(Edge {
-                                from: index(Vx::Router(r)),
-                                to: index(Vx::Net(l.id)),
-                                cost: u64::from(l.metric),
-                                near: l.data,
-                                far: None,
-                            });
-                        }
+                    LinkKind::Transit
+                        if networks.get(&l.id).is_some_and(|(_, att)| att.contains(&r)) =>
+                    {
+                        edges.push(Edge {
+                            from: index(Vx::Router(r)),
+                            to: index(Vx::Net(l.id)),
+                            cost: u64::from(l.metric),
+                            near: l.data,
+                            far: None,
+                        });
                     }
                     _ => {}
                 }
@@ -585,7 +589,7 @@ fn oracle(db: &Database, root: Ipv4Addr, features: &mut Features) -> Table {
     // RFC 2328 16.4 with no forwarding address. A type 1 path ranks by the
     // sum of the distance and the metric. A type 2 path ranks after each
     // type 1 path, by the metric and then by the distance.
-    let mut externals: BTreeMap<Prefix, Vec<((u8, u64, u64), Answer)>> = BTreeMap::new();
+    let mut externals: BTreeMap<Prefix, Vec<(Rank, Answer)>> = BTreeMap::new();
     for l in db.lsas.values() {
         let Body::External {
             prefix: p,
