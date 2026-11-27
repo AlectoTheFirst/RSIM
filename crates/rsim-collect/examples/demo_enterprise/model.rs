@@ -231,6 +231,8 @@ pub struct Dev {
     /// The VRF, the VNI and the VLAN of the layer 3 VNI.
     pub l3vni: Option<(String, u32, u16)>,
     pub bgp: Option<Bgp>,
+    /// The OSPF process redistributes the routes of BGP.
+    pub ospf_redistribute_bgp: bool,
     pub vpc_domain: Option<u32>,
     pub vpc_peer: Option<usize>,
     /// The source address of the tunnel end.

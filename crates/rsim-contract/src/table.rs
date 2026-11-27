@@ -342,6 +342,7 @@ pub const TABLES: &[TableDef] = &[
             ),
             col("built", ColumnType::Text, "ospf_lsa_value", "Built"),
             col("collected", ColumnType::Text, "ospf_lsa_value", "Collected"),
+            col("reason", ColumnType::Text, "reason", "Reason"),
             col(
                 "provenance",
                 ColumnType::List,

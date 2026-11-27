@@ -452,6 +452,7 @@ fn line(r: &Route, pad: &str) -> String {
         (Kind::Static, true) => "S*".to_string(),
         (Kind::Static, false) => "S".to_string(),
         (Kind::Ospf, true) => "O*E2".to_string(),
+        (Kind::Ospf, false) if r.external => "O E2".to_string(),
         (Kind::Ospf, false) => "O".to_string(),
         (Kind::Ebgp | Kind::Ibgp, true) => "B*".to_string(),
         (Kind::Ebgp | Kind::Ibgp, false) => "B".to_string(),
@@ -770,7 +771,7 @@ pub fn render(
     out.insert("hsrp_detail", hsrp_detail(dev));
     out.insert("vrrp_detail", String::new());
     out.insert("bgp_sessions", bgp_summary(dev));
-    super::ospf::cisco(e, d, "", "1", &mut out);
+    super::ospf::cisco(e, d, "", "1", &t.redistributed, &mut out);
     let mut vrfs = BTreeMap::new();
     if dev.ifaces.iter().any(|i| i.mode == Mode::Mgmt) {
         let v = mgmt_vrf(dev);
@@ -790,6 +791,7 @@ mod tests {
             vrf: "default".to_string(),
             prefix: (Ipv4Addr::new(198, 51, 100, 0), 24),
             kind: Kind::Ospf,
+            external: false,
             metric: 20,
             paths: vec![Path {
                 next_hop: Some(Ipv4Addr::new(192, 0, 2, 1)),
@@ -801,6 +803,15 @@ mod tests {
             line(&r, "").contains("[110/20] via 192.0.2.1"),
             "{}",
             line(&r, "")
+        );
+        let e2 = Route {
+            external: true,
+            ..r
+        };
+        assert!(
+            line(&e2, "      ").starts_with("O E2      198.51.100.0/24 [110/20]"),
+            "{}",
+            line(&e2, "      ")
         );
     }
 }

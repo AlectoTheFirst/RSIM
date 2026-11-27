@@ -644,6 +644,26 @@ fn left_out_external_lsas_are_gaps_of_each_database_of_the_as() {
 }
 
 #[test]
+fn the_database_of_the_router_that_leaves_out_its_external_lsas_has_the_gap_as_an_own_gap() {
+    let mut rs = asbr_routers(AreaType::Normal);
+    rs[3].1.config.processes[0]
+        .redistribute
+        .push(redistribute(Source::Bgp, None, None));
+    let built = twin(rs);
+    let d4 = db(&built, "r4", Version::V2);
+    assert!(d4.gaps.is_empty(), "{:?}", d4.gaps);
+    assert_eq!(d4.own_gaps.len(), 1);
+    assert_eq!(d4.own_gaps[0].lsa_type, LsaType::External);
+    assert_eq!(d4.own_gaps[0].reach, GapReach::External);
+    assert_eq!(d4.own_gaps[0].lsid, ip("203.0.113.4"));
+    for device in ["r1", "r2", "r3"] {
+        let d = db(&built, device, Version::V2);
+        assert!(d.own_gaps.is_empty(), "the own gaps of {device}");
+        assert_eq!(d.gaps.len(), 1, "the gaps of {device}");
+    }
+}
+
+#[test]
 fn default_information_originate_needs_always_or_a_default_route() {
     let make = |always: bool, has_default: bool| {
         let mut r = v2("203.0.113.1", vec![p2p("eth0", BACKBONE, "192.0.2.1/30")]);

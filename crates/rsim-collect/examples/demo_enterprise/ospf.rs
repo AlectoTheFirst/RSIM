@@ -10,8 +10,10 @@
 //! passive interface is a stub link of its network. The secondary address
 //! of a loopback is a stub link of its /32 with the cost 1. A router of the
 //! internet edge originates the default route as an external LSA of type 2
-//! with the metric 1. The database of a router holds the LSAs of the
-//! routers that its adjacencies reach.
+//! with the metric 1. A router with `ospf_redistribute_bgp` originates an
+//! external LSA of type 2 with the metric 20 for each prefix of its eBGP
+//! routes in the default VRF. The database of a router holds the LSAs of
+//! the routers that its adjacencies reach.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
@@ -24,6 +26,45 @@ use super::model::*;
 const AGE: u32 = 100;
 const SEQ: u32 = 0x8000_0001;
 const BACKBONE: &str = "0.0.0.0";
+/// The metric of a route that IOS-XR redistributes from BGP with no metric
+/// in the statement.
+const BGP_METRIC: u32 = 20;
+
+/// The prefixes that each router with `ospf_redistribute_bgp` redistributes
+/// from BGP, by device index.
+pub type Redistributed = BTreeMap<usize, Vec<(Ipv4Addr, u8)>>;
+
+/// The prefixes of the eBGP routes of the default VRF of `ribs` of each
+/// router with `ospf_redistribute_bgp`, other than the default route.
+/// IOS-XR redistributes an iBGP route only with `bgp
+/// redistribute-internal`.
+pub fn redistributed(e: &Estate, ribs: &[Vec<super::route::Route>]) -> Redistributed {
+    let mut out = Redistributed::new();
+    for (d, dev) in e.devs.iter().enumerate() {
+        if !dev.ospf_redistribute_bgp {
+            continue;
+        }
+        let mut list: Vec<(Ipv4Addr, u8)> = ribs[d]
+            .iter()
+            .filter(|r| r.vrf == "default" && r.kind == super::route::Kind::Ebgp && r.prefix.1 > 0)
+            .map(|r| r.prefix)
+            .collect();
+        list.sort();
+        list.dedup();
+        out.insert(d, list);
+    }
+    out
+}
+
+/// An AS-external LSA of type 2.
+#[derive(Clone, Debug)]
+struct AsExternal {
+    adv: Ipv4Addr,
+    net: Ipv4Addr,
+    len: u8,
+    metric: u32,
+    tag: u32,
+}
 
 /// A link of a router LSA.
 #[derive(Clone, Debug)]
@@ -75,8 +116,9 @@ pub struct Ospf {
     neighbors: Vec<(Ipv4Addr, Ipv4Addr, String, &'static str)>,
     routers: BTreeMap<Ipv4Addr, Vec<Link>>,
     networks: Vec<Network>,
-    /// The routers that originate the default route.
-    externals: Vec<Ipv4Addr>,
+    /// The AS-external LSAs in the order of the prefix and the advertising
+    /// router.
+    externals: Vec<AsExternal>,
 }
 
 fn router_id(dev: &Dev) -> Option<Ipv4Addr> {
@@ -118,7 +160,7 @@ fn ospf_ifaces(dev: &Dev) -> Vec<OIface> {
 }
 
 /// The OSPF state of the router `d`, or `None` for a device with no OSPF.
-pub fn of(e: &Estate, d: usize) -> Option<Ospf> {
+pub fn of(e: &Estate, d: usize, redistributed: &Redistributed) -> Option<Ospf> {
     let mut rids: BTreeMap<usize, Ipv4Addr> = BTreeMap::new();
     let mut ifaces: BTreeMap<usize, Vec<OIface>> = BTreeMap::new();
     for (x, dev) in e.devs.iter().enumerate() {
@@ -231,6 +273,28 @@ pub fn of(e: &Estate, d: usize) -> Option<Ospf> {
         }
     }
     let in_area: BTreeSet<Ipv4Addr> = reach.iter().map(|x| rids[x]).collect();
+    let mut externals = Vec::new();
+    for x in &reach {
+        if e.devs[*x].role == Role::Inet {
+            externals.push(AsExternal {
+                adv: rids[x],
+                net: Ipv4Addr::UNSPECIFIED,
+                len: 0,
+                metric: 1,
+                tag: 1,
+            });
+        }
+        for (net, len) in redistributed.get(x).into_iter().flatten() {
+            externals.push(AsExternal {
+                adv: rids[x],
+                net: *net,
+                len: *len,
+                metric: BGP_METRIC,
+                tag: 0,
+            });
+        }
+    }
+    externals.sort_by_key(|x| (x.net, x.len, x.adv));
     let own = &ifaces[&d];
     let mut neighbors = Vec::new();
     for i in own.iter().filter(|i| !i.loopback && !i.passive) {
@@ -259,11 +323,7 @@ pub fn of(e: &Estate, d: usize) -> Option<Ospf> {
             .into_iter()
             .filter(|n| in_area.contains(&n.adv))
             .collect(),
-        externals: reach
-            .iter()
-            .filter(|x| e.devs[**x].role == Role::Inet)
-            .map(|x| rids[x])
-            .collect(),
+        externals,
     })
 }
 
@@ -296,12 +356,17 @@ fn nx_area(lsas: Vec<Value>) -> Value {
 
 /// The OSPF sections of an NX-OS switch. A switch with no OSPF, and each
 /// OSPFv3 section, has the answer of a feature that is not on.
-pub fn nxos(e: &Estate, d: usize, out: &mut BTreeMap<&'static str, String>) {
+pub fn nxos(
+    e: &Estate,
+    d: usize,
+    redistributed: &Redistributed,
+    out: &mut BTreeMap<&'static str, String>,
+) {
     let no = super::nxos::NO_FEATURE;
     for n in rsim_collect::ospf::V3 {
         out.insert(n, no.to_string());
     }
-    let Some(o) = of(e, d) else {
+    let Some(o) = of(e, d, redistributed) else {
         for n in rsim_collect::ospf::V2 {
             out.insert(n, no.to_string());
         }
@@ -385,10 +450,10 @@ pub fn nxos(e: &Estate, d: usize, out: &mut BTreeMap<&'static str, String>) {
     let ext: Vec<Value> = o
         .externals
         .iter()
-        .map(|adv| {
-            let mut m = nx_head(Ipv4Addr::UNSPECIFIED, *adv);
-            m.insert("netmask".into(), json!("0.0.0.0"));
-            m.insert("metric".into(), json!("1"));
+        .map(|x| {
+            let mut m = nx_head(x.net, x.adv);
+            m.insert("netmask".into(), json!(mask(x.len).to_string()));
+            m.insert("metric".into(), json!(x.metric.to_string()));
             m.insert("metrictype".into(), json!("2"));
             m.insert("fwdaddr".into(), json!("0.0.0.0"));
             Value::Object(m)
@@ -428,12 +493,13 @@ pub fn cisco(
     d: usize,
     stamp: &str,
     process: &str,
+    redistributed: &Redistributed,
     out: &mut BTreeMap<&'static str, String>,
 ) {
     for n in rsim_collect::ospf::V3 {
         out.insert(n, stamp.to_string());
     }
-    let Some(o) = of(e, d) else {
+    let Some(o) = of(e, d, redistributed) else {
         for n in rsim_collect::ospf::V2 {
             out.insert(n, stamp.to_string());
         }
@@ -539,17 +605,19 @@ pub fn cisco(
         "\n            OSPF Router with ID ({}) (Process ID {process})\n\n                Type-5 AS External Link States\n",
         o.rid
     );
-    for adv in &o.externals {
+    for x in &o.externals {
         lsa_head(
             &mut s,
             "AS External Link",
-            Ipv4Addr::UNSPECIFIED,
-            *adv,
+            x.net,
+            x.adv,
             " (External Network Number )",
         );
-        s.push_str(
-            "  Network Mask: /0\n        Metric Type: 2 (Larger than any link state path)\n        MTID: 0\n        \
-             Metric: 1\n        Forward Address: 0.0.0.0\n        External Route Tag: 1\n\n",
+        let _ = write!(
+            s,
+            "  Network Mask: /{}\n        Metric Type: 2 (Larger than any link state path)\n        MTID: 0\n        \
+             Metric: {}\n        Forward Address: 0.0.0.0\n        External Route Tag: {}\n\n",
+            x.len, x.metric, x.tag
         );
     }
     out.insert("ospf_lsdb_external", s);
@@ -622,14 +690,14 @@ fn database(o: &Ospf) -> rsim_routing::ospf::Database {
             },
         ));
     }
-    for r in &o.externals {
+    for x in &o.externals {
         db.insert(lsa(
             LsaType::External,
-            Ipv4Addr::UNSPECIFIED,
-            *r,
+            x.net,
+            x.adv,
             Body::External {
-                prefix: rsim_core::Prefix::new(std::net::IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
-                metric: 1,
+                prefix: rsim_core::Prefix::new(std::net::IpAddr::V4(x.net), x.len),
+                metric: x.metric,
                 metric_type: Some(2),
                 forwarding: None,
             },
@@ -641,10 +709,15 @@ fn database(o: &Ospf) -> rsim_routing::ospf::Database {
 /// The OSPF routes of the router `d` from the calculation of `rsim-routing`
 /// on its database, or `None` for a device with no OSPF. A route with no
 /// next hop or that depends on a gap is left out.
-pub fn routes(e: &Estate, d: usize, os: Os) -> Option<Vec<super::route::Route>> {
+pub fn routes(
+    e: &Estate,
+    d: usize,
+    os: Os,
+    redistributed: &Redistributed,
+) -> Option<Vec<super::route::Route>> {
     use rsim_routing::Platform;
-    use rsim_routing::ospf::{OspfProfile, compute};
-    let o = of(e, d)?;
+    use rsim_routing::ospf::{OspfProfile, PathType, compute};
+    let o = of(e, d, redistributed)?;
     let platform = match os {
         Os::Nxos => Platform::Nxos,
         Os::Iosxe => Platform::Iosxe,
@@ -675,6 +748,7 @@ pub fn routes(e: &Estate, d: usize, os: Os) -> Option<Vec<super::route::Route>> 
             vrf: "default".to_string(),
             prefix: (net, r.prefix.len()),
             kind: super::route::Kind::Ospf,
+            external: matches!(r.path_type, PathType::External1 | PathType::External2),
             metric: r.metric,
             paths,
         });

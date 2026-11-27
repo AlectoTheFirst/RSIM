@@ -448,6 +448,7 @@ fn each_category_is_counted_and_the_rate_holds_all_rows() {
             differ: 1,
             only_built: 1,
             only_collected: 1,
+            not_computed: 0,
         }
     );
     assert_eq!(counts.rate(), Some(25.0));
@@ -767,4 +768,213 @@ fn an_ospfv3_intra_area_prefix_lsa_compares_the_prefixes_with_their_metrics() {
         Some("prefixes 2001:db8:fe::/64 metric 10, 2001:db8:ff::1/128 metric 1")
     );
     assert_eq!(rows[0].collected_spans.len(), 2);
+}
+
+fn gap(lsa_type: LsaType, area: Option<&str>, router: &str, reach: GapReach) -> Gap {
+    Gap {
+        lsa_type,
+        lsid: ip(router),
+        area: area.map(ip),
+        detail: format!("the LSAs of {router} are left out"),
+        reach,
+    }
+}
+
+#[test]
+fn an_external_lsa_under_an_external_gap_of_its_router_is_not_computed_and_outside_the_rate() {
+    let p2p = vec![link(LinkKind::PointToPoint, R2, Some("192.0.2.1"), 1)];
+    let mut built = db(Version::V2, vec![router(A0, R1, p2p.clone(), 1)]);
+    built
+        .gaps
+        .push(gap(LsaType::External, None, R1, GapReach::External));
+    let collected = db(
+        Version::V2,
+        vec![
+            router(A0, R1, p2p, 1),
+            external(LsaType::External, None, "203.0.113.0/24", R1, 20, 2, None),
+            external(
+                LsaType::External,
+                None,
+                "198.51.100.128/25",
+                R2,
+                20,
+                2,
+                None,
+            ),
+        ],
+    );
+    let rows = compare_databases(&built, &collected);
+    assert_eq!(
+        categories(&rows),
+        vec![
+            (R1, Category::Match),
+            (
+                "198.51.100.128/25 from 198.51.100.2",
+                Category::OnlyCollected
+            ),
+            ("203.0.113.0/24 from 198.51.100.1", Category::NotComputed),
+        ]
+    );
+    assert_eq!(
+        rows[2].reason.as_deref(),
+        Some("the LSAs of 198.51.100.1 are left out")
+    );
+    assert_eq!(rows[1].reason, None);
+    let counts = Counts::of(&rows);
+    assert_eq!(
+        counts,
+        Counts {
+            matched: 1,
+            differ: 0,
+            only_built: 0,
+            only_collected: 1,
+            not_computed: 1,
+        }
+    );
+    assert_eq!(counts.rate(), Some(50.0));
+    assert_eq!(Category::NotComputed.name(), "not_computed");
+}
+
+#[test]
+fn a_prefix_gap_reaches_only_its_prefixes_and_a_built_lsa_under_a_gap_compares() {
+    let mut built = db(
+        Version::V2,
+        vec![external(
+            LsaType::External,
+            None,
+            "192.0.2.0/24",
+            R1,
+            20,
+            2,
+            None,
+        )],
+    );
+    built.gaps.push(gap(
+        LsaType::External,
+        None,
+        R1,
+        GapReach::Prefixes(vec![p("203.0.113.0/24"), p("192.0.2.0/24")]),
+    ));
+    let collected = db(
+        Version::V2,
+        vec![
+            external(LsaType::External, None, "192.0.2.0/24", R1, 30, 2, None),
+            external(LsaType::External, None, "203.0.113.0/24", R1, 20, 2, None),
+            external(LsaType::External, None, "198.51.100.0/24", R1, 20, 2, None),
+        ],
+    );
+    let rows = compare_databases(&built, &collected);
+    assert_eq!(
+        categories(&rows),
+        vec![
+            ("192.0.2.0/24 from 198.51.100.1", Category::Differ),
+            ("198.51.100.0/24 from 198.51.100.1", Category::OnlyCollected),
+            ("203.0.113.0/24 from 198.51.100.1", Category::NotComputed),
+        ]
+    );
+    assert_eq!(rows[0].reason, None);
+}
+
+#[test]
+fn a_gap_of_another_area_or_another_type_does_not_reach_an_lsa() {
+    let mut built = db(Version::V2, Vec::new());
+    built.gaps.push(gap(
+        LsaType::Summary,
+        Some("0.0.0.1"),
+        R1,
+        GapReach::InterArea,
+    ));
+    built
+        .gaps
+        .push(gap(LsaType::NssaExternal, Some(A0), R1, GapReach::External));
+    built
+        .gaps
+        .push(gap(LsaType::External, None, A0, GapReach::External));
+    let collected = db(
+        Version::V2,
+        vec![
+            lsa(
+                LsaType::Summary,
+                Some(A0),
+                "192.0.2.0",
+                R1,
+                Body::Summary {
+                    prefix: p("192.0.2.0/24"),
+                    metric: 10,
+                },
+                40,
+            ),
+            external(LsaType::External, None, "203.0.113.0/24", R1, 20, 2, None),
+        ],
+    );
+    let rows = compare_databases(&built, &collected);
+    assert!(
+        rows.iter().all(|r| r.category == Category::OnlyCollected),
+        "{:?}",
+        categories(&rows)
+    );
+}
+
+#[test]
+fn the_router_and_network_lsas_of_a_left_out_process_are_not_computed() {
+    let mut built = db(Version::V2, Vec::new());
+    built.gaps.push(gap(
+        LsaType::Router,
+        Some(A0),
+        R1,
+        GapReach::Prefixes(vec![p("192.0.2.0/24")]),
+    ));
+    let collected = db(
+        Version::V2,
+        vec![
+            router(
+                A0,
+                R1,
+                vec![link(LinkKind::Transit, "192.0.2.1", Some("192.0.2.1"), 10)],
+                1,
+            ),
+            network(A0, "192.0.2.1", R1, Some("255.255.255.0"), &[R1, R2]),
+            router(
+                A0,
+                R2,
+                vec![link(LinkKind::Transit, "192.0.2.1", Some("192.0.2.2"), 10)],
+                2,
+            ),
+        ],
+    );
+    let rows = compare_databases(&built, &collected);
+    assert_eq!(
+        categories(&rows),
+        vec![
+            (R1, Category::NotComputed),
+            (R2, Category::OnlyCollected),
+            ("192.0.2.0/24", Category::NotComputed),
+        ]
+    );
+}
+
+#[test]
+fn an_own_gap_of_the_built_database_makes_an_lsa_of_its_router_not_computed() {
+    let mut built = db(Version::V2, Vec::new());
+    built.router_id = Some(ip(R1));
+    built
+        .own_gaps
+        .push(gap(LsaType::External, None, R1, GapReach::External));
+    let collected = db(
+        Version::V2,
+        vec![external(
+            LsaType::External,
+            None,
+            "203.0.113.0/24",
+            R1,
+            20,
+            2,
+            None,
+        )],
+    );
+    let rows = compare_databases(&built, &collected);
+    assert_eq!(
+        categories(&rows),
+        vec![("203.0.113.0/24 from 198.51.100.1", Category::NotComputed)]
+    );
 }

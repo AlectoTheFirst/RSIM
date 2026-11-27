@@ -64,7 +64,11 @@ fn config(dev: &Dev) -> String {
         s.push_str("!\n");
     }
     if let Some(bgp) = &dev.bgp {
-        let _ = writeln!(s, "router ospf CORE\n router-id {}\n area 0", bgp.router_id);
+        let _ = writeln!(s, "router ospf CORE\n router-id {}", bgp.router_id);
+        if dev.ospf_redistribute_bgp {
+            let _ = writeln!(s, " redistribute bgp {}", bgp.asn);
+        }
+        s.push_str(" area 0\n");
         for i in dev.ifaces.iter().filter(|i| i.ospf) {
             let _ = writeln!(s, "  interface {}\n   cost {}", i.name, i.ospf_cost);
             if i.mode != Mode::Loopback {
@@ -225,6 +229,7 @@ fn route_lines(r: &Route) -> String {
         (Kind::Static, true) => "S*",
         (Kind::Static, false) => "S",
         (Kind::Ospf, true) => "O*E2",
+        (Kind::Ospf, false) if r.external => "O E2",
         (Kind::Ospf, false) => "O",
         (Kind::Ebgp | Kind::Ibgp, true) => "B*",
         (Kind::Ebgp | Kind::Ibgp, false) => "B",
@@ -368,7 +373,7 @@ pub fn render(e: &Estate, t: &Tables, d: usize) -> BTreeMap<&'static str, String
     out.insert("inventory", inventory(dev));
     out.insert("hsrp", TIME.to_string());
     out.insert("bgp_sessions", bgp_summary(dev));
-    super::ospf::cisco(e, d, TIME, "CORE", &mut out);
+    super::ospf::cisco(e, d, TIME, "CORE", &t.redistributed, &mut out);
     out
 }
 
@@ -385,6 +390,7 @@ mod tests {
             vrf: "default".to_string(),
             prefix: (Ipv4Addr::new(198, 51, 100, 0), 24),
             kind: Kind::Ospf,
+            external: false,
             metric: 20,
             paths: vec![Path {
                 next_hop: Some(Ipv4Addr::new(192, 0, 2, 1)),
@@ -394,5 +400,10 @@ mod tests {
         };
         let text = route_lines(&r);
         assert!(text.contains("[110/20] via 192.0.2.1"), "{text}");
+        let e2 = route_lines(&Route {
+            external: true,
+            ..r
+        });
+        assert!(e2.starts_with("O E2 198.51.100.0/24 [110/20]"), "{e2}");
     }
 }
