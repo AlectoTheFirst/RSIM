@@ -224,6 +224,17 @@ fn own_routes(e: &Estate, d: usize) -> Vec<Route> {
     out
 }
 
+/// The administrative distance of a kind of route.
+fn distance(k: Kind) -> u8 {
+    match k {
+        Kind::Connected | Kind::Local => 0,
+        Kind::Static => 1,
+        Kind::Ebgp => 20,
+        Kind::Ospf => 110,
+        Kind::Ibgp => 200,
+    }
+}
+
 /// The route tables of all devices.
 fn ribs(e: &Estate) -> Vec<Vec<Route>> {
     let edges = edges(e);
@@ -281,6 +292,26 @@ fn ribs(e: &Estate) -> Vec<Vec<Route>> {
                     .map(|p| p.1)
                     .collect(),
             });
+        }
+    }
+    // The OSPF routes of each OSPF router come from the calculation over its
+    // database. A route of another kind with a lower distance stays.
+    for (d, rib) in out.iter_mut().enumerate() {
+        let Some(computed) = super::ospf::routes(e, d, e.devs[d].os) else {
+            continue;
+        };
+        rib.retain(|r| !(r.vrf == "default" && r.kind == Kind::Ospf));
+        for c in computed {
+            let held = rib
+                .iter()
+                .filter(|r| r.vrf == "default" && r.prefix == c.prefix)
+                .map(|r| distance(r.kind))
+                .min();
+            if held.is_some_and(|h| h < distance(Kind::Ospf)) {
+                continue;
+            }
+            rib.retain(|r| !(r.vrf == "default" && r.prefix == c.prefix));
+            rib.push(c);
         }
     }
     for r in &mut out {

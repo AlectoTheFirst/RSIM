@@ -199,6 +199,28 @@ pub fn of(e: &Estate, d: usize) -> Option<Ospf> {
                 metric: 1,
             });
         }
+        // The other networks of the default VRF are stub links with the
+        // cost 1, so each OSPF router reaches the networks of the others.
+        let done: BTreeSet<(Ipv4Addr, u8)> = list
+            .iter()
+            .map(|i| (network(i.addr, i.len), i.len))
+            .collect();
+        for i in e.devs[*x]
+            .ifaces
+            .iter()
+            .filter(|i| i.vrf == "default" && i.mode != Mode::Mgmt)
+        {
+            for (a, l) in i.addr.iter().chain(i.secondary.iter()) {
+                let net = (network(*a, *l), *l);
+                if !done.contains(&net) {
+                    routers.entry(*x).or_default().push(Link::Stub {
+                        net: net.0,
+                        len: net.1,
+                        metric: 1,
+                    });
+                }
+            }
+        }
     }
     let mut reach = BTreeSet::from([d]);
     let mut queue = VecDeque::from([d]);
@@ -532,4 +554,131 @@ pub fn cisco(
         );
     }
     out.insert("ospf_lsdb_external", s);
+}
+
+/// The link-state database of a router for the OSPF calculation of
+/// `rsim-routing`, in area 0 of the default VRF.
+fn database(o: &Ospf) -> rsim_routing::ospf::Database {
+    use rsim_routing::ospf::{
+        BACKBONE, Body, Database, Interface, LinkKind, Lsa, LsaType, RouterLink, Version,
+    };
+    let span = rsim_core::SourceSpan::line("demo", 1);
+    let mut db = Database::new(Version::V2, "default", "1");
+    db.router_id = Some(o.rid);
+    for i in &o.ifaces {
+        db.interfaces.push(Interface {
+            name: i.name.clone(),
+            area: Some(BACKBONE),
+            address: Some((std::net::IpAddr::V4(i.addr), Some(i.len))),
+            interface_id: None,
+            cost: Some(i.cost),
+            span: span.clone(),
+        });
+    }
+    let lsa = |lsa_type, lsid, adv_router, body| Lsa {
+        lsa_type,
+        area: Some(BACKBONE),
+        lsid,
+        adv_router,
+        seq: Some(SEQ),
+        age: Some(AGE),
+        body,
+        span: span.clone(),
+    };
+    for (rid, links) in &o.routers {
+        let links = links
+            .iter()
+            .map(|l| {
+                let (kind, id, data, metric) = match l {
+                    Link::P2p { nbr, own, metric } => {
+                        (LinkKind::PointToPoint, *nbr, Some(*own), *metric)
+                    }
+                    Link::Transit { dr, own, metric } => {
+                        (LinkKind::Transit, *dr, Some(*own), *metric)
+                    }
+                    Link::Stub { net, len, metric } => {
+                        (LinkKind::Stub, *net, Some(mask(*len)), *metric)
+                    }
+                };
+                RouterLink {
+                    kind,
+                    id,
+                    data,
+                    metric,
+                    interface_id: None,
+                    neighbor_interface_id: None,
+                }
+            })
+            .collect();
+        db.insert(lsa(LsaType::Router, *rid, *rid, Body::Router { links }));
+    }
+    for n in &o.networks {
+        db.insert(lsa(
+            LsaType::Network,
+            n.dr,
+            n.adv,
+            Body::Network {
+                mask: Some(mask(n.len)),
+                attached: n.attached.clone(),
+            },
+        ));
+    }
+    for r in &o.externals {
+        db.insert(lsa(
+            LsaType::External,
+            Ipv4Addr::UNSPECIFIED,
+            *r,
+            Body::External {
+                prefix: rsim_core::Prefix::new(std::net::IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
+                metric: 1,
+                metric_type: Some(2),
+                forwarding: None,
+            },
+        ));
+    }
+    db
+}
+
+/// The OSPF routes of the router `d` from the calculation of `rsim-routing`
+/// on its database, or `None` for a device with no OSPF. A route with no
+/// next hop or that depends on a gap is left out.
+pub fn routes(e: &Estate, d: usize, os: Os) -> Option<Vec<super::route::Route>> {
+    use rsim_routing::Platform;
+    use rsim_routing::ospf::{OspfProfile, compute};
+    let o = of(e, d)?;
+    let platform = match os {
+        Os::Nxos => Platform::Nxos,
+        Os::Iosxe => Platform::Iosxe,
+        Os::Iosxr => Platform::Iosxr,
+    };
+    let calc = compute(&database(&o), o.rid, &OspfProfile::of(platform));
+    let mut out = Vec::new();
+    for r in calc.routes.iter().filter(|r| r.unknown.is_none()) {
+        let std::net::IpAddr::V4(net) = r.prefix.addr() else {
+            continue;
+        };
+        let paths: Vec<super::route::Path> = r
+            .next_hops
+            .iter()
+            .map(|h| super::route::Path {
+                next_hop: match h.gateway {
+                    std::net::IpAddr::V4(g) => Some(g),
+                    std::net::IpAddr::V6(_) => None,
+                },
+                iface: h.interface.clone(),
+                vxlan: None,
+            })
+            .collect();
+        if paths.is_empty() {
+            continue;
+        }
+        out.push(super::route::Route {
+            vrf: "default".to_string(),
+            prefix: (net, r.prefix.len()),
+            kind: super::route::Kind::Ospf,
+            metric: r.metric,
+            paths,
+        });
+    }
+    Some(out)
 }
