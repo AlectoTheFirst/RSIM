@@ -268,7 +268,15 @@ fn without_a_route_table_the_routing_protocols_are_unhandled() {
         &nxos::table(&RouteTables::uniform(false, nxos::dynamic_vrfs(&doc))),
     );
     let paths: Vec<&str> = cov.ranked().iter().map(|r| r.0).collect();
-    assert!(paths.contains(&"router ospf .."), "{paths:?}");
+    // The process lines that the OSPF reader reads are handled, and the
+    // other lines of the process are unhandled.
+    assert!(!paths.contains(&"router ospf .."), "{paths:?}");
+    assert!(
+        paths
+            .iter()
+            .any(|p| p.starts_with("router ospf */area 0.0.0.0 authentication")),
+        "{paths:?}"
+    );
     // The neighbour lines are handled, and the routing lines below them
     // are unhandled.
     assert!(!paths.contains(&"router bgp .."), "{paths:?}");

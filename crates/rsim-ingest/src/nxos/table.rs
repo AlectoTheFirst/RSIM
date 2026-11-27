@@ -191,6 +191,7 @@ const ENTRIES: &[Entry] = &[
     e("interface */no lldp ..", Irrelevant, Subtree),
     e("interface */logging ..", Irrelevant, Subtree),
     e("interface */load-interval ..", Irrelevant, Subtree),
+    e("interface */bandwidth *", Handled, Subtree),
     e("interface */bandwidth ..", Irrelevant, Subtree),
     e("interface */delay ..", Irrelevant, Subtree),
     e("interface */carrier-delay ..", Irrelevant, Subtree),
@@ -232,10 +233,11 @@ const PROCESSES: &[&str] = &[
     "router rip",
 ];
 
-/// The classification table, with the mask of the secrets. The routing
-/// lines of a VRF with collected route rows are known-irrelevant, because
-/// its routes come from the route table; the routing lines of a VRF
-/// without rows are unhandled. The route maps, the lists, the multicast
+/// The classification table, with the mask of the secrets. The BGP and
+/// OSPF lines that a reader reads are handled. The other routing lines of
+/// a VRF with collected route rows are known-irrelevant, because its routes
+/// come from the route table; the other routing lines of a VRF without rows
+/// are unhandled. The route maps, the lists, the multicast
 /// routing and the routing lines of an interface are known-irrelevant only
 /// if each VRF with a dynamic protocol has rows. IPv6 is known-irrelevant,
 /// because each IPv6 packet is unknown at the route lookup.
@@ -244,6 +246,7 @@ pub fn table(tables: &RouteTables) -> Table {
     let default = tables.routing(DEFAULT_VRF);
     let shared = tables.shared();
     super::bgp::push_entries(&mut t, tables);
+    super::ospf_config::push_entries(&mut t, tables);
     for p in PROCESSES {
         t.push_levels(&[&format!("{p} ..")], default, Subtree);
         tables.push_vrfs(&mut t, &[&format!("{p} .."), &format!("vrf {VRF}")]);

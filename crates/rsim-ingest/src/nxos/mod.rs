@@ -7,6 +7,7 @@ pub mod lower;
 mod mask;
 mod mcast;
 pub mod names;
+pub mod ospf_config;
 mod profile;
 pub mod state;
 mod table;
