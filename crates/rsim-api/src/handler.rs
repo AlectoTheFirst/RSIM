@@ -76,11 +76,11 @@ pub struct Settings {
 }
 
 /// The state of a server: the settings, the tools of the MCP transport
-/// with the twins that a request named, and the query texts above the
-/// inline limit. The REST routes and the MCP tools share the twins, and the
-/// twin `store` is the newest built snapshot of the store, with the twin of
-/// a newer snapshot built in the background. It
-/// keeps no answer.
+/// with the twins that a request named and the last 4 scenario twins, and
+/// the query texts above the inline limit. The REST routes and the MCP
+/// tools share the twins, and the twin `store` is the newest built snapshot
+/// of the store, with the twin of a newer snapshot built in the background.
+/// It keeps no answer.
 pub struct State {
     pub settings: Settings,
     mcp: rsim_mcp::tools::Tools,
@@ -314,8 +314,6 @@ impl State {
     }
 }
 
-/// The parameters of a request as a map; a name that is given twice keeps
-/// its last value.
 /// The parameter `min` of a claim, the minimum MTU.
 fn min_mtu(p: &BTreeMap<&str, &str>) -> Result<Option<u64>, Problem> {
     p.get("min")
@@ -326,6 +324,8 @@ fn min_mtu(p: &BTreeMap<&str, &str>) -> Result<Option<u64>, Problem> {
         .transpose()
 }
 
+/// The parameters of a request as a map; a name that is given twice keeps
+/// its last value.
 fn params(req: &Request) -> BTreeMap<&str, &str> {
     req.query
         .iter()
@@ -349,6 +349,7 @@ fn selection(req: &Request, reserved: &[&str]) -> Result<Selection, Problem> {
                 })?);
             }
             "cursor" => sel.cursor = Some(v.clone()),
+            "down" => {}
             k if reserved.contains(&k) => {}
             k if k.contains('.') => {
                 sel.typed.insert(k.to_string(), v.clone());
@@ -359,6 +360,31 @@ fn selection(req: &Request, reserved: &[&str]) -> Result<Selection, Problem> {
         }
     }
     Ok(sel)
+}
+
+/// The values of the parameter `down` of a request, in order.
+fn down(req: &Request) -> Vec<String> {
+    req.query
+        .iter()
+        .filter(|(k, _)| k == "down")
+        .map(|(_, v)| v.clone())
+        .collect()
+}
+
+/// The parameters `down` of a request as the query part of a URL, or an
+/// empty text with none.
+fn down_query(req: &Request) -> String {
+    down(req)
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            format!(
+                "{}down={}",
+                if i == 0 { '?' } else { '&' },
+                percent_encode(v)
+            )
+        })
+        .collect()
 }
 
 fn form(req: &Request) -> Result<Form, Problem> {
@@ -667,6 +693,14 @@ fn route(
         ["mcp"] => mcp(state, req),
         ["v1", "inventory", rest @ ..] => crate::inventory::route(state, req, rest, user),
         ["v1", "twins", twin, rest @ ..] => {
+            let down = down(req);
+            if !down.is_empty() && !crate::openapi::takes_layers(rest) {
+                return Err(problem(
+                    422,
+                    "invalid_query",
+                    format!("down is not a parameter of {}", req.path),
+                ));
+            }
             let t = match state.twin(twin)? {
                 Resolved::Twin(t) => t,
                 // A new query on the alias gets its resource on the snapshot
@@ -696,6 +730,13 @@ fn route(
                         body: Vec::new(),
                     });
                 }
+            };
+            let t = TwinRef {
+                loaded: state
+                    .mcp
+                    .scenario(t.loaded, &down)
+                    .map_err(from_query_error)?,
+                topology: t.topology,
             };
             // The ETag of a request with `against` holds the compared twin.
             // A request whose `against` names no held twin gets no ETag.
@@ -919,7 +960,11 @@ fn twin_route(
             }
             let text = Value::Object(m).to_string();
             let q = state.remember(&text);
-            let location = format!("/v1/twins/{id}/queries/{q}");
+            let location = format!(
+                "/v1/twins/{}/queries/{q}{}",
+                l.identity.base,
+                down_query(req)
+            );
             let body =
                 json!({"rsim_json": VERSION, "kind": "query_ref", "qid": q, "href": location});
             let mut r = json_response(&body);

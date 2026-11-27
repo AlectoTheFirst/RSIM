@@ -6,7 +6,7 @@ paths:
 
 # `rsim-contract` and `rsim-cli`
 
-`rsim-contract` has no engine dependency. It holds the JSON output types, the query echo and error types, the typed arguments of the operations, the brief forms `summary` and `steps`, and the registry of operations in `registry.rs`; `rsim-mcp` makes its tools and their schemas from the registry. `rsim-cli` converts the engine values with the trait `json::FromEngine`.
+`rsim-contract` has no engine dependency. It holds the JSON output types, the query echo and error types, the typed arguments of the operations, the brief forms `summary` and `steps`, and the registry of operations in `registry.rs`; `rsim-mcp` makes its tools and their schemas from the registry. An operation with `layers` adds the field `down` of `args::LayerArgs` to the input schema of its tool. The tools `path_query`, `set_query`, `explain_step`, `table_query` and `run_claim` have `layers`. `rsim-cli` converts the engine values with the trait `json::FromEngine`.
 
 `rsim-contract/src/table.rs` holds the table catalog, the selection parameters and the output types of a table request. `rsim-cli/src/frame.rs` holds the rows of a table as columns: each column is an Arrow dictionary array, one `u32` key for each row over the distinct values, and the rows are in key order. The selection works on the columns: a filter is evaluated once for each distinct value, a scan runs in chunks on `rayon`, a sort orders row numbers by the ranks of the distinct values with the row number as the last key, a page with no sort stops its scan at the end of the page, and JSON is made only for the rows of the answer; `crates/rsim-cli/src/frame/tests.rs` compares it with a selection on rows of JSON values.
 

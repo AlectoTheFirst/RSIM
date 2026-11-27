@@ -4188,6 +4188,8 @@ export interface operations {
                 device?: string;
                 /** @description Minimum MTU */
                 min?: string;
+                /** @description Links down, each as <device>:<interface> */
+                down?: string[];
             };
             header?: never;
             path: {
@@ -4227,6 +4229,8 @@ export interface operations {
                 device?: string;
                 /** @description Minimum MTU */
                 min?: string;
+                /** @description Links down, each as <device>:<interface> */
+                down?: string[];
             };
             header?: never;
             path: {
@@ -4295,7 +4299,10 @@ export interface operations {
     };
     createQuery: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Links down, each as <device>:<interface> */
+                down?: string[];
+            };
             header?: never;
             path: {
                 twin: string;
@@ -4333,6 +4340,8 @@ export interface operations {
             query?: {
                 /** @description Answer form */
                 form?: string;
+                /** @description Links down, each as <device>:<interface> */
+                down?: string[];
             };
             header?: never;
             path: {
@@ -4370,6 +4379,8 @@ export interface operations {
                 reply_of?: string;
                 /** @description Source lines */
                 source_lines?: string;
+                /** @description Links down, each as <device>:<interface> */
+                down?: string[];
             };
             header?: never;
             path: {
@@ -4407,6 +4418,8 @@ export interface operations {
             query?: {
                 /** @description Minimum MTU */
                 min?: string;
+                /** @description Links down, each as <device>:<interface> */
+                down?: string[];
             };
             header?: never;
             path: {
@@ -4443,6 +4456,8 @@ export interface operations {
             query?: {
                 /** @description Compared twin */
                 against?: string;
+                /** @description Links down, each as <device>:<interface> */
+                down?: string[];
             };
             header?: never;
             path: {
@@ -4478,6 +4493,8 @@ export interface operations {
             query?: {
                 /** @description Format */
                 format?: string;
+                /** @description Links down, each as <device>:<interface> */
+                down?: string[];
             };
             header?: never;
             path: {
@@ -4555,6 +4572,8 @@ export interface operations {
                 limit?: string;
                 /** @description Cursor */
                 cursor?: string;
+                /** @description Links down, each as <device>:<interface> */
+                down?: string[];
             };
             header?: never;
             path: {
@@ -4594,6 +4613,8 @@ export interface operations {
                 columns?: string;
                 /** @description Sort order */
                 sort?: string;
+                /** @description Links down, each as <device>:<interface> */
+                down?: string[];
             };
             header?: never;
             path: {
@@ -4632,6 +4653,8 @@ export interface operations {
                 address?: string;
                 /** @description Prefix column */
                 column?: string;
+                /** @description Links down, each as <device>:<interface> */
+                down?: string[];
             };
             header?: never;
             path: {
@@ -4673,6 +4696,8 @@ export interface operations {
                 limit?: string;
                 /** @description Cursor */
                 cursor?: string;
+                /** @description Links down, each as <device>:<interface> */
+                down?: string[];
             };
             header?: never;
             path: {
@@ -4705,7 +4730,10 @@ export interface operations {
     };
     summarizeTable: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Links down, each as <device>:<interface> */
+                down?: string[];
+            };
             header?: never;
             path: {
                 twin: string;
@@ -4744,6 +4772,8 @@ export interface operations {
                 count?: string;
                 /** @description Ascending */
                 ascending?: string;
+                /** @description Links down, each as <device>:<interface> */
+                down?: string[];
             };
             header?: never;
             path: {
@@ -4779,6 +4809,8 @@ export interface operations {
             query?: {
                 /** @description Columns */
                 columns?: string;
+                /** @description Links down, each as <device>:<interface> */
+                down?: string[];
             };
             header?: never;
             path: {

@@ -4,7 +4,8 @@
 use serde_json::{Value, json};
 
 use crate::args::{
-    PathQueryArgs, SetQueryArgs, StepArgs, TableQueryArgs, TopologyArgs, TopologyViewArgs,
+    LayerArgs, PathQueryArgs, SetQueryArgs, StepArgs, TableQueryArgs, TopologyArgs,
+    TopologyViewArgs,
 };
 use crate::claim::{ClaimArgs, ClaimOut, ClaimsOut};
 use crate::json::{
@@ -46,6 +47,8 @@ pub struct Operation {
     pub http: Option<(Method, &'static str)>,
     /// The schema of the arguments, if the operation takes arguments.
     pub input: Option<fn() -> Value>,
+    /// True if the tool takes the layers of [`LayerArgs`] on a store twin.
+    pub layers: bool,
     /// The schemas of the success outputs.
     pub outputs: &'static [fn() -> Value],
 }
@@ -60,6 +63,7 @@ pub const OPERATIONS: &[Operation] = &[
         command: None,
         http: Some((Method::Get, "/v1/twins")),
         input: None,
+        layers: false,
         outputs: &[schema::<TopologiesOut>],
     },
     Operation {
@@ -70,6 +74,7 @@ pub const OPERATIONS: &[Operation] = &[
         command: Some("devices"),
         http: Some((Method::Get, "/v1/twins/{twin}/tables/devices/rows")),
         input: Some(schema::<TopologyArgs>),
+        layers: false,
         outputs: &[schema::<DevicesOut>],
     },
     Operation {
@@ -80,6 +85,7 @@ pub const OPERATIONS: &[Operation] = &[
         command: Some("path"),
         http: Some((Method::Post, "/v1/twins/{twin}/queries")),
         input: Some(schema::<PathQueryArgs>),
+        layers: true,
         outputs: &[schema::<PathBriefOut>, schema::<PathAnswerOut>],
     },
     Operation {
@@ -90,6 +96,7 @@ pub const OPERATIONS: &[Operation] = &[
         command: Some("set"),
         http: Some((Method::Post, "/v1/twins/{twin}/queries")),
         input: Some(schema::<SetQueryArgs>),
+        layers: true,
         outputs: &[schema::<SetBriefOut>, schema::<SetAnswerOut>],
     },
     Operation {
@@ -103,6 +110,7 @@ pub const OPERATIONS: &[Operation] = &[
             "/v1/twins/{twin}/queries/{qid}/branches/{b}/steps/{s}",
         )),
         input: Some(schema::<StepArgs>),
+        layers: true,
         outputs: &[schema::<StepOut>],
     },
     Operation {
@@ -113,6 +121,7 @@ pub const OPERATIONS: &[Operation] = &[
         command: Some("tables"),
         http: Some((Method::Get, "/v1/tables")),
         input: Some(empty),
+        layers: false,
         outputs: &[schema::<TablesOut>],
     },
     Operation {
@@ -123,6 +132,7 @@ pub const OPERATIONS: &[Operation] = &[
         command: Some("<twin> <table>"),
         http: Some((Method::Get, "/v1/twins/{twin}/tables/{table}/rows")),
         input: Some(schema::<TableQueryArgs>),
+        layers: true,
         outputs: &[
             schema::<TableOut>,
             schema::<UniqueOut>,
@@ -137,6 +147,7 @@ pub const OPERATIONS: &[Operation] = &[
         command: Some("<twin> claim list"),
         http: Some((Method::Get, "/v1/claims")),
         input: Some(empty),
+        layers: false,
         outputs: &[schema::<ClaimsOut>],
     },
     Operation {
@@ -147,6 +158,7 @@ pub const OPERATIONS: &[Operation] = &[
         command: Some("<twin> claim run"),
         http: Some((Method::Get, "/v1/twins/{twin}/claims/{claim}")),
         input: Some(schema::<ClaimArgs>),
+        layers: true,
         outputs: &[schema::<ClaimOut>],
     },
     Operation {
@@ -157,6 +169,7 @@ pub const OPERATIONS: &[Operation] = &[
         command: Some("<twin> topology"),
         http: Some((Method::Get, "/v1/twins/{twin}/topology")),
         input: Some(schema::<TopologyViewArgs>),
+        layers: false,
         outputs: &[schema::<TopologyOut>],
     },
 ];
@@ -171,10 +184,19 @@ pub fn by_tool(tool: &str) -> Option<&'static Operation> {
     OPERATIONS.iter().find(|o| o.tool == Some(tool))
 }
 
-/// The input schema of a tool: the schema of its arguments, with the
-/// topology names as an enumeration and no other field.
+/// The input schema of a tool: the schema of its arguments and, with
+/// `layers`, the fields of [`LayerArgs`], with the topology names as an
+/// enumeration and no other field.
 pub fn tool_input(op: &Operation, topologies: &[&str]) -> Value {
     let mut s = op.input.map_or_else(|| json!({"type": "object"}), |f| f());
+    if op.layers
+        && let (Some(Value::Object(props)), Value::Object(extra)) = (
+            s.get_mut("properties"),
+            schema::<LayerArgs>()["properties"].take(),
+        )
+    {
+        props.extend(extra);
+    }
     if let Some(t) = s.pointer_mut("/properties/topology") {
         t["enum"] = json!(topologies);
     }

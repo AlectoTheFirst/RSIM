@@ -1,6 +1,6 @@
 //! The tools of the server: their definitions and their calls.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use rsim_cli::commands::Loaded;
@@ -10,7 +10,7 @@ use rsim_contract::args::Form;
 use rsim_contract::args::{TableQueryArgs, TableVerb};
 use rsim_contract::claim::ClaimArgs;
 use rsim_contract::registry;
-use rsim_contract::twin::snapshot_name;
+use rsim_contract::twin::{TwinJson, snapshot_name};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
@@ -62,18 +62,100 @@ impl<T> Cache<T> {
     }
 }
 
-/// Runs tools. It keeps the twin of each topology that a call named, and no
-/// answer. With a store, the topology `store` is the newest snapshot of the
+/// The number of scenario twins that the tools hold.
+pub const SCENARIOS: usize = 4;
+
+/// A cache of the values of the last `cap` keys that a call named. The
+/// build of a value holds only the slot of its key, and the calls for one
+/// key build its value once. A failed build is not kept.
+pub struct Recent<T> {
+    cap: usize,
+    /// The keys with their slots, the key of the newest call last.
+    slots: Mutex<VecDeque<(String, Slot<T>)>>,
+}
+
+impl<T> Recent<T> {
+    pub fn new(cap: usize) -> Self {
+        Recent {
+            cap,
+            slots: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, VecDeque<(String, Slot<T>)>> {
+        self.slots.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// The value of `key`, built with `load` if the cache has none. The key
+    /// becomes the newest key. After a build, the cache releases the oldest
+    /// keys above `cap`.
+    pub fn get_or_load<E>(
+        &self,
+        key: &str,
+        load: impl FnOnce() -> Result<T, E>,
+    ) -> Result<Arc<T>, E> {
+        let slot = {
+            let mut slots = self.lock();
+            let slot = match slots.iter().position(|(k, _)| k == key) {
+                Some(i) => slots.remove(i).map(|(_, s)| s).unwrap_or_default(),
+                None => Slot::default(),
+            };
+            slots.push_back((key.to_string(), Arc::clone(&slot)));
+            slot
+        };
+        let mut value = slot.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(v) = &*value {
+            return Ok(Arc::clone(v));
+        }
+        match load() {
+            Ok(v) => {
+                let v = Arc::new(v);
+                *value = Some(Arc::clone(&v));
+                drop(value);
+                let mut slots = self.lock();
+                let excess = slots.len().saturating_sub(self.cap);
+                slots.drain(..excess);
+                Ok(v)
+            }
+            Err(e) => {
+                drop(value);
+                self.lock().retain(|(_, s)| !Arc::ptr_eq(s, &slot));
+                Err(e)
+            }
+        }
+    }
+
+    /// The keys in the order of their last call, the newest last.
+    pub fn keys(&self) -> Vec<String> {
+        self.lock().iter().map(|(k, _)| k.clone()).collect()
+    }
+}
+
+/// Runs tools. It keeps the twin of each topology that a call named, the
+/// last [`SCENARIOS`] scenario twins by twin ID, and no answer. With a store, the topology `store` is the newest snapshot of the
 /// store when the first call names it; with `reload_store`, it is the newest
 /// built snapshot, and a newer snapshot builds in the background. The
 /// clones of one `Tools` share its cache of twins.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Tools {
     twins: Arc<Cache<Loaded>>,
+    scenarios: Arc<Recent<Loaded>>,
     store: Option<String>,
     reload: Option<Arc<Reload<Loaded>>>,
     /// The cycle of `HEAD` of the last read and the time of its snapshot.
     head: Arc<Mutex<Option<(u64, u64)>>>,
+}
+
+impl Default for Tools {
+    fn default() -> Self {
+        Tools {
+            twins: Arc::default(),
+            scenarios: Arc::new(Recent::new(SCENARIOS)),
+            store: None,
+            reload: None,
+            head: Arc::default(),
+        }
+    }
 }
 
 /// The build of the value of a version, with the text of its error.
@@ -305,10 +387,8 @@ impl Tools {
     /// Tools with the topology `store` for the store in a data folder.
     pub fn with_store(folder: String) -> Tools {
         Tools {
-            twins: Arc::default(),
             store: Some(folder),
-            reload: None,
-            head: Arc::default(),
+            ..Tools::default()
         }
     }
 
@@ -412,6 +492,41 @@ impl Tools {
         self.twins.get_or_load(topology, || commands::load(&source))
     }
 
+    /// The scenario twin of the snapshot of the store twin `base` with a
+    /// link-down layer for each `<device>:<interface>` of `down`, in order.
+    /// With no layer, it is `base`. The tools hold the last [`SCENARIOS`]
+    /// scenario twins by twin ID.
+    pub fn scenario(&self, base: Arc<Loaded>, down: &[String]) -> Result<Arc<Loaded>, QueryError> {
+        if down.is_empty() {
+            return Ok(base);
+        }
+        let layers = commands::layers(down)?;
+        let (Some(folder), Some(source)) = (&self.store, &base.source) else {
+            return Err(QueryError::new(
+                rsim_cli::ErrorCode::InvalidQuery,
+                format!(
+                    "{} is not a store twin, and a link-down layer needs a store twin",
+                    base.identity.id
+                ),
+            ));
+        };
+        let texts: Vec<String> = layers.iter().map(|l| l.text()).collect();
+        let manifest = &source.snapshot.manifest;
+        let id = TwinJson::scenario(manifest.time, texts.clone()).id;
+        let load = || commands::load_store_at(folder, Some(manifest.cycle), &layers);
+        let twin = self.scenarios.get_or_load(&id, load)?;
+        if twin.identity.layers == texts {
+            return Ok(twin);
+        }
+        // Another list of layers with the same twin ID is held.
+        load().map(Arc::new)
+    }
+
+    /// The twin of a topology name with the layers of `down`.
+    fn twin_with(&self, topology: &str, down: &[String]) -> Result<Arc<Loaded>, QueryError> {
+        self.scenario(self.twin(topology)?, down)
+    }
+
     /// The state of the store of the tools that follow its newest snapshot,
     /// after a call for the store when a twin is held, so a newer snapshot
     /// starts its build. `None` with no such store.
@@ -454,13 +569,22 @@ impl Tools {
 
     /// Calls the tool `name`. `None` is a name that is not a tool.
     pub fn call(&self, name: &str, arguments: &Map<String, Value>) -> Option<Output> {
+        let mut arguments = arguments.clone();
+        let down = match registry::by_tool(name) {
+            Some(op) if op.layers => match take_down(&mut arguments) {
+                Ok(d) => d,
+                Err(e) => return Some(error(e)),
+            },
+            _ => Vec::new(),
+        };
+        let (arguments, down) = (&arguments, down.as_slice());
         let r = match name {
             "list_devices" => args::topology(arguments)
                 .and_then(|t| self.twin(&t).map(|twin| commands::devices(&t, &twin)))
                 .map(|o| text(&o)),
             "path_query" => args::form(arguments).and_then(|form| {
                 args::query(arguments, &["form"]).and_then(|q| {
-                    let t = self.twin(&q.topology)?;
+                    let t = self.twin_with(&q.topology, down)?;
                     match form {
                         Form::Full => commands::path(&q, &t).map(|o| text(&o)),
                         f => commands::path_brief(&q, &t, f).map(|o| text(&o)),
@@ -469,7 +593,7 @@ impl Tools {
             }),
             "set_query" => args::form(arguments).and_then(|form| {
                 args::set_query(arguments, &["form"]).and_then(|q| {
-                    let t = self.twin(&q.topology)?;
+                    let t = self.twin_with(&q.topology, down)?;
                     match form {
                         Form::Full => commands::set(&q, &t).map(|o| text(&o)),
                         f => commands::set_brief(&q, &t, f).map(|o| text(&o)),
@@ -485,11 +609,11 @@ impl Tools {
                 };
                 match args::mode(arguments) {
                     Ok(false) => args::step(arguments).and_then(|(q, at)| {
-                        let t = self.twin(&q.topology)?;
+                        let t = self.twin_with(&q.topology, down)?;
                         commands::explain(&q, at, &t).map(|o| with_lines(o, &t))
                     }),
                     Ok(true) => args::set_step(arguments).and_then(|(q, at)| {
-                        let t = self.twin(&q.topology)?;
+                        let t = self.twin_with(&q.topology, down)?;
                         commands::explain_set(&q, at, &t).map(|o| with_lines(o, &t))
                     }),
                     Err(e) => Err(e),
@@ -510,7 +634,7 @@ impl Tools {
                 .map_err(|e| QueryError::new(rsim_cli::ErrorCode::InvalidQuery, e.to_string()))
                 .and_then(|a| {
                     let t = a.topology.clone();
-                    let twin = self.twin(&t)?;
+                    let twin = self.twin_with(&t, down)?;
                     rsim_cli::claims::run(&t, &twin, &a).map(|o| text(&o))
                 }),
             "table_query" => {
@@ -518,7 +642,7 @@ impl Tools {
                     .map_err(|e| QueryError::new(rsim_cli::ErrorCode::InvalidQuery, e.to_string()))
                     .and_then(|a| {
                         let t = a.topology.clone();
-                        let twin = self.twin(&t)?;
+                        let twin = self.twin_with(&t, down)?;
                         let s = &a.selection;
                         let name = a.table.as_str();
                         match a.verb.unwrap_or_default() {
@@ -560,11 +684,38 @@ impl Tools {
                 json,
                 is_error: false,
             },
-            Err(e) => Output {
-                json: text(&ErrorOut::new(e)),
-                is_error: true,
-            },
+            Err(e) => error(e),
         })
+    }
+}
+
+/// The output of an error.
+fn error(e: QueryError) -> Output {
+    Output {
+        json: text(&ErrorOut::new(e)),
+        is_error: true,
+    }
+}
+
+/// Takes the argument `down` out of the arguments: a list of
+/// `<device>:<interface>`, or none.
+fn take_down(arguments: &mut Map<String, Value>) -> Result<Vec<String>, QueryError> {
+    let invalid = || {
+        QueryError::new(
+            rsim_cli::ErrorCode::InvalidQuery,
+            "down is not a list of <device>:<interface>".to_string(),
+        )
+    };
+    match arguments.remove("down") {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(items)) => items
+            .into_iter()
+            .map(|v| match v {
+                Value::String(s) => Ok(s),
+                _ => Err(invalid()),
+            })
+            .collect(),
+        Some(_) => Err(invalid()),
     }
 }
 
@@ -593,7 +744,7 @@ pub fn definitions(names: &[&str]) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cache, Load, Reload};
+    use super::{Cache, Load, Recent, Reload};
     use std::sync::atomic::Ordering::SeqCst;
     use std::sync::atomic::{AtomicU64, AtomicUsize};
     use std::sync::mpsc::channel;
@@ -820,6 +971,22 @@ mod tests {
             Err("the store has no snapshot".to_string())
         );
         assert_eq!(s.builds(), 0);
+    }
+
+    #[test]
+    fn the_recent_cache_holds_the_last_keys_and_no_failed_build() {
+        let c: Recent<u32> = Recent::new(2);
+        let ok = |v: u32| move || Ok::<_, &str>(v);
+        assert_eq!(c.get_or_load("a", ok(1)).map(|v| *v), Ok(1));
+        assert_eq!(c.get_or_load("b", ok(2)).map(|v| *v), Ok(2));
+        assert_eq!(c.get_or_load("a", ok(9)).map(|v| *v), Ok(1));
+        assert_eq!(c.get_or_load("c", ok(3)).map(|v| *v), Ok(3));
+        assert_eq!(c.keys(), ["a", "c"]);
+        assert_eq!(c.get_or_load("b", ok(4)).map(|v| *v), Ok(4));
+        assert_eq!(c.keys(), ["c", "b"]);
+        assert_eq!(c.get_or_load("d", || Err::<u32, _>("no")), Err("no"));
+        assert_eq!(c.keys(), ["c", "b"]);
+        assert_eq!(c.get_or_load("c", ok(8)).map(|v| *v), Ok(3));
     }
 
     #[test]

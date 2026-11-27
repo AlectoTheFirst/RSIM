@@ -303,6 +303,14 @@ pub struct TableQueryArgs {
     pub address: Option<String>,
 }
 
+/// The layers of a scenario on a store twin
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LayerArgs {
+    /// Links down, each as <device>:<interface>
+    pub down: Option<Vec<String>>,
+}
+
 /// Topology view
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

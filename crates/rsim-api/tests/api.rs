@@ -1532,3 +1532,147 @@ fn a_new_data_folder_has_no_snapshot_and_a_folder_with_no_keys_has_a_reload_erro
         "{store}"
     );
 }
+
+/// The devices of the steps of the one branch of a full path answer, each
+/// once in order.
+fn path_devices(v: &Value) -> Vec<String> {
+    let branches = v["answer"]["branches"].as_array().unwrap();
+    assert_eq!(branches.len(), 1, "{v:#}");
+    let mut out: Vec<String> = Vec::new();
+    for s in branches[0]["steps"].as_array().unwrap() {
+        let d = s["function"].as_str().unwrap().split('/').next().unwrap();
+        if out.last().map(String::as_str) != Some(d) {
+            out.push(d.to_string());
+        }
+    }
+    out
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)]
+fn the_parameter_down_gives_the_scenario_answer_and_its_layers() {
+    const LAYER: &str = "layer 1: link-down r1:Ethernet1/1";
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-api-scenario");
+    let _ = std::fs::remove_dir_all(&dir);
+    fixture_store::write_triangle(&dir);
+    let s = state(Some(dir.display().to_string()));
+    let body = json!({
+        "ingress": "r1/Ethernet1/3",
+        "source.ip": "203.0.113.10",
+        "destination.ip": "203.0.113.74",
+        "network.transport": "tcp",
+        "source.port": 40000,
+        "destination.port": 22,
+        "reply": false
+    });
+    let r = post(&s, "/v1/twins/store/queries", &body);
+    assert_eq!(r.status, 303, "{}", String::from_utf8_lossy(&r.body));
+    let base_at = r.header("location").unwrap().to_string();
+    let snapshot = base_at.split('/').nth(3).unwrap().to_string();
+    let base = get(&s, &format!("{base_at}?form=full"));
+    assert_eq!(base.status, 200);
+    let v = json(&base);
+    assert_eq!(v["twin"]["layers"], json!([]));
+    assert_eq!(path_devices(&v), ["r1", "r2"]);
+
+    let r = post(&s, "/v1/twins/store/queries?down=r1:Ethernet1/1", &body);
+    assert_eq!(r.status, 303, "{}", String::from_utf8_lossy(&r.body));
+    let location = r.header("location").unwrap().to_string();
+    assert_eq!(location, format!("{base_at}?down=r1%3AEthernet1%2F1"));
+    let at = format!("{base_at}?down=r1:Ethernet1/1");
+    let scenario = get(&s, &format!("{at}&form=full"));
+    assert_eq!(
+        scenario.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&scenario.body)
+    );
+    let v = json(&scenario);
+    assert_eq!(v["twin"]["layers"], json!(["link-down r1:Ethernet1/1"]));
+    assert_eq!(v["twin"]["base"], snapshot.as_str());
+    let id = v["twin"]["id"].as_str().unwrap();
+    assert!(id.starts_with(&format!("{snapshot}~~")), "{id}");
+    assert_eq!(path_devices(&v), ["r1", "r3", "r2"]);
+    assert!(v.to_string().contains(LAYER), "{v:#}");
+    assert_ne!(scenario.header("etag"), base.header("etag"));
+    // The scenario gives the same bytes again, and its ETag gives 304.
+    assert_eq!(get(&s, &format!("{at}&form=full")).body, scenario.body);
+    let mut r = req("GET", &format!("{at}&form=full"));
+    r.headers.insert(
+        "if-none-match".into(),
+        scenario.header("etag").unwrap().to_string(),
+    );
+    assert_eq!(handle(&s, &r).status, 304);
+    let mut r = req("GET", &format!("{base_at}?form=full"));
+    r.headers.insert(
+        "if-none-match".into(),
+        scenario.header("etag").unwrap().to_string(),
+    );
+    assert_eq!(handle(&s, &r).status, 200);
+
+    let rows = json(&get(
+        &s,
+        &format!("/v1/twins/{snapshot}/tables/fib/rows?device=r1&down=r1:Ethernet1/1"),
+    ));
+    assert_eq!(rows["twin"]["layers"], json!(["link-down r1:Ethernet1/1"]));
+    let columns = rows["columns"].as_array().unwrap();
+    let col = columns.iter().position(|c| c == "prefix").unwrap();
+    let lan: Vec<String> = rows["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r[col] == "203.0.113.64/26")
+        .map(Value::to_string)
+        .collect();
+    assert_eq!(lan.len(), 1, "{rows:#}");
+    assert!(lan[0].contains("198.51.100.6@Ethernet1/2"), "{}", lan[0]);
+    assert!(lan[0].contains(LAYER), "{}", lan[0]);
+
+    let claim = get(
+        &s,
+        &format!("{base_at}/claims/no-unknown?down=r1:Ethernet1/1"),
+    );
+    assert_eq!(
+        claim.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&claim.body)
+    );
+    assert_eq!(
+        json(&claim)["twin"]["layers"],
+        json!(["link-down r1:Ethernet1/1"])
+    );
+
+    // The base answer against the scenario.
+    let d = get(
+        &s,
+        &format!("{base_at}/diff?against={snapshot}&down=r1:Ethernet1/1"),
+    );
+    assert_eq!(d.status, 200, "{}", String::from_utf8_lossy(&d.body));
+
+    for (path, code) in [
+        (
+            "/v1/twins/builtin.ecmp/tables/devices/rows?down=r1:eth1".to_string(),
+            "invalid_query",
+        ),
+        (
+            format!("/v1/twins/{snapshot}/coverage?down=r1:Ethernet1/1"),
+            "invalid_query",
+        ),
+        (
+            format!("/v1/twins/{snapshot}/tables/devices/rows?down=r1:Ethernet1/9"),
+            "invalid_query",
+        ),
+        (
+            format!("/v1/twins/{snapshot}/tables/devices/rows?down=r1"),
+            "invalid_query",
+        ),
+    ] {
+        let r = get(&s, &path);
+        assert_eq!(
+            (r.status, json(&r)["code"].as_str()),
+            (422, Some(code)),
+            "{path}"
+        );
+    }
+}
