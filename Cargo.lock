@@ -2922,6 +2922,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rsim-routing"
+version = "0.1.0"
+dependencies = [
+ "rsim-core",
+]
+
+[[package]]
 name = "rsim-store"
 version = "0.1.0"
 dependencies = [
