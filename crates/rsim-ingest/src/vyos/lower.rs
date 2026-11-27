@@ -976,12 +976,35 @@ impl L<'_> {
             route: r.clone(),
         }));
         let computed = install(cands);
+        // The interfaces whose address the device gets at run time by PPPoE
+        // or DHCP. A collected route of such an interface that the config
+        // does not give is an access default or the address of the PPP peer,
+        // and the calculation takes it from the collected table.
+        let access: BTreeSet<&str> = self
+            .cfg
+            .interfaces
+            .iter()
+            .filter(|i| i.dynamic.iter().any(|d| d == "pppoe" || d == "dhcp"))
+            .map(|i| i.name.as_str())
+            .collect();
         let mut routes = BTreeMap::new();
         for r in col.routes.iter().filter(|r| r.selected && r.vrf == VRF) {
             let Ok(p) = r.prefix.parse::<Prefix>() else {
                 continue;
             };
-            routes.entry(p).or_insert_with(|| guard_route(&r.protocol));
+            let seeded = r.interface.as_deref().is_some_and(|i| access.contains(i))
+                && computed.get(&p).is_none()
+                && r.protocol != "kernel";
+            routes.entry(p).or_insert_with(|| {
+                if seeded {
+                    rsim_guard::CollectedRoute {
+                        protocol: r.protocol.clone(),
+                        class: rsim_guard::Class::Seeded,
+                    }
+                } else {
+                    guard_route(&r.protocol)
+                }
+            });
         }
         let rows = rsim_guard::compare(VRF, &computed, t, &routes);
         rsim_guard::mark(t, &rows);

@@ -97,10 +97,23 @@ pub struct Row {
     pub spans: Vec<SourceSpan>,
 }
 
+/// True for a prefix in the loopback range or the link-local range, whose
+/// routes do not forward to another device.
+fn host_scope(p: &Prefix) -> bool {
+    let inside = |range: &str| {
+        let r: Prefix = range.parse().expect("a valid prefix");
+        p.len() >= r.len() && r.contains(p.addr())
+    };
+    ["127.0.0.0/8", "::1/128", "169.254.0.0/16", "fe80::/10"]
+        .into_iter()
+        .any(inside)
+}
+
 /// The rows of one device and VRF in prefix order. `collected` is the
 /// route table of the collected rows, and `routes` holds the collected
 /// route of each prefix of the rows. A prefix of `collected` that `routes`
-/// does not hold, for example a local route of the config, is left out.
+/// does not hold, for example a local route of the config, is left out, and
+/// so is a loopback or link-local prefix.
 pub fn compare(
     vrf: &str,
     computed: &Fib,
@@ -112,6 +125,7 @@ pub fn compare(
         .keys()
         .chain(routes.keys())
         .copied()
+        .filter(|p| !host_scope(p))
         .collect();
     let mut rows = Vec::new();
     for prefix in prefixes {

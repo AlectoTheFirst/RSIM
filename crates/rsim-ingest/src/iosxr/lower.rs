@@ -1237,11 +1237,8 @@ fn cross_check(l: &mut L, cfg: &Config, st: &state::State) {
 
 /// The route code of a path, without the `*` of a candidate default.
 fn code(protocol: &str) -> &str {
-    protocol
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .trim_end_matches('*')
+    let first = protocol.split_whitespace().next().unwrap_or_default();
+    first.split('*').next().unwrap_or_default()
 }
 
 /// The paths that are not backup paths.

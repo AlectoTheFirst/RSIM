@@ -178,3 +178,26 @@ fn an_unknown_collected_route_is_not_computed_and_no_compared_row_gives_no_rate(
     );
     assert_eq!(Counts::of(&rows).rate(), None);
 }
+
+#[test]
+fn the_loopback_and_link_local_prefixes_are_left_out() {
+    let computed: Fib = [
+        (
+            p("127.0.0.0/8"),
+            route(RouteKind::Connected, vec![hop("lo", None)], 1),
+        ),
+        (
+            p("fe80::/64"),
+            route(RouteKind::Connected, vec![hop("eth0", None)], 2),
+        ),
+        (
+            p("2001:db8::/64"),
+            route(RouteKind::Connected, vec![hop("eth0", None)], 3),
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let rows = compare("default", &computed, &Fib::new(), &BTreeMap::new());
+    let got: Vec<String> = rows.iter().map(|r| r.prefix.to_string()).collect();
+    assert_eq!(got, ["2001:db8::/64"]);
+}
