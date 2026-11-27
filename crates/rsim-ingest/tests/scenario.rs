@@ -125,6 +125,10 @@ fn path(a: &Answer) -> (Vec<String>, VerdictKind) {
     (devices, branches[0].verdict.kind())
 }
 
+/// The reason of the last step of a path that leaves on the LAN port of a
+/// switch, which has no link.
+const LAN_EGRESS: &str = "no link on interface Ethernet1/3";
+
 /// The reason of the last step of the one branch.
 fn last_reason(a: &Answer) -> String {
     let branches = a.branches();
@@ -197,15 +201,17 @@ fn the_base_guard_matches_each_collected_route_but_the_bgp_route() {
 #[test]
 fn a_link_down_moves_the_path_to_the_other_link_and_the_trace_names_the_layer() {
     let base = twin(assemble(inputs(false)));
-    let (devices, verdict) = path(&run(&base, "203.0.113.74"));
+    let a = run(&base, "203.0.113.74");
+    let (devices, verdict) = path(&a);
     assert_eq!(devices, ["r1", "r2"]);
-    assert_ne!(verdict, VerdictKind::Unknown);
+    assert_eq!(last_reason(&a), LAN_EGRESS, "{:#?}", text(&a));
 
     let t = twin(scenario(false, &["r1:Ethernet1/1"]));
     let a = run(&t, "203.0.113.74");
     let (devices, after) = path(&a);
     assert_eq!(devices, ["r1", "r3", "r2"], "{:#?}", text(&a));
     assert_eq!(after, verdict);
+    assert_eq!(last_reason(&a), LAN_EGRESS, "{:#?}", text(&a));
     assert!(
         names_layer(&a, "layer 1: link-down r1:Ethernet1/1"),
         "{:#?}",
@@ -223,9 +229,9 @@ fn a_link_down_moves_the_path_to_the_other_link_and_the_trace_names_the_layer() 
 #[test]
 fn a_prefix_whose_base_differs_from_the_collected_route_is_unknown() {
     let base = twin(assemble(inputs(true)));
-    let (devices, verdict) = path(&run(&base, "203.0.113.74"));
-    assert_eq!(devices, ["r1", "r3", "r2"]);
-    assert_ne!(verdict, VerdictKind::Unknown);
+    let a = run(&base, "203.0.113.74");
+    assert_eq!(path(&a).0, ["r1", "r3", "r2"]);
+    assert_eq!(last_reason(&a), LAN_EGRESS, "{:#?}", text(&a));
     let t = twin(scenario(true, &["r1:Ethernet1/1"]));
     let a = run(&t, "203.0.113.74");
     assert_eq!(path(&a), (vec!["r1".to_string()], VerdictKind::Unknown));
