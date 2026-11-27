@@ -160,7 +160,7 @@ const NOT_FOUND: &str = "not_found";
 const AMBIGUOUS: &str = "ambiguous";
 
 /// The one value of a set, or the reason of the join.
-fn one<T: Clone>(set: Option<&BTreeSet<T>>) -> Result<T, &'static str> {
+fn one<T: Clone + Ord>(set: Option<&BTreeSet<T>>) -> Result<T, &'static str> {
     match set.map(|s| (s.len(), s.first())) {
         Some((1, Some(v))) => Ok(v.clone()),
         Some((n, _)) if n > 1 => Err(AMBIGUOUS),
@@ -329,11 +329,11 @@ pub(super) fn joins(t: &Loaded) -> Result<&Joins, String> {
 /// input to the join.
 type Join<T = String> = Option<Result<T, &'static str>>;
 
-fn cell(v: &Result<String, &'static str>) -> Cell<'_> {
+fn cell<'a>(v: &'a Result<String, &'static str>) -> Cell<'a> {
     v.as_deref().map_or(Cell::Null, Cell::Text)
 }
 
-fn reason(v: &Result<String, &'static str>) -> Cell<'_> {
+fn reason<'a>(v: &'a Result<String, &'static str>) -> Cell<'a> {
     v.as_ref().err().map_or(Cell::Null, |r| Cell::Text(r))
 }
 
