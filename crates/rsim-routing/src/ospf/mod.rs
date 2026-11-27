@@ -9,6 +9,7 @@
 //! next hops by gateway and interface.
 
 mod change;
+pub mod config;
 mod spf;
 
 use std::collections::BTreeMap;
