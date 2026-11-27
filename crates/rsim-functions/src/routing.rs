@@ -448,7 +448,11 @@ fn group_guard(g: &GroupRoutes<'_>) -> RibGuardFlag {
         return RibGuardFlag::DiffersFromCollected;
     }
     let whole = g.exact && g.count == g.guards.len() && !g.guards.is_empty();
-    if whole && g.guards.iter().all(|f| *f == RibGuardFlag::MatchesCollected) {
+    if whole
+        && g.guards
+            .iter()
+            .all(|f| *f == RibGuardFlag::MatchesCollected)
+    {
         RibGuardFlag::MatchesCollected
     } else {
         RibGuardFlag::NotChecked
