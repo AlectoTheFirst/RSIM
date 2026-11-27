@@ -11,7 +11,7 @@
   LS Seq Number: 80000001
   Checksum: 0x1A2B
   Length: 48
-  Number of Links: 5
+  Number of Links: 6
 
     Link connected to: another Router (point-to-point)
      (Link ID) Neighboring Router ID: 10.17.0.1
@@ -43,6 +43,12 @@
       Number of MTID metrics: 0
        TOS 0 Metrics: 1
 
+    Link connected to: a Stub Network
+     (Link ID) Network/subnet number: 203.0.113.0
+     (Link Data) Network Mask: 255.255.255.254
+      Number of MTID metrics: 0
+       TOS 0 Metrics: 1
+
   LS age: 100
   Options: (No TOS-capability, DC)
   LS Type: Router Links
@@ -51,7 +57,7 @@
   LS Seq Number: 80000001
   Checksum: 0x1A2B
   Length: 48
-  Number of Links: 7
+  Number of Links: 9
 
     Link connected to: another Router (point-to-point)
      (Link ID) Neighboring Router ID: 10.16.255.1
@@ -95,6 +101,18 @@
       Number of MTID metrics: 0
        TOS 0 Metrics: 1
 
+    Link connected to: a Stub Network
+     (Link ID) Network/subnet number: 10.19.0.0
+     (Link Data) Network Mask: 255.255.255.254
+      Number of MTID metrics: 0
+       TOS 0 Metrics: 1
+
+    Link connected to: a Stub Network
+     (Link ID) Network/subnet number: 10.250.0.0
+     (Link Data) Network Mask: 255.255.255.254
+      Number of MTID metrics: 0
+       TOS 0 Metrics: 1
+
   LS age: 100
   Options: (No TOS-capability, DC)
   LS Type: Router Links
@@ -103,7 +121,7 @@
   LS Seq Number: 80000001
   Checksum: 0x1A2B
   Length: 48
-  Number of Links: 7
+  Number of Links: 9
 
     Link connected to: another Router (point-to-point)
      (Link ID) Neighboring Router ID: 10.16.255.1
@@ -147,6 +165,18 @@
       Number of MTID metrics: 0
        TOS 0 Metrics: 1
 
+    Link connected to: a Stub Network
+     (Link ID) Network/subnet number: 10.19.0.2
+     (Link Data) Network Mask: 255.255.255.254
+      Number of MTID metrics: 0
+       TOS 0 Metrics: 1
+
+    Link connected to: a Stub Network
+     (Link ID) Network/subnet number: 10.250.0.2
+     (Link Data) Network Mask: 255.255.255.254
+      Number of MTID metrics: 0
+       TOS 0 Metrics: 1
+
   LS age: 100
   Options: (No TOS-capability, DC)
   LS Type: Router Links
@@ -155,7 +185,7 @@
   LS Seq Number: 80000001
   Checksum: 0x1A2B
   Length: 48
-  Number of Links: 4
+  Number of Links: 7
 
     Link connected to: a Transit Network
      (Link ID) Designated Router address: 10.12.250.2
@@ -181,6 +211,24 @@
       Number of MTID metrics: 0
        TOS 0 Metrics: 1
 
+    Link connected to: a Stub Network
+     (Link ID) Network/subnet number: 10.12.99.0
+     (Link Data) Network Mask: 255.255.255.0
+      Number of MTID metrics: 0
+       TOS 0 Metrics: 1
+
+    Link connected to: a Stub Network
+     (Link ID) Network/subnet number: 10.12.110.0
+     (Link Data) Network Mask: 255.255.255.0
+      Number of MTID metrics: 0
+       TOS 0 Metrics: 1
+
+    Link connected to: a Stub Network
+     (Link ID) Network/subnet number: 10.12.120.0
+     (Link Data) Network Mask: 255.255.255.0
+      Number of MTID metrics: 0
+       TOS 0 Metrics: 1
+
   LS age: 100
   Options: (No TOS-capability, DC)
   LS Type: Router Links
@@ -189,7 +237,7 @@
   LS Seq Number: 80000001
   Checksum: 0x1A2B
   Length: 48
-  Number of Links: 4
+  Number of Links: 7
 
     Link connected to: a Transit Network
      (Link ID) Designated Router address: 10.12.250.2
@@ -212,6 +260,24 @@
     Link connected to: a Stub Network
      (Link ID) Network/subnet number: 10.18.255.2
      (Link Data) Network Mask: 255.255.255.255
+      Number of MTID metrics: 0
+       TOS 0 Metrics: 1
+
+    Link connected to: a Stub Network
+     (Link ID) Network/subnet number: 10.12.99.0
+     (Link Data) Network Mask: 255.255.255.0
+      Number of MTID metrics: 0
+       TOS 0 Metrics: 1
+
+    Link connected to: a Stub Network
+     (Link ID) Network/subnet number: 10.12.110.0
+     (Link Data) Network Mask: 255.255.255.0
+      Number of MTID metrics: 0
+       TOS 0 Metrics: 1
+
+    Link connected to: a Stub Network
+     (Link ID) Network/subnet number: 10.12.120.0
+     (Link Data) Network Mask: 255.255.255.0
       Number of MTID metrics: 0
        TOS 0 Metrics: 1
 
