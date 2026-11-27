@@ -18,6 +18,7 @@ use rsim_store::{
 use serde_json::Value;
 
 use crate::bgp::{self, CaptureBgp, Peer};
+use crate::ospf;
 use crate::{
     BoxFuture, Device, Extract, RawSection, SectionSpec, Source, Ssh, Timeouts, TransportError,
     Vendor, fetch_sections,
@@ -164,10 +165,14 @@ impl Source for VyosSource {
     }
 
     /// Reads the sections, then the 3 tables of each IPv4 unicast neighbour
-    /// of the BGP sessions. A failed, absent or unreadable answer of the
-    /// sessions makes the section of the tables absent, except a connect error or a
-    /// timeout, which the section takes as its error, as it does when each
-    /// of its commands ends in one.
+    /// of the BGP sessions, then the OSPF sections. A failed, absent or
+    /// unreadable answer of the sessions makes the section of the tables
+    /// absent, except a connect error or a timeout, which the section takes
+    /// as its error, as it does when each of its commands ends in one. Each
+    /// OSPFv2 section combines the answers of the VRFs with `protocols ospf`
+    /// in the config of the same cycle, and the OSPFv3 sections are read
+    /// when the main table has `protocols ospfv3`; else the sections are
+    /// absent.
     fn fetch<'a>(
         &'a self,
         device: &'a Device,
@@ -179,13 +184,57 @@ impl Source for VyosSource {
                 let ssh = self.ssh.clone();
                 Box::pin(async move { ssh.run(device, &command).await })
             };
-            let (fixed, routes): (Vec<SectionSpec>, Vec<SectionSpec>) = self
+            let (fixed, derived): (Vec<SectionSpec>, Vec<SectionSpec>) = self
                 .sections(device)
                 .into_iter()
-                .partition(|s| s.name != bgp::ROUTES);
+                .partition(|s| s.name != bgp::ROUTES && !ospf::is_ospf(s.name));
             let mut out = fetch_sections(fixed, timeouts, serial, read).await;
             out.iter_mut().for_each(bgp_answer);
-            for spec in routes {
+            let plan = out.iter().find(|s| s.spec.name == "config").map(|s| {
+                s.result
+                    .clone()
+                    .and_then(|b| ospf::vyos_plan(&b).map_err(TransportError::NotFound))
+            });
+            for spec in derived {
+                if spec.name != bgp::ROUTES {
+                    let result = match &plan {
+                        None => Err(TransportError::NotFound("the config is not read".into())),
+                        Some(Err(e @ (TransportError::Connect(_) | TransportError::Timeout))) => {
+                            Err(e.clone())
+                        }
+                        Some(Err(e)) => {
+                            Err(TransportError::NotFound(format!("the config failed: {e}")))
+                        }
+                        Some(Ok((vrfs, v3))) => {
+                            if ospf::V3.contains(&spec.name) {
+                                if *v3 {
+                                    let mut a =
+                                        fetch_sections(vec![spec.clone()], timeouts, serial, read)
+                                            .await;
+                                    a.iter_mut().for_each(ospf_answer);
+                                    a.remove(0).result
+                                } else {
+                                    Err(TransportError::NotFound("no OSPFv3 in the config".into()))
+                                }
+                            } else if vrfs.is_empty() {
+                                Err(TransportError::NotFound("no OSPF in the config".into()))
+                            } else {
+                                let parts = ospf::vyos_parts(spec.name, vrfs);
+                                let mut answers =
+                                    bgp::fetch_parts(&spec, &parts, timeouts, serial, read).await;
+                                answers.iter_mut().for_each(ospf_answer);
+                                bgp::combined(
+                                    Ok(parts.as_slice()),
+                                    "the config",
+                                    &answers,
+                                    ospf::combine_vrfs,
+                                )
+                            }
+                        }
+                    };
+                    out.push(RawSection { spec, result });
+                    continue;
+                }
                 let peers = out
                     .iter()
                     .find(|s| s.spec.name == bgp::SESSIONS)
@@ -316,6 +365,7 @@ pub fn sections_with(capture: CaptureBgp) -> Vec<SectionSpec> {
             &[],
         ));
     }
+    out.extend(ospf::vyos());
     out
 }
 
@@ -327,6 +377,22 @@ fn bgp_answer(section: &mut RawSection) {
     if ![bgp::SESSIONS, bgp::NEIGHBORS, bgp::ROUTES].contains(&section.spec.name) {
         return;
     }
+    let Ok(bytes) = &section.result else { return };
+    let text = String::from_utf8_lossy(bytes);
+    let text = text.trim();
+    if text.is_empty() {
+        section.result = Ok(b"{}".to_vec());
+    } else if text.starts_with('%') {
+        let line = text.lines().next().unwrap_or_default().to_string();
+        section.result = Err(TransportError::NotFound(line));
+    }
+}
+
+/// An answer of an OSPF command: an empty answer is `{}`, and an answer
+/// whose first line starts with `%`, such as the answer of a router with
+/// no OSPF instance, gives the error of a command that the device does not
+/// have.
+fn ospf_answer(section: &mut RawSection) {
     let Ok(bytes) = &section.result else { return };
     let text = String::from_utf8_lossy(bytes);
     let text = text.trim();

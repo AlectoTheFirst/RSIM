@@ -28,7 +28,7 @@ pub fn short(name: &str) -> String {
     }
 }
 
-fn pretty(v: &Value) -> String {
+pub fn pretty(v: &Value) -> String {
     let mut s = serde_json::to_string_pretty(v).expect("JSON");
     s.push('\n');
     s
@@ -839,5 +839,6 @@ pub fn render(e: &Estate, t: &Tables, d: usize) -> BTreeMap<&'static str, String
         "bgp_sessions",
         bgp_sessions(dev).unwrap_or_else(|| NO_FEATURE.to_string()),
     );
+    super::ospf::nxos(e, d, &mut out);
     out
 }

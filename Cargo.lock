@@ -2824,6 +2824,7 @@ dependencies = [
  "rsim-engine",
  "rsim-ingest",
  "rsim-inventory",
+ "rsim-routing",
  "rsim-store",
  "russh",
  "rustls",

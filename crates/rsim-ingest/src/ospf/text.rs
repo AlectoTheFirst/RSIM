@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr};
 
 use rsim_core::SourceSpan;
-use rsim_routing::ospf::{AreaType, Interface, LsaType, Neighbor, RouterId, Version};
+use rsim_routing::ospf::{AreaType, Interface, Neighbor, RouterId, Version};
 
 use super::{Build, RawLink, RawLsa, RawPrefix, VersionSections, dotted, metric_type, num};
 use crate::bgp::Answer;

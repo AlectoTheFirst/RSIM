@@ -367,5 +367,6 @@ pub fn render(e: &Estate, t: &Tables, d: usize) -> BTreeMap<&'static str, String
     out.insert("inventory", inventory(dev));
     out.insert("hsrp", TIME.to_string());
     out.insert("bgp_sessions", bgp_summary(dev));
+    super::ospf::cisco(e, d, TIME, "CORE", &mut out);
     out
 }

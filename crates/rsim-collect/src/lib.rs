@@ -24,6 +24,8 @@ pub mod iosxe;
 pub mod iosxr;
 #[cfg(feature = "nxos")]
 pub mod nxos;
+#[cfg(feature = "ssh")]
+pub mod ospf;
 mod path;
 mod pipeline;
 #[cfg(feature = "https")]

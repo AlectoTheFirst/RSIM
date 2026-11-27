@@ -770,6 +770,7 @@ pub fn render(
     out.insert("hsrp_detail", hsrp_detail(dev));
     out.insert("vrrp_detail", String::new());
     out.insert("bgp_sessions", bgp_summary(dev));
+    super::ospf::cisco(e, d, "", "1", &mut out);
     let mut vrfs = BTreeMap::new();
     if dev.ifaces.iter().any(|i| i.mode == Mode::Mgmt) {
         let v = mgmt_vrf(dev);

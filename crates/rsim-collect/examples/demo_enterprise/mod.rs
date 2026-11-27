@@ -6,6 +6,7 @@ pub mod iosxe;
 pub mod iosxr;
 pub mod model;
 pub mod nxos;
+pub mod ospf;
 pub mod route;
 
 use std::collections::BTreeMap;
