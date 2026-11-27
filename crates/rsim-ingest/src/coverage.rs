@@ -46,6 +46,9 @@ pub struct Entry {
     pub reach: Reach,
 }
 
+/// A check of the key of a stanza.
+pub type Check = fn(&str) -> bool;
+
 /// A classification table. For each stanza, the entry with the longest path
 /// that matches the stanza decides. A stanza with no entry is unhandled. An
 /// entry with a check matches only a stanza whose key passes the check.
@@ -54,7 +57,7 @@ pub struct Entry {
 /// example to hide a secret.
 #[derive(Clone, Debug)]
 pub struct Table {
-    entries: Vec<(Vec<String>, State, Reach, Option<fn(&str) -> bool>)>,
+    entries: Vec<(Vec<String>, State, Reach, Option<Check>)>,
     mask: Option<fn(&str) -> String>,
 }
 
@@ -106,13 +109,7 @@ impl Table {
 
     /// Adds an entry with its segments as a list. The entry matches only a
     /// stanza whose key at the last segment gives true from `check`.
-    pub fn push_checked(
-        &mut self,
-        levels: &[&str],
-        state: State,
-        reach: Reach,
-        check: fn(&str) -> bool,
-    ) {
+    pub fn push_checked(&mut self, levels: &[&str], state: State, reach: Reach, check: Check) {
         self.entries.push((
             levels.iter().map(|l| (*l).to_string()).collect(),
             state,
