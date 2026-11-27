@@ -1,7 +1,8 @@
 //! The OSPF readers on the synthetic sections in `tests/fixtures/ospf/`:
 //! the same OSPFv2 and OSPFv3 database in the format of each vendor. The
-//! formats follow the readers of HST for OSPFv2 and the vendor documents for
-//! OSPFv3; none is confirmed on a device.
+//! OSPFv2 formats follow the readers of HST. The FRR OSPFv3 keys of the
+//! LSAs come from the FRR source, and the other OSPFv3 formats follow the
+//! OSPFv2 formats of the same vendor. No format is confirmed on a device.
 
 use std::collections::BTreeMap;
 

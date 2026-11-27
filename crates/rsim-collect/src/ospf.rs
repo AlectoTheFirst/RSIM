@@ -5,8 +5,9 @@
 //!
 //! The age, the sequence number and the checksum of an LSA, the timers and
 //! the counters are volatile, so a refresh of an LSA gives no new snapshot.
-//! The commands are the commands of the HST collector for OSPFv2 and of the
-//! vendor documents for OSPFv3; they are not confirmed on a device.
+//! The OSPFv2 commands are the commands of the HST collector. The OSPFv3
+//! commands follow the command names of each vendor. No command is
+//! confirmed on a device.
 
 use rsim_store::{Class, Format};
 use serde_json::Value;

@@ -87,6 +87,9 @@ fn load(t: &FakeTransport, d: &Device) {
     match d.vendor {
         Vendor::Vyos => {
             for s in rsim_collect::vyos::sections() {
+                if rsim_collect::ospf::is_ospf(s.name) {
+                    continue;
+                }
                 let mut b = fixture(vyos_file(s.name));
                 if s.name == "config" {
                     b = String::from_utf8(b)

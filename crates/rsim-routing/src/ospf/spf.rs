@@ -211,10 +211,7 @@ impl Out {
         let e = self.gaps.entry(key).or_insert_with(|| {
             let place = area.map(|a| format!(" in area {a}")).unwrap_or_default();
             GapEntry {
-                detail: format!(
-                    "{} LSA {lsid}{place} is not in the database: {detail}",
-                    lsa_type.name(version)
-                ),
+                detail: format!("{} LSA {lsid}{place}, {detail}", lsa_type.name(version)),
                 all: false,
                 bound: None,
                 prefixes: BTreeSet::new(),
@@ -390,7 +387,7 @@ fn p2p_hops(
                         "ospf-ambiguous-next-hop",
                         format!("{area}/{far}"),
                         format!(
-                            "routers {root} and {far} share {} point-to-point links in area {area}, and no stub link pairs {own} with one of them; each far-end address is a next hop",
+                            "routers {root} and {far} share {} point-to-point links in area {area}, and no stub link pairs {own} with one of them. Each far-end address is a next hop.",
                             addrs.len()
                         ),
                     );
@@ -573,7 +570,7 @@ fn spf(cx: &Cx<'_>, out: &mut Out, area: AreaId) -> Tree {
                             "ospf-virtual-link-not-modeled",
                             format!("{area}/{}", link.id),
                             format!(
-                                "router {root} has a virtual link to {} in area {area}; the paths of the transit area are not computed, so the link is skipped",
+                                "the virtual link of router {root} to {} in area {area} is not computed",
                                 link.id
                             ),
                         ),
@@ -738,7 +735,7 @@ fn prefixes(cx: &Cx<'_>, out: &mut Out, area: AreaId, tree: &mut Tree) {
                         "malformed-lsa",
                         key.lsid().to_string(),
                         format!(
-                            "{} has no usable mask; its prefix is left out",
+                            "{} has no usable mask, and its prefix is left out",
                             net.describe(Version::V2)
                         ),
                     );
@@ -968,7 +965,7 @@ fn inter_area(
                     adv,
                     Some(area),
                     &format!(
-                        "the area border router that advertises {}; the route that it describes has no cost",
+                        "the area border router that advertises {}",
                         lsa.describe(version)
                     ),
                     Reach::Prefixes(reach),
@@ -1119,7 +1116,7 @@ fn external_path(
                     lsa.adv_router,
                     lsa.area,
                     &format!(
-                        "the AS boundary router that advertises {}; no router LSA and no ASBR-summary LSA places it, so the external route has no cost",
+                        "the AS boundary router that advertises {}, with no router LSA and no ASBR-summary LSA",
                         lsa.describe(db.version)
                     ),
                     Reach::Prefixes(vec![prefix]),
@@ -1266,7 +1263,7 @@ fn externals(
                 "malformed-lsa",
                 lsa.lsid.to_string(),
                 format!(
-                    "{} has no metric type; it is costed as type 2",
+                    "{} has no metric type, and its cost is the cost of type 2",
                     lsa.describe(cx.version())
                 ),
             );
@@ -1360,7 +1357,7 @@ pub fn compute(db: &Database, router_id: RouterId, profile: &OspfProfile) -> Cal
             LsaType::Router,
             root,
             None,
-            "the router LSA of the calculating router; the database gives no routes",
+            "the router LSA of the calculating router",
             Reach::All,
         );
         calc.gaps = out.gap_list();

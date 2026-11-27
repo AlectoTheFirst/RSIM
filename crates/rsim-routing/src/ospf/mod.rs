@@ -495,7 +495,7 @@ pub struct Route {
     pub next_hops: Vec<NextHop>,
     /// The spans of the LSAs that give the prefix.
     pub spans: Vec<SourceSpan>,
-    /// The reason when the route depends on a gap of the database: a cheaper
+    /// The reason when the route depends on a gap of the database. A cheaper
     /// path or a path of a better type can pass through the LSA that the
     /// database lacks.
     pub unknown: Option<String>,

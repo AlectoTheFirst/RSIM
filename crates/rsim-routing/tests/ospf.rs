@@ -677,9 +677,7 @@ fn a_missing_lsa_is_a_gap_and_the_routes_beyond_it_are_unknown() {
     );
     assert_eq!(
         g.detail,
-        format!(
-            "router LSA {R3} in area {AREA_0} is not in the database: named by a point-to-point link of router {R1}"
-        )
+        format!("router LSA {R3} in area {AREA_0}, named by a point-to-point link of router {R1}")
     );
     assert_eq!(g.reach, GapReach::FromCost(20));
     let got: Vec<(String, bool)> = c

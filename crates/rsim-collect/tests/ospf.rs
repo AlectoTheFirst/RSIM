@@ -289,3 +289,47 @@ async fn vyos_combines_the_vrfs_of_the_config_and_reads_ospfv3() {
     assert_eq!(d.of(Version::V2, "default").next().unwrap().lsas.len(), 11);
     assert_eq!(d.of(Version::V3, "default").next().unwrap().lsas.len(), 21);
 }
+
+#[tokio::test(start_paused = true)]
+async fn vyos_ages_and_sequence_numbers_make_no_snapshot() {
+    let mut e = env(Vendor::Vyos, "vyos");
+    let first = e.c.run_cycle().await.unwrap().snapshot.unwrap();
+    for n in rsim_collect::ospf::V2 {
+        if n.contains("_lsdb_") {
+            let t = swap(
+                "vyos",
+                n,
+                &[
+                    ("\"lsaAge\": 100", "\"lsaAge\": 1799"),
+                    (
+                        "\"lsaSeqNumber\": \"80000001\"",
+                        "\"lsaSeqNumber\": \"80000002\"",
+                    ),
+                    ("\"checksum\": \"1a2b\"", "\"checksum\": \"3c4d\""),
+                ],
+            );
+            set(&e.t, Vendor::Vyos, n, &t);
+        }
+    }
+    for n in rsim_collect::ospf::V3 {
+        if n.contains("_lsdb_") {
+            let t = swap(
+                "vyos",
+                n,
+                &[
+                    ("\"age\": 100", "\"age\": 1799"),
+                    (
+                        "\"lsSequenceNumber\": 2147483649",
+                        "\"lsSequenceNumber\": 2147483650",
+                    ),
+                    ("\"checksum\": 6699", "\"checksum\": 7000"),
+                ],
+            );
+            set(&e.t, Vendor::Vyos, n, &t);
+        }
+    }
+    tokio::time::advance(Duration::from_secs(60)).await;
+    let r = e.c.run_cycle().await.unwrap();
+    assert_eq!(r.snapshot, None, "{r:?}");
+    assert_eq!(latest(&e).manifest.cycle, first);
+}

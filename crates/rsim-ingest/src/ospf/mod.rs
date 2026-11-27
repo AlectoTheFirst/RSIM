@@ -290,7 +290,7 @@ fn outcome<'a>(
         (0, false) => Outcome::Failed,
         (_, false) => Outcome::Partial,
     };
-    with(outcome, (!notes.is_empty()).then(|| notes.join("; ")))
+    with(outcome, (!notes.is_empty()).then(|| notes.join(", ")))
 }
 
 /// One link of a router LSA as a section gives it.
