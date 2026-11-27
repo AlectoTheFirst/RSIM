@@ -1016,7 +1016,7 @@ fn a_static_route_of_a_higher_distance_installs_only_when_the_better_route_is_ab
 }
 
 #[test]
-fn a_static_route_whose_gateway_does_not_resolve_gives_way_to_a_floating_static_route() {
+fn a_static_route_whose_gateway_resolves_only_through_the_kernel_default_route_is_not_computed() {
     let config = String::from_utf8(VYOS.to_vec()).unwrap().replacen(
         "\"static\": {\n      \"table\"",
         r#""static": {"route": {"198.51.100.0/24": {"next-hop": {"203.0.113.5": {}, "192.0.2.3": {"distance": "200"}}}}, "table""#,
@@ -1035,11 +1035,8 @@ fn a_static_route_whose_gateway_does_not_resolve_gives_way_to_a_floating_static_
         .iter()
         .find(|r| r.prefix.to_string() == "198.51.100.0/24")
         .unwrap();
-    assert_eq!(r.category, rsim_guard::Category::Match, "{r:?}");
-    assert_eq!(
-        r.computed.as_ref().unwrap().next_hops,
-        ["192.0.2.3@eth0.10"]
-    );
+    assert_eq!(r.category, rsim_guard::Category::NotComputed, "{r:?}");
+    assert!(r.reason.contains("kernel route"), "{r:?}");
 }
 
 #[test]

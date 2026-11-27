@@ -134,7 +134,11 @@ pub fn compare(
     let prefixes: BTreeSet<Prefix> = computed_routes
         .iter()
         .filter(|(p, r)| {
-            let listed = if p.addr().is_ipv4() { local_v4 } else { local_v6 };
+            let listed = if p.addr().is_ipv4() {
+                local_v4
+            } else {
+                local_v6
+            };
             listed || r.kind != RouteKind::Local || routes.contains_key(*p)
         })
         .map(|(p, _)| p)

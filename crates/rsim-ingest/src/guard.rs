@@ -118,7 +118,12 @@ mod tests {
         let fib = install(cands, false);
         let through_bgp = fib.get(&p("192.0.2.128/25")).unwrap();
         assert!(through_bgp.next_hops().is_empty());
-        assert!(through_bgp.unknown_reason().unwrap().contains("bgp not computed"));
+        assert!(
+            through_bgp
+                .unknown_reason()
+                .unwrap()
+                .contains("bgp not computed")
+        );
         let through_seed = fib.get(&p("192.0.2.64/26")).unwrap();
         assert_eq!(through_seed.next_hops().len(), 1);
     }
