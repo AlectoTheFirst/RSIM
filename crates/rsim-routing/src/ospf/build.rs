@@ -1230,9 +1230,28 @@ impl<'a> Builder<'a> {
                 );
             }
             let areas = p.areas();
+            // The NSSAs of the process. Its type 7 LSAs of the sources that
+            // are not known are gaps of each NSSA, because the routers of an
+            // NSSA do not read the gaps of the AS.
+            let nssas: BTreeSet<AreaId> = areas
+                .iter()
+                .copied()
+                .filter(|a| p.cfg.areas.get(a).is_some_and(|x| x.kind == AreaType::Nssa))
+                .collect();
             let mut procs = BTreeSet::from([pi]);
             for a in areas {
                 procs.extend(self.gap_procs(pi, a));
+                if external && nssas.contains(&a) {
+                    self.spread_gap(
+                        pi,
+                        a,
+                        LsaType::NssaExternal,
+                        GapReach::External,
+                        format!(
+                            "the process of {rid} is left out, and its NSSA LSAs are not known"
+                        ),
+                    );
+                }
                 if !prefixes.is_empty() {
                     self.spread_gap(
                         pi,
