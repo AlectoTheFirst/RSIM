@@ -165,6 +165,7 @@ const FORWARDING: &[Entry] = &[
     e("interface */spanning-tree ..", Irrelevant, Subtree),
     e("interface */udld ..", Irrelevant, Subtree),
     e("interface */lacp ..", Irrelevant, Subtree),
+    e("interface */bandwidth *", Handled, Subtree),
     e("interface */bandwidth ..", Irrelevant, Subtree),
     e("interface */delay ..", Irrelevant, Subtree),
     e("interface */ip redirects", Irrelevant, Subtree),
@@ -207,7 +208,8 @@ const FORWARDING: &[Entry] = &[
 /// its routes come from the route table; the routing lines of a VRF
 /// without rows are unhandled. The route maps, the lists of the routing
 /// policies and the routing lines of an interface are known-irrelevant only
-/// if each VRF with a dynamic protocol has rows.
+/// if each VRF with a dynamic protocol has rows. The BGP and OSPF lines
+/// that a reader reads are handled in each VRF.
 pub fn table(tables: &RouteTables) -> Table {
     let mut t = Table::new(MANAGEMENT).with_mask(super::mask);
     for entry in FORWARDING {
@@ -216,6 +218,7 @@ pub fn table(tables: &RouteTables) -> Table {
     let default = tables.routing(DEFAULT_VRF);
     let shared = tables.shared();
     super::bgp::push_entries(&mut t, tables);
+    super::ospf_config::push_entries(&mut t, tables);
     for p in ["router bgp", "router eigrp", "router rip"] {
         t.push_levels(&[&format!("{p} ..")], default, Subtree);
         for af in ["address-family ipv4", "address-family ipv4 unicast"] {
