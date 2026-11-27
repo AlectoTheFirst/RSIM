@@ -245,7 +245,7 @@ fn route_lines(r: &Route) -> String {
                 Kind::Ebgp => 20,
                 _ => 200,
             };
-            let metric = if k == Kind::Ospf { r.metric + 1 } else { 0 };
+            let metric = if k == Kind::Ospf { r.metric } else { 0 };
             let indent = " ".repeat(head.len() + 1);
             for (n, p) in r.paths.iter().enumerate() {
                 let nh = p.next_hop.expect("a next hop");
@@ -369,4 +369,29 @@ pub fn render(e: &Estate, t: &Tables, d: usize) -> BTreeMap<&'static str, String
     out.insert("bgp_sessions", bgp_summary(dev));
     super::ospf::cisco(e, d, TIME, "CORE", &mut out);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv4Addr;
+
+    use super::super::route::Path;
+    use super::*;
+
+    #[test]
+    fn an_ospf_route_shows_the_metric_of_the_calculation() {
+        let r = Route {
+            vrf: "default".to_string(),
+            prefix: (Ipv4Addr::new(198, 51, 100, 0), 24),
+            kind: Kind::Ospf,
+            metric: 20,
+            paths: vec![Path {
+                next_hop: Some(Ipv4Addr::new(192, 0, 2, 1)),
+                iface: Some("TenGigE0/0/0/0".to_string()),
+                vxlan: None,
+            }],
+        };
+        let text = route_lines(&r);
+        assert!(text.contains("[110/20] via 192.0.2.1"), "{text}");
+    }
 }

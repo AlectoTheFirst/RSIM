@@ -1,5 +1,6 @@
-//! The OSPF sections of NX-OS, IOS XE and VyOS on the fake transport, with
-//! the synthetic answers of `rsim-ingest/tests/fixtures/ospf/`.
+//! The OSPF sections of NX-OS, IOS XE and VyOS on the fake transport, and
+//! the change hash of the IOS XE, IOS XR and VyOS sections, with the
+//! synthetic answers of `rsim-ingest/tests/fixtures/ospf/`.
 
 #![cfg(all(feature = "nxos", feature = "iosxe", feature = "vyos"))]
 
@@ -11,7 +12,7 @@ use rsim_collect::*;
 use rsim_ingest::bgp::Outcome;
 use rsim_ingest::ospf as reader;
 use rsim_routing::ospf::Version;
-use rsim_store::{SectionStatus, Snapshot, Store};
+use rsim_store::{Hash, SectionStatus, Snapshot, Store, change_hash};
 
 #[path = "support/keys.rs"]
 mod keys;
@@ -19,7 +20,11 @@ mod keys;
 const T0: u64 = 1_700_000_000_000;
 
 fn fixture(vendor: &str, name: &str) -> String {
-    let ext = if vendor == "iosxe" { "txt" } else { "json" };
+    let ext = if vendor.starts_with("ios") {
+        "txt"
+    } else {
+        "json"
+    };
     let p = format!(
         "{}/../rsim-ingest/tests/fixtures/ospf/{vendor}/{name}.{ext}",
         env!("CARGO_MANIFEST_DIR")
@@ -332,4 +337,133 @@ async fn vyos_ages_and_sequence_numbers_make_no_snapshot() {
     let r = e.c.run_cycle().await.unwrap();
     assert_eq!(r.snapshot, None, "{r:?}");
     assert_eq!(latest(&e).manifest.cycle, first);
+}
+
+/// The change hash of a text as the answer of an OSPF section.
+fn hash(specs: Vec<SectionSpec>, section: &str, text: &str) -> Hash {
+    let s = specs
+        .into_iter()
+        .find(|s| s.name == section)
+        .unwrap_or_else(|| panic!("no section {section}"));
+    change_hash(&keys::keys(), s.format, text.as_bytes(), s.volatile).unwrap()
+}
+
+#[test]
+fn ios_xe_process_elapsed_times_do_not_change_the_hash() {
+    let text = |elapsed: &str, area: &str| {
+        swap(
+            "iosxe",
+            "ospf",
+            &[
+                (
+                    " Supports only single TOS(TOS0) routes\n",
+                    &format!(
+                        " Supports only single TOS(TOS0) routes\n Start time: 00:00:01.532, Time elapsed: {elapsed}\n"
+                    ),
+                ),
+                ("It is a NSSA area", area),
+            ],
+        )
+    };
+    let h = |t: String| hash(rsim_collect::ospf::iosxe(), "ospf", &t);
+    let first = h(text("00:00:22.332", "It is a NSSA area"));
+    for elapsed in ["00:00:22", "5h12m", "1d02h", "1w6d", "1y2w"] {
+        assert_eq!(h(text(elapsed, "It is a NSSA area")), first, "{elapsed}");
+    }
+    assert_ne!(h(text("1w6d", "It is a stub area")), first);
+}
+
+#[test]
+fn ios_xr_ls_ack_list_lengths_do_not_change_the_hash() {
+    let text = |current: u32, high: u32, cost: &str| {
+        swap(
+            "iosxr",
+            "ospf_interfaces",
+            &[
+                (
+                    "    Hello due in 00:00:03\nGigabitEthernet0/0/0/1",
+                    &format!(
+                        "    Hello due in 00:00:03\n  LS Ack List: current length {current}, high water mark {high}\nGigabitEthernet0/0/0/1"
+                    ),
+                ),
+                ("POINT_TO_POINT, Cost: 10", cost),
+            ],
+        )
+    };
+    let h = |t: String| hash(rsim_collect::ospf::iosxr(), "ospf_interfaces", &t);
+    let first = h(text(0, 4, "POINT_TO_POINT, Cost: 10"));
+    assert_eq!(h(text(2, 11, "POINT_TO_POINT, Cost: 10")), first);
+    assert_ne!(h(text(2, 11, "POINT_TO_POINT, Cost: 30")), first);
+}
+
+/// A VyOS OSPFv2 section with the answer of the VRF `RED` only, which FRR
+/// nests under the VRF name, from the answer of the default VRF of the
+/// fixture with each change of `pairs`.
+fn red(section: &str, pairs: &[(&str, &str)]) -> String {
+    let v: serde_json::Value = serde_json::from_str(&swap("vyos", section, pairs)).unwrap();
+    serde_json::json!({ "RED": { "answer": { "RED": v["default"]["answer"] } } }).to_string()
+}
+
+#[test]
+fn frr_timers_and_lsa_ages_of_a_named_vrf_do_not_change_the_hash() {
+    let h = |section: &str, pairs: &[(&str, &str)]| {
+        hash(rsim_collect::ospf::vyos(), section, &red(section, pairs))
+    };
+    let lsa = |age: &str, seq: &str, sum: &str, metric: &str| {
+        h(
+            "ospf_lsdb_router",
+            &[
+                ("\"lsaAge\": 100", age),
+                ("\"lsaSeqNumber\": \"80000001\"", seq),
+                ("\"checksum\": \"1a2b\"", sum),
+                ("\"metric\": 10", metric),
+            ],
+        )
+    };
+    let first = lsa(
+        "\"lsaAge\": 100",
+        "\"lsaSeqNumber\": \"80000001\"",
+        "\"checksum\": \"1a2b\"",
+        "\"metric\": 10",
+    );
+    let refresh = |metric: &str| {
+        lsa(
+            "\"lsaAge\": 1799",
+            "\"lsaSeqNumber\": \"80000002\"",
+            "\"checksum\": \"3c4d\"",
+            metric,
+        )
+    };
+    assert_eq!(refresh("\"metric\": 10"), first);
+    assert_ne!(refresh("\"metric\": 30"), first);
+
+    let spf = |msecs: &str| {
+        h(
+            "ospf",
+            &[(
+                "\"routerId\": \"198.51.100.1\"",
+                &format!("\"routerId\": \"198.51.100.1\", \"spfLastExecutedMsecs\": {msecs}"),
+            )],
+        )
+    };
+    assert_eq!(spf("100"), spf("4200"));
+
+    let neighbor = |dead: &str, state: &str| {
+        h(
+            "ospf_neighbors",
+            &[
+                ("\"deadTimeMsecs\": 35000", dead),
+                ("\"nbrState\": \"Full/-\"", state),
+            ],
+        )
+    };
+    let full = neighbor("\"deadTimeMsecs\": 35000", "\"nbrState\": \"Full/-\"");
+    assert_eq!(
+        neighbor("\"deadTimeMsecs\": 31000", "\"nbrState\": \"Full/-\""),
+        full
+    );
+    assert_ne!(
+        neighbor("\"deadTimeMsecs\": 31000", "\"nbrState\": \"Init/-\""),
+        full
+    );
 }
