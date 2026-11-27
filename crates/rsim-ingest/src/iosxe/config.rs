@@ -339,6 +339,8 @@ pub fn read(doc: &Document, table: &Table) -> Config {
     }
     cfg.read = r.read;
     cfg.dynamic_vrfs = super::table::dynamic_vrfs(doc);
+    let ospf = super::ospf_config::read_lines(doc, &cfg, table);
+    cfg.read.extend(ospf);
     cfg
 }
 
@@ -431,6 +433,8 @@ fn interface_line(i: &mut Interface, c: &Stanza) -> bool {
             });
         }
         ["ipv6", "address", a, ..] => i.ipv6.push(((*a).to_string(), lines)),
+        // `ospf_config` reads the OSPF lines and the bandwidth.
+        ["bandwidth", _] | ["ip", "ospf", ..] | ["ipv6", "ospf", ..] | ["ospfv3", ..] => {}
         ["ip", "access-group", acl, dir @ ("in" | "out")] => {
             let a = Some(((*acl).to_string(), lines));
             if *dir == "in" {
