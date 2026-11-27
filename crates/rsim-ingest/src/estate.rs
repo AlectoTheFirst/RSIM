@@ -521,6 +521,8 @@ fn layer_downs(
                 far.insert(end.clone());
             }
         }
+        // A far port with 2 or more peers stays up through the other peers.
+        far.retain(|f| base.links.get(f).is_none_or(|ends| ends.len() <= 1));
         downs
             .entry(device.clone())
             .or_default()
@@ -1769,4 +1771,48 @@ fn ospf_guard(
         }
     }
     rows
+}
+
+#[cfg(test)]
+mod layer_tests {
+    use super::*;
+
+    fn end(d: &str, p: &str) -> (String, String) {
+        (d.to_string(), p.to_string())
+    }
+
+    fn estate(links: &[((&str, &str), &[(&str, &str)])]) -> Estate {
+        let mut e = assemble_pass(Vec::new(), &BTreeMap::new(), Plan::Snapshot).0;
+        for ((d, p), ends) in links {
+            e.links
+                .insert(end(d, p), ends.iter().map(|(a, b)| end(a, b)).collect());
+            e.vendors.insert(d.to_string(), "nxos".to_string());
+        }
+        e
+    }
+
+    fn down(e: &Estate, layer: &str) -> BTreeMap<String, BTreeSet<String>> {
+        layer_downs(e, &[Layer::link_down(layer).unwrap()]).unwrap()
+    }
+
+    fn set(items: &[(&str, &[&str])]) -> BTreeMap<String, BTreeSet<String>> {
+        items
+            .iter()
+            .map(|(d, ps)| (d.to_string(), ps.iter().map(|p| p.to_string()).collect()))
+            .collect()
+    }
+
+    #[test]
+    fn a_layer_on_a_vpc_member_keeps_the_port_of_the_leaf_up() {
+        let e = estate(&[
+            (("leaf", "Po1"), &[("swA", "Po10"), ("swB", "Po10")]),
+            (("swA", "Po10"), &[("leaf", "Po1")]),
+            (("swB", "Po10"), &[("leaf", "Po1")]),
+        ]);
+        assert_eq!(down(&e, "swA:Po10"), set(&[("swA", &["Po10"])]));
+        assert_eq!(
+            down(&e, "leaf:Po1"),
+            set(&[("leaf", &["Po1"]), ("swA", &["Po10"]), ("swB", &["Po10"])])
+        );
+    }
 }

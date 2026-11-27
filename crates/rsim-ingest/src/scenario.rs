@@ -28,7 +28,8 @@ pub const VENDORS: &[&str] = &["vyos", "nxos", "iosxr", "iosxe"];
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Layer {
     /// Both ends of the link of the interface are administratively down. An
-    /// interface with no link goes down alone.
+    /// interface with no link goes down alone. A far port with 2 or more
+    /// peers stays up.
     LinkDown { device: String, interface: String },
 }
 
