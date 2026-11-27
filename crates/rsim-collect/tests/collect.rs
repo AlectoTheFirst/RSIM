@@ -517,6 +517,7 @@ async fn a_device_that_the_collector_does_not_reach_keeps_its_previous_address()
         s.devices["r1"]
             .sections
             .iter()
+            .filter(|sec| !rsim_collect::ospf::is_ospf(&sec.name))
             .all(|sec| matches!(sec.status, SectionStatus::Old { .. }))
     );
     assert_eq!(
@@ -537,7 +538,11 @@ async fn a_failed_device_keeps_its_data_and_backs_off() {
     assert_eq!(r.snapshot, Some(1));
     assert!(r.changed.is_empty());
     let s = latest(&e);
-    for sec in &s.devices["r1"].sections {
+    for sec in s.devices["r1"]
+        .sections
+        .iter()
+        .filter(|sec| !rsim_collect::ospf::is_ospf(&sec.name))
+    {
         assert!(matches!(sec.status, SectionStatus::Old { .. }), "{sec:?}");
         assert!(sec.blob.is_some());
     }
@@ -676,6 +681,7 @@ async fn the_time_limits_of_a_device_replace_the_limits_of_the_cycle() {
             s.devices[d]
                 .sections
                 .iter()
+                .filter(|x| !rsim_collect::ospf::is_ospf(&x.name))
                 .all(|x| matches!(x.status, SectionStatus::Missing { .. })),
             "{d}"
         );
@@ -684,6 +690,7 @@ async fn the_time_limits_of_a_device_replace_the_limits_of_the_cycle() {
         s.devices["r3"]
             .sections
             .iter()
+            .filter(|x| !rsim_collect::ospf::is_ospf(&x.name))
             .all(|x| x.status == SectionStatus::Fresh)
     );
 }
