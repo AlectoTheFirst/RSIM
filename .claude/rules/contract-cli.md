@@ -40,7 +40,7 @@ The table `devices` has one row for each device with a function and each device 
 
 A claim answer has the field `detail` for what the claim leaves out of its rows.
 
-The table `ospf-guard` has one row for each LSA of the database guard (`Loaded::ospf_guard`): the device, the VRF, the version, the area, the LSA type, the key, the category, the fields that differ and the built and collected values.
+The table `ospf-guard` has one row for each LSA of the database guard (`Loaded::ospf_guard`): the device, the VRF, the version, the area, the LSA type, the key, the category, the fields that differ, the built and collected values, and the reason of a collected LSA that a gap of the builder covers (`not_computed`).
 
 `rib-fib-agree` reads `Loaded::guard`, the RIB guard rows of `rsim-guard`, on the scope `twin` or `devices`. Each route is one row: a match is confirmed, a difference and a route of only one table are refuted, and a route that is not computed and a seed are unknown. The detail gives the match rate, the number of compared routes, and the numbers of the routes that are not computed and of the seeds. The table `rib-guard` has the same rows, with the computed and the collected kind and next hops, the fields that differ and the reason.
 
