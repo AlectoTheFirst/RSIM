@@ -64,6 +64,20 @@ fn lookup(what: &str, def: &'static table::TableDef, f: &Frame, sel: &Selection)
     ));
 }
 
+/// The cells of a row of the table `def`: the named cells, and null in each
+/// other column.
+fn row<'a>(def: &table::TableDef, named: &[(&str, Cell<'a>)]) -> Vec<Cell<'a>> {
+    def.columns
+        .iter()
+        .map(|c| {
+            named
+                .iter()
+                .find(|(n, _)| *n == c.name)
+                .map_or(Cell::Null, |(_, v)| *v)
+        })
+        .collect()
+}
+
 /// The MAC address of the row `r` of the device `d`.
 fn mac_of(r: usize, d: usize) -> String {
     format!(
@@ -100,14 +114,17 @@ fn main() {
         for r in 0..per {
             let m = mac_of(r, d);
             let port = format!("eth{}", r % 48);
-            b.push(&[
-                Cell::Text(&device),
-                Cell::Integer(10 + (r % 20) as u64),
-                Cell::Text(&m),
-                Cell::Text(&port),
-                Cell::Text("dynamic"),
-                Cell::List(&span),
-            ]);
+            b.push(&row(
+                mac,
+                &[
+                    ("device", Cell::Text(&device)),
+                    ("vlan", Cell::Integer(10 + (r % 20) as u64)),
+                    ("mac", Cell::Text(&m)),
+                    ("port", Cell::Text(&port)),
+                    ("kind", Cell::Text("dynamic")),
+                    ("provenance", Cell::List(&span)),
+                ],
+            ));
         }
     }
     let f = b.finish(&rsim_cli::tables::key_text);
@@ -122,14 +139,17 @@ fn main() {
             for r in 0..per {
                 let m = mac_of(r, d);
                 let port = format!("eth{}", r % 48);
-                b.push(&[
-                    Cell::Text(&device),
-                    Cell::Integer(10 + (r % 20) as u64),
-                    Cell::Text(&m),
-                    Cell::Text(&port),
-                    Cell::Text("dynamic"),
-                    Cell::List(&span),
-                ]);
+                b.push(&row(
+                    mac,
+                    &[
+                        ("device", Cell::Text(&device)),
+                        ("vlan", Cell::Integer(10 + (r % 20) as u64)),
+                        ("mac", Cell::Text(&m)),
+                        ("port", Cell::Text(&port)),
+                        ("kind", Cell::Text("dynamic")),
+                        ("provenance", Cell::List(&span)),
+                    ],
+                ));
             }
             b.finish(&rsim_cli::tables::key_text)
         })
@@ -192,14 +212,17 @@ fn main() {
                 (d >> 8) & 0xff,
                 d & 0xff
             );
-            b.push(&[
-                Cell::Text(&device),
-                Cell::Text("eth0"),
-                Cell::Text(&ip),
-                Cell::Text(&m),
-                Cell::Text("reachable"),
-                Cell::List(&span),
-            ]);
+            b.push(&row(
+                arp,
+                &[
+                    ("device", Cell::Text(&device)),
+                    ("interface", Cell::Text("eth0")),
+                    ("ip", Cell::Text(&ip)),
+                    ("mac", Cell::Text(&m)),
+                    ("state", Cell::Text("reachable")),
+                    ("provenance", Cell::List(&span)),
+                ],
+            ));
         }
     }
     let f = b.finish(&rsim_cli::tables::key_text);

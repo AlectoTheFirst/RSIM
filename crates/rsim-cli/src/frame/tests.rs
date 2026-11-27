@@ -806,6 +806,7 @@ fn an_index_gives_the_rows_of_a_device_a_mac_address_and_a_prefix() {
             ]
         })
         .collect();
+    let rows = widen(def, &rows);
     let f = frame_of(def, &rows);
     let sel = Selection {
         filters: [
@@ -836,6 +837,7 @@ fn an_index_gives_the_rows_of_a_device_a_mac_address_and_a_prefix() {
             ]
         })
         .collect();
+    let rows = widen(def, &rows);
     let f = frame_of(def, &rows);
     let sel = Selection {
         typed: [("ip.in_prefix".to_string(), "198.51.1.0/24".to_string())].into(),
@@ -863,6 +865,7 @@ fn an_equality_filter_on_a_text_column_with_many_values_finds_each_value() {
             ]
         })
         .collect();
+    let rows = widen(def, &rows);
     let f = frame_of(def, &rows);
     for want in [
         vec!["eth7".to_string()],
@@ -929,4 +932,28 @@ fn the_parts_of_the_devices_in_key_order_give_the_answers_of_1_frame() {
             }
         }
     }
+}
+
+/// The rows with a null in each join column (`tables::JOINED`) and the
+/// values of each row in the other columns, in column order.
+fn widen(def: &TableDef, rows: &[Vec<Value>]) -> Vec<Vec<Value>> {
+    let joined = crate::tables::JOINED
+        .iter()
+        .find(|(n, _)| *n == def.name)
+        .map_or(&[][..], |(_, c)| c);
+    rows.iter()
+        .map(|r| {
+            let mut given = r.iter();
+            def.columns
+                .iter()
+                .map(|c| {
+                    if joined.contains(&c.name) {
+                        Value::Null
+                    } else {
+                        given.next().cloned().unwrap_or(Value::Null)
+                    }
+                })
+                .collect()
+        })
+        .collect()
 }
