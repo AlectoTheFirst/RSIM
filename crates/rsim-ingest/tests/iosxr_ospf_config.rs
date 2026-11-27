@@ -791,3 +791,61 @@ fn an_interface_of_a_type_with_no_known_network_type_is_unhandled() {
     let p = &ospf(text).processes[0];
     assert_eq!(unhandled(p), [("interface FooBar0/1", 3)]);
 }
+
+#[test]
+fn a_vrf_process_gets_each_unread_interface_line_of_the_default_vrf() {
+    let text = "router ospf 1
+ mpls ldp sync
+ prefix-suppression
+ loopback stub-network enable
+ demand-circuit
+ database-filter all out
+ distribute-list prefix-list IN-FILTER in
+ max-metric router-lsa
+ summary-prefix 198.51.100.0/24
+ distance 120
+ maximum paths 8
+ default-metric 20
+ redistribute isis CORE level-2
+ router-id 0x1
+ hello-interval 5
+ vrf RED
+  area 0
+  !
+ !
+!
+";
+    let c = ospf(text);
+    assert_eq!(c.processes[1].vrf, "RED");
+    assert_eq!(
+        unhandled(&c.processes[1]),
+        [
+            ("mpls ldp sync", 2),
+            ("prefix-suppression", 3),
+            ("loopback stub-network enable", 4),
+            ("demand-circuit", 5),
+            ("database-filter all out", 6),
+            ("distribute-list prefix-list IN-FILTER in", 7),
+        ]
+    );
+}
+
+#[test]
+fn an_ospfv2_interface_with_no_primary_address_is_unhandled() {
+    let text = "interface Loopback0
+ ipv4 address 192.0.2.1 255.255.255.255
+!
+interface GigabitEthernet0/0/0/2
+ ipv4 unnumbered Loopback0
+!
+router ospf 1
+ area 0
+  interface GigabitEthernet0/0/0/2
+  !
+ !
+!
+";
+    let p = &ospf(text).processes[0];
+    assert_eq!(p.interfaces[0].address, None);
+    assert_eq!(unhandled(p), [("interface GigabitEthernet0/0/0/2", 9)]);
+}

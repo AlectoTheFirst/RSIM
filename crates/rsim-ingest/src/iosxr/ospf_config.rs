@@ -65,6 +65,22 @@ const PROCESS: &[&str] = &[
 /// The first words of the process lines that a `vrf` stanza inherits.
 const INHERITED: &[&str] = &["cost", "network", "passive", "priority", "auto-cost"];
 
+/// The first words of the process lines that apply only to the default VRF.
+/// A `vrf` stanza inherits each other unread or unreadable process line.
+const DEFAULT_ONLY: &[&str] = &[
+    "router-id",
+    "redistribute",
+    "default-information",
+    "area",
+    "vrf",
+    "address-family",
+    "max-metric",
+    "summary-prefix",
+    "distance",
+    "maximum",
+    "default-metric",
+];
+
 /// The handled lines of an area stanza, without the interface stanzas.
 const AREA: &[&str] = &[
     "stub",
@@ -153,8 +169,8 @@ pub struct OspfProcess {
     /// The masked lines of the scope that the reader does not read, and the
     /// handled lines with a form that the reader cannot read.
     pub unhandled: Vec<(String, Lines)>,
-    /// The masked lines of the process level with a first word of
-    /// [`INHERITED`], while [`read`] reads the stanza. Empty after
+    /// The masked lines of the process level that a `vrf` stanza inherits
+    /// (see [`inherited`]), while [`read`] reads the stanza. Empty after
     /// [`read`].
     pub inheritable: Vec<(String, Lines)>,
     pub lines: Lines,
@@ -318,6 +334,20 @@ fn irrelevant(w: &[&str]) -> bool {
     w.first().is_some_and(|f| IRRELEVANT.contains(f))
 }
 
+/// True if a `vrf` stanza inherits the process line `w` of the default VRF
+/// with the parse `parse`: a line with a first word of [`INHERITED`], and
+/// an unread or unreadable line with a first word that is not in
+/// [`DEFAULT_ONLY`] or [`IRRELEVANT`].
+fn inherited(w: &[&str], parse: &Parse) -> bool {
+    let Some(first) = w.first() else {
+        return false;
+    };
+    INHERITED.contains(first)
+        || (!matches!(parse, Parse::Read)
+            && !DEFAULT_ONLY.contains(first)
+            && !IRRELEVANT.contains(first))
+}
+
 /// An area ID as a decimal number or in dotted form.
 fn area_id(text: &str) -> Option<AreaId> {
     text.parse::<Ipv4Addr>()
@@ -422,8 +452,8 @@ impl Reader<'_> {
 /// Reads a `router ospf <name>` or `router ospfv3 <name>` stanza: the
 /// process of the default VRF, then the process of each `vrf` stanza.
 /// Each line that the reader reads goes into `read`. The process of a `vrf`
-/// stanza gets the lines of the default VRF with a first word of
-/// [`INHERITED`] as unhandled lines.
+/// stanza gets the inherited lines of the default VRF (see [`inherited`])
+/// as unhandled lines.
 pub fn read(s: &Stanza, read: &mut BTreeSet<u32>, table: &Table) -> Vec<OspfProcess> {
     let w = words(&s.key);
     let version = if w.get(1) == Some(&"ospfv3") {
@@ -509,7 +539,11 @@ fn scope(r: &mut Reader, s: &Stanza, name: &str, vrf: &str, top: bool) -> OspfPr
             }
             ["address-family", f] | ["address-family", f, "unicast"] if *f == family => {
                 for g in c.children() {
-                    p.unhandled.push(r.unhandled(g));
+                    let u = r.unhandled(g);
+                    if inherited(&words(&g.key), &Parse::Other) {
+                        p.inheritable.push(u.clone());
+                    }
+                    p.unhandled.push(u);
                 }
                 Parse::Read
             }
@@ -538,7 +572,7 @@ fn scope(r: &mut Reader, s: &Stanza, name: &str, vrf: &str, top: bool) -> OspfPr
                 x => x,
             },
         };
-        if w.first().is_some_and(|f| INHERITED.contains(f)) {
+        if inherited(&w, &parse) {
             p.inheritable.push(r.unhandled(c));
         }
         match parse {
@@ -688,7 +722,8 @@ fn link_local(a: &Ipv6Addr) -> bool {
 /// interface is its first IPv6 address that is not link-local. A
 /// secondary IPv4 address or a second such IPv6 address goes into the
 /// unhandled lines of the process. An OSPF interface with no `interface`
-/// stanza goes into the unhandled lines of the process. A process of the
+/// stanza, and an OSPFv2 interface with no primary IPv4 address, goes into
+/// the unhandled lines of the process. A process of the
 /// default VRF with no area, router ID, redistribution, default route or
 /// unhandled line is left out.
 pub fn router_config(cfg: &Config, file: &str) -> RouterConfig {
@@ -728,11 +763,16 @@ pub fn router_config(cfg: &Config, file: &str) -> RouterConfig {
                                 )),
                             }
                         }
-                        i.addresses
+                        let primary = i
+                            .addresses
                             .iter()
                             .find(|x| !x.secondary)
                             .and_then(|x| prefix::<Ipv4Addr>(&x.prefix))
-                            .map(|(a, l)| (IpAddr::V4(a), l))
+                            .map(|(a, l)| (IpAddr::V4(a), l));
+                        if primary.is_none() {
+                            unhandled.push((format!("interface {}", oi.name), oi.lines));
+                        }
+                        primary
                     }
                     (Some(i), Version::V3) => {
                         let global: Vec<((Ipv6Addr, u8), Lines)> = i
