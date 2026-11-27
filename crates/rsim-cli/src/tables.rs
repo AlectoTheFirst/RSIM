@@ -737,7 +737,6 @@ fn sdwan_rows(t: &Loaded) -> Vec<Vec<Value>> {
     rows
 }
 
-/// The row of a BGP peer fact.
 /// The row of one route of the RIB guard.
 fn guard_row(device: &str, r: &rsim_guard::Row) -> Vec<Value> {
     let kind = |v: &Option<rsim_guard::View>| v.as_ref().map_or(Value::Null, |v| json!(v.kind));
@@ -763,6 +762,7 @@ fn guard_row(device: &str, r: &rsim_guard::Row) -> Vec<Value> {
     ]
 }
 
+/// The row of a BGP peer fact.
 fn bgp_row(f: &BgpPeerFact) -> Vec<Value> {
     let opt = |v: Option<String>| v.map_or(Value::Null, Value::from);
     let (local, local_reason) = match &f.local_asn.value {

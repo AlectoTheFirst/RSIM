@@ -72,6 +72,7 @@ pub const CLAIMS: &[ClaimDef] = &[
         scopes: &["twin", "devices"],
         reads: &[
             "connected and static routes of the config",
+            "OSPF databases",
             "collected route tables",
         ],
     },

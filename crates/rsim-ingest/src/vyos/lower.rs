@@ -47,6 +47,10 @@ fn interface_of(addrs: &Addrs, gw: IpAddr) -> Option<String> {
 /// The routing defaults of VyOS: FRR with its traditional profile.
 const PLATFORM: Platform = Platform::FrrTraditional;
 
+/// The words of `Interface::dynamic` of an address that the device gets at
+/// run time from the access network.
+const ACCESS_WORDS: &[&str] = &["pppoe", "dhcp", "dhcpv6", "ipv6-autoconf", "dhcpv6-pd"];
+
 /// The guard class of a collected route of the protocol word `word`. The
 /// connected, local and static routes are compared. Each other route is not
 /// computed.
@@ -947,15 +951,15 @@ impl L<'_> {
         for (iface, list) in addrs {
             for (a, len, span) in list {
                 if *len < max_len(*a) {
-                    out.push(Candidate {
-                        prefix: Prefix::new(*a, *len),
-                        distance: PLATFORM.distance(rsim_routing::Origin::Connected),
-                        route: Route::new(
+                    out.push(Candidate::new(
+                        Prefix::new(*a, *len),
+                        PLATFORM.distance(rsim_routing::Origin::Connected),
+                        Route::new(
                             RouteKind::Connected,
                             vec![self.hop(iface, None)],
                             span.iter().cloned().collect(),
                         ),
-                    });
+                    ));
                 }
             }
         }
@@ -973,35 +977,43 @@ impl L<'_> {
             .cloned()
             .collect();
         for r in &statics {
-            out.extend(self.static_route(r, addrs));
+            out.extend(self.static_route(r));
         }
         out
     }
 
     /// The RIB guard of the main VRF: the computed route table of the
-    /// connected, static and local routes against the collected route table
-    /// `t`, whose routes it marks.
+    /// connected, static, local and OSPF routes against the collected route
+    /// table `t`, whose routes it marks. The notes of the static routes are
+    /// not kept, as the device forwards on `t`.
     fn guard(&mut self, t: &mut Fib, col: &Collected, addrs: &Addrs, locals: &[(Prefix, Route)]) {
+        let notes = self.out.notes.len();
         let mut cands = self.config_candidates(addrs);
-        cands.extend(locals.iter().map(|(p, r)| Candidate {
-            prefix: *p,
-            distance: PLATFORM.distance(rsim_routing::Origin::Connected),
-            route: r.clone(),
+        self.out.notes.truncate(notes);
+        cands.extend(locals.iter().map(|(p, r)| {
+            Candidate::new(
+                *p,
+                PLATFORM.distance(rsim_routing::Origin::Connected),
+                r.clone(),
+            )
         }));
         let ospf = OspfRoutes::of(col.ospf.as_ref(), VRF, PLATFORM);
-        cands.extend(ospf.candidates(PLATFORM, &|i, gw| self.hop(i, gw), &|gw| {
-            interface_of(addrs, gw)
-        }));
-        let computed = install(cands);
-        // The interfaces whose address the device gets at run time by PPPoE
-        // or DHCP. A collected route of such an interface that the config
-        // does not give is an access default or the address of the PPP peer,
-        // and the calculation takes it from the collected table.
+        cands.extend(
+            ospf.candidates(PLATFORM, true, &|i, gw| self.hop(i, gw), &|gw| {
+                interface_of(addrs, gw)
+            }),
+        );
+        let computed = install(cands, super::profile::COMPUTED_THROUGH_DEFAULT);
+        // The interfaces whose address the device gets at run time by PPPoE,
+        // DHCP, DHCPv6, IPv6 autoconfiguration or DHCPv6 prefix delegation.
+        // A collected route of such an interface that the config does not
+        // give is an access default or the address of the PPP peer, and the
+        // calculation takes it from the collected table.
         let access: BTreeSet<&str> = self
             .cfg
             .interfaces
             .iter()
-            .filter(|i| i.dynamic.iter().any(|d| d == "pppoe" || d == "dhcp"))
+            .filter(|i| i.dynamic.iter().any(|d| ACCESS_WORDS.contains(&d.as_str())))
             .map(|i| i.name.as_str())
             .collect();
         let mut routes = BTreeMap::new();
@@ -1046,7 +1058,7 @@ impl L<'_> {
         let collected = col.routes.iter().any(|r| r.vrf == VRF);
         if !collected {
             let cands = self.config_candidates(addrs);
-            t = install(cands);
+            t = install(cands, super::profile::COMPUTED_THROUGH_DEFAULT);
             // A routing protocol can add a longer route for each address,
             // so only the connected and the local routes stay definite.
             let protocols = self.cfg.routing_protocols.clone();
@@ -1147,7 +1159,9 @@ impl L<'_> {
     }
 
     /// The FIB of a policy route table: its static routes and the local
-    /// routes.
+    /// routes. The gateway of a static route takes the interface of its
+    /// connected network. A static route with a gateway on no connected
+    /// network is unknown.
     fn table_fib(&mut self, table: &str, addrs: &Addrs, locals: &[(Prefix, Route)]) -> Fib {
         let statics: Vec<_> = self
             .cfg
@@ -1158,9 +1172,30 @@ impl L<'_> {
             .collect();
         let mut cands = Vec::new();
         for r in &statics {
-            cands.extend(self.static_route(r, addrs));
+            for c in self.static_route(r) {
+                if c.gateways.is_empty() {
+                    cands.push(c);
+                    continue;
+                }
+                let hops: Option<Vec<RouteNextHop>> = c
+                    .gateways
+                    .iter()
+                    .map(|gw| Some(self.hop(&interface_of(addrs, *gw)?, Some(*gw))))
+                    .collect();
+                let route = match hops {
+                    Some(h) => Route::new(c.route.kind, h, c.route.spans.clone()),
+                    None => {
+                        self.note(format!(
+                            "static route {} of table {table}: gateway on no connected network",
+                            r.prefix
+                        ));
+                        Route::new(c.route.kind, Vec::new(), c.route.spans.clone())
+                    }
+                };
+                cands.push(Candidate::new(c.prefix, c.distance, route));
+            }
         }
-        let mut t = install(cands);
+        let mut t = install(cands, super::profile::COMPUTED_THROUGH_DEFAULT);
         for (p, r) in locals {
             t.insert(*p, r.clone());
         }
@@ -1168,14 +1203,11 @@ impl L<'_> {
     }
 
     /// The candidates of a static route: one for each next hop, with the
-    /// distance of the next hop, else 1. A route that is not fully lowered
-    /// is one unknown candidate, so its packets are unknown and do not fall
-    /// to a shorter prefix.
-    fn static_route(
-        &mut self,
-        r: &crate::vyos::config::StaticRoute,
-        addrs: &Addrs,
-    ) -> Vec<Candidate> {
+    /// distance of the next hop, else 1. The install stage resolves the
+    /// gateway of a `next-hop`. A route that is not fully lowered is one
+    /// unknown candidate with the lowest distance of its next hops, so its
+    /// packets are unknown and do not fall to a shorter prefix.
+    fn static_route(&mut self, r: &crate::vyos::config::StaticRoute) -> Vec<Candidate> {
         let Ok(p) = r.prefix.parse::<Prefix>() else {
             self.note(format!("static route {}: prefix not valid", r.prefix));
             return Vec::new();
@@ -1183,69 +1215,67 @@ impl L<'_> {
         let span = vec![self.span(r.lines)];
         let static_distance = PLATFORM.distance(rsim_routing::Origin::Static);
         let distance_of = |key: &str| r.distances.get(key).copied().unwrap_or(static_distance);
-        let first = r
-            .distances
-            .values()
+        let keys: Vec<String> = r
+            .blackhole
+            .then(|| "blackhole".to_string())
+            .into_iter()
+            .chain(r.interfaces.iter().map(|i| format!("interface {i}")))
+            .chain(r.gateways.iter().map(|g| format!("next-hop {g}")))
+            .collect();
+        let lowest = keys
+            .iter()
+            .map(|k| distance_of(k.as_str()))
             .min()
-            .copied()
             .unwrap_or(static_distance);
-        let unknown = vec![Candidate {
-            prefix: p,
-            distance: first,
-            route: Route::new(RouteKind::Static, Vec::new(), span.clone()),
-        }];
+        let unknown = |distance: u8| {
+            Candidate::new(
+                p,
+                distance,
+                Route::new(RouteKind::Static, Vec::new(), span.clone()),
+            )
+        };
         if !r.unhandled.is_empty() {
             self.note(format!(
                 "static route {}: options not lowered: {}",
                 r.prefix,
                 r.unhandled.join(", ")
             ));
-            return unknown;
+            return vec![unknown(lowest)];
         }
         let mut out = Vec::new();
         if r.blackhole {
-            out.push(Candidate {
-                prefix: p,
-                distance: distance_of("blackhole"),
-                route: Route::new(RouteKind::Null, Vec::new(), span.clone()),
-            });
+            out.push(Candidate::new(
+                p,
+                distance_of("blackhole"),
+                Route::new(RouteKind::Null, Vec::new(), span.clone()),
+            ));
         }
         for i in &r.interfaces {
-            out.push(Candidate {
-                prefix: p,
-                distance: distance_of(&format!("interface {i}")),
-                route: Route::new(RouteKind::Static, vec![self.hop(i, None)], span.clone()),
-            });
+            out.push(Candidate::new(
+                p,
+                distance_of(&format!("interface {i}")),
+                Route::new(RouteKind::Static, vec![self.hop(i, None)], span.clone()),
+            ));
         }
         for g in &r.gateways {
-            let iface = g.parse::<IpAddr>().ok().and_then(|gw| {
-                addrs
-                    .iter()
-                    .find(|(_, v)| {
-                        v.iter().any(|(a, len, _)| {
-                            *len < max_len(*a) && Prefix::new(*a, *len).contains(gw)
-                        })
-                    })
-                    .map(|(i, _)| (i, gw))
-            });
-            match iface {
-                Some((i, gw)) => out.push(Candidate {
-                    prefix: p,
-                    distance: distance_of(&format!("next-hop {g}")),
-                    route: Route::new(RouteKind::Static, vec![self.hop(i, Some(gw))], span.clone()),
-                }),
-                None => {
-                    self.note(format!(
-                        "static route {}: gateway {g} is on no connected network",
-                        r.prefix
-                    ));
-                    return unknown;
+            let distance = distance_of(&format!("next-hop {g}"));
+            match g.parse::<IpAddr>() {
+                Ok(gw) => out.push(Candidate::via(
+                    p,
+                    distance,
+                    RouteKind::Static,
+                    vec![gw],
+                    span.clone(),
+                )),
+                Err(_) => {
+                    self.note(format!("static route {}: gateway {g} not valid", r.prefix));
+                    out.push(unknown(distance));
                 }
             }
         }
         if out.is_empty() {
             self.note(format!("static route {}: no next hop", r.prefix));
-            return unknown;
+            return vec![unknown(lowest)];
         }
         out
     }

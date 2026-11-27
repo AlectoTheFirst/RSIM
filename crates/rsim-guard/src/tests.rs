@@ -201,3 +201,91 @@ fn the_loopback_and_link_local_prefixes_are_left_out() {
     let got: Vec<String> = rows.iter().map(|r| r.prefix.to_string()).collect();
     assert_eq!(got, ["2001:db8::/64"]);
 }
+
+#[test]
+fn an_unknown_computed_route_is_not_computed_and_the_mark_sets_no_flag() {
+    let mut fib: Fib = [
+        (
+            p("198.51.100.0/24"),
+            route(RouteKind::Static, vec![hop("eth0", Some("192.0.2.1"))], 1),
+        ),
+        (
+            p("203.0.113.0/24"),
+            route(RouteKind::Static, vec![hop("eth0", Some("192.0.2.1"))], 2),
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let ospf = RouteKind::Learned(rsim_functions::RouteProtocol::Ospf);
+    let computed: Fib = [
+        (
+            p("198.51.100.0/24"),
+            Route::unknown(ospf, "database gap: router LSA 192.0.2.9", Vec::new()),
+        ),
+        (
+            p("10.0.0.0/8"),
+            Route::unknown(RouteKind::Static, "options not lowered", Vec::new()),
+        ),
+        (
+            p("203.0.113.0/24"),
+            route(RouteKind::Static, vec![hop("eth0", Some("192.0.2.1"))], 3),
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let routes = BTreeMap::from([
+        (p("198.51.100.0/24"), compared("ospf")),
+        (p("203.0.113.0/24"), compared("static")),
+    ]);
+    let rows = compare("default", &computed, &fib, &routes);
+    let got: Vec<(String, Category, String)> = rows
+        .iter()
+        .map(|r| (r.prefix.to_string(), r.category, r.reason.clone()))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            (
+                "10.0.0.0/8".to_string(),
+                Category::NotComputed,
+                "computed route unknown: options not lowered".to_string()
+            ),
+            (
+                "198.51.100.0/24".to_string(),
+                Category::NotComputed,
+                "computed route unknown: database gap: router LSA 192.0.2.9".to_string()
+            ),
+            ("203.0.113.0/24".to_string(), Category::Match, String::new()),
+        ]
+    );
+    mark(&mut fib, &rows);
+    assert_eq!(
+        fib.guard(&p("198.51.100.0/24")),
+        Some(RibGuardFlag::NotChecked)
+    );
+}
+
+#[test]
+fn the_computed_local_routes_are_left_out_when_the_collected_table_lists_no_local_route() {
+    let table = || -> Fib {
+        [
+            (
+                p("192.0.2.0/24"),
+                route(RouteKind::Connected, vec![hop("eth0", None)], 1),
+            ),
+            (p("192.0.2.1/32"), route(RouteKind::Local, Vec::new(), 1)),
+        ]
+        .into_iter()
+        .collect()
+    };
+    let computed = table();
+    let collected = table();
+    let mut routes = BTreeMap::from([(p("192.0.2.0/24"), compared("connected"))]);
+    let rows = compare("default", &computed, &collected, &routes);
+    let got: Vec<String> = rows.iter().map(|r| r.prefix.to_string()).collect();
+    assert_eq!(got, ["192.0.2.0/24"]);
+    routes.insert(p("192.0.2.1/32"), compared("local"));
+    let rows = compare("default", &computed, &collected, &routes);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1].category, Category::Match);
+}

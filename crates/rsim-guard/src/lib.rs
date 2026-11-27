@@ -113,7 +113,10 @@ fn host_scope(p: &Prefix) -> bool {
 /// route table of the collected rows, and `routes` holds the collected
 /// route of each prefix of the rows. A prefix of `collected` that `routes`
 /// does not hold, for example a local route of the config, is left out, and
-/// so is a loopback or link-local prefix.
+/// so is a loopback or link-local prefix. If no prefix of `routes` has a
+/// local route in `collected`, the computed local routes are left out. A
+/// computed route with no next hop that is not a local or a discard route
+/// is not computed, with its reason.
 pub fn compare(
     vrf: &str,
     computed: &Fib,
@@ -121,8 +124,13 @@ pub fn compare(
     routes: &BTreeMap<Prefix, CollectedRoute>,
 ) -> Vec<Row> {
     let computed_routes: BTreeMap<Prefix, Route> = computed.entries().into_iter().collect();
-    let prefixes: BTreeSet<Prefix> = computed_routes
+    let lists_local = routes
         .keys()
+        .any(|p| collected.get(p).is_some_and(|r| r.kind == RouteKind::Local));
+    let prefixes: BTreeSet<Prefix> = computed_routes
+        .iter()
+        .filter(|(p, r)| lists_local || r.kind != RouteKind::Local || routes.contains_key(*p))
+        .map(|(p, _)| p)
         .chain(routes.keys())
         .copied()
         .filter(|p| !host_scope(p))
@@ -148,14 +156,23 @@ pub fn compare(
                 .chain(mine.iter().flat_map(|r| r.spans.iter().cloned()))
                 .collect(),
         };
+        let mine_unknown = mine.and_then(|m| View::of(m).unknown);
         let out = match (mine, theirs.as_ref()) {
             (None, None) => continue,
-            (Some(m), None) => row(
-                Category::OnlyComputed,
-                m.kind.name().to_string(),
-                Vec::new(),
-                String::new(),
-            ),
+            (Some(m), None) => match mine_unknown {
+                Some(why) => row(
+                    Category::NotComputed,
+                    m.kind.name().to_string(),
+                    Vec::new(),
+                    format!("computed route unknown: {why}"),
+                ),
+                None => row(
+                    Category::OnlyComputed,
+                    m.kind.name().to_string(),
+                    Vec::new(),
+                    String::new(),
+                ),
+            },
             (_, Some((c, r))) => match &c.class {
                 Class::NotComputed(why) => row(
                     Category::NotComputed,
@@ -178,15 +195,20 @@ pub fn compare(
                             Vec::new(),
                             format!("collected route unknown: {why}"),
                         )
+                    } else if let Some(why) = mine_unknown {
+                        row(
+                            Category::NotComputed,
+                            c.protocol.clone(),
+                            Vec::new(),
+                            format!("computed route unknown: {why}"),
+                        )
                     } else if let Some(m) = mine {
                         let mine_view = View::of(m);
                         let mut fields = Vec::new();
                         if mine_view.kind != theirs_view.kind {
                             fields.push("kind");
                         }
-                        if mine_view.next_hops != theirs_view.next_hops
-                            || mine_view.unknown.is_some()
-                        {
+                        if mine_view.next_hops != theirs_view.next_hops {
                             fields.push("next_hops");
                         }
                         let category = if fields.is_empty() {

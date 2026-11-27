@@ -341,3 +341,45 @@ fn the_sections_of_each_vendor() {
     assert_eq!(ospf::sections("iosxe").len(), 21);
     assert!(ospf::sections("unifi").is_empty());
 }
+
+#[test]
+fn the_ospf_candidates_leave_out_ospfv3_on_request_and_a_vrf_with_no_database_is_not_computed() {
+    use rsim_core::{FunctionId, InterfaceId, Prefix};
+    use rsim_functions::RouteNextHop;
+    use rsim_ingest::ospf::routes::OspfRoutes;
+
+    let mut d = ospf::read("nxos", &sections("nxos"));
+    let hop = |i: &str, gw: Option<std::net::IpAddr>| RouteNextHop {
+        interface: InterfaceId::new(i),
+        gateway: gw,
+        next: FunctionId::new("r1/next"),
+    };
+    let none = |_: std::net::IpAddr| None;
+    let prefixes = |routes: &OspfRoutes, v3: bool| -> Vec<Prefix> {
+        routes
+            .candidates(Platform::Nxos, v3, &hop, &none)
+            .iter()
+            .map(|c| c.prefix)
+            .collect()
+    };
+    let routes = OspfRoutes::of(Some(&d), "default", Platform::Nxos);
+    let v4 = prefixes(&routes, false);
+    assert_eq!(v4.len(), 6);
+    assert!(v4.iter().all(Prefix::is_ipv4));
+    assert_eq!(prefixes(&routes, true).len(), 12);
+
+    let red = OspfRoutes::of(Some(&d), "RED", Platform::Nxos);
+    assert_eq!(
+        red.class("192.0.2.64/26".parse().unwrap()),
+        rsim_guard::Class::NotComputed("no OSPF database of the VRF".into())
+    );
+
+    let mut second = d.of(Version::V2, "default").next().unwrap().clone();
+    second.process = "2".into();
+    d.databases.push(second);
+    let two = OspfRoutes::of(Some(&d), "default", Platform::Nxos);
+    let c = two.candidates(Platform::Nxos, false, &hop, &none);
+    assert_eq!(c.len(), 6);
+    assert!(c.iter().all(|c| c.route.unknown_reason()
+        == Some("more than one OSPF process gives the route")));
+}

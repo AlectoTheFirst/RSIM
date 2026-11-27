@@ -1362,9 +1362,11 @@ pub(crate) fn fib(
 }
 
 /// The RIB guard of a VRF: the computed route table of the connected,
-/// local and static routes of the config against the collected route table
-/// `t`, whose routes it marks. The class of a collected route comes from the
-/// code of its first path that is not a backup path.
+/// local and static routes of the config and of the OSPFv2 routes against
+/// the collected route table `t`, whose routes it marks. The class of a
+/// collected route comes from the code of its first path that is not a
+/// backup path. In a VRF with no static route of the config, a collected
+/// static route is seeded.
 fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &Hops) {
     let hop = |l: &L, iface: &str, gw: Option<IpAddr>| RouteNextHop {
         interface: InterfaceId::new(iface),
@@ -1378,21 +1380,17 @@ fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &H
         for a in &p.i.addresses {
             if let Some((ip, len)) = iface_addr(&a.prefix) {
                 let span = vec![l.span(a.lines)];
-                cands.push(Candidate {
-                    prefix: Prefix::host(ip),
-                    distance: zero,
-                    route: Route::new(RouteKind::Local, Vec::new(), span.clone()),
-                });
+                cands.push(Candidate::new(
+                    Prefix::host(ip),
+                    zero,
+                    Route::new(RouteKind::Local, Vec::new(), span.clone()),
+                ));
                 if len < 32 {
-                    cands.push(Candidate {
-                        prefix: Prefix::new(ip, len),
-                        distance: zero,
-                        route: Route::new(
-                            RouteKind::Connected,
-                            vec![hop(l, &p.i.name, None)],
-                            span,
-                        ),
-                    });
+                    cands.push(Candidate::new(
+                        Prefix::new(ip, len),
+                        zero,
+                        Route::new(RouteKind::Connected, vec![hop(l, &p.i.name, None)], span),
+                    ));
                 }
             }
         }
@@ -1403,41 +1401,42 @@ fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &H
         };
         let span = vec![l.span(r.lines)];
         let gw = r.next_hop.as_deref().and_then(|g| g.parse::<IpAddr>().ok());
-        let route = if r
+        let cand = if r
             .interface
             .as_deref()
             .is_some_and(|i| i.eq_ignore_ascii_case("null0"))
         {
-            Route::new(RouteKind::Null, Vec::new(), span)
-        } else {
-            let iface = r.interface.clone().or_else(|| {
-                let gw = gw?;
-                mine.iter()
-                    .find(|p| {
-                        p.i.addresses.iter().any(|a| {
-                            iface_addr(&a.prefix).is_some_and(|(ip, len)| {
-                                len < 32 && Prefix::new(ip, len).contains(gw)
-                            })
-                        })
-                    })
-                    .map(|p| p.i.name.clone())
-            });
-            match iface {
-                Some(i) if r.unhandled.is_empty() => {
-                    Route::new(RouteKind::Static, vec![hop(l, &i, gw)], span)
-                }
-                _ => Route::unknown(
+            Candidate::new(
+                p,
+                r.preference,
+                Route::new(RouteKind::Null, Vec::new(), span),
+            )
+        } else if !r.unhandled.is_empty() || (r.interface.is_none() && gw.is_none()) {
+            Candidate::new(
+                p,
+                r.preference,
+                Route::unknown(
                     RouteKind::Static,
                     format!("static route {p} in VRF {vrf}, next hop not known"),
                     span,
                 ),
-            }
+            )
+        } else if let Some(i) = &r.interface {
+            Candidate::new(
+                p,
+                r.preference,
+                Route::new(RouteKind::Static, vec![hop(l, i, gw)], span),
+            )
+        } else {
+            Candidate::via(
+                p,
+                r.preference,
+                RouteKind::Static,
+                gw.into_iter().collect(),
+                span,
+            )
         };
-        cands.push(Candidate {
-            prefix: p,
-            distance: r.preference,
-            route,
-        });
+        cands.push(cand);
     }
     let ospf = crate::ospf::routes::OspfRoutes::of(hops.ospf, vrf, hops.platform);
     let interface_of = |gw: IpAddr| {
@@ -1450,8 +1449,11 @@ fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &H
             })
             .map(|p| p.i.name.clone())
     };
-    cands.extend(ospf.candidates(hops.platform, &|i, gw| hop(l, i, gw), &interface_of));
-    let computed = install(cands);
+    cands.extend(ospf.candidates(hops.platform, false, &|i, gw| hop(l, i, gw), &interface_of));
+    let computed = install(cands, hops.computed_through_default);
+    // A VRF with no static route of the config takes its static routes from
+    // the collected table.
+    let config_statics = hops.config_statics.iter().any(|r| r.vrf == vrf);
     let mut by_prefix: BTreeMap<Prefix, Vec<&RoutePath>> = BTreeMap::new();
     for p in rib.paths.iter().filter(|p| p.vrf == vrf) {
         by_prefix.entry(p.prefix).or_default().push(p);
@@ -1462,7 +1464,9 @@ fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &H
             continue;
         };
         let c = code(&head.protocol);
-        let class = if c == CONNECTED_CODE || c == LOCAL_CODE || c == "S" {
+        let class = if c == "S" && !config_statics {
+            rsim_guard::Class::Seeded
+        } else if c == CONNECTED_CODE || c == LOCAL_CODE || c == "S" {
             rsim_guard::Class::Compared
         } else if c == "O" {
             ospf.class(*prefix)

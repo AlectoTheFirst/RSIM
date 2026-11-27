@@ -1014,3 +1014,62 @@ fn a_static_route_of_a_higher_distance_installs_only_when_the_better_route_is_ab
         ["192.0.2.2@eth0.10"]
     );
 }
+
+#[test]
+fn a_static_route_whose_gateway_does_not_resolve_gives_way_to_a_floating_static_route() {
+    let config = String::from_utf8(VYOS.to_vec()).unwrap().replacen(
+        "\"static\": {\n      \"table\"",
+        r#""static": {"route": {"198.51.100.0/24": {"next-hop": {"203.0.113.5": {}, "192.0.2.3": {"distance": "200"}}}}, "table""#,
+        1,
+    );
+    let e = estate_from(
+        config.as_bytes(),
+        |_, b| b,
+        vec![RouteRow {
+            next_hop: Some("192.0.2.3".into()),
+            ..route("198.51.100.0/24", "static", "eth0.10")
+        }],
+        Vec::new(),
+    );
+    let r = e.guard["r1"]
+        .iter()
+        .find(|r| r.prefix.to_string() == "198.51.100.0/24")
+        .unwrap();
+    assert_eq!(r.category, rsim_guard::Category::Match, "{r:?}");
+    assert_eq!(
+        r.computed.as_ref().unwrap().next_hops,
+        ["192.0.2.3@eth0.10"]
+    );
+}
+
+#[test]
+fn a_dhcpv6_route_is_seeded_and_an_ospf6_route_has_the_kind_ospf() {
+    let config = String::from_utf8(VYOS.to_vec()).unwrap().replacen(
+        r#""eth2": {"description""#,
+        r#""eth2": {"address": "dhcpv6", "description""#,
+        1,
+    );
+    let e = estate_from(
+        config.as_bytes(),
+        |_, b| b,
+        vec![
+            route("2001:db8:1::/64", "connected", "eth2"),
+            route("2001:db8:5::/64", "ospf6", "eth0"),
+        ],
+        Vec::new(),
+    );
+    let row = |p: &str| {
+        e.guard["r1"]
+            .iter()
+            .find(|r| r.prefix.to_string() == p)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(
+        row("2001:db8:1::/64").category,
+        rsim_guard::Category::Seeded
+    );
+    let o = row("2001:db8:5::/64");
+    assert_eq!(o.category, rsim_guard::Category::NotComputed);
+    assert_eq!(o.collected.unwrap().kind, "ospf");
+}

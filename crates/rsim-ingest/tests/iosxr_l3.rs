@@ -719,3 +719,34 @@ fn outcome(s: &rsim_engine::Summary) -> String {
         other => format!("{other:?}"),
     }
 }
+
+#[test]
+fn a_collected_static_route_of_a_vrf_with_no_static_route_of_the_config_is_seeded() {
+    let config = String::from_utf8(CONFIG.to_vec()).unwrap().replacen(
+        "   192.0.2.192/27 192.0.2.10\n",
+        "",
+        1,
+    );
+    let e = assemble(vec![Input::Iosxr {
+        name: "pe1".into(),
+        config: config.into_bytes(),
+        file: "pe1/config".into(),
+        collected: Collected::default(),
+        sections: sections(),
+    }]);
+    let category = |vrf: &str, p: &str| {
+        e.guard["pe1"]
+            .iter()
+            .find(|r| r.vrf == vrf && r.prefix.to_string() == p)
+            .unwrap_or_else(|| panic!("{vrf} {p} not in the guard"))
+            .category
+    };
+    assert_eq!(
+        category("RED", "192.0.2.192/27"),
+        rsim_guard::Category::Seeded
+    );
+    assert_eq!(
+        category("default", "0.0.0.0/0"),
+        rsim_guard::Category::Match
+    );
+}

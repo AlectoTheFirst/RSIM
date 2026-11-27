@@ -1310,7 +1310,10 @@ impl L<'_> {
         };
         let collected = col.routes.iter().any(|r| r.vrf == vrf);
         if !collected {
-            t = install(self.config_candidates(vrf, active, names, next));
+            t = install(
+                self.config_candidates(vrf, active, names, next),
+                super::profile::COMPUTED_THROUGH_DEFAULT,
+            );
             if let Some(found) = self.cfg.dynamic_vrfs.get(vrf).cloned() {
                 self.note(format!(
                     "VRF {vrf}: dynamic routing protocol, no collected route rows, each destination outside the connected and local routes unknown"
@@ -1503,15 +1506,15 @@ impl L<'_> {
                 if let Some((ip, len)) = iface_addr(&a.prefix)
                     && len < 32
                 {
-                    out.push(Candidate {
-                        prefix: Prefix::new(ip, len),
-                        distance: PLATFORM.distance(rsim_routing::Origin::Connected),
-                        route: Route::new(
+                    out.push(Candidate::new(
+                        Prefix::new(ip, len),
+                        PLATFORM.distance(rsim_routing::Origin::Connected),
+                        Route::new(
                             RouteKind::Connected,
                             vec![hop(self, &i.name, None)],
                             vec![self.span(a.lines)],
                         ),
-                    });
+                    ));
                 }
             }
         }
@@ -1524,57 +1527,56 @@ impl L<'_> {
                 self.note(format!("static route {}: prefix not valid", r.prefix));
                 continue;
             };
-            let route = if r
+            let gw = r.next_hop.as_deref().and_then(|g| g.parse::<IpAddr>().ok());
+            let iface = r.interface.clone().map(|i| names.resolve(&i));
+            let cand = if r
                 .interface
                 .as_deref()
                 .is_some_and(|i| i.eq_ignore_ascii_case("null0"))
             {
-                Route::new(RouteKind::Null, Vec::new(), span)
+                Candidate::new(
+                    p,
+                    r.preference,
+                    Route::new(RouteKind::Null, Vec::new(), span),
+                )
+            } else if !r.unhandled.is_empty() || (iface.is_none() && gw.is_none()) {
+                self.note(format!(
+                    "static route {} in VRF {vrf}, next hop not known",
+                    r.prefix
+                ));
+                Candidate::new(
+                    p,
+                    r.preference,
+                    Route::unknown(
+                        RouteKind::Static,
+                        format!("static route {p} in VRF {vrf}, next hop not known"),
+                        span,
+                    ),
+                )
+            } else if let Some(i) = iface {
+                Candidate::new(
+                    p,
+                    r.preference,
+                    Route::new(RouteKind::Static, vec![hop(self, &i, gw)], span),
+                )
             } else {
-                let gw = r.next_hop.as_deref().and_then(|g| g.parse::<IpAddr>().ok());
-                let iface = r.interface.clone().map(|i| names.resolve(&i)).or_else(|| {
-                    let gw = gw?;
-                    active
-                        .iter()
-                        .filter(|i| vrf_of(i) == vrf)
-                        .find(|i| {
-                            i.addresses.iter().any(|a| {
-                                iface_addr(&a.prefix).is_some_and(|(ip, len)| {
-                                    len < 32 && Prefix::new(ip, len).contains(gw)
-                                })
-                            })
-                        })
-                        .map(|i| i.name.clone())
-                });
-                match iface {
-                    Some(i) if r.unhandled.is_empty() => {
-                        Route::new(RouteKind::Static, vec![hop(self, &i, gw)], span)
-                    }
-                    _ => {
-                        self.note(format!(
-                            "static route {} in VRF {vrf}, next hop not known",
-                            r.prefix
-                        ));
-                        Route::unknown(
-                            RouteKind::Static,
-                            format!("static route {p} in VRF {vrf}, next hop not known"),
-                            span,
-                        )
-                    }
-                }
+                Candidate::via(
+                    p,
+                    r.preference,
+                    RouteKind::Static,
+                    gw.into_iter().collect(),
+                    span,
+                )
             };
-            out.push(Candidate {
-                prefix: p,
-                distance: r.preference,
-                route,
-            });
+            out.push(cand);
         }
         out
     }
 
     /// The RIB guard of a VRF: the computed route table of the connected,
-    /// static and local routes against the collected route table `t`,
-    /// whose routes it marks.
+    /// static, local and OSPFv2 routes against the collected route table
+    /// `t`, whose routes it marks. The notes of the static routes are not
+    /// kept, as the device forwards on `t`.
     fn guard(
         &mut self,
         t: &mut Fib,
@@ -1584,15 +1586,17 @@ impl L<'_> {
         names: &Names,
         next: &str,
     ) {
+        let notes = self.out.notes.len();
         let mut cands = self.config_candidates(vrf, active, names, next);
+        self.out.notes.truncate(notes);
         for i in active.iter().filter(|i| vrf_of(i) == vrf) {
             for a in &i.addresses {
                 if let Some((ip, _)) = iface_addr(&a.prefix) {
-                    cands.push(Candidate {
-                        prefix: Prefix::host(ip),
-                        distance: PLATFORM.distance(rsim_routing::Origin::Connected),
-                        route: Route::new(RouteKind::Local, Vec::new(), vec![self.span(a.lines)]),
-                    });
+                    cands.push(Candidate::new(
+                        Prefix::host(ip),
+                        PLATFORM.distance(rsim_routing::Origin::Connected),
+                        Route::new(RouteKind::Local, Vec::new(), vec![self.span(a.lines)]),
+                    ));
                 }
             }
         }
@@ -1614,8 +1618,8 @@ impl L<'_> {
             gateway: gw,
             next: self.id(next),
         };
-        cands.extend(ospf.candidates(PLATFORM, &hop, &interface_of));
-        let computed = install(cands);
+        cands.extend(ospf.candidates(PLATFORM, false, &hop, &interface_of));
+        let computed = install(cands, super::profile::COMPUTED_THROUGH_DEFAULT);
         let mut routes = BTreeMap::new();
         for r in col.routes.iter().filter(|r| r.selected && r.vrf == vrf) {
             let Ok(p) = r.prefix.parse::<Prefix>() else {

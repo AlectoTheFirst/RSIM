@@ -1696,3 +1696,49 @@ fn config_static_routes_of_one_prefix_keep_the_lowest_preference_and_each_equal_
     );
     assert_eq!(kinds(&t, "default")["198.51.100.0/30"], "connected");
 }
+
+#[test]
+fn a_config_static_route_whose_gateway_does_not_resolve_gives_way_to_a_floating_static_route() {
+    let text = String::from_utf8(CONFIG.to_vec()).unwrap();
+    let start = text.find("router ospf 1\n").unwrap();
+    let end = text.find("ip nat inside source static").unwrap();
+    let config = format!(
+        "{}{}\nip route 198.51.100.64/26 203.0.113.250\nip route 198.51.100.64/26 192.0.2.9 200\n",
+        &text[..start],
+        &text[end..]
+    );
+    let t = estate_of(config.as_bytes(), Collected::default())
+        .builder
+        .build()
+        .expect("the twin builds");
+    assert_eq!(
+        gateways(&t, "default", "198.51.100.64/26"),
+        [Some(ip("192.0.2.9"))].into_iter().collect()
+    );
+}
+
+#[test]
+fn the_guard_keeps_no_static_route_note_and_an_unknown_static_route_is_not_computed() {
+    let text = String::from_utf8(CONFIG.to_vec()).unwrap().replacen(
+        "ip route 0.0.0.0/0 198.51.100.2\n",
+        "ip route 0.0.0.0/0 198.51.100.2\nip route 198.51.100.128/25 192.0.2.9 track 5\n",
+        1,
+    );
+    let e = estate_of(text.as_bytes(), collected());
+    assert!(
+        e.notes["leaf1"]
+            .iter()
+            .all(|n| !n.contains("198.51.100.128/25")),
+        "{:?}",
+        e.notes["leaf1"]
+    );
+    let r = e.guard["leaf1"]
+        .iter()
+        .find(|r| r.prefix.to_string() == "198.51.100.128/25")
+        .unwrap();
+    assert_eq!(r.category, rsim_guard::Category::NotComputed);
+    assert_eq!(
+        r.reason,
+        "computed route unknown: static route 198.51.100.128/25 in VRF default, next hop not known"
+    );
+}
