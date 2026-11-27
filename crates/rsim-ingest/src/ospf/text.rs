@@ -7,9 +7,11 @@
 //! line gives the area of the LSAs below it, and a `Router with ID` line
 //! gives the process. The VRF of a process is the VRF of its `Connected to
 //! MPLS VPN Superbackbone, VRF` line, else of its `router ospf <process>
-//! vrf <name>` line of the running config, else `default`. The neighbour
-//! table has no process column, and a neighbour takes the process of its
-//! interface, else the first process.
+//! vrf <name>` line of the running config, else `default`. When the
+//! IOS-XE running config is not fresh, the VRF of an OSPFv2 process with no
+//! `Superbackbone` line is not read, and the outcome has a note for the
+//! process. The neighbour table has no process column, and a neighbour
+//! takes the process of its interface, else the first process.
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr};
@@ -385,11 +387,12 @@ fn line_of_lsa(t: &str, r: &mut RawLsa) {
     }
 }
 
-/// The databases of an IOS-XE or IOS-XR router for one version.
+/// The databases of an IOS-XE or IOS-XR router for one version. `config`
+/// is the running config answer of IOS-XE and `None` for IOS-XR.
 pub(crate) fn cisco<'a>(
     v: &VersionSections,
     a: &impl Fn(&str) -> Answer<'a>,
-    config: Answer<'a>,
+    config: Option<Answer<'a>>,
 ) -> Build {
     let version = v.version;
     let mut b = Build::default();
@@ -400,9 +403,10 @@ pub(crate) fn cisco<'a>(
     let procs = text(a(v.process))
         .map(|(t, _)| processes(&t))
         .unwrap_or_default();
-    let cfg = match (version, text(config)) {
-        (Version::V2, Some((t, _))) => config_vrfs(&t),
-        _ => BTreeMap::new(),
+    let (cfg, cfg_missing) = match (version, config.map(text)) {
+        (Version::V2, Some(Some((t, _)))) => (config_vrfs(&t), false),
+        (Version::V2, Some(None)) => (BTreeMap::new(), true),
+        _ => (BTreeMap::new(), false),
     };
     let vrf_of = |process: &str| -> String {
         procs
@@ -452,6 +456,16 @@ pub(crate) fn cisco<'a>(
     for (p, rid) in routers {
         let db = b.db(version, &vrf_of(&p), &p);
         db.router_id.get_or_insert(rid);
+    }
+    if cfg_missing {
+        let unread: Vec<String> = b
+            .dbs
+            .keys()
+            .map(|(_, p)| p)
+            .filter(|p| procs.get(*p).and_then(|x| x.vrf.as_ref()).is_none())
+            .map(|p| format!("process {p}"))
+            .collect();
+        b.vrf_unread = unread;
     }
     b
 }

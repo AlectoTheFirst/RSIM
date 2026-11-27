@@ -1,0 +1,9 @@
+hostname r1
+!
+router ospf 1
+ router-id 198.51.100.1
+!
+ipv6 router ospf 1
+ router-id 198.51.100.1
+!
+end

@@ -138,7 +138,8 @@ pub fn read(vendor: &str, s: &OspfSections) -> DeviceOspf {
         let mut b = match vendor {
             "nxos" => json::nxos(&v, &a),
             "vyos" => json::frr(&v, &a),
-            "iosxe" | "iosxr" => text::cisco(&v, &a, a(CONFIG)),
+            "iosxe" => text::cisco(&v, &a, Some(a(CONFIG))),
+            "iosxr" => text::cisco(&v, &a, None),
             _ => Build::default(),
         };
         let o = outcome(&v, &a, &mut b);
@@ -196,12 +197,13 @@ fn short(h: &Hash) -> String {
     h.to_string().chars().take(12).collect()
 }
 
-/// The databases of one version while the sections are read, and the parts
-/// that are not read.
+/// The databases of one version while the sections are read, the parts
+/// that are not read, and the processes whose VRF is not read.
 #[derive(Default)]
 pub(crate) struct Build {
     pub dbs: BTreeMap<(String, String), Database>,
     pub unread: Vec<String>,
+    pub vrf_unread: Vec<String>,
     pub lsas: usize,
 }
 
@@ -226,11 +228,13 @@ impl Build {
     }
 }
 
-/// The outcome of the database sections of a version: `NotCaptured` when
-/// no section is collected or each is absent, `Failed` when a read failed
-/// or when no LSA is read of an answer with parts that are not read,
-/// `Partial` when some sections are absent or some parts are not read, else
-/// `Complete` or `CompleteEmpty`. The scope is the VRFs of the databases.
+/// The outcome of the database sections of a version. The outcome is
+/// `NotCaptured` when no section is collected or each is absent. It is
+/// `Failed` when a read failed, or when no LSA is read and some sections are
+/// absent or some parts are not read. It is `Partial` when some sections
+/// are absent, some parts are not read or the VRF of a process is not read.
+/// Else it is `Complete` or `CompleteEmpty`. The scope is the VRFs of the
+/// databases.
 fn outcome<'a>(
     v: &VersionSections,
     a: &impl Fn(&str) -> Answer<'a>,
@@ -285,11 +289,15 @@ fn outcome<'a>(
     if !b.unread.is_empty() {
         notes.push(format!("not read: {}", b.unread.join(", ")));
     }
-    let outcome = match (b.lsas, notes.is_empty()) {
-        (0, true) => Outcome::CompleteEmpty,
-        (_, true) => Outcome::Complete,
-        (0, false) => Outcome::Failed,
-        (_, false) => Outcome::Partial,
+    let lost = !notes.is_empty();
+    if !b.vrf_unread.is_empty() {
+        notes.push(format!("VRF not read: {}", b.vrf_unread.join(", ")));
+    }
+    let outcome = match (b.lsas, lost, notes.is_empty()) {
+        (0, _, true) => Outcome::CompleteEmpty,
+        (_, _, true) => Outcome::Complete,
+        (0, true, _) => Outcome::Failed,
+        _ => Outcome::Partial,
     };
     with(outcome, (!notes.is_empty()).then(|| notes.join(", ")))
 }
@@ -305,7 +313,8 @@ pub(crate) struct RawLink {
     pub neighbor_interface_id: Option<String>,
 }
 
-/// One prefix of an OSPFv3 LSA with its length and metric.
+/// One prefix of an OSPFv3 LSA with its length and metric. The prefix is
+/// empty when the row has no prefix field.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RawPrefix {
     pub prefix: String,
@@ -324,6 +333,7 @@ pub(crate) struct RawLsa {
     pub seq: Option<String>,
     pub age: Option<String>,
     pub links: Vec<RawLink>,
+    /// An attached router is empty when its row has no router field.
     pub attached: Vec<String>,
     pub mask: Option<String>,
     pub prefix: Option<String>,
@@ -478,6 +488,14 @@ fn v2_prefix(lsid: Ipv4Addr, raw: &RawLsa) -> Result<Prefix, String> {
     Ok(Prefix::new(IpAddr::V4(lsid), len))
 }
 
+/// The prefix of a prefix row of an OSPFv3 LSA.
+fn row_prefix(p: &RawPrefix) -> Result<Prefix, String> {
+    if p.prefix.trim().is_empty() {
+        return Err("a prefix row has no prefix".into());
+    }
+    prefix(&p.prefix, p.len.as_deref()).ok_or_else(|| format!("prefix {} not read", p.prefix))
+}
+
 fn v3_prefix(raw: &RawLsa) -> Result<Prefix, String> {
     let p = req(&raw.prefix, "prefix")?;
     prefix(p, raw.prefix_len.as_deref()).ok_or_else(|| format!("prefix {p} not read"))
@@ -574,10 +592,11 @@ pub(crate) fn to_lsa(version: Version, lsa_type: LsaType, raw: &RawLsa) -> Resul
             attached: raw
                 .attached
                 .iter()
-                .map(|r| {
-                    r.trim()
+                .map(|r| match r.trim() {
+                    "" => Err("an attached router row has no router".to_string()),
+                    t => t
                         .parse()
-                        .map_err(|_| format!("attached router {r} not read"))
+                        .map_err(|_| format!("attached router {r} not read")),
                 })
                 .collect::<Result<_, _>>()?,
         },
@@ -591,7 +610,8 @@ pub(crate) fn to_lsa(version: Version, lsa_type: LsaType, raw: &RawLsa) -> Resul
         LsaType::AsbrSummary => Body::AsbrSummary {
             router: match (&raw.router, version) {
                 (Some(_), _) => router_id(&raw.router, "destination router")?,
-                (None, _) => lsid,
+                (None, Version::V2) => lsid,
+                (None, Version::V3) => return Err("no destination router".into()),
             },
             metric: number(&raw.metric, "metric")?,
         },
@@ -628,10 +648,7 @@ pub(crate) fn to_lsa(version: Version, lsa_type: LsaType, raw: &RawLsa) -> Resul
             prefixes: raw
                 .prefixes
                 .iter()
-                .map(|p| {
-                    prefix(&p.prefix, p.len.as_deref())
-                        .ok_or_else(|| format!("prefix {} not read", p.prefix))
-                })
+                .map(row_prefix)
                 .collect::<Result<_, _>>()?,
             interface: raw.interface.clone(),
         },
@@ -659,11 +676,14 @@ pub(crate) fn to_lsa(version: Version, lsa_type: LsaType, raw: &RawLsa) -> Resul
                     .prefixes
                     .iter()
                     .map(|p| {
-                        let pf = prefix(&p.prefix, p.len.as_deref())
-                            .ok_or_else(|| format!("prefix {} not read", p.prefix))?;
-                        let m = p.metric.as_deref().map_or(Some(0), num);
-                        m.map(|m| (pf, m))
-                            .ok_or_else(|| format!("metric of prefix {} not read", p.prefix))
+                        let pf = row_prefix(p)?;
+                        let m = p
+                            .metric
+                            .as_deref()
+                            .ok_or_else(|| format!("prefix {} has no metric", p.prefix))?;
+                        num(m)
+                            .map(|m| (pf, m))
+                            .ok_or_else(|| format!("metric {m} of prefix {} not read", p.prefix))
                     })
                     .collect::<Result<_, _>>()?,
             }

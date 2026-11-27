@@ -4,15 +4,16 @@
 //! NX-OS keys each table by context, one for each process and VRF, under
 //! `TABLE_ctx`. A database answer has an area level (`TABLE_area`) with the
 //! LSAs below it, or the LSAs right below the context with the area on each
-//! LSA; both are read. The keys are those of HST, with the names that HST
-//! accepts for each field, and they are not confirmed on a device.
+//! LSA. The reader reads both forms. The keys are those of HST, with the
+//! names that HST accepts for each field, and they are not confirmed on a
+//! device.
 //!
 //! The FRR OSPFv2 sections hold one object for each VRF, `{"answer": ...}`
 //! or `{"failed": ...}`. An LSA is each object with the key
 //! `advertisedRouter`, in the area of the member of `areas` above it. The
-//! FRR OSPFv3 sections are the answers of the default VRF; an LSA is each
-//! object with the key `advertisingRouter`, in the area of the `areaId` of
-//! an object above it.
+//! FRR OSPFv3 sections are the answers of the default VRF. An OSPFv3 LSA is
+//! each object with the key `advertisingRouter`, in the area of the
+//! `areaId` of an object above it.
 
 use rsim_core::SourceSpan;
 use std::net::{IpAddr, Ipv4Addr};
@@ -58,7 +59,7 @@ fn rows<'s>(s: &'s Stanza, name: &str) -> Vec<&'s Stanza> {
     }
 }
 
-/// The document of a fresh JSON answer. Another answer gives `None`; a
+/// The document of a fresh JSON answer. Another answer gives `None`. A
 /// fresh answer that is not JSON goes in the parts that are not read.
 fn doc<'a>(b: &mut Build, name: &str, answer: Answer<'a>) -> Option<(Document, &'a str)> {
     let Answer::Fresh(bytes, file) = answer else {
@@ -126,12 +127,11 @@ fn nx_lsa(lsa: &Stanza, vrf: &str, process: &str, area: Option<String>, file: &s
     r.attached = match lsa.get("attached_rtr").map(|a| &a.body) {
         Some(Body::Array(items)) => items
             .iter()
-            .filter_map(Stanza::text)
-            .map(str::to_string)
+            .map(|x| x.text().unwrap_or_default().to_string())
             .collect(),
         _ => rows(lsa, "rtr")
             .into_iter()
-            .filter_map(|x| first(x, &["rtr", "rtrid", "attached_rtr", "id"]))
+            .map(|x| first(x, &["rtr", "rtrid", "attached_rtr", "id"]).unwrap_or_default())
             .collect(),
     };
     r.mask = first(lsa, &["netmask", "mask", "masklen"]);
@@ -141,10 +141,7 @@ fn nx_lsa(lsa: &Stanza, vrf: &str, process: &str, area: Option<String>, file: &s
         r.mask = r.prefix_len.clone();
     }
     r.metric = first(lsa, &["metric", "cost", "tos0_metric"]);
-    r.metric_type = first(
-        lsa,
-        &["metrictype", "metric_type", "ext_type", "ebit", "e_bit"],
-    );
+    r.metric_type = first(lsa, &["metrictype", "metric_type", "ext_type"]);
     r.forwarding = first(lsa, &["fwdaddr", "fwd_addr", "forwarding_address"]);
     r.router = first(
         lsa,
@@ -161,12 +158,10 @@ fn nx_lsa(lsa: &Stanza, vrf: &str, process: &str, area: Option<String>, file: &s
     );
     r.prefixes = rows(lsa, "prefix")
         .into_iter()
-        .filter_map(|p| {
-            Some(RawPrefix {
-                prefix: first(p, &["prefix", "ipv6_prefix", "addr"])?,
-                len: first(p, &["prefixlen", "prefix_len", "plen"]),
-                metric: first(p, &["metric", "cost"]),
-            })
+        .map(|p| RawPrefix {
+            prefix: first(p, &["prefix", "ipv6_prefix", "addr"]).unwrap_or_default(),
+            len: first(p, &["prefixlen", "prefix_len", "plen"]),
+            metric: first(p, &["metric", "cost"]),
         })
         .collect();
     r.reference = first(lsa, &["ref_type", "ref_lstype", "reference_type"]);
@@ -376,10 +371,11 @@ fn frr_attached(lsa: &Stanza) -> Vec<String> {
     };
     a.children()
         .iter()
-        .filter_map(|c| {
+        .map(|c| {
             c.text()
                 .map(str::to_string)
                 .or_else(|| scalar(c, "attachedRouterId"))
+                .unwrap_or_default()
         })
         .collect()
 }
@@ -433,12 +429,10 @@ fn frr_lsa(
                 Some(Body::Array(items)) => {
                     r.prefixes = items
                         .iter()
-                        .filter_map(|p| {
-                            Some(RawPrefix {
-                                prefix: scalar(p, "prefix")?,
-                                len: None,
-                                metric: scalar(p, "metric"),
-                            })
+                        .map(|p| RawPrefix {
+                            prefix: scalar(p, "prefix").unwrap_or_default(),
+                            len: None,
+                            metric: scalar(p, "metric"),
                         })
                         .collect();
                 }
