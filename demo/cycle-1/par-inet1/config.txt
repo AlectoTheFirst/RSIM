@@ -1,6 +1,6 @@
 Building configuration...
 
-Current configuration : 2267 bytes
+Current configuration : 2383 bytes
 !
 ! Last configuration change at 07:30:00 UTC Mon Nov 2 2026 by admin
 !
@@ -37,12 +37,14 @@ redundancy
 interface Loopback0
  ip address 10.26.255.1 255.255.255.255
  ip ospf 1 area 0
+ ip ospf cost 1
 !
 interface TenGigabitEthernet0/1/0
  description par-wan1
  ip address 10.26.0.1 255.255.255.254
  ip ospf network point-to-point
  ip ospf 1 area 0
+ ip ospf cost 10
  negotiation auto
 !
 interface TenGigabitEthernet0/1/1
@@ -50,11 +52,15 @@ interface TenGigabitEthernet0/1/1
  ip address 10.26.0.3 255.255.255.254
  ip ospf network point-to-point
  ip ospf 1 area 0
+ ip ospf cost 10
  negotiation auto
 !
 interface GigabitEthernet0/0/0
  description internet uplink
  ip address 198.51.100.0 255.255.255.254
+ ip ospf network point-to-point
+ ip ospf 1 area 0
+ ip ospf cost 1
  negotiation auto
 !
 interface GigabitEthernet0
