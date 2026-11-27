@@ -449,8 +449,8 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                                 i.name.as_str(),
                                 i.vrf.clone(),
                                 i.admin_up != Some(false),
-                                &i.addresses,
-                                &i.ipv6,
+                                i.addresses.iter().map(|a| a.prefix.as_str()).collect(),
+                                i.ipv6.iter().map(|(a, _)| a.as_str()).collect(),
                             )
                         })),
                         &cisco_statics(&cfg.static_routes),
@@ -489,8 +489,8 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                                 i.name.as_str(),
                                 i.vrf.as_ref().map(|v| v.0.clone()),
                                 !i.shutdown,
-                                &i.addresses,
-                                &i.ipv6,
+                                i.addresses.iter().map(|a| a.prefix.as_str()).collect(),
+                                i.ipv6.iter().map(|(a, _)| a.as_str()).collect(),
                             )
                         })),
                         &cisco_statics(&cfg.static_routes),
@@ -529,8 +529,8 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                                 i.name.as_str(),
                                 i.vrf.as_ref().map(|v| v.0.clone()),
                                 i.admin_up != Some(false),
-                                &i.addresses,
-                                &i.ipv6,
+                                i.addresses.iter().map(|a| a.prefix.as_str()).collect(),
+                                i.ipv6.iter().map(|(a, _)| a.as_str()).collect(),
                             )
                         })),
                         &cisco_statics(&cfg.static_routes),
@@ -1340,19 +1340,10 @@ pub fn unifi_profile() -> rsim_functions::VendorProfile {
 }
 
 /// The interfaces of an NX-OS, IOS-XR or IOS-XE config for the OSPF
-/// database builder: the name, the VRF, the admin state, the IPv4 addresses
-/// and the IPv6 address lines.
-#[allow(clippy::type_complexity)]
+/// database builder: the name, the VRF, the admin state, the IPv4 address
+/// texts and the IPv6 address lines.
 fn cisco_ifaces<'a>(
-    list: impl Iterator<
-        Item = (
-            &'a str,
-            Option<String>,
-            bool,
-            &'a Vec<nxos::config::Address>,
-            &'a Vec<(String, nxos::config::Lines)>,
-        ),
-    >,
+    list: impl Iterator<Item = (&'a str, Option<String>, bool, Vec<&'a str>, Vec<&'a str>)>,
 ) -> Vec<ospf_inputs::Iface> {
     list.map(|(name, vrf, up, v4, v6)| ospf_inputs::Iface {
         name: name.to_string(),
@@ -1360,11 +1351,13 @@ fn cisco_ifaces<'a>(
         up,
         loopback: ospf_inputs::loopback_name(name),
         addresses: v4
-            .iter()
-            .filter_map(|a| ospf_inputs::address(&a.prefix))
-            .chain(v6.iter().filter_map(|(a, _)| {
-                ospf_inputs::address(a.split_whitespace().next().unwrap_or(""))
-            }))
+            .into_iter()
+            .filter_map(ospf_inputs::address)
+            .chain(
+                v6.into_iter().filter_map(|a| {
+                    ospf_inputs::address(a.split_whitespace().next().unwrap_or(""))
+                }),
+            )
             .collect(),
     })
     .collect()
