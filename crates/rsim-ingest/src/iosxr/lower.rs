@@ -131,6 +131,7 @@ pub(crate) struct Hops<'a> {
     /// computed route table of the RIB guard.
     pub(crate) config_statics: &'a [nxos::config::StaticRoute],
     pub(crate) platform: Platform,
+    pub(crate) ospf: Option<&'a crate::ospf::DeviceOspf>,
 }
 
 fn port(i: &Interface) -> nxos::config::Interface {
@@ -356,6 +357,7 @@ pub fn lower(
         resolver: &resolver,
         computed_through_default: super::profile::COMPUTED_THROUGH_DEFAULT,
         config_statics: &cfg.static_routes,
+        ospf: ext.ospf.as_ref(),
         platform: Platform::Iosxr,
     };
     let mut tables = BTreeMap::new();
@@ -1437,6 +1439,18 @@ fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &H
             route,
         });
     }
+    let ospf = crate::ospf::routes::OspfRoutes::of(hops.ospf, vrf, hops.platform);
+    let interface_of = |gw: IpAddr| {
+        mine.iter()
+            .find(|p| {
+                p.i.addresses.iter().any(|a| {
+                    iface_addr(&a.prefix)
+                        .is_some_and(|(ip, len)| len < 32 && Prefix::new(ip, len).contains(gw))
+                })
+            })
+            .map(|p| p.i.name.clone())
+    };
+    cands.extend(ospf.candidates(hops.platform, &|i, gw| hop(l, i, gw), &interface_of));
     let computed = install(cands);
     let mut by_prefix: BTreeMap<Prefix, Vec<&RoutePath>> = BTreeMap::new();
     for p in rib.paths.iter().filter(|p| p.vrf == vrf) {
@@ -1450,6 +1464,8 @@ fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &H
         let c = code(&head.protocol);
         let class = if c == CONNECTED_CODE || c == LOCAL_CODE || c == "S" {
             rsim_guard::Class::Compared
+        } else if c == "O" {
+            ospf.class(*prefix)
         } else {
             let name = route_kind(c, hops.learned, hops.statics).name();
             rsim_guard::Class::NotComputed(format!("{name} not computed"))

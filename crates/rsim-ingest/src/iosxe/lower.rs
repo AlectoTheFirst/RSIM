@@ -332,6 +332,7 @@ pub fn lower(
             resolver: &resolver,
             computed_through_default: super::profile::COMPUTED_THROUGH_DEFAULT,
             config_statics: &cfg.static_routes,
+            ospf: ext.ospf.as_ref(),
             platform: Platform::Iosxe,
         };
         let t = fib(&mut l, v, &active, rib, &vips, &hops);

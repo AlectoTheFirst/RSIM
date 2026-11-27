@@ -29,6 +29,8 @@ use crate::route_tables::{TABLE_NOT_COLLECTED, route_kind};
 use crate::vyos::Lowered;
 use rsim_routing::{Candidate, Platform, install};
 
+use crate::ospf::routes::OspfRoutes;
+
 /// The VRF of an interface with no `vrf member`.
 pub(super) const DEFAULT_VRF: &str = "default";
 
@@ -1594,13 +1596,41 @@ impl L<'_> {
                 }
             }
         }
+        let ospf = OspfRoutes::of(col.ospf.as_ref(), vrf, PLATFORM);
+        let interface_of = |gw: IpAddr| {
+            active
+                .iter()
+                .filter(|i| vrf_of(i) == vrf)
+                .find(|i| {
+                    i.addresses.iter().any(|a| {
+                        iface_addr(&a.prefix)
+                            .is_some_and(|(ip, len)| len < 32 && Prefix::new(ip, len).contains(gw))
+                    })
+                })
+                .map(|i| i.name.clone())
+        };
+        let hop = |iface: &str, gw: Option<IpAddr>| RouteNextHop {
+            interface: InterfaceId::new(iface),
+            gateway: gw,
+            next: self.id(next),
+        };
+        cands.extend(ospf.candidates(PLATFORM, &hop, &interface_of));
         let computed = install(cands);
         let mut routes = BTreeMap::new();
         for r in col.routes.iter().filter(|r| r.selected && r.vrf == vrf) {
             let Ok(p) = r.prefix.parse::<Prefix>() else {
                 continue;
             };
-            routes.entry(p).or_insert_with(|| guard_route(&r.protocol));
+            routes.entry(p).or_insert_with(|| {
+                if super::profile::protocol_word(&r.protocol).starts_with("ospf") {
+                    rsim_guard::CollectedRoute {
+                        protocol: r.protocol.clone(),
+                        class: ospf.class(p),
+                    }
+                } else {
+                    guard_route(&r.protocol)
+                }
+            });
         }
         let rows = rsim_guard::compare(vrf, &computed, t, &routes);
         rsim_guard::mark(t, &rows);
