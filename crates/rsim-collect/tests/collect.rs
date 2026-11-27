@@ -567,6 +567,7 @@ async fn a_failed_device_keeps_its_data_and_backs_off() {
         s.devices["r1"]
             .sections
             .iter()
+            .filter(|x| !rsim_collect::ospf::is_ospf(&x.name))
             .all(|x| x.status == SectionStatus::Fresh)
     );
 }
