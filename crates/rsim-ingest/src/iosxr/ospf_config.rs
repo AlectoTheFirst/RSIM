@@ -62,6 +62,9 @@ const PROCESS: &[&str] = &[
     "default-information originate ..",
 ];
 
+/// The first words of the process lines that a `vrf` stanza inherits.
+const INHERITED: &[&str] = &["cost", "network", "passive", "priority", "auto-cost"];
+
 /// The handled lines of an area stanza, without the interface stanzas.
 const AREA: &[&str] = &[
     "stub",
@@ -150,9 +153,9 @@ pub struct OspfProcess {
     /// The masked lines of the scope that the reader does not read, and the
     /// handled lines with a form that the reader cannot read.
     pub unhandled: Vec<(String, Lines)>,
-    /// The masked settings lines and the `auto-cost` line of the process
-    /// level, while [`read`] reads the stanza. A `vrf` stanza can inherit
-    /// the lines of the default VRF. Empty after [`read`].
+    /// The masked lines of the process level with a first word of
+    /// [`INHERITED`], while [`read`] reads the stanza. Empty after
+    /// [`read`].
     pub inheritable: Vec<(String, Lines)>,
     pub lines: Lines,
 }
@@ -169,7 +172,8 @@ fn words(s: &str) -> Vec<&str> {
 }
 
 /// Adds the entries of the OSPF lines that [`read`] reads, and of the
-/// irrelevant OSPF lines. The other lines of an OSPFv2 stanza keep the
+/// irrelevant OSPF lines. An entry of a handled line matches only the forms
+/// that [`read`] reads. The other lines of an OSPFv2 stanza keep the
 /// state of the routing lines of their VRF. The other lines of an OSPFv3
 /// stanza are unhandled. Call it before the entries of the routing
 /// processes.
@@ -177,6 +181,10 @@ pub fn push_entries(t: &mut Table, tables: &RouteTables) {
     fn push(t: &mut Table, levels: &[String], state: State, reach: Reach) {
         let l: Vec<&str> = levels.iter().map(String::as_str).collect();
         t.push_levels(&l, state, reach);
+    }
+    fn handled(t: &mut Table, levels: &[String]) {
+        let l: Vec<&str> = levels.iter().map(String::as_str).collect();
+        t.push_checked(&l, State::Handled, Reach::Subtree, readable);
     }
     fn at(scope: &[String], extra: &[&str]) -> Vec<String> {
         let mut out = scope.to_vec();
@@ -197,14 +205,14 @@ pub fn push_entries(t: &mut Table, tables: &RouteTables) {
                 push(t, &at(&scope, &[&f]), State::Handled, Reach::Node);
             }
             for line in PROCESS {
-                push(t, &at(&scope, &[*line]), State::Handled, Reach::Subtree);
+                handled(t, &at(&scope, &[*line]));
             }
             let area = at(&scope, &["area *"]);
             let interface = at(&area, &["interface *"]);
             push(t, &area, State::Handled, Reach::Node);
             push(t, &interface, State::Handled, Reach::Node);
             for line in AREA {
-                push(t, &at(&area, &[*line]), State::Handled, Reach::Subtree);
+                handled(t, &at(&area, &[*line]));
             }
             push(
                 t,
@@ -214,7 +222,7 @@ pub fn push_entries(t: &mut Table, tables: &RouteTables) {
             );
             for level in [&scope, &area, &interface] {
                 for line in LEVEL {
-                    push(t, &at(level, &[*line]), State::Handled, Reach::Subtree);
+                    handled(t, &at(level, &[*line]));
                 }
                 for w in IRRELEVANT {
                     let line = format!("{w} ..");
@@ -223,6 +231,41 @@ pub fn push_entries(t: &mut Table, tables: &RouteTables) {
             }
         }
     }
+}
+
+/// True if [`read`] reads the handled line `key` of a process, an area or
+/// an interface.
+fn readable(key: &str) -> bool {
+    let none = Lines::default();
+    match words(key).as_slice() {
+        ["router-id", id] => router_id(id).is_some(),
+        ["auto-cost", "reference-bandwidth", n] => reference_bandwidth(n).is_some(),
+        ["redistribute", rest @ ..] => redistribute(rest, none).is_some(),
+        ["default-information", "originate", rest @ ..] => default_originate(rest, none).is_some(),
+        ["stub" | "nssa", rest @ ..] => rest.is_empty() || rest == ["no-summary"],
+        ["default-cost", n] => n.parse::<u32>().is_ok(),
+        other => matches!(level(other, &mut Settings::default()), Parse::Read),
+    }
+}
+
+/// The router ID of a `router-id` line: an IPv4 address, or a name that
+/// starts with a letter and holds a digit.
+fn router_id(id: &str) -> Option<RouterIdLine> {
+    if let Ok(a) = id.parse::<Ipv4Addr>() {
+        Some(RouterIdLine::Address(a))
+    } else if id.chars().next().is_some_and(char::is_alphabetic)
+        && id.chars().any(|c| c.is_ascii_digit())
+    {
+        Some(RouterIdLine::Interface(id.to_string()))
+    } else {
+        None
+    }
+}
+
+/// The reference bandwidth of an `auto-cost reference-bandwidth` line, in
+/// Mbit/s, more than 0.
+fn reference_bandwidth(n: &str) -> Option<u32> {
+    n.parse::<u32>().ok().filter(|n| *n > 0)
 }
 
 /// The state of a parse of a handled line.
@@ -378,7 +421,9 @@ impl Reader<'_> {
 
 /// Reads a `router ospf <name>` or `router ospfv3 <name>` stanza: the
 /// process of the default VRF, then the process of each `vrf` stanza.
-/// Each line that the reader reads goes into `read`.
+/// Each line that the reader reads goes into `read`. The process of a `vrf`
+/// stanza gets the lines of the default VRF with a first word of
+/// [`INHERITED`] as unhandled lines.
 pub fn read(s: &Stanza, read: &mut BTreeSet<u32>, table: &Table) -> Vec<OspfProcess> {
     let w = words(&s.key);
     let version = if w.get(1) == Some(&"ospfv3") {
@@ -399,7 +444,6 @@ pub fn read(s: &Stanza, read: &mut BTreeSet<u32>, table: &Table) -> Vec<OspfProc
         if let ["vrf", v] = words(&c.key).as_slice() {
             r.mark(c);
             let mut p = scope(&mut r, c, name, v, false);
-            p.unhandled.extend(default.unhandled.iter().cloned());
             p.unhandled.extend(default.inheritable.iter().cloned());
             p.unhandled.sort_by_key(|u| (u.1.first, u.1.last));
             p.inheritable.clear();
@@ -433,26 +477,19 @@ fn scope(r: &mut Reader, s: &Stanza, name: &str, vrf: &str, top: bool) -> OspfPr
         let lines = lines_of(c);
         let parse = match w.as_slice() {
             ["vrf", _] if top => continue,
-            ["router-id", id] => {
-                if let Ok(a) = id.parse::<Ipv4Addr>() {
-                    p.router_id = Some((RouterIdLine::Address(a), lines));
+            ["router-id", id] => match router_id(id) {
+                Some(id) => {
+                    p.router_id = Some((id, lines));
                     Parse::Read
-                } else if id.chars().next().is_some_and(char::is_alphabetic)
-                    && id.chars().any(|c| c.is_ascii_digit())
-                {
-                    p.router_id = Some((RouterIdLine::Interface((*id).to_string()), lines));
-                    Parse::Read
-                } else {
-                    Parse::Unreadable
                 }
-            }
-            ["auto-cost", "reference-bandwidth", n] => match n.parse::<u32>() {
-                Ok(n) if n > 0 => {
+                None => Parse::Unreadable,
+            },
+            ["auto-cost", "reference-bandwidth", n] => match reference_bandwidth(n) {
+                Some(n) => {
                     p.reference_bandwidth_mbps = Some(n);
-                    p.inheritable.push(r.unhandled(c));
                     Parse::Read
                 }
-                _ => Parse::Unreadable,
+                None => Parse::Unreadable,
             },
             ["redistribute", rest @ ..] => match redistribute(rest, lines) {
                 Some(e) => {
@@ -497,14 +534,13 @@ fn scope(r: &mut Reader, s: &Stanza, name: &str, vrf: &str, top: bool) -> OspfPr
                 }
             },
             other => match level(other, &mut p.settings) {
-                Parse::Read => {
-                    p.inheritable.push(r.unhandled(c));
-                    Parse::Read
-                }
                 Parse::Other if irrelevant(other) => continue,
                 x => x,
             },
         };
+        if w.first().is_some_and(|f| INHERITED.contains(f)) {
+            p.inheritable.push(r.unhandled(c));
+        }
         match parse {
             Parse::Read => r.mark(c),
             Parse::Unreadable => {
@@ -651,7 +687,10 @@ fn link_local(a: &Ipv6Addr) -> bool {
 /// OSPFv2 interface is its primary IPv4 address. The address of an OSPFv3
 /// interface is its first IPv6 address that is not link-local. A
 /// secondary IPv4 address or a second such IPv6 address goes into the
-/// unhandled lines of the process.
+/// unhandled lines of the process. An OSPF interface with no `interface`
+/// stanza goes into the unhandled lines of the process. A process of the
+/// default VRF with no area, router ID, redistribution, default route or
+/// unhandled line is left out.
 pub fn router_config(cfg: &Config, file: &str) -> RouterConfig {
     let span = |l: Lines| SourceSpan::new(file, l.first, l.last);
     let mut out = RouterConfig::default();
@@ -701,7 +740,10 @@ pub fn router_config(cfg: &Config, file: &str) -> RouterConfig {
                         }
                         global.first().map(|((a, l), _)| (IpAddr::V6(*a), *l))
                     }
-                    (None, _) => None,
+                    (None, _) => {
+                        unhandled.push((format!("interface {}", oi.name), oi.lines));
+                        None
+                    }
                 };
                 let network = match s.network.or_else(|| default_network(&oi.name)) {
                     Some(n) => n,
@@ -727,6 +769,15 @@ pub fn router_config(cfg: &Config, file: &str) -> RouterConfig {
         }
         unhandled.sort_by_key(|u| (u.1.first, u.1.last));
         unhandled.dedup();
+        if p.vrf == DEFAULT_VRF
+            && p.areas.is_empty()
+            && router_id.is_none()
+            && p.redistribute.is_empty()
+            && p.default_originate.is_none()
+            && unhandled.is_empty()
+        {
+            continue;
+        }
         let export = |e: &Export| Redistribute {
             source: e.source.clone().unwrap_or(Source::Connected),
             metric: e.metric,

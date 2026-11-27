@@ -518,11 +518,17 @@ fn a_vrf_stanza_is_a_process_of_its_vrf() {
 }
 
 #[test]
-fn a_vrf_process_gets_the_unhandled_and_the_setting_lines_of_the_default_vrf() {
+fn a_vrf_process_gets_only_the_setting_lines_of_the_default_vrf() {
     let text = "router ospf 1
  cost 30
+ cost 0
+ network non-broadcast
  max-metric router-lsa
  area 0
+  range 198.51.100.0/24
+  interface Loopback0
+   mpls ldp sync
+  !
  !
  vrf RED
   area 0
@@ -531,11 +537,142 @@ fn a_vrf_process_gets_the_unhandled_and_the_setting_lines_of_the_default_vrf() {
 !
 ";
     let c = ospf(text);
-    assert_eq!(unhandled(&c.processes[0]), [("max-metric router-lsa", 3)]);
+    assert_eq!(
+        unhandled(&c.processes[0]),
+        [
+            ("cost 0", 3),
+            ("network non-broadcast", 4),
+            ("max-metric router-lsa", 5),
+            ("range 198.51.100.0/24", 7),
+            ("interface Loopback0", 8),
+            ("mpls ldp sync", 9),
+        ]
+    );
+    assert_eq!(c.processes[1].vrf, "RED");
     assert_eq!(
         unhandled(&c.processes[1]),
-        [("cost 30", 2), ("max-metric router-lsa", 3)]
+        [("cost 30", 2), ("cost 0", 3), ("network non-broadcast", 4)]
     );
+}
+
+#[test]
+fn an_unreadable_form_of_a_handled_line_is_not_handled_in_the_coverage() {
+    use State::{Handled, Irrelevant, Unhandled};
+    let text = "router ospf 1
+ cost 0
+ redistribute connected tag 5
+ area 0
+  default-cost x
+ !
+!
+";
+    let p = &ospf(text).processes[0];
+    assert_eq!(
+        unhandled(p),
+        [
+            ("cost 0", 2),
+            ("redistribute connected tag 5", 3),
+            ("default-cost x", 5)
+        ]
+    );
+    let doc = iosxr::read_text(text.as_bytes());
+    let cov = classify(&doc, &table(false, &doc));
+    let paths: Vec<&str> = cov.ranked().into_iter().map(|r| r.0).collect();
+    for want in [
+        "router ospf */cost 0",
+        "router ospf */redistribute connected tag 5",
+        "router ospf */area */default-cost x",
+    ] {
+        assert!(paths.contains(&want), "{want} is not in {paths:?}");
+    }
+    let empty = iosxr::read_text(b"");
+    let with = table(true, &empty);
+    let without = table(false, &empty);
+    for (path, rib, no_rib) in [
+        (&["router ospf 1", "cost 0"][..], Irrelevant, Unhandled),
+        (&["router ospf 1", "cost 1"], Handled, Handled),
+        (&["router ospf 1", "priority 300"], Irrelevant, Unhandled),
+        (&["router ospf 1", "router-id 0x1"], Irrelevant, Unhandled),
+        (
+            &["router ospf 1", "auto-cost reference-bandwidth 0"],
+            Irrelevant,
+            Unhandled,
+        ),
+        (
+            &["router ospf 1", "redistribute bgp ASX"],
+            Irrelevant,
+            Unhandled,
+        ),
+        (
+            &["router ospf 1", "redistribute bgp 64496 route-policy P"],
+            Handled,
+            Handled,
+        ),
+        (
+            &["router ospf 1", "default-information originate metric x"],
+            Irrelevant,
+            Unhandled,
+        ),
+        (
+            &["router ospf 1", "default-information originate always"],
+            Handled,
+            Handled,
+        ),
+        (
+            &["router ospf 1", "area 0", "default-cost x"],
+            Irrelevant,
+            Unhandled,
+        ),
+        (
+            &["router ospfv3 1", "area 0", "interface Loopback0", "cost 0"],
+            Unhandled,
+            Unhandled,
+        ),
+    ] {
+        assert_eq!(with.state(path), rib, "{path:?} with route rows");
+        assert_eq!(without.state(path), no_rib, "{path:?} without route rows");
+    }
+}
+
+#[test]
+fn an_ospf_interface_with_no_interface_stanza_is_unhandled() {
+    let text = "router ospf 1\n area 0\n  interface GigabitEthernet0/0/0/7\n  !\n !\n!\n";
+    let p = &ospf(text).processes[0];
+    assert_eq!(p.interfaces[0].address, None);
+    assert_eq!(unhandled(p), [("interface GigabitEthernet0/0/0/7", 3)]);
+}
+
+#[test]
+fn a_default_vrf_with_only_vrf_stanzas_gives_no_default_process() {
+    let text = "router ospf 1
+ passive enable
+ vrf RED
+  area 0
+  !
+ !
+!
+";
+    let c = ospf(text);
+    let vrfs: Vec<&str> = c.processes.iter().map(|p| p.vrf.as_str()).collect();
+    assert_eq!(vrfs, ["RED"]);
+    assert_eq!(unhandled(&c.processes[0]), [("passive enable", 2)]);
+}
+
+#[test]
+fn a_default_vrf_with_only_an_unreadable_area_keeps_its_process() {
+    let text = "router ospf 1
+ area x
+ !
+ vrf RED
+  area 0
+  !
+ !
+!
+";
+    let c = ospf(text);
+    let vrfs: Vec<&str> = c.processes.iter().map(|p| p.vrf.as_str()).collect();
+    assert_eq!(vrfs, ["default", "RED"]);
+    assert_eq!(unhandled(&c.processes[0]), [("area x", 2)]);
 }
 
 #[test]
@@ -639,7 +776,10 @@ fn an_ospfv3_line_that_is_not_read_is_unhandled_in_the_coverage() {
 ";
     let doc = iosxr::read_text(text.as_bytes());
     let p = &ospf(text).processes[0];
-    assert_eq!(unhandled(p), [("instance 3", 4)]);
+    assert_eq!(
+        unhandled(p),
+        [("interface GigabitEthernet0/0/0/0", 3), ("instance 3", 4)]
+    );
     let cov = classify(&doc, &table(true, &doc));
     let paths: Vec<&str> = cov.ranked().into_iter().map(|r| r.0).collect();
     assert_eq!(paths, ["router ospfv3 */area */interface */instance 3"]);
