@@ -22,6 +22,8 @@ use rsim_functions::{
 
 use rsim_routing::{Candidate, Platform, install};
 
+use crate::ospf::routes::OspfRoutes;
+
 use crate::collected::Collected;
 use crate::resolve::{Origin, Path, Resolver, Target, through_default};
 use crate::route_tables::{TABLE_NOT_COLLECTED, route_kind};
@@ -30,6 +32,17 @@ use crate::vyos::config::{Action, Config, Family, Interface, Kind, Lines, RuleMa
 /// The default VRF. It is the only VRF with a route table, so the packets
 /// of an interface in another VRF are unknown at the route lookup.
 const VRF: &str = "default";
+
+/// The interface of `addrs` whose connected network holds `gw`.
+fn interface_of(addrs: &Addrs, gw: IpAddr) -> Option<String> {
+    addrs
+        .iter()
+        .find(|(_, v)| {
+            v.iter()
+                .any(|(a, len, _)| *len < max_len(*a) && Prefix::new(*a, *len).contains(gw))
+        })
+        .map(|(i, _)| i.clone())
+}
 
 /// The routing defaults of VyOS: FRR with its traditional profile.
 const PLATFORM: Platform = Platform::FrrTraditional;
@@ -975,6 +988,10 @@ impl L<'_> {
             distance: PLATFORM.distance(rsim_routing::Origin::Connected),
             route: r.clone(),
         }));
+        let ospf = OspfRoutes::of(col.ospf.as_ref(), VRF, PLATFORM);
+        cands.extend(ospf.candidates(PLATFORM, &|i, gw| self.hop(i, gw), &|gw| {
+            interface_of(addrs, gw)
+        }));
         let computed = install(cands);
         // The interfaces whose address the device gets at run time by PPPoE
         // or DHCP. A collected route of such an interface that the config
@@ -996,7 +1013,12 @@ impl L<'_> {
                 && computed.get(&p).is_none()
                 && r.protocol != "kernel";
             routes.entry(p).or_insert_with(|| {
-                if seeded {
+                if matches!(r.protocol.as_str(), "ospf" | "ospf6") {
+                    rsim_guard::CollectedRoute {
+                        protocol: r.protocol.clone(),
+                        class: ospf.class(p),
+                    }
+                } else if seeded {
                     rsim_guard::CollectedRoute {
                         protocol: r.protocol.clone(),
                         class: rsim_guard::Class::Seeded,

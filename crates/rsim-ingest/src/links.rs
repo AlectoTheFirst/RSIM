@@ -537,6 +537,8 @@ pub struct External {
     /// the far end is a routed port: a port that is not a switch port and
     /// has layer 3 addresses.
     pub far_macs: BTreeMap<String, Mac>,
+    /// The OSPF databases of the device, if its vendor reads OSPF.
+    pub ospf: Option<crate::ospf::DeviceOspf>,
 }
 
 /// One end of a link: a device and a port.

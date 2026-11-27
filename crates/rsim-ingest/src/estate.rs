@@ -274,7 +274,25 @@ pub fn session_inputs(
 
 /// Builds the twin of the devices of a snapshot.
 pub fn build(store: &Store, snap: &Snapshot) -> Result<Estate, StoreError> {
-    let (inputs, skipped) = inputs(store, snap)?;
+    let (mut inputs, skipped) = inputs(store, snap)?;
+    let mut ospf = crate::ospf::of_snapshot(store, snap)?;
+    for i in &mut inputs {
+        match i {
+            Input::Vyos {
+                name, collected, ..
+            }
+            | Input::Nxos {
+                name, collected, ..
+            }
+            | Input::Iosxr {
+                name, collected, ..
+            }
+            | Input::Iosxe {
+                name, collected, ..
+            } => collected.ospf = ospf.remove(name.as_str()),
+            _ => {}
+        }
+    }
     let sessions = session_inputs(store, snap)?;
     let mut e = assemble_with(inputs, &sessions);
     e.facts = facts::of_snapshot(store, snap)?;
@@ -299,6 +317,9 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
 /// NX-OS switch, each IOS-XR router, each IOS-XE device and each VeloCloud
 /// edge is lowered with its links.
 pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSections>) -> Estate {
+    // The OSPF databases of each IOS-XR and IOS-XE device, for its final
+    // lowering.
+    let mut ios_ospf: BTreeMap<String, crate::ospf::DeviceOspf> = BTreeMap::new();
     let mut e = Estate {
         builder: TwinBuilder::new(),
         coverage: BTreeMap::new(),
@@ -387,8 +408,11 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 config,
                 file,
                 sections,
-                ..
+                collected,
             } => {
+                if let Some(o) = collected.ospf {
+                    ios_ospf.insert(name.clone(), o);
+                }
                 let doc = iosxr::read_text(&config);
                 let tables =
                     RouteTables::new(iosxr::rib_vrfs(&sections), iosxr::dynamic_vrfs(&doc));
@@ -406,8 +430,11 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 config,
                 file,
                 sections,
-                ..
+                collected,
             } => {
+                if let Some(o) = collected.ospf {
+                    ios_ospf.insert(name.clone(), o);
+                }
                 let doc = iosxe::read_text(&config);
                 let tables =
                     RouteTables::new(iosxe::rib_vrfs(&sections), iosxe::dynamic_vrfs(&doc));
@@ -864,6 +891,8 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     // The IOS-XR routers, with their links.
     for (device, (cfg, file, sections)) in &xr {
         let ext = joined.devices.remove(device).unwrap_or_default();
+        let mut ext = ext;
+        ext.ospf = ios_ospf.remove(device);
         let (low, _) = iosxr::lower(device, file, &xr_profile, cfg, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         if !low.guard.is_empty() {
@@ -880,6 +909,8 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
     // The IOS-XE routers and switches, with their links and endpoints.
     for (device, (cfg, file, sections)) in &xe {
         let ext = joined.devices.remove(device).unwrap_or_default();
+        let mut ext = ext;
+        ext.ospf = ios_ospf.remove(device);
         let (low, _) = iosxe::lower(device, file, &xe_profile, cfg, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         if !low.guard.is_empty() {

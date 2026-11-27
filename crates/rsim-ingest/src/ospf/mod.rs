@@ -11,6 +11,7 @@
 //! a device.
 
 mod json;
+pub mod routes;
 mod text;
 
 use std::collections::BTreeMap;
