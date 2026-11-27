@@ -8,7 +8,8 @@ Section 13 of `../rsim-project/BUILD_BRIEF.md` gives the steps. `../rsim-project
 | 1b: `rsim-topologies`, `rsim-cli` and `rsim-mcp` | Complete |
 | 2: the packet sets | Complete |
 | 3: collection, the snapshot store, ingestion and the snapshot view | Complete |
-| 4 to 9 | Not started |
+| 4: routing, convergence and the RIB guard | In progress |
+| 5 to 9 | Not started |
 
 ## Step 1b
 
@@ -33,6 +34,18 @@ Complete:
 - the manual collection of a device or a group
 - the snapshot view: the tables of the collected state with their join columns and the frames of each device shared between twins, the table `links` and the claim `path-mtu`, the indexes of the lookups, the export as CSV or Parquet, and the difference of a table, a query and a claim between the 2 held twins
 
+## Step 4
+
+Complete:
+
+- the crate `rsim-routing` with the administrative distances and the install stage with recursive next-hop resolution
+- the connected, local and static routes from the config of VyOS, NX-OS, IOS-XR and IOS-XE
+- OSPFv2 and OSPFv3 from the config: the config readers of the 4 vendors, the database builder of the twin and the shortest-path calculation
+- the collection and the readers of the OSPF databases of the 4 vendors, the reference of the database guard
+- the crate `rsim-guard`: the database guard (the table `ospf-guard`) and the route guard (the table `rib-guard`, the claim `rib-fib-agree` and the guard flag of each route lookup step)
+
+Not started: BGP and the convergence detection.
+
 ## Other parts
 
 Complete:
@@ -44,4 +57,4 @@ Complete:
 - the second VLAN tag with the TPIDs
 - the container images, the compose file, the Helm chart and the CI image build
 
-The Cargo workspace has 14 crates. The other crates of section 3 of the brief come with their steps.
+The Cargo workspace has 16 crates. The other crates of section 3 of the brief come with their steps.
