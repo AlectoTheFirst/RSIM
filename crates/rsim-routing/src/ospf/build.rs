@@ -16,12 +16,23 @@
 //!   computes these routes with [`compute`] on the LSAs of one area.
 //! - An ASBR in an NSSA that originates no AS-external LSA sets the P bit
 //!   of its NSSA LSAs and gives them a forwarding address (RFC 3101 2.3 and
-//!   2.4). The NSSA border router with the highest router ID translates the
-//!   NSSA LSAs of its routes with the P bit into AS-external LSAs with the
-//!   same forwarding address (RFC 3101 3.1 and 3.2).
+//!   2.4). The translator of an NSSA is the NSSA border router with the
+//!   highest router ID that the NSSA calculation of each other router of the
+//!   NSSA reaches (RFC 3101 3.1). It translates the NSSA LSAs of its routes
+//!   with the P bit into AS-external LSAs with the same forwarding address,
+//!   except the default route (RFC 3101 3.2). A left-out border router, a
+//!   border router that a gap hides, or an NSSA with no reached border
+//!   router gives a gap of the AS-external LSAs of the AS.
 //! - The process with an unhandled line, or with an active interface with no
 //!   address of its version, originates no LSA, so the calculation of each
-//!   neighbour sees a gap.
+//!   neighbour sees a gap. Each area of the process has a gap of its
+//!   interface prefixes and its redistributed prefixes. The AS has a gap of
+//!   AS-external LSAs when the process redistributes from a source that is
+//!   not evaluated or has `default-information originate`.
+//! - A gap of a process in an area where the process has no neighbour is a
+//!   gap of each area instance with that area ID in the VRF and the version.
+//! - An area border router carries the gaps of the prefixes of a left-out
+//!   router in an area into its summary LSAs of the other areas.
 //! - LSAs that the builder leaves out are gaps of each database of their
 //!   flooding scope (`Database::gaps`): the AS for an AS-external LSA, the
 //!   area for a summary or an NSSA LSA.
@@ -280,6 +291,8 @@ struct AbrView {
     asbrs: BTreeMap<AreaId, BTreeMap<RouterId, u32>>,
     /// The areas whose intra-area routes depend on a gap of the database.
     incomplete: BTreeSet<AreaId>,
+    /// By area: the prefixes of the router gaps with a list of prefixes.
+    left: BTreeMap<AreaId, BTreeSet<Prefix>>,
 }
 
 type Store = BTreeMap<LsaKey, Lsa>;
@@ -470,6 +483,52 @@ impl<'a> Builder<'a> {
         };
         let gap = self.stated(pi, lsa_type, Some(area), reach, detail);
         self.area_gaps.entry(inst).or_default().push(gap);
+    }
+
+    /// The processes whose area instance of `area` gets a gap of the process
+    /// `pi`: the process `pi` and, when no interface of `pi` in `area` has a
+    /// neighbour, each process of the same VRF and version in an area with
+    /// that ID.
+    fn gap_procs(&self, pi: usize, area: AreaId) -> BTreeSet<usize> {
+        let p = &self.procs[pi];
+        let linked = p
+            .ifs
+            .iter()
+            .any(|f| f.cfg.area == area && !matches!(f.link, Link::Stub));
+        let mut out = BTreeSet::from([pi]);
+        if !linked {
+            out.extend(
+                self.nodes
+                    .keys()
+                    .filter(|&&(q, a)| {
+                        a == area
+                            && self.procs[q].cfg.vrf == p.cfg.vrf
+                            && self.procs[q].version() == p.version()
+                    })
+                    .map(|&(q, _)| q),
+            );
+        }
+        out
+    }
+
+    /// Adds a gap of the process `pi` to each area instance of `gap_procs`.
+    fn spread_gap(
+        &mut self,
+        pi: usize,
+        area: AreaId,
+        lsa_type: LsaType,
+        reach: GapReach,
+        detail: String,
+    ) {
+        let gap = self.stated(pi, lsa_type, Some(area), reach, detail);
+        let insts: BTreeSet<usize> = self
+            .gap_procs(pi, area)
+            .into_iter()
+            .filter_map(|q| self.inst(q, area))
+            .collect();
+        for inst in insts {
+            self.area_gaps.entry(inst).or_default().push(gap.clone());
+        }
     }
 
     /// Adds a gap of AS-external LSAs to the AS of a process.
@@ -1115,27 +1174,83 @@ impl<'a> Builder<'a> {
     }
 
     /// The forwarding address of the NSSA LSAs with the P bit of a process
-    /// in an NSSA (RFC 3101 2.3): an address of an up OSPF interface of the
-    /// process in the area, of a loopback first, then of a stub link, then of
-    /// another interface. Of 2 addresses of one class, the higher is taken.
-    /// The order in a class is not confirmed by a vendor document.
+    /// in an NSSA (RFC 3101 2.3): the highest address of a loopback of the
+    /// process in the area, else the highest address of an up OSPF
+    /// interface of the process in the area. Not confirmed by a vendor
+    /// document.
     fn nssa_forwarding_address(&self, pi: usize, area: AreaId) -> Option<IpAddr> {
         self.procs[pi]
             .ifs
             .iter()
             .filter(|f| f.cfg.area == area)
-            .filter_map(|f| {
-                let class = if f.cfg.network == NetworkType::Loopback {
-                    2
-                } else if matches!(f.link, Link::Stub) {
-                    1
-                } else {
-                    0
-                };
-                f.addr.map(|a| (class, a))
-            })
+            .filter_map(|f| f.addr.map(|a| (f.cfg.network == NetworkType::Loopback, a)))
             .max()
             .map(|(_, a)| a)
+    }
+
+    /// The gaps of each left-out process with a router ID: a gap of its
+    /// interface prefixes and its redistributed prefixes in each of its
+    /// areas, and a gap of AS-external LSAs when it redistributes from a
+    /// source that is not evaluated or has `default-information originate`.
+    fn left_out_gaps(&mut self) {
+        for pi in 0..self.procs.len() {
+            let p = &self.procs[pi];
+            let Some(rid) = p.rid else { continue };
+            if !p.left_out {
+                continue;
+            }
+            let version = p.version();
+            let vrf = &p.cfg.vrf;
+            let mut prefixes: BTreeSet<Prefix> = p.ifs.iter().filter_map(|f| f.prefix).collect();
+            let mut external = p.cfg.default_originate.is_some();
+            for r in &p.cfg.redistribute {
+                let list = match &r.source {
+                    Source::Connected => p.input.connected.get(vrf),
+                    Source::Static => p.input.statics.get(vrf),
+                    Source::Bgp | Source::Other(_) => {
+                        external = true;
+                        continue;
+                    }
+                };
+                prefixes.extend(
+                    list.into_iter()
+                        .flatten()
+                        .copied()
+                        .filter(|x| family_ok(version, x.addr()) && x.len() > 0),
+                );
+            }
+            let areas = p.areas();
+            let mut procs = BTreeSet::from([pi]);
+            for a in areas {
+                procs.extend(self.gap_procs(pi, a));
+                if !prefixes.is_empty() {
+                    self.spread_gap(
+                        pi,
+                        a,
+                        LsaType::Router,
+                        GapReach::Prefixes(prefixes.iter().copied().collect()),
+                        format!(
+                            "the process of {rid} is left out, and the routes of its interface prefixes and its redistributed prefixes are not known"
+                        ),
+                    );
+                }
+            }
+            if external {
+                let gap = self.stated(
+                    pi,
+                    LsaType::External,
+                    None,
+                    GapReach::External,
+                    format!(
+                        "the process of {rid} is left out, and its AS-external LSAs are not known"
+                    ),
+                );
+                let ases: BTreeSet<usize> = procs.iter().map(|q| self.as_of(*q)).collect();
+                for as_id in ases {
+                    self.as_gaps.entry(as_id).or_default().push(gap.clone());
+                }
+            }
+        }
     }
 
     /// The AS-external LSAs and the NSSA LSAs, and the gaps of the external
@@ -1227,6 +1342,26 @@ impl<'a> Builder<'a> {
                         "ospf-nssa-no-forwarding-address",
                         format!("the process has no address in the NSSA {a}, and it originates no NSSA LSA into it"),
                     );
+                    if !exts.is_empty() {
+                        self.spread_gap(
+                            pi,
+                            a,
+                            LsaType::NssaExternal,
+                            GapReach::Prefixes(exts.keys().copied().collect()),
+                            format!(
+                                "the process of {rid} has no address in the NSSA {a}, and its NSSA LSAs are left out"
+                            ),
+                        );
+                    }
+                    for (reach, detail) in &left {
+                        self.spread_gap(
+                            pi,
+                            a,
+                            LsaType::NssaExternal,
+                            reach.clone(),
+                            detail.clone(),
+                        );
+                    }
                     continue;
                 }
                 let store = self.area_store.entry(inst).or_default();
@@ -1243,7 +1378,7 @@ impl<'a> Builder<'a> {
                     }
                     if p_bit {
                         self.p_bit.insert((inst, rid, *prefix));
-                        if !e.connected {
+                        if !e.connected && prefix.len() > 0 {
                             fa_unknown.push(*prefix);
                         }
                     }
@@ -1277,12 +1412,17 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// RFC 3101 3.1 and 3.2: the NSSA border router with the highest router
-    /// ID in each NSSA translates the NSSA LSAs of its routes with the P bit
-    /// into AS-external LSAs. It does not translate a prefix that an ASBR
-    /// also originates in an AS-external LSA, and that prefix is a gap. The
-    /// gaps of the NSSA in the calculation of the translator are gaps of the
-    /// AS.
+    /// RFC 3101 3.1 and 3.2: the translator of each NSSA is the NSSA border
+    /// router with the highest router ID that the NSSA calculation of each
+    /// other originating router of the NSSA reaches. It translates the NSSA
+    /// LSAs of its routes with the P bit, except the default route, into
+    /// AS-external LSAs. It does not translate a prefix that an ASBR also
+    /// originates in an AS-external LSA, and that prefix is a gap. The gaps
+    /// of the NSSA in the calculation of the translator are gaps of the AS.
+    /// The AS has a gap of AS-external LSAs, and no LSA is translated, when a
+    /// border router with a higher router ID than the translator is left out
+    /// or is not reached by a calculation with a gap, or when no border
+    /// router is reached.
     fn translate_nssa(&mut self) {
         let mut borders: BTreeMap<usize, Vec<(RouterId, usize, AreaId)>> = BTreeMap::new();
         for (pi, p) in self.procs.iter().enumerate() {
@@ -1311,20 +1451,81 @@ impl<'a> Builder<'a> {
                     .map(move |x| (as_id, x))
             })
             .collect();
-        for (inst, list) in borders {
-            let Some(&(rid, pi, a)) = list.iter().max() else {
+        for (inst, mut list) in borders {
+            list.sort_by(|x, y| y.cmp(x));
+            let Some(&(_, first, a)) = list.first() else {
                 continue;
             };
-            if self.procs[pi].left_out {
-                self.as_gap(
-                    pi,
-                    GapReach::External,
-                    format!(
-                        "the NSSA translator {rid} of area {a} is left out, and its AS-external LSAs are not known"
-                    ),
-                );
-                continue;
+            let members: Vec<usize> = self
+                .nodes
+                .keys()
+                .filter(|&&(q, x)| {
+                    x == a && self.procs[q].originates() && self.inst(q, a) == Some(inst)
+                })
+                .map(|&(q, _)| q)
+                .collect();
+            let views: Vec<(usize, BTreeSet<RouterId>, bool)> = members
+                .iter()
+                .map(|&q| {
+                    let db = self.assemble(q, &BTreeSet::from([a]), false);
+                    let own = self.procs[q].rid.unwrap_or(Ipv4Addr::UNSPECIFIED);
+                    let calc = compute(&db, own, &self.procs[q].profile);
+                    let reached = calc
+                        .router_costs
+                        .keys()
+                        .filter(|(x, _)| *x == a)
+                        .map(|(_, r)| *r)
+                        .collect();
+                    let hidden = calc
+                        .gaps
+                        .iter()
+                        .any(|g| matches!(g.reach, GapReach::All | GapReach::FromCost(_)));
+                    (q, reached, hidden)
+                })
+                .collect();
+            let mut elected = None;
+            let mut unknown = None;
+            for &(rid, pi, _) in &list {
+                if self.procs[pi].left_out {
+                    unknown = Some((
+                        pi,
+                        format!(
+                            "the NSSA border router {rid} of area {a} is left out, and the NSSA translator of area {a} and its AS-external LSAs are not known"
+                        ),
+                    ));
+                    break;
+                }
+                let missed: Vec<bool> = views
+                    .iter()
+                    .filter(|(q, reached, _)| *q != pi && !reached.contains(&rid))
+                    .map(|(_, _, hidden)| *hidden)
+                    .collect();
+                if missed.is_empty() {
+                    elected = Some((rid, pi));
+                    break;
+                }
+                if missed.contains(&true) {
+                    unknown = Some((
+                        pi,
+                        format!(
+                            "the NSSA border router {rid} of area {a} is not reached past a gap of the database, and the NSSA translator of area {a} and its AS-external LSAs are not known"
+                        ),
+                    ));
+                    break;
+                }
             }
+            let Some((rid, pi)) = elected else {
+                let (gp, detail) = unknown.unwrap_or_else(|| {
+                    (
+                        first,
+                        format!(
+                            "no NSSA border router of area {a} is reached in the NSSA, and the NSSA translator of area {a} and its AS-external LSAs are not known"
+                        ),
+                    )
+                });
+                self.as_gap(gp, GapReach::External, detail);
+                continue;
+            };
             let version = self.procs[pi].version();
             let db = self.assemble(pi, &BTreeSet::from([a]), false);
             let calc = compute(&db, rid, &self.procs[pi].profile);
@@ -1339,7 +1540,10 @@ impl<'a> Builder<'a> {
             }
             let mut lsas = Vec::new();
             for r in &calc.routes {
-                if r.lsa_type != Some(LsaType::NssaExternal) || r.unknown.is_some() {
+                if r.lsa_type != Some(LsaType::NssaExternal)
+                    || r.unknown.is_some()
+                    || r.prefix.len() == 0
+                {
                     continue;
                 }
                 let Some(adv) = r.advertising_router else {
@@ -1388,6 +1592,7 @@ impl<'a> Builder<'a> {
                 }
             }
             prefixes.extend(lost.iter().copied());
+            prefixes.retain(|x| x.len() > 0);
             self.lsid_notes(pi, lost);
             if wide {
                 self.as_gap(
@@ -1562,6 +1767,13 @@ impl<'a> Builder<'a> {
                     ),
                 ));
             }
+            for g in &calc.gaps {
+                if g.lsa_type == LsaType::Router
+                    && let GapReach::Prefixes(x) = &g.reach
+                {
+                    view.left.entry(area).or_default().extend(x.iter().copied());
+                }
+            }
             let intra = view.intra.entry(area).or_default();
             for r in &calc.routes {
                 if r.path_type != PathType::IntraArea {
@@ -1669,6 +1881,7 @@ impl<'a> Builder<'a> {
             let span = p.cfg.span.clone();
             let mut out: Vec<(AreaId, Vec<Lsa>)> = Vec::new();
             let mut incomplete = Vec::new();
+            let mut carried = Vec::new();
             for b in p.areas() {
                 let kind = p.area_type(b);
                 let mut prefixes: BTreeMap<Prefix, (u32, SourceSpan)> = BTreeMap::new();
@@ -1676,6 +1889,17 @@ impl<'a> Builder<'a> {
                     && view.incomplete.iter().any(|a| *a != b)
                 {
                     incomplete.push(b);
+                }
+                if kind == AreaType::Normal || !p.no_summary(b) {
+                    let left: BTreeSet<Prefix> = view
+                        .left
+                        .iter()
+                        .filter(|(a, _)| **a != b)
+                        .flat_map(|(_, x)| x.iter().copied())
+                        .collect();
+                    if !left.is_empty() {
+                        carried.push((b, left));
+                    }
                 }
                 if kind == AreaType::Normal || !p.no_summary(b) {
                     for (a, routes) in &view.intra {
@@ -1737,6 +1961,17 @@ impl<'a> Builder<'a> {
                     GapReach::InterArea,
                     format!(
                         "the summary LSAs of {rid} into area {b} of the routes behind a gap of the database are left out"
+                    ),
+                );
+            }
+            for (b, left) in carried {
+                self.area_gap(
+                    pi,
+                    b,
+                    LsaType::Summary,
+                    GapReach::Prefixes(left.into_iter().collect()),
+                    format!(
+                        "the summary LSAs of {rid} into area {b} of the prefixes of a left-out router are not known"
                     ),
                 );
             }
@@ -1888,6 +2123,7 @@ pub fn build(routers: &BTreeMap<String, RouterInput>) -> Built {
     b.scopes();
     b.originate_intra();
     b.originate_externals();
+    b.left_out_gaps();
     b.translate_nssa();
     b.originate_summaries();
     b.finish()
