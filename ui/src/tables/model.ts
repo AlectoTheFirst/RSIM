@@ -227,6 +227,23 @@ export function apiUrl(twin: string, s: TablesState, def: TableDef | null): stri
   return `/v1/twins/${encodeURIComponent(twin)}/tables/${encodeURIComponent(s.table)}/${p}${q ? `?${q}` : ""}`;
 }
 
+/** The formats of a table export. */
+export const EXPORT_FORMATS = ["csv", "parquet"] as const;
+export type ExportFormat = (typeof EXPORT_FORMATS)[number];
+
+/** The item of each export format in the menu Export. */
+export const EXPORT_LABELS: Record<ExportFormat, string> = { csv: "CSV", parquet: "Parquet" };
+
+/** The URL of the export of the filtered rows of a state, in the order of its sort, with the columns that are not hidden. */
+export function exportUrl(twin: string, s: TablesState, def: TableDef | null, format: ExportFormat): string | null {
+  if (!s.table || !def) return null;
+  const q = new URLSearchParams(s.filters.map((f) => [filterKey(f), f.value]));
+  if (s.sort.length) q.set("sort", s.sort.join(","));
+  if (s.hide.length) q.set("columns", def.columns.map((c) => c.name).filter((c) => !s.hide.includes(c)).join(","));
+  q.set("format", format);
+  return `/v1/twins/${encodeURIComponent(twin)}/tables/${encodeURIComponent(s.table)}/export?${q.toString()}`;
+}
+
 /** The request of a state as an rsim command. */
 export function tableCommand(topology: string, s: TablesState, def: TableDef | null): string {
   const args = ["rsim", topology, shellWord(s.table), s.verb];

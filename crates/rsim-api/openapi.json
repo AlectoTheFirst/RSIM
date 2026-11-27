@@ -8811,6 +8811,98 @@
         "summary": "Table difference"
       }
     },
+    "/v1/twins/{twin}/tables/{table}/export": {
+      "get": {
+        "operationId": "exportTable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "twin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "File format",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Columns",
+            "in": "query",
+            "name": "columns",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Sort order",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.apache.parquet": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "rsim.read"
+            ]
+          },
+          {
+            "token": [
+              "rsim.read"
+            ]
+          }
+        ],
+        "summary": "Table export"
+      }
+    },
     "/v1/twins/{twin}/tables/{table}/lpm": {
       "get": {
         "operationId": "lpmTable",

@@ -14,11 +14,14 @@ import { Tabs } from "../page/Tabs";
 import { toast } from "../page/notes";
 import { endpointAddresses } from "../page/pick";
 import { cliTopology } from "../page/query";
+import { saveFile } from "../page/save";
 import { type RowHeight, SIZE } from "../theme";
 import { RowPanel } from "./RowPanel";
 import { Table, type TableColumn } from "./Table";
 import {
   type CellText,
+  EXPORT_FORMATS,
+  EXPORT_LABELS,
   FORM_LABELS,
   type Pages,
   type TablesState,
@@ -31,6 +34,7 @@ import {
   columnWidths,
   defaultBy,
   deviceFunctions,
+  exportUrl,
   filterCellText,
   filterColumns,
   formsOf,
@@ -690,6 +694,37 @@ export function TablesView(props: {
               ) : null}
               {tools}
               <span class="grow" />
+              <MenuButton
+                kind="menu"
+                label="Export"
+                buttonClass="ghost"
+                align="end"
+                button={
+                  <span class="with-icon">
+                    Export
+                    <Icon name="menu" />
+                  </span>
+                }
+              >
+                {(close) =>
+                  EXPORT_FORMATS.map((f) => (
+                    <button
+                      type="button"
+                      class="menu-item"
+                      role="menuitem"
+                      tabIndex={-1}
+                      disabled={!def}
+                      onClick={() => {
+                        close();
+                        const url = exportUrl(twin, st, def, f);
+                        if (url) saveFile(url, `${st.table}.${f}`);
+                      }}
+                    >
+                      {EXPORT_LABELS[f]}
+                    </button>
+                  ))
+                }
+              </MenuButton>
               <MenuButton
                 kind="menu"
                 label="Copy"

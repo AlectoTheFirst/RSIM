@@ -833,6 +833,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/twins/{twin}/tables/{table}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Table export */
+        get: operations["exportTable"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/twins/{twin}/tables/{table}/lpm": {
         parameters: {
             query?: never;
@@ -4555,6 +4572,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TableDiffOut"];
+                };
+            };
+            /** @description Problem */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    exportTable: {
+        parameters: {
+            query?: {
+                /** @description File format */
+                format?: string;
+                /** @description Columns */
+                columns?: string;
+                /** @description Sort order */
+                sort?: string;
+            };
+            header?: never;
+            path: {
+                twin: string;
+                table: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.apache.parquet": string;
+                    "text/csv": string;
                 };
             };
             /** @description Problem */

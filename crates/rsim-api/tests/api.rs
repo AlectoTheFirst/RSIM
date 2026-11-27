@@ -1185,6 +1185,50 @@ fn the_mcp_tools_answer_through_the_streamable_http_transport() {
 }
 
 #[test]
+fn the_export_of_a_table_is_a_csv_or_a_parquet_file_of_the_filtered_rows() {
+    let s = state(None);
+    let r = get(
+        &s,
+        "/v1/twins/builtin.leaf-spine/tables/fib/export?device=leaf1&columns=device,prefix",
+    );
+    assert_eq!(r.status, 200);
+    assert_eq!(r.header("content-type"), Some("text/csv; charset=utf-8"));
+    assert_eq!(
+        r.header("content-disposition"),
+        Some("attachment; filename=\"fib.csv\"")
+    );
+    let text = String::from_utf8(r.body.clone()).unwrap();
+    let lines: Vec<&str> = text.split_terminator("\r\n").collect();
+    let rows = json(&get(
+        &s,
+        "/v1/twins/builtin.leaf-spine/tables/fib/rows?device=leaf1",
+    ));
+    assert_eq!(lines[0], "device,prefix");
+    assert_eq!(lines.len() as u64, 1 + rows["total"].as_u64().unwrap());
+    assert!(lines[1..].iter().all(|l| l.starts_with("leaf1,")), "{text}");
+
+    let r = get(
+        &s,
+        "/v1/twins/builtin.leaf-spine/tables/fib/export?format=parquet",
+    );
+    assert_eq!(r.status, 200);
+    assert_eq!(
+        r.header("content-type"),
+        Some("application/vnd.apache.parquet")
+    );
+    assert!(r.body.starts_with(b"PAR1") && r.body.ends_with(b"PAR1"));
+
+    for (path, code) in [
+        ("fib/export?format=xlsx", "invalid_query"),
+        ("fib/export?limit=5", "invalid_filter"),
+        ("nope/export", "unknown_table"),
+    ] {
+        let r = get(&s, &format!("/v1/twins/builtin.leaf-spine/tables/{path}"));
+        assert_eq!(json(&r)["code"].as_str(), Some(code), "{path}");
+    }
+}
+
+#[test]
 fn the_table_verbs_filter_by_device_and_check_their_numbers() {
     let s = state(None);
     let device = |v: &Value| -> Vec<String> {

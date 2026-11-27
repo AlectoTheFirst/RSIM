@@ -11,22 +11,32 @@
 //!
 //! A slot is the place of a value in the per-value vectors: slot 0 is null
 //! and slot `k + 1` is the distinct value `k`.
+//!
+//! The indexes of a frame are built when a selection first needs them. In a
+//! table whose first key column is `device`, the rows of each device are 1
+//! range. A column with the semantic type `mac` has the rows of each slot.
+//! A text column of type address or prefix has its distinct values in the
+//! prefix table of `rsim-core`.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, OnceLock};
 
 use arrow_array::builder::{ListBuilder, StringBuilder};
 use arrow_array::cast::AsArray;
 use arrow_array::types::{UInt32Type, UInt64Type};
 use arrow_array::{
-    Array, ArrayRef, BooleanArray, DictionaryArray, StringArray, UInt32Array, UInt64Array,
+    Array, ArrayRef, BooleanArray, DictionaryArray, RecordBatch, StringArray, UInt32Array,
+    UInt64Array,
 };
 use rayon::prelude::*;
 use rsim_contract::table::{
     ColumnSummary, ColumnType, DiffCounts, DiffRow, RowChange, Selection, TableDef,
 };
+use rsim_core::Prefix;
+use rsim_core::addr::addr_bit;
+use rsim_core::prefix_table::{PrefixTable, TriePrefixTable};
 use serde_json::Value;
 
 /// The number of rows of one chunk of a parallel scan.
@@ -242,7 +252,8 @@ impl FrameBuilder {
         }
         let columns = parts
             .into_iter()
-            .map(|(kind, keys, values)| {
+            .zip(def.columns)
+            .map(|((kind, keys, values), c)| {
                 let mut counts = vec![0usize; values.len() + 1];
                 for k in &keys {
                     counts[slot(*k)] += 1;
@@ -256,13 +267,25 @@ impl FrameBuilder {
                     .collect();
                 FrameColumn {
                     kind,
+                    prefixes: kind == Kind::Text
+                        && matches!(c.kind, ColumnType::Address | ColumnType::Prefix),
                     data: DictionaryArray::new(ordered, values),
                     counts,
                     order: OnceLock::new(),
+                    postings: OnceLock::new(),
+                    trie: OnceLock::new(),
                 }
             })
             .collect();
-        Frame { rows: n, columns }
+        let device = (def.key.first() == Some(&"device"))
+            .then(|| def.columns.iter().position(|c| c.name == "device"))
+            .flatten();
+        Frame {
+            rows: n,
+            columns,
+            device,
+            ranges: OnceLock::new(),
+        }
     }
 }
 
@@ -333,9 +356,128 @@ pub struct FrameColumn {
     counts: Vec<usize>,
     /// The ranks of the slots in the order of a sort.
     order: OnceLock<Vec<u32>>,
+    /// True for a text column of type address or prefix.
+    prefixes: bool,
+    /// The rows of each slot: the rows of slot `s` are
+    /// `rows[offsets[s]..offsets[s + 1]]`, in row order.
+    postings: OnceLock<(Vec<u32>, Vec<u32>)>,
+    /// The distinct values that are an address or a prefix, each with the
+    /// slots of its texts.
+    trie: OnceLock<TriePrefixTable<Vec<u32>>>,
+}
+
+/// The prefix of `<address>/<length>`, or of an address alone with the full
+/// length, with the host bits 0.
+fn prefix_of(s: &str) -> Option<Prefix> {
+    parse_prefix(s).map(to_prefix)
+}
+
+/// The prefix of the parsed `(network, length, width)`, with the host bits
+/// 0.
+fn to_prefix((a, len, bits): (u128, u32, u32)) -> Prefix {
+    let addr = if bits == 32 {
+        IpAddr::V4(Ipv4Addr::from(a as u32))
+    } else {
+        IpAddr::V6(Ipv6Addr::from(a))
+    };
+    Prefix::new(addr, len as u8)
 }
 
 impl FrameColumn {
+    /// The rows of each slot, built at the first call.
+    fn postings(&self) -> (&[u32], &[u32]) {
+        let (offsets, rows) = self.postings.get_or_init(|| {
+            let mut offsets = Vec::with_capacity(self.counts.len() + 1);
+            let mut sum = 0u32;
+            offsets.push(0);
+            for c in &self.counts {
+                sum += *c as u32;
+                offsets.push(sum);
+            }
+            let mut next = offsets.clone();
+            let mut rows = vec![0u32; sum as usize];
+            for r in 0..sum as usize {
+                let s = self.slot(r);
+                rows[next[s] as usize] = r as u32;
+                next[s] += 1;
+            }
+            (offsets, rows)
+        });
+        (offsets, rows)
+    }
+
+    /// The prefix table of the distinct values, built at the first call.
+    fn trie(&self) -> &TriePrefixTable<Vec<u32>> {
+        self.trie.get_or_init(|| {
+            let mut by: BTreeMap<Prefix, Vec<u32>> = BTreeMap::new();
+            for s in 1..self.slots() {
+                if let Some(p) = prefix_of(self.text(s - 1)) {
+                    by.entry(p).or_default().push(s as u32);
+                }
+            }
+            let mut t = TriePrefixTable::new();
+            for (p, slots) in by {
+                t.insert(p, slots);
+            }
+            t
+        })
+    }
+
+    /// The mask of the slots whose value is inside `p`: an address or a
+    /// prefix of the family of `p`, with a length of at least the length of
+    /// `p` and its network in `p`.
+    fn inside_mask(&self, p: Prefix) -> Vec<bool> {
+        let mut mask = vec![false; self.slots()];
+        let t = self.trie();
+        let Some(root) = t.walk_root(!p.is_ipv4()) else {
+            return mask;
+        };
+        let mut stack = vec![root];
+        while let Some(n) = stack.pop() {
+            let w = t.walk_node(n);
+            let d = w.depth.min(p.len());
+            if Prefix::new(w.key, d) != Prefix::new(p.addr(), d) {
+                continue;
+            }
+            if let Some((_, e, slots)) = w.entry
+                && e.len() >= p.len()
+            {
+                for s in slots {
+                    mask[*s as usize] = true;
+                }
+            }
+            stack.extend(w.children.into_iter().flatten());
+        }
+        mask
+    }
+
+    /// The slots of the prefixes with a `/` that contain `addr`, each with
+    /// the length of its prefix.
+    fn containing(&self, addr: IpAddr) -> HashMap<usize, u32> {
+        let mut out = HashMap::new();
+        let t = self.trie();
+        let max = if addr.is_ipv4() { 32 } else { 128 };
+        let mut node = t.walk_root(addr.is_ipv6());
+        while let Some(n) = node {
+            let w = t.walk_node(n);
+            if !Prefix::new(w.key, w.depth).contains(addr) {
+                break;
+            }
+            if let Some((_, e, slots)) = w.entry {
+                for s in slots {
+                    if self.text(*s as usize - 1).contains('/') {
+                        out.insert(*s as usize, u32::from(e.len()));
+                    }
+                }
+            }
+            if w.depth >= max {
+                break;
+            }
+            node = w.children[usize::from(addr_bit(addr, w.depth))];
+        }
+        out
+    }
+
     /// The slot of the value of a row.
     #[inline]
     fn slot(&self, row: usize) -> usize {
@@ -449,9 +591,41 @@ impl FrameColumn {
 pub struct Frame {
     rows: usize,
     columns: Vec<FrameColumn>,
+    /// The column `device` of a table whose first key column is `device`.
+    device: Option<usize>,
+    /// The rows of each slot of the column `device`, as 1 range for each
+    /// slot; none if the rows of a slot are not 1 range.
+    ranges: OnceLock<Option<Vec<(u32, u32)>>>,
 }
 
 impl Frame {
+    /// The row range of each slot of the column `device`, built at the
+    /// first call.
+    fn ranges(&self) -> Option<&[(u32, u32)]> {
+        let d = self.device?;
+        self.ranges
+            .get_or_init(|| {
+                let c = &self.columns[d];
+                let mut ranges = vec![(0u32, 0u32); c.slots()];
+                let mut seen = vec![false; c.slots()];
+                let mut start = 0;
+                for r in 1..=self.rows {
+                    if r < self.rows && c.slot(r) == c.slot(start) {
+                        continue;
+                    }
+                    let s = c.slot(start);
+                    if seen[s] {
+                        return None;
+                    }
+                    seen[s] = true;
+                    ranges[s] = (start as u32, r as u32);
+                    start = r;
+                }
+                Some(ranges)
+            })
+            .as_deref()
+    }
+
     /// The number of rows.
     pub fn len(&self) -> usize {
         self.rows
@@ -528,6 +702,8 @@ impl Cond<'_> {
 struct Plan {
     masks: Vec<(usize, Vec<bool>)>,
     sort: Vec<(usize, bool)>,
+    /// The ranges of rows that hold each matching row, from an index.
+    candidates: Option<Vec<(u32, u32)>>,
 }
 
 fn index(def: &TableDef, name: &str) -> Result<usize, String> {
@@ -578,19 +754,97 @@ fn plan(def: &TableDef, frame: &Frame, sel: &Selection) -> Result<Plan, String> 
         };
         sort.push((index(def, name)?, desc));
     }
-    let masks = conds
+    let masks: Vec<(usize, Vec<bool>)> = conds
         .into_iter()
         .map(|(i, cs)| {
             let col = &frame.columns[i];
+            // The masks of the conditions that the prefix table evaluates.
+            let indexed: Vec<Option<Vec<bool>>> = cs
+                .iter()
+                .map(|c| match c {
+                    Cond::InPrefix(p) if col.prefixes => Some(col.inside_mask(to_prefix(*p))),
+                    _ => None,
+                })
+                .collect();
             let mask = (0..col.slots())
                 .into_par_iter()
                 .with_min_len(CHUNK)
-                .map(|s| cs.iter().all(|c| col.any(s, &|t, n| c.holds(t, n))))
+                .map(|s| {
+                    cs.iter().zip(&indexed).all(|(c, m)| match m {
+                        Some(m) => m[s],
+                        None => col.any(s, &|t, n| c.holds(t, n)),
+                    })
+                })
                 .collect();
             (i, mask)
         })
         .collect();
-    Ok(Plan { masks, sort })
+    let candidates = candidates(def, frame, &masks);
+    Ok(Plan {
+        masks,
+        sort,
+        candidates,
+    })
+}
+
+/// The number of rows of the slots of a mask.
+fn mask_rows(col: &FrameColumn, mask: &[bool]) -> usize {
+    col.counts
+        .iter()
+        .zip(mask)
+        .filter(|(_, ok)| **ok)
+        .map(|(c, _)| c)
+        .sum()
+}
+
+/// The ranges of rows that hold each matching row, from the index with the
+/// fewest rows: the row range of each device of the mask of the column
+/// `device`, or the rows of each MAC address of the mask of a column of the
+/// semantic type `mac` when they are at most a quarter of the rows. None if
+/// no index applies.
+fn candidates(
+    def: &TableDef,
+    frame: &Frame,
+    masks: &[(usize, Vec<bool>)],
+) -> Option<Vec<(u32, u32)>> {
+    let mut best: Option<(usize, Vec<(u32, u32)>)> = None;
+    if let Some(d) = frame.device
+        && let Some((_, m)) = masks.iter().find(|(i, _)| *i == d)
+        && let Some(ranges) = frame.ranges()
+    {
+        let mut rs: Vec<(u32, u32)> = m
+            .iter()
+            .enumerate()
+            .filter(|(s, ok)| **ok && ranges[*s].0 < ranges[*s].1)
+            .map(|(s, _)| ranges[s])
+            .collect();
+        rs.sort_unstable();
+        best = Some((mask_rows(&frame.columns[d], m), rs));
+    }
+    for (i, m) in masks {
+        let col = &frame.columns[*i];
+        if def.columns[*i].semantic != "mac" || col.kind != Kind::Text {
+            continue;
+        }
+        let n = mask_rows(col, m);
+        if best.as_ref().is_some_and(|(b, _)| *b <= n) || n > frame.rows / 4 {
+            continue;
+        }
+        let (offsets, rows) = col.postings();
+        let mut hit: Vec<u32> = m
+            .iter()
+            .enumerate()
+            .filter(|(_, ok)| **ok)
+            .flat_map(|(s, _)| {
+                rows[offsets[s] as usize..offsets[s + 1] as usize]
+                    .iter()
+                    .copied()
+            })
+            .collect();
+        hit.par_sort_unstable();
+        best = Some((n, hit.into_iter().map(|r| (r, r + 1)).collect()));
+    }
+    best.map(|(_, rs)| rs)
 }
 
 impl Plan {
@@ -601,22 +855,39 @@ impl Plan {
             .all(|(i, m)| m[frame.columns[*i].slot(row)])
     }
 
+    /// The matching rows that `keep` takes, as a parallel scan of the
+    /// candidates of the index, or of all rows.
+    fn scan<T: Send>(
+        &self,
+        frame: &Frame,
+        keep: impl Fn(u32) -> Option<T> + Sync + Send,
+    ) -> Vec<T> {
+        let keep = |r: u32| {
+            if self.matches(frame, r as usize) {
+                keep(r)
+            } else {
+                None
+            }
+        };
+        match &self.candidates {
+            Some(c) => c
+                .par_iter()
+                .flat_map_iter(|(a, b)| (*a..*b).filter_map(&keep))
+                .collect(),
+            None => (0..frame.rows as u32)
+                .into_par_iter()
+                .with_min_len(CHUNK)
+                .filter_map(keep)
+                .collect(),
+        }
+    }
+
     /// The number of matching rows.
     fn count(&self, frame: &Frame) -> usize {
         match self.masks.as_slice() {
             [] => frame.rows,
-            [(i, m)] => frame.columns[*i]
-                .counts
-                .iter()
-                .zip(m)
-                .filter(|(_, ok)| **ok)
-                .map(|(c, _)| c)
-                .sum(),
-            _ => (0..frame.rows)
-                .into_par_iter()
-                .with_min_len(CHUNK)
-                .filter(|r| self.matches(frame, *r))
-                .count(),
+            [(i, m)] => mask_rows(&frame.columns[*i], m),
+            _ => self.scan(frame, |_| Some(())).len(),
         }
     }
 
@@ -625,12 +896,7 @@ impl Plan {
         if self.masks.is_empty() {
             return (0..frame.rows as u32).collect();
         }
-        (0..frame.rows)
-            .into_par_iter()
-            .with_min_len(CHUNK)
-            .filter(|r| self.matches(frame, *r))
-            .map(|r| r as u32)
-            .collect()
+        self.scan(frame, Some)
     }
 
     /// The matching rows from the match `start` to the match before `end`,
@@ -641,13 +907,15 @@ impl Plan {
         }
         let mut out = Vec::with_capacity(end - start);
         let mut seen = 0;
-        for r in 0..frame.rows {
+        let all = [(0, frame.rows as u32)];
+        let ranges = self.candidates.as_deref().unwrap_or(&all);
+        for r in ranges.iter().flat_map(|(a, b)| *a..*b) {
             if out.len() == end - start {
                 break;
             }
-            if self.matches(frame, r) {
+            if self.matches(frame, r as usize) {
                 if seen >= start {
-                    out.push(r as u32);
+                    out.push(r);
                 }
                 seen += 1;
             }
@@ -996,33 +1264,34 @@ pub fn lpm(
     column: &str,
     address: &str,
 ) -> Result<Page, String> {
-    let plan = plan(def, frame, sel)?;
+    let mut plan = plan(def, frame, sel)?;
     let i = def
         .columns
         .iter()
         .position(|c| c.name == column && c.kind == ColumnType::Prefix)
         .ok_or_else(|| format!("{column} is not a prefix column of {}", def.name))?;
-    address
+    let addr = address
         .parse::<IpAddr>()
         .map_err(|_| format!("{address} is not an address"))?;
     let proj = projection(def, sel)?;
     let col = &frame.columns[i];
     // The length of the prefix of each slot that contains the address.
-    let hit: Vec<Option<u32>> = (0..col.slots())
-        .into_par_iter()
-        .with_min_len(CHUNK)
-        .map(|s| {
-            let t = (s > 0).then(|| col.text(s - 1))?;
-            let p = t.contains('/').then(|| parse_prefix(t)).flatten()?;
-            inside(address, p).then_some(p.1)
-        })
-        .collect();
+    let hit = col.containing(addr);
+    let mut mask = vec![false; col.slots()];
+    for s in hit.keys() {
+        mask[*s] = true;
+    }
+    plan.masks.push((i, mask));
     let rows = plan.rows(frame);
-    let best = rows.iter().filter_map(|r| hit[col.slot(*r as usize)]).max();
+    let best = rows
+        .iter()
+        .filter_map(|r| hit.get(&col.slot(*r as usize)))
+        .max()
+        .copied();
     let mut rows: Vec<u32> = match best {
         Some(b) => rows
             .into_iter()
-            .filter(|r| hit[col.slot(*r as usize)] == Some(b))
+            .filter(|r| hit.get(&col.slot(*r as usize)) == Some(&b))
             .collect(),
         None => Vec::new(),
     };
@@ -1195,6 +1464,156 @@ pub fn summarize(
         })
         .collect();
     Ok((total, columns))
+}
+
+/// The rows of an export: the column names, the column indexes and each
+/// matching row in the order of the selection. An export takes no limit and
+/// no cursor.
+pub struct Export {
+    pub columns: Vec<String>,
+    index: Vec<usize>,
+    pub rows: Vec<u32>,
+}
+
+/// All matching rows in the order of the selection. An error names a
+/// column, an op or a filter value that is not valid, or a limit or a
+/// cursor.
+pub fn export(def: &TableDef, frame: &Frame, sel: &Selection) -> Result<Export, String> {
+    if sel.limit.is_some() || sel.cursor.is_some() {
+        return Err("an export takes no limit and no cursor".into());
+    }
+    let plan = plan(def, frame, sel)?;
+    let (columns, index) = projection(def, sel)?;
+    let mut rows = plan.rows(frame);
+    let n = rows.len();
+    plan.order(frame, &mut rows, n);
+    Ok(Export {
+        columns,
+        index,
+        rows,
+    })
+}
+
+/// Adds a CSV field: a text with a comma, a quote, a CR or an LF, and the
+/// empty text, in quotes with each quote doubled.
+fn csv_field(out: &mut String, s: &str) {
+    if s.is_empty() || s.contains([',', '"', '\r', '\n']) {
+        out.push('"');
+        out.push_str(&s.replace('"', "\"\""));
+        out.push('"');
+    } else {
+        out.push_str(s);
+    }
+}
+
+/// The rows of an export as CSV (RFC 4180): a header line with the column
+/// names, then 1 line for each row, each line with CR LF at its end. A null
+/// is an empty field, and a list is its JSON text.
+pub fn csv(frame: &Frame, e: &Export) -> Vec<u8> {
+    let mut out = String::new();
+    for (j, name) in e.columns.iter().enumerate() {
+        if j > 0 {
+            out.push(',');
+        }
+        csv_field(&mut out, name);
+    }
+    out.push_str("\r\n");
+    for r in &e.rows {
+        for (j, i) in e.index.iter().enumerate() {
+            if j > 0 {
+                out.push(',');
+            }
+            let c = &frame.columns[*i];
+            let s = c.slot(*r as usize);
+            if s == 0 {
+                continue;
+            }
+            match c.kind {
+                Kind::Text => csv_field(&mut out, c.text(s - 1)),
+                Kind::Integer => out.push_str(&c.integer(s - 1).to_string()),
+                Kind::Boolean => out.push_str(if c.boolean(s - 1) { "true" } else { "false" }),
+                Kind::List => csv_field(&mut out, &list_json(c.data.values(), s - 1)),
+            }
+        }
+        out.push_str("\r\n");
+    }
+    out.into_bytes()
+}
+
+/// The values of a column for some rows as a plain Arrow array.
+fn plain(c: &FrameColumn, rows: &[u32]) -> ArrayRef {
+    let slot = |r: &u32| c.slot(*r as usize).checked_sub(1);
+    match c.kind {
+        Kind::Text => Arc::new(StringArray::from_iter(
+            rows.iter().map(|r| slot(r).map(|e| c.text(e))),
+        )),
+        Kind::Integer => Arc::new(UInt64Array::from_iter(
+            rows.iter().map(|r| slot(r).map(|e| c.integer(e))),
+        )),
+        Kind::Boolean => Arc::new(BooleanArray::from_iter(
+            rows.iter().map(|r| slot(r).map(|e| c.boolean(e))),
+        )),
+        Kind::List => {
+            let mut b = ListBuilder::new(StringBuilder::new());
+            for r in rows {
+                match slot(r) {
+                    None => b.append(false),
+                    Some(e) => {
+                        for v in c.list(e) {
+                            b.values().append_value(v);
+                        }
+                        b.append(true);
+                    }
+                }
+            }
+            Arc::new(b.finish())
+        }
+    }
+}
+
+/// The rows of an export as a Parquet file with Snappy compression: 1
+/// column for each column of the export, text as UTF-8, an integer as an
+/// unsigned 64-bit integer, a list as a list of UTF-8 texts, and each
+/// column nullable.
+pub fn parquet(frame: &Frame, e: &Export) -> Result<Vec<u8>, String> {
+    use arrow_schema::{DataType, Field, Schema};
+    use parquet::arrow::ArrowWriter;
+    use parquet::basic::Compression;
+    use parquet::file::properties::WriterProperties;
+
+    let fields: Vec<Field> = e
+        .index
+        .iter()
+        .zip(&e.columns)
+        .map(|(i, name)| {
+            let t = match frame.columns[*i].kind {
+                Kind::Text => DataType::Utf8,
+                Kind::Integer => DataType::UInt64,
+                Kind::Boolean => DataType::Boolean,
+                Kind::List => DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
+            };
+            Field::new(name, t, true)
+        })
+        .collect();
+    let schema = Arc::new(Schema::new(fields));
+    let props = WriterProperties::builder()
+        .set_compression(Compression::SNAPPY)
+        .set_created_by("rsim".to_string())
+        .build();
+    let mut buf = Vec::new();
+    let mut w =
+        ArrowWriter::try_new(&mut buf, schema.clone(), Some(props)).map_err(|e| e.to_string())?;
+    for rows in e.rows.chunks(CHUNK) {
+        let columns: Vec<ArrayRef> = e
+            .index
+            .iter()
+            .map(|i| plain(&frame.columns[*i], rows))
+            .collect();
+        let batch = RecordBatch::try_new(schema.clone(), columns).map_err(|e| e.to_string())?;
+        w.write(&batch).map_err(|e| e.to_string())?;
+    }
+    w.close().map_err(|e| e.to_string())?;
+    Ok(buf)
 }
 
 #[cfg(test)]

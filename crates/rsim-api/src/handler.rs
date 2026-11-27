@@ -822,6 +822,7 @@ fn twin_route(
                 "top" => &["column", "count", "ascending"],
                 "diff" => &["against"],
                 "lpm" => &["column", "address"],
+                "export" => &["format"],
                 _ => &[],
             };
             let sel = selection(req, reserved)?;
@@ -868,6 +869,21 @@ fn twin_route(
                     )
                     .map_err(err)?,
                 )),
+                "export" => {
+                    let format = get("format").unwrap_or_else(|| "csv".into());
+                    let (body, kind) = tables::export(l, table, &format, &sel).map_err(err)?;
+                    Ok(Response {
+                        status: 200,
+                        headers: vec![
+                            ("content-type".into(), kind.into()),
+                            (
+                                "content-disposition".into(),
+                                format!("attachment; filename=\"{table}.{format}\""),
+                            ),
+                        ],
+                        body,
+                    })
+                }
                 "diff" => {
                     let (_, other) = state.against(&p)?;
                     Ok(json_response(
