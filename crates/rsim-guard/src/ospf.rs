@@ -431,8 +431,8 @@ fn reaching_gap(
     })
 }
 
-/// The details of the gaps of `gaps` that reach each LSA of a collected
-/// entry, joined with `; `, or `None` if a gap reaches no LSA of the entry.
+/// The details of the gaps of `gaps` that reach the LSAs of a collected
+/// entry, joined with `; `, or `None` if no gap reaches an LSA of the entry.
 fn not_computed(gaps: &[Gap], key: &EntryKey, entry: &Entry) -> Option<String> {
     let (no_area, area, lsa_type, _) = key;
     let area = (!no_area).then_some(*area);

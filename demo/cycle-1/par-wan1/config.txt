@@ -74,6 +74,7 @@ router static
 !
 router ospf CORE
  router-id 10.27.0.1
+ redistribute bgp 65020
  area 0
   interface Loopback0
    cost 1
