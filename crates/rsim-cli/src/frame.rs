@@ -274,6 +274,7 @@ impl FrameBuilder {
                     order: OnceLock::new(),
                     postings: OnceLock::new(),
                     trie: OnceLock::new(),
+                    sorted: OnceLock::new(),
                 }
             })
             .collect();
@@ -364,6 +365,8 @@ pub struct FrameColumn {
     /// The distinct values that are an address or a prefix, each with the
     /// slots of its texts.
     trie: OnceLock<TriePrefixTable<Vec<u32>>>,
+    /// The distinct values of a text column in the order of their text.
+    sorted: OnceLock<Vec<u32>>,
 }
 
 /// The prefix of `<address>/<length>`, or of an address alone with the full
@@ -551,6 +554,24 @@ impl FrameColumn {
             Kind::Boolean => f(if self.boolean(e) { "true" } else { "false" }, None),
             Kind::List => self.list(e).into_iter().any(|s| f(s, None)),
         }
+    }
+
+    /// The mask of the slots of a text column whose text is one of `vs`,
+    /// from the distinct values in the order of their text, built at the
+    /// first call.
+    fn equal_mask(&self, vs: &[String]) -> Vec<bool> {
+        let sorted = self.sorted.get_or_init(|| {
+            let mut v: Vec<u32> = (0..self.slots() as u32 - 1).collect();
+            v.par_sort_unstable_by(|a, b| self.text(*a as usize).cmp(self.text(*b as usize)));
+            v
+        });
+        let mut mask = vec![false; self.slots()];
+        for want in vs {
+            if let Ok(i) = sorted.binary_search_by(|e| self.text(*e as usize).cmp(want.as_str())) {
+                mask[sorted[i] as usize + 1] = true;
+            }
+        }
+        mask
     }
 
     /// The ranks of the slots for a sort: null first, numbers by their
@@ -763,6 +784,9 @@ fn plan(def: &TableDef, frame: &Frame, sel: &Selection) -> Result<Plan, String> 
                 .iter()
                 .map(|c| match c {
                     Cond::InPrefix(p) if col.prefixes => Some(col.inside_mask(to_prefix(*p))),
+                    Cond::Eq(vs) if col.kind == Kind::Text && col.slots() > CHUNK => {
+                        Some(col.equal_mask(vs))
+                    }
                     _ => None,
                 })
                 .collect();
