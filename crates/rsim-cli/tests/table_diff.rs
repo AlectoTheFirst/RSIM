@@ -21,6 +21,8 @@ fn routes(rows: &[(&str, Option<u64>, &str)]) -> Frame {
             metric.map_or(Cell::Null, Cell::Integer),
             Cell::Text("192.0.2.1"),
             Cell::Text("eth0"),
+            Cell::Null,
+            Cell::Null,
             Cell::List(&spans),
         ]);
     }
