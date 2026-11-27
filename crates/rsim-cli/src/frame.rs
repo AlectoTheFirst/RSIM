@@ -1506,6 +1506,7 @@ fn frame_column(kind: Kind, t: ColumnType, keys: UInt32Array, values: ArrayRef) 
         order: OnceLock::new(),
         postings: OnceLock::new(),
         trie: OnceLock::new(),
+        sorted: OnceLock::new(),
     }
 }
 
