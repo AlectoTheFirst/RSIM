@@ -1,5 +1,9 @@
-//! The RIB guard: the comparison of the computed route table of a device
-//! and VRF with its collected route table.
+//! The guards of the twin. The RIB guard compares the computed route table
+//! of a device and VRF with its collected route table. The OSPF database
+//! guard in [`ospf`] compares the link-state database that the twin builds
+//! for a router with its collected database.
+
+pub mod ospf;
 
 use std::collections::{BTreeMap, BTreeSet};
 
