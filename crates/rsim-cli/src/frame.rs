@@ -426,14 +426,23 @@ impl FrameColumn {
         })
     }
 
-    /// The mask of the slots whose value is inside `p`: an address or a
-    /// prefix of the family of `p`, with a length of at least the length of
-    /// `p` and its network in `p`.
+    /// The mask of the slots whose value is inside `p`.
     fn inside_mask(&self, p: Prefix) -> Vec<bool> {
         let mut mask = vec![false; self.slots()];
+        for s in self.inside_slots(p) {
+            mask[s as usize] = true;
+        }
+        mask
+    }
+
+    /// The slots whose value is inside `p`, in slot order: an address or a
+    /// prefix of the family of `p`, with a length of at least the length of
+    /// `p` and its network in `p`.
+    fn inside_slots(&self, p: Prefix) -> Vec<u32> {
+        let mut out = Vec::new();
         let t = self.trie();
         let Some(root) = t.walk_root(!p.is_ipv4()) else {
-            return mask;
+            return out;
         };
         let mut stack = vec![root];
         while let Some(n) = stack.pop() {
@@ -445,13 +454,12 @@ impl FrameColumn {
             if let Some((_, e, slots)) = w.entry
                 && e.len() >= p.len()
             {
-                for s in slots {
-                    mask[*s as usize] = true;
-                }
+                out.extend_from_slice(slots);
             }
             stack.extend(w.children.into_iter().flatten());
         }
-        mask
+        out.sort_unstable();
+        out
     }
 
     /// The slots of the prefixes with a `/` that contain `addr`, each with
@@ -820,6 +828,11 @@ fn plan(def: &TableDef, frame: &Frame, sel: &Selection) -> Result<Plan, String> 
             {
                 return (i, Mask::Sparse(col.equal_slots(vs)));
             }
+            if let [Cond::InPrefix(p)] = cs.as_slice()
+                && col.prefixes
+            {
+                return (i, Mask::Sparse(col.inside_slots(to_prefix(*p))));
+            }
             // The masks of the conditions that the prefix table evaluates.
             let indexed: Vec<Option<Vec<bool>>> = cs
                 .iter()
@@ -858,9 +871,9 @@ fn mask_rows(col: &FrameColumn, mask: &Mask) -> usize {
 
 /// The ranges of rows that hold each matching row, from the index with the
 /// fewest rows: the row range of each device of the mask of the column
-/// `device`, or the rows of each MAC address of the mask of a column of the
-/// semantic type `mac` when they are at most a quarter of the rows. None if
-/// no index applies.
+/// `device`, or the rows of each value of a sparse mask or of the mask of a
+/// column of the semantic type `mac` when they are at most a quarter of the
+/// rows. None if no index applies.
 fn candidates(def: &TableDef, frame: &Frame, masks: &[(usize, Mask)]) -> Option<Vec<(u32, u32)>> {
     let mut best: Option<(usize, Vec<(u32, u32)>)> = None;
     if let Some(d) = frame.device
@@ -878,7 +891,8 @@ fn candidates(def: &TableDef, frame: &Frame, masks: &[(usize, Mask)]) -> Option<
     }
     for (i, m) in masks {
         let col = &frame.columns[*i];
-        if def.columns[*i].semantic != "mac" || col.kind != Kind::Text {
+        let sparse = matches!(m, Mask::Sparse(_));
+        if !sparse && (def.columns[*i].semantic != "mac" || col.kind != Kind::Text) {
             continue;
         }
         let n = mask_rows(col, m);
