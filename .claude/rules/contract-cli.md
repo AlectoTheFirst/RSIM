@@ -40,6 +40,8 @@ The table `devices` has one row for each device with a function and each device 
 
 A claim answer has the field `detail` for what the claim leaves out of its rows.
 
+`rib-fib-agree` reads `Loaded::guard`, the RIB guard rows of `rsim-guard`, on the scope `twin` or `devices`. Each route is one row: a match is confirmed, a difference and a route of only one table are refuted, and a route that is not computed and a seed are unknown. The detail gives the match rate, the number of compared routes, and the numbers of the routes that are not computed and of the seeds. The table `rib-guard` has the same rows, with the computed and the collected kind and next hops, the fields that differ and the reason.
+
 The BGP claims `bgp-peers-up` and `bgp-peers-agree` read `Loaded::bgp` with the far end of each neighbour from the join; a neighbour with `shutdown` gives no row in either claim, a neighbour whose peer is outside the twin gives no row in `bgp-peers-agree`, the detail counts them, and a scope with no row has the detail `no BGP neighbour in scope`.
 
 `bgp-peers-up` has one row for each configured neighbour and each dynamic peer of a listen range, a peer outside the twin included: established is confirmed, another state word is refuted, and a neighbour with no session row is refuted with `not in session table` only when the session section is `Complete` or `CompleteEmpty` and its scope covers the VRF and each activated address family of the neighbour; else it is unknown, as is a neighbour whose inheritance gap can hide a shutdown line and a neighbour named by its interface.

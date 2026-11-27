@@ -12,6 +12,7 @@ arrow-array = "60.1.0"
 rsim-core.workspace = true
 rsim-engine.workspace = true
 rsim-functions.workspace = true
+rsim-guard.workspace = true
 rsim-routing.workspace = true
 rsim-store.workspace = true
 rsim-textfsm.workspace = true

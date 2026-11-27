@@ -62,6 +62,7 @@ fn loaded() -> Loaded {
         seen: estate.seen,
         fabric: estate.fabric,
         mtu: estate.mtu,
+        guard: estate.guard,
         tables: Default::default(),
         source: None,
     }

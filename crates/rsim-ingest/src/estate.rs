@@ -41,6 +41,9 @@ pub struct Estate {
     /// The MTU of the interfaces of the IOS-XR, IOS-XE, UniFi and VeloCloud
     /// devices.
     pub mtu: crate::mtu::Mtus,
+    /// The RIB guard rows of each device with collected route rows, by
+    /// twin device.
+    pub guard: BTreeMap<String, Vec<rsim_guard::Row>>,
 }
 
 fn short(h: &Hash) -> String {
@@ -306,6 +309,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         seen: Vec::new(),
         fabric: BTreeMap::new(),
         mtu: BTreeMap::new(),
+        guard: BTreeMap::new(),
     };
     let mut routers: BTreeMap<String, Router> = BTreeMap::new();
     #[allow(clippy::type_complexity)]
@@ -824,6 +828,9 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
             &twin_addresses,
         );
         e.notes.entry(device.clone()).or_default().extend(low.notes);
+        if !low.guard.is_empty() {
+            e.guard.insert(device.clone(), low.guard);
+        }
         for f in low.functions {
             e.builder.add_arc(f);
         }
@@ -837,6 +844,9 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         let ext = joined.devices.remove(device).unwrap_or_default();
         let (low, _) = nxos::lower(device, file, &nx_profile, cfg, col, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
+        if !low.guard.is_empty() {
+            e.guard.insert(device.clone(), low.guard);
+        }
         for f in low.functions {
             e.builder.add_arc(f);
         }
@@ -856,6 +866,9 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         let ext = joined.devices.remove(device).unwrap_or_default();
         let (low, _) = iosxr::lower(device, file, &xr_profile, cfg, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
+        if !low.guard.is_empty() {
+            e.guard.insert(device.clone(), low.guard);
+        }
         for f in low.functions {
             e.builder.add_arc(f);
         }
@@ -869,6 +882,9 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         let ext = joined.devices.remove(device).unwrap_or_default();
         let (low, _) = iosxe::lower(device, file, &xe_profile, cfg, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
+        if !low.guard.is_empty() {
+            e.guard.insert(device.clone(), low.guard);
+        }
         for f in low.functions {
             e.builder.add_arc(f);
         }

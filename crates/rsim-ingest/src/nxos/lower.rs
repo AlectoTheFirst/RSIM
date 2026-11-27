@@ -27,6 +27,7 @@ use crate::links::{External, Summary};
 use crate::resolve::{Origin, Path, Resolver, Target, through_default};
 use crate::route_tables::{TABLE_NOT_COLLECTED, route_kind};
 use crate::vyos::Lowered;
+use rsim_routing::{Candidate, Platform, install};
 
 /// The VRF of an interface with no `vrf member`.
 pub(super) const DEFAULT_VRF: &str = "default";
@@ -312,7 +313,7 @@ pub fn lower(
             .filter_map(|i| gws.get(&i.name))
             .flat_map(|g| g.active.iter().map(|(_, a, s)| (*a, s.clone())))
             .collect();
-        let fib = l.fib(v, &active, col, &names, &vips, "snat", &vx);
+        let fib = l.fib(v, &active, col, &names, &vips, "snat", &vx, true);
         tables.insert(VrfId::new(v), fib);
     }
     l.note("IPv6 not lowered".into());
@@ -336,7 +337,16 @@ pub fn lower(
         .iter()
         .any(|f| f.successors().contains(&entry));
     if encapsulates {
-        let fib = l.fib(DEFAULT_VRF, &active, col, &names, &[], "vxlan/nexthop", &vx);
+        let fib = l.fib(
+            DEFAULT_VRF,
+            &active,
+            col,
+            &names,
+            &[],
+            "vxlan/nexthop",
+            &vx,
+            false,
+        );
         let meta = l.meta(super::profile::VXLAN_ENTRY, Vec::new());
         l.add(RouteLookup {
             meta,
@@ -1288,6 +1298,7 @@ impl L<'_> {
         vips: &[(IpAddr, Vec<SourceSpan>)],
         next: &str,
         vx: &Vx<'_>,
+        guard: bool,
     ) -> Fib {
         let mut t = Fib::new();
         let hop = |l: &L, iface: &str, gw: Option<IpAddr>| RouteNextHop {
@@ -1295,108 +1306,9 @@ impl L<'_> {
             gateway: gw,
             next: l.id(next),
         };
-        if !col.routes.iter().any(|r| r.vrf == vrf) {
-            for i in active.iter().filter(|i| vrf_of(i) == vrf) {
-                for a in &i.addresses {
-                    if let Some((ip, len)) = iface_addr(&a.prefix)
-                        && len < 32
-                    {
-                        t.insert(
-                            Prefix::new(ip, len),
-                            Route::new(
-                                RouteKind::Connected,
-                                vec![hop(self, &i.name, None)],
-                                vec![self.span(a.lines)],
-                            ),
-                        );
-                    }
-                }
-            }
-            // The static routes of each prefix with the lowest preference.
-            #[derive(Default)]
-            struct Best {
-                preference: u8,
-                null: bool,
-                not_known: bool,
-                hops: Vec<RouteNextHop>,
-                spans: Vec<SourceSpan>,
-            }
-            let mut statics: BTreeMap<Prefix, Best> = BTreeMap::new();
-            for r in self.cfg.static_routes.clone() {
-                if r.vrf != vrf {
-                    continue;
-                }
-                let span = vec![self.span(r.lines)];
-                let Ok(p) = r.prefix.parse::<Prefix>() else {
-                    self.note(format!("static route {}: prefix not valid", r.prefix));
-                    continue;
-                };
-                let best = statics.entry(p).or_insert_with(|| Best {
-                    preference: r.preference,
-                    ..Best::default()
-                });
-                if r.preference < best.preference {
-                    *best = Best {
-                        preference: r.preference,
-                        ..Best::default()
-                    };
-                }
-                if r.preference > best.preference {
-                    continue;
-                }
-                best.spans.extend(span);
-                if r.interface
-                    .as_deref()
-                    .is_some_and(|i| i.eq_ignore_ascii_case("null0"))
-                {
-                    best.null = true;
-                    continue;
-                }
-                let gw = r.next_hop.as_deref().and_then(|g| g.parse::<IpAddr>().ok());
-                let iface = r.interface.clone().map(|i| names.resolve(&i)).or_else(|| {
-                    let gw = gw?;
-                    active
-                        .iter()
-                        .filter(|i| vrf_of(i) == vrf)
-                        .find(|i| {
-                            i.addresses.iter().any(|a| {
-                                iface_addr(&a.prefix).is_some_and(|(ip, len)| {
-                                    len < 32 && Prefix::new(ip, len).contains(gw)
-                                })
-                            })
-                        })
-                        .map(|i| i.name.clone())
-                });
-                match iface {
-                    Some(i) if r.unhandled.is_empty() => best.hops.push(hop(self, &i, gw)),
-                    _ => {
-                        self.note(format!(
-                            "static route {} in VRF {vrf}, next hop not known",
-                            r.prefix
-                        ));
-                        best.not_known = true;
-                    }
-                }
-            }
-            for (p, best) in statics {
-                if t.get(&p).is_some_and(|c| c.kind == RouteKind::Connected) {
-                    continue;
-                }
-                let route = match (best.null, best.not_known, best.hops.is_empty()) {
-                    (true, false, true) => Route::new(RouteKind::Null, Vec::new(), best.spans),
-                    (false, _, true) | (false, false, false) => {
-                        Route::new(RouteKind::Static, best.hops, best.spans)
-                    }
-                    _ => Route::unknown(
-                        RouteKind::Static,
-                        format!(
-                            "static route {p} in VRF {vrf}, a next hop of the same preference not known"
-                        ),
-                        best.spans,
-                    ),
-                };
-                t.insert(p, route);
-            }
+        let collected = col.routes.iter().any(|r| r.vrf == vrf);
+        if !collected {
+            t = install(self.config_candidates(vrf, active, names, next));
             if let Some(found) = self.cfg.dynamic_vrfs.get(vrf).cloned() {
                 self.note(format!(
                     "VRF {vrf}: dynamic routing protocol, no collected route rows, each destination outside the connected and local routes unknown"
@@ -1564,7 +1476,153 @@ impl L<'_> {
         }
         let v6: Prefix = "::/0".parse().expect("a valid prefix");
         t.insert(v6, Route::new(RouteKind::Static, Vec::new(), Vec::new()));
+        if collected && guard {
+            self.guard(&mut t, vrf, active, col, names, next);
+        }
         t
+    }
+
+    /// The connected routes and the static routes of the config of a VRF.
+    fn config_candidates(
+        &mut self,
+        vrf: &str,
+        active: &[Interface],
+        names: &Names,
+        next: &str,
+    ) -> Vec<Candidate> {
+        let hop = |l: &L, iface: &str, gw: Option<IpAddr>| RouteNextHop {
+            interface: InterfaceId::new(iface),
+            gateway: gw,
+            next: l.id(next),
+        };
+        let mut out = Vec::new();
+        for i in active.iter().filter(|i| vrf_of(i) == vrf) {
+            for a in &i.addresses {
+                if let Some((ip, len)) = iface_addr(&a.prefix)
+                    && len < 32
+                {
+                    out.push(Candidate {
+                        prefix: Prefix::new(ip, len),
+                        distance: PLATFORM.distance(rsim_routing::Origin::Connected),
+                        route: Route::new(
+                            RouteKind::Connected,
+                            vec![hop(self, &i.name, None)],
+                            vec![self.span(a.lines)],
+                        ),
+                    });
+                }
+            }
+        }
+        for r in self.cfg.static_routes.clone() {
+            if r.vrf != vrf {
+                continue;
+            }
+            let span = vec![self.span(r.lines)];
+            let Ok(p) = r.prefix.parse::<Prefix>() else {
+                self.note(format!("static route {}: prefix not valid", r.prefix));
+                continue;
+            };
+            let route = if r
+                .interface
+                .as_deref()
+                .is_some_and(|i| i.eq_ignore_ascii_case("null0"))
+            {
+                Route::new(RouteKind::Null, Vec::new(), span)
+            } else {
+                let gw = r.next_hop.as_deref().and_then(|g| g.parse::<IpAddr>().ok());
+                let iface = r.interface.clone().map(|i| names.resolve(&i)).or_else(|| {
+                    let gw = gw?;
+                    active
+                        .iter()
+                        .filter(|i| vrf_of(i) == vrf)
+                        .find(|i| {
+                            i.addresses.iter().any(|a| {
+                                iface_addr(&a.prefix).is_some_and(|(ip, len)| {
+                                    len < 32 && Prefix::new(ip, len).contains(gw)
+                                })
+                            })
+                        })
+                        .map(|i| i.name.clone())
+                });
+                match iface {
+                    Some(i) if r.unhandled.is_empty() => {
+                        Route::new(RouteKind::Static, vec![hop(self, &i, gw)], span)
+                    }
+                    _ => {
+                        self.note(format!(
+                            "static route {} in VRF {vrf}, next hop not known",
+                            r.prefix
+                        ));
+                        Route::unknown(
+                            RouteKind::Static,
+                            format!("static route {p} in VRF {vrf}, next hop not known"),
+                            span,
+                        )
+                    }
+                }
+            };
+            out.push(Candidate {
+                prefix: p,
+                distance: r.preference,
+                route,
+            });
+        }
+        out
+    }
+
+    /// The RIB guard of a VRF: the computed route table of the connected,
+    /// static and local routes against the collected route table `t`,
+    /// whose routes it marks.
+    fn guard(
+        &mut self,
+        t: &mut Fib,
+        vrf: &str,
+        active: &[Interface],
+        col: &Collected,
+        names: &Names,
+        next: &str,
+    ) {
+        let mut cands = self.config_candidates(vrf, active, names, next);
+        for i in active.iter().filter(|i| vrf_of(i) == vrf) {
+            for a in &i.addresses {
+                if let Some((ip, _)) = iface_addr(&a.prefix) {
+                    cands.push(Candidate {
+                        prefix: Prefix::host(ip),
+                        distance: PLATFORM.distance(rsim_routing::Origin::Connected),
+                        route: Route::new(RouteKind::Local, Vec::new(), vec![self.span(a.lines)]),
+                    });
+                }
+            }
+        }
+        let computed = install(cands);
+        let mut routes = BTreeMap::new();
+        for r in col.routes.iter().filter(|r| r.selected && r.vrf == vrf) {
+            let Ok(p) = r.prefix.parse::<Prefix>() else {
+                continue;
+            };
+            routes.entry(p).or_insert_with(|| guard_route(&r.protocol));
+        }
+        let rows = rsim_guard::compare(vrf, &computed, t, &routes);
+        rsim_guard::mark(t, &rows);
+        self.out.guard.extend(rows);
+    }
+}
+
+/// The routing defaults of NX-OS.
+const PLATFORM: Platform = Platform::Nxos;
+
+/// The guard class of a collected route of the `clientname` word `word`.
+/// The connected, local and static routes are compared. Each other route is
+/// not computed.
+fn guard_route(word: &str) -> rsim_guard::CollectedRoute {
+    let w = super::profile::protocol_word(word);
+    let class = match w {
+        "direct" | "local" | "static" => rsim_guard::Class::Compared,
+        other => rsim_guard::Class::NotComputed(format!("{other} not computed")),
+    };
+    rsim_guard::CollectedRoute {
+        protocol: word.to_string(),
+        class,
     }
 }
 

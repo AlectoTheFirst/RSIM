@@ -464,3 +464,30 @@ fn an_hsrp_line_that_is_not_read_goes_to_the_group() {
     assert_eq!(cfg.hsrp[1].unhandled, ["hsrp use-bia"]);
     assert_eq!(iosxr::unread(&doc, &table, &cfg.read), Vec::<String>::new());
 }
+
+#[test]
+fn router_static_gives_the_static_routes_of_the_default_vrf_and_of_each_vrf() {
+    let doc = iosxr::read_text(CONFIG);
+    let table = iosxr::table(&RouteTables::uniform(false, iosxr::dynamic_vrfs(&doc)));
+    let cfg = iosxr::read(&doc, &table);
+    let got: Vec<(&str, &str, Option<&str>, u8)> = cfg
+        .static_routes
+        .iter()
+        .map(|r| {
+            (
+                r.vrf.as_str(),
+                r.prefix.as_str(),
+                r.next_hop.as_deref(),
+                r.preference,
+            )
+        })
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("default", "0.0.0.0/0", Some("203.0.113.254"), 1),
+            ("RED", "192.0.2.192/27", Some("192.0.2.10"), 1),
+        ]
+    );
+    assert!(cfg.static_routes.iter().all(|r| r.unhandled.is_empty()));
+}

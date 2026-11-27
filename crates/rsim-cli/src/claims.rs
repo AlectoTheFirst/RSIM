@@ -332,6 +332,63 @@ fn states(f: &BgpPeerFact) -> Vec<String> {
     f.sessions.iter().map(|r| r.state.clone()).collect()
 }
 
+/// The evidence rows of the RIB guard of the devices that `keep` selects,
+/// one for each route, and the detail with the match rate. A match is
+/// confirmed. A difference and a route of only one table are refuted. A
+/// route that is not computed and a seed are unknown.
+pub fn rib_fib_agree(
+    guard: &BTreeMap<String, Vec<rsim_guard::Row>>,
+    keep: &dyn Fn(&str) -> bool,
+) -> (Vec<Evidence>, String) {
+    use rsim_guard::Category;
+    let view = |v: &Option<rsim_guard::View>| {
+        v.as_ref()
+            .map(|v| json!({"kind": v.kind, "next_hops": v.next_hops}))
+    };
+    let mut evidence = Vec::new();
+    let mut all = Vec::new();
+    for (device, rows) in guard.iter().filter(|(d, _)| keep(d)) {
+        for r in rows {
+            all.push(r);
+            let result = match r.category {
+                Category::Match => ClaimResult::Confirmed,
+                Category::Differ | Category::OnlyComputed | Category::OnlyCollected => {
+                    ClaimResult::Refuted
+                }
+                Category::NotComputed | Category::Seeded => ClaimResult::Unknown,
+            };
+            let detail = if r.fields.is_empty() {
+                r.reason.clone()
+            } else {
+                format!("{} differ", r.fields.join(" and "))
+            };
+            evidence.push(Evidence {
+                subject: format!("{device} {} {}", r.vrf, r.prefix),
+                result,
+                expected: view(&r.computed),
+                observed: view(&r.collected),
+                reason: r.category.name().to_string(),
+                detail,
+                provenance: spans(&r.spans),
+            });
+        }
+    }
+    let c = rsim_guard::Counts::of(all);
+    let detail = match c.rate() {
+        Some(rate) => format!(
+            "match rate {rate}% of {} compared routes, {} not computed, {} seeded",
+            c.compared(),
+            c.not_computed,
+            c.seeded
+        ),
+        None => format!(
+            "no compared route, {} not computed, {} seeded",
+            c.not_computed, c.seeded
+        ),
+    };
+    (evidence, detail)
+}
+
 /// The rows of the claim `bgp-peers-up` on the devices that `keep`
 /// selects: one for each configured neighbour and each dynamic peer of a
 /// listen range, a peer outside the twin included, and the detail of the
@@ -813,6 +870,7 @@ pub fn run(topology: &str, t: &Loaded, args: &ClaimArgs) -> Result<ClaimOut, Que
         }
         "bgp-peers-up" => (evidence, detail) = bgp_peers_up(&t.bgp, &in_scope),
         "bgp-peers-agree" => (evidence, detail) = bgp_peers_agree(&t.bgp, &in_scope),
+        "rib-fib-agree" => (evidence, detail) = rib_fib_agree(&t.guard, &in_scope),
         _ => {}
     }
     Ok(out(

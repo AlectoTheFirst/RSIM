@@ -2795,6 +2795,7 @@ dependencies = [
  "rsim-core",
  "rsim-engine",
  "rsim-functions",
+ "rsim-guard",
  "rsim-ingest",
  "rsim-store",
  "rsim-topologies",
@@ -2881,6 +2882,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rsim-guard"
+version = "0.1.0"
+dependencies = [
+ "rsim-core",
+ "rsim-functions",
+]
+
+[[package]]
 name = "rsim-ingest"
 version = "0.1.0"
 dependencies = [
@@ -2888,6 +2897,7 @@ dependencies = [
  "rsim-core",
  "rsim-engine",
  "rsim-functions",
+ "rsim-guard",
  "rsim-routing",
  "rsim-store",
  "rsim-textfsm",
@@ -2928,6 +2938,7 @@ name = "rsim-routing"
 version = "0.1.0"
 dependencies = [
  "rsim-core",
+ "rsim-functions",
 ]
 
 [[package]]

@@ -440,15 +440,19 @@ impl RouteLookup {
     }
 }
 
-/// The RIB guard result of a group: `DiffersFromCollected` if a route of
-/// the sample differs, `MatchesCollected` if the sample holds each route
-/// of the group and each matches, else `NotChecked`.
+/// The RIB guard result of a group. It is `DiffersFromCollected` if a route
+/// of the sample differs. It is `MatchesCollected` if the sample holds each
+/// route of the group and each route matches. Else it is `NotChecked`.
 fn group_guard(g: &GroupRoutes<'_>) -> RibGuardFlag {
     if g.guards.contains(&RibGuardFlag::DiffersFromCollected) {
         return RibGuardFlag::DiffersFromCollected;
     }
     let whole = g.exact && g.count == g.guards.len() && !g.guards.is_empty();
-    if whole && g.guards.iter().all(|f| *f == RibGuardFlag::MatchesCollected) {
+    if whole
+        && g.guards
+            .iter()
+            .all(|f| *f == RibGuardFlag::MatchesCollected)
+    {
         RibGuardFlag::MatchesCollected
     } else {
         RibGuardFlag::NotChecked

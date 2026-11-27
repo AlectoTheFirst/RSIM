@@ -191,6 +191,9 @@ pub struct StaticRoute {
     pub gateways: Vec<String>,
     pub interfaces: Vec<String>,
     pub blackhole: bool,
+    /// The administrative distance of each next hop that states one, by
+    /// `next-hop <address>`, `interface <name>` or `blackhole`.
+    pub distances: BTreeMap<String, u8>,
     pub unhandled: Vec<String>,
     pub lines: Lines,
 }
@@ -811,6 +814,19 @@ fn read_rules(r: &mut Reader, rules: &Stanza) -> Vec<Rule> {
     out
 }
 
+/// The `distance` of a next hop of a static route: a number from 1 to 255.
+fn distance(r: &mut Reader, h: &Stanza, key: &str, route: &mut StaticRoute) {
+    let Some(d) = r.text(h, "distance") else {
+        return;
+    };
+    match d.parse::<u8>() {
+        Ok(n) if n > 0 => {
+            route.distances.insert(key.to_string(), n);
+        }
+        _ => route.unhandled.push(format!("{key} distance {d}")),
+    }
+}
+
 fn read_static(r: &mut Reader, routes: &Stanza, table: Option<String>, c: &mut Config) {
     for p in members(routes) {
         r.mark(p);
@@ -820,6 +836,7 @@ fn read_static(r: &mut Reader, routes: &Stanza, table: Option<String>, c: &mut C
             gateways: Vec::new(),
             interfaces: Vec::new(),
             blackhole: false,
+            distances: BTreeMap::new(),
             unhandled: Vec::new(),
             lines: Lines::of(p),
         };
@@ -832,7 +849,8 @@ fn read_static(r: &mut Reader, routes: &Stanza, table: Option<String>, c: &mut C
                             continue;
                         }
                         let key = format!("{} {}", opt.key, h.key);
-                        route.unhandled.extend(others(h, &key, &[]));
+                        route.unhandled.extend(others(h, &key, &["distance"]));
+                        distance(r, h, &key, &mut route);
                         if opt.key == "next-hop" {
                             route.gateways.push(h.key.clone());
                         } else {
@@ -842,7 +860,10 @@ fn read_static(r: &mut Reader, routes: &Stanza, table: Option<String>, c: &mut C
                 }
                 "blackhole" => {
                     r.mark_all(opt);
-                    route.unhandled.extend(others(opt, "blackhole", &[]));
+                    route
+                        .unhandled
+                        .extend(others(opt, "blackhole", &["distance"]));
+                    distance(r, opt, "blackhole", &mut route);
                     route.blackhole = true;
                 }
                 "description" => r.mark_all(opt),

@@ -194,7 +194,9 @@ impl Fib {
 
     /// The RIB guard result of the route of `prefix`.
     pub fn guard(&self, prefix: &Prefix) -> Option<RibGuardFlag> {
-        self.trie.get(prefix).map(|i| self.entries[*i as usize].guard)
+        self.trie
+            .get(prefix)
+            .map(|i| self.entries[*i as usize].guard)
     }
 
     pub fn len(&self) -> usize {
