@@ -843,3 +843,44 @@ fn an_index_gives_the_rows_of_a_device_a_mac_address_and_a_prefix() {
     };
     assert_eq!(show(def, &f, &sel).unwrap().total, 100);
 }
+
+#[test]
+fn an_equality_filter_on_a_text_column_with_many_values_finds_each_value() {
+    let def = table::table("mac").unwrap();
+    let rows: Vec<Vec<Value>> = (0..500)
+        .map(|i| {
+            vec![
+                json!(format!("sw{}", i % 3)),
+                json!(10),
+                json!(format!("02:00:00:00:{:02x}:{:02x}", i % 7, i % 90)),
+                json!(format!("eth{}", i % 60)),
+                if i % 11 == 0 {
+                    Value::Null
+                } else {
+                    json!("dynamic")
+                },
+                json!([]),
+            ]
+        })
+        .collect();
+    let f = frame_of(def, &rows);
+    for want in [
+        vec!["eth7".to_string()],
+        vec!["eth7".to_string(), "eth59".to_string(), "eth60".to_string()],
+        vec!["02:00:00:00:03:0a".to_string()],
+        vec!["nope".to_string()],
+    ] {
+        for column in ["port", "mac"] {
+            let i = def.columns.iter().position(|c| c.name == column).unwrap();
+            let n = rows
+                .iter()
+                .filter(|r| r[i].as_str().is_some_and(|v| want.iter().any(|w| w == v)))
+                .count();
+            let sel = Selection {
+                filters: [(column.to_string(), want.clone())].into(),
+                ..Selection::default()
+            };
+            assert_eq!(show(def, &f, &sel).unwrap().total, n, "{column} {want:?}");
+        }
+    }
+}
