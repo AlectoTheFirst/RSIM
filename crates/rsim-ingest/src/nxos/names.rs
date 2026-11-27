@@ -56,6 +56,17 @@ pub struct Names {
     by_key: BTreeMap<(String, String), Vec<String>>,
 }
 
+/// The interface types of a vendor of the store: `nxos`, `iosxe` or
+/// `iosxr`. Other vendors print each name in full.
+pub fn vendor_types(vendor: &str) -> Option<Types> {
+    match vendor {
+        "nxos" => Some(TYPES),
+        "iosxe" => Some(crate::iosxe::INTERFACE_TYPES),
+        "iosxr" => Some(crate::iosxr::INTERFACE_TYPES),
+        _ => None,
+    }
+}
+
 impl Default for Names {
     fn default() -> Names {
         Names::with_types(TYPES, [])

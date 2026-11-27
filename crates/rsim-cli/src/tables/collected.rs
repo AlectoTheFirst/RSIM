@@ -19,7 +19,8 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 use arrow_array::RecordBatch;
 use rayon::prelude::*;
 use rsim_contract::table::TableDef;
-use rsim_functions::PortIngress;
+use rsim_functions::{Egress, Ingress, PortEgress, PortIngress};
+use rsim_ingest::nxos::names::{Names, vendor_types};
 
 use super::{Owned, key_text, rows_of, store_value, twin_links};
 use crate::commands::Loaded;
@@ -197,6 +198,9 @@ pub struct Joins {
     /// The bridge domains of the tag of each VLAN of the switch ports of a
     /// device.
     domains: HashMap<(String, u64), BTreeSet<String>>,
+    /// The resolver of the short interface names of each device of a
+    /// vendor with short names, over the interfaces of its functions.
+    names: HashMap<String, Names>,
 }
 
 /// The address of an `<address>/<length>` or of an address.
@@ -242,6 +246,32 @@ impl Joins {
         let Some(src) = &t.source else {
             return Ok(j);
         };
+        let mut interfaces: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for f in t.functions() {
+            let any: &dyn std::any::Any = f.as_ref();
+            let name = if let Some(i) = any.downcast_ref::<Ingress>() {
+                i.interface.to_string()
+            } else if let Some(e) = any.downcast_ref::<Egress>() {
+                e.interface.to_string()
+            } else if let Some(p) = any.downcast_ref::<PortIngress>() {
+                p.port.to_string()
+            } else if let Some(p) = any.downcast_ref::<PortEgress>() {
+                p.port.to_string()
+            } else {
+                continue;
+            };
+            if let Some(d) = f.device() {
+                interfaces.entry(d.to_string()).or_default().insert(name);
+            }
+        }
+        for (device, m) in &src.snapshot.devices {
+            if let (Some(types), Some(names)) = (vendor_types(&m.vendor), interfaces.get(device)) {
+                j.names.insert(
+                    device.clone(),
+                    Names::with_types(types, names.iter().map(String::as_str)),
+                );
+            }
+        }
         let read = |name: &str| -> Result<Vec<(String, RecordBatch)>, String> {
             let schema =
                 rsim_store::table(name).ok_or_else(|| format!("{name} is not a store table"))?;
@@ -297,8 +327,11 @@ impl Joins {
                 if let (Some(mac), Some(port)) = (
                     text(store_value(&b, "mac", r)),
                     text(store_value(&b, "port", r)),
-                ) && !j.peers.contains_key(&(device.clone(), port.clone()))
-                {
+                ) {
+                    let port = j.interface(&device, &port);
+                    if j.peers.contains_key(&(device.clone(), port.clone())) {
+                        continue;
+                    }
                     j.access
                         .entry(mac.to_ascii_lowercase())
                         .or_default()
@@ -307,6 +340,15 @@ impl Joins {
             }
         }
         Ok(j)
+    }
+
+    /// The name of an interface of a device in the twin: the short name of a
+    /// vendor with short names resolved to the one interface of the same
+    /// type and number, else the name.
+    fn interface(&self, device: &str, name: &str) -> String {
+        self.names
+            .get(device)
+            .map_or_else(|| name.to_string(), |n| n.resolve(name))
     }
 
     /// The device or the host that has the address or the MAC address.
@@ -374,7 +416,7 @@ fn fill_joins(t: &Loaded, def: &'static TableDef, f: &mut Frame) -> Result<(), S
     let peer = |f: &Frame, port: &str| -> (Vec<Join>, Vec<Join>) {
         let found: Vec<Join<(String, Option<String>)>> = (0..n)
             .map(|r| {
-                let p = text_of(f, port, r)?;
+                let p = j.interface(&device[r], &text_of(f, port, r)?);
                 Some(one(j.peers.get(&(device[r].clone(), p))))
             })
             .collect();
