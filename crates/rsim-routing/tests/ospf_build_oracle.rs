@@ -156,7 +156,8 @@ fn case(rng: &mut Rng) -> Case {
     }
     let lans = rng.below(4);
     for k in 0..lans {
-        let members = rng.pick(n, 1 + rng.below(n.min(4)));
+        let size = 1 + rng.below(n.min(4));
+        let members = rng.pick(n, size);
         let base = 8 * k as u8;
         let mut seg = Segment {
             broadcast: true,

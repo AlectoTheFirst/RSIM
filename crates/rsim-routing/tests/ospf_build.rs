@@ -109,7 +109,7 @@ fn db<'a>(built: &'a Built, device: &str, version: Version) -> &'a Database {
     )]
 }
 
-fn find(db: &Database, lsa_type: LsaType, adv: &str) -> Vec<&Lsa> {
+fn find<'a>(db: &'a Database, lsa_type: LsaType, adv: &str) -> Vec<&'a Lsa> {
     db.lsas
         .values()
         .filter(|l| l.lsa_type == lsa_type && l.adv_router == ip(adv))
