@@ -470,7 +470,7 @@ pub fn document() -> Value {
             "title": "rsim",
             "version": contract_version(),
             "description": "rsim REST API",
-            "license": {"name": "MIT", "identifier": "MIT"}
+            "license": {"name": "Apache-2.0", "identifier": "Apache-2.0"}
         },
         "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
         "paths": paths,
