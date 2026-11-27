@@ -474,6 +474,34 @@ fn ospf_line(version: Version, w: &[&str]) -> bool {
     }
 }
 
+/// The process tag of a join line of a version, also of a join line that
+/// the reader cannot read.
+fn join_tag<'a>(version: Version, w: &[&'a str]) -> Option<&'a str> {
+    match (version, w) {
+        (Version::V2, ["ip", "router", "ospf", tag, ..])
+        | (Version::V3, ["ipv6", "router", "ospfv3", tag, ..]) => Some(tag),
+        _ => None,
+    }
+}
+
+/// The process of a VRF and a tag. A tag with a router stanza and no
+/// process in the VRF gets a new process with the span of the router
+/// stanza. A tag with no router stanza gives `None`.
+fn process_mut<'a>(
+    procs: &'a mut BTreeMap<Key, Process>,
+    routers: &BTreeMap<(Version, String), SourceSpan>,
+    version: Version,
+    vrf: &str,
+    tag: &str,
+) -> Option<&'a mut Process> {
+    let key = (version, vrf.to_string(), tag.to_string());
+    if !procs.contains_key(&key) {
+        let span = routers.get(&(version, tag.to_string()))?;
+        procs.insert(key.clone(), process(version, vrf, tag, span.clone()));
+    }
+    procs.get_mut(&key)
+}
+
 /// The lines of an interface that both versions read.
 #[derive(Default)]
 struct Common<'a> {
@@ -496,11 +524,17 @@ struct Settings {
     priority: Option<u8>,
     shutdown: bool,
     unhandled: Vec<(String, SourceSpan)>,
+    /// The join lines that the reader cannot read, with the process tag.
+    bad_joins: Vec<(String, (String, SourceSpan))>,
 }
 
 /// Reads the OSPF lines of one version of an interface and adds the
 /// interface to its process. An interface that names no process of a
-/// router stanza joins no process.
+/// router stanza joins no process. A join line that the reader cannot read
+/// goes into the `unhandled` list of the process of its tag in the VRF of
+/// the interface. With no other join line, the other unhandled lines of the
+/// interface go there too. An address line of a joined interface that
+/// `cfg` does not list goes into the `unhandled` list of its process.
 fn interface(
     r: &mut R,
     s: &Stanza,
@@ -523,7 +557,11 @@ fn interface(
         };
         if table.state(&[c.key.as_str()]) != State::Handled {
             if ospf_line(version, &w) {
-                l.unhandled.push((super::mask(&c.key), r.span(c)));
+                let entry = (super::mask(&c.key), r.span(c));
+                if let Some(tag) = join_tag(version, &w) {
+                    l.bad_joins.push((tag.to_string(), entry.clone()));
+                }
+                l.unhandled.push(entry);
             }
             continue;
         }
@@ -569,26 +607,50 @@ fn interface(
             _ => false,
         };
         if !ok {
-            l.unhandled.push((super::mask(&c.key), span));
+            let entry = (super::mask(&c.key), span);
+            if let Some(tag) = join_tag(version, &w) {
+                l.bad_joins.push((tag.to_string(), entry.clone()));
+            }
+            l.unhandled.push(entry);
+        }
+    }
+    let vrf = config
+        .and_then(|i| i.vrf.clone())
+        .unwrap_or_else(|| DEFAULT_VRF.to_string());
+    let joined = l.join.as_ref().map(|j| j.0.clone());
+    for (tag, entry) in &l.bad_joins {
+        if joined.as_ref() == Some(tag) {
+            continue;
+        }
+        if let Some(p) = process_mut(procs, routers, version, &vrf, tag) {
+            if joined.is_none() && !l.unhandled.is_empty() {
+                p.unhandled.append(&mut l.unhandled);
+            } else {
+                p.unhandled.push(entry.clone());
+            }
         }
     }
     let Some((tag, area, secondaries, join_span)) = l.join else {
         return;
     };
-    let vrf = config
-        .and_then(|i| i.vrf.clone())
-        .unwrap_or_else(|| DEFAULT_VRF.to_string());
-    let key = (version, vrf.clone(), tag.clone());
-    if !procs.contains_key(&key) {
-        let Some(span) = routers.get(&(version, tag.clone())) else {
-            return;
-        };
-        procs.insert(key.clone(), process(version, &vrf, &tag, span.clone()));
-    }
-    let Some(p) = procs.get_mut(&key) else {
+    let Some(p) = process_mut(procs, routers, version, &vrf, &tag) else {
         return;
     };
     p.unhandled.extend(l.unhandled);
+    for c in s.children() {
+        let listed = match (version, words(&c.key).as_slice()) {
+            (Version::V2, ["ip", "address", ..]) => {
+                config.is_some_and(|i| i.addresses.iter().any(|a| a.lines.first == c.first_line))
+            }
+            (Version::V3, ["ipv6", "address", ..]) => {
+                config.is_some_and(|i| i.ipv6.iter().any(|(_, l)| l.first == c.first_line))
+            }
+            _ => true,
+        };
+        if !listed {
+            p.unhandled.push((super::mask(&c.key), r.span(c)));
+        }
+    }
     let mut addr = None;
     if let Some(i) = config {
         match version {
@@ -1170,5 +1232,257 @@ mod tests {
             .map(|p| (p.version, p.interfaces.len()))
             .collect();
         assert_eq!(joined, [(Version::V2, 1), (Version::V3, 0)]);
+    }
+
+    #[test]
+    fn a_join_line_that_the_reader_cannot_read_is_unhandled_in_the_vrf_process() {
+        let t = text(&[
+            "vrf context RED",
+            "interface Ethernet1/1",
+            "  no switchport",
+            "  vrf member RED",
+            "  ip address 198.51.100.1/30",
+            "  ip router ospf 1 area backbone",
+            "  ip ospf hello-interval 5",
+            "  no shutdown",
+            "interface Ethernet1/2",
+            "  no switchport",
+            "  ip address 198.51.100.5/30",
+            "  ip router ospf 1",
+            "  no shutdown",
+            "interface Ethernet1/3",
+            "  no switchport",
+            "  ip address 198.51.100.9/30",
+            "  ip router ospf 9 area bad",
+            "  no shutdown",
+            "router ospf 1",
+        ]);
+        let c = ospf(&t);
+        let keys: Vec<(&str, &str)> = c
+            .processes
+            .iter()
+            .map(|p| (p.vrf.as_str(), p.process.as_str()))
+            .collect();
+        assert_eq!(keys, [("RED", "1"), ("default", "1")]);
+        let one = |l: &str| span(&t, l, l);
+        let m = super::super::mask;
+        let red = &c.processes[0];
+        assert_eq!(red.span, span(&t, "router ospf 1", "router ospf 1"));
+        assert!(red.interfaces.is_empty());
+        assert_eq!(
+            red.unhandled,
+            [
+                (
+                    m("ip router ospf 1 area backbone"),
+                    one("ip router ospf 1 area backbone")
+                ),
+                (m("ip ospf hello-interval 5"), one("ip ospf hello")),
+            ]
+        );
+        let default = &c.processes[1];
+        assert!(default.interfaces.is_empty());
+        assert_eq!(
+            default.unhandled,
+            [(
+                m("ip router ospf 1"),
+                SourceSpan::new(
+                    "sw1",
+                    line_of(&t, "interface Ethernet1/2") + 3,
+                    line_of(&t, "interface Ethernet1/2") + 3
+                )
+            )]
+        );
+        read_is_handled(&t);
+    }
+
+    #[test]
+    fn an_address_that_the_interface_config_drops_is_unhandled() {
+        let t = text(&[
+            "interface Ethernet1/1",
+            "  no switchport",
+            "  ip address dhcp",
+            "  ip router ospf 1 area 0",
+            "  no shutdown",
+            "interface Ethernet1/2",
+            "  no switchport",
+            "  ipv6 address 2001:db8::/64 eui64",
+            "  ipv6 router ospfv3 1 area 0",
+            "  no shutdown",
+            "interface Ethernet1/3",
+            "  no switchport",
+            "  ipv6 address use-link-local-only",
+            "  ipv6 router ospfv3 1 area 0",
+            "  no shutdown",
+            "router ospf 1",
+            "router ospfv3 1",
+        ]);
+        let c = ospf(&t);
+        let one = |l: &str| span(&t, l, l);
+        let m = super::super::mask;
+        let v2 = &c.processes[0];
+        assert_eq!(v2.version, Version::V2);
+        assert_eq!(interface(v2, "Ethernet1/1").address, None);
+        assert_eq!(
+            v2.unhandled,
+            [(m("ip address dhcp"), one("ip address dhcp"))]
+        );
+        let v3 = &c.processes[1];
+        assert_eq!(v3.version, Version::V3);
+        assert_eq!(interface(v3, "Ethernet1/2").address, None);
+        assert_eq!(interface(v3, "Ethernet1/3").address, None);
+        assert_eq!(
+            v3.unhandled,
+            [
+                (
+                    m("ipv6 address 2001:db8::/64 eui64"),
+                    one("ipv6 address 2001:db8::/64")
+                ),
+                (
+                    m("ipv6 address use-link-local-only"),
+                    one("ipv6 address use-link-local-only")
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn secondaries_none_keeps_the_secondary_addresses_out() {
+        let t = text(&[
+            "interface Ethernet1/1",
+            "  no switchport",
+            "  ip address 198.51.100.1/30",
+            "  ip address 198.51.100.65/26 secondary",
+            "  ip router ospf 1 area 0 secondaries none",
+            "  no shutdown",
+            "router ospf 1",
+        ]);
+        let c = ospf(&t);
+        let p = &c.processes[0];
+        assert_eq!(p.unhandled, Vec::new());
+        let eth = interface(p, "Ethernet1/1");
+        assert_eq!(eth.address, Some((ip("198.51.100.1"), 30)));
+        assert_eq!(eth.area, Ipv4Addr::UNSPECIFIED);
+        read_is_handled(&t);
+    }
+
+    #[test]
+    fn the_reference_bandwidth_in_mbps_and_with_no_unit() {
+        for (line, mbps) in [
+            ("  auto-cost reference-bandwidth 40000 Mbps", 40_000),
+            ("  auto-cost reference-bandwidth 25000", 25_000),
+        ] {
+            let c = ospf(&text(&["router ospf 1", line]));
+            let p = &c.processes[0];
+            assert_eq!(p.reference_bandwidth_mbps, Some(mbps), "{line}");
+            assert_eq!(p.unhandled, Vec::new());
+        }
+    }
+
+    #[test]
+    fn default_information_originate_with_a_route_map_and_no_always() {
+        let t = text(&[
+            "router ospf 1",
+            "  default-information originate route-map DEFAULT",
+        ]);
+        let c = ospf(&t);
+        let p = &c.processes[0];
+        let d = p.default_originate.as_ref().unwrap();
+        assert!(!d.always);
+        assert_eq!(d.route_map.as_deref(), Some("DEFAULT"));
+        assert_eq!(p.unhandled, Vec::new());
+        read_is_handled(&t);
+    }
+
+    #[test]
+    fn redistribute_static_with_no_route_map_is_unhandled() {
+        let t = text(&["router ospf 1", "  redistribute static"]);
+        let c = ospf(&t);
+        let p = &c.processes[0];
+        let m = super::super::mask;
+        assert!(p.redistribute.is_empty());
+        assert_eq!(
+            p.unhandled,
+            [(
+                m("redistribute static"),
+                span(&t, "redistribute static", "redistribute static")
+            )]
+        );
+    }
+
+    #[test]
+    fn the_ospfv3_priority_shutdown_and_passive_lines_of_an_interface() {
+        let t = text(&[
+            "interface Ethernet1/1",
+            "  no switchport",
+            "  ipv6 address 2001:db8::1/64",
+            "  ipv6 router ospfv3 1 area 0",
+            "  ospfv3 priority 0",
+            "  ospfv3 passive-interface",
+            "  no shutdown",
+            "interface Ethernet1/2",
+            "  no switchport",
+            "  ipv6 address 2001:db8:1::1/64",
+            "  ipv6 router ospfv3 1 area 0",
+            "  ospfv3 shutdown",
+            "  no shutdown",
+            "router ospfv3 1",
+        ]);
+        let c = ospf(&t);
+        let p = &c.processes[0];
+        assert_eq!(p.unhandled, Vec::new());
+        let e1 = interface(p, "Ethernet1/1");
+        assert_eq!(e1.priority, 0);
+        assert!(e1.passive && e1.up);
+        let e2 = interface(p, "Ethernet1/2");
+        assert_eq!(e2.priority, 1);
+        assert!(!e2.passive && !e2.up);
+        read_is_handled(&t);
+    }
+
+    #[test]
+    fn a_vrf_stanza_of_an_ospfv3_router_gives_a_process_of_the_vrf() {
+        let t = text(&[
+            "vrf context RED",
+            "interface Ethernet1/1",
+            "  no switchport",
+            "  vrf member RED",
+            "  ipv6 address 2001:db8::1/64",
+            "  ipv6 router ospfv3 CORE area 0.0.0.0",
+            "  no shutdown",
+            "router ospfv3 CORE",
+            "  router-id 192.0.2.1",
+            "  vrf RED",
+            "    router-id 192.0.2.2",
+            "    area 0.0.0.5 stub",
+            "    address-family ipv6 unicast",
+            "      redistribute static route-map RED-STATIC",
+        ]);
+        let c = ospf(&t);
+        let keys: Vec<(Version, &str, &str)> = c
+            .processes
+            .iter()
+            .map(|p| (p.version, p.vrf.as_str(), p.process.as_str()))
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                (Version::V3, "RED", "CORE"),
+                (Version::V3, "default", "CORE")
+            ]
+        );
+        let red = &c.processes[0];
+        assert_eq!(red.span, span(&t, "vrf RED", "redistribute static"));
+        assert_eq!(red.router_id, Some(Ipv4Addr::new(192, 0, 2, 2)));
+        assert_eq!(red.areas[&Ipv4Addr::new(0, 0, 0, 5)].kind, AreaType::Stub);
+        assert_eq!(red.redistribute.len(), 1);
+        assert_eq!(red.redistribute[0].source, Source::Static);
+        assert_eq!(red.interfaces.len(), 1);
+        assert_eq!(red.interfaces[0].address, Some((ip("2001:db8::1"), 64)));
+        assert_eq!(red.unhandled, Vec::new());
+        let default = &c.processes[1];
+        assert_eq!(default.router_id, Some(Ipv4Addr::new(192, 0, 2, 1)));
+        assert!(default.interfaces.is_empty());
+        assert!(default.redistribute.is_empty());
+        read_is_handled(&t);
     }
 }
