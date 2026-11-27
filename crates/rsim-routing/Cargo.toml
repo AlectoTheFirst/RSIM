@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 rsim-core = { workspace = true }
+rsim-functions = { workspace = true }
 
 [lints]
 workspace = true

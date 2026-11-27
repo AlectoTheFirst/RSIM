@@ -2880,6 +2880,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rsim-guard"
+version = "0.1.0"
+dependencies = [
+ "rsim-core",
+ "rsim-functions",
+]
+
+[[package]]
 name = "rsim-ingest"
 version = "0.1.0"
 dependencies = [
@@ -2926,6 +2934,7 @@ name = "rsim-routing"
 version = "0.1.0"
 dependencies = [
  "rsim-core",
+ "rsim-functions",
 ]
 
 [[package]]
