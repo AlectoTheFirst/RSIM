@@ -37,6 +37,14 @@ struct PartKey {
     rows: Vec<(&'static str, u64, u32, u64, u64)>,
 }
 
+/// The rows of each device in each store table of a table, by the name of
+/// the store table.
+type StoreRows = Vec<(&'static str, Vec<(String, RecordBatch)>)>;
+
+/// The far ends of the links of the twin, by device and interface: the
+/// peer device and the peer interface, if the far end has one.
+type Peers = HashMap<(String, String), BTreeSet<(String, Option<String>)>>;
+
 /// The parts that a twin holds, by their key.
 fn parts() -> &'static Mutex<HashMap<PartKey, Weak<Frame>>> {
     static PARTS: OnceLock<Mutex<HashMap<PartKey, Weak<Frame>>>> = OnceLock::new();
@@ -82,18 +90,17 @@ pub(super) fn build(
         devices.push((key_text(device).unwrap_or_else(|| device.clone()), key));
     }
     devices.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.device.cmp(&b.1.device)));
-    let read =
-        |keep: &dyn Fn(&str) -> bool| -> Result<Vec<(&'static str, Vec<(String, RecordBatch)>)>, String> {
-            schemas
-                .iter()
-                .map(|s| {
-                    src.store
-                        .read_table_of(&src.snapshot, s, keep)
-                        .map(|b| (s.name, b))
-                        .map_err(|e| e.to_string())
-                })
-                .collect()
-        };
+    let read = |keep: &dyn Fn(&str) -> bool| -> Result<StoreRows, String> {
+        schemas
+            .iter()
+            .map(|s| {
+                src.store
+                    .read_table_of(&src.snapshot, s, keep)
+                    .map(|b| (s.name, b))
+                    .map_err(|e| e.to_string())
+            })
+            .collect()
+    };
     if devices.windows(2).any(|w| w[0].0 == w[1].0) {
         // 2 devices with the same key text: the rows of all devices in 1
         // frame, in the key order of the rows.
@@ -121,7 +128,7 @@ pub(super) fn build(
         let built: BTreeMap<&str, Arc<Frame>> = missing
             .par_iter()
             .map(|d| {
-                let own: Vec<(&str, Vec<(String, RecordBatch)>)> = tables
+                let own: StoreRows = tables
                     .iter()
                     .map(|(n, batches)| {
                         let rows = batches
@@ -181,7 +188,7 @@ pub struct Joins {
     /// The addresses of the ARP and neighbour rows of each MAC address.
     mac_addresses: HashMap<String, BTreeSet<String>>,
     /// The far end of each link of the twin, by device and interface.
-    peers: HashMap<(String, String), BTreeSet<(String, Option<String>)>>,
+    peers: Peers,
     /// The device and the port of each MAC table row on a port with no
     /// link, by the MAC address.
     access: HashMap<String, BTreeSet<(String, String)>>,
