@@ -132,6 +132,7 @@ pub(crate) struct Hops<'a> {
     pub(crate) config_statics: &'a [nxos::config::StaticRoute],
     pub(crate) platform: Platform,
     pub(crate) ospf: Option<&'a crate::ospf::DeviceOspf>,
+    pub(crate) pass: &'a crate::scenario::Pass,
 }
 
 fn port(i: &Interface) -> nxos::config::Interface {
@@ -359,6 +360,7 @@ pub fn lower(
         config_statics: &cfg.static_routes,
         ospf: ext.ospf.as_ref(),
         platform: Platform::Iosxr,
+        pass: &ext.pass,
     };
     let mut tables = BTreeMap::new();
     for v in &vrfs {
@@ -1483,9 +1485,15 @@ fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &H
     }
     cands.extend(crate::guard::outside(&routes, t, hops.platform));
     let computed = install(cands, hops.computed_through_default);
-    let rows = rsim_guard::compare(vrf, &computed, t, &routes);
-    rsim_guard::mark(t, &rows);
-    l.out.guard.extend(rows);
+    crate::scenario::finish(
+        hops.pass,
+        vrf,
+        t,
+        &routes,
+        computed,
+        &mut l.out.guard,
+        &mut l.out.base,
+    );
 }
 
 /// The routes of the route table section for the resolution of a next hop:

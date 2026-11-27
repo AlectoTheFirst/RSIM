@@ -83,6 +83,8 @@ pub struct Lowered {
     pub notes: Vec<String>,
     /// The RIB guard rows of each VRF with collected route rows.
     pub guard: Vec<rsim_guard::Row>,
+    /// The tables of each VRF with a guard, in the base pass of a scenario.
+    pub base: Vec<(String, crate::scenario::BaseVrf)>,
 }
 
 struct L<'a> {
@@ -90,6 +92,7 @@ struct L<'a> {
     file: &'a str,
     profile: &'a VendorProfile,
     cfg: &'a Config,
+    pass: &'a crate::scenario::Pass,
     out: Lowered,
 }
 
@@ -196,11 +199,37 @@ pub fn lower(
     l2: &Layer2Links,
     twin: &BTreeSet<IpAddr>,
 ) -> Lowered {
+    lower_in(
+        device,
+        file,
+        profile,
+        cfg,
+        col,
+        l2,
+        twin,
+        &crate::scenario::Pass::Snapshot,
+    )
+}
+
+/// Lowers one VyOS device in the pass `pass` of a snapshot twin or a
+/// scenario.
+#[allow(clippy::too_many_arguments)]
+pub fn lower_in(
+    device: &str,
+    file: &str,
+    profile: &VendorProfile,
+    cfg: &Config,
+    col: &Collected,
+    l2: &Layer2Links,
+    twin: &BTreeSet<IpAddr>,
+    pass: &crate::scenario::Pass,
+) -> Lowered {
     let mut l = L {
         dev: device,
         file,
         profile,
         cfg,
+        pass,
         out: Lowered::default(),
     };
     let active: Vec<&Interface> = cfg
@@ -1042,9 +1071,15 @@ impl L<'_> {
         }
         cands.extend(crate::guard::outside(&routes, t, PLATFORM));
         let computed = install(cands, super::profile::COMPUTED_THROUGH_DEFAULT);
-        let rows = rsim_guard::compare(VRF, &computed, t, &routes);
-        rsim_guard::mark(t, &rows);
-        self.out.guard.extend(rows);
+        crate::scenario::finish(
+            self.pass,
+            VRF,
+            t,
+            &routes,
+            computed,
+            &mut self.out.guard,
+            &mut self.out.base,
+        );
     }
 
     /// The main FIB: the collected route rows of the main VRF, or else the

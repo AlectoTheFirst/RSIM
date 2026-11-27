@@ -298,7 +298,7 @@ fn load_at_time(folder: &str, time: u64) -> Result<Loaded, String> {
         .cycle_at(time / 1000)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("{} not in the store", snapshot_name(time)))?;
-    commands::load_store_at(folder, Some(cycle)).map_err(|e| e.detail)
+    commands::load_store_at(folder, Some(cycle), &[]).map_err(|e| e.detail)
 }
 
 impl Tools {

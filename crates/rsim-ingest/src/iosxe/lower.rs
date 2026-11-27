@@ -334,6 +334,7 @@ pub fn lower(
             config_statics: &cfg.static_routes,
             ospf: ext.ospf.as_ref(),
             platform: Platform::Iosxe,
+            pass: &ext.pass,
         };
         let t = fib(&mut l, v, &active, rib, &vips, &hops);
         let has_hops = t.groups().iter().any(|g| !g.next_hops.is_empty());

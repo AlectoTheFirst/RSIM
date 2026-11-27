@@ -539,6 +539,8 @@ pub struct External {
     pub far_macs: BTreeMap<String, Mac>,
     /// The OSPF databases of the device, if its vendor reads OSPF.
     pub ospf: Option<crate::ospf::DeviceOspf>,
+    /// The pass of the lowering of a router or a switch.
+    pub pass: crate::scenario::Pass,
 }
 
 /// One end of a link: a device and a port.

@@ -61,7 +61,9 @@ pub struct View {
 }
 
 impl View {
-    fn of(r: &Route) -> View {
+    /// The view of a route. A route with no next hop that is not a local or
+    /// a discard route is unknown, with its reason.
+    pub fn of(r: &Route) -> View {
         let unknown = (r.next_hops().is_empty()
             && !matches!(r.kind, RouteKind::Local | RouteKind::Null))
         .then(|| {

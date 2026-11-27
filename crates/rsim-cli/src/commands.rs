@@ -70,6 +70,35 @@ pub fn load(topology: &str) -> Result<Loaded, QueryError> {
     fixture(topology)
 }
 
+/// The twin of `topology` with a link-down layer for each
+/// `<device>:<interface>` of `down`, in order. With no layer, it is the
+/// twin of [`load`]. A layer needs a store twin.
+pub fn load_with(topology: &str, down: &[String]) -> Result<Loaded, QueryError> {
+    if down.is_empty() {
+        return load(topology);
+    }
+    let layers = layers(down)?;
+    let Some(folder) = topology.strip_prefix(STORE_PREFIX) else {
+        return Err(QueryError::new(
+            ErrorCode::InvalidQuery,
+            format!(
+                "{topology} is not a store twin; a link-down layer needs {STORE_PREFIX}<data folder>"
+            ),
+        ));
+    };
+    load_store_at(folder, None, &layers)
+}
+
+/// The link-down layers of `<device>:<interface>` texts, in order.
+pub fn layers(down: &[String]) -> Result<Vec<rsim_ingest::scenario::Layer>, QueryError> {
+    down.iter()
+        .map(|d| {
+            rsim_ingest::scenario::Layer::link_down(d)
+                .map_err(|e| QueryError::new(ErrorCode::InvalidQuery, format!("down: {e}")))
+        })
+        .collect()
+}
+
 /// A twin that is not `store:<folder>`: none in the product.
 #[cfg(not(feature = "test-fixtures"))]
 fn fixture(topology: &str) -> Result<Loaded, QueryError> {
@@ -112,7 +141,7 @@ fn fixture(topology: &str) -> Result<Loaded, QueryError> {
 /// The twin of the newest snapshot of a store. It reads the store and
 /// writes nothing.
 pub fn load_store(folder: &str) -> Result<Loaded, QueryError> {
-    load_store_at(folder, None)
+    load_store_at(folder, None, &[])
 }
 
 /// The store in a data folder, opened to read: the folder holds the store
@@ -142,8 +171,13 @@ pub fn new_data_folder(folder: &str) -> bool {
 }
 
 /// The twin of the snapshot `cycle` of a store, or of its newest snapshot
-/// with `None`. It reads the store and writes nothing.
-pub fn load_store_at(folder: &str, cycle: Option<u64>) -> Result<Loaded, QueryError> {
+/// with `None`, with the layers in order. With no layer, it is the twin of
+/// the snapshot. It reads the store and writes nothing.
+pub fn load_store_at(
+    folder: &str,
+    cycle: Option<u64>,
+    layers: &[rsim_ingest::scenario::Layer],
+) -> Result<Loaded, QueryError> {
     let err = |d: String| QueryError::new(ErrorCode::Store, d);
     let store = open_store(folder)?;
     let snap = match cycle {
@@ -153,7 +187,13 @@ pub fn load_store_at(folder: &str, cycle: Option<u64>) -> Result<Loaded, QueryEr
             .map_err(|e| err(e.to_string()))?
             .ok_or_else(|| err(format!("{folder} has no snapshot")))?,
     };
-    let estate = rsim_ingest::estate::build(&store, &snap).map_err(|e| err(e.to_string()))?;
+    let estate = match rsim_ingest::estate::build_scenario(&store, &snap, layers) {
+        Ok(e) => e,
+        Err(rsim_ingest::estate::ScenarioError::Store(e)) => return Err(err(e.to_string())),
+        Err(rsim_ingest::estate::ScenarioError::Layer(e)) => {
+            return Err(QueryError::new(ErrorCode::InvalidQuery, e));
+        }
+    };
     let coverage = estate.coverage.clone();
     let bgp = estate.bgp.clone();
     let facts = estate.facts.clone();
@@ -166,9 +206,17 @@ pub fn load_store_at(folder: &str, cycle: Option<u64>) -> Result<Loaded, QueryEr
         let text: Vec<String> = errors.iter().map(ToString::to_string).collect();
         err(format!("the twin does not build: {}", text.join("; ")))
     })?;
+    let identity = if layers.is_empty() {
+        TwinJson::snapshot(snap.manifest.time)
+    } else {
+        TwinJson::scenario(
+            snap.manifest.time,
+            layers.iter().map(|l| l.text()).collect(),
+        )
+    };
     Ok(Loaded {
         twin,
-        identity: TwinJson::snapshot(snap.manifest.time),
+        identity,
         coverage,
         bgp,
         facts,

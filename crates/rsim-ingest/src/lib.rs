@@ -19,6 +19,7 @@ pub mod nxos;
 pub mod ospf;
 pub mod resolve;
 pub mod route_tables;
+pub mod scenario;
 pub mod stanza;
 pub mod unifi;
 pub mod velocloud;
