@@ -394,10 +394,15 @@ fn what_is_not_lowered_gives_unknown() {
     assert_eq!(verdict, VerdictKind::Unknown);
     assert!(has(&steps, "IPv6 not filtered"));
     assert!(has(&steps, "route ::/0 in VRF default, no next hop"));
-    let notes = &estate().notes["leaf1"];
+    let e = estate();
+    let notes: Vec<&str> = e.notes["leaf1"]
+        .iter()
+        .map(String::as_str)
+        .filter(|n| !n.starts_with("ospf-"))
+        .collect();
     assert_eq!(
         notes,
-        &[
+        [
             "leaf1/vlan10/00:00:5e:00:53:e1: a next hop of a route, not an endpoint",
             "Ethernet1/9: vPC domain not known",
             "IPv6 not lowered",

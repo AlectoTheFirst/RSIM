@@ -1085,7 +1085,7 @@ mod tests {
         let one = |l: &str| span(&t, l, l);
         let m = super::super::mask;
         assert_eq!(
-            p.unhandled[..7],
+            p.unhandled[..6],
             [
                 (m("maximum-paths 4"), one("maximum-paths")),
                 (

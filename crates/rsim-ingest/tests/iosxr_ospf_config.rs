@@ -676,7 +676,7 @@ fn a_default_vrf_with_only_an_unreadable_area_keeps_its_process() {
 }
 
 #[test]
-fn a_secondary_address_is_not_read() {
+fn a_secondary_address_is_a_stub_network_of_the_interface() {
     let text = "interface GigabitEthernet0/0/0/0
  ipv4 address 198.51.100.1 255.255.255.0
  ipv4 address 203.0.113.1 255.255.255.0 secondary
@@ -689,7 +689,11 @@ router ospf 1
 !
 ";
     let p = &ospf(text).processes[0];
-    assert_eq!(unhandled(p), [("ipv4 address 203.0.113.1/24 secondary", 3)]);
+    assert!(unhandled(p).is_empty());
+    assert_eq!(
+        p.interfaces[0].secondaries,
+        [("203.0.113.1".parse().unwrap(), 24)]
+    );
 }
 
 #[test]
