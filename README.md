@@ -326,4 +326,4 @@ rsim-collect --data <data folder> seed --demo demo
 
 ## License
 
-MIT
+Apache-2.0. The text is in `LICENSE`.
