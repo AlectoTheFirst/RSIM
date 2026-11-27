@@ -1,0 +1,84 @@
+{
+  "TABLE_ctx": {
+    "ROW_ctx": [
+      {
+        "TABLE_area": {
+          "ROW_area": [
+            {
+              "TABLE_lsdb": {
+                "ROW_lsdb": [
+                  {
+                    "TABLE_prefix": {
+                      "ROW_prefix": [
+                        {
+                          "prefix": "2001:db8:12::/64"
+                        }
+                      ]
+                    },
+                    "advrouter": "198.51.100.1",
+                    "age": "100",
+                    "lladdr": "fe80::1",
+                    "lsid": "1",
+                    "seqno": "0x80000001"
+                  },
+                  {
+                    "TABLE_prefix": {
+                      "ROW_prefix": [
+                        {
+                          "prefix": "2001:db8:12::/64"
+                        }
+                      ]
+                    },
+                    "advrouter": "198.51.100.2",
+                    "age": "100",
+                    "lladdr": "fe80::2",
+                    "lsid": "1",
+                    "seqno": "0x80000001"
+                  }
+                ]
+              },
+              "aid": "0.0.0.0"
+            },
+            {
+              "TABLE_lsdb": {
+                "ROW_lsdb": [
+                  {
+                    "TABLE_prefix": {
+                      "ROW_prefix": [
+                        {
+                          "prefix": "2001:db8:14::/64"
+                        }
+                      ]
+                    },
+                    "advrouter": "198.51.100.1",
+                    "age": "100",
+                    "lladdr": "fe80::1",
+                    "lsid": "3",
+                    "seqno": "0x80000001"
+                  },
+                  {
+                    "TABLE_prefix": {
+                      "ROW_prefix": [
+                        {
+                          "prefix": "2001:db8:14::/64"
+                        }
+                      ]
+                    },
+                    "advrouter": "198.51.100.4",
+                    "age": "100",
+                    "lladdr": "fe80::4",
+                    "lsid": "1",
+                    "seqno": "0x80000001"
+                  }
+                ]
+              },
+              "aid": "0.0.0.1"
+            }
+          ]
+        },
+        "cname": "default",
+        "ptag": "1"
+      }
+    ]
+  }
+}

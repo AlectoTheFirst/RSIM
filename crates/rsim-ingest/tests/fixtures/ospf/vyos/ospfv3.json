@@ -1,0 +1,13 @@
+{
+  "areas": {
+    "0": {
+      "areaIsNSSA": false,
+      "areaIsStub": false
+    },
+    "1": {
+      "areaIsNSSA": true,
+      "areaIsStub": false
+    }
+  },
+  "routerId": "198.51.100.1"
+}

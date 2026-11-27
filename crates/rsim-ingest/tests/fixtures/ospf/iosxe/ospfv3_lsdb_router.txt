@@ -1,0 +1,93 @@
+
+            OSPFv3 Router with ID (198.51.100.1) (Process ID 1)
+
+                Router Link States (Area 0)
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Router Links
+  Link State ID: 0
+  Advertising Router: 198.51.100.1
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Number of Links: 1
+
+    Link connected to: another Router (point-to-point)
+      Link Metric: 10
+      Local Interface ID: 1
+      Neighbor Interface ID: 1
+      Neighbor Router ID: 198.51.100.2
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Router Links
+  Link State ID: 0
+  Advertising Router: 198.51.100.2
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Number of Links: 2
+
+    Link connected to: another Router (point-to-point)
+      Link Metric: 10
+      Local Interface ID: 1
+      Neighbor Interface ID: 1
+      Neighbor Router ID: 198.51.100.1
+
+    Link connected to: a Transit Network
+      Link Metric: 10
+      Local Interface ID: 2
+      Neighbor (DR) Interface ID: 2
+      Neighbor (DR) Router ID: 198.51.100.3
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Router Links
+  Link State ID: 0
+  Advertising Router: 198.51.100.3
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Number of Links: 1
+
+    Link connected to: a Transit Network
+      Link Metric: 10
+      Local Interface ID: 2
+      Neighbor (DR) Interface ID: 2
+      Neighbor (DR) Router ID: 198.51.100.3
+
+
+                Router Link States (Area 1)
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Router Links
+  Link State ID: 0
+  Advertising Router: 198.51.100.1
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Number of Links: 1
+
+    Link connected to: another Router (point-to-point)
+      Link Metric: 10
+      Local Interface ID: 3
+      Neighbor Interface ID: 1
+      Neighbor Router ID: 198.51.100.4
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Router Links
+  Link State ID: 0
+  Advertising Router: 198.51.100.4
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Number of Links: 1
+
+    Link connected to: another Router (point-to-point)
+      Link Metric: 10
+      Local Interface ID: 1
+      Neighbor Interface ID: 3
+      Neighbor Router ID: 198.51.100.1

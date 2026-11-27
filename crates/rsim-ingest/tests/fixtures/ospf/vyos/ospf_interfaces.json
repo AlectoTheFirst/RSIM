@@ -1,0 +1,22 @@
+{
+  "default": {
+    "answer": {
+      "interfaces": {
+        "eth0": {
+          "area": "0.0.0.0",
+          "cost": 10,
+          "ipAddress": "192.0.2.1",
+          "ipAddressPrefixlen": 30,
+          "timerDeadSecs": 35
+        },
+        "eth1": {
+          "area": "0.0.0.1",
+          "cost": 10,
+          "ipAddress": "192.0.2.9",
+          "ipAddressPrefixlen": 30,
+          "timerDeadSecs": 35
+        }
+      }
+    }
+  }
+}

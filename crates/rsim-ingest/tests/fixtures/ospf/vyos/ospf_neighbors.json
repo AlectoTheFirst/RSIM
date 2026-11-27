@@ -1,0 +1,24 @@
+{
+  "default": {
+    "answer": {
+      "neighbors": {
+        "198.51.100.2": [
+          {
+            "address": "192.0.2.2",
+            "deadTimeMsecs": 35000,
+            "ifaceName": "eth0:192.0.2.1",
+            "nbrState": "Full/-"
+          }
+        ],
+        "198.51.100.4": [
+          {
+            "address": "192.0.2.10",
+            "deadTimeMsecs": 35000,
+            "ifaceName": "eth1:192.0.2.9",
+            "nbrState": "Full/-"
+          }
+        ]
+      }
+    }
+  }
+}

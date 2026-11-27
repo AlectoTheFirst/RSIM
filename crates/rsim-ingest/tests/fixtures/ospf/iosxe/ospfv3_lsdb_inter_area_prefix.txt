@@ -1,0 +1,31 @@
+
+            OSPFv3 Router with ID (198.51.100.1) (Process ID 1)
+
+                Inter Area Prefix Link States (Area 0)
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Inter Area Prefix Links
+  Link State ID: 1
+  Advertising Router: 198.51.100.1
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Metric: 10
+  Prefix Address: 2001:DB8:14::
+  Prefix Length: 64, Options: None
+
+
+                Inter Area Prefix Link States (Area 1)
+
+  LS age: 100
+  Options: (No TOS-capability, DC)
+  LS Type: Inter Area Prefix Links
+  Link State ID: 1
+  Advertising Router: 198.51.100.1
+  LS Seq Number: 80000001
+  Checksum: 0x1A2B
+  Length: 48
+  Metric: 10
+  Prefix Address: 2001:DB8:FF::2
+  Prefix Length: 128, Options: None

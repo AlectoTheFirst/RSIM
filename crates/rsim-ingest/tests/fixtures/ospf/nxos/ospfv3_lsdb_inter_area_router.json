@@ -1,0 +1,29 @@
+{
+  "TABLE_ctx": {
+    "ROW_ctx": [
+      {
+        "TABLE_area": {
+          "ROW_area": [
+            {
+              "TABLE_lsdb": {
+                "ROW_lsdb": [
+                  {
+                    "advrouter": "198.51.100.1",
+                    "age": "100",
+                    "dest_rid": "198.51.100.4",
+                    "lsid": "4",
+                    "metric": "10",
+                    "seqno": "0x80000001"
+                  }
+                ]
+              },
+              "aid": "0.0.0.0"
+            }
+          ]
+        },
+        "cname": "default",
+        "ptag": "1"
+      }
+    ]
+  }
+}

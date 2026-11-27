@@ -1,0 +1,7 @@
+ Routing Process "ospfv3 1" with ID 198.51.100.1
+ Supports only single TOS(TOS0) routes
+ Area BACKBONE(0)
+    Number of interfaces in this area is 1
+ Area 1
+    Number of interfaces in this area is 1
+    It is a NSSA area

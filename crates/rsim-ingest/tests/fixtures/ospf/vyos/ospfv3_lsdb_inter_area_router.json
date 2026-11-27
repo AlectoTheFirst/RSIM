@@ -1,0 +1,19 @@
+{
+  "areaScopedLinkStateDb": [
+    {
+      "areaId": "0.0.0.0",
+      "lsa": [
+        {
+          "advertisingRouter": "198.51.100.1",
+          "age": 100,
+          "checksum": 6699,
+          "destinationRouterId": "198.51.100.4",
+          "length": 40,
+          "linkStateId": "0.0.0.4",
+          "lsSequenceNumber": 2147483649,
+          "metric": 10
+        }
+      ]
+    }
+  ]
+}

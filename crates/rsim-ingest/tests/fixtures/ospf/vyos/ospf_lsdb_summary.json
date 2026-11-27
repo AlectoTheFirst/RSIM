@@ -1,0 +1,33 @@
+{
+  "default": {
+    "answer": {
+      "routerId": "198.51.100.1",
+      "summaryLinkStates": {
+        "areas": {
+          "0.0.0.0": [
+            {
+              "advertisedRouter": "198.51.100.1",
+              "checksum": "1a2b",
+              "lsId": "192.0.2.8",
+              "lsaAge": 100,
+              "lsaSeqNumber": "80000001",
+              "metric": 10,
+              "networkMask": 30
+            }
+          ],
+          "0.0.0.1": [
+            {
+              "advertisedRouter": "198.51.100.1",
+              "checksum": "1a2b",
+              "lsId": "198.51.100.2",
+              "lsaAge": 100,
+              "lsaSeqNumber": "80000001",
+              "metric": 11,
+              "networkMask": 32
+            }
+          ]
+        }
+      }
+    }
+  }
+}

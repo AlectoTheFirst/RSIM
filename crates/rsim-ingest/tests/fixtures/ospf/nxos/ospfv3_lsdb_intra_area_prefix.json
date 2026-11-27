@@ -1,0 +1,142 @@
+{
+  "TABLE_ctx": {
+    "ROW_ctx": [
+      {
+        "TABLE_area": {
+          "ROW_area": [
+            {
+              "TABLE_lsdb": {
+                "ROW_lsdb": [
+                  {
+                    "TABLE_prefix": {
+                      "ROW_prefix": [
+                        {
+                          "metric": "10",
+                          "prefix": "2001:db8:12::/64"
+                        },
+                        {
+                          "metric": "0",
+                          "prefix": "2001:db8:ff::1/128"
+                        }
+                      ]
+                    },
+                    "advrouter": "198.51.100.1",
+                    "age": "100",
+                    "lsid": "0",
+                    "ref_advrtr": "198.51.100.1",
+                    "ref_lsid": "0",
+                    "ref_type": "router",
+                    "seqno": "0x80000001"
+                  },
+                  {
+                    "TABLE_prefix": {
+                      "ROW_prefix": [
+                        {
+                          "metric": "10",
+                          "prefix": "2001:db8:12::/64"
+                        },
+                        {
+                          "metric": "0",
+                          "prefix": "2001:db8:ff::2/128"
+                        }
+                      ]
+                    },
+                    "advrouter": "198.51.100.2",
+                    "age": "100",
+                    "lsid": "0",
+                    "ref_advrtr": "198.51.100.2",
+                    "ref_lsid": "0",
+                    "ref_type": "router",
+                    "seqno": "0x80000001"
+                  },
+                  {
+                    "TABLE_prefix": {
+                      "ROW_prefix": [
+                        {
+                          "metric": "0",
+                          "prefix": "2001:db8:ff::3/128"
+                        }
+                      ]
+                    },
+                    "advrouter": "198.51.100.3",
+                    "age": "100",
+                    "lsid": "0",
+                    "ref_advrtr": "198.51.100.3",
+                    "ref_lsid": "0",
+                    "ref_type": "router",
+                    "seqno": "0x80000001"
+                  },
+                  {
+                    "TABLE_prefix": {
+                      "ROW_prefix": [
+                        {
+                          "metric": "0",
+                          "prefix": "2001:db8:23::/64"
+                        }
+                      ]
+                    },
+                    "advrouter": "198.51.100.3",
+                    "age": "100",
+                    "lsid": "1002",
+                    "ref_advrtr": "198.51.100.3",
+                    "ref_lsid": "2",
+                    "ref_type": "network",
+                    "seqno": "0x80000001"
+                  }
+                ]
+              },
+              "aid": "0.0.0.0"
+            },
+            {
+              "TABLE_lsdb": {
+                "ROW_lsdb": [
+                  {
+                    "TABLE_prefix": {
+                      "ROW_prefix": [
+                        {
+                          "metric": "10",
+                          "prefix": "2001:db8:14::/64"
+                        }
+                      ]
+                    },
+                    "advrouter": "198.51.100.1",
+                    "age": "100",
+                    "lsid": "0",
+                    "ref_advrtr": "198.51.100.1",
+                    "ref_lsid": "0",
+                    "ref_type": "router",
+                    "seqno": "0x80000001"
+                  },
+                  {
+                    "TABLE_prefix": {
+                      "ROW_prefix": [
+                        {
+                          "metric": "10",
+                          "prefix": "2001:db8:14::/64"
+                        },
+                        {
+                          "metric": "0",
+                          "prefix": "2001:db8:ff::4/128"
+                        }
+                      ]
+                    },
+                    "advrouter": "198.51.100.4",
+                    "age": "100",
+                    "lsid": "0",
+                    "ref_advrtr": "198.51.100.4",
+                    "ref_lsid": "0",
+                    "ref_type": "router",
+                    "seqno": "0x80000001"
+                  }
+                ]
+              },
+              "aid": "0.0.0.1"
+            }
+          ]
+        },
+        "cname": "default",
+        "ptag": "1"
+      }
+    ]
+  }
+}

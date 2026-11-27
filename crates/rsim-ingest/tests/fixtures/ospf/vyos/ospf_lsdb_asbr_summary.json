@@ -1,0 +1,22 @@
+{
+  "default": {
+    "answer": {
+      "asbrSummaryLinkStates": {
+        "areas": {
+          "0.0.0.0": [
+            {
+              "advertisedRouter": "198.51.100.1",
+              "checksum": "1a2b",
+              "lsId": "198.51.100.4",
+              "lsaAge": 100,
+              "lsaSeqNumber": "80000001",
+              "metric": 10,
+              "networkMask": 0
+            }
+          ]
+        }
+      },
+      "routerId": "198.51.100.1"
+    }
+  }
+}

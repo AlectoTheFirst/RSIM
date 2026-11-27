@@ -1,0 +1,15 @@
+Thu Nov 26 10:00:00.000 UTC
+GigabitEthernet0/0/0/0 is up, line protocol is up
+  Link Local Address FE80::1, Interface ID 1
+  Area 0, Process ID 1, Instance ID 0, Router ID 198.51.100.1
+  Network Type POINT_TO_POINT, Cost: 10
+  Transmit Delay is 1 sec, State POINT_TO_POINT
+  Timer intervals configured, Hello 10, Dead 40, Wait 40, Retransmit 5
+    Hello due in 00:00:03
+GigabitEthernet0/0/0/1 is up, line protocol is up
+  Link Local Address FE80::1, Interface ID 3
+  Area 1, Process ID 1, Instance ID 0, Router ID 198.51.100.1
+  Network Type POINT_TO_POINT, Cost: 10
+  Transmit Delay is 1 sec, State POINT_TO_POINT
+  Timer intervals configured, Hello 10, Dead 40, Wait 40, Retransmit 5
+    Hello due in 00:00:03

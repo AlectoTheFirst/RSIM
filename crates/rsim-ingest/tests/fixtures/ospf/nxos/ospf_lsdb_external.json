@@ -1,0 +1,24 @@
+{
+  "TABLE_ctx": {
+    "ROW_ctx": [
+      {
+        "TABLE_lsdb": {
+          "ROW_lsdb": [
+            {
+              "advrouter": "198.51.100.3",
+              "age": "100",
+              "fwdaddr": "0.0.0.0",
+              "lsid": "203.0.113.64",
+              "metric": "20",
+              "metrictype": "1",
+              "netmask": "255.255.255.192",
+              "seqno": "0x80000001"
+            }
+          ]
+        },
+        "cname": "default",
+        "ptag": "1"
+      }
+    ]
+  }
+}

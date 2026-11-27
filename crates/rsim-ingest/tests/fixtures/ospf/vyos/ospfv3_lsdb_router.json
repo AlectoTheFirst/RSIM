@@ -1,0 +1,106 @@
+{
+  "areaScopedLinkStateDb": [
+    {
+      "areaId": "0.0.0.0",
+      "lsa": [
+        {
+          "advertisingRouter": "198.51.100.1",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkStateId": "0.0.0.0",
+          "lsSequenceNumber": 2147483649,
+          "lsaDescription": [
+            {
+              "interfaceId": "0.0.0.1",
+              "metric": 10,
+              "neighborInterfaceId": "0.0.0.1",
+              "neighborRouterId": "198.51.100.2",
+              "type": "Point-To-Point"
+            }
+          ]
+        },
+        {
+          "advertisingRouter": "198.51.100.2",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkStateId": "0.0.0.0",
+          "lsSequenceNumber": 2147483649,
+          "lsaDescription": [
+            {
+              "interfaceId": "0.0.0.1",
+              "metric": 10,
+              "neighborInterfaceId": "0.0.0.1",
+              "neighborRouterId": "198.51.100.1",
+              "type": "Point-To-Point"
+            },
+            {
+              "interfaceId": "0.0.0.2",
+              "metric": 10,
+              "neighborInterfaceId": "0.0.0.2",
+              "neighborRouterId": "198.51.100.3",
+              "type": "Transit-Network"
+            }
+          ]
+        },
+        {
+          "advertisingRouter": "198.51.100.3",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkStateId": "0.0.0.0",
+          "lsSequenceNumber": 2147483649,
+          "lsaDescription": [
+            {
+              "interfaceId": "0.0.0.2",
+              "metric": 10,
+              "neighborInterfaceId": "0.0.0.2",
+              "neighborRouterId": "198.51.100.3",
+              "type": "Transit-Network"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "areaId": "0.0.0.1",
+      "lsa": [
+        {
+          "advertisingRouter": "198.51.100.1",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkStateId": "0.0.0.0",
+          "lsSequenceNumber": 2147483649,
+          "lsaDescription": [
+            {
+              "interfaceId": "0.0.0.3",
+              "metric": 10,
+              "neighborInterfaceId": "0.0.0.1",
+              "neighborRouterId": "198.51.100.4",
+              "type": "Point-To-Point"
+            }
+          ]
+        },
+        {
+          "advertisingRouter": "198.51.100.4",
+          "age": 100,
+          "checksum": 6699,
+          "length": 40,
+          "linkStateId": "0.0.0.0",
+          "lsSequenceNumber": 2147483649,
+          "lsaDescription": [
+            {
+              "interfaceId": "0.0.0.1",
+              "metric": 10,
+              "neighborInterfaceId": "0.0.0.3",
+              "neighborRouterId": "198.51.100.1",
+              "type": "Point-To-Point"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

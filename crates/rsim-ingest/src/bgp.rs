@@ -217,7 +217,7 @@ impl Collected {
         }
     }
 
-    fn answer(&self) -> Answer<'_> {
+    pub(crate) fn answer(&self) -> Answer<'_> {
         match self {
             Collected::Absent(r) => Answer::Absent(r),
             Collected::Failed(e) => Answer::Failed(e),
