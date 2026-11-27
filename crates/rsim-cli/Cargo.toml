@@ -48,3 +48,7 @@ path = "src/main.rs"
 [[bench]]
 name = "scale"
 harness = false
+
+[[bench]]
+name = "frame"
+harness = false
