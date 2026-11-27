@@ -104,6 +104,7 @@ impl Builder {
             vlans: Vec::new(),
             l3vni: None,
             bgp: None,
+            ospf_redistribute_bgp: false,
             vpc_domain: None,
             vpc_peer: None,
             vtep: None,
@@ -277,6 +278,7 @@ pub fn estate(cycle: usize) -> Estate {
                 router_id: ip(10, s * 10 + 7, 0, u8::try_from(k + 1).expect("2")),
                 neighbors: Vec::new(),
             });
+            b.e.devs[w].ospf_redistribute_bgp = true;
             b.mgmt(w, "MgmtEth0/RP0/CPU0/0", "MGMT");
         }
         let (w1, w2) = (wans[site][0], wans[site][1]);

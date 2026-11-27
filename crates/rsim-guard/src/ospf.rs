@@ -4,15 +4,17 @@
 //!
 //! The comparison uses the meaning of each LSA. The age, the sequence
 //! number and the checksum are not compared. An LSA at the maximum age is
-//! left out. The LSAs of one key are merged, and their values are joined.
+//! left out. The LSAs of one key are merged, and their values are joined. A
+//! collected LSA that a stated gap of the built database reaches and that
+//! the built database does not hold is not computed.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr};
 
 use rsim_core::{Prefix, SourceSpan};
 use rsim_routing::ospf::{
-    AreaId, Body, Database, LinkKind, Lsa, LsaType, Reference, RouterId, RouterLink, Version,
-    mask_len,
+    AreaId, Body, Database, Gap, GapReach, LinkKind, Lsa, LsaType, Reference, RouterId, RouterLink,
+    Version, mask_len,
 };
 
 /// The category of one LSA row.
@@ -22,6 +24,7 @@ pub enum Category {
     Differ,
     OnlyBuilt,
     OnlyCollected,
+    NotComputed,
 }
 
 impl Category {
@@ -32,6 +35,7 @@ impl Category {
             Category::Differ => "differ",
             Category::OnlyBuilt => "only_built",
             Category::OnlyCollected => "only_collected",
+            Category::NotComputed => "not_computed",
         }
     }
 }
@@ -54,6 +58,9 @@ pub struct LsaRow {
     /// joined with `; `. The items of a set field are joined with `, `.
     pub built: Option<String>,
     pub collected: Option<String>,
+    /// The details of the gaps of the built database that make a collected
+    /// LSA not computed, joined with `; `.
+    pub reason: Option<String>,
     pub built_spans: Vec<SourceSpan>,
     pub collected_spans: Vec<SourceSpan>,
 }
@@ -67,10 +74,13 @@ type Fields = Vec<(&'static str, BTreeSet<String>)>;
 struct Entry {
     fields: Fields,
     spans: Vec<SourceSpan>,
+    /// The advertising router and the prefix of each LSA.
+    origins: Vec<(RouterId, Option<Prefix>)>,
 }
 
 impl Entry {
-    fn add(&mut self, fields: Fields, span: SourceSpan) {
+    fn add(&mut self, fields: Fields, span: SourceSpan, origin: (RouterId, Option<Prefix>)) {
+        self.origins.push(origin);
         if self.fields.is_empty() {
             self.fields = fields;
         } else {
@@ -363,6 +373,16 @@ impl<'a> Index<'a> {
         }
     }
 
+    /// The prefix of a summary, an external or an NSSA LSA, and the subnet
+    /// of an OSPFv2 network LSA.
+    fn prefix(&self, lsa: &Lsa) -> Option<Prefix> {
+        match &lsa.body {
+            Body::Summary { prefix, .. } | Body::External { prefix, .. } => Some(*prefix),
+            Body::Network { .. } if self.db.version == Version::V2 => Index::v2_subnet(lsa),
+            _ => None,
+        }
+    }
+
     fn entries(&self) -> BTreeMap<EntryKey, Entry> {
         let mut out: BTreeMap<EntryKey, Entry> = BTreeMap::new();
         for lsa in self.lsas() {
@@ -373,10 +393,57 @@ impl<'a> Index<'a> {
                 lsa.lsa_type,
                 key,
             );
-            out.entry(k).or_default().add(fields, lsa.span.clone());
+            out.entry(k).or_default().add(
+                fields,
+                lsa.span.clone(),
+                (lsa.adv_router, self.prefix(lsa)),
+            );
         }
         out
     }
+}
+
+/// The first gap of `gaps` that reaches an LSA of the type `lsa_type` in
+/// `area` from `adv` with the prefix `prefix`. The gap must have `adv` as
+/// its link-state ID and `area` as its area. It reaches the LSA if its type
+/// is `lsa_type` and its reach is `All`, `InterArea` or `External`, if its
+/// reach is `Prefixes` and holds `prefix`, or if its reach is `Prefixes` and
+/// it and the LSA are router LSAs. A gap of a router with no router ID has
+/// the link-state ID 0.0.0.0 and reaches no LSA.
+fn reaching_gap(
+    gaps: &[Gap],
+    lsa_type: LsaType,
+    area: Option<AreaId>,
+    adv: RouterId,
+    prefix: Option<Prefix>,
+) -> Option<&Gap> {
+    gaps.iter().find(|g| {
+        g.lsid == adv
+            && g.area == area
+            && match &g.reach {
+                GapReach::All | GapReach::InterArea | GapReach::External => g.lsa_type == lsa_type,
+                GapReach::Prefixes(list) => {
+                    prefix.is_some_and(|p| list.contains(&p))
+                        || (g.lsa_type == LsaType::Router && lsa_type == LsaType::Router)
+                }
+                GapReach::FromCost(_) => false,
+            }
+    })
+}
+
+/// The details of the gaps of `gaps` that reach each LSA of a collected
+/// entry, joined with `; `, or `None` if a gap reaches no LSA of the entry.
+fn not_computed(gaps: &[Gap], key: &EntryKey, entry: &Entry) -> Option<String> {
+    let (no_area, area, lsa_type, _) = key;
+    let area = (!no_area).then_some(*area);
+    let mut details: Vec<&str> = Vec::new();
+    for (adv, prefix) in &entry.origins {
+        let g = reaching_gap(gaps, *lsa_type, area, *adv, *prefix)?;
+        if !details.contains(&g.detail.as_str()) {
+            details.push(&g.detail);
+        }
+    }
+    (!details.is_empty()).then(|| details.join("; "))
 }
 
 fn join_prefixes(prefixes: &[Prefix]) -> String {
@@ -430,6 +497,11 @@ fn lone_networks(
 /// the metric type and the forwarding address. An intra-area-prefix LSA
 /// compares its prefixes with their metrics, and a link LSA compares its
 /// prefixes.
+///
+/// A collected LSA with no built LSA of its key is not computed if a gap of
+/// `built.gaps` with its advertising router and its area reaches its type or
+/// its prefix, and the row holds the detail of the gap as its reason. A row
+/// that is not computed is outside the match rate.
 pub fn compare_databases(built: &Database, collected: &Database) -> Vec<LsaRow> {
     let mut b = Index::new(built);
     let mut c = Index::new(collected);
@@ -467,6 +539,7 @@ pub fn compare_databases(built: &Database, collected: &Database) -> Vec<LsaRow> 
             let (no_area, area, lsa_type, key) = k;
             let b = mine.get(k);
             let c = theirs.get(k);
+            let mut reason = None;
             let (category, fields) = match (b, c) {
                 (Some(b), Some(c)) => {
                     let fields: Vec<&'static str> = b
@@ -483,7 +556,14 @@ pub fn compare_databases(built: &Database, collected: &Database) -> Vec<LsaRow> 
                     }
                 }
                 (Some(_), None) => (Category::OnlyBuilt, Vec::new()),
-                _ => (Category::OnlyCollected, Vec::new()),
+                (None, c) => {
+                    reason = c.and_then(|c| not_computed(&built.gaps, k, c));
+                    if reason.is_some() {
+                        (Category::NotComputed, Vec::new())
+                    } else {
+                        (Category::OnlyCollected, Vec::new())
+                    }
+                }
             };
             LsaRow {
                 version: built.version,
@@ -495,6 +575,7 @@ pub fn compare_databases(built: &Database, collected: &Database) -> Vec<LsaRow> 
                 fields,
                 built: b.map(Entry::text),
                 collected: c.map(Entry::text),
+                reason,
                 built_spans: b.map(|e| e.spans.clone()).unwrap_or_default(),
                 collected_spans: c.map(|e| e.spans.clone()).unwrap_or_default(),
             }
@@ -509,6 +590,7 @@ pub struct Counts {
     pub differ: usize,
     pub only_built: usize,
     pub only_collected: usize,
+    pub not_computed: usize,
 }
 
 impl Counts {
@@ -520,12 +602,14 @@ impl Counts {
                 Category::Differ => c.differ += 1,
                 Category::OnlyBuilt => c.only_built += 1,
                 Category::OnlyCollected => c.only_collected += 1,
+                Category::NotComputed => c.not_computed += 1,
             }
         }
         c
     }
 
-    /// The number of rows of the match rate: all rows.
+    /// The number of rows of the match rate: all rows other than the rows
+    /// that are not computed.
     pub fn compared(&self) -> usize {
         self.matched + self.differ + self.only_built + self.only_collected
     }

@@ -760,6 +760,7 @@ fn ospf_guard_row(device: &str, r: &rsim_guard::ospf::LsaRow) -> Vec<Value> {
         json!(r.fields),
         text(&r.built),
         text(&r.collected),
+        text(&r.reason),
         json!(spans(&spans_all)),
     ]
 }

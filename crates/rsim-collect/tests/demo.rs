@@ -153,6 +153,20 @@ async fn the_twin_of_the_newest_snapshot_answers_the_planned_queries() {
         let unread = e.unread.get(device).cloned().unwrap_or_default();
         assert!(unread.is_empty(), "{device}: {unread:?}");
     }
+    // The builder does not evaluate the redistribution of BGP on the WAN
+    // routers, and the database guard shows their AS-external LSAs as not
+    // computed.
+    let wans = ["10.17.0.1", "10.17.0.2", "10.27.0.1", "10.27.0.2"];
+    let mut redistributed = 0;
+    for (device, rows) in &e.ospf_guard {
+        for r in rows.iter().filter(|r| r.area.is_none()) {
+            if wans.iter().any(|w| r.key.ends_with(&format!(" from {w}"))) {
+                assert_eq!(r.category.name(), "not_computed", "{device}: {}", r.key);
+                redistributed += 1;
+            }
+        }
+    }
+    assert!(redistributed > 0, "no AS-external LSA of a WAN router");
     let t = e.builder.build().expect("the twin builds");
     let tcp = PROTO_TCP;
     // A Paris user reaches the web shop in Frankfurt over the WAN and the

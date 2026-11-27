@@ -848,6 +848,6 @@ pub fn render(e: &Estate, t: &Tables, d: usize) -> BTreeMap<&'static str, String
         "bgp_sessions",
         bgp_sessions(dev).unwrap_or_else(|| NO_FEATURE.to_string()),
     );
-    super::ospf::nxos(e, d, &mut out);
+    super::ospf::nxos(e, d, &t.redistributed, &mut out);
     out
 }
