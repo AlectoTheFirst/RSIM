@@ -296,6 +296,7 @@ CI is in `.github/workflows/ci.yml`. For each pull request, it runs the format c
 | `ui.md` | UI |
 | `inventory.md` | `rsim-inventory` |
 | `store.md` | `rsim-store` |
+| `guard.md` | `rsim-guard` |
 | `collect.md` | `rsim-collect` |
 | `ingest.md` | `rsim-ingest` |
 | `ingest-vyos.md` | `rsim-ingest`, VyOS |
