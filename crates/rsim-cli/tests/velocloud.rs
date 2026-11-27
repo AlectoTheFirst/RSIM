@@ -111,6 +111,7 @@ fn loaded_with(m: &BTreeMap<String, Value>, estate: Vec<Input>) -> Loaded {
         fabric: estate.fabric,
         mtu: estate.mtu,
         guard: estate.guard,
+        ospf_guard: estate.ospf_guard,
         tables: Default::default(),
         source: None,
     }

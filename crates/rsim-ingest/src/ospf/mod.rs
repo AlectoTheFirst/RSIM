@@ -10,11 +10,12 @@
 //! VRF for OSPFv3. The OSPF commands and their fields are not confirmed on
 //! a device.
 
+pub mod inputs;
 mod json;
 pub mod routes;
 mod text;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use rsim_core::{Prefix, SourceSpan};
@@ -119,6 +120,20 @@ pub struct DeviceOspf {
 }
 
 impl DeviceOspf {
+    /// The databases that the builder makes from the router config, with a
+    /// complete outcome for each version.
+    pub fn built(databases: Vec<Database>) -> DeviceOspf {
+        let complete = || SectionOutcome {
+            outcome: Outcome::Complete,
+            scope: Scope(BTreeSet::new()),
+            detail: None,
+        };
+        DeviceOspf {
+            databases,
+            outcomes: BTreeMap::from([(V2.version, complete()), (V3.version, complete())]),
+        }
+    }
+
     /// The databases of a version in a VRF.
     pub fn of(&self, version: Version, vrf: &str) -> impl Iterator<Item = &Database> {
         self.databases
