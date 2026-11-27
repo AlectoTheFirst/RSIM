@@ -806,6 +806,7 @@ fn an_index_gives_the_rows_of_a_device_a_mac_address_and_a_prefix() {
             ]
         })
         .collect();
+    let rows = widen(def, &rows);
     let f = frame_of(def, &rows);
     let sel = Selection {
         filters: [
@@ -836,6 +837,7 @@ fn an_index_gives_the_rows_of_a_device_a_mac_address_and_a_prefix() {
             ]
         })
         .collect();
+    let rows = widen(def, &rows);
     let f = frame_of(def, &rows);
     let sel = Selection {
         typed: [("ip.in_prefix".to_string(), "198.51.1.0/24".to_string())].into(),
@@ -863,6 +865,7 @@ fn an_equality_filter_on_a_text_column_with_many_values_finds_each_value() {
             ]
         })
         .collect();
+    let rows = widen(def, &rows);
     let f = frame_of(def, &rows);
     for want in [
         vec!["eth7".to_string()],
@@ -883,4 +886,74 @@ fn an_equality_filter_on_a_text_column_with_many_values_finds_each_value() {
             assert_eq!(show(def, &f, &sel).unwrap().total, n, "{column} {want:?}");
         }
     }
+}
+
+#[test]
+fn the_parts_of_the_devices_in_key_order_give_the_answers_of_1_frame() {
+    let mut g = Gen(0x5851_f42d_4c95_7f2d);
+    let devices = ["r2", "r10", "10.0.0.0/8", "sw1", "a b"];
+    for name in ["interfaces", "routes", "mac", "arp"] {
+        let def = table::table(name).unwrap();
+        for n in [0, 1, 7, 60, 400] {
+            let rows: Vec<Vec<Value>> = (0..n)
+                .map(|_| {
+                    let mut r: Vec<Value> =
+                        def.columns.iter().map(|c| value(&mut g, c.kind)).collect();
+                    r[0] = json!(g.pick(&devices));
+                    r
+                })
+                .collect();
+            let full = frame_of(def, &rows);
+            let mut by: BTreeMap<String, Vec<Vec<Value>>> = BTreeMap::new();
+            for r in &rows {
+                by.entry(r[0].as_str().unwrap().to_string())
+                    .or_default()
+                    .push(r.clone());
+            }
+            let mut groups: Vec<(String, Vec<Vec<Value>>)> = by.into_iter().collect();
+            groups.sort_by_key(|(d, _)| crate::tables::key_text(d).unwrap_or_else(|| d.clone()));
+            let parts: Vec<Frame> = groups.iter().map(|(_, r)| frame_of(def, r)).collect();
+            let refs: Vec<&Frame> = parts.iter().collect();
+            let joined = concat(def, &refs);
+            assert_eq!(joined.len(), full.len());
+            for _ in 0..40 {
+                let sel = selection(&mut g, def, n);
+                assert_eq!(
+                    show(def, &joined, &sel).map(page_parts),
+                    show(def, &full, &sel).map(page_parts),
+                    "{name} show {sel:?}"
+                );
+                let names = vec![column(&mut g, def)];
+                assert_eq!(
+                    unique(def, &joined, &sel, &names),
+                    unique(def, &full, &sel, &names),
+                    "{name} unique {sel:?}"
+                );
+            }
+        }
+    }
+}
+
+/// The rows with a null in each join column (`tables::JOINED`) and the
+/// values of each row in the other columns, in column order.
+fn widen(def: &TableDef, rows: &[Vec<Value>]) -> Vec<Vec<Value>> {
+    let joined = crate::tables::JOINED
+        .iter()
+        .find(|(n, _)| *n == def.name)
+        .map_or(&[][..], |(_, c)| c);
+    rows.iter()
+        .map(|r| {
+            let mut given = r.iter();
+            def.columns
+                .iter()
+                .map(|c| {
+                    if joined.contains(&c.name) {
+                        Value::Null
+                    } else {
+                        given.next().cloned().unwrap_or(Value::Null)
+                    }
+                })
+                .collect()
+        })
+        .collect()
 }

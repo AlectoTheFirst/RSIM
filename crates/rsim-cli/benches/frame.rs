@@ -6,7 +6,9 @@
 //! selection that builds an index, and the median time of a selection after
 //! it: a page of the rows of one device, the rows of one MAC address, the
 //! addresses inside a /24, the rows of one port with no index, and the
-//! export of all rows as CSV and as Parquet.
+//! export of all rows as CSV and as Parquet. For the table `mac`, it also
+//! prints the time of the frame of each device and of the table frame from
+//! the device frames.
 
 use std::io::Write;
 use std::time::{Duration, Instant};
@@ -62,6 +64,31 @@ fn lookup(what: &str, def: &'static table::TableDef, f: &Frame, sel: &Selection)
     ));
 }
 
+/// The cells of a row of the table `def`: the named cells, and null in each
+/// other column.
+fn row<'a>(def: &table::TableDef, named: &[(&str, Cell<'a>)]) -> Vec<Cell<'a>> {
+    def.columns
+        .iter()
+        .map(|c| {
+            named
+                .iter()
+                .find(|(n, _)| *n == c.name)
+                .map_or(Cell::Null, |(_, v)| *v)
+        })
+        .collect()
+}
+
+/// The MAC address of the row `r` of the device `d`.
+fn mac_of(r: usize, d: usize) -> String {
+    format!(
+        "02:00:{:02x}:{:02x}:{:02x}:{:02x}",
+        (r >> 8) & 0xff,
+        r & 0xff,
+        (d >> 8) & 0xff,
+        d & 0xff
+    )
+}
+
 fn filter(column: &str, value: &str) -> Selection {
     Selection {
         filters: [(column.to_string(), vec![value.to_string()])].into(),
@@ -85,26 +112,64 @@ fn main() {
     for d in 0..devices {
         let device = format!("sw{d:05}");
         for r in 0..per {
-            let m = format!(
-                "02:00:{:02x}:{:02x}:{:02x}:{:02x}",
-                (r >> 8) & 0xff,
-                r & 0xff,
-                (d >> 8) & 0xff,
-                d & 0xff
-            );
+            let m = mac_of(r, d);
             let port = format!("eth{}", r % 48);
-            b.push(&[
-                Cell::Text(&device),
-                Cell::Integer(10 + (r % 20) as u64),
-                Cell::Text(&m),
-                Cell::Text(&port),
-                Cell::Text("dynamic"),
-                Cell::List(&span),
-            ]);
+            b.push(&row(
+                mac,
+                &[
+                    ("device", Cell::Text(&device)),
+                    ("vlan", Cell::Integer(10 + (r % 20) as u64)),
+                    ("mac", Cell::Text(&m)),
+                    ("port", Cell::Text(&port)),
+                    ("kind", Cell::Text("dynamic")),
+                    ("provenance", Cell::List(&span)),
+                ],
+            ));
         }
     }
     let f = b.finish(&rsim_cli::tables::key_text);
     out(format!("mac build: {}", ms(t.elapsed())));
+    // The frame of each device, and the table frame from the device frames,
+    // as a twin of a new snapshot makes it when 1 device changed.
+    let t = Instant::now();
+    let parts: Vec<Frame> = (0..devices)
+        .map(|d| {
+            let device = format!("sw{d:05}");
+            let mut b = FrameBuilder::new(mac);
+            for r in 0..per {
+                let m = mac_of(r, d);
+                let port = format!("eth{}", r % 48);
+                b.push(&row(
+                    mac,
+                    &[
+                        ("device", Cell::Text(&device)),
+                        ("vlan", Cell::Integer(10 + (r % 20) as u64)),
+                        ("mac", Cell::Text(&m)),
+                        ("port", Cell::Text(&port)),
+                        ("kind", Cell::Text("dynamic")),
+                        ("provenance", Cell::List(&span)),
+                    ],
+                ));
+            }
+            b.finish(&rsim_cli::tables::key_text)
+        })
+        .collect();
+    let each = t.elapsed();
+    out(format!(
+        "mac device frames: {} for {devices} devices, {} for 1 device",
+        ms(each),
+        ms(each / devices as u32)
+    ));
+    let refs: Vec<&Frame> = parts.iter().collect();
+    let t = Instant::now();
+    let joined = frame::concat(mac, &refs);
+    out(format!(
+        "mac table frame from the device frames: {} rows, {}",
+        joined.len(),
+        ms(t.elapsed())
+    ));
+    drop(joined);
+    drop(parts);
     let one = format!("sw{:05}", devices / 2);
     lookup("one device", mac, &f, &filter("device", &one));
     lookup(
@@ -147,14 +212,17 @@ fn main() {
                 (d >> 8) & 0xff,
                 d & 0xff
             );
-            b.push(&[
-                Cell::Text(&device),
-                Cell::Text("eth0"),
-                Cell::Text(&ip),
-                Cell::Text(&m),
-                Cell::Text("reachable"),
-                Cell::List(&span),
-            ]);
+            b.push(&row(
+                arp,
+                &[
+                    ("device", Cell::Text(&device)),
+                    ("interface", Cell::Text("eth0")),
+                    ("ip", Cell::Text(&ip)),
+                    ("mac", Cell::Text(&m)),
+                    ("state", Cell::Text("reachable")),
+                    ("provenance", Cell::List(&span)),
+                ],
+            ));
         }
     }
     let f = b.finish(&rsim_cli::tables::key_text);

@@ -23,6 +23,8 @@ pub use table::{dynamic_vrfs, table};
 /// The text sections of a router that the lowering reads.
 pub const SECTIONS: &[&str] = &["interfaces", "vrfs", "rib", "arp", "lldp", "cdp", "hsrp"];
 
+pub use profile::INTERFACE_TYPES;
+
 /// The resolver of the interface names of the sections to the names of the
 /// config.
 pub fn names(cfg: &Config) -> crate::nxos::names::Names {

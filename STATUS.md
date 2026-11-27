@@ -7,7 +7,7 @@ Section 13 of `../rsim-project/BUILD_BRIEF.md` gives the steps. `../rsim-project
 | 1 | Complete |
 | 1b: `rsim-topologies`, `rsim-cli` and `rsim-mcp` | Complete |
 | 2: the packet sets | Complete |
-| 3: collection, the snapshot store, ingestion and the snapshot view | In progress |
+| 3: collection, the snapshot store, ingestion and the snapshot view | Complete |
 | 4 to 9 | Not started |
 
 ## Step 1b
@@ -31,8 +31,7 @@ Complete:
 - the BGP sessions, the BGP neighbour config and the claims `bgp-peers-up` and `bgp-peers-agree`
 - the collection interval of each device and the retention of the snapshot history
 - the manual collection of a device or a group
-
-Open: the snapshot view.
+- the snapshot view: the tables of the collected state with their join columns and the frames of each device shared between twins, the table `links` and the claim `path-mtu`, the indexes of the lookups, the export as CSV or Parquet, and the difference of a table, a query and a claim between the 2 held twins
 
 ## Other parts
 

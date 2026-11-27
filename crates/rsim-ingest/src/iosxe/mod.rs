@@ -40,6 +40,8 @@ pub const SECTIONS: &[&str] = &[
     "arp_vrfs",
 ];
 
+pub use profile::INTERFACE_TYPES;
+
 /// The resolver of the interface names of the sections to the names of the
 /// config.
 pub fn names(cfg: &Config) -> crate::nxos::names::Names {

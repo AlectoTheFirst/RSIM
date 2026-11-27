@@ -143,6 +143,19 @@ impl ColumnBuilder {
     }
 }
 
+/// The builder of 1 column of the type `t`.
+fn column_builder(t: ColumnType) -> ColumnBuilder {
+    ColumnBuilder {
+        keys: Vec::new(),
+        distinct: match kind(t) {
+            Kind::Text => Distinct::Text(HashMap::new()),
+            Kind::Integer => Distinct::Integer(HashMap::new()),
+            Kind::Boolean => Distinct::Boolean(HashMap::new()),
+            Kind::List => Distinct::List(HashMap::new()),
+        },
+    }
+}
+
 /// The rows of one table, filled once for each twin and table.
 pub struct FrameBuilder {
     def: &'static TableDef,
@@ -151,19 +164,7 @@ pub struct FrameBuilder {
 
 impl FrameBuilder {
     pub fn new(def: &'static TableDef) -> Self {
-        let columns = def
-            .columns
-            .iter()
-            .map(|c| ColumnBuilder {
-                keys: Vec::new(),
-                distinct: match kind(c.kind) {
-                    Kind::Text => Distinct::Text(HashMap::new()),
-                    Kind::Integer => Distinct::Integer(HashMap::new()),
-                    Kind::Boolean => Distinct::Boolean(HashMap::new()),
-                    Kind::List => Distinct::List(HashMap::new()),
-                },
-            })
-            .collect();
+        let columns = def.columns.iter().map(|c| column_builder(c.kind)).collect();
         FrameBuilder { def, columns }
     }
 
@@ -1530,6 +1531,181 @@ pub fn summarize(
         })
         .collect();
     Ok((total, columns))
+}
+
+/// A new column of a frame from its keys in row order and its distinct
+/// values.
+fn frame_column(kind: Kind, t: ColumnType, keys: UInt32Array, values: ArrayRef) -> FrameColumn {
+    let mut counts = vec![0usize; values.len() + 1];
+    for k in keys.iter() {
+        counts[k.map_or(0, |k| k as usize + 1)] += 1;
+    }
+    FrameColumn {
+        kind,
+        prefixes: kind == Kind::Text && matches!(t, ColumnType::Address | ColumnType::Prefix),
+        data: DictionaryArray::new(keys, values),
+        counts,
+        order: OnceLock::new(),
+        postings: OnceLock::new(),
+        trie: OnceLock::new(),
+        sorted: OnceLock::new(),
+    }
+}
+
+/// The frame of the parts of 1 table, with the rows of each part in the
+/// order of `parts`. Each part is a frame of the table in key order, and a
+/// part holds only rows whose keys come after the keys of the parts before
+/// it, so the frame is in key order with no sort.
+pub fn concat(def: &'static TableDef, parts: &[&Frame]) -> Frame {
+    let rows: usize = parts.iter().map(|p| p.rows).sum();
+    assert!(u32::try_from(rows).is_ok(), "fewer than 2^32 rows");
+    let columns = def
+        .columns
+        .par_iter()
+        .enumerate()
+        .map(|(j, c)| {
+            let k = kind(c.kind);
+            // The global key of each distinct value of each part.
+            let mut remaps: Vec<Vec<u32>> = Vec::with_capacity(parts.len());
+            let values: ArrayRef = match k {
+                Kind::Text => {
+                    let mut m: HashMap<&str, u32> = HashMap::new();
+                    let mut order: Vec<&str> = Vec::new();
+                    for p in parts {
+                        let col = &p.columns[j];
+                        remaps.push(
+                            (0..col.slots() - 1)
+                                .map(|e| {
+                                    let v = col.text(e);
+                                    *m.entry(v).or_insert_with(|| {
+                                        order.push(v);
+                                        (order.len() - 1) as u32
+                                    })
+                                })
+                                .collect(),
+                        );
+                    }
+                    Arc::new(StringArray::from_iter_values(order))
+                }
+                Kind::Integer => {
+                    let mut m: HashMap<u64, u32> = HashMap::new();
+                    let mut order: Vec<u64> = Vec::new();
+                    for p in parts {
+                        let col = &p.columns[j];
+                        remaps.push(
+                            (0..col.slots() - 1)
+                                .map(|e| {
+                                    let v = col.integer(e);
+                                    *m.entry(v).or_insert_with(|| {
+                                        order.push(v);
+                                        (order.len() - 1) as u32
+                                    })
+                                })
+                                .collect(),
+                        );
+                    }
+                    Arc::new(UInt64Array::from(order))
+                }
+                Kind::Boolean => {
+                    let mut m: HashMap<bool, u32> = HashMap::new();
+                    let mut order: Vec<bool> = Vec::new();
+                    for p in parts {
+                        let col = &p.columns[j];
+                        remaps.push(
+                            (0..col.slots() - 1)
+                                .map(|e| {
+                                    let v = col.boolean(e);
+                                    *m.entry(v).or_insert_with(|| {
+                                        order.push(v);
+                                        (order.len() - 1) as u32
+                                    })
+                                })
+                                .collect(),
+                        );
+                    }
+                    Arc::new(BooleanArray::from(order))
+                }
+                Kind::List => {
+                    let mut m: HashMap<Vec<&str>, u32> = HashMap::new();
+                    let mut order: Vec<Vec<&str>> = Vec::new();
+                    for p in parts {
+                        let col = &p.columns[j];
+                        remaps.push(
+                            (0..col.slots() - 1)
+                                .map(|e| {
+                                    let v = col.list(e);
+                                    if let Some(k) = m.get(&v) {
+                                        return *k;
+                                    }
+                                    order.push(v.clone());
+                                    let k = (order.len() - 1) as u32;
+                                    m.insert(v, k);
+                                    k
+                                })
+                                .collect(),
+                        );
+                    }
+                    let mut b = ListBuilder::new(StringBuilder::new());
+                    for l in order {
+                        for v in l {
+                            b.values().append_value(v);
+                        }
+                        b.append(true);
+                    }
+                    Arc::new(b.finish())
+                }
+            };
+            let keys: UInt32Array = parts
+                .iter()
+                .zip(&remaps)
+                .flat_map(|(p, remap)| {
+                    let col = &p.columns[j];
+                    (0..p.rows).map(move |r| col.slot(r).checked_sub(1).map(|e| remap[e]))
+                })
+                .collect();
+            frame_column(k, c.kind, keys, values)
+        })
+        .collect();
+    let device = (def.key.first() == Some(&"device"))
+        .then(|| def.columns.iter().position(|c| c.name == "device"))
+        .flatten();
+    Frame {
+        rows,
+        columns,
+        device,
+        ranges: OnceLock::new(),
+    }
+}
+
+impl Frame {
+    /// The text of a text column of a row; none for null.
+    pub fn text(&self, row: usize, column: usize) -> Option<&str> {
+        let c = &self.columns[column];
+        let s = c.slot(row);
+        (s > 0 && c.kind == Kind::Text).then(|| c.text(s - 1))
+    }
+
+    /// The integer of an integer column of a row; none for null.
+    pub fn integer(&self, row: usize, column: usize) -> Option<u64> {
+        let c = &self.columns[column];
+        let s = c.slot(row);
+        (s > 0 && c.kind == Kind::Integer).then(|| c.integer(s - 1))
+    }
+
+    /// Puts in the place of the column `column` the values that `cell`
+    /// gives for each row. The column is not a key column, so the order of
+    /// the rows stays.
+    pub fn fill<'a>(&mut self, def: &TableDef, column: usize, cell: impl Fn(usize) -> Cell<'a>) {
+        let c = &def.columns[column];
+        debug_assert!(!def.key.contains(&c.name), "{} is a key column", c.name);
+        let mut b = column_builder(c.kind);
+        for r in 0..self.rows {
+            b.push(cell(r));
+        }
+        let (keys, values) = b.values();
+        let keys: UInt32Array = keys.into_iter().map(|k| (k != NULL).then_some(k)).collect();
+        self.columns[column] = frame_column(kind(c.kind), c.kind, keys, values);
+    }
 }
 
 /// The rows of an export: the column names, the column indexes and each
