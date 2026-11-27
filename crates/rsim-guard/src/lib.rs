@@ -124,12 +124,19 @@ pub fn compare(
     routes: &BTreeMap<Prefix, CollectedRoute>,
 ) -> Vec<Row> {
     let computed_routes: BTreeMap<Prefix, Route> = computed.entries().into_iter().collect();
-    let lists_local = routes
-        .keys()
-        .any(|p| collected.get(p).is_some_and(|r| r.kind == RouteKind::Local));
+    // The address families whose collected table lists local routes.
+    let lists_local = |v4: bool| {
+        routes.keys().any(|p| {
+            p.addr().is_ipv4() == v4 && collected.get(p).is_some_and(|r| r.kind == RouteKind::Local)
+        })
+    };
+    let (local_v4, local_v6) = (lists_local(true), lists_local(false));
     let prefixes: BTreeSet<Prefix> = computed_routes
         .iter()
-        .filter(|(p, r)| lists_local || r.kind != RouteKind::Local || routes.contains_key(*p))
+        .filter(|(p, r)| {
+            let listed = if p.addr().is_ipv4() { local_v4 } else { local_v6 };
+            listed || r.kind != RouteKind::Local || routes.contains_key(*p)
+        })
         .map(|(p, _)| p)
         .chain(routes.keys())
         .copied()

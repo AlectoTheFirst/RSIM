@@ -225,11 +225,15 @@ fn order(list: &mut [Candidate]) {
     list.sort_by_key(|c| (c.distance, rank(c.route.kind)));
 }
 
+/// The bound on the passes of the next hop resolution, as in HST
+/// `simul/convergence.py`.
+pub const PASSES: usize = 64;
+
 /// The route table of the candidates. Each pass selects the route of each
-/// prefix in prefix order over the routes of the pass before. The passes
-/// stop when a pass changes no route. The number of passes is at most the
-/// number of prefixes and 1. The routes that the last of these passes still
-/// changes are unknown. `through_default` is the flag
+/// prefix in prefix order over the routes that are installed at that
+/// moment, from this pass and the passes before. The passes stop when a
+/// pass changes no route, after at most [`PASSES`] passes. The routes that
+/// the last pass still changes are unknown. `through_default` is the flag
 /// `COMPUTED_THROUGH_DEFAULT` of the vendor profile.
 pub fn install(candidates: Vec<Candidate>, through_default: bool) -> Fib {
     let mut by_prefix: BTreeMap<Prefix, Vec<Candidate>> = BTreeMap::new();
@@ -240,7 +244,7 @@ pub fn install(candidates: Vec<Candidate>, through_default: bool) -> Fib {
         order(list);
     }
     let mut routes: BTreeMap<Prefix, Route> = BTreeMap::new();
-    let bound = by_prefix.len() + 1;
+    let bound = PASSES;
     let mut changed: Vec<Prefix> = Vec::new();
     for _ in 0..bound {
         changed.clear();

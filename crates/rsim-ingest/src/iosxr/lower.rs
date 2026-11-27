@@ -1450,7 +1450,6 @@ fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &H
             .map(|p| p.i.name.clone())
     };
     cands.extend(ospf.candidates(hops.platform, false, &|i, gw| hop(l, i, gw), &interface_of));
-    let computed = install(cands, hops.computed_through_default);
     // A VRF with no static route of the config takes its static routes from
     // the collected table.
     let config_statics = hops.config_statics.iter().any(|r| r.vrf == vrf);
@@ -1482,6 +1481,8 @@ fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &H
             },
         );
     }
+    cands.extend(crate::guard::outside(&routes, t, hops.platform));
+    let computed = install(cands, hops.computed_through_default);
     let rows = rsim_guard::compare(vrf, &computed, t, &routes);
     rsim_guard::mark(t, &rows);
     l.out.guard.extend(rows);

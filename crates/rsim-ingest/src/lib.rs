@@ -9,6 +9,7 @@ pub mod coverage;
 pub mod equinix;
 pub mod estate;
 pub mod facts;
+pub mod guard;
 pub mod iosxe;
 pub mod iosxr;
 pub mod links;

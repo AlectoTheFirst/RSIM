@@ -1003,7 +1003,7 @@ impl L<'_> {
                 interface_of(addrs, gw)
             }),
         );
-        let computed = install(cands, super::profile::COMPUTED_THROUGH_DEFAULT);
+        let given: BTreeSet<Prefix> = cands.iter().map(|c| c.prefix).collect();
         // The interfaces whose address the device gets at run time by PPPoE,
         // DHCP, DHCPv6, IPv6 autoconfiguration or DHCPv6 prefix delegation.
         // A collected route of such an interface that the config does not
@@ -1022,7 +1022,7 @@ impl L<'_> {
                 continue;
             };
             let seeded = r.interface.as_deref().is_some_and(|i| access.contains(i))
-                && computed.get(&p).is_none()
+                && !given.contains(&p)
                 && r.protocol != "kernel";
             routes.entry(p).or_insert_with(|| {
                 if matches!(r.protocol.as_str(), "ospf" | "ospf6") {
@@ -1040,6 +1040,8 @@ impl L<'_> {
                 }
             });
         }
+        cands.extend(crate::guard::outside(&routes, t, PLATFORM));
+        let computed = install(cands, super::profile::COMPUTED_THROUGH_DEFAULT);
         let rows = rsim_guard::compare(VRF, &computed, t, &routes);
         rsim_guard::mark(t, &rows);
         self.out.guard.extend(rows);

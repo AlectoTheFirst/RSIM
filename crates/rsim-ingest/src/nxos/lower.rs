@@ -1619,7 +1619,9 @@ impl L<'_> {
             next: self.id(next),
         };
         cands.extend(ospf.candidates(PLATFORM, false, &hop, &interface_of));
-        let computed = install(cands, super::profile::COMPUTED_THROUGH_DEFAULT);
+        // A VRF with no static route of the config takes its collected static
+        // routes as inputs.
+        let no_statics = !self.cfg.static_routes.iter().any(|r| r.vrf == vrf);
         let mut routes = BTreeMap::new();
         for r in col.routes.iter().filter(|r| r.selected && r.vrf == vrf) {
             let Ok(p) = r.prefix.parse::<Prefix>() else {
@@ -1631,11 +1633,18 @@ impl L<'_> {
                         protocol: r.protocol.clone(),
                         class: ospf.class(p),
                     }
+                } else if no_statics && super::profile::protocol_word(&r.protocol) == "static" {
+                    rsim_guard::CollectedRoute {
+                        protocol: r.protocol.clone(),
+                        class: rsim_guard::Class::Seeded,
+                    }
                 } else {
                     guard_route(&r.protocol)
                 }
             });
         }
+        cands.extend(crate::guard::outside(&routes, t, PLATFORM));
+        let computed = install(cands, super::profile::COMPUTED_THROUGH_DEFAULT);
         let rows = rsim_guard::compare(vrf, &computed, t, &routes);
         rsim_guard::mark(t, &rows);
         self.out.guard.extend(rows);
