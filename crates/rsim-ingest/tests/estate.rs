@@ -99,7 +99,6 @@ fn estate_from(
         }],
         macs: Vec::new(),
         ospf: None,
-        ospf: None,
     };
     let sections: BTreeMap<String, (Vec<u8>, String)> =
         ["networks", "wlans", "devices", "clients", "port_profiles"]

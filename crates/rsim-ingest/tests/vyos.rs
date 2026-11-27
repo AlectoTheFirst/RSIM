@@ -334,7 +334,6 @@ mod twin {
             speeds: Vec::new(),
             macs: Vec::new(),
             ospf: None,
-            ospf: None,
         }
     }
 
