@@ -1781,7 +1781,9 @@ mod layer_tests {
         (d.to_string(), p.to_string())
     }
 
-    fn estate(links: &[((&str, &str), &[(&str, &str)])]) -> Estate {
+    type Ends<'a> = &'a [(&'a str, &'a str)];
+
+    fn estate(links: &[((&str, &str), Ends)]) -> Estate {
         let mut e = assemble_pass(Vec::new(), &BTreeMap::new(), Plan::Snapshot).0;
         for ((d, p), ends) in links {
             e.links
