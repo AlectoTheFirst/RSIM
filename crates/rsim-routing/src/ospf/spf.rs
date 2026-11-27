@@ -9,7 +9,8 @@
 //!   its link back, for OSPFv3 the link-local address of its link LSA. Over
 //!   a directly attached transit network it is the address of the
 //!   neighbour on the segment. Each other vertex takes the next hops of its
-//!   parent.
+//!   parent. A vertex with more than one parent at equal cost takes the
+//!   next hops of each parent.
 //! - RFC 2328 16.2 gives the inter-area routes from the summary and
 //!   ASBR-summary LSAs. An area border router reads only the summary LSAs of
 //!   the backbone. A router with no active backbone attachment reads the
@@ -252,6 +253,9 @@ impl Out {
 struct Vertex {
     cost: u32,
     hops: Hops,
+    /// True for a network with a shortest path that is the direct link of
+    /// the calculating router.
+    direct: bool,
 }
 
 /// An intra-area path to a prefix in one area.
@@ -288,15 +292,18 @@ struct Frontier {
 }
 
 impl Frontier {
-    fn offer(&mut self, tree: &Tree, vid: Vid, cost: u32, hops: Hops) {
+    fn offer(&mut self, tree: &Tree, vid: Vid, cost: u32, hops: Hops, direct: bool) {
         if tree.placed(vid) {
             return;
         }
         match self.candidates.get_mut(&vid) {
-            Some(held) if cost == held.cost => held.hops.extend(hops),
+            Some(held) if cost == held.cost => {
+                held.hops.extend(hops);
+                held.direct |= direct;
+            }
             Some(held) if cost > held.cost => {}
             _ => {
-                self.candidates.insert(vid, Vertex { cost, hops });
+                self.candidates.insert(vid, Vertex { cost, hops, direct });
                 self.heap.push(Reverse((cost, vid)));
             }
         }
@@ -547,7 +554,7 @@ fn spf(cx: &Cx<'_>, out: &mut Out, area: AreaId) -> Tree {
     let version = cx.version();
     let mut tree = Tree::default();
     let mut front = Frontier::default();
-    front.offer(&tree, Vid::Router(root), 0, Hops::new());
+    front.offer(&tree, Vid::Router(root), 0, Hops::new(), false);
     while let Some(Reverse((cost, vid))) = front.heap.pop() {
         if tree.placed(vid) || front.candidates.get(&vid).is_none_or(|v| v.cost != cost) {
             continue;
@@ -605,7 +612,7 @@ fn spf(cx: &Cx<'_>, out: &mut Out, area: AreaId) -> Tree {
                             } else {
                                 vertex.hops.clone()
                             };
-                            front.offer(&tree, Vid::Network(key), next, hops);
+                            front.offer(&tree, Vid::Network(key), next, hops, rid == root);
                         }
                         LinkKind::PointToPoint | LinkKind::Virtual => {
                             let Some(far) = cx.index.routers.get(&(area, link.id)) else {
@@ -642,7 +649,7 @@ fn spf(cx: &Cx<'_>, out: &mut Out, area: AreaId) -> Tree {
                             if hops.is_empty() {
                                 continue;
                             }
-                            front.offer(&tree, Vid::Router(link.id), next, hops);
+                            front.offer(&tree, Vid::Router(link.id), next, hops, false);
                         }
                     }
                 }
@@ -652,7 +659,7 @@ fn spf(cx: &Cx<'_>, out: &mut Out, area: AreaId) -> Tree {
                 let Some(net) = cx.index.networks.get(&(area, key)) else {
                     continue;
                 };
-                let direct = vertex.hops.is_empty();
+                let direct = vertex.direct;
                 let members: BTreeSet<RouterId> = attached(net).iter().copied().collect();
                 for rid in members {
                     if rid == root {
@@ -681,15 +688,14 @@ fn spf(cx: &Cx<'_>, out: &mut Out, area: AreaId) -> Tree {
                     if backs.is_empty() {
                         continue;
                     }
-                    let hops = if direct {
-                        direct_hops(cx, out, area, key, rid, &backs, cost)
-                    } else {
-                        vertex.hops.clone()
-                    };
+                    let mut hops = vertex.hops.clone();
+                    if direct {
+                        hops.extend(direct_hops(cx, out, area, key, rid, &backs, cost));
+                    }
                     if hops.is_empty() {
                         continue;
                     }
-                    front.offer(&tree, Vid::Router(rid), cost, hops);
+                    front.offer(&tree, Vid::Router(rid), cost, hops, false);
                 }
             }
         }
@@ -741,14 +747,7 @@ fn prefixes(cx: &Cx<'_>, out: &mut Out, area: AreaId, tree: &mut Tree) {
                     );
                     continue;
                 };
-                offer_prefix(
-                    &mut tree.prefixes,
-                    p,
-                    v.cost,
-                    &v.hops,
-                    v.hops.is_empty(),
-                    &net.span,
-                );
+                offer_prefix(&mut tree.prefixes, p, v.cost, &v.hops, v.direct, &net.span);
             }
         }
         Version::V3 => {
@@ -772,7 +771,7 @@ fn prefixes(cx: &Cx<'_>, out: &mut Out, area: AreaId, tree: &mut Tree) {
                     Reference::Network(id) => tree
                         .networks
                         .get(&NetKey::V3(*router, *id))
-                        .map(|v| (v, v.hops.is_empty())),
+                        .map(|v| (v, v.direct)),
                 };
                 let Some((v, direct)) = found else { continue };
                 for (p, metric) in prefixes {
