@@ -62,7 +62,7 @@ pub fn def(name: &str) -> Result<&'static TableDef, QueryError> {
 pub const JOINED: &[(&str, &[&str])] = &[
     (
         "interfaces",
-        &["peer_device", "peer_interface", "peer_reason"],
+        &["peer_device", "peer_interface", "peer_device_reason"],
     ),
     ("routes", &["next_hop_device", "next_hop_device_reason"]),
     (
@@ -74,7 +74,7 @@ pub const JOINED: &[(&str, &[&str])] = &[
             "ip_reason",
             "peer_device",
             "peer_interface",
-            "peer_reason",
+            "peer_device_reason",
             "bridge_domain",
             "bridge_domain_reason",
         ],
@@ -88,7 +88,7 @@ pub const JOINED: &[(&str, &[&str])] = &[
             "vlan_reason",
             "access_device",
             "access_port",
-            "access_reason",
+            "access_device_reason",
         ],
     ),
 ];
@@ -740,7 +740,7 @@ fn bgp_row(f: &BgpPeerFact) -> Vec<Value> {
         ),
         AsnValue::Unknown(r) => (Value::from(Vec::<String>::new()), json!(r)),
     };
-    let (peer, peer_reason) = match &f.peer_asn.value {
+    let (peer, peer_device_reason) = match &f.peer_asn.value {
         AsnValue::Known(v) => (v.first().map_or(Value::Null, |a| json!(a)), Value::Null),
         AsnValue::Unknown(r) => (Value::Null, json!(r)),
     };
@@ -773,7 +773,7 @@ fn bgp_row(f: &BgpPeerFact) -> Vec<Value> {
         local,
         local_reason,
         peer,
-        peer_reason,
+        peer_device_reason,
         f.observed_asn.map_or(Value::Null, |a| json!(a)),
         f.shutdown.map_or(Value::Null, Value::from),
         Value::from(f.families.iter().cloned().collect::<Vec<_>>()),

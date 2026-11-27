@@ -492,7 +492,7 @@ fn fill_joins(t: &Loaded, def: &'static TableDef, f: &mut Frame) -> Result<(), S
             if let (Some(d), Some(p), Some(w)) = (
                 col("access_device"),
                 col("access_port"),
-                col("access_reason"),
+                col("access_device_reason"),
             ) {
                 f.fill(def, d, |r| match &access[r] {
                     Some(Ok((d, _))) => Cell::Text(d),
@@ -522,13 +522,13 @@ fn fill_joins(t: &Loaded, def: &'static TableDef, f: &mut Frame) -> Result<(), S
     Ok(())
 }
 
-/// Fills the columns `peer_device`, `peer_interface` and `peer_reason`.
+/// Fills the columns `peer_device`, `peer_interface` and `peer_device_reason`.
 fn fill_peer(f: &mut Frame, def: &TableDef, devices: &[Join], interfaces: &[Join]) {
     let col = |name: &str| def.columns.iter().position(|c| c.name == name);
     let (Some(d), Some(i), Some(w)) = (
         col("peer_device"),
         col("peer_interface"),
-        col("peer_reason"),
+        col("peer_device_reason"),
     ) else {
         return;
     };

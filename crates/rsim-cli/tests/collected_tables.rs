@@ -298,7 +298,7 @@ fn the_join_columns_of_a_store_twin_resolve_the_host_the_addresses_and_the_vlan(
         // Each join has a value or the reason that it has none.
         for (v, why) in [
             ("host", "host_reason"),
-            ("peer_device", "peer_reason"),
+            ("peer_device", "peer_device_reason"),
             ("bridge_domain", "bridge_domain_reason"),
         ] {
             assert_ne!(c(v).is_null(), c(why).is_null(), "{v} {r:?}");
@@ -328,7 +328,10 @@ fn the_join_columns_of_a_store_twin_resolve_the_host_the_addresses_and_the_vlan(
         (&Value::Null, &json!("not_found"))
     );
     assert_ne!(c("host").is_null(), c("host_reason").is_null());
-    assert_ne!(c("access_device").is_null(), c("access_reason").is_null());
+    assert_ne!(
+        c("access_device").is_null(),
+        c("access_device_reason").is_null()
+    );
     assert_eq!(c("access_device").is_null(), c("access_port").is_null());
 }
 
