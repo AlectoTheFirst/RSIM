@@ -2,9 +2,10 @@
 //! ospfv3` of the main VRF and of each `vrf name <name>`, in the form of
 //! `rsim_routing::ospf::config`.
 //!
-//! The schema of each version classifies the lines of a process. A handled
-//! line is read. A line with no entry in the schema goes into
-//! `Process::unhandled`. `log-adjacency-changes` is known-irrelevant.
+//! The schema of each version classifies the lines of a process. A line
+//! with no entry in the schema goes into `Process::unhandled`. A handled
+//! line is read unless the reader puts it into `Process::unhandled`.
+//! `log-adjacency-changes` is known-irrelevant.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr};
@@ -235,14 +236,10 @@ fn walk<'s>(
     }
 }
 
-/// Marks the handled lines of each OSPF process in `read`.
+/// Marks the read lines of each OSPF process in `read`: the handled lines
+/// with no line of an entry of `Process::unhandled`.
 pub(crate) fn mark(root: &Stanza, read: &mut BTreeSet<u32>) {
-    let tables = [process_table(Version::V2), process_table(Version::V3)];
-    for (version, _, s) in processes(root) {
-        read.insert(s.first_line);
-        let t = &tables[usize::from(version == Version::V3)];
-        walk(t, s, &mut Vec::new(), read, &mut Vec::new());
-    }
+    build(root, "", read);
 }
 
 /// An interface of the config with the facts that OSPF reads.
@@ -251,6 +248,9 @@ struct Link {
     name: String,
     /// The static addresses with their prefix length.
     addresses: Vec<(IpAddr, u8)>,
+    /// The `dhcp` and `dhcpv6` values of `address`, with the words and the
+    /// first and the last line of each.
+    dynamic: Vec<(String, String, u32, u32)>,
     disabled: bool,
     vrf: String,
     /// The network type that FRR takes for the interface kind.
@@ -261,11 +261,19 @@ struct Link {
 /// loopback, point-to-point for an interface that the kernel marks
 /// point-to-point, and broadcast for each other interface. A tunnel is
 /// point-to-point if it has a remote address and is not a layer 2 GRE
-/// tunnel.
+/// tunnel. An OpenVPN interface is point-to-point unless its device type
+/// is `tap`.
 fn default_network(kind: &str, s: &Stanza) -> NetworkType {
     match kind {
         "loopback" => NetworkType::Loopback,
-        "pppoe" | "wireguard" | "vti" => NetworkType::PointToPoint,
+        "pppoe" | "sstpc" | "wireguard" | "vti" => NetworkType::PointToPoint,
+        "openvpn" => {
+            if s.get("device-type").and_then(Stanza::text) == Some("tap") {
+                NetworkType::Broadcast
+            } else {
+                NetworkType::PointToPoint
+            }
+        }
         "tunnel" => {
             let layer2 = s
                 .get("encapsulation")
@@ -287,13 +295,28 @@ fn address(t: &str) -> Option<(IpAddr, u8)> {
     Some((a.parse().ok()?, l.parse().ok()?))
 }
 
-fn link(s: &Stanza, name: String, network: NetworkType, parent_disabled: bool) -> Link {
+/// The address values that a DHCP client sets.
+const DYNAMIC: [&str; 2] = ["dhcp", "dhcpv6"];
+
+/// The link of the interface stanza `s`. `path` is the words of the
+/// stanza.
+fn link(s: &Stanza, name: String, path: &str, network: NetworkType, parent_disabled: bool) -> Link {
+    let values = s.get("address").map(values).unwrap_or_default();
     Link {
         name,
-        addresses: s
-            .get("address")
-            .map(|a| a.texts().into_iter().filter_map(address).collect())
-            .unwrap_or_default(),
+        addresses: values.iter().filter_map(|(t, _)| address(t)).collect(),
+        dynamic: values
+            .iter()
+            .filter(|(t, _)| DYNAMIC.contains(t))
+            .map(|(t, x)| {
+                (
+                    (*t).to_string(),
+                    format!("{path} address {t}"),
+                    x.first_line,
+                    x.last_line,
+                )
+            })
+            .collect(),
         disabled: parent_disabled || s.get("disable").is_some(),
         vrf: s
             .get("vrf")
@@ -315,22 +338,26 @@ fn links(root: &Stanza) -> Vec<Link> {
     for kind in ifs.children() {
         for i in kind.children() {
             let network = default_network(&kind.key, i);
-            let parent = link(i, i.key.clone(), network, false);
+            let path = format!("interfaces {} {}", kind.key, i.key);
+            let parent = link(i, i.key.clone(), &path, network, false);
             let disabled = parent.disabled;
             out.push(parent);
             for v in i.get("vif").map(Stanza::children).unwrap_or_default() {
                 let name = format!("{}.{}", i.key, v.key);
-                out.push(link(v, name, network, disabled));
+                let words = format!("{path} vif {}", v.key);
+                out.push(link(v, name, &words, network, disabled));
             }
             for s in i.get("vif-s").map(Stanza::children).unwrap_or_default() {
                 let name = format!("{}.{}", i.key, s.key);
-                let outer = link(s, name.clone(), network, disabled);
+                let words = format!("{path} vif-s {}", s.key);
+                let outer = link(s, name.clone(), &words, network, disabled);
                 let outer_disabled = outer.disabled;
                 out.push(outer);
                 for c in s.get("vif-c").map(Stanza::children).unwrap_or_default() {
                     out.push(link(
                         c,
                         format!("{name}.{}", c.key),
+                        &format!("{words} vif-c {}", c.key),
                         network,
                         outer_disabled,
                     ));
@@ -544,6 +571,21 @@ fn global_ipv6(link: &Link) -> Option<(IpAddr, u8)> {
         .find(|(a, _)| matches!(a, IpAddr::V6(v6) if v6.segments()[0] & 0xffc0 != 0xfe80))
 }
 
+/// The unhandled entries of the DHCP addresses of a link that a process of
+/// `version` can take: `dhcp` for OSPFv2 and `dhcpv6` for OSPFv3. The
+/// config does not hold the leased address.
+fn dynamic(link: &Link, version: Version, file: &str) -> Vec<(String, SourceSpan)> {
+    let key = match version {
+        Version::V2 => "dhcp",
+        Version::V3 => "dhcpv6",
+    };
+    link.dynamic
+        .iter()
+        .filter(|(t, ..)| t == key)
+        .map(|(_, w, f, l)| (w.clone(), SourceSpan::new(file, *f, *l)))
+        .collect()
+}
+
 /// One OSPF interface.
 fn interface(
     link: &Link,
@@ -592,11 +634,8 @@ fn process(
     let passive_default = match (version, s.get("passive-interface")) {
         (Version::V2, Some(p)) => match p.text() {
             Some("default") => true,
-            other => {
-                r.bad(
-                    format!("passive-interface {}", other.unwrap_or_default()),
-                    p,
-                );
+            _ => {
+                r.bad(words(&["passive-interface"], p), p);
                 false
             }
         },
@@ -669,6 +708,7 @@ fn process(
             r.unhandled.push((words.clone(), line.clone()));
             continue;
         };
+        r.unhandled.extend(dynamic(link, version, file));
         let set = settings.get(name);
         let addresses: Vec<Option<(IpAddr, u8)>> = match version {
             Version::V2 => {
@@ -698,6 +738,9 @@ fn process(
         for l in links.iter().filter(|l| l.vrf == vrf) {
             if own.contains_key(&l.name) {
                 continue;
+            }
+            if !networks.is_empty() && !l.disabled {
+                r.unhandled.extend(dynamic(l, version, file));
             }
             for &(ip, len) in &l.addresses {
                 let covering: Vec<usize> = networks
@@ -766,15 +809,28 @@ fn process(
 /// network type of each interface come from `interfaces`. The bandwidth of
 /// an interface is the `bandwidth` line of the process, else `None`.
 pub fn read(doc: &Document, file: &str) -> RouterConfig {
-    let root = &doc.root;
+    build(&doc.root, file, &mut BTreeSet::new())
+}
+
+/// The OSPF config of `root`. Adds the read lines of each process to
+/// `read`.
+fn build(root: &Stanza, file: &str, read: &mut BTreeSet<u32>) -> RouterConfig {
     let links = links(root);
     let tables = [process_table(Version::V2), process_table(Version::V3)];
     let mut processes_out = Vec::new();
     for (version, vrf, s) in processes(root) {
         let t = &tables[usize::from(version == Version::V3)];
         let mut walked = Vec::new();
-        walk(t, s, &mut Vec::new(), &mut BTreeSet::new(), &mut walked);
-        processes_out.push(process(version, &vrf, s, &links, file, walked));
+        let mut lines = BTreeSet::from([s.first_line]);
+        walk(t, s, &mut Vec::new(), &mut lines, &mut walked);
+        let p = process(version, &vrf, s, &links, file, walked);
+        for (_, span) in &p.unhandled {
+            if s.first_line <= span.first_line && span.last_line <= s.last_line {
+                lines.retain(|l| !(span.first_line..=span.last_line).contains(l));
+            }
+        }
+        read.extend(lines);
+        processes_out.push(p);
     }
     RouterConfig {
         processes: processes_out,
@@ -816,36 +872,59 @@ mod tests {
         p.unhandled.iter().map(|(w, _)| w.as_str()).collect()
     }
 
-    /// Checks that each handled line is read, with collected route rows
-    /// and without, and that the coverage has no more unhandled OSPF lines
-    /// than the processes.
+    /// The first line of each stanza below `s` that has no entry in `t`
+    /// or is not in `read`, with no line below such a stanza.
+    fn unread_tops<'s>(
+        t: &Table,
+        s: &'s Stanza,
+        path: &mut Vec<&'s str>,
+        read: &BTreeSet<u32>,
+        out: &mut BTreeSet<u32>,
+    ) {
+        for c in s.children() {
+            path.push(&c.key);
+            let state = t.state(path);
+            if state == State::Unhandled || !read.contains(&c.first_line) {
+                out.insert(c.first_line);
+            } else if state == State::Handled {
+                unread_tops(t, c, path, read, out);
+            }
+            path.pop();
+        }
+    }
+
+    /// Checks that the lines of each process that are unhandled or not
+    /// read are the first lines of the entries of `Process::unhandled` in
+    /// the process, and that the unread lines of the vendor are OSPF lines.
     fn check_coverage(json: &str) {
         let d = doc(json);
         let mut read_lines = BTreeSet::new();
         mark(&d.root, &mut read_lines);
         let cfg = super::super::read(&d);
-        let unhandled: usize = read(&d, FILE)
-            .processes
-            .iter()
-            .map(|p| p.unhandled.len())
-            .sum();
+        assert!(read_lines.is_subset(&cfg.read));
+        let procs = read(&d, FILE).processes;
+        let tables = [process_table(Version::V2), process_table(Version::V3)];
+        for ((version, _, s), p) in processes(&d.root).into_iter().zip(&procs) {
+            let t = &tables[usize::from(version == Version::V3)];
+            let mut tops = BTreeSet::new();
+            unread_tops(t, s, &mut Vec::new(), &cfg.read, &mut tops);
+            let lines: BTreeSet<u32> = p
+                .unhandled
+                .iter()
+                .filter(|(_, x)| s.first_line <= x.first_line && x.last_line <= s.last_line)
+                .map(|(_, x)| x.first_line)
+                .collect();
+            assert_eq!(tops, lines, "{:?}", p.unhandled);
+        }
         for rows in [true, false] {
             let table =
                 super::super::table(&RouteTables::uniform(rows, super::super::dynamic_vrfs(&d)));
-            assert_eq!(
-                super::super::unread(&d, &table, &cfg.read),
-                Vec::<String>::new()
-            );
-            let cov = classify(&d, &table);
-            let walked: u32 = cov
-                .unhandled
-                .iter()
-                .filter(|(p, _)| p.contains("/ospf"))
-                .map(|(_, (n, _))| n)
-                .sum();
-            assert!(walked as usize <= unhandled, "{:?}", cov.unhandled);
+            let unread = super::super::unread(&d, &table, &cfg.read);
+            assert!(unread.iter().all(|p| p.contains("/ospf")), "{unread:?}");
+            if procs.iter().all(|p| p.unhandled.is_empty()) {
+                assert_eq!(unread, Vec::<String>::new());
+            }
         }
-        assert!(read_lines.is_subset(&cfg.read));
     }
 
     const V2: &str = r#"{
@@ -1009,6 +1088,80 @@ mod tests {
         check_coverage(V2);
         check_coverage(V3);
         check_coverage(UNREAD);
+        check_coverage(REJECTED);
+    }
+
+    const REJECTED: &str = r#"{
+      "interfaces": {"ethernet": {"eth0": {"address": "192.0.2.1/24"}}},
+      "protocols": {
+        "ospf": {
+          "parameters": {"router-id": "192.0.2.300"},
+          "area": {
+            "0": {"network": ["192.0.2.0/24", "2001:db8::/32", "192.0.2.0/33"]},
+            "1": {"network": "192.0.0.0/16", "area-type": {"stub": {"default-cost": "x"}}}
+          },
+          "interface": {
+            "eth0": {"network": "point-to-multipoint"},
+            "bond0": {"area": "0"}
+          },
+          "passive-interface": "eth0",
+          "redistribute": {"connected": {"metric-type": "3"}}
+        }
+      }
+    }"#;
+
+    #[test]
+    fn a_line_that_the_reader_rejects_is_not_read() {
+        let p = one(REJECTED);
+        assert_eq!(
+            unhandled(&p),
+            [
+                "area 0 network 192.0.2.0/24",
+                "area 0 network 2001:db8::/32",
+                "area 0 network 192.0.2.0/33",
+                "area 1 area-type stub default-cost x",
+                "area 1 network 192.0.0.0/16",
+                "interface bond0 area 0",
+                "interface eth0 network point-to-multipoint",
+                "parameters router-id 192.0.2.300",
+                "passive-interface eth0",
+                "redistribute connected metric-type 3",
+            ]
+        );
+        let d = doc(REJECTED);
+        let cfg = super::super::read(&d);
+        let table =
+            super::super::table(&RouteTables::uniform(true, super::super::dynamic_vrfs(&d)));
+        assert_eq!(
+            super::super::unread(&d, &table, &cfg.read),
+            [
+                "protocols/ospf/area/0/network/0",
+                "protocols/ospf/area/0/network/1",
+                "protocols/ospf/area/0/network/2",
+                "protocols/ospf/area/1/area-type/stub/default-cost",
+                "protocols/ospf/area/1/network",
+                "protocols/ospf/interface/bond0/area",
+                "protocols/ospf/interface/eth0/network",
+                "protocols/ospf/parameters/router-id",
+                "protocols/ospf/passive-interface",
+                "protocols/ospf/redistribute/connected/metric-type",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_passive_interface_line_with_2_values_is_not_read() {
+        let json = r#"{
+              "interfaces": {"ethernet": {"eth0": {"address": "192.0.2.1/24"}}},
+              "protocols": {"ospf": {
+                "area": {"0": {"network": "192.0.2.0/24"}},
+                "passive-interface": ["eth0", "eth1"]
+              }}
+            }"#;
+        let p = one(json);
+        assert_eq!(unhandled(&p), ["passive-interface eth0 eth1"]);
+        assert!(!p.passive_default);
+        check_coverage(json);
     }
 
     const UNREAD: &str = r#"{
@@ -1148,6 +1301,83 @@ mod tests {
             cfg.processes[1].router_id,
             Some(Ipv4Addr::new(192, 0, 2, 65))
         );
+    }
+
+    #[test]
+    fn a_dhcp_address_that_a_network_line_can_cover_is_unhandled() {
+        let p = one(r#"{
+              "interfaces": {"ethernet": {
+                "eth0": {"address": "192.0.2.1/24"},
+                "eth1": {"address": ["dhcp", "dhcpv6"]},
+                "eth2": {"vif": {"10": {"address": "dhcp"}}},
+                "eth3": {"address": "dhcp", "disable": {}}
+              }},
+              "protocols": {"ospf": {"area": {"0": {"network": "192.0.2.0/24"}}}}
+            }"#);
+        let names: Vec<&str> = p.interfaces.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["eth0"]);
+        assert_eq!(
+            unhandled(&p),
+            [
+                "interfaces ethernet eth1 address dhcp",
+                "interfaces ethernet eth2 vif 10 address dhcp",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_dhcp_address_with_no_network_line_is_not_unhandled() {
+        let p = one(r#"{
+              "interfaces": {"ethernet": {"eth1": {"address": "dhcp"}}},
+              "protocols": {"ospf": {"parameters": {"router-id": "192.0.2.1"}}}
+            }"#);
+        assert_eq!(unhandled(&p), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn a_named_interface_with_a_dhcp_address_has_no_address_and_is_unhandled() {
+        let json = r#"{
+              "interfaces": {"ethernet": {"eth1": {"address": ["dhcp", "dhcpv6"]}}},
+              "protocols": {
+                "ospf": {"interface": {"eth1": {"area": "0"}}},
+                "ospfv3": {"interface": {"eth1": {"area": "0"}}}
+              }
+            }"#;
+        let cfg = read(&doc(json), FILE);
+        for (p, words) in cfg.processes.iter().zip([
+            "interfaces ethernet eth1 address dhcp",
+            "interfaces ethernet eth1 address dhcpv6",
+        ]) {
+            let eth1 = iface(p, "eth1");
+            assert_eq!(eth1.area, area("0"));
+            assert_eq!(eth1.address, None);
+            assert_eq!(unhandled(p), [words]);
+        }
+        check_coverage(json);
+    }
+
+    #[test]
+    fn an_openvpn_tun_and_a_ppp_interface_are_point_to_point() {
+        let p = one(r#"{
+              "interfaces": {
+                "openvpn": {
+                  "vtun0": {"mode": "site-to-site"},
+                  "vtun1": {"device-type": "tun"},
+                  "vtun2": {"device-type": "tap"}
+                },
+                "sstpc": {"sstpc0": {"server": "vpn.example.com"}}
+              },
+              "protocols": {"ospf": {"interface": {
+                "vtun0": {"area": "0"},
+                "vtun1": {"area": "0"},
+                "vtun2": {"area": "0"},
+                "sstpc0": {"area": "0"}
+              }}}
+            }"#);
+        assert_eq!(iface(&p, "vtun0").network, NetworkType::PointToPoint);
+        assert_eq!(iface(&p, "vtun1").network, NetworkType::PointToPoint);
+        assert_eq!(iface(&p, "vtun2").network, NetworkType::Broadcast);
+        assert_eq!(iface(&p, "sstpc0").network, NetworkType::PointToPoint);
     }
 
     const V3: &str = r#"{
