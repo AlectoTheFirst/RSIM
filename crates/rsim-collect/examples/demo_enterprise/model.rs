@@ -122,8 +122,12 @@ pub struct Iface {
     /// The routing cost of the interface and the protocol of the routes
     /// that it learns. An interface with none is not a routing adjacency.
     pub routing: Option<(u32, Proto)>,
-    /// The interface runs OSPF.
+    /// The interface runs OSPF in area 0.
     pub ospf: bool,
+    /// The OSPF cost of an OSPF interface.
+    pub ospf_cost: u32,
+    /// The OSPF interface is passive.
+    pub ospf_passive: bool,
     pub speed: u32,
     pub peer_link: bool,
     /// The spanning tree blocks the port in each VLAN.
@@ -147,6 +151,8 @@ impl Iface {
             acl_in: None,
             routing: None,
             ospf: false,
+            ospf_cost: 1,
+            ospf_passive: false,
             speed: 10_000,
             peer_link: false,
             blocked: false,

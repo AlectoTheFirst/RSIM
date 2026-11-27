@@ -205,7 +205,12 @@ fn config(e: &Estate, d: usize) -> String {
                     let _ = writeln!(s, "  ip address {a}/{l}");
                 }
                 if i.ospf {
-                    s.push_str("  ip ospf network point-to-point\n  ip router ospf UNDERLAY area 0.0.0.0\n");
+                    let _ = writeln!(s, "  ip ospf cost {}", i.ospf_cost);
+                    s.push_str("  ip ospf network point-to-point\n");
+                    if i.ospf_passive {
+                        s.push_str("  ip ospf passive-interface\n");
+                    }
+                    s.push_str("  ip router ospf UNDERLAY area 0.0.0.0\n");
                 }
                 s.push_str("  no shutdown\n");
             }
@@ -217,7 +222,11 @@ fn config(e: &Estate, d: usize) -> String {
                     let _ = writeln!(s, "  ip address {a}/{l} secondary");
                 }
                 if i.ospf {
-                    s.push_str("  ip router ospf UNDERLAY area 0.0.0.0\n");
+                    let _ = writeln!(
+                        s,
+                        "  ip ospf cost {}\n  ip router ospf UNDERLAY area 0.0.0.0",
+                        i.ospf_cost
+                    );
                 }
             }
             Mode::Mgmt => {

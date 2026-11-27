@@ -66,11 +66,12 @@ fn config(dev: &Dev) -> String {
     if let Some(bgp) = &dev.bgp {
         let _ = writeln!(s, "router ospf CORE\n router-id {}\n area 0", bgp.router_id);
         for i in dev.ifaces.iter().filter(|i| i.ospf) {
-            let _ = writeln!(s, "  interface {}", i.name);
-            if i.mode == Mode::Loopback {
-                s.push_str("   passive enable\n");
-            } else {
+            let _ = writeln!(s, "  interface {}\n   cost {}", i.name, i.ospf_cost);
+            if i.mode != Mode::Loopback {
                 s.push_str("   network point-to-point\n");
+            }
+            if i.mode == Mode::Loopback || i.ospf_passive {
+                s.push_str("   passive enable\n");
             }
             s.push_str("  !\n");
         }

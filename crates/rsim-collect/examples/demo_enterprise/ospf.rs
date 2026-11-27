@@ -3,12 +3,14 @@
 //! NX-OS, IOS-XE and IOS-XR readers of `rsim-ingest` read.
 //!
 //! An OSPF interface is an interface with `ospf` in the default VRF: on
-//! NX-OS a routed port or a loopback. A routed port of NX-OS and IOS-XE and
-//! each port of IOS-XR other than a loopback is point-to-point; an IOS-XE
-//! SVI is a broadcast segment whose designated router has the highest
-//! address. A loopback is a stub link of its /32 with the cost 1. A router
-//! of the internet edge originates the default route as an external LSA of
-//! type 2 with the metric 1. The database of a router holds the LSAs of the
+//! NX-OS a routed port or a loopback. Its cost is `ospf_cost`. A routed
+//! port of NX-OS and IOS-XE and each port of IOS-XR other than a loopback
+//! is point-to-point. An IOS-XE SVI is a broadcast segment whose designated
+//! router has the highest address. A loopback is a stub link of its /32. A
+//! passive interface is a stub link of its network. The secondary address
+//! of a loopback is a stub link of its /32 with the cost 1. A router of the
+//! internet edge originates the default route as an external LSA of type 2
+//! with the metric 1. The database of a router holds the LSAs of the
 //! routers that its adjacencies reach.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -61,6 +63,7 @@ struct OIface {
     cost: u32,
     p2p: bool,
     loopback: bool,
+    passive: bool,
 }
 
 /// The OSPF state of one router.
@@ -105,13 +108,10 @@ fn ospf_ifaces(dev: &Dev) -> Vec<OIface> {
                 name: i.name.clone(),
                 addr,
                 len,
-                cost: if loopback {
-                    1
-                } else {
-                    i.routing.map_or(1, |r| r.0)
-                },
+                cost: i.ospf_cost,
                 p2p,
                 loopback,
+                passive: i.ospf_passive,
             })
         })
         .collect()
@@ -131,7 +131,7 @@ pub fn of(e: &Estate, d: usize) -> Option<Ospf> {
     rids.get(&d)?;
     let mut segments: BTreeMap<(Ipv4Addr, u8), Vec<(usize, OIface)>> = BTreeMap::new();
     for (x, list) in &ifaces {
-        for i in list.iter().filter(|i| !i.loopback) {
+        for i in list.iter().filter(|i| !i.loopback && !i.passive) {
             segments
                 .entry((network(i.addr, i.len), i.len))
                 .or_default()
@@ -196,29 +196,28 @@ pub fn of(e: &Estate, d: usize) -> Option<Ospf> {
             routers.entry(*x).or_default().push(Link::Stub {
                 net: i.addr,
                 len: 32,
-                metric: 1,
+                metric: i.cost,
             });
         }
-        // The other networks of the default VRF are stub links with the
-        // cost 1, so each OSPF router reaches the networks of the others.
-        let done: BTreeSet<(Ipv4Addr, u8)> = list
-            .iter()
-            .map(|i| (network(i.addr, i.len), i.len))
-            .collect();
         for i in e.devs[*x]
             .ifaces
             .iter()
             .filter(|i| i.vrf == "default" && i.mode != Mode::Mgmt)
         {
-            for (a, l) in i.addr.iter().chain(i.secondary.iter()) {
-                let net = (network(*a, *l), *l);
-                if !done.contains(&net) {
-                    routers.entry(*x).or_default().push(Link::Stub {
-                        net: net.0,
-                        len: net.1,
-                        metric: 1,
-                    });
-                }
+            let links = routers.entry(*x).or_default();
+            if let Some(o) = list.iter().find(|o| o.passive && o.name == i.name) {
+                links.push(Link::Stub {
+                    net: network(o.addr, o.len),
+                    len: o.len,
+                    metric: o.cost,
+                });
+            }
+            if let (Some((a, l)), true) = (i.secondary, list.iter().any(|o| o.name == i.name)) {
+                links.push(Link::Stub {
+                    net: network(a, l),
+                    len: l,
+                    metric: 1,
+                });
             }
         }
     }
@@ -234,7 +233,7 @@ pub fn of(e: &Estate, d: usize) -> Option<Ospf> {
     let in_area: BTreeSet<Ipv4Addr> = reach.iter().map(|x| rids[x]).collect();
     let own = &ifaces[&d];
     let mut neighbors = Vec::new();
-    for i in own.iter().filter(|i| !i.loopback) {
+    for i in own.iter().filter(|i| !i.loopback && !i.passive) {
         let seg = &segments[&(network(i.addr, i.len), i.len)];
         let dr = seg.iter().map(|(_, j)| j.addr).max().expect("a member");
         for (y, j) in seg.iter().filter(|(y, _)| *y != d) {
