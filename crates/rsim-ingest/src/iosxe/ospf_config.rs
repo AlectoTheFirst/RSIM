@@ -1113,7 +1113,8 @@ router ospf 1
 ";
         let rc = read(text);
         let p = &rc.processes[0];
-        let r: Vec<(Source, Option<u32>, Option<u8>, Option<&str>)> = p
+        type Statement<'a> = (Source, Option<u32>, Option<u8>, Option<&'a str>);
+        let r: Vec<Statement> = p
             .redistribute
             .iter()
             .map(|r| {
