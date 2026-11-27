@@ -388,7 +388,13 @@ fn the_router_id_is_the_configured_one_else_the_rule_of_the_platform() {
     let d = db(&built, "r1", Version::V2);
     assert_eq!(d.router_id, None);
     assert!(d.lsas.is_empty());
-    assert_eq!(kinds(&built, "r1"), vec!["ospf-no-router-id".to_string()]);
+    assert_eq!(
+        kinds(&built, "r1"),
+        vec![
+            "ospf-no-router-id".to_string(),
+            "ospf-no-address".to_string()
+        ]
+    );
 }
 
 /// r1 (area 1) - r2 (areas 1 and 0) - r3 (areas 0 and 2) - r4 (area 2), with
