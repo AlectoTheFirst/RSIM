@@ -75,6 +75,7 @@ pub const TIME: u64 = 1_795_356_312_000;
 /// Writes the data folder of `rsim-collect` in `dir`: the store keys in
 /// `keys` and the store in `store`, with one snapshot at [`TIME`], or at the
 /// second after the newest snapshot of a store that has one.
+#[allow(dead_code)]
 pub fn write(dir: &Path) {
     write_with(dir, false);
 }
