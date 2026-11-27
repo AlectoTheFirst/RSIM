@@ -76,16 +76,30 @@ router ospf CORE
  router-id 10.17.0.1
  area 0
   interface Loopback0
+   cost 1
    passive enable
   !
   interface TenGigE0/0/0/1
+   cost 10
    network point-to-point
   !
+  interface TenGigE0/0/0/3
+   cost 1
+   network point-to-point
+   passive enable
+  !
   interface TenGigE0/0/0/2
+   cost 10
    network point-to-point
   !
   interface TenGigE0/0/0/4
+   cost 10
    network point-to-point
+  !
+  interface TenGigE0/0/0/0
+   cost 1
+   network point-to-point
+   passive enable
   !
  !
 !

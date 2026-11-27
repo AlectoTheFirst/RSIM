@@ -4,6 +4,15 @@ Loopback0 is up, line protocol is up
 TenGigabitEthernet1/0/1 is up, line protocol is up
   Internet Address 10.28.0.3/31, Area 0, Attached via Interface Enable
   Process ID 1, Router ID 10.28.255.2, Network Type POINT_TO_POINT, Cost: 10
+Vlan99 is up, line protocol is up
+  Internet Address 10.22.99.3/24, Area 0, Attached via Interface Enable
+  Process ID 1, Router ID 10.28.255.2, Network Type BROADCAST, Cost: 1
+Vlan110 is up, line protocol is up
+  Internet Address 10.22.110.3/24, Area 0, Attached via Interface Enable
+  Process ID 1, Router ID 10.28.255.2, Network Type BROADCAST, Cost: 1
+Vlan120 is up, line protocol is up
+  Internet Address 10.22.120.3/24, Area 0, Attached via Interface Enable
+  Process ID 1, Router ID 10.28.255.2, Network Type BROADCAST, Cost: 1
 Vlan900 is up, line protocol is up
   Internet Address 10.22.250.2/29, Area 0, Attached via Interface Enable
   Process ID 1, Router ID 10.28.255.2, Network Type BROADCAST, Cost: 10

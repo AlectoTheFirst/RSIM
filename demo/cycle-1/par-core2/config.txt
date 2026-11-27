@@ -1,6 +1,6 @@
 Building configuration...
 
-Current configuration : 3179 bytes
+Current configuration : 3331 bytes
 !
 ! Last configuration change at 07:30:00 UTC Mon Nov 2 2026 by admin
 !
@@ -56,6 +56,7 @@ vlan 900
 interface Loopback0
  ip address 10.28.255.2 255.255.255.255
  ip ospf 1 area 0
+ ip ospf cost 1
 !
 interface TenGigabitEthernet1/0/1
  description par-wan2
@@ -63,6 +64,7 @@ interface TenGigabitEthernet1/0/1
  ip address 10.28.0.3 255.255.255.254
  ip ospf network point-to-point
  ip ospf 1 area 0
+ ip ospf cost 10
 !
 interface TenGigabitEthernet1/0/47
  description par-core1
@@ -87,6 +89,8 @@ interface Vlan99
  standby 99 ip 10.22.99.1
  standby 99 priority 100
  standby 99 preempt
+ ip ospf 1 area 0
+ ip ospf cost 1
 !
 interface Vlan110
  description USERS
@@ -94,6 +98,8 @@ interface Vlan110
  standby 110 ip 10.22.110.1
  standby 110 priority 100
  standby 110 preempt
+ ip ospf 1 area 0
+ ip ospf cost 1
 !
 interface Vlan120
  description PRINTERS
@@ -101,11 +107,14 @@ interface Vlan120
  standby 120 ip 10.22.120.1
  standby 120 priority 100
  standby 120 preempt
+ ip ospf 1 area 0
+ ip ospf cost 1
 !
 interface Vlan900
  description CORE-TRANSIT
  ip address 10.22.250.2 255.255.255.248
  ip ospf 1 area 0
+ ip ospf cost 10
 !
 interface TenGigabitEthernet1/0/10
  description par-acc1

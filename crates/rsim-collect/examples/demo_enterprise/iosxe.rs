@@ -149,7 +149,7 @@ fn config_body(dev: &Dev) -> String {
                     if i.mode == Mode::Routed {
                         s.push_str(" ip ospf network point-to-point\n");
                     }
-                    s.push_str(" ip ospf 1 area 0\n");
+                    let _ = writeln!(s, " ip ospf 1 area 0\n ip ospf cost {}", i.ospf_cost);
                 }
                 if !sw && i.mode == Mode::Routed {
                     s.push_str(" negotiation auto\n");
@@ -173,7 +173,7 @@ fn config_body(dev: &Dev) -> String {
         for i in dev
             .ifaces
             .iter()
-            .filter(|i| i.ospf && i.mode != Mode::Loopback)
+            .filter(|i| i.ospf && !i.ospf_passive && i.mode != Mode::Loopback)
         {
             let _ = writeln!(s, " no passive-interface {}", i.name);
         }
