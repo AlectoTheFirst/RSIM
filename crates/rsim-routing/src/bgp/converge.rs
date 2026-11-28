@@ -988,10 +988,70 @@ fn search_order(g: &Group<'_, '_>, fixed: &[Option<BestPath>]) -> Vec<usize> {
     out
 }
 
+/// The variables that can have an unknown selection: a variable with an
+/// unknown possible candidate of the domains `dom`, a variable whose
+/// decision over 1, 2 or all of its possible paths is unknown, a variable
+/// with an unknown fixed value, and each variable that reads one of them
+/// through a source of `dependencies` that is not in `silent`.
+fn unknowable(
+    g: &Group<'_, '_>,
+    fixed: &[Option<BestPath>],
+    dom: &[BTreeSet<BestPath>],
+    silent: &BTreeSet<(usize, Source)>,
+) -> Vec<bool> {
+    let n = g.vars.len();
+    let mut can = vec![false; n];
+    for v in 0..n {
+        if let Some(f) = &fixed[v] {
+            can[v] = matches!(f, BestPath::Unknown(_));
+            continue;
+        }
+        let cands: Vec<Cand> = possible(g, v, dom, fixed)
+            .into_iter()
+            .map(|(_, c)| c)
+            .collect();
+        if cands.iter().any(|c| c.offer.is_err()) {
+            can[v] = true;
+            continue;
+        }
+        let unknown = |set: &[Cand]| matches!(g.choose(v, set), Choice::Unknown(_));
+        can[v] = unknown(&cands)
+            || (0..cands.len())
+                .any(|i| (i..cands.len()).any(|j| unknown(&[cands[i].clone(), cands[j].clone()])));
+    }
+    let reads = |v: usize| -> Vec<usize> {
+        let mut out = g.contributors[v].clone();
+        for &(l, w) in &g.inlinks[v] {
+            if !silent.contains(&(v, Source::Link(l))) {
+                out.push(w);
+                out.extend(g.suppressors[w].iter().copied());
+            }
+        }
+        for (pos, &(_, w)) in g.inleaks[v].iter().enumerate() {
+            if !silent.contains(&(v, Source::Leak(pos))) {
+                out.push(w);
+            }
+        }
+        out
+    };
+    loop {
+        let mut changed = false;
+        for v in (0..n).filter(|&v| fixed[v].is_none() && !can[v]) {
+            if reads(v).iter().any(|&w| can[w]) {
+                can[v] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            return can;
+        }
+    }
+}
+
 /// The best paths of each stable assignment, in the order of the search.
 /// The options of a variable are no path, and with a possible candidate of
-/// the domains `dom` an unknown selection and each source of a possible
-/// candidate.
+/// the domains `dom` each source of a possible candidate and, for a
+/// variable of [`unknowable`], an unknown selection.
 fn search(
     g: &Group<'_, '_>,
     fixed: &[Option<BestPath>],
@@ -999,6 +1059,33 @@ fn search(
 ) -> Vec<Vec<BestPath>> {
     let n = g.vars.len();
     let free = search_order(g, fixed);
+    // A link or a leak whose source gives no path for each value of its
+    // domain and for an unknown value gives no candidate, so the check of a
+    // variable does not wait for that source.
+    let probe = BestPath::Unknown(Unknown::new(Reason::SelectionNotKnown, String::new()));
+    let mut silent: BTreeSet<(usize, Source)> = BTreeSet::new();
+    for &v in &free {
+        for &(l, w) in &g.inlinks[v] {
+            if g.suppressors[w].is_empty()
+                && dom[w]
+                    .iter()
+                    .chain([&probe])
+                    .all(|x| matches!(g.transfer(l, w, x), Offer::None))
+            {
+                silent.insert((v, Source::Link(l)));
+            }
+        }
+        for (pos, &(li, w)) in g.inleaks[v].iter().enumerate() {
+            if dom[w]
+                .iter()
+                .chain([&probe])
+                .all(|x| matches!(g.leak(li, x), Offer::None))
+            {
+                silent.insert((v, Source::Leak(pos)));
+            }
+        }
+    }
+    let can = unknowable(g, fixed, dom, &silent);
     let domains: Vec<Vec<Assign>> = free
         .iter()
         .map(|&v| {
@@ -1009,7 +1096,7 @@ fn search(
                 .map(|(_, c)| c.source)
                 .collect();
             let mut d = vec![Assign::Empty];
-            if !cands.is_empty() {
+            if !cands.is_empty() && can[v] {
                 d.push(Assign::Unknown);
             }
             if g.network[v].is_some() {
@@ -1041,32 +1128,6 @@ fn search(
             d
         })
         .collect();
-    // A link or a leak whose source gives no path for each value of its
-    // domain and for an unknown value gives no candidate, so the check of a
-    // variable does not wait for that source.
-    let probe = BestPath::Unknown(Unknown::new(Reason::SelectionNotKnown, String::new()));
-    let mut silent: BTreeSet<(usize, Source)> = BTreeSet::new();
-    for &v in &free {
-        for &(l, w) in &g.inlinks[v] {
-            if g.suppressors[w].is_empty()
-                && dom[w]
-                    .iter()
-                    .chain([&probe])
-                    .all(|x| matches!(g.transfer(l, w, x), Offer::None))
-            {
-                silent.insert((v, Source::Link(l)));
-            }
-        }
-        for (pos, &(li, w)) in g.inleaks[v].iter().enumerate() {
-            if dom[w]
-                .iter()
-                .chain([&probe])
-                .all(|x| matches!(g.leak(li, x), Offer::None))
-            {
-                silent.insert((v, Source::Leak(pos)));
-            }
-        }
-    }
     let mut assign: Vec<Option<Assign>> = vec![None; n];
     let mut found = Vec::new();
     #[allow(clippy::too_many_arguments)]
