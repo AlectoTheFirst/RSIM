@@ -3,6 +3,8 @@
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 
+use rsim_core::Prefix;
+
 use super::RouteKey;
 use crate::platform::Platform;
 
@@ -40,6 +42,18 @@ pub enum ObjectRef {
         device: String,
         vrf: String,
         name: String,
+    },
+    /// The entry of a prefix in the route table of a process.
+    IgpRoute {
+        device: String,
+        vrf: String,
+        prefix: Prefix,
+    },
+    /// The selections of the routes inside `key` at a process.
+    Contributors {
+        device: String,
+        vrf: String,
+        key: RouteKey,
     },
     /// The candidate paths of a route at a process.
     Candidates {

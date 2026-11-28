@@ -191,6 +191,29 @@ impl Comparator<'_> {
     }
 }
 
+fn comparator<'a>(profile: &'a BgpProfile, options: &BgpOptions) -> Comparator<'a> {
+    Comparator {
+        profile,
+        always_med: options.always_compare_med,
+        missing_worst: profile.missing_as_worst(options),
+        compare_routerid: options.compare_routerid,
+        default_lp: profile.default_local_pref(options),
+    }
+}
+
+/// The multipath of `base` among `candidates`, as [`Decision`] gives it for
+/// a best path, with `base` first.
+pub(crate) fn multipath_for(
+    candidates: &[BgpPath],
+    base: usize,
+    options: &BgpOptions,
+    profile: &BgpProfile,
+) -> Vec<usize> {
+    let cmp = comparator(profile, options);
+    let limit = profile.maximum_paths(candidates[base].peer.kind, options);
+    multipath(candidates, base, &cmp, options, limit)
+}
+
 /// The best path of a route from its candidates under the options of the
 /// process and the profile of the platform.
 ///
@@ -225,13 +248,7 @@ pub fn decide(
             });
         }
     }
-    let cmp = Comparator {
-        profile,
-        always_med: options.always_compare_med,
-        missing_worst: profile.missing_as_worst(options),
-        compare_routerid: options.compare_routerid,
-        default_lp: profile.default_local_pref(options),
-    };
+    let cmp = comparator(profile, options);
     let mut win = if !cmp.always_med && profile.deterministic_med(options) {
         let mut groups: BTreeMap<(NeighbourAs, Option<usize>), Vec<usize>> = BTreeMap::new();
         for (i, p) in candidates.iter().enumerate() {

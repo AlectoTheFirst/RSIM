@@ -4,12 +4,15 @@
 //! The order is fixed: communities, route targets and lists are ordered
 //! sets, and the policies and lists are held by name in `BTreeMap`s.
 
+pub mod converge;
 pub mod decision;
 pub mod lists;
 pub mod pattern;
 pub mod policy;
 pub mod process;
 pub mod profile;
+pub mod propagate;
+pub mod session;
 pub mod stage;
 
 use std::collections::BTreeSet;
@@ -19,6 +22,10 @@ use std::str::FromStr;
 
 use rsim_core::{Prefix, SourceSpan};
 
+pub use converge::{
+    BgpResult, Convergence, ConvergenceKind, CycleWitness, Event, GroupResult, Note, Outcome,
+    RouteAt, RouteState, WheelSpoke, compute, install_candidates,
+};
 pub use decision::{Decision, DecisionStage, DecisionStep, decide};
 pub use lists::{
     AsPathLine, AsPathList, AsPathTerm, Cmp, CommunityLine, CommunityList, CommunityTerm, Half,
@@ -34,6 +41,11 @@ pub use process::{
     Aggregate, BgpOptions, BgpProcess, LocalAs, Neighbor, Network, NextHopSelf, PolicySet,
 };
 pub use profile::{BgpProfile, DECISION_ORDER, MatchReads, UndefinedPolicy};
+pub use propagate::{
+    BestPath, BgpInput, IgpView, InputError, OriginateInput, OriginateStage, Resolution, Seed,
+    Selection, aggregate_offer, network_offer,
+};
+pub use session::{Offer, Session, SessionEnd, SessionStage, export, receive};
 pub use stage::{ObjectRef, RoutingStage};
 
 /// An AS number in the asplain form.
@@ -333,6 +345,34 @@ impl AsPath {
         self.segments.iter().any(|s| s.asns.contains(&asn))
     }
 
+    /// The path with the confederation segments removed.
+    pub fn without_confed(&self) -> AsPath {
+        AsPath {
+            segments: self
+                .segments
+                .iter()
+                .filter(|s| matches!(s.kind, SegmentKind::Sequence | SegmentKind::Set))
+                .cloned()
+                .collect(),
+        }
+    }
+
+    /// The path with `asn` before it, in the first AS_CONFED_SEQUENCE.
+    pub fn prepend_confed(&self, asn: Asn) -> AsPath {
+        let mut out = self.clone();
+        match out.segments.first_mut() {
+            Some(s) if s.kind == SegmentKind::ConfedSequence => s.asns.insert(0, asn),
+            _ => out.segments.insert(
+                0,
+                AsSegment {
+                    kind: SegmentKind::ConfedSequence,
+                    asns: vec![asn],
+                },
+            ),
+        }
+        out
+    }
+
     /// The path with `asns` before it, in the first AS_SEQUENCE.
     pub fn prepend(&self, asns: &[Asn]) -> AsPath {
         let mut out = self.clone();
@@ -431,7 +471,7 @@ pub struct Peer {
 }
 
 /// One path of a route with its attributes.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BgpPath {
     pub next_hop: Option<IpAddr>,
     pub as_path: AsPath,
@@ -498,6 +538,20 @@ pub enum Reason {
     NoBgpProfile,
     /// The decision compares a path whose attributes are not collected.
     PathAttributesNotCollected,
+    /// The address families of a neighbour depend on a default that the
+    /// profile does not hold.
+    AddressFamilyNotKnown,
+    /// The IGP view does not know the resolution of a next hop.
+    NextHopNotResolved,
+    /// The IGP view does not know whether the route of a `network`
+    /// statement is present.
+    OriginationNotKnown,
+    /// The search assigns an unknown selection to a route.
+    SelectionNotKnown,
+    /// The prefix group has more than one stable outcome.
+    MultipleStableOutcomes,
+    /// The prefix group has no stable outcome.
+    NoConvergence,
 }
 
 impl Reason {
@@ -506,12 +560,18 @@ impl Reason {
             Reason::PolicyClauseNotEvaluated => "policy clause not evaluated",
             Reason::NoBgpProfile => "no bgp profile",
             Reason::PathAttributesNotCollected => "path attributes not collected",
+            Reason::AddressFamilyNotKnown => "address family not known",
+            Reason::NextHopNotResolved => "next hop not resolved",
+            Reason::OriginationNotKnown => "origination not known",
+            Reason::SelectionNotKnown => "selection not known",
+            Reason::MultipleStableOutcomes => "multiple stable outcomes",
+            Reason::NoConvergence => "no convergence",
         }
     }
 }
 
 /// An unknown BGP result with its reason and the constructs that cause it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Unknown {
     pub reason: Reason,
     /// The constructs or paths that cause the result, in a fixed order.

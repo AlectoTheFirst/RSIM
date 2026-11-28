@@ -728,7 +728,7 @@ fn guard_reads(g: &Guard, device: &str, vrf: &str, out: &mut BTreeSet<ObjectRef>
 
 /// Adds the policy `name`, the lists that it references and the policies
 /// that it applies to `out`.
-fn policy_reads(
+pub(crate) fn policy_reads(
     set: &PolicySet,
     name: &str,
     device: &str,
