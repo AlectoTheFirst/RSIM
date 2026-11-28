@@ -32,9 +32,10 @@
 //!    timings" when the greedy construction stops at a dispute wheel or the
 //!    forward pass cycles, and "safety under all timings not checked"
 //!    otherwise. 1 with an unknown route gives the result `Unknown` with
-//!    the reason "convergence not determined" and the routes of the
-//!    outcome. More give `MultipleStableOutcomes`, and the routes of the
-//!    group are unknown.
+//!    the reason "convergence not determined" and the text of each unknown
+//!    route of the outcome as its details, and each variable with a
+//!    possible candidate is unknown. More give `MultipleStableOutcomes`,
+//!    and the routes of the group are unknown.
 //!    0 outcomes with a fixed point of the forward pass give the result
 //!    `Unknown` with the reason "internal error".
 
@@ -184,9 +185,7 @@ pub enum Event {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BgpResult {
     /// The state of each route with a path. The routes of a group with a
-    /// result other than `Converged` are unknown, except for the result
-    /// `Unknown` with 1 stable outcome, which keeps the routes of the
-    /// outcome.
+    /// result other than `Converged` are unknown.
     pub routes: BTreeMap<RouteAt, RouteState>,
     pub groups: Vec<GroupResult>,
     pub events: Vec<Event>,
@@ -964,16 +963,16 @@ fn run_group(
         },
         (1, _) if picks[0].iter().any(|b| matches!(b, BestPath::Unknown(_))) => {
             Convergence::Unknown {
-                reason: Unknown::new(
-                    Reason::ConvergenceNotDetermined,
-                    format!(
-                        "{} unknown routes in the stable outcome",
-                        picks[0]
-                            .iter()
-                            .filter(|b| matches!(b, BestPath::Unknown(_)))
-                            .count()
-                    ),
-                ),
+                reason: Unknown {
+                    reason: Reason::ConvergenceNotDetermined,
+                    details: picks[0]
+                        .iter()
+                        .filter_map(|b| match b {
+                            BestPath::Unknown(u) => Some(u.to_string()),
+                            _ => None,
+                        })
+                        .collect(),
+                },
             }
         }
         (1, _) => Convergence::Converged {
@@ -1025,7 +1024,6 @@ fn run_group(
                 ),
             ),
         ),
-        Convergence::Unknown { .. } if outcomes.len() == 1 => outcomes.swap_remove(0).routes,
         Convergence::Unknown { reason } => unknown_routes(&g, possible_path, reason),
     };
     (result(convergence), routes)

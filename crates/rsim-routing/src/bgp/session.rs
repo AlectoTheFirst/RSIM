@@ -161,11 +161,25 @@ pub fn export(
             }
         }
     }
+    // The reflected path needs a known ORIGINATOR_ID and cluster ID.
+    let mut id_unknown = None;
     if reflect {
         if p.originator_id.is_none() {
-            p.originator_id = Some(best.peer.router_id);
+            p.originator_id = best.peer.router_id;
+            if p.originator_id.is_none() {
+                id_unknown = Some(format!(
+                    "originator id of the path from {} at {}",
+                    best.peer
+                        .address
+                        .map_or_else(|| "the device".to_string(), |a| a.to_string()),
+                    sender.device
+                ));
+            }
         }
-        p.cluster_list.insert(0, sender.cluster_id());
+        match sender.cluster_id() {
+            Some(c) => p.cluster_list.insert(0, c),
+            None => id_unknown = Some(format!("cluster id of {}", sender.device)),
+        }
     }
     let (result, next_hop_set) =
         neighbor_policy_next_hop(sender, neighbor, Direction::Export, key, &p, Some(&profile));
@@ -174,6 +188,9 @@ pub fn export(
         PolicyResult::Deny => return Offer::None,
         PolicyResult::Unknown(u) => return Offer::Unknown(u),
     };
+    if let Some(why) = id_unknown {
+        return Offer::Unknown(Unknown::new(Reason::RouterIdNotKnown, why));
+    }
     match out {
         SessionKind::Ebgp => {
             let own = sender.confederation_id.unwrap_or(sender.asn);
@@ -223,11 +240,13 @@ pub fn export(
 
 /// The path that `receiver` accepts from its neighbour `neighbor` for the
 /// sent path `sent` of `key`. `sender_router_id` is the router ID of the
-/// sender.
+/// sender, `None` when it is not known. An ORIGINATOR_ID or a CLUSTER_LIST
+/// loop check that needs a router ID or a cluster ID of the receiver that
+/// is not known gives `Unknown` for a path that the import policy permits.
 pub fn receive(
     receiver: &BgpProcess,
     neighbor: &Neighbor,
-    sender_router_id: Ipv4Addr,
+    sender_router_id: Option<Ipv4Addr>,
     key: &RouteKey,
     sent: &BgpPath,
 ) -> Offer {
@@ -253,10 +272,24 @@ pub fn receive(
         SessionKind::ConfedEbgp => path.contains(receiver.asn),
         _ => false,
     };
-    if looped
-        || sent.originator_id == Some(receiver.router_id)
-        || sent.cluster_list.contains(&receiver.cluster_id())
-    {
+    let mut id_unknown = None;
+    let originator_loop = match (sent.originator_id, receiver.router_id) {
+        (Some(o), Some(r)) => o == r,
+        (Some(_), None) => {
+            id_unknown = Some(format!("router id of {}", receiver.device));
+            false
+        }
+        (None, _) => false,
+    };
+    let cluster_loop = match receiver.cluster_id() {
+        Some(c) => sent.cluster_list.contains(&c),
+        None if !sent.cluster_list.is_empty() => {
+            id_unknown = Some(format!("cluster id of {}", receiver.device));
+            false
+        }
+        None => false,
+    };
+    if looped || originator_loop || cluster_loop {
         return Offer::None;
     }
     let mut p = sent.clone();
@@ -275,14 +308,20 @@ pub fn receive(
         asn: neighbor.remote_as,
         kind,
     };
-    policy_offer(neighbor_policy(
+    match policy_offer(neighbor_policy(
         receiver,
         neighbor,
         Direction::Import,
         key,
         &p,
         Some(&profile),
-    ))
+    )) {
+        Offer::Path(_) if id_unknown.is_some() => Offer::Unknown(Unknown::new(
+            Reason::RouterIdNotKnown,
+            id_unknown.unwrap_or_default(),
+        )),
+        other => other,
+    }
 }
 
 /// The transfer stage of one direction of a session: the export of the end

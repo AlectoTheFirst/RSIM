@@ -29,7 +29,7 @@ pub fn path(kind: SessionKind, addr: &str, as_path: &[u32]) -> BgpPath {
     let asn = as_path.first().copied().unwrap_or(65000);
     let peer = Peer {
         address: Some(ip(addr)),
-        router_id: v4(addr),
+        router_id: Some(v4(addr)),
         asn: Asn(asn),
         kind,
     };
@@ -224,7 +224,7 @@ impl Lab {
         med: Option<u32>,
     ) {
         use rsim_routing::bgp::Seed;
-        let local = self.get(device).router_id.to_string();
+        let local = self.get(device).router_id.expect("a router ID").to_string();
         self.proc(device)
             .neighbors
             .entry(ip(addr))

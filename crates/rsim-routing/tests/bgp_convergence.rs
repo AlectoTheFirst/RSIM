@@ -683,7 +683,10 @@ fn an_unhandled_term_inside_bad_gadget_gives_an_unknown_convergence() {
     assert!(r.affected.contains(&key(SPP_PREFIX)));
     for d in ["n1", "n2", "n3"] {
         assert!(
-            matches!(state(&r, d, SPP_PREFIX), Some(RouteState::Unknown(_))),
+            matches!(
+                state(&r, d, SPP_PREFIX),
+                Some(RouteState::Unknown(u)) if u.reason == Reason::ConvergenceNotDetermined
+            ),
             "{d}: {:?}",
             state(&r, d, SPP_PREFIX)
         );
@@ -691,21 +694,37 @@ fn an_unhandled_term_inside_bad_gadget_gives_an_unknown_convergence() {
 }
 
 #[test]
-fn a_med_decision_over_more_candidates_than_the_bound_gives_an_unknown_route() {
-    use rsim_routing::bgp::{ConvergenceKind, ORDER_BOUND};
-    let mut lab = Lab::default();
-    lab.router("r1", Platform::Iosxe, 65001, "10.255.0.1");
-    for i in 0..=ORDER_BOUND {
-        let asn = if i % 2 == 0 { 64500 } else { 64501 };
-        let addr = format!("192.0.2.{}", i + 1);
-        lab.seed("r1", &addr, asn, SPP_PREFIX, &[asn], Some(i as u32));
+fn a_med_cycle_with_11_more_candidates_has_one_outcome_for_each_order_winner() {
+    let mut lab = med_cycle(None);
+    for i in 0..11u32 {
+        let addr = format!("198.51.101.{}", i + 1);
+        lab.seed("r1", &addr, 65001, SPP_PREFIX, &[64502], Some(i));
+        lab.cost("r1", &addr, 100 + i);
     }
     let r = lab.run();
-    let Some(RouteState::Unknown(u)) = state(&r, "r1", SPP_PREFIX) else {
-        panic!("{:?}", state(&r, "r1", SPP_PREFIX));
+    let Convergence::MultipleStableOutcomes { outcomes } = only_group(&r) else {
+        panic!("{:?}", r.groups[0].convergence);
     };
-    assert_eq!(u.reason, Reason::CandidateOrderNotComputed);
-    assert_eq!(r.worst, ConvergenceKind::Unknown, "{:?}", r.groups);
+    let at = rsim_routing::bgp::RouteAt {
+        device: "r1".to_string(),
+        vrf: "default".to_string(),
+        key: key(SPP_PREFIX),
+    };
+    let hops: BTreeSet<_> = outcomes
+        .iter()
+        .map(|o| match &o.routes[&at] {
+            RouteState::Selected(s) => s.best.next_hop,
+            RouteState::Unknown(u) => panic!("{u}"),
+        })
+        .collect();
+    assert_eq!(
+        hops,
+        BTreeSet::from([
+            Some(ip("198.51.100.1")),
+            Some(ip("198.51.100.2")),
+            Some(ip("198.51.100.3")),
+        ])
+    );
 }
 
 /// An iBGP mesh of x, v and w in AS 65001, with the eBGP peer y of x in AS

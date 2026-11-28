@@ -311,7 +311,7 @@ fn mutations(w: &[BgpProcess]) -> Vec<(String, Mutation)> {
                     vrf: v.clone(),
                 },
                 Box::new(|p: &mut BgpProcess| {
-                    p.router_id = v4("10.255.9.9");
+                    p.router_id = Some(v4("10.255.9.9"));
                     p.cluster_id = Some(v4("10.255.8.8"));
                     p.options.always_compare_med = !p.options.always_compare_med;
                     p.options.default_local_pref = Some(7);

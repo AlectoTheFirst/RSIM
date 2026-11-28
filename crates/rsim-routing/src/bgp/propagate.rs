@@ -18,7 +18,7 @@ use rsim_core::{Prefix, SourceSpan};
 use super::decision::{Decision, decide, multipath_for, order_winners};
 use super::policy::{Direction, PolicyContext, PolicyResult, evaluate, policy_reads};
 use super::process::{Aggregate, BgpProcess, Network};
-use super::profile::UndefinedPolicy;
+use super::profile::{BgpProfile, UndefinedPolicy};
 use super::session::{Offer, Session, export, receive};
 use super::stage::{ObjectRef, RoutingStage};
 use super::{
@@ -148,11 +148,17 @@ fn local_path(p: &BgpProcess, origin: LocalOrigin, spans: &[SourceSpan]) -> BgpP
 }
 
 /// The path of the `network` statement `n` of `process`. `route_present`
-/// tells whether the route table holds the prefix. The route-map of the
-/// statement runs on the path.
+/// tells whether the route table holds the prefix. With the option
+/// `network_import_check` `Some(false)`, the statement originates the path
+/// with no route. The route-map of the statement runs on the path.
 pub fn network_offer(process: &BgpProcess, n: &Network, route_present: Option<bool>) -> Offer {
     let Some(profile) = process.profile() else {
         return Offer::Unknown(Unknown::new(Reason::NoBgpProfile, process.device.clone()));
+    };
+    let route_present = if process.options.network_import_check == Some(false) {
+        Some(true)
+    } else {
+        route_present
     };
     match route_present {
         Some(true) => {}
@@ -862,21 +868,23 @@ impl<'n, 'a> Group<'n, 'a> {
             best: paths[base].clone(),
             multipath: mp.iter().map(|&j| paths[j].clone()).collect(),
         };
+        let tie = |tied: &[usize], profile: &BgpProfile| {
+            let mut out = Vec::new();
+            for &t in tied {
+                match multipath_for(&paths, t, &p.options, profile) {
+                    Ok(mp) => out.push((cands[t].source, sel(t, &mp))),
+                    Err(u) => return Choice::Unknown(u),
+                }
+            }
+            Choice::Tie(out)
+        };
         let decision = decide(&paths, &p.options, profile.as_ref());
         if matches!(decision, Decision::Best { .. } | Decision::Tie { .. }) {
             match order_winners(&paths, &p.options, profile.as_ref()) {
                 Err(u) => return Choice::Unknown(u),
                 Ok(Some(winners)) if winners.len() > 1 => {
                     let profile = profile.expect("order winners have a profile");
-                    return Choice::Tie(
-                        winners
-                            .iter()
-                            .map(|&t| {
-                                let mp = multipath_for(&paths, t, &p.options, &profile);
-                                (cands[t].source, sel(t, &mp))
-                            })
-                            .collect(),
-                    );
+                    return tie(&winners, &profile);
                 }
                 Ok(_) => {}
             }
@@ -888,14 +896,7 @@ impl<'n, 'a> Group<'n, 'a> {
             } => Choice::Best(cands[best].source, Box::new(sel(best, &multipath))),
             Decision::Tie { tied, .. } => {
                 let profile = profile.expect("a tie has a profile");
-                Choice::Tie(
-                    tied.iter()
-                        .map(|&t| {
-                            let mp = multipath_for(&paths, t, &p.options, &profile);
-                            (cands[t].source, sel(t, &mp))
-                        })
-                        .collect(),
-                )
+                tie(&tied, &profile)
             }
             Decision::Unknown(u) => Choice::Unknown(u),
         }

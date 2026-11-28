@@ -38,6 +38,10 @@ pub struct BgpOptions {
     /// `bgp default ipv4-unicast`. `Some(false)` for `no bgp default
     /// ipv4-unicast`.
     pub default_ipv4_unicast: Option<bool>,
+    /// `bgp network import-check` of FRR. `Some(false)` originates a
+    /// `network` statement with no route of its prefix. `None` and
+    /// `Some(true)` originate it only with that route.
+    pub network_import_check: Option<bool>,
 }
 
 /// The `local-as` of a neighbour.
@@ -145,7 +149,8 @@ pub struct BgpProcess {
     /// profile.
     pub platform: Option<Platform>,
     pub asn: Asn,
-    pub router_id: Ipv4Addr,
+    /// `None` when the config states no router ID.
+    pub router_id: Option<Ipv4Addr>,
     /// `None` takes the router ID (RFC 4456 7).
     pub cluster_id: Option<Ipv4Addr>,
     /// The confederation identifier.
@@ -168,14 +173,14 @@ impl BgpProcess {
         vrf: impl Into<String>,
         platform: Option<Platform>,
         asn: Asn,
-        router_id: Ipv4Addr,
+        router_id: impl Into<Option<Ipv4Addr>>,
     ) -> BgpProcess {
         BgpProcess {
             device: device.into(),
             vrf: vrf.into(),
             platform,
             asn,
-            router_id,
+            router_id: router_id.into(),
             cluster_id: None,
             confederation_id: None,
             confederation_peers: BTreeSet::new(),
@@ -193,9 +198,10 @@ impl BgpProcess {
         self.platform.map(BgpProfile::of)
     }
 
-    /// The cluster ID: the configured one or the router ID.
-    pub fn cluster_id(&self) -> Ipv4Addr {
-        self.cluster_id.unwrap_or(self.router_id)
+    /// The cluster ID: the configured one or the router ID. `None` when
+    /// neither is known.
+    pub fn cluster_id(&self) -> Option<Ipv4Addr> {
+        self.cluster_id.or(self.router_id)
     }
 
     /// The kind of the session to `n`. The session is iBGP when the remote
