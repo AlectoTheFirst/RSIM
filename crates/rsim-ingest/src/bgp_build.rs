@@ -887,7 +887,6 @@ mod tests {
     use super::*;
     use rsim_core::{FunctionId, InterfaceId};
     use rsim_functions::RouteNextHop;
-    use rsim_routing::install;
 
     const OSPF: RouteKind = RouteKind::Learned(RouteProtocol::Ospf);
 
