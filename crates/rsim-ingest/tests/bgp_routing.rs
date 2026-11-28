@@ -307,3 +307,69 @@ fn a_bgp_route_that_matches_in_the_base_stays_unknown_in_a_scenario() {
     let detail = x3_lookup(&t);
     assert!(detail.contains(NOT_RECOMPUTED), "{detail}");
 }
+
+#[test]
+fn a_reflected_route_of_a_client_with_no_router_id_makes_its_group_not_computed() {
+    let mut inputs = inputs();
+    for i in &mut inputs {
+        if let Input::Iosxr { name, config, .. } = i
+            && name == "x2"
+        {
+            *config = String::from_utf8(config.clone())
+                .unwrap()
+                .replace(" bgp router-id 192.0.2.2\n", "")
+                .into_bytes();
+        }
+    }
+    let e = assemble(inputs);
+    let b = e.bgp_routing.as_ref().unwrap();
+    assert!(b.gaps.is_empty(), "{:?}", b.gaps);
+    for d in ["n1", "x1", "x3"] {
+        let r = row(&e, d, "192.0.2.64/27");
+        assert_eq!(r.0, Category::NotComputed, "{d}: {r:?}");
+        assert!(r.1.starts_with("convergence not determined"), "{d}: {r:?}");
+    }
+    assert!(
+        row(&e, "x3", "192.0.2.64/27")
+            .1
+            .contains("router id not known")
+    );
+}
+
+#[test]
+fn a_collected_route_with_a_next_hop_inside_the_twin_is_compared_with_a_seeded_best_path() {
+    let mut inputs = inputs();
+    if let Input::Nxos { collected, .. } = &mut inputs[0] {
+        for r in &mut collected.routes {
+            if r.prefix == "198.51.100.128/25" {
+                r.next_hop = Some("198.51.100.2".to_string());
+                r.interface = Some("Ethernet1/1".to_string());
+            }
+        }
+    }
+    let e = assemble_with(inputs, &n1_tables(&[]));
+    let r = row(&e, "n1", "198.51.100.128/25");
+    assert_eq!(r.0, Category::Differ, "{r:?}");
+    assert_eq!(r.2, ["203.0.113.2@Ethernet1/2"]);
+}
+
+#[test]
+fn the_received_table_of_an_ibgp_peer_outside_the_twin_keeps_the_local_preference() {
+    let n1 = fixture("n1-config.txt")
+        .replace("    remote-as 64499\n", "    remote-as 64501\n")
+        .replace("      route-map FROM-ISP in\n", "");
+    let text =
+        fixture("n1-routes.json").replace("\"localpref\": \"100\"", "\"localpref\": \"250\"");
+    let section = Section::Fresh(text.into_bytes(), "n1/bgp_routes".into());
+    let tables = BTreeMap::from([(
+        "n1".to_string(),
+        BTreeMap::from([(rsim_ingest::bgp_routes::ROUTES.to_string(), section)]),
+    )]);
+    let e = assemble_with(inputs_with(&n1, &fixture("x1-config.txt")), &tables);
+    let seeds = &e.bgp_routing.as_ref().unwrap().input.seeds;
+    assert!(!seeds.is_empty());
+    for s in seeds {
+        assert!(s.received, "{s:?}");
+        assert_eq!(s.path.local_pref, Some(250), "{s:?}");
+    }
+}

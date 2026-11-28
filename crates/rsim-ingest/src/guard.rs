@@ -37,6 +37,27 @@ pub fn outside(
     out
 }
 
+/// The computed route table of a VRF for the IGP view of the BGP
+/// calculation: the install stage of `cands`, the candidates other than
+/// BGP, with the candidates of [`outside`] of the collected routes that are
+/// not BGP routes.
+pub fn igp(
+    mut cands: Vec<Candidate>,
+    routes: &BTreeMap<Prefix, CollectedRoute>,
+    collected: &Fib,
+    platform: Platform,
+    through_default: bool,
+) -> Fib {
+    let bgp = RouteKind::Learned(RouteProtocol::Bgp);
+    let other: BTreeMap<Prefix, CollectedRoute> = routes
+        .iter()
+        .filter(|(p, _)| collected.get(p).is_some_and(|r| r.kind != bgp))
+        .map(|(p, c)| (*p, c.clone()))
+        .collect();
+    cands.extend(outside(&other, collected, platform));
+    rsim_routing::install(cands, through_default)
+}
+
 /// The default administrative distance of a kind of route.
 fn distance(platform: Platform, kind: RouteKind) -> u8 {
     match kind {

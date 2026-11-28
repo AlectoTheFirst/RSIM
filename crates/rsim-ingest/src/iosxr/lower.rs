@@ -1455,6 +1455,7 @@ fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &H
             .map(|p| p.i.name.clone())
     };
     cands.extend(ospf.candidates(hops.platform, false, &|i, gw| hop(l, i, gw), &interface_of));
+    let igp = cands.clone();
     // In a scenario each BGP route of the computed table of the base is an
     // unknown candidate.
     let bgp = match hops.pass {
@@ -1504,6 +1505,16 @@ fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &H
             },
         );
     }
+    l.out.igp.push((
+        vrf.to_string(),
+        crate::guard::igp(
+            igp,
+            &routes,
+            t,
+            hops.platform,
+            hops.computed_through_default,
+        ),
+    ));
     cands.extend(crate::guard::outside(&routes, t, hops.platform));
     let computed = install(cands, hops.computed_through_default);
     crate::scenario::finish(

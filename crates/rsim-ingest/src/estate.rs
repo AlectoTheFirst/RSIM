@@ -1008,33 +1008,36 @@ fn assemble_pass(
     }
     e.ospf_guard = ospf_rows;
 
-    // The computed connected, static and OSPF routes of each VRF of the
-    // devices with BGP, for the IGP view of the BGP calculation, and the
-    // tables of the neighbours of the section `bgp_routes`.
+    // The devices with BGP with the tables of the neighbours of the section
+    // `bgp_routes` and the router IDs of the neighbour detail. The IGP view
+    // of each VyOS router comes from its main route table here, and the one
+    // of the other devices from their first lowering.
     let mut bgp_devices: BTreeMap<String, crate::bgp_build::DeviceInput> = BTreeMap::new();
+    let mut igp_fibs: BTreeMap<String, Vec<(String, rsim_functions::Fib)>> = BTreeMap::new();
     for (device, (platform, bgp, collected)) in bgp_in {
-        let ospf = match platform {
-            rsim_routing::Platform::Nxos => switches.get(&device).and_then(|s| s.1.ospf.as_ref()),
-            rsim_routing::Platform::FrrTraditional | rsim_routing::Platform::FrrDatacenter => {
-                routers.get(&device).and_then(|r| r.col.ospf.as_ref())
-            }
-            _ => ios_ospf.get(&device),
-        };
-        let igp = igp_tables(ospf_in.get(&device), ospf, platform);
         let vendor = e.vendors.get(&device).map_or("", String::as_str);
-        let answer = sessions
-            .get(&device)
-            .and_then(|s| s.get(crate::bgp_routes::ROUTES))
+        let none = SessionSections::new();
+        let device_sections = sessions.get(&device).unwrap_or(&none);
+        let answer = device_sections
+            .get(crate::bgp_routes::ROUTES)
             .map_or(bgp::Answer::NotCollected, bgp::Collected::answer);
         let tables = crate::bgp_routes::read(vendor, answer);
+        let router_ids = crate::bgp_neighbors::router_ids(vendor, device_sections);
+        if let Some(r) = routers.get(&device) {
+            igp_fibs.insert(
+                device.clone(),
+                vyos::lower::igp_tables(&device, &r.file, &vyos::profile(), &r.cfg, &r.col),
+            );
+        }
         bgp_devices.insert(
             device,
             crate::bgp_build::DeviceInput {
                 platform,
                 bgp,
-                igp,
+                igp: BTreeMap::new(),
                 collected,
                 tables,
+                router_ids,
             },
         );
     }
@@ -1058,50 +1061,63 @@ fn assemble_pass(
         );
     }
 
-    // The first lowering of each NX-OS switch gives its summary. Its next
-    // hops join the set, and the summaries give the links and the places of
-    // the endpoints.
+    // The first lowering of each NX-OS switch gives its summary and its IGP
+    // view. Its next hops join the set, and the summaries give the links and
+    // the places of the endpoints.
     let nx_profile = nxos::profile();
-    let mut summaries: BTreeMap<String, crate::links::Summary> = switches
-        .iter()
-        .map(|(d, (cfg, col, file, sections))| {
-            let (_, sum) = nxos::lower(
-                d,
-                file,
-                &nx_profile,
-                cfg,
-                col,
-                sections,
-                &crate::links::External::default(),
-            );
-            (d.clone(), sum)
-        })
-        .collect();
-    // The first lowering of each IOS-XR router gives its summary.
-    let xr_profile = iosxr::profile();
-    for (d, (cfg, file, sections)) in &xr {
-        let (_, sum) = iosxr::lower(
+    let mut summaries: BTreeMap<String, crate::links::Summary> = BTreeMap::new();
+    for (d, (cfg, col, file, sections)) in &switches {
+        let (low, sum) = nxos::lower(
             d,
             file,
-            &xr_profile,
+            &nx_profile,
             cfg,
+            col,
             sections,
             &crate::links::External::default(),
         );
+        igp_fibs.insert(d.clone(), low.igp);
         summaries.insert(d.clone(), sum);
     }
-    // The first lowering of each IOS-XE device gives its summary.
+    // The first lowering of each IOS-XR router gives its summary and its IGP
+    // view.
+    let xr_profile = iosxr::profile();
+    for (d, (cfg, file, sections)) in &xr {
+        let ext = crate::links::External {
+            ospf: ios_ospf.get(d).cloned(),
+            ..Default::default()
+        };
+        let (low, sum) = iosxr::lower(d, file, &xr_profile, cfg, sections, &ext);
+        igp_fibs.insert(d.clone(), low.igp);
+        summaries.insert(d.clone(), sum);
+    }
+    // The first lowering of each IOS-XE device gives its summary and its IGP
+    // view.
     let xe_profile = iosxe::profile();
     for (d, (cfg, file, sections)) in &xe {
-        let (_, sum) = iosxe::lower(
-            d,
-            file,
-            &xe_profile,
-            cfg,
-            sections,
-            &crate::links::External::default(),
-        );
+        let ext = crate::links::External {
+            ospf: ios_ospf.get(d).cloned(),
+            ..Default::default()
+        };
+        let (low, sum) = iosxe::lower(d, file, &xe_profile, cfg, sections, &ext);
+        igp_fibs.insert(d.clone(), low.igp);
         summaries.insert(d.clone(), sum);
+    }
+    // The IGP view of each device with BGP.
+    for (device, x) in bgp_devices.iter_mut() {
+        let ospf = match x.platform {
+            rsim_routing::Platform::Nxos => switches.get(device).and_then(|s| s.1.ospf.as_ref()),
+            rsim_routing::Platform::FrrTraditional | rsim_routing::Platform::FrrDatacenter => {
+                routers.get(device).and_then(|r| r.col.ospf.as_ref())
+            }
+            _ => ios_ospf.get(device),
+        };
+        x.igp = igp_tables(
+            igp_fibs.remove(device).unwrap_or_default(),
+            ospf_in.get(device),
+            ospf,
+            x.platform,
+        );
     }
     // The VeloCloud enterprises: the coverage of the shared stanzas and of
     // each edge, and the summary of each edge, whose ports the join links by
@@ -1623,40 +1639,37 @@ fn assemble_pass(
     (e, missing)
 }
 
-/// The computed connected, static and OSPF routes of each VRF of a device:
-/// the networks and the static routes of the input of the OSPF builder and
-/// the routes of the OSPF calculation, each with the distance of the
-/// platform.
+/// The IGP view of each VRF of a device with BGP: the computed route table
+/// `fibs` of each VRF with no BGP candidate, the metric of each computed
+/// OSPF route, and the reason of each family whose OSPF version has a
+/// process of the VRF in the config and is not computed in full.
 fn igp_tables(
+    fibs: Vec<(String, rsim_functions::Fib)>,
     input: Option<&rsim_routing::ospf::build::RouterInput>,
     ospf: Option<&crate::ospf::DeviceOspf>,
     platform: rsim_routing::Platform,
 ) -> BTreeMap<String, crate::bgp_build::IgpTable> {
-    use rsim_routing::Origin;
-    let mut vrfs: BTreeSet<String> = BTreeSet::new();
-    if let Some(i) = input {
-        vrfs.extend(i.connected.keys().cloned());
-        vrfs.extend(i.statics.keys().cloned());
-    }
-    if let Some(o) = ospf {
-        vrfs.extend(o.databases.iter().map(|d| d.vrf.clone()));
-    }
-    let ospf_distance = rsim_routing::ospf::OspfProfile::of(platform).distance();
-    vrfs.into_iter()
-        .map(|vrf| {
-            let mut t = crate::bgp_build::IgpTable::default();
-            if let Some(i) = input {
-                for p in i.connected.get(&vrf).into_iter().flatten() {
-                    t.add(*p, platform.distance(Origin::Connected), Ok(0));
-                }
-                for p in i.statics.get(&vrf).into_iter().flatten() {
-                    t.add(*p, platform.distance(Origin::Static), Ok(0));
-                }
-            }
+    use rsim_routing::ospf::Version;
+    fibs.into_iter()
+        .map(|(vrf, fib)| {
             let routes = crate::ospf::routes::OspfRoutes::of(ospf, &vrf, platform);
-            for (p, m) in routes.metrics() {
-                t.add(p, ospf_distance, m);
+            let mut incomplete = BTreeMap::new();
+            for (v4, version) in [(true, Version::V2), (false, Version::V3)] {
+                let runs = input.is_some_and(|i| {
+                    i.config
+                        .processes
+                        .iter()
+                        .any(|p| p.vrf == vrf && p.version == version)
+                });
+                if let Some(why) = runs.then(|| routes.incomplete(version)).flatten() {
+                    incomplete.insert(v4, why);
+                }
             }
+            let t = crate::bgp_build::IgpTable {
+                routes: fib.entries().into_iter().collect(),
+                ospf: routes.metrics().into_iter().collect(),
+                incomplete,
+            };
             (vrf, t)
         })
         .collect()

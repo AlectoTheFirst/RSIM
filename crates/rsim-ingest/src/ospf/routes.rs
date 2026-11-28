@@ -124,6 +124,19 @@ impl OspfRoutes {
         out
     }
 
+    /// The reason why the version `v` is not computed in full: the version
+    /// is not computed, or a calculation has a gap. `None` when it is.
+    pub fn incomplete(&self, v: Version) -> Option<String> {
+        match self.by_version.get(&v)? {
+            Err(why) => Some(why.clone()),
+            Ok(calcs) => calcs.iter().find_map(|c| {
+                c.gaps
+                    .first()
+                    .map(|g| format!("{} database gap: {}", v.name(), g.detail))
+            }),
+        }
+    }
+
     /// The guard class of a collected OSPF route of `prefix`. It is not
     /// computed if its version is not computed, if the computed route
     /// depends on a gap of a database, or if the computed tables have no

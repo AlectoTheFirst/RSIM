@@ -1641,6 +1641,7 @@ impl L<'_> {
             next: self.id(next),
         };
         cands.extend(ospf.candidates(PLATFORM, false, &hop, &interface_of));
+        let igp = cands.clone();
         if let Some(b) = &bgp {
             cands.extend(b.candidates.iter().cloned());
         }
@@ -1675,6 +1676,16 @@ impl L<'_> {
                 }
             });
         }
+        self.out.igp.push((
+            vrf.to_string(),
+            crate::guard::igp(
+                igp,
+                &routes,
+                t,
+                PLATFORM,
+                super::profile::COMPUTED_THROUGH_DEFAULT,
+            ),
+        ));
         cands.extend(crate::guard::outside(&routes, t, PLATFORM));
         let computed = install(cands, super::profile::COMPUTED_THROUGH_DEFAULT);
         crate::scenario::finish(

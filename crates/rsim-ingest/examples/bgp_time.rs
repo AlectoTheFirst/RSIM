@@ -19,7 +19,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let data = &args[1];
     let keys = std::fs::read_to_string(format!("{data}/keys")).expect("the key file is readable");
-    let store = Store::open(
+    let store = Store::open_read(
         format!("{data}/store"),
         Keys::from_hex(&keys).expect("valid keys"),
     )
@@ -36,7 +36,13 @@ fn main() {
         return;
     };
     let started = Instant::now();
-    let result = compute(&b.input, &Igp { tables: &b.igp });
+    let result = compute(
+        &b.input,
+        &Igp {
+            tables: &b.igp,
+            bgp: &b.bgp_prefixes,
+        },
+    );
     let ms = started.elapsed().as_millis();
     println!("estate build ms {estate_ms}");
     println!("processes {}", b.input.processes.len());
