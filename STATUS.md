@@ -47,7 +47,7 @@ Complete:
 - the BGP calculation in `rsim-routing`: the policy evaluator, the decision function, the propagation and the convergence detection, on hand-built inputs
 - BGP from the config of VyOS, NX-OS, IOS-XR and IOS-XE, the section `bgp_routes` and the BGP rows of the guard
 
-Not started: redistribution, VRF leaking and the EVPN import, which are gaps of the BGP rows, and the benchmark.
+Not started: redistribution, VRF leaking, the EVPN import and the benchmark.
 
 ## Step 5
 
