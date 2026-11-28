@@ -85,6 +85,10 @@ pub struct Lowered {
     pub guard: Vec<rsim_guard::Row>,
     /// The tables of each VRF with a guard, in the base pass of a scenario.
     pub base: Vec<(String, crate::scenario::BaseVrf)>,
+    /// The computed route table of each VRF with a guard with no BGP
+    /// candidate and with the OSPFv3 candidates, for the IGP view of the
+    /// BGP calculation.
+    pub igp: Vec<(String, crate::guard::IgpRoutes)>,
 }
 
 struct L<'a> {
@@ -93,6 +97,8 @@ struct L<'a> {
     profile: &'a VendorProfile,
     cfg: &'a Config,
     pass: &'a crate::scenario::Pass,
+    /// The BGP routes of each VRF from the BGP calculation.
+    bgp: &'a BTreeMap<String, crate::bgp_build::VrfBgp>,
     out: Lowered,
 }
 
@@ -163,6 +169,47 @@ fn addresses(cfg: &Config, col: &Collected) -> Addrs {
     m
 }
 
+/// The addresses of the interfaces of the default VRF.
+fn main_addresses(cfg: &Config, addrs: &Addrs) -> Addrs {
+    addrs
+        .iter()
+        .filter(|(n, _)| {
+            !cfg.interfaces
+                .iter()
+                .any(|i| i.name == **n && i.vrf.is_some())
+        })
+        .map(|(n, v)| (n.clone(), v.clone()))
+        .collect()
+}
+
+/// The computed route table of the main VRF with no BGP candidate, for the
+/// IGP view of the BGP calculation. It is empty when the main VRF has no
+/// collected route rows.
+pub fn igp_tables(
+    device: &str,
+    file: &str,
+    profile: &VendorProfile,
+    cfg: &Config,
+    col: &Collected,
+) -> Vec<(String, crate::guard::IgpRoutes)> {
+    let pass = crate::scenario::Pass::Snapshot;
+    let bgp = BTreeMap::new();
+    let mut l = L {
+        dev: device,
+        file,
+        profile,
+        cfg,
+        pass: &pass,
+        bgp: &bgp,
+        out: Lowered::default(),
+    };
+    let addrs = addresses(cfg, col);
+    let main = main_addresses(cfg, &addrs);
+    let locals = local_routes(&main);
+    l.main_fib(col, &main, &locals);
+    l.out.igp
+}
+
 /// The layer 2 peer of each physical interface: the ingress function of
 /// the switch port on the other end of the link, the provenance of the
 /// link, and the physical facts of the switch port.
@@ -208,11 +255,13 @@ pub fn lower(
         l2,
         twin,
         &crate::scenario::Pass::Snapshot,
+        &BTreeMap::new(),
     )
 }
 
 /// Lowers one VyOS device in the pass `pass` of a snapshot twin or a
-/// scenario.
+/// scenario, with the BGP routes `bgp` of each VRF from the BGP
+/// calculation.
 #[allow(clippy::too_many_arguments)]
 pub fn lower_in(
     device: &str,
@@ -223,6 +272,7 @@ pub fn lower_in(
     l2: &Layer2Links,
     twin: &BTreeSet<IpAddr>,
     pass: &crate::scenario::Pass,
+    bgp: &BTreeMap<String, crate::bgp_build::VrfBgp>,
 ) -> Lowered {
     let mut l = L {
         dev: device,
@@ -230,6 +280,7 @@ pub fn lower_in(
         profile,
         cfg,
         pass,
+        bgp,
         out: Lowered::default(),
     };
     let active: Vec<&Interface> = cfg
@@ -238,16 +289,7 @@ pub fn lower_in(
         .filter(|i| !i.disabled && i.name != "lo")
         .collect();
     let addrs = addresses(cfg, col);
-    // The addresses of the interfaces of the default VRF.
-    let main_addrs: Addrs = addrs
-        .iter()
-        .filter(|(n, _)| {
-            !cfg.interfaces
-                .iter()
-                .any(|i| i.name == **n && i.vrf.is_some())
-        })
-        .map(|(n, v)| (n.clone(), v.clone()))
-        .collect();
+    let main_addrs = main_addresses(cfg, &addrs);
     let local_zone = cfg.zones.iter().find(|z| z.local).map(|z| z.name.clone());
     let has_pbr = cfg.policy_routes.iter().any(|p| !p.rules.is_empty());
     let after_nat = if has_pbr { "pbr" } else { "route" };
@@ -1012,9 +1054,11 @@ impl L<'_> {
     }
 
     /// The RIB guard of the main VRF: the computed route table of the
-    /// connected, static, local and OSPF routes against the collected route
-    /// table `t`, whose routes it marks. The notes of the static routes are
-    /// not kept, as the device forwards on `t`.
+    /// connected, static, local, OSPF and BGP routes against the collected
+    /// route table `t`, whose routes it marks. The notes of the static
+    /// routes are not kept, as the device forwards on `t`. In a scenario
+    /// each BGP route of the computed table of the base is an unknown
+    /// candidate.
     fn guard(&mut self, t: &mut Fib, col: &Collected, addrs: &Addrs, locals: &[(Prefix, Route)]) {
         let notes = self.out.notes.len();
         let mut cands = self.config_candidates(addrs);
@@ -1032,6 +1076,19 @@ impl L<'_> {
                 interface_of(addrs, gw)
             }),
         );
+        let igp = cands.clone();
+        let bgp = match self.pass {
+            crate::scenario::Pass::Scenario(s) => s.base.get(VRF).map(|b| {
+                crate::bgp_build::VrfBgp::scenario(
+                    &b.computed,
+                    crate::bgp_build::unknown_distance(PLATFORM),
+                )
+            }),
+            _ => self.bgp.get(VRF).cloned(),
+        };
+        if let Some(b) = &bgp {
+            cands.extend(b.candidates.iter().cloned());
+        }
         let given: BTreeSet<Prefix> = cands.iter().map(|c| c.prefix).collect();
         // The interfaces whose address the device gets at run time by PPPoE,
         // DHCP, DHCPv6, IPv6 autoconfiguration or DHCPv6 prefix delegation.
@@ -1059,6 +1116,13 @@ impl L<'_> {
                         protocol: r.protocol.clone(),
                         class: ospf.class(p),
                     }
+                } else if r.protocol == "bgp"
+                    && let Some(b) = &bgp
+                {
+                    rsim_guard::CollectedRoute {
+                        protocol: r.protocol.clone(),
+                        class: b.class(p),
+                    }
                 } else if seeded {
                     rsim_guard::CollectedRoute {
                         protocol: r.protocol.clone(),
@@ -1069,6 +1133,16 @@ impl L<'_> {
                 }
             });
         }
+        self.out.igp.push((
+            VRF.to_string(),
+            crate::guard::igp(
+                igp,
+                &routes,
+                t,
+                PLATFORM,
+                super::profile::COMPUTED_THROUGH_DEFAULT,
+            ),
+        ));
         cands.extend(crate::guard::outside(&routes, t, PLATFORM));
         let computed = install(cands, super::profile::COMPUTED_THROUGH_DEFAULT);
         crate::scenario::finish(

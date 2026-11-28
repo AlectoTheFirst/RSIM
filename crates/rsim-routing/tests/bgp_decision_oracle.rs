@@ -14,6 +14,7 @@ use bgp_common::{Rng, ibgp, path, permutations};
 use rsim_routing::Platform;
 use rsim_routing::bgp::{
     AsPath, BgpOptions, BgpOrigin, BgpPath, BgpProfile, Decision, LocalOrigin, SessionKind, decide,
+    order_winners,
 };
 
 const PLATFORMS: [Platform; 5] = [
@@ -106,7 +107,7 @@ impl Oracle {
         if ext(a) && ext(b) && !self.compare_routerid {
             return None;
         }
-        let rid = |p: &BgpPath| p.originator_id.unwrap_or(p.peer.router_id);
+        let rid = |p: &BgpPath| p.originator_id.or(p.peer.router_id);
         if rid(a) != rid(b) {
             return Some(rid(b).cmp(&rid(a)));
         }
@@ -189,11 +190,11 @@ fn generate(rng: &mut Rng, n: usize) -> Vec<BgpPath> {
             if matches!(kind, SessionKind::Local(_)) {
                 p.peer.address = None;
             }
-            p.peer.router_id = rng.pick(&[
+            p.peer.router_id = Some(rng.pick(&[
                 bgp_common::v4("192.0.2.1"),
                 bgp_common::v4("192.0.2.2"),
                 bgp_common::v4("192.0.2.3"),
-            ]);
+            ]));
             p.weight = if rng.below(8) == 0 { 100 } else { 0 };
             p.local_pref = rng.pick(&[None, Some(100), Some(100), Some(200)]);
             p.origin = rng.pick(&[
@@ -325,4 +326,122 @@ fn two_paths_with_the_empty_as_path_compare_their_med() {
     let profile = BgpProfile::of(Platform::Iosxe);
     let d = decide(&[a, b], &BgpOptions::default(), Some(&profile));
     assert!(matches!(d, Decision::Best { best: 1, .. }), "{d:?}");
+}
+
+#[test]
+fn the_order_winners_are_the_best_paths_of_each_order_of_the_candidates() {
+    let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+    for case in 0..300 {
+        let n = 1 + (case % 6);
+        let base = generate(&mut rng, n);
+        let platform = rng.pick(&[Platform::Iosxe, Platform::FrrTraditional, Platform::Nxos]);
+        let options = BgpOptions {
+            deterministic_med: Some(false),
+            missing_as_worst: rng.pick(&[None, Some(true)]),
+            compare_routerid: rng.below(2) == 0,
+            ..BgpOptions::default()
+        };
+        let profile = BgpProfile::of(platform);
+        let mut seen: BTreeSet<BTreeSet<Option<IpAddr>>> = BTreeSet::new();
+        for perm in permutations(n) {
+            let c: Vec<BgpPath> = perm.iter().map(|&i| base[i].clone()).collect();
+            seen.insert(identities(
+                &c,
+                &chosen(&decide(&c, &options, Some(&profile))),
+            ));
+        }
+        let all: BTreeSet<Option<IpAddr>> = seen.iter().flatten().copied().collect();
+        match order_winners(&base, &options, Some(&profile)) {
+            Ok(Some(w)) => assert_eq!(identities(&base, &w), all, "case {case}"),
+            Ok(None) => assert_eq!(seen.len(), 1, "case {case}: {seen:?}"),
+            Err(u) => panic!("case {case}: {u}"),
+        }
+    }
+    let mut several = 0;
+    for case in 0..300 {
+        let n = 3 + (case % 4);
+        let lower = 1 + (case % 2);
+        let base: Vec<BgpPath> = (0..n)
+            .map(|i| {
+                let asn = rng.pick(&[64500, 64501]);
+                let as_path = if i < lower {
+                    vec![asn, 64999]
+                } else {
+                    vec![asn]
+                };
+                let mut p = ibgp(&format!("198.51.100.{}", i + 1), &as_path);
+                p.med = Some(rng.pick(&[0, 10, 20]));
+                p.igp_cost = rng.pick(&[0, 10, 20, 30]);
+                p
+            })
+            .collect();
+        let options = BgpOptions::default();
+        let profile = BgpProfile::of(Platform::Iosxe);
+        let mut all: BTreeSet<Option<IpAddr>> = BTreeSet::new();
+        for perm in permutations(n) {
+            let c: Vec<BgpPath> = perm.iter().map(|&i| base[i].clone()).collect();
+            all.extend(identities(
+                &c,
+                &chosen(&decide(&c, &options, Some(&profile))),
+            ));
+        }
+        match order_winners(&base, &options, Some(&profile)) {
+            Ok(Some(w)) => {
+                assert_eq!(identities(&base, &w), all, "cycle case {case}");
+                if w.len() > 1 {
+                    several += 1;
+                }
+            }
+            Ok(None) => assert_eq!(all.len(), 1, "cycle case {case}: {all:?}"),
+            Err(u) => panic!("cycle case {case}: {u}"),
+        }
+    }
+    assert!(several > 10, "{several}");
+    let c = med_cycle();
+    let profile = BgpProfile::of(Platform::Iosxe);
+    assert_eq!(
+        order_winners(&c, &BgpOptions::default(), Some(&profile)),
+        Ok(Some(vec![0, 1, 2]))
+    );
+}
+
+#[test]
+fn the_order_winners_over_14_top_candidates_are_the_winners_of_the_med_cycle() {
+    let profile = BgpProfile::of(Platform::Iosxe);
+    let options = BgpOptions::default();
+    // The MED cycle with 11 candidates of a third neighbour AS at a higher
+    // IGP cost. Each of the 11 loses to each candidate of the cycle, so the
+    // winners are the 3 candidates of the cycle.
+    let mut c = med_cycle();
+    for i in 0..11u32 {
+        let mut p = ibgp(&format!("198.51.101.{}", i + 1), &[64502]);
+        p.med = Some(i);
+        p.igp_cost = 100 + i;
+        c.push(p);
+    }
+    assert_eq!(
+        order_winners(&c, &options, Some(&profile)),
+        Ok(Some(vec![0, 1, 2]))
+    );
+    let mut lower = c.clone();
+    for i in 0..30u32 {
+        let mut p = ibgp(&format!("198.51.102.{}", i + 1), &[64500, 64999]);
+        p.med = Some(i);
+        lower.push(p);
+    }
+    assert_eq!(
+        order_winners(&lower, &options, Some(&profile)),
+        Ok(Some(vec![0, 1, 2]))
+    );
+    let one_as: Vec<BgpPath> = (0..40u32)
+        .map(|i| {
+            let mut p = ibgp(&format!("198.51.103.{}", i + 1), &[64500]);
+            p.med = Some(i);
+            p.igp_cost = i % 3;
+            p
+        })
+        .collect();
+    assert_eq!(order_winners(&one_as, &options, Some(&profile)), Ok(None));
+    let d = decide(&one_as, &options, Some(&profile));
+    assert!(matches!(d, Decision::Best { best: 0, .. }), "{d:?}");
 }

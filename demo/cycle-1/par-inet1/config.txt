@@ -1,6 +1,6 @@
 Building configuration...
 
-Current configuration : 2383 bytes
+Current configuration : 2436 bytes
 !
 ! Last configuration change at 07:30:00 UTC Mon Nov 2 2026 by admin
 !
@@ -83,6 +83,7 @@ router bgp 64500
  !
  address-family ipv4
   neighbor 198.51.100.1 activate
+  neighbor 198.51.100.1 soft-reconfiguration inbound
   neighbor 198.51.100.1 route-map ISP-IN in
   neighbor 198.51.100.1 route-map ISP-OUT out
  exit-address-family

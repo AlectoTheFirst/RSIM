@@ -332,3 +332,18 @@ fn a_sub_interface_of_a_down_interface_is_down() {
     assert!(!is_down(&down, "eth10"));
     assert!(!is_down(&down, "eth2.1"));
 }
+
+#[test]
+fn a_bgp_route_that_is_the_same_in_the_base_and_the_scenario_is_unknown() {
+    let route = |file: &str| via(BGP, "eth2", "198.51.100.2", file);
+    let t = run(
+        &[("203.0.113.0/24", route("collected"))],
+        &[("203.0.113.0/24", class("bgp", Class::Compared))],
+        &[("203.0.113.0/24", route("base"))],
+        &[("203.0.113.0/24", route("scenario"))],
+    );
+    let r = t.get(&p("203.0.113.0/24")).unwrap();
+    assert_eq!(r.kind, BGP);
+    assert_eq!(r.unknown_reason(), Some(NOT_RECOMPUTED));
+    assert_eq!(files(&r), ["collected", "layer 1: link-down r1:eth1"]);
+}

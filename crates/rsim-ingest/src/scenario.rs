@@ -8,7 +8,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use rsim_core::{NetFunction, Prefix, RibGuardFlag, SourceSpan};
-use rsim_functions::{Fib, Route, RouteKind, RouteLookup};
+use rsim_functions::{Fib, Route, RouteKind, RouteLookup, RouteProtocol};
 use rsim_guard::{Category, Class, CollectedRoute, Row, View};
 use rsim_routing::ospf::config::RouterConfig;
 
@@ -97,6 +97,10 @@ pub struct DeviceScenario {
     pub base: BTreeMap<String, BaseVrf>,
     /// The interfaces of the device that a layer takes down.
     pub down: BTreeSet<String>,
+    /// The interfaces of `down` that a layer on a sub-interface of another
+    /// device takes down at the far end of its link. The config of the
+    /// device need not have them.
+    pub far: BTreeSet<String>,
     /// The spans of the layers of the scenario.
     pub spans: Vec<SourceSpan>,
 }
@@ -218,6 +222,9 @@ fn kept(
 /// prefix, `base` the tables of the base, and `computed` the computed table
 /// of the scenario. For each prefix in order:
 ///
+/// - A prefix with a BGP route in the collected table, in the computed
+///   table of the base or in the computed table of the scenario is unknown
+///   with the reason [`NOT_RECOMPUTED`].
 /// - A collected route that is not computed is unknown with the reason
 ///   [`NOT_RECOMPUTED`]. A seeded route stays.
 /// - A prefix whose computed route is the same and known in the base and in
@@ -263,7 +270,14 @@ pub fn forward(
         let (b, s) = (was.get(&p), now.get(&p));
         let flag = t.guard(&p).unwrap_or(RibGuardFlag::NotChecked);
         let class = routes.get(&p).map(|c| &c.class);
+        let bgp = [col, b, s]
+            .into_iter()
+            .any(|r| r.is_some_and(|r| r.kind == RouteKind::Learned(RouteProtocol::Bgp)));
         let result: Option<(Route, RibGuardFlag)> = match (class, col) {
+            _ if bgp => col
+                .or(b)
+                .or(s)
+                .map(|r| (unknown(r, NOT_RECOMPUTED, spans), RibGuardFlag::NotChecked)),
             (Some(Class::NotComputed(_)), Some(c)) => {
                 Some((unknown(c, NOT_RECOMPUTED, spans), flag))
             }

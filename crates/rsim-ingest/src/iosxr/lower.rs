@@ -133,6 +133,8 @@ pub(crate) struct Hops<'a> {
     pub(crate) platform: Platform,
     pub(crate) ospf: Option<&'a crate::ospf::DeviceOspf>,
     pub(crate) pass: &'a crate::scenario::Pass,
+    /// The BGP routes of each VRF from the BGP calculation.
+    pub(crate) bgp: &'a BTreeMap<String, crate::bgp_build::VrfBgp>,
 }
 
 fn port(i: &Interface) -> nxos::config::Interface {
@@ -361,6 +363,7 @@ pub fn lower(
         ospf: ext.ospf.as_ref(),
         platform: Platform::Iosxr,
         pass: &ext.pass,
+        bgp: &ext.bgp,
     };
     let mut tables = BTreeMap::new();
     for v in &vrfs {
@@ -1451,7 +1454,23 @@ fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &H
             })
             .map(|p| p.i.name.clone())
     };
+    let mut igp = cands.clone();
+    igp.extend(ospf.candidates(hops.platform, true, &|i, gw| hop(l, i, gw), &interface_of));
     cands.extend(ospf.candidates(hops.platform, false, &|i, gw| hop(l, i, gw), &interface_of));
+    // In a scenario each BGP route of the computed table of the base is an
+    // unknown candidate.
+    let bgp = match hops.pass {
+        crate::scenario::Pass::Scenario(s) => s.base.get(vrf).map(|b| {
+            crate::bgp_build::VrfBgp::scenario(
+                &b.computed,
+                crate::bgp_build::unknown_distance(hops.platform),
+            )
+        }),
+        _ => hops.bgp.get(vrf).cloned(),
+    };
+    if let Some(b) = &bgp {
+        cands.extend(b.candidates.iter().cloned());
+    }
     // A VRF with no static route of the config takes its static routes from
     // the collected table.
     let config_statics = hops.config_statics.iter().any(|r| r.vrf == vrf);
@@ -1471,6 +1490,10 @@ fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &H
             rsim_guard::Class::Compared
         } else if c == "O" {
             ospf.class(*prefix)
+        } else if c == "B"
+            && let Some(b) = &bgp
+        {
+            b.class(*prefix)
         } else {
             let name = route_kind(c, hops.learned, hops.statics).name();
             rsim_guard::Class::NotComputed(format!("{name} not computed"))
@@ -1483,6 +1506,16 @@ fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &H
             },
         );
     }
+    l.out.igp.push((
+        vrf.to_string(),
+        crate::guard::igp(
+            igp,
+            &routes,
+            t,
+            hops.platform,
+            hops.computed_through_default,
+        ),
+    ));
     cands.extend(crate::guard::outside(&routes, t, hops.platform));
     let computed = install(cands, hops.computed_through_default);
     crate::scenario::finish(

@@ -95,6 +95,48 @@ impl OspfRoutes {
         out
     }
 
+    /// The metric of each computed route of each version that is computed,
+    /// or the reason why the route is unknown: a route that depends on a
+    /// gap, or whose prefix more than one calculation of its version gives.
+    pub fn metrics(&self) -> Vec<(Prefix, Result<u32, String>)> {
+        let mut out = Vec::new();
+        for calcs in self.by_version.values() {
+            let Ok(calcs) = calcs else {
+                continue;
+            };
+            let mut by_prefix: BTreeMap<Prefix, Vec<&rsim_routing::ospf::Route>> = BTreeMap::new();
+            for c in calcs {
+                for r in &c.routes {
+                    by_prefix.entry(r.prefix).or_default().push(r);
+                }
+            }
+            for (prefix, list) in by_prefix {
+                let m = match list.as_slice() {
+                    [r] => match &r.unknown {
+                        Some(why) => Err(why.clone()),
+                        None => Ok(r.metric),
+                    },
+                    _ => Err("more than one OSPF process gives the route".to_string()),
+                };
+                out.push((prefix, m));
+            }
+        }
+        out
+    }
+
+    /// The reason why the version `v` is not computed in full: the version
+    /// is not computed, or a calculation has a gap. `None` when it is.
+    pub fn incomplete(&self, v: Version) -> Option<String> {
+        match self.by_version.get(&v)? {
+            Err(why) => Some(why.clone()),
+            Ok(calcs) => calcs.iter().find_map(|c| {
+                c.gaps
+                    .first()
+                    .map(|g| format!("{} database gap: {}", v.name(), g.detail))
+            }),
+        }
+    }
+
     /// The guard class of a collected OSPF route of `prefix`. It is not
     /// computed if its version is not computed, if the computed route
     /// depends on a gap of a database, or if the computed tables have no

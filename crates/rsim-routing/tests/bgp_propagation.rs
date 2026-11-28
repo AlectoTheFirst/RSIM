@@ -78,7 +78,7 @@ fn an_ebgp_export_prepends_the_as_sets_the_next_hop_and_drops_the_internal_attri
     assert_eq!(a.peer.address, Some(ip("10.0.0.1")));
     assert_eq!(a.peer.kind, SessionKind::Ebgp);
     assert_eq!(a.peer.asn, Asn(65001));
-    assert_eq!(a.peer.router_id, v4("10.255.0.1"));
+    assert_eq!(a.peer.router_id, Some(v4("10.255.0.1")));
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn a_local_path_keeps_its_med_to_an_ebgp_peer() {
     let mut path = rsim_routing::bgp::BgpPath::new(
         rsim_routing::bgp::Peer {
             address: None,
-            router_id: v4("10.255.0.1"),
+            router_id: Some(v4("10.255.0.1")),
             asn: Asn(65001),
             kind: SessionKind::Local(rsim_routing::bgp::LocalOrigin::Network),
         },
@@ -171,19 +171,55 @@ fn an_ibgp_path_goes_to_an_ibgp_peer_only_through_a_reflector() {
 }
 
 #[test]
+fn a_reflected_path_needs_a_known_originator_id_and_cluster_id() {
+    let mut lab = pair(65001);
+    lab.neighbor_mut("r1", "10.0.0.2").route_reflector_client = true;
+    let mut p = ibgp("10.9.9.9", &[64500]);
+    p.peer.router_id = None;
+    assert!(matches!(
+        transfer(&lab, &p).0,
+        Offer::Unknown(u) if u.reason == Reason::RouterIdNotKnown
+    ));
+    let p = ibgp("10.9.9.9", &[64500]);
+    lab.proc("r1").router_id = None;
+    assert!(matches!(
+        transfer(&lab, &p).0,
+        Offer::Unknown(u) if u.reason == Reason::RouterIdNotKnown
+    ));
+    lab.proc("r1").cluster_id = Some(v4("10.255.0.100"));
+    assert!(matches!(transfer(&lab, &p).0, Offer::Path(_)));
+    let r2 = lab.get("r2").clone();
+    let n = &r2.neighbors[&ip("10.0.0.1")];
+    let mut r2 = r2.clone();
+    r2.router_id = None;
+    let mut q = ibgp("10.0.0.1", &[64500]);
+    q.originator_id = Some(v4("10.255.0.9"));
+    assert!(matches!(
+        receive(&r2, n, Some(v4("10.255.0.1")), &key(P), &q),
+        Offer::Unknown(u) if u.reason == Reason::RouterIdNotKnown
+    ));
+}
+
+#[test]
 fn a_reflected_path_is_rejected_by_its_originator_and_by_a_router_of_its_cluster() {
     let lab = pair(65001);
     let r2 = lab.get("r2");
     let n = &r2.neighbors[&ip("10.0.0.1")];
     let mut p = ibgp("10.0.0.1", &[64500]);
     p.originator_id = Some(v4("10.255.0.2"));
-    assert_eq!(receive(r2, n, v4("10.255.0.1"), &key(P), &p), Offer::None);
+    assert_eq!(
+        receive(r2, n, Some(v4("10.255.0.1")), &key(P), &p),
+        Offer::None
+    );
     p.originator_id = Some(v4("10.255.0.9"));
     p.cluster_list = vec![v4("10.255.0.2")];
-    assert_eq!(receive(r2, n, v4("10.255.0.1"), &key(P), &p), Offer::None);
+    assert_eq!(
+        receive(r2, n, Some(v4("10.255.0.1")), &key(P), &p),
+        Offer::None
+    );
     p.cluster_list = vec![v4("10.255.0.3")];
     assert!(matches!(
-        receive(r2, n, v4("10.255.0.1"), &key(P), &p),
+        receive(r2, n, Some(v4("10.255.0.1")), &key(P), &p),
         Offer::Path(_)
     ));
 }
@@ -512,7 +548,7 @@ fn a_platform_with_no_profile_makes_its_routes_and_the_routes_after_it_unknown()
         let Some(RouteState::Unknown(u)) = state(&r, d, P) else {
             panic!("{d}: {:?}", state(&r, d, P));
         };
-        assert_eq!(u.reason, Reason::NoBgpProfile);
+        assert_cause(u, Reason::NoBgpProfile);
     }
     let inst = install_candidates(&r, &lab.input.processes);
     let c = &inst[&("r2".to_string(), "default".to_string())][0];
@@ -521,7 +557,7 @@ fn a_platform_with_no_profile_makes_its_routes_and_the_routes_after_it_unknown()
         c.route
             .unknown_reason()
             .unwrap()
-            .starts_with("no bgp profile")
+            .starts_with("convergence not determined: no bgp profile")
     );
 }
 
@@ -552,8 +588,18 @@ fn an_unhandled_import_term_makes_the_route_unknown_only_where_it_decides() {
     let Some(RouteState::Unknown(u)) = state(&r, "r2", P) else {
         panic!("{:?}", state(&r, "r2", P));
     };
-    assert_eq!(u.reason, Reason::PolicyClauseNotEvaluated);
+    assert_cause(u, Reason::PolicyClauseNotEvaluated);
     assert!(state(&r, "r2", "198.51.100.0/24").is_none());
+    let g = r.groups.iter().find(|g| g.keys.contains(&key(P))).unwrap();
+    assert!(
+        matches!(
+            &g.convergence,
+            Convergence::Unknown { reason } if reason.reason == Reason::ConvergenceNotDetermined
+        ),
+        "{:?}",
+        g.convergence
+    );
+    assert!(r.affected.contains(&key(P)));
 }
 
 #[test]
@@ -571,7 +617,7 @@ fn a_next_hop_that_does_not_resolve_gives_no_candidate_and_an_unknown_one_an_unk
     let Some(RouteState::Unknown(u)) = state(&r, "r1", P) else {
         panic!("{:?}", state(&r, "r1", P));
     };
-    assert_eq!(u.reason, Reason::NextHopNotResolved);
+    assert_cause(u, Reason::NextHopNotResolved);
 }
 
 #[test]
@@ -699,7 +745,7 @@ fn a_sole_seed_with_attributes_not_collected_propagates_and_a_contested_one_is_u
     let Some(RouteState::Unknown(u)) = state(&r, "r1", P) else {
         panic!("{:?}", state(&r, "r1", P));
     };
-    assert_eq!(u.reason, Reason::PathAttributesNotCollected);
+    assert_cause(u, Reason::PathAttributesNotCollected);
 }
 
 #[test]
@@ -721,4 +767,64 @@ fn an_accepted_seed_skips_the_import_policy_and_a_received_seed_runs_it() {
     let b = best(&r, "r1", P).unwrap();
     assert_eq!(b.best.peer.address, Some(ip("192.0.2.1")));
     assert_eq!(b.best.peer.kind, SessionKind::Ebgp);
+}
+
+#[test]
+fn two_outside_ibgp_seeds_that_tie_to_the_router_id_step_need_their_router_ids() {
+    let run = |ids: [Option<&str>; 2]| {
+        let mut lab = Lab::default();
+        lab.router("r1", Platform::Iosxe, 65001, "10.255.0.1");
+        lab.seed("r1", "192.0.2.1", 65001, P, &[64500], None);
+        lab.seed("r1", "192.0.2.5", 65001, P, &[64500], None);
+        for (s, id) in lab.input.seeds.iter_mut().zip(ids) {
+            s.path.peer.router_id = id.map(v4);
+        }
+        lab.run()
+    };
+    let r = run([None, None]);
+    let Some(RouteState::Unknown(u)) = state(&r, "r1", P) else {
+        panic!("{:?}", state(&r, "r1", P));
+    };
+    assert_cause(u, Reason::RouterIdNotKnown);
+    let r = run([Some("198.51.100.9"), Some("198.51.100.2")]);
+    assert_eq!(
+        best(&r, "r1", P).unwrap().best.next_hop,
+        Some(ip("192.0.2.5"))
+    );
+}
+
+#[test]
+fn a_network_with_no_import_check_is_originated_with_no_route_of_its_prefix() {
+    use rsim_routing::bgp::{Network, network_offer};
+    let mut lab = Lab::default();
+    lab.router("r1", Platform::FrrTraditional, 65001, "10.255.0.1");
+    let n = Network {
+        key: key(P),
+        policy: None,
+        spans: Vec::new(),
+    };
+    for (check, originated) in [(Some(false), true), (Some(true), false), (None, false)] {
+        lab.proc("r1").options.network_import_check = check;
+        let out = network_offer(lab.get("r1"), &n, Some(false));
+        assert_eq!(
+            matches!(out, Offer::Path(_)),
+            originated,
+            "{check:?}: {out:?}"
+        );
+        assert!(matches!(
+            network_offer(lab.get("r1"), &n, Some(true)),
+            Offer::Path(_)
+        ));
+    }
+    lab.proc("r1").options.network_import_check = Some(false);
+    lab.proc("r1").networks.push(n);
+    let r = lab.run();
+    assert!(best(&r, "r1", P).is_some());
+}
+
+/// Asserts that `u` is an unknown convergence whose details hold an
+/// unknown route with the reason `cause`.
+fn assert_cause(u: &rsim_routing::bgp::Unknown, cause: Reason) {
+    assert_eq!(u.reason, Reason::ConvergenceNotDetermined, "{u}");
+    assert!(u.details.iter().any(|d| d.starts_with(cause.text())), "{u}");
 }

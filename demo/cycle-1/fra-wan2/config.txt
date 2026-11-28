@@ -106,13 +106,17 @@ router ospf CORE
 !
 router bgp 65010
  bgp router-id 10.17.0.2
+ default-information originate
  address-family ipv4 unicast
+  redistribute connected
+  redistribute ospf CORE
  !
  neighbor 10.17.0.1
   remote-as 65010
   description fra-wan1
   update-source Loopback0
   address-family ipv4 unicast
+   soft-reconfiguration inbound always
    next-hop-self
   !
  !
@@ -120,6 +124,7 @@ router bgp 65010
   remote-as 65110
   description fra-dc-bl2
   address-family ipv4 unicast
+   soft-reconfiguration inbound always
    route-policy PASS in
    route-policy PASS out
   !
@@ -128,6 +133,7 @@ router bgp 65010
   remote-as 65020
   description par-wan2
   address-family ipv4 unicast
+   soft-reconfiguration inbound always
    route-policy PASS in
    route-policy PASS out
   !

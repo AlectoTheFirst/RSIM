@@ -669,3 +669,26 @@ fn an_as_number_reads_in_the_asplain_and_the_asdot_form() {
         assert_eq!(text.parse::<Asn>().ok().map(|a| a.0), want, "{text}");
     }
 }
+
+#[test]
+fn an_ibgp_decision_that_reaches_the_router_id_step_with_a_router_id_not_known_is_unknown() {
+    let a = ibgp("192.0.2.1", &[64500]);
+    let mut b = ibgp("192.0.2.2", &[64500]);
+    b.peer.router_id = None;
+    for platform in PLATFORMS {
+        let d = best_of(&[a.clone(), b.clone()], &BgpOptions::default(), platform);
+        let Decision::Unknown(u) = d else {
+            panic!("{platform:?}: {d:?}");
+        };
+        assert_eq!(u.reason, Reason::RouterIdNotKnown);
+        assert_eq!(u.reason.text(), "router id not known");
+    }
+    let mut known = b.clone();
+    known.peer.router_id = Some(v4("192.0.2.2"));
+    let d = best_of(&[a.clone(), known], &BgpOptions::default(), Platform::Iosxe);
+    assert!(matches!(d, Decision::Best { best: 0, .. }), "{d:?}");
+    let mut worse = b;
+    worse.local_pref = Some(50);
+    let d = best_of(&[a, worse], &BgpOptions::default(), Platform::Iosxe);
+    assert!(matches!(d, Decision::Best { best: 0, .. }), "{d:?}");
+}

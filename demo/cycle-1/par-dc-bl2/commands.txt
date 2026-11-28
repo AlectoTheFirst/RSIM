@@ -22,6 +22,7 @@ evpn_mac_ips.json	show l2route evpn mac-ip all | json
 mroutes.json	show ip mroute vrf all | json
 pim_neighbors.json	show ip pim neighbor vrf all | json
 bgp_sessions.json	show bgp sessions vrf all | json
+bgp_neighbors.json	show bgp vrf all neighbors | json
 ospf.json	show ip ospf vrf all | json
 ospf_interfaces.json	show ip ospf interface vrf all | json
 ospf_neighbors.json	show ip ospf neighbors vrf all | json
@@ -42,3 +43,15 @@ ospfv3_lsdb_external.json	show ospfv3 database external detail vrf all | json
 ospfv3_lsdb_nssa.json	show ospfv3 database nssa detail vrf all | json
 ospfv3_lsdb_link.json	show ospfv3 database link detail vrf all | json
 ospfv3_lsdb_intra_area_prefix.json	show ospfv3 database intra-area-prefix detail vrf all | json
+bgp_routes.default.10.20.0.1.received-routes.json	show bgp ipv4 unicast neighbors 10.20.0.1 received-routes | json
+bgp_routes.default.10.20.0.1.routes.json	show bgp ipv4 unicast neighbors 10.20.0.1 routes | json
+bgp_routes.default.10.20.0.1.advertised-routes.json	show bgp ipv4 unicast neighbors 10.20.0.1 advertised-routes | json
+bgp_routes.default.10.20.0.2.received-routes.json	show bgp ipv4 unicast neighbors 10.20.0.2 received-routes | json
+bgp_routes.default.10.20.0.2.routes.json	show bgp ipv4 unicast neighbors 10.20.0.2 routes | json
+bgp_routes.default.10.20.0.2.advertised-routes.json	show bgp ipv4 unicast neighbors 10.20.0.2 advertised-routes | json
+bgp_routes.PROD.10.29.0.2.received-routes.json	show bgp vrf PROD ipv4 unicast neighbors 10.29.0.2 received-routes | json
+bgp_routes.PROD.10.29.0.2.routes.json	show bgp vrf PROD ipv4 unicast neighbors 10.29.0.2 routes | json
+bgp_routes.PROD.10.29.0.2.advertised-routes.json	show bgp vrf PROD ipv4 unicast neighbors 10.29.0.2 advertised-routes | json
+bgp_routes.PROD.10.99.0.2.received-routes.json	show bgp vrf PROD ipv4 unicast neighbors 10.99.0.2 received-routes | json
+bgp_routes.PROD.10.99.0.2.routes.json	show bgp vrf PROD ipv4 unicast neighbors 10.99.0.2 routes | json
+bgp_routes.PROD.10.99.0.2.advertised-routes.json	show bgp vrf PROD ipv4 unicast neighbors 10.99.0.2 advertised-routes | json

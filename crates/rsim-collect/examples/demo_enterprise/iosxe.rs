@@ -198,7 +198,7 @@ fn config_body(dev: &Dev) -> String {
         for n in &bgp.neighbors {
             let _ = writeln!(
                 s,
-                "  neighbor {a} activate\n  neighbor {a} route-map ISP-IN in\n  neighbor {a} route-map ISP-OUT out",
+                "  neighbor {a} activate\n  neighbor {a} soft-reconfiguration inbound\n  neighbor {a} route-map ISP-IN in\n  neighbor {a} route-map ISP-OUT out",
                 a = n.addr
             );
         }
@@ -713,7 +713,11 @@ fn vlans(dev: &Dev) -> String {
     s
 }
 
-fn bgp_summary(dev: &Dev) -> String {
+/// The session summary. The prefix count of a neighbour is the number of
+/// prefixes of its accepted table.
+fn bgp_summary(e: &Estate, t: &Tables, d: usize) -> String {
+    let dev = &e.devs[d];
+    let owners = super::bgp::owners(e);
     let Some(bgp) = &dev.bgp else {
         return "% BGP not active\n".to_string();
     };
@@ -723,9 +727,10 @@ fn bgp_summary(dev: &Dev) -> String {
     );
     for n in &bgp.neighbors {
         if n.up {
+            let count = super::bgp::tables(e, t, &owners, d, n).accepted.len();
             let _ = writeln!(
                 s,
-                "{:<15} 4 {:>12}   58211   58190       14    0    0 5w6d            1",
+                "{:<15} 4 {:>12}   58211   58190       14    0    0 5w6d {count:>12}",
                 n.addr.to_string(),
                 n.remote_as
             );
@@ -770,7 +775,13 @@ pub fn render(
     out.insert("vlans", l2(vlans(dev)));
     out.insert("hsrp_detail", hsrp_detail(dev));
     out.insert("vrrp_detail", String::new());
-    out.insert("bgp_sessions", bgp_summary(dev));
+    out.insert("bgp_sessions", bgp_summary(e, t, d));
+    if dev.bgp.is_some() {
+        out.insert(
+            "bgp_neighbors",
+            super::bgp::neighbor_detail(dev, &|_| true, ""),
+        );
+    }
     super::ospf::cisco(e, d, "", "1", &t.redistributed, &mut out);
     let mut vrfs = BTreeMap::new();
     if dev.ifaces.iter().any(|i| i.mode == Mode::Mgmt) {

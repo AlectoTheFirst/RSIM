@@ -37,6 +37,64 @@ pub fn outside(
     out
 }
 
+/// The candidates of the computed route table of a VRF for the IGP view of
+/// the BGP calculation, and the flag `COMPUTED_THROUGH_DEFAULT` of the
+/// vendor profile for their install.
+#[derive(Clone, Debug, Default)]
+pub struct IgpRoutes {
+    pub cands: Vec<Candidate>,
+    pub through_default: bool,
+}
+
+/// The lowest distance of a route of `platform` other than a connected or a
+/// local route.
+pub fn lowest_distance(platform: Platform) -> u8 {
+    [
+        Origin::Static,
+        Origin::Ebgp,
+        Origin::Ibgp,
+        Origin::Ospf,
+        Origin::LocalBgp,
+    ]
+    .into_iter()
+    .map(|o| platform.distance(o))
+    .min()
+    .unwrap_or(UNKNOWN_DISTANCE)
+}
+
+/// The candidates of the computed route table of a VRF for the IGP view of
+/// the BGP calculation: `cands`, the candidates other than BGP, with the
+/// collected routes of `routes` that are not BGP routes. A seeded route is
+/// a candidate with the default distance of its kind. A route that is not
+/// computed is an unknown candidate with [`lowest_distance`].
+pub fn igp(
+    mut cands: Vec<Candidate>,
+    routes: &BTreeMap<Prefix, CollectedRoute>,
+    collected: &Fib,
+    platform: Platform,
+    through_default: bool,
+) -> IgpRoutes {
+    let bgp = RouteKind::Learned(RouteProtocol::Bgp);
+    for (p, c) in routes {
+        let Some(r) = collected.get(p).filter(|r| r.kind != bgp) else {
+            continue;
+        };
+        match &c.class {
+            Class::Compared => {}
+            Class::Seeded => cands.push(Candidate::new(*p, distance(platform, r.kind), r)),
+            Class::NotComputed(why) => cands.push(Candidate::new(
+                *p,
+                lowest_distance(platform),
+                Route::unknown(r.kind, why.clone(), r.spans.clone()),
+            )),
+        }
+    }
+    IgpRoutes {
+        cands,
+        through_default,
+    }
+}
+
 /// The default administrative distance of a kind of route.
 fn distance(platform: Platform, kind: RouteKind) -> u8 {
     match kind {

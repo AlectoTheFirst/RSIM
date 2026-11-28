@@ -3,7 +3,12 @@
 //! clock and no randomness.
 
 pub mod bgp;
+pub mod bgp_build;
+pub mod bgp_config;
+pub mod bgp_neighbors;
 pub mod bgp_peers;
+pub mod bgp_routes;
+pub mod bgp_table;
 pub mod collected;
 pub mod coverage;
 pub mod equinix;

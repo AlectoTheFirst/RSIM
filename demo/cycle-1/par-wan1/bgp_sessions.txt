@@ -16,6 +16,6 @@ Process       RcvTblVer   bRIB/RIB   LabelVer  ImportVer  SendTblVer  StandbyVer
 Speaker             214        214        214        214         214           0
 
 Neighbor        Spk    AS MsgRcvd MsgSent   TblVer  InQ OutQ  Up/Down  St/PfxRcd
-10.27.0.2         0 65020   58211   58190      214    0    0 5w6d             12
-10.29.0.1         0 65120   58211   58190      214    0    0 5w6d             12
-10.250.0.0        0 65010   58211   58190      214    0    0 5w6d             12
+10.27.0.2         0 65020   58211   58190      214    0    0 5w6d              0
+10.29.0.1         0 65120   58211   58190      214    0    0 5w6d              6
+10.250.0.0        0 65010   58211   58190      214    0    0 5w6d             18

@@ -322,6 +322,9 @@ pub struct Config {
     pub advertise_pip: Option<Lines>,
     /// The BGP processes, neighbours and listen ranges.
     pub bgp: crate::bgp_peers::BgpConfig,
+    /// The BGP processes and the gaps for the BGP calculation, with no file
+    /// in the spans.
+    pub bgp_routing: crate::bgp_config::DeviceBgp,
     /// The name of the line `hostname`.
     pub hostname: Option<String>,
     pub vpc_domain: Option<VpcDomain>,
@@ -575,6 +578,8 @@ pub fn read(doc: &Document, table: &Table) -> Config {
         }
     }
     super::ospf_config::parse(doc, &cfg.interfaces, "", &mut r.read);
+    cfg.bgp_routing =
+        super::bgp_config::read(doc, &cfg.bgp, "", &|k| table.report_key(k), &mut r.read);
     cfg.read = r.read;
     cfg.dynamic_vrfs = super::table::dynamic_vrfs(doc);
     cfg

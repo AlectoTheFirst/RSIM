@@ -1,0 +1,174 @@
+{
+  "RED": {
+    "203.0.113.9": {
+      "advertised-routes": {
+        "failed": "the command timed out"
+      },
+      "received-routes": {
+        "answer": "% Inbound soft reconfiguration not enabled"
+      },
+      "routes": {
+        "answer": {
+          "TABLE_neighbor": {}
+        }
+      }
+    }
+  },
+  "default": {
+    "192.0.2.1": {
+      "advertised-routes": {
+        "answer": {}
+      },
+      "received-routes": {
+        "answer": {
+          "TABLE_vrf": {
+            "ROW_vrf": [
+              {
+                "TABLE_afi": {
+                  "ROW_afi": [
+                    {
+                      "TABLE_safi": {
+                        "ROW_safi": [
+                          {
+                            "TABLE_prefix": {
+                              "ROW_prefix": [
+                                {
+                                  "TABLE_path": {
+                                    "ROW_path": [
+                                      {
+                                        "aspath": "64500",
+                                        "best": "true",
+                                        "community": "64500:1 64500:2",
+                                        "ipnexthop": "192.0.2.1",
+                                        "localpref": "100",
+                                        "metric": "0",
+                                        "origin": "i",
+                                        "pathnr": "0",
+                                        "weight": "0"
+                                      }
+                                    ]
+                                  },
+                                  "ipprefix": "10.1.0.0/16"
+                                },
+                                {
+                                  "TABLE_path": {
+                                    "ROW_path": [
+                                      {
+                                        "aspath": "64500 64510",
+                                        "best": "true",
+                                        "ipnexthop": "192.0.2.1",
+                                        "localpref": "100",
+                                        "metric": "10",
+                                        "origin": "i",
+                                        "pathnr": "0",
+                                        "weight": "0"
+                                      },
+                                      {
+                                        "aspath": "64500 64499 64510",
+                                        "best": "false",
+                                        "ipnexthop": "192.0.2.1",
+                                        "localpref": "100",
+                                        "metric": "20",
+                                        "origin": "?",
+                                        "pathnr": "1",
+                                        "weight": "0"
+                                      }
+                                    ]
+                                  },
+                                  "ipprefix": "198.51.100.0/24"
+                                }
+                              ]
+                            },
+                            "af-name": "IPv4 Unicast",
+                            "safi": "1"
+                          }
+                        ]
+                      },
+                      "afi": "1"
+                    }
+                  ]
+                },
+                "vrf-name-out": "default"
+              }
+            ]
+          }
+        }
+      },
+      "routes": {
+        "answer": {
+          "TABLE_vrf": {
+            "ROW_vrf": [
+              {
+                "TABLE_afi": {
+                  "ROW_afi": [
+                    {
+                      "TABLE_safi": {
+                        "ROW_safi": [
+                          {
+                            "TABLE_prefix": {
+                              "ROW_prefix": [
+                                {
+                                  "TABLE_path": {
+                                    "ROW_path": [
+                                      {
+                                        "aspath": "64500",
+                                        "best": "true",
+                                        "community": "64500:1 64500:2",
+                                        "ipnexthop": "192.0.2.1",
+                                        "localpref": "100",
+                                        "metric": "0",
+                                        "origin": "i",
+                                        "pathnr": "0",
+                                        "weight": "0"
+                                      }
+                                    ]
+                                  },
+                                  "ipprefix": "10.1.0.0/16"
+                                },
+                                {
+                                  "TABLE_path": {
+                                    "ROW_path": [
+                                      {
+                                        "aspath": "64500 64510",
+                                        "best": "true",
+                                        "ipnexthop": "192.0.2.1",
+                                        "localpref": "100",
+                                        "metric": "10",
+                                        "origin": "i",
+                                        "pathnr": "0",
+                                        "weight": "0"
+                                      },
+                                      {
+                                        "aspath": "64500 64499 64510",
+                                        "best": "false",
+                                        "ipnexthop": "192.0.2.1",
+                                        "localpref": "100",
+                                        "metric": "20",
+                                        "origin": "?",
+                                        "pathnr": "1",
+                                        "weight": "0"
+                                      }
+                                    ]
+                                  },
+                                  "ipprefix": "198.51.100.0/24"
+                                }
+                              ]
+                            },
+                            "af-name": "IPv4 Unicast",
+                            "safi": "1"
+                          }
+                        ]
+                      },
+                      "afi": "1"
+                    }
+                  ]
+                },
+                "vrf-name-out": "default"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

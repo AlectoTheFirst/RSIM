@@ -166,6 +166,7 @@ interface Ethernet1/2
 line console
 line vty
 boot nxos bootflash:/nxos64-cs.10.3.4a.M.bin
+route-map PROD-DIRECT permit 10
 router ospf UNDERLAY
   router-id 10.10.0.21
 router bgp 65110
@@ -189,14 +190,17 @@ router bgp 65110
   vrf PROD
     address-family ipv4 unicast
       advertise l2vpn evpn
+      redistribute direct route-map PROD-DIRECT
     neighbor 10.19.0.0
       remote-as 65010
       description fra-wan1
       address-family ipv4 unicast
+        soft-reconfiguration inbound
     neighbor 10.99.0.1
       remote-as 65120
       description par-dc-bl1
       address-family ipv4 unicast
+        soft-reconfiguration inbound
 evpn
   vni 10090 l2
     rd auto

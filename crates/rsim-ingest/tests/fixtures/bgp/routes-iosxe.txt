@@ -1,0 +1,53 @@
+NEIGHBOR: default 192.0.2.1 received-routes
+BGP table version is 9, local router ID is 192.0.2.9
+Status codes: s suppressed, d damped, h history, * valid, > best, i - internal, 
+              r RIB-failure, S Stale, m multipath, b backup-path, f RT-Filter, 
+              x best-external, a additional-path, c RIB-compressed, 
+              t secondary path, L long-lived-stale,
+Origin codes: i - IGP, e - EGP, ? - incomplete
+RPKI validation codes: V valid, I invalid, N Not found
+
+     Network          Next Hop            Metric LocPrf Weight Path
+ *   10.0.0.0         192.0.2.1                0             0 64500 i
+ *   100.100.100.128/25
+                      192.0.2.1                0             0 64500 64511 ?
+ *   198.51.100.0/24  192.0.2.1               10             0 64500 64510 i
+ *                    192.0.2.1               20             0 64500 64499 64510 i
+
+Total number of prefixes 3 
+NEIGHBOR: default 192.0.2.1 routes
+BGP table version is 9, local router ID is 192.0.2.9
+Status codes: s suppressed, d damped, h history, * valid, > best, i - internal, 
+              r RIB-failure, S Stale, m multipath, b backup-path, f RT-Filter, 
+              x best-external, a additional-path, c RIB-compressed, 
+              t secondary path, L long-lived-stale,
+Origin codes: i - IGP, e - EGP, ? - incomplete
+RPKI validation codes: V valid, I invalid, N Not found
+
+     Network          Next Hop            Metric LocPrf Weight Path
+ *>  10.0.0.0         192.0.2.1                0             0 64500 i
+ *>  100.100.100.128/25
+                      192.0.2.1                0             0 64500 64511 ?
+ *>  198.51.100.0/24  192.0.2.1               10             0 64500 64510 i
+ *                    192.0.2.1               20             0 64500 64499 64510 i
+
+Total number of prefixes 3 
+NEIGHBOR: default 192.0.2.1 advertised-routes
+
+Total number of prefixes 0 
+NEIGHBOR: RED 203.0.113.9 received-routes
+% Inbound soft reconfiguration not enabled on 203.0.113.9
+NEIGHBOR: RED 203.0.113.9 routes
+BGP table version is 9, local router ID is 192.0.2.9
+Status codes: s suppressed, d damped, h history, * valid, > best, i - internal, 
+              r RIB-failure, S Stale, m multipath, b backup-path, f RT-Filter, 
+              x best-external, a additional-path, c RIB-compressed, 
+              t secondary path, L long-lived-stale,
+Origin codes: i - IGP, e - EGP, ? - incomplete
+RPKI validation codes: V valid, I invalid, N Not found
+
+     Network          Next Hop            Metric LocPrf Weight Path
+ *>  203.0.113.128/25 203.0.113.9              0             0 64510 i
+
+Total number of prefixes 2 
+NEIGHBOR: RED 203.0.113.9 advertised-routes failed

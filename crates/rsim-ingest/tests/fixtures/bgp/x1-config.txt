@@ -1,0 +1,80 @@
+hostname x1
+interface Loopback0
+ ipv4 address 192.0.2.1 255.255.255.255
+!
+interface TenGigE0/0/0/0
+ description n1
+ ipv4 address 198.51.100.2 255.255.255.252
+!
+interface TenGigE0/0/0/1
+ description x2
+ ipv4 address 198.51.100.5 255.255.255.252
+!
+interface TenGigE0/0/0/2
+ description x3
+ ipv4 address 198.51.100.9 255.255.255.252
+!
+route-policy PASS
+  pass
+end-policy
+!
+router ospf CORE
+ router-id 192.0.2.1
+ area 0
+  interface Loopback0
+   cost 1
+   passive enable
+  !
+  interface TenGigE0/0/0/1
+   cost 10
+   network point-to-point
+  !
+  interface TenGigE0/0/0/2
+   cost 10
+   network point-to-point
+  !
+ !
+!
+prefix-set ANYCAST
+  203.0.113.128/26
+end-set
+!
+route-policy FROM-N1
+  if destination in ANYCAST then
+    set local-preference 200
+  endif
+  pass
+end-policy
+!
+router bgp 64502
+ bgp router-id 192.0.2.1
+ address-family ipv4 unicast
+ !
+ neighbor 198.51.100.1
+  remote-as 64501
+  description n1
+  address-family ipv4 unicast
+   route-policy FROM-N1 in
+   route-policy PASS out
+  !
+ !
+ neighbor 192.0.2.2
+  remote-as 64502
+  description x2
+  update-source Loopback0
+  address-family ipv4 unicast
+   route-reflector-client
+   next-hop-self
+  !
+ !
+ neighbor 192.0.2.3
+  remote-as 64502
+  description x3
+  update-source Loopback0
+  address-family ipv4 unicast
+   route-reflector-client
+   next-hop-self
+  !
+ !
+!
+end

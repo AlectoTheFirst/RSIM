@@ -78,7 +78,7 @@ fn as_str(v: &[(String, u32, u32)]) -> Vec<(&str, u32, u32)> {
 
 #[test]
 fn the_coverage_shares_of_the_fixtures() {
-    for (config, handled, irrelevant, unhandled) in [(ROUTER, 139, 134, 27), (SWITCH, 49, 57, 4)] {
+    for (config, handled, irrelevant, unhandled) in [(ROUTER, 150, 123, 27), (SWITCH, 49, 57, 4)] {
         let doc = iosxe::read_text(config);
         let cov = classify(
             &doc,
@@ -134,7 +134,7 @@ fn without_a_route_table_the_routing_is_unhandled() {
     assert_eq!(count("router bgp .."), None);
     assert_eq!(
         count("router bgp */address-family ../network 192.0.2.0 mask 255.255.255.0"),
-        Some((1, 1))
+        None
     );
     assert_eq!(
         count("router bgp */address-family ipv4 vrf * ../redistribute connected"),
@@ -144,8 +144,8 @@ fn without_a_route_table_the_routing_is_unhandled() {
         count("router bgp */neighbor 198.51.100.1 password <secret>"),
         Some((1, 1))
     );
-    assert_eq!(count("route-map .."), Some((2, 6)));
-    assert_eq!(count("ip prefix-list .."), Some((2, 2)));
+    assert_eq!(count("route-map .."), None);
+    assert_eq!(count("ip prefix-list .."), None);
     assert_eq!(count("vrf definition */rd .."), Some((1, 1)));
     assert_eq!(
         count("vrf definition */address-family ipv4/route-target .."),
@@ -153,7 +153,7 @@ fn without_a_route_table_the_routing_is_unhandled() {
     );
     assert_eq!(count("ip vrf */rd .."), Some((1, 1)));
     assert_eq!(count("ip vrf */route-target .."), Some((2, 2)));
-    assert_eq!(got.len(), ranked(ROUTER, true).len() + 15);
+    assert_eq!(got.len(), ranked(ROUTER, true).len() + 10);
     assert_eq!(ranked(SWITCH, false), ranked(SWITCH, true));
 }
 
@@ -326,8 +326,8 @@ fn the_states_of_key_stanzas() {
                 "address-family ipv4",
                 "network 192.0.2.0 mask 255.255.255.0",
             ],
-            Irrelevant,
-            Unhandled,
+            Handled,
+            Handled,
         ),
         (
             &["router bgp 64496", "neighbor 198.51.100.1 remote-as 64511"],
@@ -340,22 +340,18 @@ fn the_states_of_key_stanzas() {
             Unhandled,
         ),
         (&["router eigrp 10"], Irrelevant, Unhandled),
-        (&["route-map PBR permit 10"], Irrelevant, Unhandled),
+        (&["route-map PBR permit 10"], Handled, Handled),
         (
             &["ip prefix-list P seq 5 permit 0.0.0.0/0"],
-            Irrelevant,
-            Unhandled,
+            Handled,
+            Handled,
         ),
         (
             &["ip community-list standard C permit 64496:1"],
-            Irrelevant,
-            Unhandled,
+            Handled,
+            Handled,
         ),
-        (
-            &["ip as-path access-list 1 permit ^$"],
-            Irrelevant,
-            Unhandled,
-        ),
+        (&["ip as-path access-list 1 permit ^$"], Handled, Handled),
         (&["zone security INSIDE"], Unhandled, Unhandled),
         (
             &["zone-pair security A source B destination C"],

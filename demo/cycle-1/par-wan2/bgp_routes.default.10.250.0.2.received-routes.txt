@@ -1,0 +1,35 @@
+Mon Nov  2 08:00:00.000 UTC
+BGP router identifier 10.27.0.2, local AS number 65020
+BGP generic scan interval 60 secs
+Non-stop routing is enabled
+BGP table state: Active
+Table ID: 0xe0000000   RD version: 214
+BGP main routing table version 214
+BGP NSR Initial initsync version 4 (Reached)
+BGP NSR/ISSU Sync-Group versions 0/0
+BGP scan interval 60 secs
+
+Status codes: s suppressed, d damped, h history, * valid, > best
+              i - internal, r RIB-failure, S stale, N Nexthop-discard
+Origin codes: i - IGP, e - EGP, ? - incomplete
+   Network            Next Hop            Metric LocPrf Weight Path
+*  10.11.10.0/24      10.250.0.2               0             0 65010 65110 ?
+*  10.11.20.0/24      10.250.0.2               0             0 65010 65110 ?
+*  10.11.30.0/24      10.250.0.2               0             0 65010 65110 ?
+*  10.11.40.0/24      10.250.0.2               0             0 65010 65110 ?
+*  10.11.50.0/24      10.250.0.2               0             0 65010 65110 ?
+*  10.11.90.0/24      10.250.0.2               0             0 65010 65110 ?
+*  10.12.99.0/24      10.250.0.2               0             0 65010 ?
+*  10.12.110.0/24     10.250.0.2               0             0 65010 ?
+*  10.12.120.0/24     10.250.0.2               0             0 65010 ?
+*  10.12.250.0/29     10.250.0.2               0             0 65010 ?
+*  10.16.0.2/31       10.250.0.2               0             0 65010 ?
+*  10.16.255.1/32     10.250.0.2               0             0 65010 ?
+*  10.17.0.2/32       10.250.0.2               0             0 65010 ?
+*  10.17.1.0/31       10.250.0.2               0             0 65010 ?
+*  10.18.0.2/31       10.250.0.2               0             0 65010 ?
+*  10.18.255.2/32     10.250.0.2               0             0 65010 ?
+*  10.19.0.2/31       10.250.0.2               0             0 65010 ?
+*  203.0.113.0/31     10.250.0.2               0             0 65010 ?
+
+Processed 18 prefixes, 18 paths

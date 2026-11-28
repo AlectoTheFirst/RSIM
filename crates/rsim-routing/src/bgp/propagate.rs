@@ -18,7 +18,7 @@ use rsim_core::{Prefix, SourceSpan};
 use super::decision::{Decision, decide, multipath_for, order_winners};
 use super::policy::{Direction, PolicyContext, PolicyResult, evaluate, policy_reads};
 use super::process::{Aggregate, BgpProcess, Network};
-use super::profile::UndefinedPolicy;
+use super::profile::{BgpProfile, UndefinedPolicy};
 use super::session::{Offer, Session, export, receive};
 use super::stage::{ObjectRef, RoutingStage};
 use super::{
@@ -148,11 +148,17 @@ fn local_path(p: &BgpProcess, origin: LocalOrigin, spans: &[SourceSpan]) -> BgpP
 }
 
 /// The path of the `network` statement `n` of `process`. `route_present`
-/// tells whether the route table holds the prefix. The route-map of the
-/// statement runs on the path.
+/// tells whether the route table holds the prefix. With the option
+/// `network_import_check` `Some(false)`, the statement originates the path
+/// with no route. The route-map of the statement runs on the path.
 pub fn network_offer(process: &BgpProcess, n: &Network, route_present: Option<bool>) -> Offer {
     let Some(profile) = process.profile() else {
         return Offer::Unknown(Unknown::new(Reason::NoBgpProfile, process.device.clone()));
+    };
+    let route_present = if process.options.network_import_check == Some(false) {
+        Some(true)
+    } else {
+        route_present
     };
     match route_present {
         Some(true) => {}
@@ -706,15 +712,40 @@ impl<'n, 'a> Group<'n, 'a> {
         }
     }
 
+    /// True if each path that `w` can select comes from an iBGP neighbour
+    /// that is not a route-reflector client.
+    fn ibgp_only(&self, w: usize) -> bool {
+        let p = self.net.procs[self.vars[w].0];
+        self.network[w].is_none()
+            && !self.has_aggregate[w]
+            && self.seeds[w].is_empty()
+            && self.inlinks[w].iter().all(|&(l, _)| {
+                let n = &p.neighbors[&self.net.links[l].to_neighbor];
+                p.session_kind(n) == SessionKind::Ibgp && !n.route_reflector_client
+            })
+    }
+
     /// The sent path over link `l` for the best path `best` of variable
-    /// `w` at the sender, with no summary-only check.
+    /// `w` at the sender, with no summary-only check. An unknown best path
+    /// gives no path to an iBGP neighbour that is not a route-reflector
+    /// client when each path of `w` comes from such a neighbour.
     pub fn sent(&self, l: usize, w: usize, best: &BestPath) -> Offer {
         let link = &self.net.links[l];
         let sender = self.net.procs[link.from];
         let key = self.vars[w].1;
         match best {
             BestPath::None => Offer::None,
-            BestPath::Unknown(u) => Offer::Unknown(u.clone()),
+            BestPath::Unknown(u) => {
+                let n = &sender.neighbors[&link.from_neighbor];
+                if sender.session_kind(n) == SessionKind::Ibgp
+                    && !n.route_reflector_client
+                    && self.ibgp_only(w)
+                {
+                    Offer::None
+                } else {
+                    Offer::Unknown(u.clone())
+                }
+            }
             BestPath::Path(p) => export(
                 sender,
                 &sender.neighbors[&link.from_neighbor],
@@ -837,21 +868,26 @@ impl<'n, 'a> Group<'n, 'a> {
             best: paths[base].clone(),
             multipath: mp.iter().map(|&j| paths[j].clone()).collect(),
         };
+        let tie = |tied: &[usize], profile: &BgpProfile| {
+            let mut out = Vec::new();
+            for &t in tied {
+                match multipath_for(&paths, t, &p.options, profile) {
+                    Ok(mp) => out.push((cands[t].source, sel(t, &mp))),
+                    Err(u) => return Choice::Unknown(u),
+                }
+            }
+            Choice::Tie(out)
+        };
         let decision = decide(&paths, &p.options, profile.as_ref());
-        if matches!(decision, Decision::Best { .. } | Decision::Tie { .. })
-            && let Some(winners) = order_winners(&paths, &p.options, profile.as_ref())
-            && winners.len() > 1
-        {
-            let profile = profile.expect("order winners have a profile");
-            return Choice::Tie(
-                winners
-                    .iter()
-                    .map(|&t| {
-                        let mp = multipath_for(&paths, t, &p.options, &profile);
-                        (cands[t].source, sel(t, &mp))
-                    })
-                    .collect(),
-            );
+        if matches!(decision, Decision::Best { .. } | Decision::Tie { .. }) {
+            match order_winners(&paths, &p.options, profile.as_ref()) {
+                Err(u) => return Choice::Unknown(u),
+                Ok(Some(winners)) if winners.len() > 1 => {
+                    let profile = profile.expect("order winners have a profile");
+                    return tie(&winners, &profile);
+                }
+                Ok(_) => {}
+            }
         }
         match decision {
             Decision::NoCandidate => Choice::None,
@@ -860,14 +896,7 @@ impl<'n, 'a> Group<'n, 'a> {
             } => Choice::Best(cands[best].source, Box::new(sel(best, &multipath))),
             Decision::Tie { tied, .. } => {
                 let profile = profile.expect("a tie has a profile");
-                Choice::Tie(
-                    tied.iter()
-                        .map(|&t| {
-                            let mp = multipath_for(&paths, t, &p.options, &profile);
-                            (cands[t].source, sel(t, &mp))
-                        })
-                        .collect(),
-                )
+                tie(&tied, &profile)
             }
             Decision::Unknown(u) => Choice::Unknown(u),
         }

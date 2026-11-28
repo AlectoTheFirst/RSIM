@@ -1279,7 +1279,7 @@ mod twin {
             vyos::dynamic_vrfs(&doc),
         );
         let table = vyos::table(&tables);
-        let network = ["address-family", "ipv4-unicast", "network"];
+        let network = ["address-family", "ipv4-unicast", "redistribute"];
         let main: Vec<&str> = ["protocols", "bgp"]
             .iter()
             .chain(&network)

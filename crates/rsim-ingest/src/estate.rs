@@ -56,6 +56,11 @@ pub struct Estate {
     /// The tables of each VRF with a guard of each device, in the base of a
     /// scenario; empty for a snapshot twin.
     pub base: BTreeMap<String, BTreeMap<String, BaseVrf>>,
+    /// The BGP calculation of the VyOS routers, the NX-OS switches and the
+    /// IOS-XR and IOS-XE devices with its input and the convergence result
+    /// of each prefix group. `None` for a twin with no such device; a
+    /// scenario holds the one of its base.
+    pub bgp_routing: Option<crate::bgp_build::BgpBuild>,
 }
 
 /// An error of the build of a scenario: the store cannot be read, or a
@@ -457,7 +462,7 @@ pub fn assemble_scenario(
         return Ok(assemble_with(inputs, sessions));
     }
     let (mut base, _) = assemble_pass(inputs.clone(), sessions, Plan::Base);
-    let downs = layer_downs(&base, layers)?;
+    let (downs, far) = layer_downs(&base, layers)?;
     let spans: Vec<SourceSpan> = layers
         .iter()
         .enumerate()
@@ -474,6 +479,7 @@ pub fn assemble_scenario(
                 DeviceScenario {
                     base: tables.remove(d).unwrap_or_default(),
                     down: downs.get(d).cloned().unwrap_or_default(),
+                    far: far.get(d).cloned().unwrap_or_default(),
                     spans: spans.clone(),
                 },
             )
@@ -485,17 +491,30 @@ pub fn assemble_scenario(
     }
     e.guard = base.guard;
     e.ospf_guard = base.ospf_guard;
+    e.bgp_routing = base.bgp_routing;
     Ok(e)
 }
 
 /// The down interfaces of each device of the layers: the named interface,
 /// and the far end of each link of the interface in the base, with the
-/// links that name the interface as their far end.
+/// links that name the interface as their far end. A sub-interface with no
+/// link of its own, for example `eth1.10`, takes down the sub-interface
+/// with the same number of the far end of each link of its interface, for
+/// example `eth3.10`. The second map holds these far sub-interfaces, other
+/// than the interfaces that a layer names.
+#[allow(clippy::type_complexity)]
 fn layer_downs(
     base: &Estate,
     layers: &[Layer],
-) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+) -> Result<
+    (
+        BTreeMap<String, BTreeSet<String>>,
+        BTreeMap<String, BTreeSet<String>>,
+    ),
+    String,
+> {
     let mut downs: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut derived: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let vendor = |l: &Layer, d: &str| -> Result<(), String> {
         match base.vendors.get(d) {
             None => Err(format!("{l}: no device {d} in the twin")),
@@ -505,24 +524,33 @@ fn layer_downs(
             Some(_) => Ok(()),
         }
     };
+    // The far ends of the links of a port. A far port with 2 or more peers
+    // stays up through the other peers.
+    let far_of = |key: &(String, String)| -> BTreeSet<(String, String)> {
+        let mut far: BTreeSet<(String, String)> =
+            base.links.get(key).into_iter().flatten().cloned().collect();
+        for (end, ends) in &base.links {
+            if ends.contains(key) {
+                far.insert(end.clone());
+            }
+        }
+        far.retain(|f| base.links.get(f).is_none_or(|ends| ends.len() <= 1));
+        far
+    };
     for l in layers {
         let Layer::LinkDown { device, interface } = l;
         vendor(l, device)?;
         let key = (device.clone(), interface.clone());
-        let mut far: BTreeSet<(String, String)> = base
-            .links
-            .get(&key)
-            .into_iter()
-            .flatten()
-            .cloned()
-            .collect();
-        for (end, ends) in &base.links {
-            if ends.contains(&key) {
-                far.insert(end.clone());
+        let mut far = far_of(&key);
+        if far.is_empty()
+            && let Some((port, number)) = interface.rsplit_once('.')
+        {
+            for (d, p) in far_of(&(device.clone(), port.to_string())) {
+                let sub = format!("{p}.{number}");
+                derived.entry(d.clone()).or_default().insert(sub.clone());
+                far.insert((d, sub));
             }
         }
-        // A far port with 2 or more peers stays up through the other peers.
-        far.retain(|f| base.links.get(f).is_none_or(|ends| ends.len() <= 1));
         downs
             .entry(device.clone())
             .or_default()
@@ -532,7 +560,15 @@ fn layer_downs(
             downs.entry(d).or_default().insert(port);
         }
     }
-    Ok(downs)
+    for (d, subs) in &mut derived {
+        subs.retain(|s| {
+            !layers.iter().any(|l| {
+                let Layer::LinkDown { device, interface } = l;
+                device == d && interface == s
+            })
+        });
+    }
+    Ok((downs, derived))
 }
 
 /// Builds the twin of the inputs in a pass. Gives the interfaces of the
@@ -562,6 +598,7 @@ fn assemble_pass(
         links: BTreeMap::new(),
         vendors: BTreeMap::new(),
         base: BTreeMap::new(),
+        bgp_routing: None,
     };
     let mut routers: BTreeMap<String, Router> = BTreeMap::new();
     #[allow(clippy::type_complexity)]
@@ -584,6 +621,17 @@ fn assemble_pass(
     let mut bgp_hidden: BTreeMap<String, bool> = BTreeMap::new();
     // The input of the OSPF database builder of each router.
     let mut ospf_in: BTreeMap<String, rsim_routing::ospf::build::RouterInput> = BTreeMap::new();
+    // The BGP config and the collected BGP routes of each VyOS router,
+    // NX-OS switch and IOS-XR and IOS-XE device.
+    #[allow(clippy::type_complexity)]
+    let mut bgp_in: BTreeMap<
+        String,
+        (
+            rsim_routing::Platform,
+            crate::bgp_config::DeviceBgp,
+            Vec<crate::bgp_build::CollectedBgp>,
+        ),
+    > = BTreeMap::new();
     for input in inputs {
         match input {
             Input::Vyos {
@@ -670,6 +718,16 @@ fn assemble_pass(
                 e.unread
                     .insert(name.clone(), vyos::unread(&doc, &table, &cfg.read));
                 e.vendors.insert(name.clone(), "vyos".into());
+                let bgp_dev =
+                    vyos::bgp_config::read(&doc.root, &cfg.bgp, &file, &mut BTreeSet::new());
+                bgp_in.insert(
+                    name.clone(),
+                    (
+                        rsim_routing::Platform::FrrTraditional,
+                        bgp_dev,
+                        vyos::bgp_config::collected(&col),
+                    ),
+                );
                 routers.insert(name, Router { cfg, col, file });
             }
             Input::Nxos {
@@ -719,6 +777,21 @@ fn assemble_pass(
                         })),
                         &cisco_statics(&cfg.static_routes),
                         collected_defaults(&col),
+                    ),
+                );
+                let bgp_dev = nxos::bgp_config::read(
+                    &doc,
+                    &cfg.bgp,
+                    &file,
+                    &|k| table.report_key(k),
+                    &mut BTreeSet::new(),
+                );
+                bgp_in.insert(
+                    name.clone(),
+                    (
+                        rsim_routing::Platform::Nxos,
+                        bgp_dev,
+                        nxos::bgp_config::collected(&col),
                     ),
                 );
                 e.coverage.insert(name.clone(), classify(&doc, &table));
@@ -775,6 +848,21 @@ fn assemble_pass(
                         })),
                         &cisco_statics(&cfg.static_routes),
                         BTreeSet::new(),
+                    ),
+                );
+                let bgp_dev = iosxr::bgp_config::read(
+                    &doc,
+                    &cfg.bgp,
+                    &file,
+                    &|k| table.report_key(k),
+                    &mut BTreeSet::new(),
+                );
+                bgp_in.insert(
+                    name.clone(),
+                    (
+                        rsim_routing::Platform::Iosxr,
+                        bgp_dev,
+                        iosxr::bgp_config::collected(&cfg, &sections),
                     ),
                 );
                 e.coverage.insert(name.clone(), classify(&doc, &table));
@@ -837,6 +925,21 @@ fn assemble_pass(
                 e.unread
                     .insert(name.clone(), iosxe::unread(&doc, &table, &cfg.read));
                 e.vendors.insert(name.clone(), "iosxe".into());
+                let bgp_dev = iosxe::bgp_config::read(
+                    &doc,
+                    &cfg.bgp,
+                    &file,
+                    &|k| table.report_key(k),
+                    &mut BTreeSet::new(),
+                );
+                bgp_in.insert(
+                    name.clone(),
+                    (
+                        rsim_routing::Platform::Iosxe,
+                        bgp_dev,
+                        iosxe::bgp_config::collected(&cfg, &sections),
+                    ),
+                );
                 xe.insert(name, (cfg, file, sections));
             }
             Input::Unifi { name, sections } => {
@@ -857,7 +960,7 @@ fn assemble_pass(
     if let Plan::Scenario { devices, .. } = &plan {
         for (d, s) in devices {
             for i in &s.down {
-                if !found.contains(&(d.clone(), i.clone())) {
+                if !found.contains(&(d.clone(), i.clone())) && !s.far.contains(i) {
                     missing.push(format!("no interface {i} in the config of {d}"));
                 }
             }
@@ -905,6 +1008,40 @@ fn assemble_pass(
     }
     e.ospf_guard = ospf_rows;
 
+    // The devices with BGP with the tables of the neighbours of the section
+    // `bgp_routes` and the router IDs of the neighbour detail. The IGP view
+    // of each VyOS router comes from its main route table here, and the one
+    // of the other devices from their first lowering.
+    let mut bgp_devices: BTreeMap<String, crate::bgp_build::DeviceInput> = BTreeMap::new();
+    let mut igp_fibs: BTreeMap<String, Vec<(String, crate::guard::IgpRoutes)>> = BTreeMap::new();
+    for (device, (platform, bgp, collected)) in bgp_in {
+        let vendor = e.vendors.get(&device).map_or("", String::as_str);
+        let none = SessionSections::new();
+        let device_sections = sessions.get(&device).unwrap_or(&none);
+        let answer = device_sections
+            .get(crate::bgp_routes::ROUTES)
+            .map_or(bgp::Answer::NotCollected, bgp::Collected::answer);
+        let tables = crate::bgp_routes::read(vendor, answer);
+        let router_ids = crate::bgp_neighbors::router_ids(vendor, device_sections);
+        if let Some(r) = routers.get(&device) {
+            igp_fibs.insert(
+                device.clone(),
+                vyos::lower::igp_tables(&device, &r.file, &vyos::profile(), &r.cfg, &r.col),
+            );
+        }
+        bgp_devices.insert(
+            device,
+            crate::bgp_build::DeviceInput {
+                platform,
+                bgp,
+                igp: BTreeMap::new(),
+                collected,
+                tables,
+                router_ids,
+            },
+        );
+    }
+
     // The next hops of the routes of the routers: the collected route table
     // and the static routes.
     let mut next_hops: BTreeSet<IpAddr> = BTreeSet::new();
@@ -924,50 +1061,63 @@ fn assemble_pass(
         );
     }
 
-    // The first lowering of each NX-OS switch gives its summary. Its next
-    // hops join the set, and the summaries give the links and the places of
-    // the endpoints.
+    // The first lowering of each NX-OS switch gives its summary and its IGP
+    // view. Its next hops join the set, and the summaries give the links and
+    // the places of the endpoints.
     let nx_profile = nxos::profile();
-    let mut summaries: BTreeMap<String, crate::links::Summary> = switches
-        .iter()
-        .map(|(d, (cfg, col, file, sections))| {
-            let (_, sum) = nxos::lower(
-                d,
-                file,
-                &nx_profile,
-                cfg,
-                col,
-                sections,
-                &crate::links::External::default(),
-            );
-            (d.clone(), sum)
-        })
-        .collect();
-    // The first lowering of each IOS-XR router gives its summary.
-    let xr_profile = iosxr::profile();
-    for (d, (cfg, file, sections)) in &xr {
-        let (_, sum) = iosxr::lower(
+    let mut summaries: BTreeMap<String, crate::links::Summary> = BTreeMap::new();
+    for (d, (cfg, col, file, sections)) in &switches {
+        let (low, sum) = nxos::lower(
             d,
             file,
-            &xr_profile,
+            &nx_profile,
             cfg,
+            col,
             sections,
             &crate::links::External::default(),
         );
+        igp_fibs.insert(d.clone(), low.igp);
         summaries.insert(d.clone(), sum);
     }
-    // The first lowering of each IOS-XE device gives its summary.
+    // The first lowering of each IOS-XR router gives its summary and its IGP
+    // view.
+    let xr_profile = iosxr::profile();
+    for (d, (cfg, file, sections)) in &xr {
+        let ext = crate::links::External {
+            ospf: ios_ospf.get(d).cloned(),
+            ..Default::default()
+        };
+        let (low, sum) = iosxr::lower(d, file, &xr_profile, cfg, sections, &ext);
+        igp_fibs.insert(d.clone(), low.igp);
+        summaries.insert(d.clone(), sum);
+    }
+    // The first lowering of each IOS-XE device gives its summary and its IGP
+    // view.
     let xe_profile = iosxe::profile();
     for (d, (cfg, file, sections)) in &xe {
-        let (_, sum) = iosxe::lower(
-            d,
-            file,
-            &xe_profile,
-            cfg,
-            sections,
-            &crate::links::External::default(),
-        );
+        let ext = crate::links::External {
+            ospf: ios_ospf.get(d).cloned(),
+            ..Default::default()
+        };
+        let (low, sum) = iosxe::lower(d, file, &xe_profile, cfg, sections, &ext);
+        igp_fibs.insert(d.clone(), low.igp);
         summaries.insert(d.clone(), sum);
+    }
+    // The IGP view of each device with BGP.
+    for (device, x) in bgp_devices.iter_mut() {
+        let ospf = match x.platform {
+            rsim_routing::Platform::Nxos => switches.get(device).and_then(|s| s.1.ospf.as_ref()),
+            rsim_routing::Platform::FrrTraditional | rsim_routing::Platform::FrrDatacenter => {
+                routers.get(device).and_then(|r| r.col.ospf.as_ref())
+            }
+            _ => ios_ospf.get(device),
+        };
+        x.igp = igp_tables(
+            igp_fibs.remove(device).unwrap_or_default(),
+            ospf_in.get(device),
+            ospf,
+            x.platform,
+        );
     }
     // The VeloCloud enterprises: the coverage of the shared stanzas and of
     // each edge, and the summary of each edge, whose ports the join links by
@@ -1205,6 +1355,22 @@ fn assemble_pass(
     // router, not an endpoint.
     e.bgp = std::mem::take(&mut joined.bgp);
     e.seen = std::mem::take(&mut joined.seen);
+    // The BGP calculation over the sessions of the join. A scenario keeps
+    // each BGP route unknown and runs no calculation.
+    let mut bgp_build = match &plan {
+        Plan::Scenario { .. } => None,
+        _ => Some(crate::bgp_build::build(&bgp_devices, &e.bgp)),
+    };
+    let mut bgp_vrfs = BTreeMap::new();
+    if let Some(b) = &mut bgp_build {
+        for (d, n) in b.notes.iter().chain(&b.gaps) {
+            e.notes
+                .entry(d.clone())
+                .or_default()
+                .extend(n.iter().cloned());
+        }
+        bgp_vrfs = std::mem::take(&mut b.vrfs);
+    }
     next_hops.extend(joined.bgp_outside.iter().copied());
 
     let mut l2: BTreeMap<String, vyos::Layer2Links> = BTreeMap::new();
@@ -1323,6 +1489,7 @@ fn assemble_pass(
             col.neighbours.push(row);
         }
         let pass = plan.pass(device);
+        let bgp_routes = bgp_vrfs.remove(device).unwrap_or_default();
         let low = vyos::lower_in(
             device,
             &r.file,
@@ -1332,6 +1499,7 @@ fn assemble_pass(
             &links,
             &twin_addresses,
             &pass,
+            &bgp_routes,
         );
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         if !low.guard.is_empty() {
@@ -1353,6 +1521,7 @@ fn assemble_pass(
     for (device, (cfg, col, file, sections)) in &switches {
         let mut ext = joined.devices.remove(device).unwrap_or_default();
         ext.pass = plan.pass(device);
+        ext.bgp = bgp_vrfs.remove(device).unwrap_or_default();
         let (low, _) = nxos::lower(device, file, &nx_profile, cfg, col, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         if !low.guard.is_empty() {
@@ -1381,6 +1550,7 @@ fn assemble_pass(
         let mut ext = joined.devices.remove(device).unwrap_or_default();
         ext.ospf = ios_ospf.remove(device);
         ext.pass = plan.pass(device);
+        ext.bgp = bgp_vrfs.remove(device).unwrap_or_default();
         let (low, _) = iosxr::lower(device, file, &xr_profile, cfg, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         if !low.guard.is_empty() {
@@ -1403,6 +1573,7 @@ fn assemble_pass(
         let mut ext = joined.devices.remove(device).unwrap_or_default();
         ext.ospf = ios_ospf.remove(device);
         ext.pass = plan.pass(device);
+        ext.bgp = bgp_vrfs.remove(device).unwrap_or_default();
         let (low, _) = iosxe::lower(device, file, &xe_profile, cfg, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         if !low.guard.is_empty() {
@@ -1464,7 +1635,46 @@ fn assemble_pass(
             e.builder.edge_interface(x);
         }
     }
+    e.bgp_routing = bgp_build;
     (e, missing)
+}
+
+/// The IGP view of each VRF of a device with BGP before the install: the
+/// candidates `fibs` of each VRF other than BGP, the metric of each computed
+/// OSPF route, and the reason of each family whose OSPF version has a
+/// process of the VRF in the config and is not computed in full.
+fn igp_tables(
+    fibs: Vec<(String, crate::guard::IgpRoutes)>,
+    input: Option<&rsim_routing::ospf::build::RouterInput>,
+    ospf: Option<&crate::ospf::DeviceOspf>,
+    platform: rsim_routing::Platform,
+) -> BTreeMap<String, crate::bgp_build::IgpTable> {
+    use rsim_routing::ospf::Version;
+    fibs.into_iter()
+        .map(|(vrf, fib)| {
+            let routes = crate::ospf::routes::OspfRoutes::of(ospf, &vrf, platform);
+            let mut incomplete = BTreeMap::new();
+            for (v4, version) in [(true, Version::V2), (false, Version::V3)] {
+                let runs = input.is_some_and(|i| {
+                    i.config
+                        .processes
+                        .iter()
+                        .any(|p| p.vrf == vrf && p.version == version)
+                });
+                if let Some(why) = runs.then(|| routes.incomplete(version)).flatten() {
+                    incomplete.insert(v4, why);
+                }
+            }
+            let mut t = crate::bgp_build::IgpTable::new(
+                fib.cands,
+                fib.through_default,
+                crate::bgp_build::bgp_distance(platform),
+            );
+            t.ospf = routes.metrics().into_iter().collect();
+            t.incomplete = incomplete;
+            (vrf, t)
+        })
+        .collect()
 }
 
 /// The addresses of each interface with its VRF, `default` for an
@@ -1794,7 +2004,9 @@ mod layer_tests {
     }
 
     fn down(e: &Estate, layer: &str) -> BTreeMap<String, BTreeSet<String>> {
-        layer_downs(e, &[Layer::link_down(layer).unwrap()]).unwrap()
+        layer_downs(e, &[Layer::link_down(layer).unwrap()])
+            .unwrap()
+            .0
     }
 
     fn set(items: &[(&str, &[&str])]) -> BTreeMap<String, BTreeSet<String>> {
@@ -1815,6 +2027,33 @@ mod layer_tests {
         assert_eq!(
             down(&e, "leaf:Po1"),
             set(&[("leaf", &["Po1"]), ("swA", &["Po10"]), ("swB", &["Po10"])])
+        );
+    }
+
+    #[test]
+    fn a_layer_on_a_sub_interface_takes_down_the_sub_interface_of_the_far_end() {
+        let e = estate(&[
+            (("r1", "eth1"), &[("r2", "eth3")]),
+            (("r2", "eth3"), &[("r1", "eth1")]),
+        ]);
+        assert_eq!(
+            down(&e, "r1:eth1.10"),
+            set(&[("r1", &["eth1.10"]), ("r2", &["eth3.10"])])
+        );
+        let (_, far) = layer_downs(&e, &[Layer::link_down("r1:eth1.10").unwrap()]).unwrap();
+        assert_eq!(far, set(&[("r2", &["eth3.10"])]));
+        // A layer on the far sub-interface too makes it a named interface.
+        let both = [
+            Layer::link_down("r1:eth1.10").unwrap(),
+            Layer::link_down("r2:eth3.10").unwrap(),
+        ];
+        let (downs, far) = layer_downs(&e, &both).unwrap();
+        assert_eq!(downs, set(&[("r1", &["eth1.10"]), ("r2", &["eth3.10"])]));
+        assert!(far.values().all(BTreeSet::is_empty), "{far:?}");
+        // A port with a link keeps its own far end.
+        assert_eq!(
+            down(&e, "r1:eth1"),
+            set(&[("r1", &["eth1"]), ("r2", &["eth3"])])
         );
     }
 }

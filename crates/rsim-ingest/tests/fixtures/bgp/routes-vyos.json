@@ -1,0 +1,162 @@
+{
+  "default": {
+    "192.0.2.1": {
+      "advertised-routes": {
+        "answer": {
+          "advertisedRoutes": {},
+          "bgpLocalRouterId": "192.0.2.9",
+          "bgpTableVersion": 9,
+          "defaultLocPrf": 100,
+          "localAS": 64496,
+          "totalPrefixCounter": 0
+        }
+      },
+      "received-routes": {
+        "answer": {
+          "bgpLocalRouterId": "192.0.2.9",
+          "bgpTableVersion": 9,
+          "defaultLocPrf": 100,
+          "filteredPrefixCounter": 0,
+          "localAS": 64496,
+          "receivedRoutes": {
+            "10.1.0.0/16": {
+              "addrPrefix": "10.1.0.0",
+              "metric": 0,
+              "network": "10.1.0.0/16",
+              "nextHop": "192.0.2.1",
+              "origin": "IGP",
+              "path": "64500",
+              "prefixLen": 16,
+              "weight": 0
+            },
+            "198.51.100.0/24": {
+              "addrPrefix": "198.51.100.0",
+              "metric": 10,
+              "network": "198.51.100.0/24",
+              "nextHop": "192.0.2.1",
+              "origin": "IGP",
+              "path": "64500 64510",
+              "prefixLen": 24,
+              "weight": 0
+            }
+          },
+          "totalPrefixCounter": 2
+        }
+      },
+      "routes": {
+        "answer": {
+          "defaultLocPrf": 100,
+          "localAS": 64496,
+          "routerId": "192.0.2.9",
+          "routes": {
+            "10.1.0.0/16": [
+              {
+                "bestpath": {
+                  "overall": true
+                },
+                "community": {
+                  "string": "64500:1"
+                },
+                "metric": 0,
+                "network": "10.1.0.0/16",
+                "nexthops": [
+                  {
+                    "afi": "ipv4",
+                    "ip": "192.0.2.1",
+                    "used": true
+                  }
+                ],
+                "origin": "IGP",
+                "path": "64500",
+                "pathFrom": "external",
+                "prefix": "10.1.0.0",
+                "prefixLen": 16,
+                "valid": true,
+                "weight": 0
+              }
+            ],
+            "198.51.100.0/24": [
+              {
+                "bestpath": {
+                  "overall": true
+                },
+                "metric": 10,
+                "network": "198.51.100.0/24",
+                "nexthops": [
+                  {
+                    "afi": "ipv4",
+                    "ip": "192.0.2.1",
+                    "used": true
+                  }
+                ],
+                "origin": "IGP",
+                "path": "64500 64510",
+                "pathFrom": "external",
+                "prefix": "198.51.100.0",
+                "prefixLen": 24,
+                "valid": true,
+                "weight": 0
+              },
+              {
+                "metric": 20,
+                "network": "198.51.100.0/24",
+                "nexthops": [
+                  {
+                    "afi": "ipv4",
+                    "ip": "192.0.2.3",
+                    "used": true
+                  }
+                ],
+                "origin": "incomplete",
+                "path": "64500 64499 64510",
+                "pathFrom": "external",
+                "prefix": "198.51.100.0",
+                "prefixLen": 24,
+                "valid": true,
+                "weight": 0
+              }
+            ]
+          },
+          "tableVersion": 9,
+          "vrfId": 0,
+          "vrfName": "default"
+        }
+      }
+    },
+    "192.0.2.5": {
+      "advertised-routes": {
+        "answer": "% No such neighbor or address family"
+      },
+      "received-routes": {
+        "answer": {
+          "receivedRoutes": {
+            "10.1.0.0/16": {
+              "addrPrefix": "10.1.0.0",
+              "metric": 0,
+              "network": "10.1.0.0/16",
+              "nextHop": "192.0.2.1",
+              "origin": "IGP",
+              "path": "64500",
+              "prefixLen": 16,
+              "weight": 0
+            },
+            "198.51.100.0/24": {
+              "addrPrefix": "198.51.100.0",
+              "metric": 10,
+              "network": "198.51.100.0/24",
+              "nextHop": "192.0.2.1",
+              "origin": "IGP",
+              "path": "64500 64510",
+              "prefixLen": 24,
+              "weight": 0
+            }
+          },
+          "totalPrefixCounter": 3
+        }
+      },
+      "routes": {
+        "answer": {}
+      }
+    }
+  }
+}

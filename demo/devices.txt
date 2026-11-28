@@ -1,40 +1,40 @@
-fra-acc1 iosxe 10.12.99.10
-fra-acc2 iosxe 10.12.99.11
-fra-acc3 iosxe 10.12.99.12
-fra-acc4 iosxe 10.12.99.13
-fra-acc5 iosxe 10.12.99.14
-fra-acc6 iosxe 10.12.99.15
-fra-acc7 iosxe 10.12.99.16
-fra-acc8 iosxe 10.12.99.17
-fra-core1 iosxe 10.255.1.22
-fra-core2 iosxe 10.255.1.23
-fra-dc-bl1 nxos 10.255.1.20
-fra-dc-bl2 nxos 10.255.1.21
-fra-dc-leaf1 nxos 10.255.1.14
-fra-dc-leaf2 nxos 10.255.1.15
-fra-dc-leaf3 nxos 10.255.1.16
-fra-dc-leaf4 nxos 10.255.1.17
-fra-dc-leaf5 nxos 10.255.1.18
-fra-dc-leaf6 nxos 10.255.1.19
-fra-dc-spine1 nxos 10.255.1.12
-fra-dc-spine2 nxos 10.255.1.13
-fra-inet1 iosxe 10.255.1.32
-fra-wan1 iosxr 10.255.1.10
-fra-wan2 iosxr 10.255.1.11
-par-acc1 iosxe 10.22.99.10
-par-acc2 iosxe 10.22.99.11
-par-acc3 iosxe 10.22.99.12
-par-acc4 iosxe 10.22.99.13
-par-core1 iosxe 10.255.2.20
-par-core2 iosxe 10.255.2.21
-par-dc-bl1 nxos 10.255.2.18
-par-dc-bl2 nxos 10.255.2.19
-par-dc-leaf1 nxos 10.255.2.14
-par-dc-leaf2 nxos 10.255.2.15
-par-dc-leaf3 nxos 10.255.2.16
-par-dc-leaf4 nxos 10.255.2.17
-par-dc-spine1 nxos 10.255.2.12
-par-dc-spine2 nxos 10.255.2.13
-par-inet1 iosxe 10.255.2.26
-par-wan1 iosxr 10.255.2.10
-par-wan2 iosxr 10.255.2.11
+fra-acc1 iosxe 10.12.99.10 sessions
+fra-acc2 iosxe 10.12.99.11 sessions
+fra-acc3 iosxe 10.12.99.12 sessions
+fra-acc4 iosxe 10.12.99.13 sessions
+fra-acc5 iosxe 10.12.99.14 sessions
+fra-acc6 iosxe 10.12.99.15 sessions
+fra-acc7 iosxe 10.12.99.16 sessions
+fra-acc8 iosxe 10.12.99.17 sessions
+fra-core1 iosxe 10.255.1.22 sessions
+fra-core2 iosxe 10.255.1.23 sessions
+fra-dc-bl1 nxos 10.255.1.20 all
+fra-dc-bl2 nxos 10.255.1.21 all
+fra-dc-leaf1 nxos 10.255.1.14 all
+fra-dc-leaf2 nxos 10.255.1.15 all
+fra-dc-leaf3 nxos 10.255.1.16 all
+fra-dc-leaf4 nxos 10.255.1.17 all
+fra-dc-leaf5 nxos 10.255.1.18 all
+fra-dc-leaf6 nxos 10.255.1.19 all
+fra-dc-spine1 nxos 10.255.1.12 all
+fra-dc-spine2 nxos 10.255.1.13 all
+fra-inet1 iosxe 10.255.1.32 all
+fra-wan1 iosxr 10.255.1.10 all
+fra-wan2 iosxr 10.255.1.11 all
+par-acc1 iosxe 10.22.99.10 sessions
+par-acc2 iosxe 10.22.99.11 sessions
+par-acc3 iosxe 10.22.99.12 sessions
+par-acc4 iosxe 10.22.99.13 sessions
+par-core1 iosxe 10.255.2.20 sessions
+par-core2 iosxe 10.255.2.21 sessions
+par-dc-bl1 nxos 10.255.2.18 all
+par-dc-bl2 nxos 10.255.2.19 all
+par-dc-leaf1 nxos 10.255.2.14 all
+par-dc-leaf2 nxos 10.255.2.15 all
+par-dc-leaf3 nxos 10.255.2.16 all
+par-dc-leaf4 nxos 10.255.2.17 all
+par-dc-spine1 nxos 10.255.2.12 all
+par-dc-spine2 nxos 10.255.2.13 all
+par-inet1 iosxe 10.255.2.26 all
+par-wan1 iosxr 10.255.2.10 all
+par-wan2 iosxr 10.255.2.11 all
