@@ -106,6 +106,7 @@ router ospf CORE
 !
 router bgp 65020
  bgp router-id 10.27.0.1
+ default-information originate
  address-family ipv4 unicast
   redistribute connected
   redistribute ospf CORE
