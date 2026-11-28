@@ -336,21 +336,91 @@ fn a_reflected_route_of_a_client_with_no_router_id_makes_its_group_not_computed(
     );
 }
 
-#[test]
-fn a_collected_route_with_a_next_hop_inside_the_twin_is_compared_with_a_seeded_best_path() {
-    let mut inputs = inputs();
+/// The section `bgp_routes` of n1 from the text of `n1-routes.json` after
+/// `edit`.
+fn n1_section(
+    edit: impl Fn(&mut serde_json::Value),
+) -> BTreeMap<String, BTreeMap<String, Section>> {
+    let mut v: serde_json::Value = serde_json::from_str(&fixture("n1-routes.json")).unwrap();
+    edit(&mut v);
+    let section = Section::Fresh(v.to_string().into_bytes(), "n1/bgp_routes".into());
+    BTreeMap::from([(
+        "n1".to_string(),
+        BTreeMap::from([(rsim_ingest::bgp_routes::ROUTES.to_string(), section)]),
+    )])
+}
+
+/// The prefix rows of the received table of `v`.
+fn received_rows(v: &mut serde_json::Value) -> &mut Vec<serde_json::Value> {
+    v["default"]["203.0.113.2"]["received-routes"]["answer"]["TABLE_vrf"]["ROW_vrf"][0]["TABLE_afi"]
+        ["ROW_afi"][0]["TABLE_safi"]["ROW_safi"][0]["TABLE_prefix"]["ROW_prefix"]
+        .as_array_mut()
+        .unwrap()
+}
+
+/// The inputs with the next hop and the interface of the collected route of
+/// n1 of `prefix` replaced.
+fn n1_route_via(inputs: &mut [Input], prefix: &str, hop: &str, iface: &str) {
     if let Input::Nxos { collected, .. } = &mut inputs[0] {
         for r in &mut collected.routes {
-            if r.prefix == "198.51.100.128/25" {
-                r.next_hop = Some("198.51.100.2".to_string());
-                r.interface = Some("Ethernet1/1".to_string());
+            if r.prefix == prefix {
+                r.next_hop = Some(hop.to_string());
+                r.interface = Some(iface.to_string());
             }
         }
     }
-    let e = assemble_with(inputs, &n1_tables(&[]));
+}
+
+#[test]
+fn a_route_of_an_outside_reflector_with_a_next_hop_inside_the_twin_is_seeded() {
+    // 203.0.113.2 is an iBGP route reflector outside the twin. Its paths
+    // have the third-party next hop 198.51.100.2 of x1.
+    let n1 = fixture("n1-config.txt")
+        .replace("    remote-as 64499\n", "    remote-as 64501\n")
+        .replace("      route-map FROM-ISP in\n", "");
+    let mut inputs = inputs_with(&n1, &fixture("x1-config.txt"));
+    n1_route_via(
+        &mut inputs,
+        "198.51.100.128/25",
+        "198.51.100.2",
+        "Ethernet1/1",
+    );
+    let tables = n1_section(|v| {
+        for row in received_rows(v) {
+            for p in row["TABLE_path"]["ROW_path"].as_array_mut().unwrap() {
+                p["ipnexthop"] = serde_json::json!("198.51.100.2");
+            }
+        }
+    });
+    let e = assemble_with(inputs, &tables);
+    let seeds = &e.bgp_routing.as_ref().unwrap().input.seeds;
+    assert!(
+        seeds
+            .iter()
+            .any(|s| s.path.next_hop == Some(ip("198.51.100.2"))),
+        "{seeds:?}"
+    );
     let r = row(&e, "n1", "198.51.100.128/25");
+    assert_eq!(r.0, Category::Seeded, "{r:?}");
+}
+
+#[test]
+fn a_collected_route_through_an_outside_peer_with_a_best_path_from_inside_is_a_differ() {
+    // The received table of the peer outside the twin holds 192.0.2.64/27,
+    // which the import policy of n1 denies, and the collected route goes
+    // through that peer. The computed best path comes from x1.
+    let mut inputs = inputs();
+    n1_route_via(&mut inputs, "192.0.2.64/27", "203.0.113.2", "Ethernet1/2");
+    let tables = n1_section(|v| {
+        let rows = received_rows(v);
+        let mut extra = rows[0].clone();
+        extra["ipprefix"] = serde_json::json!("192.0.2.64/27");
+        rows.push(extra);
+    });
+    let e = assemble_with(inputs, &tables);
+    let r = row(&e, "n1", "192.0.2.64/27");
     assert_eq!(r.0, Category::Differ, "{r:?}");
-    assert_eq!(r.2, ["203.0.113.2@Ethernet1/2"]);
+    assert_eq!(r.2, ["198.51.100.2@Ethernet1/1"]);
 }
 
 #[test]
@@ -410,4 +480,80 @@ fn a_floating_static_route_of_the_config_leaves_the_ospf_cost_of_the_next_hop() 
         cost(with_x3_static("192.0.2.2/32 198.51.100.9")),
         Resolution::Resolved { cost: 0 }
     );
+}
+
+/// `config` with the IPv6 addresses `v6` after the IPv4 address lines
+/// `v4`, and a `router ospfv3 CORE` process with the router ID `rid` on
+/// the interfaces `ifaces`.
+fn with_ospfv3(config: &str, v6: &[(&str, &str)], rid: &str, ifaces: &[&str]) -> String {
+    let mut out = config.to_string();
+    for (v4, a) in v6 {
+        let line = format!(" ipv4 address {v4}\n");
+        out = out.replace(&line, &format!("{line} ipv6 address {a}\n"));
+    }
+    let mut ospf = format!("router ospfv3 CORE\n router-id {rid}\n area 0\n");
+    for i in ifaces {
+        ospf.push_str(&format!("  interface {i}\n  !\n"));
+    }
+    ospf.push_str(" !\n!\n");
+    out.replace("router bgp 64502\n", &format!("{ospf}router bgp 64502\n"))
+}
+
+#[test]
+fn an_ipv6_next_hop_learned_by_ospfv3_does_not_resolve_through_another_route() {
+    let x1 = with_ospfv3(
+        &fixture("x1-config.txt"),
+        &[
+            ("192.0.2.1 255.255.255.255", "2001:db8::1/128"),
+            ("198.51.100.5 255.255.255.252", "2001:db8:5::1/64"),
+            ("198.51.100.9 255.255.255.252", "2001:db8:9::1/64"),
+        ],
+        "192.0.2.1",
+        &["Loopback0", "TenGigE0/0/0/1", "TenGigE0/0/0/2"],
+    );
+    let mut inputs = inputs_with(&fixture("n1-config.txt"), &x1);
+    for i in &mut inputs {
+        if let Input::Iosxr { name, config, .. } = i {
+            let text = String::from_utf8(config.clone()).unwrap();
+            let text = match name.as_str() {
+                "x2" => with_ospfv3(
+                    &text,
+                    &[
+                        ("192.0.2.2 255.255.255.255", "2001:db8::2/128"),
+                        ("198.51.100.6 255.255.255.252", "2001:db8:5::2/64"),
+                    ],
+                    "192.0.2.2",
+                    &["Loopback0", "TenGigE0/0/0/0"],
+                ),
+                "x3" => with_ospfv3(
+                    &text,
+                    &[
+                        ("192.0.2.3 255.255.255.255", "2001:db8::3/128"),
+                        ("198.51.100.10 255.255.255.252", "2001:db8:9::2/64"),
+                    ],
+                    "192.0.2.3",
+                    &["Loopback0", "TenGigE0/0/0/0"],
+                ),
+                _ => text,
+            };
+            *config = text.into_bytes();
+        }
+    }
+    let e = assemble(inputs);
+    let b = e.bgp_routing.unwrap();
+    let t = &b.igp[&("x3".to_string(), "default".to_string())];
+    let lo: rsim_core::Prefix = "2001:db8::2/128".parse().unwrap();
+    // The OSPFv3 route of the loopback of x2 is in the view, or the OSPFv3
+    // of x3 is not computed in full.
+    assert!(
+        t.routes.contains_key(&lo) || t.incomplete.contains_key(&false),
+        "{:?} {:?}",
+        t.routes.keys().collect::<Vec<_>>(),
+        t.incomplete
+    );
+    assert_ne!(
+        t.resolve(ip("2001:db8::2")),
+        rsim_routing::bgp::Resolution::Resolved { cost: 0 }
+    );
+    assert_ne!(t.has_route(lo), Some(false));
 }
