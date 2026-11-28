@@ -4,7 +4,7 @@
 //! The syntax is digits, the space and `:` as literals, `.`, `^`, `$`, `_`,
 //! `*`, `+`, `?`, a class `[...]` of digits and digit ranges with an
 //! optional `^`, a group `(...)` and `|`. `_` matches the start, the end, or
-//! one of the characters space, `,`, `{`, `}`, `(`, `)`, `[` and `]`. Each
+//! one of the characters space, `,`, `{`, `}`, `(` and `)`. Each
 //! other construct is a parse error. A match is a search: the pattern
 //! matches when it matches a part of the text.
 //!
@@ -15,7 +15,7 @@
 use std::fmt;
 
 /// The characters that `_` matches between the start and the end.
-const DELIMITERS: &[u8] = b" ,{}()[]";
+const DELIMITERS: &[u8] = b" ,{}()";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Node {
@@ -401,6 +401,8 @@ mod tests {
         assert!(m("_64512_", "3356 64512 1"));
         assert!(!m("_64512_", "645120"));
         assert!(m("_1_", "{1,2}"));
+        assert!(!m("_1_", "[1,2]"));
+        assert!(!m("_2_", "[1,2]"));
     }
 
     #[test]

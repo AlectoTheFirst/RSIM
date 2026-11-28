@@ -39,6 +39,10 @@ pub enum Resolution {
 
 /// The route table that the BGP calculation reads: the resolution of the
 /// next hops and the routes of the `network` statements.
+///
+/// A next hop that resolves only through a BGP route gives
+/// `Resolution::Unknown`. `Resolution::Unresolved` removes the path as a
+/// candidate.
 pub trait IgpView {
     fn resolve(&self, device: &str, vrf: &str, next_hop: IpAddr) -> Resolution;
 

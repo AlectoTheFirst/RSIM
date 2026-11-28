@@ -2,8 +2,8 @@
 //! the decision function, the propagation over the sessions and the
 //! convergence detection.
 //!
-//! The order is fixed: communities, route targets and lists are ordered
-//! sets, and the policies and lists are held by name in `BTreeMap`s.
+//! The communities and the route targets are ordered sets. The policies and
+//! the lists are held by name in `BTreeMap`s.
 
 pub mod converge;
 pub mod decision;
@@ -203,6 +203,7 @@ impl RouteKey {
 pub struct Community(pub u32);
 
 impl Community {
+    pub const INTERNET: Community = Community(0);
     pub const NO_EXPORT: Community = Community(0xFFFF_FF01);
     pub const NO_ADVERTISE: Community = Community(0xFFFF_FF02);
     pub const NO_EXPORT_SUBCONFED: Community = Community(0xFFFF_FF03);
@@ -221,11 +222,12 @@ impl fmt::Display for Community {
 impl FromStr for Community {
     type Err = ParseAsnError;
 
-    /// Reads `high:low`, a 32-bit number, or the names `no-export`,
-    /// `no-advertise`, `local-as` and `no-export-subconfed`.
+    /// Reads `high:low`, a 32-bit number, or the names `internet` (0:0),
+    /// `no-export`, `no-advertise`, `local-as` and `no-export-subconfed`.
     fn from_str(s: &str) -> Result<Community, ParseAsnError> {
         let err = || ParseAsnError(s.to_string());
         match s.to_ascii_lowercase().as_str() {
+            "internet" => return Ok(Community::INTERNET),
             "no-export" => return Ok(Community::NO_EXPORT),
             "no-advertise" => return Ok(Community::NO_ADVERTISE),
             "local-as" | "no-export-subconfed" => return Ok(Community::NO_EXPORT_SUBCONFED),
@@ -272,14 +274,15 @@ pub struct AsSegment {
 /// The neighbour AS of a path for the MED step.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum NeighbourAs {
-    /// The path has no AS outside the confederation segments: it comes from
-    /// the local AS.
+    /// The path has no AS outside the confederation segments. The path
+    /// comes from the local AS.
     Local,
     /// The first AS of the first AS_SEQUENCE after the confederation
     /// segments.
     As(Asn),
     /// The first segment after the confederation segments is an AS_SET.
-    /// The MED of such a path compares with no other path.
+    /// The MED of such a path compares with no other path, as in FRR
+    /// `aspath_cmp_left`.
     Set,
 }
 

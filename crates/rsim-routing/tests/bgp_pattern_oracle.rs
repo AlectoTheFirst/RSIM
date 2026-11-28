@@ -100,7 +100,7 @@ fn m(r: &R, s: &[u8], i: usize, k: &dyn Fn(usize) -> bool) -> bool {
         R::Under => {
             (i == 0 && k(i))
                 || (i == s.len() && k(i))
-                || (i < s.len() && b" ,{}()[]".contains(&s[i]) && k(i + 1))
+                || (i < s.len() && b" ,{}()".contains(&s[i]) && k(i + 1))
         }
         R::Cat(v) => cat(v, s, i, k),
         R::Alt(v) => v.iter().any(|r| m(r, s, i, k)),

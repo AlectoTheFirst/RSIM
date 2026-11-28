@@ -175,6 +175,8 @@ fn the_well_known_community_names_parse_to_their_numbers() {
     assert_eq!(c("65535:65281"), Community::NO_EXPORT);
     assert_eq!(c("no-advertise"), c("65535:65282"));
     assert_eq!(c("local-as"), c("65535:65283"));
+    assert_eq!(c("internet"), c("0:0"));
+    assert_eq!(c("internet"), Community::INTERNET);
     let l = CommunityList::new(vec![standard(1, true, &["no-export"])]);
     assert_eq!(l.permits(&cs(&["65535:65281"])), Some(true));
 }
