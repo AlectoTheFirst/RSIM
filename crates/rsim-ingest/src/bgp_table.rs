@@ -267,6 +267,9 @@ fn split_origin<'a>(words: &[&'a str]) -> Option<(Vec<&'a str>, char)> {
     Some((out, o))
 }
 
+/// The score, the layout and the distances of a layout that fits a line.
+type Fit = ((i64, i64), &'static [usize], Vec<i64>);
+
 /// The fields of one line read by its tokens: the network, empty when the
 /// column is blank, the next hop, empty for a wrapped network, the metric,
 /// the local preference, the weight, the AS path and the origin.
@@ -340,7 +343,7 @@ fn by_tokens(line: &str, g: &Geometry) -> Option<(Fields, Option<usize>)> {
         g.local_pref_end as i64,
         g.weight_end as i64,
     ];
-    let mut best: Option<((i64, i64), &[usize], Vec<i64>)> = None;
+    let mut best: Option<Fit> = None;
     for layout in NUMBER_LAYOUTS {
         let count = layout.len();
         if count > numbers {

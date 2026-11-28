@@ -404,7 +404,7 @@ fn num(v: Option<&Value>) -> Option<u32> {
     }
 }
 
-fn text<'a>(v: Option<&'a Value>) -> Option<&'a str> {
+fn text(v: Option<&Value>) -> Option<&str> {
     v.and_then(Value::as_str)
 }
 

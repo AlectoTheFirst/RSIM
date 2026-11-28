@@ -93,6 +93,8 @@ struct L<'a> {
     profile: &'a VendorProfile,
     cfg: &'a Config,
     pass: &'a crate::scenario::Pass,
+    /// The BGP routes of each VRF from the BGP calculation.
+    bgp: &'a BTreeMap<String, crate::bgp_build::VrfBgp>,
     out: Lowered,
 }
 
@@ -208,11 +210,13 @@ pub fn lower(
         l2,
         twin,
         &crate::scenario::Pass::Snapshot,
+        &BTreeMap::new(),
     )
 }
 
 /// Lowers one VyOS device in the pass `pass` of a snapshot twin or a
-/// scenario.
+/// scenario, with the BGP routes `bgp` of each VRF from the BGP
+/// calculation.
 #[allow(clippy::too_many_arguments)]
 pub fn lower_in(
     device: &str,
@@ -223,6 +227,7 @@ pub fn lower_in(
     l2: &Layer2Links,
     twin: &BTreeSet<IpAddr>,
     pass: &crate::scenario::Pass,
+    bgp: &BTreeMap<String, crate::bgp_build::VrfBgp>,
 ) -> Lowered {
     let mut l = L {
         dev: device,
@@ -230,6 +235,7 @@ pub fn lower_in(
         profile,
         cfg,
         pass,
+        bgp,
         out: Lowered::default(),
     };
     let active: Vec<&Interface> = cfg
@@ -1012,9 +1018,11 @@ impl L<'_> {
     }
 
     /// The RIB guard of the main VRF: the computed route table of the
-    /// connected, static, local and OSPF routes against the collected route
-    /// table `t`, whose routes it marks. The notes of the static routes are
-    /// not kept, as the device forwards on `t`.
+    /// connected, static, local, OSPF and BGP routes against the collected
+    /// route table `t`, whose routes it marks. The notes of the static
+    /// routes are not kept, as the device forwards on `t`. In a scenario
+    /// each BGP route of the computed table of the base is an unknown
+    /// candidate.
     fn guard(&mut self, t: &mut Fib, col: &Collected, addrs: &Addrs, locals: &[(Prefix, Route)]) {
         let notes = self.out.notes.len();
         let mut cands = self.config_candidates(addrs);
@@ -1032,6 +1040,18 @@ impl L<'_> {
                 interface_of(addrs, gw)
             }),
         );
+        let bgp = match self.pass {
+            crate::scenario::Pass::Scenario(s) => s.base.get(VRF).map(|b| {
+                crate::bgp_build::VrfBgp::scenario(
+                    &b.computed,
+                    crate::bgp_build::unknown_distance(PLATFORM),
+                )
+            }),
+            _ => self.bgp.get(VRF).cloned(),
+        };
+        if let Some(b) = &bgp {
+            cands.extend(b.candidates.iter().cloned());
+        }
         let given: BTreeSet<Prefix> = cands.iter().map(|c| c.prefix).collect();
         // The interfaces whose address the device gets at run time by PPPoE,
         // DHCP, DHCPv6, IPv6 autoconfiguration or DHCPv6 prefix delegation.
@@ -1058,6 +1078,13 @@ impl L<'_> {
                     rsim_guard::CollectedRoute {
                         protocol: r.protocol.clone(),
                         class: ospf.class(p),
+                    }
+                } else if r.protocol == "bgp"
+                    && let Some(b) = &bgp
+                {
+                    rsim_guard::CollectedRoute {
+                        protocol: r.protocol.clone(),
+                        class: b.class(p),
                     }
                 } else if seeded {
                     rsim_guard::CollectedRoute {

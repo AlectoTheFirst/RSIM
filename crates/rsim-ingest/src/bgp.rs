@@ -184,12 +184,14 @@ pub const NXOS_SESSIONS_DEFAULT: &str = "bgp_sessions_default";
 /// The IOS-XR and IOS-XE section of the summaries of the VRFs.
 pub const VRF_SESSIONS: &str = "bgp_vrf_sessions";
 
-/// The session sections that a vendor reads.
+/// The session sections that a vendor reads, and the section of the
+/// tables of its neighbours.
 pub fn sections(vendor: &str) -> &'static [&'static str] {
+    use crate::bgp_routes::ROUTES;
     match vendor {
-        "vyos" => &[SESSIONS],
-        "nxos" => &[SESSIONS, NXOS_SESSIONS_DEFAULT],
-        "iosxr" | "iosxe" => &[SESSIONS, VRF_SESSIONS],
+        "vyos" => &[SESSIONS, ROUTES],
+        "nxos" => &[SESSIONS, NXOS_SESSIONS_DEFAULT, ROUTES],
+        "iosxr" | "iosxe" => &[SESSIONS, VRF_SESSIONS, ROUTES],
         _ => &[],
     }
 }

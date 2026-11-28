@@ -6,15 +6,20 @@
 //!
 //! A configured neighbour with a peer address is one of 3 things. With a
 //! paired far end whose neighbour is lowered too, it is one end of a
-//! session. With a far end outside the twin, the collected BGP routes of
-//! its VRF whose next hop is its address are seeds with attributes that are
-//! not collected. Each other neighbour is a gap of its VRF.
+//! session. With a far end outside the twin, it gives seeds from one
+//! source: the paths of its received table of the section `bgp_routes`,
+//! which go through the import policy, else the paths of its accepted
+//! table, else the collected BGP routes of its VRF whose next hop is its
+//! address, with attributes that are not collected. A table is a source
+//! only when it is read whole. Each other neighbour is a gap of its VRF.
 //!
 //! A gap covers each process in the component of its VRF over the sessions
 //! and the far ends of the neighbours, for the families of the gap. A
 //! computed BGP route under a gap is unknown with the reason of the gap,
-//! and a collected BGP route under a gap is not computed, unless it is a
-//! seed.
+//! and a collected BGP route under a gap is not computed, unless it is
+//! seeded. A collected BGP route is seeded when its next hop is a peer
+//! outside the twin with no table of the neighbour, or when the computed
+//! best path of its device and VRF comes from a peer outside the twin.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr};
@@ -133,6 +138,8 @@ pub struct DeviceInput {
     /// The computed IGP table of each VRF.
     pub igp: BTreeMap<String, IgpTable>,
     pub collected: Vec<CollectedBgp>,
+    /// The tables of the neighbours of the section `bgp_routes`.
+    pub tables: Vec<crate::bgp_routes::Table>,
 }
 
 /// The BGP routes of one device and VRF for the RIB guard.
@@ -420,6 +427,78 @@ pub fn build(
     }
     let mut seeds = Vec::new();
     let mut seeded: BTreeSet<(String, String, Prefix)> = BTreeSet::new();
+    // The neighbours outside the twin whose seeds come from a table.
+    let mut from_tables: BTreeSet<(String, String, IpAddr)> = BTreeSet::new();
+    for (d, x) in devices {
+        for (vrf, nh) in outside
+            .iter()
+            .filter(|(od, ..)| od == d)
+            .map(|(_, v, a)| (v.clone(), *a))
+        {
+            let Some(&i) = index.get(&(d.clone(), vrf.clone())) else {
+                continue;
+            };
+            let p = &processes[i];
+            let Some(n) = p.neighbors.get(&nh) else {
+                continue;
+            };
+            if n.shutdown {
+                continue;
+            }
+            let table = |dir: crate::bgp_routes::Direction| {
+                x.tables
+                    .iter()
+                    .find(|t| t.vrf == vrf && t.peer == nh && t.direction == dir && t.complete())
+            };
+            let (t, received) = match (
+                table(crate::bgp_routes::Direction::Received),
+                table(crate::bgp_routes::Direction::Accepted),
+            ) {
+                (Some(t), _) => (t, true),
+                (None, Some(t)) => (t, false),
+                (None, None) => continue,
+            };
+            from_tables.insert((d.clone(), vrf.clone(), nh));
+            let kind = p.session_kind(n);
+            for r in &t.rows {
+                let router_id = match nh {
+                    IpAddr::V4(v) => v,
+                    IpAddr::V6(_) => Ipv4Addr::UNSPECIFIED,
+                };
+                let peer = Peer {
+                    address: Some(nh),
+                    router_id,
+                    asn: n.remote_as,
+                    kind,
+                };
+                let next_hop = r.next_hop.filter(|h| !h.is_unspecified()).or(Some(nh));
+                let as_path = r.as_path.clone().unwrap_or_default();
+                let mut path = BgpPath::new(peer, next_hop, as_path);
+                if let Some(o) = r.origin {
+                    path.origin = o;
+                }
+                path.med = r.med;
+                if !received {
+                    path.local_pref = r.local_pref;
+                    path.weight = r.weight.unwrap_or(0);
+                }
+                if let Some(c) = &r.communities {
+                    path.communities.clone_from(c);
+                }
+                path.attributes_collected =
+                    r.as_path.is_some() && r.origin.is_some() && r.communities.is_some();
+                path.spans = vec![r.span.clone()];
+                seeds.push(Seed {
+                    device: d.clone(),
+                    vrf: vrf.clone(),
+                    neighbor: nh,
+                    key: RouteKey::unicast(r.prefix),
+                    path,
+                    received,
+                });
+            }
+        }
+    }
     for (d, x) in devices {
         for c in &x.collected {
             let Some(&i) = index.get(&(d.clone(), c.vrf.clone())) else {
@@ -427,7 +506,9 @@ pub fn build(
             };
             let p = &processes[i];
             for nh in &c.next_hops {
-                if !outside.contains(&(d.clone(), c.vrf.clone(), *nh)) {
+                if !outside.contains(&(d.clone(), c.vrf.clone(), *nh))
+                    || from_tables.contains(&(d.clone(), c.vrf.clone(), *nh))
+                {
                     continue;
                 }
                 let Some(n) = p.neighbors.get(nh) else {
@@ -503,7 +584,18 @@ pub fn build(
                 .or_default()
                 .entry(c.vrf.clone())
                 .or_default();
-            let class = if seeded.contains(&(d.clone(), c.vrf.clone(), c.prefix)) {
+            let from_outside = |r: &BgpResult| {
+                let at = RouteAt {
+                    device: d.clone(),
+                    vrf: c.vrf.clone(),
+                    key: RouteKey::unicast(c.prefix),
+                };
+                matches!(r.routes.get(&at), Some(RouteState::Selected(sel))
+                    if sel.best.peer.address.is_some_and(|a| outside.contains(&(d.clone(), c.vrf.clone(), a))))
+            };
+            let class = if seeded.contains(&(d.clone(), c.vrf.clone(), c.prefix))
+                || matches!(&result, Some(Ok(r)) if from_outside(r))
+            {
                 Class::Seeded
             } else if let Some(why) = comps.cover(d, &c.vrf, family(c.prefix)) {
                 Class::NotComputed(why)
@@ -532,6 +624,21 @@ pub fn build(
         }
     }
     let mut notes: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (d, x) in devices {
+        for t in x.tables.iter().filter(|t| !t.complete()) {
+            notes.entry(d.clone()).or_default().push(format!(
+                "bgp table {} of {} in vrf {}: {}{}",
+                t.direction.word(),
+                t.peer,
+                t.vrf,
+                t.outcome.name(),
+                t.detail
+                    .as_deref()
+                    .map(|x| format!(", {x}"))
+                    .unwrap_or_default()
+            ));
+        }
+    }
     let mut gap_texts: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (d, g) in &gaps {
         gap_texts.entry(d.clone()).or_default().push(reason(d, g));
