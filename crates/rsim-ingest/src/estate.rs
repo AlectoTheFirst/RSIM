@@ -1768,9 +1768,7 @@ fn bgp_routes(
                 v.clone(),
                 rsim_routing::ospf::build::BgpRoutes {
                     routes: i.map(|x| x.routes.clone()).unwrap_or_default(),
-                    unknown: i
-                        .map(|x| x.unknown.keys().copied().collect())
-                        .unwrap_or_default(),
+                    unknown: i.map(|x| x.unknown.clone()).unwrap_or_default(),
                 },
             )
         })

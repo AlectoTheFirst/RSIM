@@ -302,9 +302,8 @@ pub struct Installed {
     /// The prefix of each installed BGP route, with true for a route from
     /// an iBGP or a confederation session or a local aggregate.
     pub routes: BTreeMap<Prefix, bool>,
-    /// The prefix of each unknown BGP route that can be installed, with the
-    /// reason.
-    pub unknown: BTreeMap<Prefix, String>,
+    /// The prefix of each unknown BGP route that can be installed.
+    pub unknown: BTreeSet<Prefix>,
 }
 
 /// The installed BGP routes of each device and VRF: the state of a round of
@@ -514,8 +513,7 @@ fn igp_route(d: &str, v: &str, t: &IgpTable, prefix: Prefix, r: &Route) -> Optio
 
 /// The installed BGP routes of each device and VRF of `result`: a BGP
 /// route whose distance is below the distance of the route that the IGP
-/// view installs for its prefix. A covered route is unknown with the reason
-/// of its gap.
+/// view installs for its prefix. A covered route is unknown.
 fn installed(
     result: &BgpResult,
     processes: &[BgpProcess],
@@ -569,17 +567,14 @@ fn installed(
             }
         }
         let entry = out.entry(key).or_default();
-        let why = match state {
-            RouteState::Unknown(u) => Some(u.to_string()),
-            RouteState::Selected(_) => cover(&at.device, &at.vrf, family(prefix)),
+        let unknown = match state {
+            RouteState::Unknown(_) => true,
+            RouteState::Selected(_) => cover(&at.device, &at.vrf, family(prefix)).is_some(),
         };
-        match why {
-            Some(w) => {
-                entry.unknown.insert(prefix, w);
-            }
-            None => {
-                entry.routes.insert(prefix, internal);
-            }
+        if unknown {
+            entry.unknown.insert(prefix);
+        } else {
+            entry.routes.insert(prefix, internal);
         }
     }
     out
@@ -920,10 +915,10 @@ pub fn build(
                 continue;
             }
             if let Some(mut route) = igp_route(&p.device, &p.vrf, t, *prefix, r) {
-                if let Some(why) = held.and_then(|h| h.unknown.get(prefix)) {
-                    route
-                        .unknown
-                        .get_or_insert_with(|| format!("bgp route unknown: {why}"));
+                if held.is_some_and(|h| h.unknown.contains(prefix)) {
+                    route.unknown.get_or_insert_with(|| {
+                        "the bgp route of the round before is unknown".to_string()
+                    });
                 }
                 igp_routes.push(route);
             }
