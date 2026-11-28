@@ -939,17 +939,65 @@ fn search_parts(
     out
 }
 
+/// The free variables of `fixed` in the order of the search: a
+/// breadth-first walk from the variables with an origination, a
+/// redistribution or a seed, and from the variables whose dependencies are
+/// fixed, along the variables that read them, then the other free variables
+/// in their order.
+fn search_order(g: &Group<'_, '_>, fixed: &[Option<BestPath>]) -> Vec<usize> {
+    let n = g.vars.len();
+    let mut readers: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for v in (0..n).filter(|&v| fixed[v].is_none()) {
+        for w in dependencies(g, v) {
+            readers[w].push(v);
+        }
+    }
+    let mut seen = vec![false; n];
+    let mut queue = std::collections::VecDeque::new();
+    for v in (0..n).filter(|&v| fixed[v].is_none()) {
+        let sourced = g.network[v].is_some()
+            || g.has_aggregate[v]
+            || !g.redistributed[v].is_empty()
+            || !g.seeds[v].is_empty()
+            || dependencies(g, v).iter().all(|&w| fixed[w].is_some());
+        if sourced {
+            seen[v] = true;
+            queue.push_back(v);
+        }
+    }
+    for v in (0..n).filter(|&v| fixed[v].is_some()) {
+        for &r in &readers[v] {
+            if !seen[r] {
+                seen[r] = true;
+                queue.push_back(r);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    while let Some(v) = queue.pop_front() {
+        out.push(v);
+        for &r in &readers[v] {
+            if !seen[r] {
+                seen[r] = true;
+                queue.push_back(r);
+            }
+        }
+    }
+    out.extend((0..n).filter(|&v| fixed[v].is_none() && !seen[v]));
+    out
+}
+
 /// The best paths of each stable assignment, in the order of the search.
-/// The options of a variable are no path, an unknown selection when a
-/// possible candidate of the domains `dom` is unknown or its domain holds
-/// an unknown path, and each source with a possible candidate.
+/// The options of a variable are no path, and with a possible candidate of
+/// the domains `dom` an unknown selection and each source of a possible
+/// candidate.
 fn search(
     g: &Group<'_, '_>,
     fixed: &[Option<BestPath>],
     dom: &[BTreeSet<BestPath>],
 ) -> Vec<Vec<BestPath>> {
     let n = g.vars.len();
-    let free: Vec<usize> = (0..n).filter(|&v| fixed[v].is_none()).collect();
+    let free = search_order(g, fixed);
     let domains: Vec<Vec<Assign>> = free
         .iter()
         .map(|&v| {
@@ -960,9 +1008,7 @@ fn search(
                 .map(|(_, c)| c.source)
                 .collect();
             let mut d = vec![Assign::Empty];
-            if cands.iter().any(|(_, c)| c.offer.is_err())
-                || dom[v].iter().any(|b| matches!(b, BestPath::Unknown(_)))
-            {
+            if !cands.is_empty() {
                 d.push(Assign::Unknown);
             }
             if g.network[v].is_some() {
@@ -1085,8 +1131,8 @@ fn run_group(
         let (_, routes) = outcome(&g, state);
         return (result(Convergence::Converged { note: None }), routes);
     }
-    // A variable with one possible best path holds it in each stable
-    // assignment.
+    // A variable with no possible candidate has its domain of no path only,
+    // and has no path in each stable assignment.
     let mut fixed = fixed;
     for (v, f) in fixed.iter_mut().enumerate() {
         if f.is_none() && dom[v].len() == 1 {
