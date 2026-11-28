@@ -22,7 +22,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use rsim_core::Prefix;
 use rsim_routing::Platform;
 use rsim_routing::bgp::{
-    Aggregate, Asn, BgpOptions, BgpProcess, Family, Network, NextHopSelf, PolicySet, RouteKey,
+    Aggregate, Asn, BgpOptions, BgpProcess, Family, Network, NextHopSelf, RouteKey,
 };
 
 use crate::bgp_build::CollectedBgp;
@@ -480,7 +480,7 @@ fn vrf_imports(doc: &Document, file: &str, mask: &dyn Fn(&str) -> String, out: &
             ["vrf", "definition", v] | ["ip", "vrf", v] => *v,
             _ => continue,
         };
-        let mut check = |c: &Stanza, fams: &[Family], out: &mut DeviceBgp| {
+        let check = |c: &Stanza, fams: &[Family], out: &mut DeviceBgp| {
             if matches!(
                 words(c).as_slice(),
                 ["route-target", "import" | "both", ..]
