@@ -1,9 +1,10 @@
 //! The policy evaluator, the lists and the neighbour policies.
 //!
-//! The list and route-map cases are ported from HST
-//! `tests/test_simul_matchlist.py`, `tests/test_simul_prefixlist.py` and
-//! `tests/test_simul_policy.py` with documentation addresses. The expected
-//! results are not confirmed against a device.
+//! The list cases are ported from HST `tests/test_simul_matchlist.py` and
+//! `tests/test_simul_prefixlist.py` with documentation addresses. From HST
+//! `tests/test_simul_policy.py`, the cases of an exit through nested calls,
+//! of a call that returns to its caller and of the private AS numbers are
+//! ported. The expected results are not confirmed against a device.
 
 mod bgp_common;
 
@@ -579,6 +580,65 @@ fn done_in_an_applied_policy_ends_the_parent_and_permits() {
         permitted(run(&set, &parent, "198.51.100.0/24", &route())).med,
         Some(99)
     );
+}
+
+#[test]
+fn drop_in_a_nested_applied_policy_ends_each_policy_and_denies() {
+    let mut set = lists();
+    set.policies
+        .insert("INNER".into(), rpl("INNER", vec![Statement::Drop]));
+    set.policies.insert(
+        "MIDDLE".into(),
+        rpl(
+            "MIDDLE",
+            vec![Statement::Apply("INNER".into()), Statement::Done],
+        ),
+    );
+    let outer = rpl(
+        "OUTER",
+        vec![
+            Statement::If {
+                branches: vec![(in_a(), vec![Statement::Apply("MIDDLE".into())])],
+                otherwise: vec![],
+            },
+            Statement::Done,
+        ],
+    );
+    assert_eq!(
+        run(&set, &outer, "192.0.2.0/24", &route()),
+        PolicyResult::Deny
+    );
+    assert!(matches!(
+        run(&set, &outer, "198.51.100.0/24", &route()),
+        PolicyResult::Permit(_)
+    ));
+}
+
+#[test]
+fn an_applied_policy_with_no_verdict_returns_to_its_caller() {
+    let mut set = lists();
+    set.policies.insert(
+        "INNER".into(),
+        rpl("INNER", vec![Statement::Set(SetAction::Tag(7))]),
+    );
+    let outer = rpl(
+        "OUTER",
+        vec![
+            Statement::Apply("INNER".into()),
+            Statement::Set(SetAction::Weight(5)),
+        ],
+    );
+    let out = permitted(run(&set, &outer, "192.0.2.0/24", &route()));
+    assert_eq!((out.tag, out.weight), (Some(7), 5));
+}
+
+#[test]
+fn the_private_as_numbers_are_the_ranges_of_rfc_6996() {
+    assert!(!Asn(64500).is_private());
+    assert!(Asn(65001).is_private());
+    assert!(!Asn(65535).is_private());
+    assert!(Asn(4_200_000_000).is_private());
+    assert!(!Asn(4_294_967_295).is_private());
 }
 
 #[test]

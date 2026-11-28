@@ -1,29 +1,27 @@
 //! The BGP defaults of each platform.
 //!
-//! Sources of the values:
-//! - FRR: `bgpd/bgp_vty.c` (`FRR_CFG_DEFAULT_BOOL` of `BGP_DETERMINISTIC_MED`
-//!   and `BGP_EBGP_REQUIRES_POLICY`), `bgpd/bgpd.c` (`bgp_create` sets the
-//!   maximum paths to the build value `multipath_num`), and the FRR user
-//!   guide, section "Route Selection" and "By default only the IPv4 unicast
-//!   address family is enabled".
-//! - IOS-XE: Cisco "BGP Best Path Selection Algorithm" (document 13753):
-//!   `bgp deterministic-med` and `bgp bestpath med missing-as-worst` are off
-//!   by default, a missing MED is 0, a local path from `network` or
-//!   `redistribute` ranks above a local aggregate, and the weight of a local
-//!   path is 32768.
-//! - NX-OS: the Nexus unicast routing configuration guides and command
-//!   references: `bestpath med non-deterministic` and `med
-//!   missing-as-worst` are disabled by default.
-//! - IOS-XR: the MED comparison is always deterministic (`bgp.md`, not
-//!   confirmed against a device).
-//! - The eBGP rule with no policy, the result of an undefined neighbour
-//!   policy and the maximum paths of the Cisco platforms are from HST
-//!   `simul/platforms.py` and `simul/bestpath.py`, not confirmed against a
-//!   device.
-//! - The attributes that a later match of a policy reads are from HST
-//!   `simul/policy.py` for the Cisco platforms and from FRR `lib/routemap.c`,
-//!   where each clause applies its set actions to the route that the later
-//!   clauses match. Not confirmed against a device.
+//! The sources of the values:
+//! - FRR `bgpd/bgp_vty.c` gives deterministic MED on for the datacenter
+//!   profile only, and `ebgp-requires-policy` on for the traditional profile
+//!   only.
+//! - FRR `bgpd/bgpd.c` `bgp_create` sets the maximum paths to the build value
+//!   `multipath_num`.
+//! - The FRR user guide gives the decision order, and states that only the
+//!   IPv4 unicast family is enabled by default.
+//! - Cisco document 13753, "BGP Best Path Selection Algorithm", gives the
+//!   decision order, the MED 0 of a path with no MED unless
+//!   missing-as-worst is set, and the rank of a local path from `network` or
+//!   `redistribute` above a local aggregate.
+//! - The NX-OS command references give `med non-deterministic` and `med
+//!   missing-as-worst` as disabled by default.
+//! - The other values are not confirmed against a device. These are the
+//!   deterministic MED default of IOS-XE and IOS-XR, missing-as-worst on
+//!   IOS-XR and FRR, the local weight 32768, the rank of a local aggregate on
+//!   NX-OS and IOS-XR, the IPv4 unicast activation of NX-OS and IOS-XR, and
+//!   the route that a later match reads. The eBGP rule with no policy of the
+//!   Cisco platforms, the result of an undefined neighbour policy and the
+//!   maximum paths of the Cisco platforms come from HST `simul/platforms.py`
+//!   and `simul/bestpath.py`.
 
 use super::SessionKind;
 use super::decision::DecisionStep;

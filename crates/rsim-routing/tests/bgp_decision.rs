@@ -405,7 +405,7 @@ fn an_ibgp_path_is_not_a_multipath_of_an_ebgp_best_path() {
     );
 }
 
-// U17 and U11.
+// Paths with attributes that are not collected, and no profile.
 
 #[test]
 fn a_comparison_with_a_path_whose_attributes_are_not_collected_is_unknown() {
@@ -527,10 +527,10 @@ fn vyos_ebgp_requires_policy_overrides_the_frr_default_and_cisco_ignores_it() {
     assert!(!BgpProfile::of(Platform::Iosxr).no_policy_permits(SessionKind::Ebgp, &options(false)));
 }
 
-/// FRR `bgpd/bgp_vty.c` `BGP_DETERMINISTIC_MED` (on for datacenter only),
-/// Cisco IOS-XE document 13753 (off), the NX-OS `bestpath med
-/// non-deterministic` (disabled by default), and IOS-XR (always on, not
-/// confirmed against a device).
+/// FRR `bgpd/bgp_vty.c` gives the default on for the datacenter profile
+/// only. The NX-OS command references give `bestpath med non-deterministic`
+/// as disabled by default. IOS-XE off and IOS-XR always on are not
+/// confirmed against a device.
 #[test]
 fn the_deterministic_med_default_of_each_profile() {
     for (platform, default, fixed) in [
@@ -554,8 +554,8 @@ fn the_deterministic_med_default_of_each_profile() {
     }
 }
 
-/// Cisco IOS-XE document 13753, the NX-OS `med missing-as-worst` (a missing
-/// MED is 0 by default) and the FRR user guide: off on each platform.
+/// Cisco document 13753 for IOS-XE and the NX-OS command references give
+/// the default off. IOS-XR and FRR are not confirmed against a device.
 #[test]
 fn the_missing_as_worst_default_of_each_profile_is_off() {
     for platform in PLATFORMS {

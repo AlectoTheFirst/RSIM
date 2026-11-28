@@ -1,5 +1,8 @@
 //! The decision function against a second implementation in the test,
-//! over each order of up to 5 generated candidates.
+//! over each order of up to 5 generated candidates. The result does not
+//! depend on the order, except with no deterministic MED and no
+//! always-compare-med, where MED differs between candidates of more than
+//! one neighbour AS.
 
 mod bgp_common;
 
