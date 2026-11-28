@@ -520,7 +520,7 @@ pub struct BgpPath {
     pub attributes_collected: bool,
     /// The VRF of the next hop of a path from a VRF leak or an EVPN import.
     /// `None` for the VRF of the process.
-    pub leaked: Option<Leaked>,
+    pub leaked: Option<Box<Leaked>>,
     pub spans: Vec<SourceSpan>,
 }
 

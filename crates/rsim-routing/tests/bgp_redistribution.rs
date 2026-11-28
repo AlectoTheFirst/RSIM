@@ -59,6 +59,7 @@ fn route(device: &str, vrf: &str, prefix: &str, source: IgpSource, metric: u32) 
 
 fn redistribute(source: RedistSource, policy: Option<&str>) -> Redistribution {
     Redistribution {
+        family: Family::Ipv4Unicast,
         source,
         ospf_match: None,
         policy: policy.map(str::to_string),
@@ -278,10 +279,10 @@ fn a_vrf_imports_the_evpn_routes_of_its_target_with_the_tunnel_end_of_the_far_le
     let s = selected(&r, "l2", "A", "10.1.1.0/24").expect("the route of l1 at l2");
     assert_eq!(
         s.best.leaked,
-        Some(Leaked {
+        Some(Box::new(Leaked {
             vrf: "default".to_string(),
             evpn: true
-        })
+        }))
     );
     assert_eq!(s.best.next_hop, Some(ip("192.0.2.11")));
     assert_eq!(s.best.peer.kind, SessionKind::Ibgp);
@@ -372,10 +373,10 @@ fn a_vrf_leak_by_route_target_copies_the_selection_with_weight_0_and_once() {
     assert_eq!(s.best.weight, 0);
     assert_eq!(
         s.best.leaked,
-        Some(Leaked {
+        Some(Box::new(Leaked {
             vrf: "A".to_string(),
             evpn: false
-        })
+        }))
     );
     assert!(
         s.best

@@ -1,7 +1,8 @@
 //! The redistribution of the installed routes of a VRF into BGP.
 //!
 //! A `redistribute` statement of a process offers each installed route of
-//! its source protocol in the VRF of the process as a local path, as in HST
+//! its source protocol and its family in the VRF of the process as a local
+//! path, as in HST
 //! `simul/rib.py`: the origin incomplete, the local weight of the profile,
 //! the metric of the statement or of the route as the MED, the tag of the
 //! route, and the next hop of the route. A connected route has no next hop.
@@ -87,7 +88,7 @@ pub fn redistribute_offer(
         return Offer::Unknown(Unknown::new(Reason::NoBgpProfile, process.device.clone()));
     };
     let defaults = profile.redistribute;
-    if !takes(r, &route.source, defaults.ospf_internal_only) {
+    if key.family != r.family || !takes(r, &route.source, defaults.ospf_internal_only) {
         return Offer::None;
     }
     let at = format!("{} at {} {}", key.prefix, process.device, process.vrf);

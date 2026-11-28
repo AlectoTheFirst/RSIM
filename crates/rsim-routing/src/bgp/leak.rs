@@ -77,10 +77,10 @@ pub fn evpn_import(vrf: &BgpProcess, best: &BgpPath) -> Offer {
         return Offer::None;
     }
     let mut p = best.clone();
-    p.leaked = Some(Leaked {
+    p.leaked = Some(Box::new(Leaked {
         vrf: DEFAULT_VRF.to_string(),
         evpn: true,
-    });
+    }));
     p.spans.extend(vrf.targets.spans.iter().cloned());
     Offer::Path(p)
 }
@@ -102,10 +102,10 @@ pub fn vrf_leak(from: &BgpProcess, to: &BgpProcess, best: &BgpPath) -> Offer {
             .iter()
             .map(|t| ExtCommunity::RouteTarget(*t)),
     );
-    p.leaked = Some(Leaked {
+    p.leaked = Some(Box::new(Leaked {
         vrf: from.vrf.clone(),
         evpn: false,
-    });
+    }));
     p.spans.extend(to.targets.spans.iter().cloned());
     Offer::Path(p)
 }

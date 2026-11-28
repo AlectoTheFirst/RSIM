@@ -125,6 +125,10 @@ impl std::error::Error for InputError {}
 
 /// The best path of a route at a process.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the path variant is the common value, and a box adds an allocation to each copy"
+)]
 pub enum BestPath {
     None,
     Path(BgpPath),

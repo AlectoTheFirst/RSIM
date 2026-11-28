@@ -155,6 +155,8 @@ pub enum OspfRouteType {
 /// A `redistribute` statement of a process.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Redistribution {
+    /// The unicast family of the statement.
+    pub family: Family,
     pub source: RedistSource,
     /// The OSPF route types of a `match` clause. `None` takes the default
     /// of the profile.

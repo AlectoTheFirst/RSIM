@@ -236,6 +236,10 @@ pub struct PolicyContext<'a> {
 
 /// The result of a policy on a route.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the path variant is the common value, and a box adds an allocation to each copy"
+)]
 pub enum PolicyResult {
     /// The route is permitted with the path after the set actions.
     Permit(BgpPath),

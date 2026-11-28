@@ -75,6 +75,10 @@ pub struct Session {
 
 /// The result of a transfer step on a path.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the path variant is the common value, and a box adds an allocation to each copy"
+)]
 pub enum Offer {
     /// The step does not send the path, rejects it or denies it.
     None,
