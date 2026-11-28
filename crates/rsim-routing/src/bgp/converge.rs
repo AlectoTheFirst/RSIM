@@ -10,8 +10,9 @@
 //!    best paths of the round before. Brent's algorithm finds the fixed
 //!    point or the cycle by exact comparison of the states.
 //! 2. The uniqueness check builds the possible candidates of each variable
-//!    by a closure over the sessions. It applies when no candidate is
-//!    unknown and no pair of candidates of a variable is decided by the MED
+//!    by a closure over the sessions. It runs on each component of the
+//!    variables over the dependencies of their candidates, and it applies to
+//!    a component when no candidate is unknown and no pair of candidates of a variable is decided by the MED
 //!    with no always-compare-med, by the IGP cost, or by a tie. A pair that
 //!    the cluster list, the originator ID or the neighbour address decides
 //!    has a strict order, also at a route reflector. The greedy
@@ -526,10 +527,11 @@ fn domains(g: &Group<'_, '_>) -> Vec<BTreeSet<BestPath>> {
     }
 }
 
-/// True if the uniqueness check applies to the group with the domains
-/// `dom`.
-fn strict(g: &Group<'_, '_>, dom: &[BTreeSet<BestPath>]) -> bool {
-    for (v, d) in dom.iter().enumerate() {
+/// True if the uniqueness check applies to the variables `part` of the
+/// group with the domains `dom`.
+fn strict(g: &Group<'_, '_>, dom: &[BTreeSet<BestPath>], part: &[usize]) -> bool {
+    for &v in part {
+        let d = &dom[v];
         if d.iter().any(|b| matches!(b, BestPath::Unknown(_))) {
             return false;
         }
@@ -571,6 +573,7 @@ fn strict(g: &Group<'_, '_>, dom: &[BTreeSet<BestPath>]) -> bool {
 fn greedy(
     g: &Group<'_, '_>,
     dom: &[BTreeSet<BestPath>],
+    active: &[bool],
 ) -> (Vec<Option<BestPath>>, Option<Vec<WheelSpoke>>) {
     let n = g.vars.len();
     let mut fixed: Vec<Option<BestPath>> = vec![None; n];
@@ -578,7 +581,7 @@ fn greedy(
     loop {
         let mut progress = false;
         for v in 0..n {
-            if fixed[v].is_some() {
+            if fixed[v].is_some() || !active[v] {
                 continue;
             }
             blocks[v] = None;
@@ -620,7 +623,7 @@ fn greedy(
     }
     let mut wheel = None;
     'start: for start in 0..n {
-        if fixed[start].is_some() {
+        if fixed[start].is_some() || !active[start] {
             continue;
         }
         let mut seen: Vec<usize> = Vec::new();
@@ -1214,11 +1217,27 @@ fn run_group(
     let (fwd, rounds) = forward(&g, gi, events);
     let dom = domains(&g);
     let possible_path = |v: usize| dom[v].iter().any(|b| *b != BestPath::None);
-    let (fixed, wheel) = if strict(&g, &dom) {
-        greedy(&g, &dom)
-    } else {
-        (vec![None; g.vars.len()], None)
-    };
+    // The uniqueness check runs on each component of the variables where it
+    // applies.
+    let n = g.vars.len();
+    let mut fixed: Vec<Option<BestPath>> = vec![None; n];
+    let mut wheel = None;
+    for part in components(&g, &vec![None; n]) {
+        if !strict(&g, &dom, &part) {
+            continue;
+        }
+        let mut active = vec![false; n];
+        for &v in &part {
+            active[v] = true;
+        }
+        let (f, w) = greedy(&g, &dom, &active);
+        for &v in &part {
+            fixed[v] = f[v].clone();
+        }
+        if wheel.is_none() {
+            wheel = w;
+        }
+    }
     let result = |convergence: Convergence| GroupResult {
         keys: keys.clone(),
         convergence,
