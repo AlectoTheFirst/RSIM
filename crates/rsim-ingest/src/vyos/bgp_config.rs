@@ -11,16 +11,18 @@
 //! eBGP neighbour with no policy, and its absence clears it. A neighbour is
 //! active only in the families of its `address-family` nodes. A `network`
 //! needs the route of its prefix only with `parameters
-//! network-import-check`. A node of a process, a neighbour or a peer group
-//! that the reader does not lower, other than a node with no effect on the
-//! routes, is a gap.
+//! network-import-check`. A unicast family reads `redistribute connected`,
+//! `static`, and `ospf` for IPv4 or `ospfv3` for IPv6, each with the options
+//! `route-map` and `metric`. Each other source of `redistribute` is a gap.
+//! A node of a process, a neighbour or a peer group that the reader does
+//! not lower, other than a node with no effect on the routes, is a gap.
 //!
 //! The nodes that import or export routes between VRFs or between EVPN and
 //! a VRF are gaps of their VRF: the `vni` of a `vrf name`, each node of the
 //! `l2vpn-evpn` family of a VRF process, `advertise` and `route-target` of
 //! the `l2vpn-evpn` family of the main process, and the nodes of a unicast
-//! family that the reader does not lower, for example `import vrf` and
-//! `route-target vpn`. `advertise-all-vni` of the main process is a gap of
+//! family that the reader does not lower, for example `import vrf`, `rd
+//! vpn` and `route-target vpn`. `advertise-all-vni` of the main process is a gap of
 //! each VRF with a `vni`.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -31,8 +33,8 @@ use rsim_routing::Platform;
 use rsim_routing::bgp::{
     Aggregate, AsPathLine, AsPathList, Asn, BgpOptions, BgpProcess, Clause, Cmp, Community,
     CommunityLine, CommunityList, Continue, Family, MatchTerm, Network, NextHopMatch, NextHopSelf,
-    NextHopSet, PolicyBody, PolicySet, PrefixList, PrefixListEntry, RouteKey, RoutePolicy,
-    SetAction,
+    NextHopSet, PolicyBody, PolicySet, PrefixList, PrefixListEntry, RedistSource, Redistribution,
+    RouteKey, RoutePolicy, SetAction,
 };
 
 use crate::bgp_build::CollectedBgp;
@@ -835,6 +837,7 @@ fn process(
     let params = parameters(b.get("parameters"), read, &mut gaps);
     let mut networks = Vec::new();
     let mut aggregates = Vec::new();
+    let mut redistributions = Vec::new();
     let (mut ebgp, mut ibgp): (Option<u32>, Option<u32>) = (None, None);
     for c in b.children() {
         match c.key.as_str() {
@@ -894,6 +897,54 @@ fn process(
                                         _ => gaps.push((
                                             format!(
                                                 "address-family {} aggregate-address {}",
+                                                f.key,
+                                                text_of(x)
+                                            ),
+                                            lines(x),
+                                            vec![fam],
+                                        )),
+                                    }
+                                }
+                                read.insert(n.first_line);
+                                continue;
+                            }
+                            "redistribute" => {
+                                for x in n.children() {
+                                    let source = match (x.key.as_str(), fam) {
+                                        ("connected", _) => Some(RedistSource::Connected),
+                                        ("static", _) => Some(RedistSource::Static),
+                                        ("ospf", Family::Ipv4Unicast)
+                                        | ("ospfv3", Family::Ipv6Unicast) => {
+                                            Some(RedistSource::Ospf(None))
+                                        }
+                                        _ => None,
+                                    };
+                                    let known = x
+                                        .children()
+                                        .iter()
+                                        .all(|y| matches!(y.key.as_str(), "route-map" | "metric"));
+                                    let metric = match x.get("metric").map(Stanza::text) {
+                                        None => Some(None),
+                                        Some(t) => t.and_then(|t| t.parse::<u32>().ok()).map(Some),
+                                    };
+                                    match (source, metric) {
+                                        (Some(source), Some(metric)) if known => {
+                                            redistributions.push(Redistribution {
+                                                family: fam,
+                                                source,
+                                                ospf_match: None,
+                                                policy: x
+                                                    .get("route-map")
+                                                    .and_then(Stanza::text)
+                                                    .map(str::to_string),
+                                                metric,
+                                                spans: vec![span(file, lines(x))],
+                                            });
+                                            mark_all(x, read);
+                                        }
+                                        _ => gaps.push((
+                                            format!(
+                                                "address-family {} redistribute {}",
                                                 f.key,
                                                 text_of(x)
                                             ),
@@ -983,6 +1034,7 @@ fn process(
     p.options.maximum_paths_ibgp = ibgp;
     p.networks = networks;
     p.aggregates = aggregates;
+    p.redistributions = redistributions;
     p.policy = policy.clone();
     p.spans = vec![span(file, (b.first_line, b.first_line))];
     if let Some(c) = process.map(|x| &x.confederation) {
@@ -1179,12 +1231,66 @@ mod tests {
     fn the_nodes_that_are_not_lowered_are_gaps() {
         let (d, _) = lowered();
         let texts: Vec<&str> = d.gaps.iter().map(|g| g.text.as_str()).collect();
-        for want in [
-            "address-family ipv4-unicast redistribute connected",
-            "neighbor 198.51.100.2 address-family ipv4-unicast allowas-in number 2",
-        ] {
-            assert!(texts.contains(&want), "{want:?} not in {texts:?}");
-        }
+        let want = "neighbor 198.51.100.2 address-family ipv4-unicast allowas-in number 2";
+        assert!(texts.contains(&want), "{want:?} not in {texts:?}");
+        assert!(
+            !texts.iter().any(|t| t.contains("redistribute")),
+            "{texts:?}"
+        );
+        assert_eq!(
+            d.processes[0].redistributions[0].source,
+            RedistSource::Connected
+        );
+    }
+
+    #[test]
+    fn the_redistributions_of_each_family_are_lowered_with_their_options() {
+        let d = lowered_from(
+            r#"{
+  "protocols": {"bgp": {
+    "system-as": "64500",
+    "address-family": {
+      "ipv4-unicast": {"redistribute": {
+        "static": {"route-map": "STATIC", "metric": "50"},
+        "ospf": {},
+        "kernel": {}
+      }},
+      "ipv6-unicast": {"redistribute": {"ospfv3": {"route-map": "V6"}, "ospf": {}}}
+    }
+  }},
+  "vrf": {"name": {"RED": {"table": "100", "protocols": {"bgp": {
+    "system-as": "64500",
+    "address-family": {"ipv4-unicast": {"redistribute": {"connected": {}}}}
+  }}}}}
+}"#,
+        );
+        let texts: Vec<(&str, &str)> = d
+            .gaps
+            .iter()
+            .map(|g| (g.vrf.as_str(), g.text.as_str()))
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                ("default", "address-family ipv4-unicast redistribute kernel"),
+                ("default", "address-family ipv6-unicast redistribute ospf"),
+            ],
+            "{texts:?}"
+        );
+        let main = d.processes.iter().find(|p| p.vrf == "default").unwrap();
+        let r = &main.redistributions;
+        // The JSON reader holds the keys of an object in sorted order.
+        assert_eq!(r.len(), 3);
+        assert_eq!(r[0].source, RedistSource::Ospf(None));
+        assert_eq!(r[0].family, Family::Ipv4Unicast);
+        assert_eq!(r[1].source, RedistSource::Static);
+        assert_eq!(r[1].policy.as_deref(), Some("STATIC"));
+        assert_eq!(r[1].metric, Some(50));
+        assert_eq!(r[2].source, RedistSource::Ospf(None));
+        assert_eq!(r[2].family, Family::Ipv6Unicast);
+        assert_eq!(r[2].policy.as_deref(), Some("V6"));
+        let red = d.processes.iter().find(|p| p.vrf == "RED").unwrap();
+        assert_eq!(red.redistributions[0].source, RedistSource::Connected);
     }
 
     fn lowered_from(config: &str) -> DeviceBgp {

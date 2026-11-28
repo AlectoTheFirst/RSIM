@@ -13,3 +13,7 @@ rsim-functions = { workspace = true }
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "routing"
+harness = false

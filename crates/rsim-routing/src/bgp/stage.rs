@@ -15,8 +15,9 @@ pub enum ObjectRef {
     /// The routing profile of a platform. `None` for a platform with no
     /// profile.
     Profile(Option<Platform>),
-    /// The AS, the router ID, the cluster, the confederation, the options
-    /// and the `network` and `aggregate` statements of a process.
+    /// The AS, the router ID, the cluster, the confederation, the options,
+    /// the `network`, `aggregate` and `redistribute` statements and the
+    /// route distinguisher and the route targets of a process.
     Process { device: String, vrf: String },
     Neighbor {
         device: String,

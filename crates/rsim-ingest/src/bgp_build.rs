@@ -16,8 +16,16 @@
 //! eBGP seed is the router ID of the neighbour of the section
 //! `bgp_neighbors`, else not known. An iBGP seed has no router ID. Each other neighbour is a gap of its VRF.
 //!
-//! A gap covers each process in the component of its VRF over the sessions
-//! and the far ends of the neighbours, for the families of the gap. A
+//! The `redistribute` statements read the installed routes of the IGP view
+//! of their VRF other than BGP routes. A route of a prefix whose BGP route
+//! the route table of the round before installs is not offered, and a route
+//! of a prefix whose installed BGP route was unknown is unknown. The EVPN
+//! IP prefix routes of a VRF have the tunnel end of the device as their
+//! next hop.
+//!
+//! A gap covers each process in the component of its VRF over the sessions,
+//! the far ends of the neighbours and the leaks between the VRFs of a
+//! device, for the families of the gap. A
 //! computed BGP route under a gap is unknown with the reason of the gap,
 //! and a collected BGP route under a gap is not computed, unless it is
 //! seeded. A collected BGP route is seeded when the computed best path and
@@ -32,9 +40,10 @@ use rsim_core::{Prefix, SourceSpan};
 use rsim_functions::{Fib, Route, RouteKind, RouteProtocol};
 use rsim_guard::Class;
 use rsim_routing::bgp::{
-    AsPath, BgpInput, BgpPath, BgpProcess, BgpResult, Convergence, Event, Family, IgpView, Peer,
-    Resolution, RouteAt, RouteKey, RouteState, Seed, Session, SessionEnd, SessionKind,
-    install_candidates,
+    AsPath, BgpInput, BgpPath, BgpProcess, BgpResult, Convergence, DEFAULT_VRF as ROUTING_DEFAULT,
+    Event, Family, IgpRoute, IgpSource, IgpView, LocalOrigin, OspfRouteType, OverlayCandidate,
+    Peer, Resolution, RouteAt, RouteKey, RouteState, Seed, Session, SessionEnd, SessionKind,
+    install_candidates, overlay_candidates,
 };
 use rsim_routing::{Candidate, Origin, Platform};
 
@@ -75,6 +84,9 @@ pub struct IgpTable {
     /// The reason of each family, `true` for IPv4, whose OSPF version runs
     /// in the VRF and is not computed in full.
     pub incomplete: BTreeMap<bool, String>,
+    /// The process and the route type of each computed OSPF route, or the
+    /// reason why the route is unknown.
+    pub ospf_types: BTreeMap<Prefix, crate::ospf::routes::RouteType>,
 }
 
 /// The lowest BGP distance of a platform: its eBGP or its iBGP distance.
@@ -228,6 +240,9 @@ pub struct DeviceInput {
     /// The computed IGP table of each VRF.
     pub igp: BTreeMap<String, IgpTable>,
     pub collected: Vec<CollectedBgp>,
+    /// The address of the tunnel end of the EVPN IP prefix routes of the
+    /// VRFs of the device.
+    pub evpn_next_hop: Option<IpAddr>,
     /// The tables of the neighbours of the section `bgp_routes`.
     pub tables: Vec<crate::bgp_routes::Table>,
     /// The router ID of each neighbour by VRF and address, from the section
@@ -240,6 +255,9 @@ pub struct DeviceInput {
 pub struct VrfBgp {
     /// The install candidates of the computed BGP routes.
     pub candidates: Vec<Candidate>,
+    /// The EVPN IP prefix routes that the VRF imports. A VRF lowers them
+    /// to its tunnel.
+    pub overlay: Vec<OverlayCandidate>,
     /// The class of each collected BGP route that is not compared.
     pub classes: BTreeMap<Prefix, Class>,
     /// The class of a collected BGP route that `classes` does not hold;
@@ -270,11 +288,27 @@ impl VrfBgp {
             .collect();
         VrfBgp {
             candidates,
+            overlay: Vec::new(),
             classes: BTreeMap::new(),
             otherwise: Some(Class::NotComputed(NOT_RECOMPUTED.to_string())),
         }
     }
 }
+
+/// The BGP routes of the route table of a VRF in a round: the routes that
+/// the install stage selects over the routes of the other protocols.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Installed {
+    /// The prefix of each installed BGP route, with true for a route from
+    /// an iBGP or a confederation session or a local aggregate.
+    pub routes: BTreeMap<Prefix, bool>,
+    /// The prefix of each unknown BGP route that can be installed.
+    pub unknown: BTreeSet<Prefix>,
+}
+
+/// The installed BGP routes of each device and VRF: the state of a round of
+/// the routing calculation.
+pub type Rounds = BTreeMap<(String, String), Installed>;
 
 /// The BGP calculation of the twin with its input.
 #[derive(Clone, Debug)]
@@ -291,6 +325,8 @@ pub struct BgpBuild {
     pub gaps: BTreeMap<String, Vec<String>>,
     /// The notes of each device, and of the estate under `estate`.
     pub notes: BTreeMap<String, Vec<String>>,
+    /// The installed BGP routes of each device and VRF.
+    pub installed: Rounds,
 }
 
 /// The reason of a gap of a device.
@@ -405,7 +441,7 @@ fn describe(c: &Convergence) -> String {
         Convergence::Converged { note: None } => "converged".to_string(),
         Convergence::Converged { note: Some(n) } => format!("converged, {}", n.text),
         Convergence::MultipleStableOutcomes { outcomes } => {
-            format!("multiple stable outcomes: {}", outcomes.len())
+            format!("2 or more stable outcomes, 2 shown: {}", outcomes.len())
         }
         Convergence::NoConvergence { cycle } => format!(
             "no convergence: a cycle of {} rounds from round {}",
@@ -415,11 +451,142 @@ fn describe(c: &Convergence) -> String {
     }
 }
 
+/// The route of `prefix` of an IGP view for a redistribution, `None` for a
+/// kind that no statement reads.
+fn igp_route(d: &str, v: &str, t: &IgpTable, prefix: Prefix, r: &Route) -> Option<IgpRoute> {
+    let mut unknown = unknown_route(r).then(|| {
+        r.unknown_reason()
+            .unwrap_or("a route with no next hop")
+            .to_string()
+    });
+    let (source, metric) = match r.kind {
+        RouteKind::Connected => (IgpSource::Connected, 0),
+        RouteKind::Static => (IgpSource::Static, 0),
+        RouteKind::Learned(RouteProtocol::Ospf) => {
+            let metric = match t.ospf.get(&prefix) {
+                Some(Ok(m)) => *m,
+                Some(Err(why)) => {
+                    unknown.get_or_insert_with(|| why.clone());
+                    0
+                }
+                None => 0,
+            };
+            match t.ospf_types.get(&prefix) {
+                Some(Ok((process, route_type))) => (
+                    IgpSource::Ospf {
+                        process: process.clone(),
+                        route_type: *route_type,
+                    },
+                    metric,
+                ),
+                Some(Err(why)) => {
+                    unknown.get_or_insert_with(|| why.clone());
+                    (
+                        IgpSource::Ospf {
+                            process: String::new(),
+                            route_type: OspfRouteType::Internal,
+                        },
+                        metric,
+                    )
+                }
+                None => return None,
+            }
+        }
+        _ => return None,
+    };
+    let gateways: Vec<IpAddr> = r.next_hops().iter().filter_map(|h| h.gateway).collect();
+    Some(IgpRoute {
+        device: d.to_string(),
+        vrf: v.to_string(),
+        prefix,
+        source,
+        metric,
+        tag: None,
+        next_hop: match gateways.as_slice() {
+            [g] => Some(*g),
+            _ => None,
+        },
+        unknown,
+        spans: r.spans.clone(),
+    })
+}
+
+/// The installed BGP routes of each device and VRF of `result`: a BGP
+/// route whose distance is below the distance of the route that the IGP
+/// view installs for its prefix. A covered route is unknown.
+fn installed(
+    result: &BgpResult,
+    processes: &[BgpProcess],
+    igp: &BTreeMap<(String, String), IgpTable>,
+    cover: &dyn Fn(&str, &str, Family) -> Option<String>,
+) -> Rounds {
+    let mut out = Rounds::new();
+    for (at, state) in &result.routes {
+        if at.key.family == Family::EvpnIpPrefix {
+            continue;
+        }
+        let profile = processes
+            .iter()
+            .find(|p| p.device == at.device && p.vrf == at.vrf)
+            .and_then(|p| p.profile());
+        let lowest = || {
+            processes
+                .iter()
+                .find(|p| p.device == at.device)
+                .and_then(|p| p.platform)
+                .map_or(20, unknown_distance)
+        };
+        let (distance, internal) = match state {
+            RouteState::Selected(sel) => match sel.best.peer.kind {
+                SessionKind::Local(LocalOrigin::Network | LocalOrigin::Redistribute)
+                    if sel.best.leaked.is_none() =>
+                {
+                    continue;
+                }
+                kind => (
+                    profile.map_or_else(lowest, |p| p.distance(kind)),
+                    kind != SessionKind::Ebgp,
+                ),
+            },
+            RouteState::Unknown(_) => (lowest(), false),
+        };
+        let prefix = at.key.prefix;
+        let key = (at.device.clone(), at.vrf.clone());
+        if let Some(t) = igp.get(&key)
+            && let Some(r) = t.plain.get(&prefix)
+        {
+            let held = t
+                .cands
+                .iter()
+                .filter(|c| c.prefix == prefix && c.route.kind == r.kind)
+                .map(|c| c.distance)
+                .min()
+                .unwrap_or(0);
+            if held <= distance {
+                continue;
+            }
+        }
+        let entry = out.entry(key).or_default();
+        let unknown = match state {
+            RouteState::Unknown(_) => true,
+            RouteState::Selected(_) => cover(&at.device, &at.vrf, family(prefix)).is_some(),
+        };
+        if unknown {
+            entry.unknown.insert(prefix);
+        } else {
+            entry.routes.insert(prefix, internal);
+        }
+    }
+    out
+}
+
 /// The BGP calculation of the lowered devices with the BGP peer facts of
-/// the link join.
+/// the link join. `before` holds the installed BGP routes of the round
+/// before, empty for the first round.
 pub fn build(
     devices: &BTreeMap<String, DeviceInput>,
     facts: &BTreeMap<String, Vec<BgpPeerFact>>,
+    before: &Rounds,
 ) -> BgpBuild {
     let mut processes: Vec<BgpProcess> = Vec::new();
     let mut gaps: Vec<(String, Gap)> = Vec::new();
@@ -428,6 +595,9 @@ pub fn build(
         for p in &x.bgp.processes {
             let mut p = p.clone();
             p.device.clone_from(d);
+            if p.vrf != DEFAULT_VRF {
+                p.targets.evpn_next_hop = x.evpn_next_hop;
+            }
             processes.push(p);
         }
         for g in &x.bgp.gaps {
@@ -520,6 +690,51 @@ pub fn build(
                         gaps.push((d.clone(), gap(w)));
                     }
                 }
+            }
+        }
+    }
+    // The leaks between the VRFs of a device join their components.
+    for (i, a) in processes.iter().enumerate() {
+        for b in processes
+            .iter()
+            .skip(i + 1)
+            .filter(|b| b.device == a.device)
+        {
+            let evpn = |vrf: &BgpProcess, default: &BgpProcess| {
+                default.vrf == ROUTING_DEFAULT
+                    && (vrf.targets.advertise_evpn || !vrf.targets.evpn_import.is_empty())
+            };
+            if evpn(a, b)
+                || evpn(b, a)
+                || !a.targets.export.is_disjoint(&b.targets.import)
+                || !b.targets.export.is_disjoint(&a.targets.import)
+            {
+                edges.push((
+                    (a.device.clone(), a.vrf.clone()),
+                    (b.device.clone(), b.vrf.clone()),
+                ));
+            }
+        }
+    }
+    // A redistribution of an OSPF version that is not computed in full is a
+    // gap of its family.
+    for p in &processes {
+        let Some(t) = igp.get(&(p.device.clone(), p.vrf.clone())) else {
+            continue;
+        };
+        for r in &p.redistributions {
+            if matches!(r.source, rsim_routing::bgp::RedistSource::Ospf(_))
+                && let Some(why) = t.incomplete.get(&(r.family == Family::Ipv4Unicast))
+            {
+                gaps.push((
+                    p.device.clone(),
+                    Gap {
+                        vrf: p.vrf.clone(),
+                        families: BTreeSet::from([r.family]),
+                        text: format!("redistribute ospf: {why}"),
+                        spans: r.spans.clone(),
+                    },
+                ));
             }
         }
     }
@@ -685,10 +900,35 @@ pub fn build(
         set.insert(Prefix::new(IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 0));
         t.install(&set);
     }
+    // The installed routes of the processes with a `redistribute`
+    // statement, other than the prefixes of the BGP routes that the round
+    // before installs.
+    let mut igp_routes = Vec::new();
+    for p in processes.iter().filter(|p| !p.redistributions.is_empty()) {
+        let key = (p.device.clone(), p.vrf.clone());
+        let Some(t) = igp.get(&key) else {
+            continue;
+        };
+        let held = before.get(&key);
+        for (prefix, r) in &t.plain {
+            if held.is_some_and(|h| h.routes.contains_key(prefix)) {
+                continue;
+            }
+            if let Some(mut route) = igp_route(&p.device, &p.vrf, t, *prefix, r) {
+                if held.is_some_and(|h| h.unknown.contains(prefix)) {
+                    route.unknown.get_or_insert_with(|| {
+                        "the bgp route of the round before is unknown".to_string()
+                    });
+                }
+                igp_routes.push(route);
+            }
+        }
+    }
     let input = BgpInput {
         processes,
         sessions: sessions.into_iter().collect(),
         seeds,
+        igp_routes,
     };
     let result = (!input.processes.is_empty()).then(|| {
         rsim_routing::bgp::compute(&input, &Igp { tables: &igp }).map_err(|e| e.to_string())
@@ -706,6 +946,23 @@ pub fn build(
     }
     let mut vrfs: BTreeMap<String, BTreeMap<String, VrfBgp>> = BTreeMap::new();
     if let Some(Ok(r)) = &result {
+        for ((d, v), cands) in overlay_candidates(r, &input.processes) {
+            let entry = vrfs
+                .entry(d.clone())
+                .or_default()
+                .entry(v.clone())
+                .or_default();
+            for c in cands {
+                match comps.cover(&d, &v, family(c.prefix)) {
+                    Some(why) => entry.candidates.push(Candidate::new(
+                        c.prefix,
+                        c.distance,
+                        Route::unknown(BGP, why, c.spans.clone()),
+                    )),
+                    None => entry.overlay.push(c),
+                }
+            }
+        }
         for ((d, v), cands) in install_candidates(r, &input.processes) {
             let entry = vrfs
                 .entry(d.clone())
@@ -835,6 +1092,37 @@ pub fn build(
                     "bgp group {g}: {n} rounds with a change, {changed} route changes"
                 ));
             }
+            // The method that decides each component of each group.
+            for (i, g) in r.groups.iter().enumerate() {
+                let mut by: BTreeMap<&str, usize> = BTreeMap::new();
+                for p in &g.parts {
+                    *by.entry(p.method.text()).or_default() += 1;
+                }
+                let methods: Vec<String> =
+                    by.iter().map(|(m, n)| format!("{n} by the {m}")).collect();
+                let steps: usize = g.parts.iter().map(|p| p.steps).sum();
+                notes.entry("estate".to_string()).or_default().push(format!(
+                    "bgp group {i}: {} components, {}, {steps} search steps",
+                    g.parts.len(),
+                    methods.join(", ")
+                ));
+                for p in g
+                    .parts
+                    .iter()
+                    .filter(|p| p.convergence != rsim_routing::bgp::ConvergenceKind::Converged)
+                {
+                    let prefixes: BTreeSet<String> =
+                        p.keys.iter().map(|k| k.prefix.to_string()).collect();
+                    let list: Vec<String> = prefixes.into_iter().collect();
+                    notes.entry("estate".to_string()).or_default().push(format!(
+                        "bgp group {i}, component of {}: {:?} by the {} with {} search steps",
+                        list.join(" "),
+                        p.convergence,
+                        p.method.text(),
+                        p.steps
+                    ));
+                }
+            }
             for (i, g) in r.groups.iter().enumerate() {
                 if !matches!(g.convergence, Convergence::Converged { note: None }) {
                     notes.entry("estate".to_string()).or_default().push(format!(
@@ -851,6 +1139,10 @@ pub fn build(
             .push(format!("bgp calculation not run: {e}")),
         None => {}
     }
+    let installed = match &result {
+        Some(Ok(r)) => installed(r, &input.processes, &igp, &|d, v, f| comps.cover(d, v, f)),
+        _ => Rounds::new(),
+    };
     BgpBuild {
         input,
         igp,
@@ -858,6 +1150,7 @@ pub fn build(
         vrfs,
         gaps: gap_texts,
         notes,
+        installed,
     }
 }
 

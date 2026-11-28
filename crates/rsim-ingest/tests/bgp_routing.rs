@@ -254,17 +254,17 @@ fn the_import_policy_of_x1_selects_the_path_of_n1_by_the_local_preference() {
 }
 
 #[test]
-fn a_redistribution_on_n1_makes_each_bgp_route_of_its_component_not_computed() {
+fn a_redistribution_that_is_not_lowered_on_n1_makes_each_bgp_route_of_its_component_not_computed() {
     let n1 = fixture("n1-config.txt").replace(
         "    network 203.0.113.128/26\n",
-        "    network 203.0.113.128/26\n    redistribute direct route-map FROM-ISP\n",
+        "    network 203.0.113.128/26\n    redistribute eigrp 1 route-map FROM-ISP\n",
     );
     let e = assemble(inputs_with(&n1, &fixture("x1-config.txt")));
     for (d, p) in BGP_ROUTES {
         let r = row(&e, d, p);
         assert_eq!(r.0, Category::NotComputed, "{d} {p}: {r:?}");
         assert_eq!(
-            r.1, "bgp gap: redistribute direct route-map FROM-ISP on n1",
+            r.1, "bgp gap: redistribute eigrp 1 route-map FROM-ISP on n1",
             "{d} {p}"
         );
     }

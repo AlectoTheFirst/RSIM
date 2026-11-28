@@ -10,20 +10,28 @@
 //!    best paths of the round before. Brent's algorithm finds the fixed
 //!    point or the cycle by exact comparison of the states.
 //! 2. The uniqueness check builds the possible candidates of each variable
-//!    by a closure over the sessions. It applies when no process with a
-//!    candidate in the group has a route-reflector client, no candidate is unknown, and no
-//!    pair of candidates of a variable is decided by the MED with no
-//!    always-compare-med, by the IGP cost, or by a tie. The greedy
+//!    by a closure over the sessions. It runs on each component of the
+//!    variables over the dependencies of their candidates, and it applies to
+//!    a component when no candidate is unknown and no pair of candidates of a variable is decided by the MED
+//!    with no always-compare-med, by the IGP cost, or by a tie. A pair that
+//!    the cluster list, the originator ID or the neighbour address decides
+//!    has a strict order, also at a route reflector. The greedy
 //!    construction of Griffin, Shepherd and Wilfong then fixes a variable
 //!    when its selection from the fixed variables does not change by any
 //!    possible candidate from a variable that is not fixed. A fixed point
 //!    with each variable fixed to its value is `Converged`.
 //! 3. Else the search assigns each variable that is not fixed a source:
 //!    no path, an unknown path, the `network` path, the aggregate path, a
-//!    seed or a session. The path of a variable follows from its source and
-//!    the path of the sender. An assignment is stable when the source of
-//!    each variable gives its selection, or a tied path of it. The search
-//!    has no bound.
+//!    seed, a session or a leak. The path of a variable follows from its
+//!    source and the path of the sender. An assignment is stable when the
+//!    source of each variable gives its selection, or a tied path of it.
+//!    A variable with no possible candidate has no path. The search runs on
+//!    each component of the variables over the dependencies of their
+//!    candidates, from the variables with an origination, a redistribution
+//!    or a seed, and the stable assignments are the combinations of the
+//!    components. A variable has an unknown source only when it can be
+//!    unknown, and a check does not wait for a link or a leak that gives no
+//!    path for each possible value of its source. The search has no bound.
 //! 4. 2 stable assignments are distinct when they differ in the paths that
 //!    a variable installs or in a path that a variable sends. 0 distinct
 //!    outcomes give `NoConvergence` with the cycle of the forward pass, and
@@ -41,7 +49,9 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::net::IpAddr;
 
+use rsim_core::{Prefix, SourceSpan};
 use rsim_functions::{Route, RouteKind, RouteProtocol};
 
 use super::decision::{Decision, DecisionStep, decide};
@@ -157,9 +167,49 @@ pub struct GroupResult {
     /// The rounds that the forward pass runs until Brent's algorithm finds
     /// the fixed point or the cycle.
     pub rounds: usize,
-    /// True if the forward pass reaches a fixed point. The routes of a
-    /// converged group are then the routes of the fixed point.
+    /// True if the forward pass reaches a fixed point.
     pub fixed_point: bool,
+    /// The result of each component of the group, with the method that
+    /// decides it.
+    pub parts: Vec<PartResult>,
+}
+
+/// The method that decides the result of a component of a group.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Method {
+    /// The uniqueness check fixes each variable, so the component has
+    /// exactly 1 stable outcome.
+    UniquenessCheck,
+    /// The search walks each assignment of the variables that the check
+    /// does not fix and finds each stable outcome.
+    CompleteSearch,
+    /// The search stops at the second distinct stable outcome, so the
+    /// component has more than 1.
+    SecondOutcome,
+}
+
+impl Method {
+    pub fn text(self) -> &'static str {
+        match self {
+            Method::UniquenessCheck => "uniqueness check",
+            Method::CompleteSearch => "complete search",
+            Method::SecondOutcome => "search to the second stable outcome",
+        }
+    }
+}
+
+/// The result of one component of a group: the variables whose candidates
+/// read each other, and no other variable.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PartResult {
+    pub keys: BTreeSet<RouteKey>,
+    pub variables: usize,
+    pub method: Method,
+    /// The nodes that the search walks.
+    pub steps: usize,
+    /// The count of distinct stable outcomes: 0, 1, or 2 for 2 or more.
+    pub outcomes: usize,
+    pub convergence: ConvergenceKind,
 }
 
 /// An event of the calculation for the 3D view.
@@ -222,6 +272,13 @@ pub(crate) fn key_groups(net: &Net<'_>) -> Vec<BTreeSet<RouteKey>> {
                     union(&mut parent, ai, j);
                 }
             }
+        }
+    }
+    for (j, k) in keys.iter().enumerate() {
+        if k.family == Family::EvpnIpPrefix
+            && let Ok(u) = keys.binary_search(&RouteKey::unicast(k.prefix))
+        {
+            union(&mut parent, u, j);
         }
     }
     let hops = net.next_hop_addresses();
@@ -433,8 +490,21 @@ fn possible(
     if let Some(n) = &g.network[v] {
         push(None, Source::Network, n.clone());
     }
+    for (ri, o) in &g.redistributed[v] {
+        push(None, Source::Redistribute(*ri), o.clone());
+    }
     for (si, o) in &g.seeds[v] {
         push(None, Source::Seed(*si), o.clone());
+    }
+    for (pos, &(li, w)) in g.inleaks[v].iter().enumerate() {
+        match &fixed[w] {
+            Some(x) => push(None, Source::Leak(pos), g.leak(li, x)),
+            None => {
+                for x in values(w) {
+                    push(Some(w), Source::Leak(pos), g.leak(li, &x));
+                }
+            }
+        }
     }
     if g.has_aggregate[v] {
         let cs = &g.contributors[v];
@@ -497,10 +567,11 @@ fn domains(g: &Group<'_, '_>) -> Vec<BTreeSet<BestPath>> {
     }
 }
 
-/// True if the uniqueness check applies to the group with the domains
-/// `dom`.
-fn strict(g: &Group<'_, '_>, dom: &[BTreeSet<BestPath>]) -> bool {
-    for (v, d) in dom.iter().enumerate() {
+/// True if the uniqueness check applies to the variables `part` of the
+/// group with the domains `dom`.
+fn strict(g: &Group<'_, '_>, dom: &[BTreeSet<BestPath>], part: &[usize]) -> bool {
+    for &v in part {
+        let d = &dom[v];
         if d.iter().any(|b| matches!(b, BestPath::Unknown(_))) {
             return false;
         }
@@ -515,9 +586,6 @@ fn strict(g: &Group<'_, '_>, dom: &[BTreeSet<BestPath>]) -> bool {
             continue;
         }
         let (p, _) = g.at(v);
-        if p.neighbors.values().any(|nb| nb.route_reflector_client) {
-            return false;
-        }
         let Some(profile) = p.profile() else {
             return false;
         };
@@ -545,6 +613,7 @@ fn strict(g: &Group<'_, '_>, dom: &[BTreeSet<BestPath>]) -> bool {
 fn greedy(
     g: &Group<'_, '_>,
     dom: &[BTreeSet<BestPath>],
+    active: &[bool],
 ) -> (Vec<Option<BestPath>>, Option<Vec<WheelSpoke>>) {
     let n = g.vars.len();
     let mut fixed: Vec<Option<BestPath>> = vec![None; n];
@@ -552,7 +621,7 @@ fn greedy(
     loop {
         let mut progress = false;
         for v in 0..n {
-            if fixed[v].is_some() {
+            if fixed[v].is_some() || !active[v] {
                 continue;
             }
             blocks[v] = None;
@@ -594,7 +663,7 @@ fn greedy(
     }
     let mut wheel = None;
     'start: for start in 0..n {
-        if fixed[start].is_some() {
+        if fixed[start].is_some() || !active[start] {
             continue;
         }
         let mut seen: Vec<usize> = Vec::new();
@@ -655,6 +724,9 @@ struct Derive<'s, 'g, 'n, 'a> {
     g: &'g Group<'n, 'a>,
     fixed: &'s [Option<BestPath>],
     assign: &'s [Option<Assign>],
+    /// The links and leaks into a variable that give no path for each
+    /// possible value of their source variable.
+    silent: &'s BTreeSet<(usize, Source)>,
     memo: RefCell<Vec<Memo>>,
 }
 
@@ -702,12 +774,24 @@ impl Derive<'_, '_, '_, '_> {
                     .collect::<Result<_, _>>()?;
                 Self::path(&g.aggregate(v, &cs))
             }
+            Assign::From(Source::Redistribute(ri)) => {
+                let (_, o) = g.redistributed[v]
+                    .iter()
+                    .find(|(r, _)| *r == ri)
+                    .ok_or(Fail::Invalid)?;
+                Self::path(o)
+            }
             Assign::From(Source::Seed(si)) => {
                 let (_, o) = g.seeds[v]
                     .iter()
                     .find(|(s, _)| *s == si)
                     .ok_or(Fail::Invalid)?;
                 Self::path(o)
+            }
+            Assign::From(Source::Leak(pos)) => {
+                let &(li, w) = g.inleaks[v].get(pos).ok_or(Fail::Invalid)?;
+                let b = self.best(w)?;
+                Self::path(&g.leak(li, &b))
             }
             Assign::From(Source::Link(l)) => {
                 let &(_, w) = g.inlinks[v]
@@ -742,7 +826,8 @@ impl Derive<'_, '_, '_, '_> {
                 None
             }
         };
-        let Some(cands) = self.g.candidates(v, &get) else {
+        let skip = |s: Source| self.silent.contains(&(v, s));
+        let Some(cands) = self.g.candidates_with(v, &get, &skip) else {
             return match fail.into_inner() {
                 Some(Fail::Missing) => Err(Fail::Missing),
                 _ => Ok(false),
@@ -804,14 +889,214 @@ fn grounded(g: &Group<'_, '_>, assign: &[Option<Assign>], picks: &mut [BestPath]
     }
 }
 
-/// The best paths of each stable assignment, in the order of the search.
-fn search(g: &Group<'_, '_>, fixed: &[Option<BestPath>]) -> Vec<Vec<BestPath>> {
+/// The variables that the candidates of `v` read.
+fn dependencies(g: &Group<'_, '_>, v: usize) -> Vec<usize> {
+    let mut out = g.contributors[v].clone();
+    for &(_, w) in &g.inlinks[v] {
+        out.push(w);
+        out.extend(g.suppressors[w].iter().copied());
+    }
+    out.extend(g.inleaks[v].iter().map(|(_, w)| *w));
+    out
+}
+
+/// The free variables of `fixed` in the components over the dependencies
+/// of their candidates, each in the order of the variables.
+fn components(g: &Group<'_, '_>, fixed: &[Option<BestPath>]) -> Vec<Vec<usize>> {
     let n = g.vars.len();
-    let free: Vec<usize> = (0..n).filter(|&v| fixed[v].is_none()).collect();
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    for v in (0..n).filter(|&v| fixed[v].is_none()) {
+        for w in dependencies(g, v) {
+            if fixed[w].is_none() {
+                let (a, b) = (root(&mut parent, v), root(&mut parent, w));
+                if a != b {
+                    parent[a.max(b)] = a.min(b);
+                }
+            }
+        }
+    }
+    let mut by: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for v in (0..n).filter(|&v| fixed[v].is_none()) {
+        let r = root(&mut parent, v);
+        by.entry(r).or_default().push(v);
+    }
+    by.into_values().collect()
+}
+
+/// The free variables of `fixed` in the order of the search: a
+/// breadth-first walk from the variables with an origination, a
+/// redistribution or a seed, and from the variables whose dependencies are
+/// fixed, along the variables that read them, then the other free variables
+/// in their order.
+fn search_order(g: &Group<'_, '_>, fixed: &[Option<BestPath>]) -> Vec<usize> {
+    let n = g.vars.len();
+    let mut readers: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for v in (0..n).filter(|&v| fixed[v].is_none()) {
+        for w in dependencies(g, v) {
+            readers[w].push(v);
+        }
+    }
+    let mut seen = vec![false; n];
+    let mut queue = std::collections::VecDeque::new();
+    for v in (0..n).filter(|&v| fixed[v].is_none()) {
+        let sourced = g.network[v].is_some()
+            || g.has_aggregate[v]
+            || !g.redistributed[v].is_empty()
+            || !g.seeds[v].is_empty()
+            || dependencies(g, v).iter().all(|&w| fixed[w].is_some());
+        if sourced {
+            seen[v] = true;
+            queue.push_back(v);
+        }
+    }
+    for v in (0..n).filter(|&v| fixed[v].is_some()) {
+        for &r in &readers[v] {
+            if !seen[r] {
+                seen[r] = true;
+                queue.push_back(r);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    while let Some(v) = queue.pop_front() {
+        out.push(v);
+        for &r in &readers[v] {
+            if !seen[r] {
+                seen[r] = true;
+                queue.push_back(r);
+            }
+        }
+    }
+    out.extend((0..n).filter(|&v| fixed[v].is_none() && !seen[v]));
+    out
+}
+
+/// The variables that can have an unknown selection: a variable with an
+/// unknown possible candidate of the domains `dom`, a variable whose
+/// decision over 1, 2 or all of its possible paths is unknown, a variable
+/// with an unknown fixed value, and each variable that reads one of them
+/// through a source of `dependencies` that is not in `silent`.
+fn unknowable(
+    g: &Group<'_, '_>,
+    fixed: &[Option<BestPath>],
+    dom: &[BTreeSet<BestPath>],
+    silent: &BTreeSet<(usize, Source)>,
+) -> Vec<bool> {
+    let n = g.vars.len();
+    let mut can = vec![false; n];
+    for v in 0..n {
+        if let Some(f) = &fixed[v] {
+            can[v] = matches!(f, BestPath::Unknown(_));
+            continue;
+        }
+        let cands: Vec<Cand> = possible(g, v, dom, fixed)
+            .into_iter()
+            .map(|(_, c)| c)
+            .collect();
+        if cands.iter().any(|c| c.offer.is_err()) {
+            can[v] = true;
+            continue;
+        }
+        let unknown = |set: &[Cand]| matches!(g.choose(v, set), Choice::Unknown(_));
+        can[v] = unknown(&cands)
+            || (0..cands.len())
+                .any(|i| (i..cands.len()).any(|j| unknown(&[cands[i].clone(), cands[j].clone()])));
+    }
+    let reads = |v: usize| -> Vec<usize> {
+        let mut out = g.contributors[v].clone();
+        for &(l, w) in &g.inlinks[v] {
+            if !silent.contains(&(v, Source::Link(l))) {
+                out.push(w);
+                out.extend(g.suppressors[w].iter().copied());
+            }
+        }
+        for (pos, &(_, w)) in g.inleaks[v].iter().enumerate() {
+            if !silent.contains(&(v, Source::Leak(pos))) {
+                out.push(w);
+            }
+        }
+        out
+    };
+    loop {
+        let mut changed = false;
+        for v in 0..n {
+            if fixed[v].is_none() && !can[v] && reads(v).iter().any(|&w| can[w]) {
+                can[v] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            return can;
+        }
+    }
+}
+
+/// The best paths of each stable assignment, in the order of the search.
+/// The options of a variable are no path, and with a possible candidate of
+/// the domains `dom` each source of a possible candidate and, for a
+/// variable of [`unknowable`], an unknown selection.
+/// The result of the search of one component.
+struct Searched {
+    /// The stable assignments with distinct outcomes, at most 2.
+    distinct: Vec<Vec<BestPath>>,
+    steps: usize,
+    /// True if the search stops at the second distinct outcome.
+    stopped: bool,
+}
+
+/// The stable assignments of the free variables of `fixed`, which are one
+/// component, with distinct outcomes over the variables of the component.
+/// The search stops at the second distinct outcome.
+fn search(g: &Group<'_, '_>, fixed: &[Option<BestPath>], dom: &[BTreeSet<BestPath>]) -> Searched {
+    let n = g.vars.len();
+    let free = search_order(g, fixed);
+    // A link or a leak whose source gives no path for each value of its
+    // domain and for an unknown value gives no candidate, so the check of a
+    // variable does not wait for that source.
+    let probe = BestPath::Unknown(Unknown::new(Reason::SelectionNotKnown, String::new()));
+    let mut silent: BTreeSet<(usize, Source)> = BTreeSet::new();
+    for &v in &free {
+        for &(l, w) in &g.inlinks[v] {
+            if g.suppressors[w].is_empty()
+                && dom[w]
+                    .iter()
+                    .chain([&probe])
+                    .all(|x| matches!(g.transfer(l, w, x), Offer::None))
+            {
+                silent.insert((v, Source::Link(l)));
+            }
+        }
+        for (pos, &(li, w)) in g.inleaks[v].iter().enumerate() {
+            if dom[w]
+                .iter()
+                .chain([&probe])
+                .all(|x| matches!(g.leak(li, x), Offer::None))
+            {
+                silent.insert((v, Source::Leak(pos)));
+            }
+        }
+    }
+    let can = unknowable(g, fixed, dom, &silent);
     let domains: Vec<Vec<Assign>> = free
         .iter()
         .map(|&v| {
-            let mut d = vec![Assign::Empty, Assign::Unknown];
+            let cands = possible(g, v, dom, fixed);
+            let sources: BTreeSet<Source> = cands
+                .iter()
+                .filter(|(_, c)| c.offer.is_ok())
+                .map(|(_, c)| c.source)
+                .collect();
+            let mut d = vec![Assign::Empty];
+            if !cands.is_empty() && can[v] {
+                d.push(Assign::Unknown);
+            }
             if g.network[v].is_some() {
                 d.push(Assign::From(Source::Network));
             }
@@ -819,76 +1104,103 @@ fn search(g: &Group<'_, '_>, fixed: &[Option<BestPath>]) -> Vec<Vec<BestPath>> {
                 d.push(Assign::From(Source::Aggregate));
             }
             d.extend(
+                g.redistributed[v]
+                    .iter()
+                    .map(|(r, _)| Assign::From(Source::Redistribute(*r))),
+            );
+            d.extend(
                 g.seeds[v]
                     .iter()
                     .map(|(s, _)| Assign::From(Source::Seed(*s))),
             );
+            d.extend((0..g.inleaks[v].len()).map(|pos| Assign::From(Source::Leak(pos))));
             d.extend(
                 g.inlinks[v]
                     .iter()
                     .map(|(l, _)| Assign::From(Source::Link(*l))),
             );
+            d.retain(|a| match a {
+                Assign::From(s) => sources.contains(s),
+                _ => true,
+            });
             d
         })
         .collect();
-    let mut assign: Vec<Option<Assign>> = vec![None; n];
-    let mut found = Vec::new();
-    fn walk(
-        g: &Group<'_, '_>,
-        fixed: &[Option<BestPath>],
-        free: &[usize],
-        domains: &[Vec<Assign>],
-        depth: usize,
-        assign: &mut Vec<Option<Assign>>,
-        found: &mut Vec<Vec<BestPath>>,
-    ) {
-        let n = g.vars.len();
-        let d = Derive {
-            g,
-            fixed,
-            assign: &assign[..],
-            memo: RefCell::new(vec![Memo::Todo; n]),
-        };
-        let mut complete = true;
-        for &u in &free[..depth] {
-            match d.stable(u) {
-                Ok(true) => {}
-                Ok(false) => return,
-                Err(_) => complete = false,
+    struct Walk<'w, 'g, 'n, 'a> {
+        g: &'g Group<'n, 'a>,
+        fixed: &'w [Option<BestPath>],
+        free: &'w [usize],
+        domains: &'w [Vec<Assign>],
+        silent: &'w BTreeSet<(usize, Source)>,
+        distinct: Vec<Vec<BestPath>>,
+        keys: Vec<Vec<(Option<BTreeSet<BgpPath>>, Vec<BestPath>)>>,
+        steps: usize,
+    }
+    impl Walk<'_, '_, '_, '_> {
+        fn walk(&mut self, depth: usize, assign: &mut Vec<Option<Assign>>) {
+            if self.distinct.len() >= 2 {
+                return;
             }
-        }
-        if depth == free.len() {
-            if complete {
-                let picks: Result<Vec<BestPath>, Fail> = (0..n).map(|v| d.best(v)).collect();
-                if let Ok(mut p) = picks
-                    && grounded(g, assign, &mut p)
-                {
-                    found.push(p);
+            self.steps += 1;
+            let g = self.g;
+            let n = g.vars.len();
+            let d = Derive {
+                g,
+                fixed: self.fixed,
+                assign: &assign[..],
+                silent: self.silent,
+                memo: RefCell::new(vec![Memo::Todo; n]),
+            };
+            let mut complete = true;
+            for &u in &self.free[..depth] {
+                match d.stable(u) {
+                    Ok(true) => {}
+                    Ok(false) => return,
+                    Err(_) => complete = false,
                 }
             }
-            return;
+            if depth == self.free.len() {
+                if complete {
+                    let picks: Result<Vec<BestPath>, Fail> = (0..n).map(|v| d.best(v)).collect();
+                    if let Ok(mut p) = picks
+                        && grounded(g, assign, &mut p)
+                    {
+                        let all = outcome(g, &p).0;
+                        let key: Vec<_> = self.free.iter().map(|&v| all[v].clone()).collect();
+                        if !self.keys.contains(&key) {
+                            self.keys.push(key);
+                            self.distinct.push(p);
+                        }
+                    }
+                }
+                return;
+            }
+            drop(d);
+            let v = self.free[depth];
+            for i in 0..self.domains[depth].len() {
+                assign[v] = Some(self.domains[depth][i]);
+                self.walk(depth + 1, assign);
+            }
+            assign[v] = None;
         }
-        drop(d);
-        let v = free[depth];
-        for &a in &domains[depth] {
-            assign[v] = Some(a);
-            walk(g, fixed, free, domains, depth + 1, assign, found);
-        }
-        assign[v] = None;
     }
-    walk(g, fixed, &free, &domains, 0, &mut assign, &mut found);
-    found
-}
-
-fn unknown_routes(
-    g: &Group<'_, '_>,
-    unknown: impl Fn(usize) -> bool,
-    u: &Unknown,
-) -> BTreeMap<RouteAt, RouteState> {
-    (0..g.vars.len())
-        .filter(|&v| unknown(v))
-        .map(|v| (route_at(g, v), RouteState::Unknown(u.clone())))
-        .collect()
+    let mut w = Walk {
+        g,
+        fixed,
+        free: &free,
+        domains: &domains,
+        silent: &silent,
+        distinct: Vec::new(),
+        keys: Vec::new(),
+        steps: 0,
+    };
+    let mut assign: Vec<Option<Assign>> = vec![None; n];
+    w.walk(0, &mut assign);
+    Searched {
+        stopped: w.distinct.len() >= 2,
+        distinct: w.distinct,
+        steps: w.steps,
+    }
 }
 
 fn run_group(
@@ -901,132 +1213,268 @@ fn run_group(
     let (fwd, rounds) = forward(&g, gi, events);
     let dom = domains(&g);
     let possible_path = |v: usize| dom[v].iter().any(|b| *b != BestPath::None);
-    let (fixed, wheel) = if strict(&g, &dom) {
-        greedy(&g, &dom)
-    } else {
-        (vec![None; g.vars.len()], None)
-    };
-    let result = |convergence: Convergence| GroupResult {
-        keys: keys.clone(),
-        convergence,
-        rounds,
-        fixed_point: matches!(fwd, Forward::Fixed(_)),
-    };
-    if let Forward::Fixed(state) = &fwd
-        && fixed.iter().zip(state).all(|(f, s)| f.as_ref() == Some(s))
-    {
-        let (_, routes) = outcome(&g, state);
-        return (result(Convergence::Converged { note: None }), routes);
-    }
-    let stable = search(&g, &fixed);
-    let mut keys_seen: Vec<OutcomeKey> = Vec::new();
-    let mut picks: Vec<Vec<BestPath>> = Vec::new();
-    let mut outcomes: Vec<Outcome> = Vec::new();
-    for s in stable {
-        let (k, routes) = outcome(&g, &s);
-        if !keys_seen.contains(&k) {
-            keys_seen.push(k);
-            picks.push(s);
-            outcomes.push(Outcome { routes });
+    // The uniqueness check runs on each component of the variables where it
+    // applies.
+    let n = g.vars.len();
+    let parts = components(&g, &vec![None; n]);
+    let mut fixed: Vec<Option<BestPath>> = vec![None; n];
+    let mut wheel = None;
+    for part in &parts {
+        if !strict(&g, &dom, part) {
+            continue;
+        }
+        let mut active = vec![false; n];
+        for &v in part {
+            active[v] = true;
+        }
+        let (f, w) = greedy(&g, &dom, &active);
+        for &v in part {
+            fixed[v] = f[v].clone();
+        }
+        if wheel.is_none() {
+            wheel = w;
         }
     }
-    let convergence = match (outcomes.len(), &fwd) {
-        (
-            0,
+    // A variable with no possible candidate has its domain of no path only,
+    // and has no path in each stable assignment.
+    for (v, f) in fixed.iter_mut().enumerate() {
+        if f.is_none() && dom[v].len() == 1 {
+            *f = dom[v].iter().next().cloned();
+        }
+    }
+    // The search of the variables that the check does not fix, for each
+    // component of them alone, with the free variables of the other
+    // components at no path. The candidates of a variable read only the
+    // variables of its component.
+    let mut picks: Vec<BestPath> = fixed
+        .iter()
+        .map(|f| f.clone().unwrap_or(BestPath::None))
+        .collect();
+    let mut alternative: Option<Vec<BestPath>> = None;
+    let subs = components(&g, &fixed);
+    let mut searched: Vec<(Method, usize, usize)> =
+        vec![(Method::UniquenessCheck, 0, 1); parts.len()];
+    let mut part_of = vec![0; n];
+    for (pi, part) in parts.iter().enumerate() {
+        for &v in part {
+            part_of[v] = pi;
+        }
+    }
+    for sub in &subs {
+        let mut inside = vec![false; n];
+        for &v in sub {
+            inside[v] = true;
+        }
+        let local: Vec<Option<BestPath>> = fixed
+            .iter()
+            .enumerate()
+            .map(|(v, f)| match f {
+                None if !inside[v] => Some(BestPath::None),
+                f => f.clone(),
+            })
+            .collect();
+        let r = search(&g, &local, &dom);
+        let entry = &mut searched[part_of[sub[0]]];
+        entry.1 += r.steps;
+        if entry.0 == Method::UniquenessCheck {
+            entry.0 = Method::CompleteSearch;
+        }
+        if r.stopped {
+            entry.0 = Method::SecondOutcome;
+        }
+        match r.distinct.len() {
+            0 => entry.2 = 0,
+            k => {
+                for &v in sub {
+                    picks[v] = r.distinct[0][v].clone();
+                }
+                if k >= 2 {
+                    if entry.2 != 0 {
+                        entry.2 = 2;
+                    }
+                    if alternative.is_none() {
+                        let mut alt = picks.clone();
+                        for &v in sub {
+                            alt[v] = r.distinct[1][v].clone();
+                        }
+                        alternative = Some(alt);
+                    }
+                }
+            }
+        }
+    }
+    let (_, mut routes) = outcome(&g, &picks);
+    let mut results = Vec::new();
+    let mut not_determined: BTreeSet<String> = BTreeSet::new();
+    for (pi, part) in parts.iter().enumerate() {
+        let (method, steps, outcomes) = searched[pi];
+        let unknown: BTreeSet<String> = part
+            .iter()
+            .filter_map(|&v| match &picks[v] {
+                BestPath::Unknown(u) => Some(u.to_string()),
+                _ => None,
+            })
+            .collect();
+        let (kind, reason) = match (outcomes, &fwd) {
+            (
+                0,
+                Forward::Cycle {
+                    first_round,
+                    states,
+                },
+            ) => (
+                ConvergenceKind::NoConvergence,
+                Some(Unknown::new(
+                    Reason::NoConvergence,
+                    format!(
+                        "a cycle of {} rounds from round {first_round}",
+                        states.len()
+                    ),
+                )),
+            ),
+            (0, Forward::Fixed(_)) => (
+                ConvergenceKind::Unknown,
+                Some(Unknown::new(
+                    Reason::Internal,
+                    "no stable outcome at the fixed point of the forward pass",
+                )),
+            ),
+            (1, _) if !unknown.is_empty() => {
+                not_determined.extend(unknown.iter().cloned());
+                (
+                    ConvergenceKind::Unknown,
+                    Some(Unknown {
+                        reason: Reason::ConvergenceNotDetermined,
+                        details: unknown,
+                    }),
+                )
+            }
+            (1, _) => (ConvergenceKind::Converged, None),
+            _ => (
+                ConvergenceKind::MultipleStableOutcomes,
+                Some(Unknown::new(
+                    Reason::MultipleStableOutcomes,
+                    format!("{} found by the {}", "2 or more outcomes", method.text()),
+                )),
+            ),
+        };
+        if let Some(u) = &reason {
+            for &v in part {
+                let at = route_at(&g, v);
+                if possible_path(v) {
+                    routes.insert(at, RouteState::Unknown(u.clone()));
+                } else {
+                    routes.remove(&at);
+                }
+            }
+        }
+        results.push(PartResult {
+            keys: part.iter().map(|&v| g.vars[v].1).collect(),
+            variables: part.len(),
+            method,
+            steps,
+            outcomes,
+            convergence: kind,
+        });
+    }
+    let worst = results
+        .iter()
+        .map(|r| r.convergence)
+        .max()
+        .unwrap_or(ConvergenceKind::Converged);
+    let searched_any = results.iter().any(|r| r.method != Method::UniquenessCheck);
+    let convergence = match worst {
+        ConvergenceKind::Converged => Convergence::Converged {
+            note: match (wheel, &fwd, searched_any) {
+                (_, Forward::Fixed(_), false) => None,
+                (Some(w), _, _) => Some(Note {
+                    text: NOT_SAFE,
+                    wheel: w,
+                }),
+                (None, Forward::Cycle { .. }, _) => Some(Note {
+                    text: NOT_SAFE,
+                    wheel: Vec::new(),
+                }),
+                (None, Forward::Fixed(_), true) => Some(Note {
+                    text: NOT_CHECKED,
+                    wheel: Vec::new(),
+                }),
+            },
+        },
+        ConvergenceKind::MultipleStableOutcomes => {
+            let alt = alternative.clone().unwrap_or_else(|| picks.clone());
+            Convergence::MultipleStableOutcomes {
+                outcomes: vec![
+                    Outcome {
+                        routes: outcome(&g, &picks).1,
+                    },
+                    Outcome {
+                        routes: outcome(&g, &alt).1,
+                    },
+                ],
+            }
+        }
+        ConvergenceKind::NoConvergence => match &fwd {
             Forward::Cycle {
                 first_round,
                 states,
-            },
-        ) => {
-            let changing = (0..g.vars.len())
-                .filter(|&v| states.iter().any(|s| s[v] != states[0][v]))
-                .map(|v| {
-                    (
-                        route_at(&g, v),
-                        states.iter().map(|s| s[v].clone()).collect(),
-                    )
-                })
-                .collect();
-            Convergence::NoConvergence {
-                cycle: CycleWitness {
-                    first_round: *first_round,
-                    length: states.len(),
-                    changing,
-                },
+            } => {
+                let changing = (0..n)
+                    .filter(|&v| states.iter().any(|s| s[v] != states[0][v]))
+                    .map(|v| {
+                        (
+                            route_at(&g, v),
+                            states.iter().map(|s| s[v].clone()).collect(),
+                        )
+                    })
+                    .collect();
+                Convergence::NoConvergence {
+                    cycle: CycleWitness {
+                        first_round: *first_round,
+                        length: states.len(),
+                        changing,
+                    },
+                }
             }
-        }
-        (0, Forward::Fixed(_)) => Convergence::Unknown {
-            reason: Unknown::new(
-                Reason::Internal,
-                "no stable outcome at the fixed point of the forward pass",
-            ),
-        },
-        (1, _) if picks[0].iter().any(|b| matches!(b, BestPath::Unknown(_))) => {
-            Convergence::Unknown {
-                reason: Unknown {
-                    reason: Reason::ConvergenceNotDetermined,
-                    details: picks[0]
-                        .iter()
-                        .filter_map(|b| match b {
-                            BestPath::Unknown(u) => Some(u.to_string()),
-                            _ => None,
-                        })
-                        .collect(),
-                },
-            }
-        }
-        (1, _) => Convergence::Converged {
-            note: Some(match (wheel, &fwd) {
-                (Some(w), _) => Note {
-                    text: NOT_SAFE,
-                    wheel: w,
-                },
-                (None, Forward::Cycle { .. }) => Note {
-                    text: NOT_SAFE,
-                    wheel: Vec::new(),
-                },
-                (None, Forward::Fixed(_)) => Note {
-                    text: NOT_CHECKED,
-                    wheel: Vec::new(),
-                },
-            }),
-        },
-        _ => Convergence::MultipleStableOutcomes {
-            outcomes: outcomes.clone(),
-        },
-    };
-    events.push(Event::Search {
-        group: gi,
-        outcomes: outcomes.len(),
-        result: convergence.kind(),
-    });
-    let routes = match &convergence {
-        Convergence::Converged { .. } => match &fwd {
-            Forward::Fixed(state) => outcome(&g, state).1,
-            Forward::Cycle { .. } => outcomes.swap_remove(0).routes,
-        },
-        Convergence::MultipleStableOutcomes { outcomes } => unknown_routes(
-            &g,
-            |v| picks.iter().any(|s| s[v] != BestPath::None),
-            &Unknown::new(
-                Reason::MultipleStableOutcomes,
-                format!("{} outcomes", outcomes.len()),
-            ),
-        ),
-        Convergence::NoConvergence { cycle } => unknown_routes(
-            &g,
-            possible_path,
-            &Unknown::new(
-                Reason::NoConvergence,
-                format!(
-                    "a cycle of {} rounds from round {}",
-                    cycle.length, cycle.first_round
+            Forward::Fixed(_) => Convergence::Unknown {
+                reason: Unknown::new(
+                    Reason::Internal,
+                    "no stable outcome at the fixed point of the forward pass",
                 ),
-            ),
-        ),
-        Convergence::Unknown { reason } => unknown_routes(&g, possible_path, reason),
+            },
+        },
+        ConvergenceKind::Unknown => Convergence::Unknown {
+            reason: if not_determined.is_empty() {
+                Unknown::new(
+                    Reason::Internal,
+                    "no stable outcome at the fixed point of the forward pass",
+                )
+            } else {
+                Unknown {
+                    reason: Reason::ConvergenceNotDetermined,
+                    details: not_determined,
+                }
+            },
+        },
     };
-    (result(convergence), routes)
+    if searched_any {
+        events.push(Event::Search {
+            group: gi,
+            outcomes: results.iter().map(|r| r.outcomes).max().unwrap_or(1),
+            result: convergence.kind(),
+        });
+    }
+    let fixed_point = matches!(fwd, Forward::Fixed(_));
+    (
+        GroupResult {
+            keys: keys.clone(),
+            convergence,
+            rounds,
+            fixed_point,
+            parts: results,
+        },
+        routes,
+    )
 }
 
 /// The BGP calculation: the selection of each route at each process, with
@@ -1068,22 +1516,83 @@ const PLATFORMS: [Platform; 5] = [
     Platform::FrrDatacenter,
 ];
 
+/// An EVPN IP prefix route that a VRF imports, for the install: the next
+/// hops are tunnel ends, and the route enters the tunnel of the VRF.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OverlayCandidate {
+    pub prefix: Prefix,
+    pub distance: u8,
+    /// The tunnel ends of the best path and its multipath.
+    pub tunnel_ends: Vec<IpAddr>,
+    pub spans: Vec<SourceSpan>,
+}
+
+/// The install candidates of the EVPN IP prefix routes that the VRFs of
+/// `result` import, by device and VRF, with the distance of the session of
+/// the best path.
+pub fn overlay_candidates(
+    result: &BgpResult,
+    processes: &[BgpProcess],
+) -> BTreeMap<(String, String), Vec<OverlayCandidate>> {
+    let mut out: BTreeMap<(String, String), Vec<OverlayCandidate>> = BTreeMap::new();
+    for (at, state) in &result.routes {
+        let RouteState::Selected(sel) = state else {
+            continue;
+        };
+        if at.key.family == Family::EvpnIpPrefix
+            || !sel.best.leaked.as_ref().is_some_and(|l| l.evpn)
+        {
+            continue;
+        }
+        let profile = processes
+            .iter()
+            .find(|p| p.device == at.device && p.vrf == at.vrf)
+            .and_then(|p| p.profile());
+        let lowest = lowest_ebgp();
+        let mut tunnel_ends: Vec<IpAddr> =
+            sel.multipath.iter().filter_map(|p| p.next_hop).collect();
+        tunnel_ends.sort();
+        tunnel_ends.dedup();
+        out.entry((at.device.clone(), at.vrf.clone()))
+            .or_default()
+            .push(OverlayCandidate {
+                prefix: at.key.prefix,
+                distance: profile.map_or(lowest, |p| p.distance(sel.best.peer.kind)),
+                tunnel_ends,
+                spans: sel
+                    .multipath
+                    .iter()
+                    .flat_map(|p| p.spans.iter().cloned())
+                    .collect(),
+            });
+    }
+    out
+}
+
+/// The lowest eBGP distance of any platform.
+fn lowest_ebgp() -> u8 {
+    PLATFORMS
+        .iter()
+        .map(|p| p.distance(Origin::Ebgp))
+        .min()
+        .unwrap_or(0)
+}
+
 /// The install candidates of the unicast routes of `result`, by device and
 /// VRF. A best path from a session gives a BGP route through the next hops
 /// of its multipath with the distance of the profile. An aggregate gives a
 /// discard route with the distance of a local path. A `network` or a
-/// redistributed path gives no candidate. An unknown route gives an unknown
-/// BGP route with the lowest eBGP distance of any platform.
+/// redistributed path gives no candidate. An EVPN IP prefix route that a
+/// VRF imports gives no candidate here, and [`overlay_candidates`] gives
+/// it. A path that a VRF leaks from another VRF gives an unknown BGP route
+/// with the distance of the profile. An unknown route gives an unknown BGP
+/// route with the lowest eBGP distance of any platform.
 pub fn install_candidates(
     result: &BgpResult,
     processes: &[BgpProcess],
 ) -> BTreeMap<(String, String), Vec<Candidate>> {
     let mut out: BTreeMap<(String, String), Vec<Candidate>> = BTreeMap::new();
-    let lowest = PLATFORMS
-        .iter()
-        .map(|p| p.distance(Origin::Ebgp))
-        .min()
-        .unwrap_or(0);
+    let lowest = lowest_ebgp();
     for (at, state) in &result.routes {
         if at.key.family == Family::EvpnIpPrefix {
             continue;
@@ -1102,13 +1611,23 @@ pub fn install_candidates(
                     .iter()
                     .flat_map(|p| p.spans.iter().cloned())
                     .collect();
-                match kind {
-                    SessionKind::Local(LocalOrigin::Aggregate) => Candidate::new(
+                match (kind, &sel.best.leaked) {
+                    (_, Some(l)) if l.evpn => continue,
+                    (_, Some(l)) => Candidate::new(
+                        prefix,
+                        distance,
+                        Route::unknown(
+                            RouteKind::Learned(RouteProtocol::Bgp),
+                            format!("next hop in vrf {} not installed", l.vrf),
+                            spans,
+                        ),
+                    ),
+                    (SessionKind::Local(LocalOrigin::Aggregate), _) => Candidate::new(
                         prefix,
                         distance,
                         Route::new(RouteKind::Null, Vec::new(), spans),
                     ),
-                    SessionKind::Local(_) => continue,
+                    (SessionKind::Local(_), _) => continue,
                     _ => {
                         let mut gateways: Vec<_> =
                             sel.multipath.iter().filter_map(|p| p.next_hop).collect();

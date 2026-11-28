@@ -32,7 +32,8 @@
 //! - Without `send_community` the standard and the large communities are
 //!   removed. Without `send_community_extended` the extended communities
 //!   are removed. The fields hold the effective settings of the platform.
-//! - The sent path has the sender as its peer, the IGP cost 0 and no tag.
+//! - The sent path has the sender as its peer, the IGP cost 0, no tag and no
+//!   leak.
 //!
 //! The receipt of a path from the neighbour `n`:
 //! - An eBGP path whose AS path holds the AS, the confederation ID or the
@@ -74,6 +75,10 @@ pub struct Session {
 
 /// The result of a transfer step on a path.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the path variant is the common value, and a box adds an allocation to each copy"
+)]
 pub enum Offer {
     /// The step does not send the path, rejects it or denies it.
     None,
@@ -235,6 +240,7 @@ pub fn export(
     };
     q.igp_cost = 0;
     q.tag = None;
+    q.leaked = None;
     Offer::Path(q)
 }
 

@@ -108,8 +108,7 @@ pub struct Redistribute {
     pub metric: Option<u32>,
     /// The external metric type, 1 or 2. `None` takes type 2.
     pub metric_type: Option<u8>,
-    /// The name of the route-map. A route-map makes the statement unknown
-    /// until the policy evaluator exists.
+    /// The name of the route-map. A route-map makes the statement unknown.
     pub route_map: Option<String>,
     pub span: SourceSpan,
 }

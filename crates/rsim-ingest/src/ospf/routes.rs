@@ -5,7 +5,8 @@ use std::net::IpAddr;
 
 use rsim_core::Prefix;
 use rsim_functions::{Route, RouteKind, RouteNextHop, RouteProtocol};
-use rsim_routing::ospf::{Calculation, OspfProfile, Version, compute};
+use rsim_routing::bgp::OspfRouteType;
+use rsim_routing::ospf::{Calculation, LsaType, OspfProfile, PathType, Version, compute};
 use rsim_routing::{Candidate, Platform};
 
 use super::DeviceOspf;
@@ -15,9 +16,15 @@ use crate::bgp::Outcome;
 /// the reason that the version is not computed.
 pub struct OspfRoutes {
     by_version: BTreeMap<Version, Result<Vec<Calculation>, String>>,
+    /// The process of each calculation of `by_version`, in its order.
+    processes: BTreeMap<Version, Vec<String>>,
 }
 
 const KIND: RouteKind = RouteKind::Learned(RouteProtocol::Ospf);
+
+/// The process and the route type of a computed route, or the reason why
+/// the route is unknown.
+pub type RouteType = Result<(String, OspfRouteType), String>;
 
 impl OspfRoutes {
     /// The calculations of the databases of a VRF. A version whose sections
@@ -26,7 +33,11 @@ impl OspfRoutes {
     pub fn of(ospf: Option<&DeviceOspf>, vrf: &str, platform: Platform) -> OspfRoutes {
         let profile = OspfProfile::of(platform);
         let mut by_version = BTreeMap::new();
+        let mut processes = BTreeMap::new();
         for v in [Version::V2, Version::V3] {
+            if let Some(o) = ospf {
+                processes.insert(v, o.of(v, vrf).map(|db| db.process.clone()).collect());
+            }
             let r = match ospf {
                 None => Err(format!("{} not collected", v.name())),
                 Some(o) => match o.outcomes.get(&v).map(|s| s.outcome) {
@@ -48,7 +59,54 @@ impl OspfRoutes {
             };
             by_version.insert(v, r);
         }
-        OspfRoutes { by_version }
+        OspfRoutes {
+            by_version,
+            processes,
+        }
+    }
+
+    /// The process and the route type of each computed route, or the reason
+    /// why the route is unknown: a route that depends on a gap, or whose
+    /// prefix more than one calculation of its version gives.
+    pub fn route_types(&self) -> Vec<(Prefix, RouteType)> {
+        let mut out = Vec::new();
+        for (v, calcs) in &self.by_version {
+            let Ok(calcs) = calcs else {
+                continue;
+            };
+            let names = self.processes.get(v);
+            let mut by_prefix: BTreeMap<Prefix, Vec<(usize, &rsim_routing::ospf::Route)>> =
+                BTreeMap::new();
+            for (i, c) in calcs.iter().enumerate() {
+                for r in &c.routes {
+                    by_prefix.entry(r.prefix).or_default().push((i, r));
+                }
+            }
+            for (prefix, list) in by_prefix {
+                let t = match list.as_slice() {
+                    [(i, r)] => match &r.unknown {
+                        Some(why) => Err(why.clone()),
+                        None => {
+                            let nssa = r.lsa_type == Some(LsaType::NssaExternal);
+                            let route_type = match (r.path_type, nssa) {
+                                (PathType::IntraArea | PathType::InterArea, _) => {
+                                    OspfRouteType::Internal
+                                }
+                                (PathType::External1, false) => OspfRouteType::External1,
+                                (PathType::External2, false) => OspfRouteType::External2,
+                                (PathType::External1, true) => OspfRouteType::NssaExternal1,
+                                (PathType::External2, true) => OspfRouteType::NssaExternal2,
+                            };
+                            let name = names.and_then(|n| n.get(*i)).cloned().unwrap_or_default();
+                            Ok((name, route_type))
+                        }
+                    },
+                    _ => Err("more than one OSPF process gives the route".to_string()),
+                };
+                out.push((prefix, t));
+            }
+        }
+        out
     }
 
     /// The candidates of the computed OSPF routes. The OSPFv3 routes are

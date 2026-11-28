@@ -4,18 +4,26 @@
 //! `aggregate-address` lines and neighbours, and the route maps, the prefix
 //! lists, the community lists and the AS-path lists.
 //!
-//! The settings of a neighbour in a unicast family come from its own
-//! address-family lines, then from the `template peer-policy` stanzas that
-//! the family inherits in the order of their sequence numbers, then from
-//! the `template peer` stanzas that the neighbour inherits. A line of a
-//! process, a neighbour or a template that the reader does not lower, other
-//! than a line with no effect on the routes, is a gap.
+//! The settings of a neighbour in a unicast family or in `l2vpn evpn` come
+//! from its own address-family lines, then from the `template peer-policy`
+//! stanzas that the family inherits in the order of their sequence numbers,
+//! then from the `template peer` stanzas that the neighbour inherits. A
+//! line of a process, a neighbour or a template that the reader does not
+//! lower, other than a line with no effect on the routes, is a gap.
 //!
-//! The lines that import or export routes between VRFs or between EVPN and
-//! a VRF are gaps of their VRF: the `vni` of a `vrf context`, each
-//! `route-target`, `import` and `export` line of a unicast family of a `vrf
-//! context`, the `address-family l2vpn evpn` stanza of a `vrf` of `router
-//! bgp`, and `advertise l2vpn evpn` of a unicast family of a `vrf`.
+//! A unicast family of a process reads `redistribute direct`, `static` and
+//! `ospf <tag>` with their route-map, `default-information originate`, and
+//! `advertise l2vpn evpn` in a VRF. A `vrf context` gives the VNI, the route
+//! distinguisher and the route targets of its VRF. `rd auto` is the router
+//! ID of the default VRF and the VRF ID: 3 for the first `vrf context` other
+//! than `management`, and one more for each next one. `route-target auto` is
+//! the AS and the VNI, for a 2-byte AS. The VRF IDs and the auto values are
+//! not confirmed against a device. The route targets of the IPv4 unicast
+//! family apply to the VRF, and an IPv6 unicast family with other route
+//! targets is a gap of IPv6. An `import` and an `export` line of a family of
+//! a `vrf context`, a `route-target` line that is not read, and the
+//! `address-family l2vpn evpn` stanza of a `vrf` of `router bgp` are gaps of
+//! their VRF. An `export vrf default` line is a gap of the default VRF too.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr};
@@ -26,11 +34,15 @@ use rsim_routing::bgp::{
     AdminValue, Aggregate, AsPathLine, AsPathList, AsPathTerm, Asn, BgpOptions, BgpOrigin,
     BgpProcess, Clause, Cmp, Community, CommunityLine, CommunityList, CommunityTerm, Continue,
     Family, MatchTerm, MedSet, Network, NextHopMatch, NextHopSelf, NextHopSet, PolicyBody,
-    PolicySet, PrefixList, PrefixListEntry, RouteKey, RoutePolicy, RouteTypeMatch, SetAction,
+    PolicySet, PrefixList, PrefixListEntry, RedistSource, Redistribution, RouteDistinguisher,
+    RouteKey, RoutePolicy, RouteTypeMatch, SetAction, VrfTargets,
 };
 
 use crate::bgp_build::CollectedBgp;
-use crate::bgp_config::{AfSettings, DeviceBgp, UNICAST, neighbor, no_effect, span, unicast_words};
+use crate::bgp_config::{
+    AfSettings, DeviceBgp, FAMILIES, UNICAST, family_words, neighbor, no_effect, span,
+    unicast_words,
+};
 use crate::bgp_peers::{BgpConfig, DEFAULT_VRF};
 use crate::coverage::{Reach, State, Table};
 use crate::stanza::{Document, Stanza};
@@ -573,7 +585,7 @@ impl Reader<'_> {
         for c in s.children() {
             let w = words(c);
             match w.as_slice() {
-                ["address-family", fam @ ..] if unicast_words(fam) == Some(f) => {
+                ["address-family", fam @ ..] if family_words(fam) == Some(f) => {
                     for a in c.children() {
                         let aw = words(a);
                         if let ["inherit", "peer-policy", name, rest @ ..] = aw.as_slice() {
@@ -681,7 +693,7 @@ fn mark_af(s: &Stanza, read: &mut BTreeSet<u32>) {
     for c in s.children() {
         let w = words(c);
         match w.as_slice() {
-            ["address-family", fam @ ..] if unicast_words(fam).is_some() => {
+            ["address-family", fam @ ..] if family_words(fam).is_some() => {
                 for a in c.children() {
                     if af_line(&words(a), &mut AfSettings::default()) == Line::Read {
                         read.insert(a.first_line);
@@ -742,7 +754,7 @@ pub fn read(
 ) -> DeviceBgp {
     let mut out = DeviceBgp::default();
     let policy = policies(doc, file, mask, read);
-    route_targets(doc, file, mask, &mut out);
+    let contexts = vrf_contexts(doc, file, mask, read, &mut out);
     let Some(rb) = doc
         .root
         .children()
@@ -785,44 +797,247 @@ pub fn read(
             ctx.scope(c, v, None, read, &mut out);
         }
     }
+    let mut gaps = Vec::new();
+    for p in out.processes.iter_mut().filter(|p| p.vrf != DEFAULT_VRF) {
+        let Some(c) = contexts.get(&p.vrf) else {
+            if p.targets.advertise_evpn {
+                gaps.push((
+                    p.vrf.clone(),
+                    "advertise l2vpn evpn with no vrf context".to_string(),
+                    p.spans.clone(),
+                ));
+            }
+            continue;
+        };
+        match c.targets(p.asn.0, global_id) {
+            Ok(t) => {
+                let advertise = p.targets.advertise_evpn;
+                p.targets = VrfTargets {
+                    advertise_evpn: advertise,
+                    ..t
+                };
+                if advertise && c.vni.is_none() {
+                    gaps.push((
+                        p.vrf.clone(),
+                        "advertise l2vpn evpn with no vni".to_string(),
+                        c.spans.clone(),
+                    ));
+                }
+                if advertise && p.targets.rd.is_none() {
+                    gaps.push((
+                        p.vrf.clone(),
+                        "advertise l2vpn evpn with no rd".to_string(),
+                        c.spans.clone(),
+                    ));
+                }
+            }
+            Err(why) => gaps.push((p.vrf.clone(), why, c.spans.clone())),
+        }
+    }
+    for (vrf, text, spans) in gaps {
+        out.gap(&vrf, &UNICAST, text, spans);
+    }
     out
 }
 
-/// The `vni` line of a `vrf context` is a gap of its VRF. Each
-/// `route-target`, `import` and `export` line of a unicast family of a `vrf
-/// context` is a gap of its VRF and family.
-fn route_targets(doc: &Document, file: &str, mask: &dyn Fn(&str) -> String, out: &mut DeviceBgp) {
+/// A route target of a `route-target` line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Rt {
+    Auto,
+    Value(AdminValue),
+}
+
+/// The route targets of one family of a `vrf context`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct FamilyTargets {
+    import: BTreeSet<Rt>,
+    export: BTreeSet<Rt>,
+    evpn_import: BTreeSet<Rt>,
+    evpn_export: BTreeSet<Rt>,
+}
+
+/// The lines of a `vrf context` for the BGP calculation.
+#[derive(Clone, Debug, Default)]
+struct VrfContext {
+    vni: Option<u32>,
+    /// `None` for `rd auto`, with the VRF ID of the context.
+    rd: Option<Result<AdminValue, u16>>,
+    ipv4: Option<FamilyTargets>,
+    spans: Vec<SourceSpan>,
+}
+
+impl VrfContext {
+    /// The targets of the VRF of AS `asn`. `router_id` is the router ID of
+    /// the default VRF.
+    fn targets(&self, asn: u32, router_id: Option<Ipv4Addr>) -> Result<VrfTargets, String> {
+        let rd = match self.rd {
+            None => None,
+            Some(Ok(v)) => Some(RouteDistinguisher(v)),
+            Some(Err(id)) => match router_id {
+                Some(addr) => Some(RouteDistinguisher(AdminValue::Ipv4 { addr, value: id })),
+                None => return Err("rd auto with no router-id".to_string()),
+            },
+        };
+        let auto = || -> Result<AdminValue, String> {
+            let vni = self
+                .vni
+                .ok_or_else(|| "route-target auto with no vni".to_string())?;
+            let asn = u16::try_from(asn)
+                .map_err(|_| format!("route-target auto with the 4-byte AS {asn}"))?;
+            Ok(AdminValue::As2 { asn, value: vni })
+        };
+        let set = |rts: &BTreeSet<Rt>| -> Result<BTreeSet<AdminValue>, String> {
+            rts.iter()
+                .map(|r| match r {
+                    Rt::Auto => auto(),
+                    Rt::Value(v) => Ok(*v),
+                })
+                .collect()
+        };
+        let t = self.ipv4.clone().unwrap_or_default();
+        Ok(VrfTargets {
+            rd,
+            import: set(&t.import)?,
+            export: set(&t.export)?,
+            evpn_import: set(&t.evpn_import)?,
+            evpn_export: set(&t.evpn_export)?,
+            advertise_evpn: false,
+            evpn_next_hop: None,
+            spans: self.spans.clone(),
+        })
+    }
+}
+
+/// The `vrf context` stanzas by VRF. The lines that it reads go into
+/// `read`, and the `import` and `export` lines and the `route-target` lines
+/// that it does not read are gaps.
+fn vrf_contexts(
+    doc: &Document,
+    file: &str,
+    mask: &dyn Fn(&str) -> String,
+    read: &mut BTreeSet<u32>,
+    out: &mut DeviceBgp,
+) -> BTreeMap<String, VrfContext> {
+    let mut by = BTreeMap::new();
+    let mut next_id: u16 = 3;
     for s in doc.root.children() {
         let w = words(s);
         let ["vrf", "context", vrf] = w.as_slice() else {
             continue;
         };
+        let id = if *vrf == "management" {
+            2
+        } else {
+            let id = next_id;
+            next_id = next_id.saturating_add(1);
+            id
+        };
+        let mut c = VrfContext {
+            spans: vec![span(file, (s.first_line, s.first_line))],
+            ..VrfContext::default()
+        };
+        let mut v6: Option<FamilyTargets> = None;
         for af in s.children() {
             let w = words(af);
-            if let ["vni", ..] = w.as_slice() {
-                out.gap(vrf, &UNICAST, mask(&af.key), vec![span(file, lines(af))]);
-                continue;
-            }
-            let ["address-family", fam @ ..] = w.as_slice() else {
-                continue;
-            };
-            let Some(f) = unicast_words(fam) else {
-                continue;
-            };
-            for c in af.children() {
-                if let ["route-target", "import" | "export" | "both", ..]
-                | ["import" | "export", ..] = words(c).as_slice()
-                {
-                    out.gap(vrf, &[f], mask(&c.key), vec![span(file, lines(c))]);
-                    // An export into the default VRF is a gap of the default
-                    // VRF too.
-                    if let ["export", "vrf", "default", ..] = words(c).as_slice() {
-                        out.gap(DEFAULT_VRF, &[f], mask(&c.key), vec![span(file, lines(c))]);
+            let here = span(file, lines(af));
+            match w.as_slice() {
+                ["vni", n] => match n.parse::<u32>() {
+                    Ok(n) => {
+                        read.insert(af.first_line);
+                        c.vni = Some(n);
+                        c.spans.push(here);
+                    }
+                    Err(_) => out.gap(vrf, &UNICAST, mask(&af.key), vec![here]),
+                },
+                ["rd", "auto"] => {
+                    read.insert(af.first_line);
+                    c.rd = Some(Err(id));
+                    c.spans.push(here);
+                }
+                ["rd", v] => match v.parse::<AdminValue>() {
+                    Ok(x) => {
+                        read.insert(af.first_line);
+                        c.rd = Some(Ok(x));
+                        c.spans.push(here);
+                    }
+                    Err(_) => out.gap(vrf, &UNICAST, mask(&af.key), vec![here]),
+                },
+                ["address-family", fam @ ..] => {
+                    let Some(f) = unicast_words(fam) else {
+                        continue;
+                    };
+                    let mut t = FamilyTargets::default();
+                    for l in af.children() {
+                        let lw = words(l);
+                        let rt = |v: &str| match v {
+                            "auto" => Some(Rt::Auto),
+                            x => x.parse::<AdminValue>().ok().map(Rt::Value),
+                        };
+                        let parsed = match lw.as_slice() {
+                            [
+                                "route-target",
+                                dir @ ("import" | "export" | "both"),
+                                v,
+                                rest @ ..,
+                            ] if matches!(rest, [] | ["evpn"]) => {
+                                rt(v).map(|r| (*dir, r, !rest.is_empty()))
+                            }
+                            _ => None,
+                        };
+                        match (parsed, lw.as_slice()) {
+                            (Some((dir, r, evpn)), _) => {
+                                read.insert(l.first_line);
+                                let (imp, exp) = if evpn {
+                                    (&mut t.evpn_import, &mut t.evpn_export)
+                                } else {
+                                    (&mut t.import, &mut t.export)
+                                };
+                                if matches!(dir, "import" | "both") {
+                                    imp.insert(r);
+                                }
+                                if matches!(dir, "export" | "both") {
+                                    exp.insert(r);
+                                }
+                                c.spans.push(span(file, lines(l)));
+                            }
+                            (None, ["route-target", ..] | ["import" | "export", ..]) => {
+                                out.gap(vrf, &[f], mask(&l.key), vec![span(file, lines(l))]);
+                                // An export into the default VRF is a gap of
+                                // the default VRF too.
+                                if let ["export", "vrf", "default", ..] = lw.as_slice() {
+                                    out.gap(
+                                        DEFAULT_VRF,
+                                        &[f],
+                                        mask(&l.key),
+                                        vec![span(file, lines(l))],
+                                    );
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    if f == Family::Ipv4Unicast {
+                        c.ipv4 = Some(t);
+                    } else {
+                        v6 = Some(t);
                     }
                 }
+                _ => {}
             }
         }
+        if let Some(t) = v6
+            && t != c.ipv4.clone().unwrap_or_default()
+        {
+            out.gap(
+                vrf,
+                &[Family::Ipv6Unicast],
+                "ipv6 unicast route targets other than the ipv4 unicast route targets",
+                c.spans.clone(),
+            );
+        }
+        by.insert((*vrf).to_string(), c);
     }
+    by
 }
 
 struct Scope<'a, 'b> {
@@ -850,6 +1065,9 @@ impl Scope<'_, '_> {
         let mut cluster_id = None;
         let mut networks = Vec::new();
         let mut aggregates = Vec::new();
+        let mut redistributions = Vec::new();
+        let mut default_originate = false;
+        let mut advertise_evpn = false;
         let mut ebgp_paths: Option<u32> = None;
         let mut ibgp_paths: Option<u32> = None;
         let top = vrf == DEFAULT_VRF;
@@ -943,6 +1161,34 @@ impl Scope<'_, '_> {
                             ["maximum-paths", "ibgp", n] => n.parse::<u32>().ok().and_then(|n| {
                                 (ibgp_paths.is_none_or(|x| x == n)).then(|| ibgp_paths = Some(n))
                             }),
+                            ["redistribute", src, rest @ ..] => {
+                                let source = match (*src, rest) {
+                                    ("direct", ["route-map", _]) => Some(RedistSource::Connected),
+                                    ("static", ["route-map", _]) => Some(RedistSource::Static),
+                                    ("ospf", [tag, "route-map", _]) => {
+                                        Some(RedistSource::Ospf(Some((*tag).to_string())))
+                                    }
+                                    _ => None,
+                                };
+                                source.map(|source| {
+                                    redistributions.push(Redistribution {
+                                        family: f,
+                                        source,
+                                        ospf_match: None,
+                                        policy: rest.last().map(|m| (*m).to_string()),
+                                        metric: None,
+                                        spans,
+                                    })
+                                })
+                            }
+                            ["default-information", "originate"] => {
+                                default_originate = true;
+                                Some(())
+                            }
+                            ["advertise", "l2vpn", "evpn"] if !top => {
+                                advertise_evpn = true;
+                                Some(())
+                            }
                             w if no_effect(w) => {
                                 continue;
                             }
@@ -978,6 +1224,9 @@ impl Scope<'_, '_> {
         p.options = options;
         p.networks = networks;
         p.aggregates = aggregates;
+        p.redistributions = redistributions;
+        p.default_originate = default_originate;
+        p.targets.advertise_evpn = advertise_evpn;
         p.policy = self.policy.clone();
         p.spans = vec![span(file, (sc.first_line, sc.first_line))];
         if let Some(c) = process.map(|x| &x.confederation) {
@@ -1002,7 +1251,7 @@ impl Scope<'_, '_> {
             let mut path = Vec::new();
             self.r.session_gaps(ns, &mut path, &mut gaps);
             let mut af = BTreeMap::new();
-            for f in UNICAST {
+            for f in FAMILIES {
                 let mut path = Vec::new();
                 af.insert(f, self.r.af_of(ns, f, &mut path, &mut gaps));
             }
@@ -1186,13 +1435,20 @@ vrf context RED
             .map(|g| (g.vrf.as_str(), g.text.as_str()))
             .collect();
         for want in [
-            ("default", "redistribute direct route-map IN"),
             ("default", "allowas-in 2"),
-            ("RED", "advertise l2vpn evpn"),
-            ("RED", "route-target both auto evpn"),
+            ("RED", "route-target auto with no vni"),
         ] {
             assert!(texts.contains(&want), "{want:?} not in {texts:?}");
         }
+        assert!(
+            !texts.iter().any(|(_, t)| t.starts_with("redistribute")),
+            "{texts:?}"
+        );
+        let p = d.processes.iter().find(|p| p.vrf == "default").unwrap();
+        assert_eq!(p.redistributions.len(), 1);
+        assert_eq!(p.redistributions[0].source, RedistSource::Connected);
+        assert_eq!(p.redistributions[0].policy.as_deref(), Some("IN"));
+        assert_eq!(p.redistributions[0].family, Family::Ipv4Unicast);
         assert!(
             !texts.iter().any(|(_, t)| t.contains("router-id")),
             "{texts:?}"
@@ -1239,24 +1495,89 @@ vrf context RED
             .map(|g| (g.vrf.as_str(), g.text.as_str()))
             .collect();
         for want in [
-            ("RED", "vni 10010"),
-            ("RED", "route-target import 64500:10"),
-            ("RED", "route-target export 64500:10 evpn"),
-            ("RED", "route-target both auto evpn"),
             ("RED", "import vrf default map ALL"),
             ("RED", "export vrf default map ALL"),
             ("default", "export vrf default map ALL"),
-            ("RED", "advertise l2vpn evpn"),
             ("RED", "address-family l2vpn evpn"),
+            ("RED", "advertise l2vpn evpn with no rd"),
         ] {
             assert!(texts.contains(&want), "{want:?} not in {texts:?}");
         }
-        let default: Vec<&str> = texts
-            .iter()
-            .filter(|(v, _)| *v != "RED")
-            .map(|(_, t)| *t)
-            .collect();
-        assert_eq!(default, ["export vrf default map ALL"], "{texts:?}");
+        assert_eq!(texts.len(), 5, "{texts:?}");
+        let red = d.processes.iter().find(|p| p.vrf == "RED").unwrap();
+        let v = |s: &str| s.parse::<AdminValue>().unwrap();
+        assert!(red.targets.advertise_evpn);
+        assert_eq!(red.targets.import, BTreeSet::from([v("64500:10")]));
+        assert_eq!(red.targets.export, BTreeSet::new());
+        assert_eq!(
+            red.targets.evpn_export,
+            BTreeSet::from([v("64500:10"), v("64500:10010")])
+        );
+        assert_eq!(red.targets.evpn_import, BTreeSet::from([v("64500:10010")]));
+    }
+
+    #[test]
+    fn rd_auto_takes_the_router_id_of_the_default_vrf_and_the_vrf_id() {
+        let doc = crate::stanza::read_indented(
+            "\
+vrf context management
+vrf context BLUE
+  vni 20001
+vrf context RED
+  vni 10010
+  rd auto
+  address-family ipv4 unicast
+    route-target both auto
+    route-target both auto evpn
+router bgp 64500
+  router-id 192.0.2.11
+  neighbor 192.0.2.1
+    remote-as 64500
+    update-source loopback0
+    address-family l2vpn evpn
+      send-community
+      send-community extended
+  vrf RED
+    address-family ipv4 unicast
+      advertise l2vpn evpn
+      redistribute direct route-map ALL
+      redistribute ospf 1 route-map ALL
+      default-information originate
+",
+        );
+        let mut read = BTreeSet::new();
+        let bgp = crate::nxos::bgp::read(
+            doc.root
+                .children()
+                .iter()
+                .find(|s| s.key.starts_with("router bgp"))
+                .unwrap(),
+            &mut read,
+            &|k| k.to_string(),
+        );
+        let d = super::read(&doc, &bgp, "n1/config", &|k| k.to_string(), &mut read);
+        assert!(d.gaps.is_empty(), "{:?}", d.gaps);
+        let red = d.processes.iter().find(|p| p.vrf == "RED").unwrap();
+        let rd: AdminValue = "192.0.2.11:4".parse().unwrap();
+        assert_eq!(red.targets.rd, Some(RouteDistinguisher(rd)));
+        let auto: AdminValue = "64500:10010".parse().unwrap();
+        assert_eq!(red.targets.import, BTreeSet::from([auto]));
+        assert_eq!(red.targets.evpn_export, BTreeSet::from([auto]));
+        assert!(red.default_originate);
+        assert_eq!(
+            red.redistributions
+                .iter()
+                .map(|r| r.source.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                RedistSource::Connected,
+                RedistSource::Ospf(Some("1".to_string()))
+            ]
+        );
+        let top = d.processes.iter().find(|p| p.vrf == "default").unwrap();
+        let n = &top.neighbors[&"192.0.2.1".parse::<IpAddr>().unwrap()];
+        assert_eq!(n.activated, BTreeSet::from([Family::EvpnIpPrefix]));
+        assert!(n.send_community_extended);
     }
 
     #[test]

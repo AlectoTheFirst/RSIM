@@ -5,22 +5,34 @@
 //! lines and the neighbours, and the route maps, the prefix lists, the
 //! community lists and the AS-path lists in the form of NX-OS.
 //!
-//! The settings of a neighbour in a unicast family come from its own
-//! `neighbor <peer> <keyword>` lines of the address family, and for IPv4
-//! unicast of the default VRF also of the global part, then from the
-//! `template peer-policy` stanzas that it inherits in the order of their
-//! sequence numbers, then from its peer group. A VRF takes the router ID of
-//! its `bgp router-id` line, else the one of the global part. A line of a
-//! process, a neighbour, a peer group or a template that the reader does
-//! not lower, other than a line with no effect on the routes, is a gap.
+//! The settings of a neighbour in a unicast family or in `l2vpn evpn` of
+//! the default VRF come from its own `neighbor <peer> <keyword>` lines of
+//! the address family, and for IPv4 unicast of the default VRF also of the
+//! global part, then from the `template peer-policy` stanzas that it
+//! inherits in the order of their sequence numbers, then from its peer
+//! group. A VRF takes the router ID of its `bgp router-id` line, else the
+//! one of the global part. A line of a process, a neighbour, a peer group
+//! or a template that the reader does not lower, other than a line with no
+//! effect on the routes, is a gap.
 //!
-//! The lines that import or export routes between VRFs or between EVPN and
-//! a VRF are gaps of their VRF: each `route-target`, `import`, `export` and
-//! `route-replicate` line and the `vnid` line of a `vrf definition` or an
-//! `ip vrf`, each `route-replicate` line of a `global-address-family` as a
-//! gap of the default VRF, an
-//! `address-family l2vpn` stanza of `router bgp` with a VRF, and
-//! `advertise l2vpn evpn` of a unicast family of a VRF.
+//! A unicast family reads `redistribute connected`, `static` and `ospf
+//! <id>` with the options `match`, `route-map` and `metric`, and
+//! `default-information originate`. `default-information originate` of the
+//! global part is a line of IPv4 unicast of the default VRF. `match
+//! external` and `match nssa-external` with no type take both types.
+//!
+//! A `vrf definition` or an `ip vrf` gives the route distinguisher and the
+//! route targets of its VRF. A `route-target` line of the VRF applies to
+//! both families, and a line of an address family to that family. The
+//! route targets of IPv4 apply to the VRF, and an IPv6 family with other
+//! route targets is a gap of IPv6. Each `route-target` line that is not
+//! read, each `import`, `export` and `route-replicate` line and the `vnid`
+//! line of a VRF are gaps of their VRF. Each `route-replicate` line of a
+//! `global-address-family` is a gap of the default VRF, and an `export
+//! ipv4 unicast` or `export ipv6 unicast` line is a gap of the default VRF
+//! too. An `address-family l2vpn` stanza of `router bgp` with a VRF and
+//! `advertise l2vpn evpn` of a unicast family of a VRF are gaps of the
+//! VRF.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr};
@@ -28,11 +40,14 @@ use std::net::{IpAddr, Ipv4Addr};
 use rsim_core::Prefix;
 use rsim_routing::Platform;
 use rsim_routing::bgp::{
-    Aggregate, Asn, BgpOptions, BgpProcess, Family, Network, NextHopSelf, RouteKey,
+    AdminValue, Aggregate, Asn, BgpOptions, BgpProcess, Family, Network, NextHopSelf,
+    OspfRouteType, RedistSource, Redistribution, RouteDistinguisher, RouteKey, VrfTargets,
 };
 
 use crate::bgp_build::CollectedBgp;
-use crate::bgp_config::{AfSettings, DeviceBgp, UNICAST, neighbor, no_effect, span, unicast_of};
+use crate::bgp_config::{
+    AfSettings, DeviceBgp, FAMILIES, UNICAST, family_of, neighbor, no_effect, span, unicast_of,
+};
 use crate::bgp_peers::{BgpConfig, DEFAULT_VRF, family};
 use crate::coverage::{Reach, State, Table};
 use crate::links::BgpPeer;
@@ -107,6 +122,7 @@ pub fn push_entries(t: &mut Table) {
     for line in PROCESS_LINES.iter().chain(NEIGHBOR_LINES) {
         tree(t, &[p, line]);
     }
+
     for line in AF_LINES.iter().chain(NEIGHBOR_LINES) {
         tree(t, &[p, "address-family ..", line]);
     }
@@ -145,6 +161,87 @@ fn aggregate_options(key: &str) -> bool {
         _ => rest,
     };
     opts.iter().all(|o| matches!(*o, "summary-only" | "as-set"))
+}
+
+/// A `redistribute` statement into BGP: the source, the OSPF route types of
+/// `match`, the route-map and the metric.
+type RedistLine = (
+    RedistSource,
+    Option<BTreeSet<OspfRouteType>>,
+    Option<String>,
+    Option<u32>,
+);
+
+/// The statement of the words of a `redistribute` line. `None` for a form
+/// that the reader does not lower.
+fn redistribute_words(w: &[&str]) -> Option<RedistLine> {
+    let (source, mut rest) = match w {
+        ["redistribute", "connected", rest @ ..] => (RedistSource::Connected, rest),
+        ["redistribute", "static", rest @ ..] => (RedistSource::Static, rest),
+        ["redistribute", "ospf", id, rest @ ..] if id.parse::<u32>().is_ok() => {
+            (RedistSource::Ospf(Some((*id).to_string())), rest)
+        }
+        _ => return None,
+    };
+    let ospf = matches!(source, RedistSource::Ospf(_));
+    let (mut types, mut policy, mut metric) = (None, None, None);
+    while let Some((first, more)) = rest.split_first() {
+        match (*first, more) {
+            ("route-map", [m, tail @ ..]) if policy.is_none() => {
+                policy = Some((*m).to_string());
+                rest = tail;
+            }
+            ("metric", [n, tail @ ..]) if metric.is_none() => {
+                metric = Some(n.parse::<u32>().ok()?);
+                rest = tail;
+            }
+            ("match", tail) if ospf && types.is_none() => {
+                use OspfRouteType::*;
+                let mut set = BTreeSet::new();
+                let mut t = tail;
+                loop {
+                    t = match t {
+                        ["internal", x @ ..] => {
+                            set.insert(Internal);
+                            x
+                        }
+                        ["external", "1", x @ ..] => {
+                            set.insert(External1);
+                            x
+                        }
+                        ["external", "2", x @ ..] => {
+                            set.insert(External2);
+                            x
+                        }
+                        ["external", x @ ..] => {
+                            set.extend([External1, External2]);
+                            x
+                        }
+                        ["nssa-external", "1", x @ ..] => {
+                            set.insert(NssaExternal1);
+                            x
+                        }
+                        ["nssa-external", "2", x @ ..] => {
+                            set.insert(NssaExternal2);
+                            x
+                        }
+                        ["nssa-external", x @ ..] => {
+                            set.extend([NssaExternal1, NssaExternal2]);
+                            x
+                        }
+                        _ => break,
+                    };
+                }
+                if set.is_empty() {
+                    return None;
+                }
+                types = Some(set);
+                rest = t;
+            }
+            _ => return None,
+        }
+    }
+    Some((source, types, policy, metric))
 }
 
 /// The kind of a line of a neighbour, a peer group or a template.
@@ -190,9 +287,9 @@ fn af_line(w: &[&str], af: &mut AfSettings) -> Line {
     Line::Read
 }
 
-/// The words after `address-family`: the VRF and the unicast family, for
-/// example `ipv4 vrf RED`. `None` for a family other than IPv4 and IPv6
-/// unicast.
+/// The words after `address-family`: the VRF and the family of the
+/// calculation, for example `ipv4 vrf RED`. `None` for a family other than
+/// IPv4 and IPv6 unicast and `l2vpn evpn`.
 fn af_scope(w: &[&str]) -> (String, Option<Family>) {
     let (fam, vrf) = match w.iter().position(|x| *x == "vrf") {
         Some(i) => (&w[..i], w.get(i + 1).copied()),
@@ -200,7 +297,7 @@ fn af_scope(w: &[&str]) -> (String, Option<Family>) {
     };
     (
         vrf.unwrap_or(DEFAULT_VRF).to_string(),
-        family(fam).and_then(|f| unicast_of(&f)),
+        family(fam).and_then(|f| family_of(&f)),
     )
 }
 
@@ -233,6 +330,8 @@ struct VrfLines {
     aggregates: Vec<Aggregate>,
     ebgp_paths: Option<u32>,
     ibgp_paths: Option<u32>,
+    redistributions: Vec<Redistribution>,
+    default_originate: bool,
 }
 
 struct Reader<'a> {
@@ -316,7 +415,8 @@ impl Reader<'_> {
                     Line::Gap => e.gaps.push((
                         mask(&s.key),
                         lines(s),
-                        fam.map_or(UNICAST.to_vec(), |f| vec![f]),
+                        fam.filter(|f| *f != Family::EvpnIpPrefix)
+                            .map_or(UNICAST.to_vec(), |f| vec![f]),
                     )),
                     Line::Other | Line::NoEffect => {}
                 }
@@ -386,6 +486,24 @@ impl Reader<'_> {
                 .map(|x| v.router_id = Some(x))
                 .is_some(),
             ["no", "synchronization"] | ["no", "auto-summary"] => true,
+            ["default-information", "originate"] => {
+                v.default_originate = true;
+                true
+            }
+            ["redistribute", ..] => match redistribute_words(w) {
+                Some((source, ospf_match, policy, metric)) => {
+                    v.redistributions.push(Redistribution {
+                        family: f,
+                        source,
+                        ospf_match,
+                        policy,
+                        metric,
+                        spans: spans.clone(),
+                    });
+                    true
+                }
+                None => false,
+            },
             _ => false,
         }
     }
@@ -496,10 +614,52 @@ pub fn collected(
     }
 }
 
-/// Each `route-target`, `import`, `export`, `route-replicate` and `vnid`
-/// line of a VRF is a gap of its VRF, and each `route-replicate` line of a
-/// `global-address-family` stanza is a gap of the default VRF.
-fn vrf_imports(doc: &Document, file: &str, mask: &dyn Fn(&str) -> String, out: &mut DeviceBgp) {
+/// The import and export route targets of one family of a VRF.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Targets {
+    import: BTreeSet<AdminValue>,
+    export: BTreeSet<AdminValue>,
+}
+
+impl Targets {
+    /// Reads a `route-target import|export|both <value>` line. False for
+    /// another line.
+    fn line(&mut self, w: &[&str]) -> bool {
+        let ["route-target", dir @ ("import" | "export" | "both"), v] = w else {
+            return false;
+        };
+        let Ok(v) = v.parse::<AdminValue>() else {
+            return false;
+        };
+        if matches!(*dir, "import" | "both") {
+            self.import.insert(v);
+        }
+        if matches!(*dir, "export" | "both") {
+            self.export.insert(v);
+        }
+        true
+    }
+
+    fn with(&self, other: &Targets) -> Targets {
+        Targets {
+            import: self.import.union(&other.import).copied().collect(),
+            export: self.export.union(&other.export).copied().collect(),
+        }
+    }
+}
+
+/// The route distinguisher and the route targets of each VRF of a `vrf
+/// definition` or an `ip vrf`. Each line that it reads goes into `read`.
+/// The lines of [`read`] that import or export routes and that it does not
+/// read are gaps.
+fn vrf_targets(
+    doc: &Document,
+    file: &str,
+    mask: &dyn Fn(&str) -> String,
+    read: &mut BTreeSet<u32>,
+    out: &mut DeviceBgp,
+) -> BTreeMap<String, VrfTargets> {
+    let mut by = BTreeMap::new();
     for s in doc.root.children() {
         let w = words(s);
         if let ["global-address-family", fam @ ..] = w.as_slice() {
@@ -518,33 +678,80 @@ fn vrf_imports(doc: &Document, file: &str, mask: &dyn Fn(&str) -> String, out: &
             ["vrf", "definition", v] | ["ip", "vrf", v] => *v,
             _ => continue,
         };
-        let check = |c: &Stanza, fams: &[Family], out: &mut DeviceBgp| {
+        let mut t = VrfTargets {
+            spans: vec![span(file, (s.first_line, s.first_line))],
+            ..VrfTargets::default()
+        };
+        let mut common = Targets::default();
+        let mut by_family: BTreeMap<Family, Targets> = BTreeMap::new();
+        let check = |c: &Stanza,
+                     fams: &[Family],
+                     targets: &mut Targets,
+                     t: &mut VrfTargets,
+                     read: &mut BTreeSet<u32>,
+                     out: &mut DeviceBgp| {
+            let cw = words(c);
+            if targets.line(&cw) {
+                read.insert(c.first_line);
+                t.spans.push(span(file, lines(c)));
+                return;
+            }
             if matches!(
-                words(c).as_slice(),
-                ["route-target", "import" | "export" | "both", ..]
-                    | ["import" | "export" | "vnid" | "route-replicate", ..]
+                cw.as_slice(),
+                ["route-target", ..] | ["import" | "export" | "vnid" | "route-replicate", ..]
             ) {
                 out.gap(vrf, fams, mask(&c.key), vec![span(file, lines(c))]);
             }
             // An export into the global table is a gap of the default VRF
             // too.
-            if let ["export", "ipv4" | "ipv6", "unicast", ..] = words(c).as_slice() {
+            if let ["export", "ipv4" | "ipv6", "unicast", ..] = cw.as_slice() {
                 out.gap(DEFAULT_VRF, fams, mask(&c.key), vec![span(file, lines(c))]);
             }
         };
         for c in s.children() {
             let cw = words(c);
-            if let ["address-family", fam @ ..] = cw.as_slice() {
-                if let Some(f) = family(fam).and_then(|x| unicast_of(&x)) {
-                    for a in c.children() {
-                        check(a, &[f], out);
+            match cw.as_slice() {
+                ["address-family", fam @ ..] => {
+                    if let Some(f) = family(fam).and_then(|x| unicast_of(&x)) {
+                        let mut ft = Targets::default();
+                        for a in c.children() {
+                            check(a, &[f], &mut ft, &mut t, read, out);
+                        }
+                        by_family.insert(f, ft);
                     }
                 }
-            } else {
-                check(c, &UNICAST, out);
+                ["rd", v] => match v.parse::<AdminValue>() {
+                    Ok(x) => {
+                        read.insert(c.first_line);
+                        t.rd = Some(RouteDistinguisher(x));
+                        t.spans.push(span(file, lines(c)));
+                    }
+                    Err(_) => out.gap(vrf, &UNICAST, mask(&c.key), vec![span(file, lines(c))]),
+                },
+                _ => check(c, &UNICAST, &mut common, &mut t, read, out),
             }
         }
+        let v4 = common.with(
+            &by_family
+                .get(&Family::Ipv4Unicast)
+                .cloned()
+                .unwrap_or_default(),
+        );
+        if let Some(x) = by_family.get(&Family::Ipv6Unicast)
+            && common.with(x) != v4
+        {
+            out.gap(
+                vrf,
+                &[Family::Ipv6Unicast],
+                "ipv6 route targets other than the ipv4 route targets",
+                t.spans.clone(),
+            );
+        }
+        t.import = v4.import;
+        t.export = v4.export;
+        by.insert(vrf.to_string(), t);
     }
+    by
 }
 
 /// Reads the BGP processes of the config with the policies and the gaps.
@@ -559,7 +766,7 @@ pub fn read(
 ) -> DeviceBgp {
     let mut out = DeviceBgp::default();
     let policy = crate::nxos::bgp_config::policies(doc, file, mask, read);
-    vrf_imports(doc, file, mask, &mut out);
+    let targets = vrf_targets(doc, file, mask, read, &mut out);
     let Some(rb) = doc
         .root
         .children()
@@ -635,6 +842,20 @@ pub fn read(
                     }
                     continue;
                 };
+                if f == Family::EvpnIpPrefix {
+                    if vrf != DEFAULT_VRF {
+                        gap(&mut out, &vrf, &UNICAST, c);
+                        continue;
+                    }
+                    // The `l2vpn evpn` family of the default VRF gives the
+                    // settings of its neighbours.
+                    for a in c.children() {
+                        if let ["neighbor", name, more @ ..] = words(a).as_slice() {
+                            r.neighbor_line(&vrf, Some(f), name, more, a, read);
+                        }
+                    }
+                    continue;
+                }
                 for a in c.children() {
                     let aw = words(a);
                     match aw.as_slice() {
@@ -712,6 +933,13 @@ pub fn read(
             ["no", "synchronization"] | ["no", "auto-summary"] => {
                 read.insert(c.first_line);
             }
+            ["default-information", "originate"] => {
+                read.insert(c.first_line);
+                r.vrfs
+                    .entry(DEFAULT_VRF.to_string())
+                    .or_default()
+                    .default_originate = true;
+            }
             w if no_effect(w) => {}
             _ => gap(&mut out, DEFAULT_VRF, &UNICAST, c),
         }
@@ -741,6 +969,11 @@ pub fn read(
         }
         p.networks = v.networks;
         p.aggregates = v.aggregates;
+        p.redistributions = v.redistributions;
+        p.default_originate = v.default_originate;
+        if let Some(t) = targets.get(&vrf) {
+            p.targets = t.clone();
+        }
         p.policy = policy.clone();
         p.spans = vec![span(file, (rb.first_line, rb.first_line))];
         if let Some(id) = &process.confederation.identifier {
@@ -764,7 +997,7 @@ pub fn read(
             let mut gaps = Vec::new();
             r.session_gaps(&vrf, &name, &mut Vec::new(), &mut gaps);
             let mut af = BTreeMap::new();
-            for f in UNICAST {
+            for f in FAMILIES {
                 af.insert(f, r.settings(&vrf, f, &name, &mut Vec::new(), &mut gaps));
             }
             gaps.sort();
@@ -919,17 +1152,27 @@ vrf definition RED
             .map(|g| (g.vrf.as_str(), g.text.as_str()))
             .collect();
         for want in [
-            ("default", "redistribute connected"),
             (
                 "default",
                 "aggregate-address 198.51.100.0 255.255.255.0 attribute-map SET",
             ),
             ("default", "neighbor 198.51.100.9 allowas-in 2"),
             ("default", "fall-over bfd"),
-            ("RED", "route-target import 64500:1"),
         ] {
             assert!(texts.contains(&want), "{want:?} not in {texts:?}");
         }
+        assert!(
+            !texts
+                .iter()
+                .any(|(_, t)| t.starts_with("redistribute") || t.starts_with("route-target")),
+            "{texts:?}"
+        );
+        let p = d.processes.iter().find(|p| p.vrf == "default").unwrap();
+        assert_eq!(p.redistributions.len(), 1);
+        assert_eq!(p.redistributions[0].source, RedistSource::Connected);
+        let red = d.processes.iter().find(|p| p.vrf == "RED").unwrap();
+        let v: AdminValue = "64500:1".parse().unwrap();
+        assert_eq!(red.targets.import, BTreeSet::from([v]));
     }
 
     #[test]
@@ -980,15 +1223,11 @@ ip vrf BLUE
             .collect();
         for want in [
             ("RED", "vnid 10010 evpn-instance vni 10010"),
-            ("RED", "route-target import 64500:10"),
-            ("RED", "route-target export 64500:10"),
-            ("RED", "route-target both 64500:11"),
             ("RED", "import ipv4 unicast map FROM-GLOBAL"),
             ("RED", "export ipv4 unicast map TO-GLOBAL"),
             ("default", "export ipv4 unicast map TO-GLOBAL"),
             ("RED", "advertise l2vpn evpn"),
             ("RED", "address-family l2vpn evpn vrf RED"),
-            ("BLUE", "route-target export 64500:20"),
             ("RED", "route-replicate from vrf BLUE unicast all"),
             ("default", "route-replicate from vrf RED unicast all"),
         ] {
@@ -1007,6 +1246,97 @@ ip vrf BLUE
             ],
             "{texts:?}"
         );
+    }
+
+    #[test]
+    fn the_redistributions_the_default_route_and_the_route_targets_are_lowered() {
+        let doc = super::super::read_text(
+            b"\
+router bgp 64500
+ bgp router-id 192.0.2.1
+ default-information originate
+ address-family ipv4
+  redistribute static route-map STATIC metric 50
+  redistribute ospf 1 match internal external 2 route-map OSPF
+  redistribute ospf 2 match nssa-external
+  redistribute eigrp 10
+ exit-address-family
+ !
+ address-family ipv4 vrf RED
+  redistribute connected
+  neighbor 203.0.113.9 remote-as 64510
+  neighbor 203.0.113.9 activate
+ exit-address-family
+!
+vrf definition RED
+ rd 64500:7
+ route-target both 64500:1
+ address-family ipv4
+  route-target import 64500:2
+ exit-address-family
+ address-family ipv6
+ exit-address-family
+!
+",
+        );
+        let mut read = BTreeSet::new();
+        let rb = doc
+            .root
+            .children()
+            .iter()
+            .find(|s| s.key.starts_with("router bgp"))
+            .unwrap();
+        let bgp = super::super::bgp::read(rb, &mut read, &|k| k.to_string());
+        let d = super::read(&doc, &bgp, "r1/config", &|k| k.to_string(), &mut read);
+        let texts: Vec<(&str, &str)> = d
+            .gaps
+            .iter()
+            .map(|g| (g.vrf.as_str(), g.text.as_str()))
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                (
+                    "RED",
+                    "ipv6 route targets other than the ipv4 route targets"
+                ),
+                ("default", "redistribute eigrp 10"),
+            ],
+            "{texts:?}"
+        );
+        let p = d.processes.iter().find(|p| p.vrf == "default").unwrap();
+        assert!(p.default_originate);
+        let r = &p.redistributions;
+        assert_eq!(r.len(), 3);
+        assert_eq!(r[0].source, RedistSource::Static);
+        assert_eq!(r[0].policy.as_deref(), Some("STATIC"));
+        assert_eq!(r[0].metric, Some(50));
+        assert_eq!(r[1].source, RedistSource::Ospf(Some("1".to_string())));
+        assert_eq!(
+            r[1].ospf_match,
+            Some(BTreeSet::from([
+                OspfRouteType::Internal,
+                OspfRouteType::External2
+            ]))
+        );
+        assert_eq!(r[1].policy.as_deref(), Some("OSPF"));
+        assert_eq!(
+            r[2].ospf_match,
+            Some(BTreeSet::from([
+                OspfRouteType::NssaExternal1,
+                OspfRouteType::NssaExternal2
+            ]))
+        );
+        let red = d.processes.iter().find(|p| p.vrf == "RED").unwrap();
+        assert!(!red.default_originate);
+        assert_eq!(red.redistributions[0].source, RedistSource::Connected);
+        let v = |s: &str| s.parse::<AdminValue>().unwrap();
+        assert_eq!(red.targets.rd, Some(RouteDistinguisher(v("64500:7"))));
+        assert_eq!(
+            red.targets.import,
+            BTreeSet::from([v("64500:1"), v("64500:2")])
+        );
+        assert_eq!(red.targets.export, BTreeSet::from([v("64500:1")]));
     }
 
     #[test]

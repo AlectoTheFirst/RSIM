@@ -2,8 +2,8 @@
 //! the form of `rsim_routing::bgp`, and the gaps of the config: the lines
 //! and the neighbours that the calculation does not evaluate.
 //!
-//! A neighbour is lowered with the settings of its unicast address
-//! families. A neighbour whose unicast families have different settings, an
+//! A neighbour is lowered with the settings of its unicast and EVPN address
+//! families. A neighbour whose families have different settings, an
 //! unknown AS, an inheritance gap, a listen range and a neighbour named by
 //! its interface are gaps.
 
@@ -18,6 +18,14 @@ use crate::links::BgpPeer;
 
 /// The unicast families.
 pub const UNICAST: [Family; 2] = [Family::Ipv4Unicast, Family::Ipv6Unicast];
+
+/// The families of the calculation: the unicast families and the EVPN IP
+/// prefix routes of the `l2vpn evpn` family.
+pub const FAMILIES: [Family; 3] = [
+    Family::Ipv4Unicast,
+    Family::Ipv6Unicast,
+    Family::EvpnIpPrefix,
+];
 
 /// The start of the reason of a gap.
 pub const GAP: &str = "bgp gap";
@@ -78,6 +86,21 @@ pub fn unicast_words(words: &[&str]) -> Option<Family> {
     crate::bgp_peers::family(words).and_then(|f| unicast_of(&f))
 }
 
+/// The family of the name of a family of the session sections: a unicast
+/// family, or the EVPN IP prefix routes for `l2vpn-evpn`.
+pub fn family_of(name: &str) -> Option<Family> {
+    match name {
+        "l2vpn-evpn" => Some(Family::EvpnIpPrefix),
+        _ => unicast_of(name),
+    }
+}
+
+/// The family of the calculation of the words after `address-family`, for
+/// example `l2vpn evpn`.
+pub fn family_words(words: &[&str]) -> Option<Family> {
+    crate::bgp_peers::family(words).and_then(|f| family_of(&f))
+}
+
 /// The settings of a neighbour in one address family. Each is `None` when
 /// no line of the neighbour or of its sources states it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -118,7 +141,7 @@ pub fn span(file: &str, lines: (u32, u32)) -> SourceSpan {
 }
 
 /// The neighbour of a process from the config after the inheritance and the
-/// settings of each unicast family that it activates. `asn` is the AS of
+/// settings of each family of [`FAMILIES`] that it activates. `asn` is the AS of
 /// the process. The communities are sent only when a line states it. Gives
 /// the reason when the neighbour is not lowered.
 pub fn neighbor(
@@ -168,7 +191,7 @@ pub fn neighbor(
     }
     out.shutdown = s.shutdown.as_ref().is_some_and(|x| x.value);
     for (name, v) in &s.families {
-        if let Some(f) = unicast_of(name) {
+        if let Some(f) = family_of(name) {
             if v.value {
                 out.activated.insert(f);
             } else {
