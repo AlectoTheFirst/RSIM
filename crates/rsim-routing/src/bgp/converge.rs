@@ -10,20 +10,27 @@
 //!    best paths of the round before. Brent's algorithm finds the fixed
 //!    point or the cycle by exact comparison of the states.
 //! 2. The uniqueness check builds the possible candidates of each variable
-//!    by a closure over the sessions. It applies when no process with a
-//!    candidate in the group has a route-reflector client, no candidate is unknown, and no
-//!    pair of candidates of a variable is decided by the MED with no
-//!    always-compare-med, by the IGP cost, or by a tie. The greedy
+//!    by a closure over the sessions. It applies when no candidate is
+//!    unknown and no pair of candidates of a variable is decided by the MED
+//!    with no always-compare-med, by the IGP cost, or by a tie. A pair that
+//!    the cluster list, the originator ID or the neighbour address decides
+//!    has a strict order, also at a route reflector. The greedy
 //!    construction of Griffin, Shepherd and Wilfong then fixes a variable
 //!    when its selection from the fixed variables does not change by any
 //!    possible candidate from a variable that is not fixed. A fixed point
 //!    with each variable fixed to its value is `Converged`.
 //! 3. Else the search assigns each variable that is not fixed a source:
 //!    no path, an unknown path, the `network` path, the aggregate path, a
-//!    seed or a session. The path of a variable follows from its source and
-//!    the path of the sender. An assignment is stable when the source of
-//!    each variable gives its selection, or a tied path of it. The search
-//!    has no bound.
+//!    seed, a session or a leak. The path of a variable follows from its
+//!    source and the path of the sender. An assignment is stable when the
+//!    source of each variable gives its selection, or a tied path of it.
+//!    A variable with no possible candidate has no path. The search runs on
+//!    each component of the variables over the dependencies of their
+//!    candidates, from the variables with an origination, a redistribution
+//!    or a seed, and the stable assignments are the combinations of the
+//!    components. A variable has an unknown source only when it can be
+//!    unknown, and a check does not wait for a link or a leak that gives no
+//!    path for each possible value of its source. The search has no bound.
 //! 4. 2 stable assignments are distinct when they differ in the paths that
 //!    a variable installs or in a path that a variable sends. 0 distinct
 //!    outcomes give `NoConvergence` with the cycle of the forward pass, and
@@ -537,9 +544,6 @@ fn strict(g: &Group<'_, '_>, dom: &[BTreeSet<BestPath>]) -> bool {
             continue;
         }
         let (p, _) = g.at(v);
-        if p.neighbors.values().any(|nb| nb.route_reflector_client) {
-            return false;
-        }
         let Some(profile) = p.profile() else {
             return false;
         };
