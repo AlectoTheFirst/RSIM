@@ -973,7 +973,12 @@ ip vrf BLUE
         ] {
             assert!(texts.contains(&want), "{want:?} not in {texts:?}");
         }
-        assert!(texts.iter().all(|(v, _)| *v != "default"), "{texts:?}");
+        let default: Vec<&str> = texts
+            .iter()
+            .filter(|(v, _)| *v == "default")
+            .map(|(_, t)| *t)
+            .collect();
+        assert_eq!(default, ["export ipv4 unicast map TO-GLOBAL"], "{texts:?}");
     }
 
     #[test]
