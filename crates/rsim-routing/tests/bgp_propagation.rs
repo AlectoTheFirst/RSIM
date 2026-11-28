@@ -548,7 +548,7 @@ fn a_platform_with_no_profile_makes_its_routes_and_the_routes_after_it_unknown()
         let Some(RouteState::Unknown(u)) = state(&r, d, P) else {
             panic!("{d}: {:?}", state(&r, d, P));
         };
-        assert_cause(&u, Reason::NoBgpProfile);
+        assert_cause(u, Reason::NoBgpProfile);
     }
     let inst = install_candidates(&r, &lab.input.processes);
     let c = &inst[&("r2".to_string(), "default".to_string())][0];
@@ -557,7 +557,7 @@ fn a_platform_with_no_profile_makes_its_routes_and_the_routes_after_it_unknown()
         c.route
             .unknown_reason()
             .unwrap()
-            .starts_with("no bgp profile")
+            .starts_with("convergence not determined: no bgp profile")
     );
 }
 
@@ -588,7 +588,7 @@ fn an_unhandled_import_term_makes_the_route_unknown_only_where_it_decides() {
     let Some(RouteState::Unknown(u)) = state(&r, "r2", P) else {
         panic!("{:?}", state(&r, "r2", P));
     };
-    assert_cause(&u, Reason::PolicyClauseNotEvaluated);
+    assert_cause(u, Reason::PolicyClauseNotEvaluated);
     assert!(state(&r, "r2", "198.51.100.0/24").is_none());
     let g = r.groups.iter().find(|g| g.keys.contains(&key(P))).unwrap();
     assert!(
@@ -617,7 +617,7 @@ fn a_next_hop_that_does_not_resolve_gives_no_candidate_and_an_unknown_one_an_unk
     let Some(RouteState::Unknown(u)) = state(&r, "r1", P) else {
         panic!("{:?}", state(&r, "r1", P));
     };
-    assert_cause(&u, Reason::NextHopNotResolved);
+    assert_cause(u, Reason::NextHopNotResolved);
 }
 
 #[test]
@@ -745,7 +745,7 @@ fn a_sole_seed_with_attributes_not_collected_propagates_and_a_contested_one_is_u
     let Some(RouteState::Unknown(u)) = state(&r, "r1", P) else {
         panic!("{:?}", state(&r, "r1", P));
     };
-    assert_cause(&u, Reason::PathAttributesNotCollected);
+    assert_cause(u, Reason::PathAttributesNotCollected);
 }
 
 #[test]
@@ -785,7 +785,7 @@ fn two_outside_ibgp_seeds_that_tie_to_the_router_id_step_need_their_router_ids()
     let Some(RouteState::Unknown(u)) = state(&r, "r1", P) else {
         panic!("{:?}", state(&r, "r1", P));
     };
-    assert_cause(&u, Reason::RouterIdNotKnown);
+    assert_cause(u, Reason::RouterIdNotKnown);
     let r = run([Some("198.51.100.9"), Some("198.51.100.2")]);
     assert_eq!(
         best(&r, "r1", P).unwrap().best.next_hop,
