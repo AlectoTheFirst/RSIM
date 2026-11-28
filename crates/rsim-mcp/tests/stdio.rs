@@ -671,3 +671,181 @@ fn the_store_topology_answers_a_path_query_and_writes_nothing() {
     );
     remove_dir(&dir);
 }
+
+/// The devices of the steps of the one branch of a full path answer, each
+/// once in order.
+fn path_devices(v: &Value) -> Vec<String> {
+    let branches = v["answer"]["branches"].as_array().unwrap();
+    assert_eq!(branches.len(), 1, "{v:#}");
+    let mut out: Vec<String> = Vec::new();
+    for s in branches[0]["steps"].as_array().unwrap() {
+        let d = s["function"].as_str().unwrap().split('/').next().unwrap();
+        if out.last().map(String::as_str) != Some(d) {
+            out.push(d.to_string());
+        }
+    }
+    out
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)]
+fn the_argument_down_gives_the_scenario_answer_and_its_layers() {
+    let data = Path::new(env!("CARGO_TARGET_TMPDIR")).join("rsim-mcp-scenario-data");
+    let _ = std::fs::remove_dir_all(&data);
+    fixture_store::write_triangle(&data);
+    let dir = empty_dir("scenario");
+    let folder = data.display().to_string();
+    let query = json!({
+        "topology": "store",
+        "ingress": "r1/Ethernet1/3",
+        "source.ip": "203.0.113.10",
+        "destination.ip": "203.0.113.74",
+        "network.transport": "tcp",
+        "source.port": 40000,
+        "destination.port": 22,
+        "reply": false,
+        "form": "full"
+    });
+    let mut down = query.clone();
+    down["down"] = json!(["r1:Ethernet1/1"]);
+    let mut claim_query = query.as_object().unwrap().clone();
+    claim_query.remove("topology");
+    claim_query.remove("form");
+    let messages = vec![
+        request(1, "server/discover", json!({}), true),
+        request(2, "tools/list", json!({}), true),
+        call(3, "path_query", query.clone(), true),
+        call(4, "path_query", down.clone(), true),
+        call(
+            5,
+            "table_query",
+            json!({
+                "topology": "store",
+                "table": "fib",
+                "filters": {"device": ["r1"]},
+                "down": ["r1:Ethernet1/1"]
+            }),
+            true,
+        ),
+        call(
+            6,
+            "run_claim",
+            json!({
+                "topology": "store",
+                "claim": "no-unknown",
+                "query": claim_query,
+                "down": ["r1:Ethernet1/1"]
+            }),
+            true,
+        ),
+        call(
+            7,
+            "path_query",
+            json!({
+                "topology": "leaf-spine",
+                "source.ip": "10.1.0.10",
+                "destination.ip": "10.3.0.10",
+                "down": ["leaf1:eth1"]
+            }),
+            true,
+        ),
+        call(
+            8,
+            "path_query",
+            json!({
+                "topology": "store",
+                "source.ip": "203.0.113.10",
+                "destination.ip": "203.0.113.74",
+                "down": "r1:Ethernet1/1"
+            }),
+            true,
+        ),
+        call(9, "path_query", down.clone(), true),
+    ];
+    let r = session_with(&dir, &["--store", &folder], &messages);
+    let list = &by_id(&r, 2)["result"];
+    check_tools_list(list);
+    for t in list["tools"].as_array().unwrap() {
+        let layered = [
+            "path_query",
+            "set_query",
+            "explain_step",
+            "table_query",
+            "run_claim",
+        ]
+        .contains(&t["name"].as_str().unwrap());
+        let p = &t["inputSchema"]["properties"]["down"];
+        assert_eq!(p.is_object(), layered, "{}", t["name"]);
+    }
+    check_args_in_schema(list, "path_query", &down);
+
+    let base = &by_id(&r, 3)["result"]["structuredContent"];
+    assert_eq!(base["twin"]["layers"], json!([]));
+    assert_eq!(path_devices(base), ["r1", "r2"]);
+
+    let result = &by_id(&r, 4)["result"];
+    assert_eq!(result["isError"], false, "{result}");
+    let v = &result["structuredContent"];
+    assert_eq!(v["twin"]["layers"], json!(["link-down r1:Ethernet1/1"]));
+    let snapshot = base["twin"]["id"].as_str().unwrap();
+    assert_eq!(v["twin"]["base"], snapshot);
+    let id = v["twin"]["id"].as_str().unwrap();
+    assert!(id.starts_with(&format!("{snapshot}~~")), "{id}");
+    assert_eq!(path_devices(v), ["r1", "r3", "r2"]);
+    assert!(
+        v.to_string().contains("layer 1: link-down r1:Ethernet1/1"),
+        "{v:#}"
+    );
+    // The answer is the answer of `rsim` on the same scenario.
+    let mut args = query.as_object().unwrap().clone();
+    args.remove("form");
+    let q = rsim_cli::args::query(&args, &[]).unwrap();
+    let twin =
+        rsim_cli::commands::load_with(&format!("store:{folder}"), &["r1:Ethernet1/1".to_string()])
+            .unwrap();
+    let text = rsim_cli::json::to_text(&rsim_cli::commands::path(&q, &twin).unwrap(), false);
+    assert_eq!(result["content"][0]["text"], text.as_str());
+    // A second call gives the same bytes.
+    assert_eq!(by_id(&r, 9)["result"]["content"], result["content"]);
+
+    let table = &by_id(&r, 5)["result"];
+    assert_eq!(table["isError"], false, "{table}");
+    let rows = &table["structuredContent"];
+    assert_eq!(rows["twin"]["layers"], json!(["link-down r1:Ethernet1/1"]));
+    let columns = rows["columns"].as_array().unwrap();
+    let at = columns.iter().position(|c| c == "prefix").unwrap();
+    let lan: Vec<String> = rows["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r[at] == "203.0.113.64/26")
+        .map(Value::to_string)
+        .collect();
+    assert_eq!(lan.len(), 1, "{rows:#}");
+    assert!(lan[0].contains("198.51.100.6@Ethernet1/2"), "{}", lan[0]);
+    assert!(!lan[0].contains("@Ethernet1/1"), "{}", lan[0]);
+    assert!(
+        lan[0].contains("layer 1: link-down r1:Ethernet1/1"),
+        "{}",
+        lan[0]
+    );
+
+    let claim = &by_id(&r, 6)["result"];
+    assert_eq!(claim["isError"], false, "{claim}");
+    assert_eq!(
+        claim["structuredContent"]["twin"]["layers"],
+        json!(["link-down r1:Ethernet1/1"])
+    );
+
+    for id in [7, 8] {
+        let e = &by_id(&r, id)["result"];
+        assert_eq!(e["isError"], true, "{e}");
+        assert_eq!(e["structuredContent"]["error"]["code"], "invalid_query");
+    }
+    assert_eq!(
+        std::fs::read_dir(&dir).unwrap().count(),
+        0,
+        "the server wrote a file"
+    );
+    remove_dir(&dir);
+}

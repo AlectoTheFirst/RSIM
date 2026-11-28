@@ -70,7 +70,7 @@ impl Cli {
 enum Command {
     /// The catalog of the tables: their columns and verbs.
     Tables,
-    /// A table of a twin: `rsim <twin> <table> [show|summarize|unique|top|lpm|describe] [--<column> <values>] [--<column>.<op> <value>] [--columns a,b] [--sort a,-b] [--limit n] [--cursor c]`.
+    /// A table of a twin: `rsim <twin> <table> [show|summarize|unique|top|lpm|describe] [--<column> <values>] [--<column>.<op> <value>] [--columns a,b] [--sort a,-b] [--limit n] [--cursor c] [--down <device>:<interface>]`.
     #[command(external_subcommand)]
     Table(Vec<String>),
     /// The devices, the functions and the endpoints of a topology.
@@ -200,6 +200,10 @@ struct QueryArgs {
     /// request and a source port in 49152-65535.
     #[arg(long)]
     unstated: Option<rsim_cli::query::Unstated>,
+    /// A link to take down in a store twin, as <device>:<interface>. The
+    /// option can repeat.
+    #[arg(long)]
+    down: Vec<String>,
 }
 
 /// The fields of a set query. Each field takes a set: an address, a
@@ -259,6 +263,10 @@ struct SetArgs {
     /// Do not run the replies.
     #[arg(long)]
     no_reply: bool,
+    /// A link to take down in a store twin, as <device>:<interface>. The
+    /// option can repeat.
+    #[arg(long)]
+    down: Vec<String>,
 }
 
 impl SetArgs {
@@ -375,32 +383,32 @@ fn main() -> ExitCode {
         }
         Command::Path(q) => {
             let input = q.clone_input();
+            let loaded = commands::load_with(&input.topology, &q.down);
             match cli.brief() {
                 Some(f) => emit(
                     &cli,
-                    commands::load(&input.topology)
-                        .and_then(|t| commands::path_brief(&input, &t, f)),
+                    loaded.and_then(|t| commands::path_brief(&input, &t, f)),
                     |_| String::new(),
                 ),
                 None => emit(
                     &cli,
-                    commands::load(&input.topology).and_then(|t| commands::path(&input, &t)),
+                    loaded.and_then(|t| commands::path(&input, &t)),
                     text::path,
                 ),
             }
         }
         Command::Set(q) => {
             let input = q.input();
+            let loaded = commands::load_with(&input.topology, &q.down);
             match cli.brief() {
                 Some(f) => emit(
                     &cli,
-                    commands::load(&input.topology)
-                        .and_then(|t| commands::set_brief(&input, &t, f)),
+                    loaded.and_then(|t| commands::set_brief(&input, &t, f)),
                     |_| String::new(),
                 ),
                 None => emit(
                     &cli,
-                    commands::load(&input.topology).and_then(|t| commands::set(&input, &t)),
+                    loaded.and_then(|t| commands::set(&input, &t)),
                     text::set,
                 ),
             }
@@ -418,7 +426,7 @@ fn main() -> ExitCode {
                 branch: *branch,
                 step: *step,
             };
-            let r = commands::load(&input.topology).and_then(|t| {
+            let r = commands::load_with(&input.topology, &query.down).and_then(|t| {
                 let mut o = commands::explain_set(&input, at, &t)?;
                 if *source_lines {
                     rsim_cli::sources::attach(&mut o, &t);
@@ -440,7 +448,7 @@ fn main() -> ExitCode {
                 branch: *branch,
                 step: *step,
             };
-            let r = commands::load(&input.topology).and_then(|t| {
+            let r = commands::load_with(&input.topology, &query.down).and_then(|t| {
                 let mut o = commands::explain(&input, at, &t)?;
                 if *source_lines {
                     rsim_cli::sources::attach(&mut o, &t);
@@ -501,7 +509,8 @@ fn rows_text(columns: &[String], rows: &[Vec<serde_json::Value>]) -> String {
 }
 
 /// The parts of a table command: the twin, the table, the verb, the
-/// positional arguments, the selection and the other options.
+/// positional arguments, the selection, the other options and the links of
+/// `--down`.
 type Parsed = (
     String,
     String,
@@ -509,6 +518,7 @@ type Parsed = (
     Vec<String>,
     Selection,
     BTreeMap<String, String>,
+    Vec<String>,
 );
 
 /// `rsim <twin> <table> [verb] [flags]`.
@@ -556,6 +566,7 @@ fn table_command(cli: &Cli, args: &[String]) -> ExitCode {
         let mut positional = Vec::new();
         let mut sel = Selection::default();
         let mut opts = BTreeMap::new();
+        let mut down = Vec::new();
         let mut first = true;
         while let Some(a) = rest.next() {
             match a.strip_prefix("--") {
@@ -583,6 +594,7 @@ fn table_command(cli: &Cli, args: &[String]) -> ExitCode {
                     );
                 }
                 Some("cursor") => sel.cursor = Some(flag_value(&mut rest, "cursor")?.clone()),
+                Some("down") => down.push(flag_value(&mut rest, "down")?.clone()),
                 Some(k @ ("column" | "count" | "as")) => {
                     opts.insert(k.to_string(), flag_value(&mut rest, k)?.clone());
                 }
@@ -603,13 +615,13 @@ fn table_command(cli: &Cli, args: &[String]) -> ExitCode {
             }
             first = false;
         }
-        Ok((twin, table, verb, positional, sel, opts))
+        Ok((twin, table, verb, positional, sel, opts, down))
     })();
-    let (twin, table, verb, positional, sel, opts) = match parsed {
+    let (twin, table, verb, positional, sel, opts, down) = match parsed {
         Ok(p) => p,
         Err(e) => return usage_error(&e.detail),
     };
-    let loaded = match commands::load(&twin) {
+    let loaded = match commands::load_with(&twin, &down) {
         Ok(l) => l,
         Err(e) => return emit::<()>(cli, Err(e), |_| String::new()),
     };
@@ -696,7 +708,7 @@ fn usage_error(detail: &str) -> ExitCode {
 }
 
 /// `rsim <twin> claim list` and `rsim <twin> claim run <claim> [--device
-/// a,b] [the flags of a path query]`. The exit code of a claim is 0 for
+/// a,b] [--down <device>:<interface>] [the flags of a path query]`. The exit code of a claim is 0 for
 /// confirmed, 1 for refuted and 3 for unknown.
 fn claim_command(cli: &Cli, args: &[String]) -> ExitCode {
     use rsim_contract::claim::{ClaimArgs, ClaimResult};
@@ -721,6 +733,7 @@ fn claim_command(cli: &Cli, args: &[String]) -> ExitCode {
     };
     let mut devices = None;
     let mut min = None;
+    let mut down = Vec::new();
     let mut query = serde_json::Map::new();
     let mut rest = args[4..].iter();
     while let Some(a) = rest.next() {
@@ -737,6 +750,10 @@ fn claim_command(cli: &Cli, args: &[String]) -> ExitCode {
         let value = match flag {
             "device" => {
                 devices = Some(v.split(',').map(str::to_string).collect::<Vec<_>>());
+                continue;
+            }
+            "down" => {
+                down.push(v.clone());
                 continue;
             }
             "min" => {
@@ -763,7 +780,7 @@ fn claim_command(cli: &Cli, args: &[String]) -> ExitCode {
         query: (!query.is_empty()).then_some(query),
         min,
     };
-    let r = commands::load(&twin).and_then(|t| rsim_cli::claims::run(&twin, &t, &a));
+    let r = commands::load_with(&twin, &down).and_then(|t| rsim_cli::claims::run(&twin, &t, &a));
     let code = match &r {
         Ok(o) => match o.result {
             ClaimResult::Confirmed => 0,

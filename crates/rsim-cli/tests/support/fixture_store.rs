@@ -9,6 +9,9 @@ use rsim_store::{
     Cell, Class, DeviceUpdate, Entropy, Format, Hash, Keys, Row, SectionEntry, SectionStatus, Store,
 };
 
+#[path = "../../../rsim-ingest/tests/support/triangle.rs"]
+mod triangle;
+
 /// `N` random bytes from the operating system.
 pub fn random<const N: usize>() -> [u8; N] {
     let mut bytes = [0u8; N];
@@ -72,6 +75,7 @@ pub const TIME: u64 = 1_795_356_312_000;
 /// Writes the data folder of `rsim-collect` in `dir`: the store keys in
 /// `keys` and the store in `store`, with one snapshot at [`TIME`], or at the
 /// second after the newest snapshot of a store that has one.
+#[allow(dead_code)]
 pub fn write(dir: &Path) {
     write_with(dir, false);
 }
@@ -223,6 +227,92 @@ fn write_with(dir: &Path, l2: bool) {
     let mut c = store.begin(TIME.max(newest / 1000 * 1000 + 1000)).unwrap();
     c.add(r1).unwrap();
     c.add(site).unwrap();
+    c.prepare()
+        .unwrap()
+        .expect("the cycle has changes")
+        .publish()
+        .unwrap();
+}
+
+/// Writes the data folder of `rsim-collect` in `dir` with one snapshot at
+/// [`TIME`] of the OSPF triangle of the NX-OS switches r1, r2 and r3 of
+/// `rsim-ingest`.
+#[allow(dead_code, clippy::disallowed_methods)]
+pub fn write_triangle(dir: &Path) {
+    std::fs::create_dir_all(dir).unwrap();
+    let store = Store::open(dir.join("store"), keys(dir)).unwrap();
+    let mut e = Os;
+    let opt = |v: &Option<String>| v.as_deref().map_or(Cell::Null, s);
+    let mut updates = Vec::new();
+    for d in triangle::devices(false) {
+        let mut put = |b: &[u8]| store.put_blob(b, &mut e).unwrap();
+        let config = put(d.config.as_bytes());
+        let lldp = put(d.lldp.as_bytes());
+        let routes = put(format!("{}/routes", d.name).as_bytes());
+        let links = put(format!("{}/links", d.name).as_bytes());
+        let neighbours = put(format!("{}/neighbours", d.name).as_bytes());
+        let route_rows: Vec<Row> = d
+            .routes
+            .iter()
+            .map(|(prefix, protocol, hop, iface)| {
+                vec![
+                    s("default"),
+                    s(prefix),
+                    s(protocol),
+                    Cell::Bool(true),
+                    Cell::Null,
+                    Cell::Null,
+                    opt(hop),
+                    opt(iface),
+                ]
+            })
+            .collect();
+        let link_rows: Vec<Row> = d
+            .links
+            .iter()
+            .map(|(iface, mac)| {
+                vec![
+                    s(iface),
+                    s(mac),
+                    Cell::U64(1500),
+                    Cell::Bool(true),
+                    Cell::Null,
+                    Cell::Null,
+                    Cell::Null,
+                ]
+            })
+            .collect();
+        let arp_rows: Vec<Row> = d
+            .arp
+            .iter()
+            .map(|(iface, ip, mac)| vec![s(iface), s(ip), s(mac), s("REACHABLE")])
+            .collect();
+        updates.push(DeviceUpdate {
+            device: d.name.clone(),
+            vendor: "nxos".into(),
+            collected_at: 1,
+            sections: vec![
+                SectionEntry {
+                    format: Format::Text,
+                    ..entry("config", config, Class::Configuration)
+                },
+                entry("lldp", lldp, Class::Observation),
+                entry("routes", routes, Class::Observation),
+                entry("links", links, Class::Observation),
+                entry("neighbours", neighbours, Class::Observation),
+            ],
+            tables: BTreeMap::from([
+                ("routes".to_string(), vec![(routes, route_rows)]),
+                ("links".to_string(), vec![(links, link_rows)]),
+                ("neighbours".to_string(), vec![(neighbours, arp_rows)]),
+            ]),
+            management_address: None,
+        });
+    }
+    let mut c = store.begin(TIME).unwrap();
+    for u in updates {
+        c.add(u).unwrap();
+    }
     c.prepare()
         .unwrap()
         .expect("the cycle has changes")

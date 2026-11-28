@@ -18,6 +18,7 @@ use crate::facts::{self, DeviceFacts};
 use crate::links::{BgpPeerFact, PortAddress, Summary};
 use crate::ospf::inputs as ospf_inputs;
 use crate::route_tables::RouteTables;
+use crate::scenario::{BaseVrf, DeviceScenario, Layer, Pass, is_down};
 use crate::stanza::{Document, read_json};
 use crate::{equinix, iosxe, iosxr, nxos, unifi, velocloud, vyos};
 
@@ -48,6 +49,94 @@ pub struct Estate {
     /// The OSPF database guard rows of each device with a built and a
     /// collected database, by twin device.
     pub ospf_guard: BTreeMap<String, Vec<rsim_guard::ospf::LsaRow>>,
+    /// The far ends of each port with a link, by device and port.
+    pub links: BTreeMap<(String, String), Vec<(String, String)>>,
+    /// The vendor of each device of the twin.
+    pub vendors: BTreeMap<String, String>,
+    /// The tables of each VRF with a guard of each device, in the base of a
+    /// scenario; empty for a snapshot twin.
+    pub base: BTreeMap<String, BTreeMap<String, BaseVrf>>,
+}
+
+/// An error of the build of a scenario: the store cannot be read, or a
+/// layer is refused.
+#[derive(Debug)]
+pub enum ScenarioError {
+    Store(StoreError),
+    Layer(String),
+}
+
+impl std::fmt::Display for ScenarioError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScenarioError::Store(e) => write!(f, "{e}"),
+            ScenarioError::Layer(e) => f.write_str(e),
+        }
+    }
+}
+
+impl From<StoreError> for ScenarioError {
+    fn from(e: StoreError) -> Self {
+        ScenarioError::Store(e)
+    }
+}
+
+/// The pass of an estate.
+enum Plan {
+    Snapshot,
+    Base,
+    /// A scenario, with the inputs of each router and switch.
+    Scenario {
+        devices: BTreeMap<String, DeviceScenario>,
+        spans: Vec<SourceSpan>,
+    },
+}
+
+impl Plan {
+    /// The interfaces of a device that a layer takes down.
+    fn down(&self, device: &str) -> Option<BTreeSet<String>> {
+        match self {
+            Plan::Scenario { devices, .. } => devices
+                .get(device)
+                .map(|s| s.down.clone())
+                .filter(|d| !d.is_empty()),
+            _ => None,
+        }
+    }
+
+    /// Adds interfaces to the down interfaces of a device.
+    fn add_down(&mut self, device: &str, more: BTreeSet<String>) {
+        if let Plan::Scenario { devices, .. } = self
+            && let Some(s) = devices.get_mut(device)
+        {
+            s.down.extend(more);
+        }
+    }
+
+    /// The pass of the lowering of a router or a switch.
+    fn pass(&mut self, device: &str) -> Pass {
+        match self {
+            Plan::Snapshot => Pass::Snapshot,
+            Plan::Base => Pass::Base,
+            Plan::Scenario { devices, spans } => {
+                Pass::Scenario(devices.remove(device).unwrap_or_else(|| DeviceScenario {
+                    spans: spans.clone(),
+                    ..DeviceScenario::default()
+                }))
+            }
+        }
+    }
+
+    /// A function of a device whose vendor has no route calculation.
+    fn function(
+        &self,
+        f: std::sync::Arc<dyn rsim_core::NetFunction>,
+    ) -> std::sync::Arc<dyn rsim_core::NetFunction> {
+        match self {
+            Plan::Scenario { spans, .. } => crate::scenario::not_recomputed(f, spans),
+            _ => f,
+        }
+    }
 }
 
 fn short(h: &Hash) -> String {
@@ -64,6 +153,7 @@ struct Router {
 }
 
 /// The sections of one device.
+#[derive(Clone)]
 pub enum Input {
     /// A VyOS router: its config section, the file name of the config for
     /// the provenance, and its collected state.
@@ -278,6 +368,38 @@ pub fn session_inputs(
 
 /// Builds the twin of the devices of a snapshot.
 pub fn build(store: &Store, snap: &Snapshot) -> Result<Estate, StoreError> {
+    let (inputs, skipped, sessions) = read(store, snap)?;
+    let mut e = assemble_with(inputs, &sessions);
+    e.facts = facts::of_snapshot(store, snap)?;
+    for s in skipped {
+        e.notes.entry("estate".into()).or_default().push(s);
+    }
+    Ok(e)
+}
+
+/// Builds the twin of a scenario on a snapshot: the snapshot with the
+/// layers in order. With no layer, it is the twin of [`build`].
+pub fn build_scenario(
+    store: &Store,
+    snap: &Snapshot,
+    layers: &[Layer],
+) -> Result<Estate, ScenarioError> {
+    let (inputs, skipped, sessions) = read(store, snap)?;
+    let mut e = assemble_scenario(inputs, &sessions, layers).map_err(ScenarioError::Layer)?;
+    e.facts = facts::of_snapshot(store, snap)?;
+    for s in skipped {
+        e.notes.entry("estate".into()).or_default().push(s);
+    }
+    Ok(e)
+}
+
+/// The inputs of the devices of a snapshot with their OSPF databases, the
+/// devices that are not lowered, and the BGP session sections.
+#[allow(clippy::type_complexity)]
+fn read(
+    store: &Store,
+    snap: &Snapshot,
+) -> Result<(Vec<Input>, Vec<String>, BTreeMap<String, SessionSections>), StoreError> {
     let (mut inputs, skipped) = inputs(store, snap)?;
     let mut ospf = crate::ospf::of_snapshot(store, snap)?;
     for i in &mut inputs {
@@ -298,12 +420,7 @@ pub fn build(store: &Store, snap: &Snapshot) -> Result<Estate, StoreError> {
         }
     }
     let sessions = session_inputs(store, snap)?;
-    let mut e = assemble_with(inputs, &sessions);
-    e.facts = facts::of_snapshot(store, snap)?;
-    for s in skipped {
-        e.notes.entry("estate".into()).or_default().push(s);
-    }
-    Ok(e)
+    Ok((inputs, skipped, sessions))
 }
 
 /// Builds the twin of the inputs with no BGP session section.
@@ -321,6 +438,112 @@ pub fn assemble(inputs: Vec<Input>) -> Estate {
 /// NX-OS switch, each IOS-XR router, each IOS-XE device and each VeloCloud
 /// edge is lowered with its links.
 pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSections>) -> Estate {
+    assemble_pass(inputs, sessions, Plan::Snapshot).0
+}
+
+/// Builds the twin of a scenario on the inputs with the BGP session
+/// sections of each device: the base is the twin of [`assemble_with`], and
+/// the layers apply in order. A link-down layer takes down the interface
+/// and the far end of each link of the interface in the base. Each device
+/// must be a router or a switch of a vendor of [`crate::scenario::VENDORS`],
+/// and each named interface must be in its config. With no layer, it is
+/// the twin of [`assemble_with`]. The guard rows are the rows of the base.
+pub fn assemble_scenario(
+    inputs: Vec<Input>,
+    sessions: &BTreeMap<String, SessionSections>,
+    layers: &[Layer],
+) -> Result<Estate, String> {
+    if layers.is_empty() {
+        return Ok(assemble_with(inputs, sessions));
+    }
+    let (mut base, _) = assemble_pass(inputs.clone(), sessions, Plan::Base);
+    let downs = layer_downs(&base, layers)?;
+    let spans: Vec<SourceSpan> = layers
+        .iter()
+        .enumerate()
+        .map(|(n, l)| l.span(n + 1))
+        .collect();
+    let mut tables = std::mem::take(&mut base.base);
+    let devices: BTreeMap<String, DeviceScenario> = base
+        .vendors
+        .iter()
+        .filter(|(_, v)| crate::scenario::VENDORS.contains(&v.as_str()))
+        .map(|(d, _)| {
+            (
+                d.clone(),
+                DeviceScenario {
+                    base: tables.remove(d).unwrap_or_default(),
+                    down: downs.get(d).cloned().unwrap_or_default(),
+                    spans: spans.clone(),
+                },
+            )
+        })
+        .collect();
+    let (mut e, missing) = assemble_pass(inputs, sessions, Plan::Scenario { devices, spans });
+    if !missing.is_empty() {
+        return Err(missing.join("; "));
+    }
+    e.guard = base.guard;
+    e.ospf_guard = base.ospf_guard;
+    Ok(e)
+}
+
+/// The down interfaces of each device of the layers: the named interface,
+/// and the far end of each link of the interface in the base, with the
+/// links that name the interface as their far end.
+fn layer_downs(
+    base: &Estate,
+    layers: &[Layer],
+) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+    let mut downs: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let vendor = |l: &Layer, d: &str| -> Result<(), String> {
+        match base.vendors.get(d) {
+            None => Err(format!("{l}: no device {d} in the twin")),
+            Some(v) if !crate::scenario::VENDORS.contains(&v.as_str()) => Err(format!(
+                "{l}: the vendor {v} of {d} has no route calculation"
+            )),
+            Some(_) => Ok(()),
+        }
+    };
+    for l in layers {
+        let Layer::LinkDown { device, interface } = l;
+        vendor(l, device)?;
+        let key = (device.clone(), interface.clone());
+        let mut far: BTreeSet<(String, String)> = base
+            .links
+            .get(&key)
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect();
+        for (end, ends) in &base.links {
+            if ends.contains(&key) {
+                far.insert(end.clone());
+            }
+        }
+        // A far port with 2 or more peers stays up through the other peers.
+        far.retain(|f| base.links.get(f).is_none_or(|ends| ends.len() <= 1));
+        downs
+            .entry(device.clone())
+            .or_default()
+            .insert(interface.clone());
+        for (d, port) in far {
+            vendor(l, &d)?;
+            downs.entry(d).or_default().insert(port);
+        }
+    }
+    Ok(downs)
+}
+
+/// Builds the twin of the inputs in a pass. Gives the interfaces of the
+/// layers that no config has.
+fn assemble_pass(
+    inputs: Vec<Input>,
+    sessions: &BTreeMap<String, SessionSections>,
+    mut plan: Plan,
+) -> (Estate, Vec<String>) {
+    // The interfaces of the layers that a config has.
+    let mut found: BTreeSet<(String, String)> = BTreeSet::new();
     // The OSPF databases of each IOS-XR and IOS-XE device, for its final
     // lowering.
     let mut ios_ospf: BTreeMap<String, crate::ospf::DeviceOspf> = BTreeMap::new();
@@ -336,6 +559,9 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         mtu: BTreeMap::new(),
         guard: BTreeMap::new(),
         ospf_guard: BTreeMap::new(),
+        links: BTreeMap::new(),
+        vendors: BTreeMap::new(),
+        base: BTreeMap::new(),
     };
     let mut routers: BTreeMap<String, Router> = BTreeMap::new();
     #[allow(clippy::type_complexity)]
@@ -383,7 +609,29 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 let table = vyos::table(&tables);
                 let bare = vyos::table(&RouteTables::uniform(false, vyos::dynamic_vrfs(&doc)));
                 bgp_hidden.insert(name.clone(), peers_hidden(&doc, &bare));
-                let cfg = vyos::read(&doc);
+                let mut cfg = vyos::read(&doc);
+                let down = plan.down(&name);
+                if let Some(down) = &down {
+                    // A PPPoE interface goes down with its underlay.
+                    let mut gone = BTreeSet::new();
+                    for i in &mut cfg.interfaces {
+                        let under = i
+                            .source_interface
+                            .as_deref()
+                            .is_some_and(|s| is_down(down, s));
+                        if is_down(down, &i.name) || under {
+                            i.disabled = true;
+                            found.insert((name.clone(), i.name.clone()));
+                            gone.insert(i.name.clone());
+                        }
+                    }
+                    plan.add_down(&name, gone);
+                }
+                let down = plan.down(&name);
+                let mut ospf_cfg = vyos::ospf_config::read(&doc, &file);
+                if let Some(down) = &down {
+                    crate::scenario::down_ospf(&mut ospf_cfg, down);
+                }
                 let ifaces: Vec<ospf_inputs::Iface> = cfg
                     .interfaces
                     .iter()
@@ -411,7 +659,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 ospf_in.insert(
                     name.clone(),
                     ospf_inputs::router_input(
-                        vyos::ospf_config::read(&doc, &file),
+                        ospf_cfg,
                         rsim_routing::Platform::FrrTraditional,
                         &ifaces,
                         &statics,
@@ -421,6 +669,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
                     .insert(name.clone(), vyos::unread(&doc, &table, &cfg.read));
+                e.vendors.insert(name.clone(), "vyos".into());
                 routers.insert(name, Router { cfg, col, file });
             }
             Input::Nxos {
@@ -438,11 +687,26 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 let table = nxos::table(&tables);
                 let bare = nxos::table(&RouteTables::uniform(false, nxos::dynamic_vrfs(&doc)));
                 bgp_hidden.insert(name.clone(), peers_hidden(&doc, &bare));
-                let cfg = nxos::read(&doc, &table);
+                let mut cfg = nxos::read(&doc, &table);
+                let down = plan.down(&name);
+                if let Some(down) = &down {
+                    for i in &mut cfg.interfaces {
+                        if down.contains(&i.name) {
+                            found.insert((name.clone(), i.name.clone()));
+                        }
+                        if is_down(down, &i.name) {
+                            i.admin_up = Some(false);
+                        }
+                    }
+                }
+                let mut ospf_cfg = nxos::ospf_config::read(&doc, &cfg, &file);
+                if let Some(down) = &down {
+                    crate::scenario::down_ospf(&mut ospf_cfg, down);
+                }
                 ospf_in.insert(
                     name.clone(),
                     ospf_inputs::router_input(
-                        nxos::ospf_config::read(&doc, &cfg, &file),
+                        ospf_cfg,
                         rsim_routing::Platform::Nxos,
                         &cisco_ifaces(cfg.interfaces.iter().map(|i| {
                             (
@@ -460,6 +724,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
                     .insert(name.clone(), nxos::unread(&doc, &table, &cfg.read));
+                e.vendors.insert(name.clone(), "nxos".into());
                 switches.insert(name, (cfg, col, file, sections));
             }
             Input::Iosxr {
@@ -478,11 +743,26 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 let table = iosxr::table(&tables);
                 let bare = iosxr::table(&RouteTables::uniform(false, iosxr::dynamic_vrfs(&doc)));
                 bgp_hidden.insert(name.clone(), peers_hidden(&doc, &bare));
-                let cfg = iosxr::read(&doc, &table);
+                let mut cfg = iosxr::read(&doc, &table);
+                let down = plan.down(&name);
+                if let Some(down) = &down {
+                    for i in &mut cfg.interfaces {
+                        if down.contains(&i.name) {
+                            found.insert((name.clone(), i.name.clone()));
+                        }
+                        if is_down(down, &i.name) {
+                            i.shutdown = true;
+                        }
+                    }
+                }
+                let mut ospf_cfg = iosxr::ospf_router_config(&cfg, &file);
+                if let Some(down) = &down {
+                    crate::scenario::down_ospf(&mut ospf_cfg, down);
+                }
                 ospf_in.insert(
                     name.clone(),
                     ospf_inputs::router_input(
-                        iosxr::ospf_router_config(&cfg, &file),
+                        ospf_cfg,
                         rsim_routing::Platform::Iosxr,
                         &cisco_ifaces(cfg.interfaces.iter().map(|i| {
                             (
@@ -500,6 +780,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
                     .insert(name.clone(), iosxr::unread(&doc, &table, &cfg.read));
+                e.vendors.insert(name.clone(), "iosxr".into());
                 xr.insert(name, (cfg, file, sections));
             }
             Input::Iosxe {
@@ -518,11 +799,26 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 let table = iosxe::table(&tables);
                 let bare = iosxe::table(&RouteTables::uniform(false, iosxe::dynamic_vrfs(&doc)));
                 bgp_hidden.insert(name.clone(), peers_hidden(&doc, &bare));
-                let cfg = iosxe::read(&doc, &table);
+                let mut cfg = iosxe::read(&doc, &table);
+                let down = plan.down(&name);
+                if let Some(down) = &down {
+                    for i in &mut cfg.interfaces {
+                        if down.contains(&i.name) {
+                            found.insert((name.clone(), i.name.clone()));
+                        }
+                        if is_down(down, &i.name) {
+                            i.admin_up = Some(false);
+                        }
+                    }
+                }
+                let mut ospf_cfg = iosxe::router_config(&file, &doc, &cfg, &table);
+                if let Some(down) = &down {
+                    crate::scenario::down_ospf(&mut ospf_cfg, down);
+                }
                 ospf_in.insert(
                     name.clone(),
                     ospf_inputs::router_input(
-                        iosxe::router_config(&file, &doc, &cfg, &table),
+                        ospf_cfg,
                         rsim_routing::Platform::Iosxe,
                         &cisco_ifaces(cfg.interfaces.iter().map(|i| {
                             (
@@ -540,11 +836,31 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
                     .insert(name.clone(), iosxe::unread(&doc, &table, &cfg.read));
+                e.vendors.insert(name.clone(), "iosxe".into());
                 xe.insert(name, (cfg, file, sections));
             }
-            Input::Unifi { name, sections } => sites.push((name, sections)),
-            Input::Velocloud { name, sections } => enterprises.push((name, sections)),
-            Input::Equinix { name, sections } => accounts.push((name, sections)),
+            Input::Unifi { name, sections } => {
+                e.vendors.insert(name.clone(), "unifi".into());
+                sites.push((name, sections))
+            }
+            Input::Velocloud { name, sections } => {
+                e.vendors.insert(name.clone(), "velocloud".into());
+                enterprises.push((name, sections))
+            }
+            Input::Equinix { name, sections } => {
+                e.vendors.insert(name.clone(), "equinix".into());
+                accounts.push((name, sections))
+            }
+        }
+    }
+    let mut missing = Vec::new();
+    if let Plan::Scenario { devices, .. } = &plan {
+        for (d, s) in devices {
+            for i in &s.down {
+                if !found.contains(&(d.clone(), i.clone())) {
+                    missing.push(format!("no interface {i} in the config of {d}"));
+                }
+            }
         }
     }
 
@@ -665,6 +981,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
             velocloud::coverage::classify_part(&p, velocloud::coverage::Part::Shared),
         );
         for edge in &ent.edges {
+            e.vendors.insert(edge.device.clone(), "velocloud".into());
             e.coverage.insert(
                 edge.device.clone(),
                 velocloud::coverage::classify_part(
@@ -692,6 +1009,9 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         n.extend(p.notes);
         n.extend(sums.notes);
         summaries.insert(device.clone(), sums.account);
+        for d in sums.devices.keys() {
+            e.vendors.insert(d.clone(), "equinix".into());
+        }
         summaries.extend(sums.devices);
         fabric_macs.push((device.clone(), sums.macs));
         fabric_accounts.push((device.clone(), account));
@@ -793,6 +1113,9 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         parsed.push((device.clone(), site, files));
     }
     for (_, site, files) in &parsed {
+        for d in &site.devices {
+            e.vendors.insert(d.name.clone(), "unifi".into());
+        }
         summaries.extend(unifi::link_summary(site, files));
         e.mtu.extend(unifi::mtus(site, files));
     }
@@ -856,7 +1179,25 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
             s.bindings.extend(bindings);
         }
     }
+    // A port that a layer takes down ends no link.
+    if let Plan::Scenario { devices, .. } = &plan {
+        for (d, s) in devices {
+            if let Some(sum) = summaries.get_mut(d) {
+                sum.entries.retain(|p, _| !is_down(&s.down, p));
+                sum.port_macs.retain(|p, _| !is_down(&s.down, p));
+                sum.l3.retain(|p, _| !is_down(&s.down, p));
+            }
+        }
+    }
     let mut joined = crate::links::join(&summaries, &next_hops, &device_macs);
+    for (d, ext) in &joined.devices {
+        for (port, peers) in &ext.peers {
+            e.links.insert(
+                (d.clone(), port.clone()),
+                peers.iter().map(|p| p.far.clone()).collect(),
+            );
+        }
+    }
     for (d, notes) in std::mem::take(&mut joined.notes) {
         e.notes.entry(d).or_default().extend(notes);
     }
@@ -932,7 +1273,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         }
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         for f in low.functions {
-            e.builder.add_arc(f);
+            e.builder.add_arc(plan.function(f));
         }
         for x in low.endpoints {
             e.builder.endpoint(x);
@@ -981,7 +1322,8 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
             col.neighbours.retain(|n| !same(n));
             col.neighbours.push(row);
         }
-        let low = vyos::lower(
+        let pass = plan.pass(device);
+        let low = vyos::lower_in(
             device,
             &r.file,
             &profile,
@@ -989,10 +1331,15 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
             &col,
             &links,
             &twin_addresses,
+            &pass,
         );
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         if !low.guard.is_empty() {
             e.guard.insert(device.clone(), low.guard);
+        }
+        if !low.base.is_empty() {
+            e.base
+                .insert(device.clone(), low.base.into_iter().collect());
         }
         for f in low.functions {
             e.builder.add_arc(f);
@@ -1004,11 +1351,16 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
 
     // The NX-OS switches, with their links and endpoints.
     for (device, (cfg, col, file, sections)) in &switches {
-        let ext = joined.devices.remove(device).unwrap_or_default();
+        let mut ext = joined.devices.remove(device).unwrap_or_default();
+        ext.pass = plan.pass(device);
         let (low, _) = nxos::lower(device, file, &nx_profile, cfg, col, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         if !low.guard.is_empty() {
             e.guard.insert(device.clone(), low.guard);
+        }
+        if !low.base.is_empty() {
+            e.base
+                .insert(device.clone(), low.base.into_iter().collect());
         }
         for f in low.functions {
             e.builder.add_arc(f);
@@ -1026,13 +1378,17 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
 
     // The IOS-XR routers, with their links.
     for (device, (cfg, file, sections)) in &xr {
-        let ext = joined.devices.remove(device).unwrap_or_default();
-        let mut ext = ext;
+        let mut ext = joined.devices.remove(device).unwrap_or_default();
         ext.ospf = ios_ospf.remove(device);
+        ext.pass = plan.pass(device);
         let (low, _) = iosxr::lower(device, file, &xr_profile, cfg, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         if !low.guard.is_empty() {
             e.guard.insert(device.clone(), low.guard);
+        }
+        if !low.base.is_empty() {
+            e.base
+                .insert(device.clone(), low.base.into_iter().collect());
         }
         for f in low.functions {
             e.builder.add_arc(f);
@@ -1044,13 +1400,17 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
 
     // The IOS-XE routers and switches, with their links and endpoints.
     for (device, (cfg, file, sections)) in &xe {
-        let ext = joined.devices.remove(device).unwrap_or_default();
-        let mut ext = ext;
+        let mut ext = joined.devices.remove(device).unwrap_or_default();
         ext.ospf = ios_ospf.remove(device);
+        ext.pass = plan.pass(device);
         let (low, _) = iosxe::lower(device, file, &xe_profile, cfg, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         if !low.guard.is_empty() {
             e.guard.insert(device.clone(), low.guard);
+        }
+        if !low.base.is_empty() {
+            e.base
+                .insert(device.clone(), low.base.into_iter().collect());
         }
         for f in low.functions {
             e.builder.add_arc(f);
@@ -1080,7 +1440,7 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
         e.fabric.insert(device.clone(), low.circuits);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         for f in low.functions {
-            e.builder.add_arc(f);
+            e.builder.add_arc(plan.function(f));
         }
     }
 
@@ -1098,13 +1458,13 @@ pub fn assemble_with(inputs: Vec<Input>, sessions: &BTreeMap<String, SessionSect
             e.notes.entry(d).or_default().extend(notes);
         }
         for f in low.functions {
-            e.builder.add_arc(f);
+            e.builder.add_arc(plan.function(f));
         }
         for x in low.edges {
             e.builder.edge_interface(x);
         }
     }
-    e
+    (e, missing)
 }
 
 /// The addresses of each interface with its VRF, `default` for an
@@ -1411,4 +1771,50 @@ fn ospf_guard(
         }
     }
     rows
+}
+
+#[cfg(test)]
+mod layer_tests {
+    use super::*;
+
+    fn end(d: &str, p: &str) -> (String, String) {
+        (d.to_string(), p.to_string())
+    }
+
+    type Ends<'a> = &'a [(&'a str, &'a str)];
+
+    fn estate(links: &[((&str, &str), Ends)]) -> Estate {
+        let mut e = assemble_pass(Vec::new(), &BTreeMap::new(), Plan::Snapshot).0;
+        for ((d, p), ends) in links {
+            e.links
+                .insert(end(d, p), ends.iter().map(|(a, b)| end(a, b)).collect());
+            e.vendors.insert(d.to_string(), "nxos".to_string());
+        }
+        e
+    }
+
+    fn down(e: &Estate, layer: &str) -> BTreeMap<String, BTreeSet<String>> {
+        layer_downs(e, &[Layer::link_down(layer).unwrap()]).unwrap()
+    }
+
+    fn set(items: &[(&str, &[&str])]) -> BTreeMap<String, BTreeSet<String>> {
+        items
+            .iter()
+            .map(|(d, ps)| (d.to_string(), ps.iter().map(|p| p.to_string()).collect()))
+            .collect()
+    }
+
+    #[test]
+    fn a_layer_on_a_vpc_member_keeps_the_port_of_the_leaf_up() {
+        let e = estate(&[
+            (("leaf", "Po1"), &[("swA", "Po10"), ("swB", "Po10")]),
+            (("swA", "Po10"), &[("leaf", "Po1")]),
+            (("swB", "Po10"), &[("leaf", "Po1")]),
+        ]);
+        assert_eq!(down(&e, "swA:Po10"), set(&[("swA", &["Po10"])]));
+        assert_eq!(
+            down(&e, "leaf:Po1"),
+            set(&[("leaf", &["Po1"]), ("swA", &["Po10"]), ("swB", &["Po10"])])
+        );
+    }
 }

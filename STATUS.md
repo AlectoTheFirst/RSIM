@@ -9,7 +9,8 @@ Section 13 of `../rsim-project/BUILD_BRIEF.md` gives the steps. `../rsim-project
 | 2: the packet sets | Complete |
 | 3: collection, the snapshot store, ingestion and the snapshot view | Complete |
 | 4: routing, convergence and the RIB guard | In progress |
-| 5 to 9 | Not started |
+| 5: what-if | In progress |
+| 6 to 9 | Not started |
 
 ## Step 1b
 
@@ -45,6 +46,12 @@ Complete:
 - the crate `rsim-guard`: the database guard (the table `ospf-guard`) and the route guard (the table `rib-guard`, the claim `rib-fib-agree` and the guard flag of each route lookup step)
 
 Not started: BGP and the convergence detection.
+
+## Step 5
+
+Complete: the unnamed scenario of a snapshot with the layer `link-down`, rule W0, and the option `--down` of `rsim-cli`, the argument `down` of `rsim-mcp` and the query parameter `down` of `rsim-api`.
+
+Not started: the named scenarios and the other layer kinds.
 
 ## Other parts
 

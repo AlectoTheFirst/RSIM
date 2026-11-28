@@ -39,6 +39,16 @@ const SELECTION: &[(&str, &str)] = &[
     ("cursor", "Cursor"),
 ];
 
+/// The first segments after `/v1/twins/{twin}/` of the routes that take
+/// the parameter `down`.
+const LAYERED: [&str; 3] = ["queries", "tables", "claims"];
+
+/// True if the route of the segments after `/v1/twins/{twin}` takes the
+/// parameter `down`.
+pub fn takes_layers(rest: &[&str]) -> bool {
+    rest.first().is_some_and(|s| LAYERED.contains(s))
+}
+
 /// The routes, in a fixed order.
 pub const ROUTES: &[Route] = &[
     Route {
@@ -406,6 +416,20 @@ pub fn document() -> Value {
         params.extend(r.query.iter().map(|(name, d)| {
             json!({"name": name, "in": "query", "required": false, "description": d, "schema": {"type": "string"}})
         }));
+        let rest: Vec<&str> = r
+            .path
+            .strip_prefix("/v1/twins/{twin}/")
+            .map(|p| p.split('/').collect())
+            .unwrap_or_default();
+        if takes_layers(&rest) {
+            params.push(json!({
+                "name": "down",
+                "in": "query",
+                "required": false,
+                "description": "Links down, each as <device>:<interface>",
+                "schema": {"type": "array", "items": {"type": "string"}}
+            }));
+        }
         let files = FILES.iter().find(|(id, _)| *id == r.id).map(|f| f.1);
         let success = if let Some(media) = files {
             let content: Map<String, Value> = media

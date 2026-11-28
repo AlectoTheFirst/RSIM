@@ -43,6 +43,7 @@ pub(super) struct Vx<'a> {
     /// The collected routes of each VRF, for the resolution of a next hop
     /// with no interface.
     pub resolver: &'a Resolver,
+    pub pass: &'a crate::scenario::Pass,
 }
 
 /// The lowering of one device: its name, the file of its config, its
@@ -306,6 +307,7 @@ pub fn lower(
         tunnel: &tunnel,
         encap: encap_l3.as_ref(),
         resolver: &resolver,
+        pass: &ext.pass,
     };
     let mut tables = BTreeMap::new();
     for v in &vrfs {
@@ -1481,8 +1483,10 @@ impl L<'_> {
         }
         let v6: Prefix = "::/0".parse().expect("a valid prefix");
         t.insert(v6, Route::new(RouteKind::Static, Vec::new(), Vec::new()));
-        if collected && guard {
-            self.guard(&mut t, vrf, active, col, names, next);
+        // A scenario pass writes no guard row.
+        let scenario = matches!(vx.pass, crate::scenario::Pass::Scenario(_));
+        if collected && (guard || scenario) {
+            self.guard(&mut t, vrf, active, col, names, next, vx.pass);
         }
         t
     }
@@ -1577,6 +1581,7 @@ impl L<'_> {
     /// static, local and OSPFv2 routes against the collected route table
     /// `t`, whose routes it marks. The notes of the static routes are not
     /// kept, as the device forwards on `t`.
+    #[allow(clippy::too_many_arguments)]
     fn guard(
         &mut self,
         t: &mut Fib,
@@ -1585,6 +1590,7 @@ impl L<'_> {
         col: &Collected,
         names: &Names,
         next: &str,
+        pass: &crate::scenario::Pass,
     ) {
         let notes = self.out.notes.len();
         let mut cands = self.config_candidates(vrf, active, names, next);
@@ -1645,9 +1651,15 @@ impl L<'_> {
         }
         cands.extend(crate::guard::outside(&routes, t, PLATFORM));
         let computed = install(cands, super::profile::COMPUTED_THROUGH_DEFAULT);
-        let rows = rsim_guard::compare(vrf, &computed, t, &routes);
-        rsim_guard::mark(t, &rows);
-        self.out.guard.extend(rows);
+        crate::scenario::finish(
+            pass,
+            vrf,
+            t,
+            &routes,
+            computed,
+            &mut self.out.guard,
+            &mut self.out.base,
+        );
     }
 }
 

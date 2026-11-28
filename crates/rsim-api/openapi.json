@@ -8009,6 +8009,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Links down, each as <device>:<interface>",
+            "in": "query",
+            "name": "down",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
           }
         ],
         "responses": {
@@ -8093,6 +8105,18 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Links down, each as <device>:<interface>",
+            "in": "query",
+            "name": "down",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             }
           }
         ],
@@ -8212,6 +8236,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Links down, each as <device>:<interface>",
+            "in": "query",
+            "name": "down",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
           }
         ],
         "requestBody": {
@@ -8295,6 +8331,18 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Links down, each as <device>:<interface>",
+            "in": "query",
+            "name": "down",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             }
           }
         ],
@@ -8401,6 +8449,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Links down, each as <device>:<interface>",
+            "in": "query",
+            "name": "down",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
           }
         ],
         "responses": {
@@ -8476,6 +8536,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Links down, each as <device>:<interface>",
+            "in": "query",
+            "name": "down",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
           }
         ],
         "responses": {
@@ -8543,6 +8615,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Links down, each as <device>:<interface>",
+            "in": "query",
+            "name": "down",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
           }
         ],
         "responses": {
@@ -8609,6 +8693,18 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Links down, each as <device>:<interface>",
+            "in": "query",
+            "name": "down",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             }
           }
         ],
@@ -8772,6 +8868,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Links down, each as <device>:<interface>",
+            "in": "query",
+            "name": "down",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
           }
         ],
         "responses": {
@@ -8857,6 +8965,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Links down, each as <device>:<interface>",
+            "in": "query",
+            "name": "down",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
           }
         ],
         "responses": {
@@ -8939,6 +9059,18 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Links down, each as <device>:<interface>",
+            "in": "query",
+            "name": "down",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             }
           }
         ],
@@ -9034,6 +9166,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Links down, each as <device>:<interface>",
+            "in": "query",
+            "name": "down",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
           }
         ],
         "responses": {
@@ -9091,6 +9235,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Links down, each as <device>:<interface>",
+            "in": "query",
+            "name": "down",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             }
           }
         ],
@@ -9177,6 +9333,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Links down, each as <device>:<interface>",
+            "in": "query",
+            "name": "down",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
           }
         ],
         "responses": {
@@ -9243,6 +9411,18 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Links down, each as <device>:<interface>",
+            "in": "query",
+            "name": "down",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             }
           }
         ],

@@ -3,7 +3,8 @@
 //! The identifier grammar: `builtin.<topology>` for a hand-built topology of the tests,
 //! `snapshot-YYYY-MM-DD-HHMMSS` for a snapshot of the store, named by its UTC second, and
 //! `snapshot-YYYY-MM-DD-HHMMSS~<scenario>~<hash>` for a scenario on a snapshot. A name is
-//! lower-case letters, digits and `-`, so `.` and `~` only separate the parts.
+//! lower-case letters, digits and `-`, so `.` and `~` only separate the parts. An unnamed
+//! scenario has an empty `<scenario>`.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -135,6 +136,27 @@ impl TwinJson {
         }
     }
 
+    /// The twin of an unnamed scenario: the snapshot of the store at a time
+    /// in milliseconds since the Unix epoch, with the text of each layer in
+    /// order. The identifier is `<snapshot>~~<hash>`, where `<hash>` is the
+    /// first 12 hex digits of the 64-bit FNV-1a hash of the layer texts,
+    /// each text followed by a line feed.
+    pub fn scenario(time_ms: u64, layers: Vec<String>) -> TwinJson {
+        let base = snapshot_name(time_ms);
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in layers.iter().flat_map(|l| l.bytes().chain(*b"\n")) {
+            hash ^= u64::from(b);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        let hex = format!("{hash:016x}");
+        TwinJson {
+            id: format!("{base}~~{}", &hex[..12]),
+            base,
+            snapshot: Some(utc_time(time_ms)),
+            layers,
+        }
+    }
+
     /// The second since the Unix epoch of the snapshot of the base, or
     /// `None` for a hand-built topology of the tests.
     pub fn snapshot_second(&self) -> Option<u64> {
@@ -199,6 +221,32 @@ mod tests {
         for s in (1_709_164_800..1_709_337_600).step_by(997) {
             assert_eq!(snapshot_second(&snapshot_name(s * 1000)), Some(s));
         }
+    }
+
+    #[test]
+    fn a_scenario_identifier_holds_the_snapshot_and_the_hash_of_its_layers() {
+        let layers = |l: &[&str]| l.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let a = TwinJson::scenario(TIME, layers(&["link-down r1:eth1", "link-down r2:eth2"]));
+        assert_eq!(a.base, "snapshot-2026-11-22-140512");
+        assert!(a.id.starts_with("snapshot-2026-11-22-140512~~"), "{}", a.id);
+        assert_eq!(a.id.len(), a.base.len() + 2 + 12);
+        assert_eq!(a.snapshot.as_deref(), Some("2026-11-22T14:05:12Z"));
+        assert_eq!(
+            a.layers,
+            layers(&["link-down r1:eth1", "link-down r2:eth2"])
+        );
+        let again = TwinJson::scenario(TIME, layers(&["link-down r1:eth1", "link-down r2:eth2"]));
+        assert_eq!(a, again);
+        let other = TwinJson::scenario(TIME, layers(&["link-down r2:eth2", "link-down r1:eth1"]));
+        assert_ne!(a.id, other.id);
+        let joined = TwinJson::scenario(TIME, layers(&["link-down r1:eth1link-down r2:eth2"]));
+        assert_ne!(a.id, joined.id);
+        // The FNV-1a hash of one line feed.
+        assert_eq!(
+            TwinJson::scenario(TIME, layers(&[""])).id,
+            format!("{}~~af63c74c8601", a.base)
+        );
+        assert!(TwinJson::parse(&a.id).is_err());
     }
 
     #[test]

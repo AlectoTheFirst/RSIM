@@ -148,8 +148,13 @@ fn the_flags_of_the_query_commands_are_the_fields_of_the_registry() {
             })
             .filter(|k| k != "topology")
             .collect();
-        // The output flags of the command line.
-        fields.extend(["format".to_string(), "pretty".to_string()]);
+        // The output flags of the command line, and the layers of a store
+        // twin.
+        fields.extend([
+            "format".to_string(),
+            "pretty".to_string(),
+            "down".to_string(),
+        ]);
         fields.sort();
         assert_eq!(flags(command), fields, "{command}");
     }
