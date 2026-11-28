@@ -723,6 +723,42 @@ impl Derive<'_, '_, '_, '_> {
     }
 }
 
+/// True if each variable with an unknown source is unknown from the
+/// other variables: the least set of unknown variables that is closed under
+/// the selection holds each of them. A variable that is not yet in the set
+/// counts as one with no path. `picks` gets the unknown selections with
+/// their reasons.
+fn grounded(g: &Group<'_, '_>, assign: &[Option<Assign>], picks: &mut [BestPath]) -> bool {
+    let unknown: Vec<usize> = (0..picks.len())
+        .filter(|&v| assign[v] == Some(Assign::Unknown))
+        .collect();
+    let mut done = vec![false; picks.len()];
+    loop {
+        let mut progress = false;
+        for &v in &unknown {
+            if done[v] {
+                continue;
+            }
+            let get = |w: usize| {
+                Some(if assign[w] == Some(Assign::Unknown) && !done[w] {
+                    BestPath::None
+                } else {
+                    picks[w].clone()
+                })
+            };
+            let cands = g.candidates(v, &get).expect("a full assignment");
+            if let Choice::Unknown(u) = g.choose(v, &cands) {
+                picks[v] = BestPath::Unknown(u);
+                done[v] = true;
+                progress = true;
+            }
+        }
+        if !progress {
+            return unknown.iter().all(|&v| done[v]);
+        }
+    }
+}
+
 /// The best paths of each stable assignment, in the order of the search.
 fn search(g: &Group<'_, '_>, fixed: &[Option<BestPath>]) -> Vec<Vec<BestPath>> {
     let n = g.vars.len();
@@ -779,7 +815,9 @@ fn search(g: &Group<'_, '_>, fixed: &[Option<BestPath>]) -> Vec<Vec<BestPath>> {
         if depth == free.len() {
             if complete {
                 let picks: Result<Vec<BestPath>, Fail> = (0..n).map(|v| d.best(v)).collect();
-                if let Ok(p) = picks {
+                if let Ok(mut p) = picks
+                    && grounded(g, assign, &mut p)
+                {
                     found.push(p);
                 }
             }
