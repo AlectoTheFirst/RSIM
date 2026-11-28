@@ -1093,6 +1093,18 @@ impl<'n, 'a> Group<'n, 'a> {
         v: usize,
         get: &dyn Fn(usize) -> Option<BestPath>,
     ) -> Option<Vec<Cand>> {
+        self.candidates_with(v, get, &|_| false)
+    }
+
+    /// The candidates of `v` with no leak or link for which `skip` is true.
+    /// `get` is not called for the source variable of a skipped leak or
+    /// link.
+    pub fn candidates_with(
+        &self,
+        v: usize,
+        get: &dyn Fn(usize) -> Option<BestPath>,
+        skip: &dyn Fn(Source) -> bool,
+    ) -> Option<Vec<Cand>> {
         let mut out = Vec::new();
         let mut push = |source: Source, offer: &Offer| match offer {
             Offer::None => {}
@@ -1119,10 +1131,16 @@ impl<'n, 'a> Group<'n, 'a> {
             push(Source::Seed(*si), offer);
         }
         for (pos, &(li, w)) in self.inleaks[v].iter().enumerate() {
+            if skip(Source::Leak(pos)) {
+                continue;
+            }
             let best = get(w)?;
             push(Source::Leak(pos), &self.leak(li, &best));
         }
         for &(l, w) in &self.inlinks[v] {
+            if skip(Source::Link(l)) {
+                continue;
+            }
             let best = get(w)?;
             let offer = match self.suppressed(w, get)? {
                 Some(true) => Offer::None,

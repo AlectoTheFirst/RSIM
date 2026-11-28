@@ -677,6 +677,9 @@ struct Derive<'s, 'g, 'n, 'a> {
     g: &'g Group<'n, 'a>,
     fixed: &'s [Option<BestPath>],
     assign: &'s [Option<Assign>],
+    /// The links and leaks into a variable that give no path for each
+    /// possible value of their source variable.
+    silent: &'s BTreeSet<(usize, Source)>,
     memo: RefCell<Vec<Memo>>,
 }
 
@@ -776,7 +779,8 @@ impl Derive<'_, '_, '_, '_> {
                 None
             }
         };
-        let Some(cands) = self.g.candidates(v, &get) else {
+        let skip = |s: Source| self.silent.contains(&(v, s));
+        let Some(cands) = self.g.candidates_with(v, &get, &skip) else {
             return match fail.into_inner() {
                 Some(Fail::Missing) => Err(Fail::Missing),
                 _ => Ok(false),
@@ -1037,13 +1041,41 @@ fn search(
             d
         })
         .collect();
+    // A link or a leak whose source gives no path for each value of its
+    // domain and for an unknown value gives no candidate, so the check of a
+    // variable does not wait for that source.
+    let probe = BestPath::Unknown(Unknown::new(Reason::SelectionNotKnown, String::new()));
+    let mut silent: BTreeSet<(usize, Source)> = BTreeSet::new();
+    for &v in &free {
+        for &(l, w) in &g.inlinks[v] {
+            if g.suppressors[w].is_empty()
+                && dom[w]
+                    .iter()
+                    .chain([&probe])
+                    .all(|x| matches!(g.transfer(l, w, x), Offer::None))
+            {
+                silent.insert((v, Source::Link(l)));
+            }
+        }
+        for (pos, &(li, w)) in g.inleaks[v].iter().enumerate() {
+            if dom[w]
+                .iter()
+                .chain([&probe])
+                .all(|x| matches!(g.leak(li, x), Offer::None))
+            {
+                silent.insert((v, Source::Leak(pos)));
+            }
+        }
+    }
     let mut assign: Vec<Option<Assign>> = vec![None; n];
     let mut found = Vec::new();
+    #[allow(clippy::too_many_arguments)]
     fn walk(
         g: &Group<'_, '_>,
         fixed: &[Option<BestPath>],
         free: &[usize],
         domains: &[Vec<Assign>],
+        silent: &BTreeSet<(usize, Source)>,
         depth: usize,
         assign: &mut Vec<Option<Assign>>,
         found: &mut Vec<Vec<BestPath>>,
@@ -1053,6 +1085,7 @@ fn search(
             g,
             fixed,
             assign: &assign[..],
+            silent,
             memo: RefCell::new(vec![Memo::Todo; n]),
         };
         let mut complete = true;
@@ -1078,11 +1111,20 @@ fn search(
         let v = free[depth];
         for &a in &domains[depth] {
             assign[v] = Some(a);
-            walk(g, fixed, free, domains, depth + 1, assign, found);
+            walk(g, fixed, free, domains, silent, depth + 1, assign, found);
         }
         assign[v] = None;
     }
-    walk(g, fixed, &free, &domains, 0, &mut assign, &mut found);
+    walk(
+        g,
+        fixed,
+        &free,
+        &domains,
+        &silent,
+        0,
+        &mut assign,
+        &mut found,
+    );
     found
 }
 
