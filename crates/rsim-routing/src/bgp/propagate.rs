@@ -838,20 +838,23 @@ impl<'n, 'a> Group<'n, 'a> {
             multipath: mp.iter().map(|&j| paths[j].clone()).collect(),
         };
         let decision = decide(&paths, &p.options, profile.as_ref());
-        if matches!(decision, Decision::Best { .. } | Decision::Tie { .. })
-            && let Some(winners) = order_winners(&paths, &p.options, profile.as_ref())
-            && winners.len() > 1
-        {
-            let profile = profile.expect("order winners have a profile");
-            return Choice::Tie(
-                winners
-                    .iter()
-                    .map(|&t| {
-                        let mp = multipath_for(&paths, t, &p.options, &profile);
-                        (cands[t].source, sel(t, &mp))
-                    })
-                    .collect(),
-            );
+        if matches!(decision, Decision::Best { .. } | Decision::Tie { .. }) {
+            match order_winners(&paths, &p.options, profile.as_ref()) {
+                Err(u) => return Choice::Unknown(u),
+                Ok(Some(winners)) if winners.len() > 1 => {
+                    let profile = profile.expect("order winners have a profile");
+                    return Choice::Tie(
+                        winners
+                            .iter()
+                            .map(|&t| {
+                                let mp = multipath_for(&paths, t, &p.options, &profile);
+                                (cands[t].source, sel(t, &mp))
+                            })
+                            .collect(),
+                    );
+                }
+                Ok(_) => {}
+            }
         }
         match decision {
             Decision::NoCandidate => Choice::None,

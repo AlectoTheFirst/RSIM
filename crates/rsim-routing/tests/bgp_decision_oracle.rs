@@ -13,7 +13,8 @@ use std::net::IpAddr;
 use bgp_common::{Rng, ibgp, path, permutations};
 use rsim_routing::Platform;
 use rsim_routing::bgp::{
-    AsPath, BgpOptions, BgpOrigin, BgpPath, BgpProfile, Decision, LocalOrigin, SessionKind, decide,
+    AsPath, BgpOptions, BgpOrigin, BgpPath, BgpProfile, Decision, LocalOrigin, ORDER_BOUND, Reason,
+    SessionKind, decide, order_winners,
 };
 
 const PLATFORMS: [Platform; 5] = [
@@ -325,4 +326,83 @@ fn two_paths_with_the_empty_as_path_compare_their_med() {
     let profile = BgpProfile::of(Platform::Iosxe);
     let d = decide(&[a, b], &BgpOptions::default(), Some(&profile));
     assert!(matches!(d, Decision::Best { best: 1, .. }), "{d:?}");
+}
+
+#[test]
+fn the_order_winners_are_the_best_paths_of_each_order_of_the_candidates() {
+    let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+    let mut several = 0;
+    for case in 0..300 {
+        let n = 1 + (case % 6);
+        let base = generate(&mut rng, n);
+        let platform = rng.pick(&[Platform::Iosxe, Platform::FrrTraditional, Platform::Nxos]);
+        let options = BgpOptions {
+            deterministic_med: Some(false),
+            missing_as_worst: rng.pick(&[None, Some(true)]),
+            compare_routerid: rng.below(2) == 0,
+            ..BgpOptions::default()
+        };
+        let profile = BgpProfile::of(platform);
+        let mut seen: BTreeSet<BTreeSet<Option<IpAddr>>> = BTreeSet::new();
+        for perm in permutations(n) {
+            let c: Vec<BgpPath> = perm.iter().map(|&i| base[i].clone()).collect();
+            seen.insert(identities(
+                &c,
+                &chosen(&decide(&c, &options, Some(&profile))),
+            ));
+        }
+        let all: BTreeSet<Option<IpAddr>> = seen.iter().flatten().copied().collect();
+        match order_winners(&base, &options, Some(&profile)) {
+            Ok(Some(w)) => {
+                assert_eq!(identities(&base, &w), all, "case {case}");
+                if w.len() > 1 {
+                    several += 1;
+                }
+            }
+            Ok(None) => assert_eq!(seen.len(), 1, "case {case}: {seen:?}"),
+            Err(u) => panic!("case {case}: {u}"),
+        }
+    }
+    assert!(several > 0);
+    let c = med_cycle();
+    let profile = BgpProfile::of(Platform::Iosxe);
+    assert_eq!(
+        order_winners(&c, &BgpOptions::default(), Some(&profile)),
+        Ok(Some(vec![0, 1, 2]))
+    );
+}
+
+#[test]
+fn the_order_winners_over_more_top_candidates_than_the_bound_are_unknown() {
+    let profile = BgpProfile::of(Platform::Iosxe);
+    let options = BgpOptions::default();
+    let paths = |n: usize, neighbours: &[u32], extra: usize| -> Vec<BgpPath> {
+        (0..n + extra)
+            .map(|i| {
+                let asn = neighbours[i % neighbours.len()];
+                let mut as_path = vec![asn];
+                if i >= n {
+                    as_path.push(64999);
+                }
+                let mut p = ibgp(&format!("198.51.{}.{}", i / 200, 1 + i % 200), &as_path);
+                p.med = Some(i as u32);
+                p.igp_cost = (i % 3) as u32;
+                p
+            })
+            .collect()
+    };
+    let over = paths(ORDER_BOUND + 1, &[64500, 64501], 0);
+    let Err(u) = order_winners(&over, &options, Some(&profile)) else {
+        panic!("a result over the bound");
+    };
+    assert_eq!(u.reason, Reason::CandidateOrderNotComputed);
+    let lower = paths(ORDER_BOUND, &[64500, 64501], 30);
+    assert!(matches!(
+        order_winners(&lower, &options, Some(&profile)),
+        Ok(Some(_))
+    ));
+    let one_as = paths(40, &[64500], 0);
+    assert_eq!(order_winners(&one_as, &options, Some(&profile)), Ok(None));
+    let d = decide(&one_as, &options, Some(&profile));
+    assert!(matches!(d, Decision::Best { best: 0, .. }), "{d:?}");
 }

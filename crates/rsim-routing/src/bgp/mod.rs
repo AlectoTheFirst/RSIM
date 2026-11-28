@@ -27,7 +27,7 @@ pub use converge::{
     BgpResult, Convergence, ConvergenceKind, CycleWitness, Event, GroupResult, Note, Outcome,
     RouteAt, RouteState, WheelSpoke, compute, install_candidates,
 };
-pub use decision::{Decision, DecisionStage, DecisionStep, decide};
+pub use decision::{Decision, DecisionStage, DecisionStep, ORDER_BOUND, decide, order_winners};
 pub use lists::{
     AsPathLine, AsPathList, AsPathTerm, Cmp, CommunityLine, CommunityList, CommunityTerm, Half,
     PrefixList, PrefixListEntry,
@@ -553,10 +553,15 @@ pub enum Reason {
     /// A selection that a path depends on is not known: an unknown
     /// selection of the search, or an unknown summary-only aggregate.
     SelectionNotKnown,
+    /// The best path depends on the order of more than
+    /// [`decision::ORDER_BOUND`] candidates.
+    CandidateOrderNotComputed,
     /// The prefix group has more than one stable outcome.
     MultipleStableOutcomes,
     /// The prefix group has no stable outcome.
     NoConvergence,
+    /// The stable outcome of the prefix group holds an unknown route.
+    ConvergenceNotDetermined,
     /// The calculation reaches a state that its invariants exclude.
     Internal,
 }
@@ -571,8 +576,10 @@ impl Reason {
             Reason::NextHopNotResolved => "next hop not resolved",
             Reason::OriginationNotKnown => "origination not known",
             Reason::SelectionNotKnown => "selection not known",
+            Reason::CandidateOrderNotComputed => "candidate order not computed",
             Reason::MultipleStableOutcomes => "multiple stable outcomes",
             Reason::NoConvergence => "no convergence",
+            Reason::ConvergenceNotDetermined => "convergence not determined",
             Reason::Internal => "internal error",
         }
     }

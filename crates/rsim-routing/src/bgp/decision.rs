@@ -215,42 +215,77 @@ pub(crate) fn multipath_for(
     multipath(candidates, base, &cmp, options, limit)
 }
 
+/// The largest number of candidates over which [`order_winners`] computes
+/// the best path of each order.
+pub const ORDER_BOUND: usize = 12;
+
 /// The candidates that are a best path of [`decide`] in some order of
-/// `candidates`, in ascending index order. `None` when the result does not
-/// depend on the order: with always-compare-med, with deterministic MED, with
-/// no profile, and when no pair of candidates is decided by the MED.
+/// `candidates`, in ascending index order. `Ok(None)` when the result does
+/// not depend on the order: with always-compare-med, with deterministic
+/// MED, with no profile, and when no pair of the top candidates is decided
+/// by the MED or each top candidate has the same neighbour AS. The top
+/// candidates are the candidates that no candidate beats in a step before
+/// the MED. They are the only candidates that can win in an order.
 ///
 /// The set is exact. Each state of the calculation is a set of compared
-/// candidates with the tied paths of one order of them, so its size grows
-/// with the number of subsets of the candidates.
-pub(crate) fn order_winners(
+/// top candidates with the tied paths of one order of them, so its size
+/// grows with the number of subsets of the top candidates. More than
+/// [`ORDER_BOUND`] top candidates give `Unknown` with the reason
+/// "candidate order not computed".
+pub fn order_winners(
     candidates: &[BgpPath],
     options: &BgpOptions,
     profile: Option<&BgpProfile>,
-) -> Option<Vec<usize>> {
-    let profile = profile?;
+) -> Result<Option<Vec<usize>>, Unknown> {
+    let Some(profile) = profile else {
+        return Ok(None);
+    };
     let cmp = comparator(profile, options);
     if cmp.always_med || profile.deterministic_med(options) {
-        return None;
+        return Ok(None);
     }
     let n = candidates.len();
-    let med_pair = (0..n).any(|i| {
-        (i + 1..n).any(|j| {
+    let top: Vec<usize> = (0..n)
+        .filter(|&x| {
+            !(0..n).any(|y| {
+                matches!(
+                    cmp.compare(&candidates[y], &candidates[x]),
+                    Rank::Better(s) if s < DecisionStep::Med
+                )
+            })
+        })
+        .collect();
+    let med_pair = top.iter().enumerate().any(|(i, &a)| {
+        top[i + 1..].iter().any(|&b| {
             matches!(
-                cmp.compare(&candidates[i], &candidates[j]),
+                cmp.compare(&candidates[a], &candidates[b]),
                 Rank::Better(DecisionStep::Med) | Rank::Worse(DecisionStep::Med)
             )
         })
     });
     if !med_pair {
-        return None;
+        return Ok(None);
+    }
+    let first = candidates[top[0]].as_path.neighbour_as();
+    if first != NeighbourAs::Set
+        && top
+            .iter()
+            .all(|&x| candidates[x].as_path.neighbour_as() == first)
+    {
+        return Ok(None);
+    }
+    if top.len() > ORDER_BOUND {
+        return Err(Unknown::new(
+            Reason::CandidateOrderNotComputed,
+            format!("{} candidates, more than {ORDER_BOUND}", top.len()),
+        ));
     }
     let mut layer: BTreeMap<BTreeSet<usize>, BTreeSet<Vec<usize>>> =
         BTreeMap::from([(BTreeSet::new(), BTreeSet::from([Vec::new()]))]);
-    for _ in 0..n {
+    for _ in 0..top.len() {
         let mut next: BTreeMap<BTreeSet<usize>, BTreeSet<Vec<usize>>> = BTreeMap::new();
         for (done, wins) in &layer {
-            for x in (0..n).filter(|x| !done.contains(x)) {
+            for &x in top.iter().filter(|x| !done.contains(x)) {
                 let mut key = done.clone();
                 key.insert(x);
                 let entry = next.entry(key).or_default();
@@ -274,7 +309,7 @@ pub(crate) fn order_winners(
         layer = next;
     }
     let winners: BTreeSet<usize> = layer.into_values().flatten().flatten().collect();
-    Some(winners.into_iter().collect())
+    Ok(Some(winners.into_iter().collect()))
 }
 
 /// The best path of a route from its candidates under the options of the
