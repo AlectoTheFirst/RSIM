@@ -60,7 +60,7 @@ pub struct RouteAt {
 /// The computed state of a route at a process.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RouteState {
-    Selected(Selection),
+    Selected(Box<Selection>),
     Unknown(Unknown),
 }
 
@@ -128,6 +128,9 @@ pub struct GroupResult {
     pub convergence: Convergence,
     /// The rounds of the forward pass.
     pub rounds: usize,
+    /// True if the forward pass reaches a fixed point. The routes of a
+    /// converged group are then the routes of the fixed point.
+    pub fixed_point: bool,
 }
 
 /// An event of the calculation for the 3D view.
@@ -255,7 +258,7 @@ fn outcome(g: &Group<'_, '_>, picks: &[BestPath]) -> (OutcomeKey, BTreeMap<Route
             }
             (BestPath::Path(p), c) => match c.selection_of(p) {
                 Some(sel) => {
-                    routes.insert(route_at(g, v), RouteState::Selected(sel.clone()));
+                    routes.insert(route_at(g, v), RouteState::Selected(Box::new(sel.clone())));
                     Some(sel.multipath.iter().map(plain).collect())
                 }
                 None => None,
@@ -475,13 +478,13 @@ fn strict_domains(g: &Group<'_, '_>) -> Option<Vec<BTreeSet<BestPath>>> {
             break;
         }
     }
-    for v in 0..n {
+    for (v, held) in cands.iter().enumerate() {
         let (p, _) = g.at(v);
-        if cands[v].is_empty() {
+        if held.is_empty() {
             continue;
         }
         let profile = p.profile()?;
-        let list: Vec<&BgpPath> = cands[v].iter().collect();
+        let list: Vec<&BgpPath> = held.iter().collect();
         for i in 0..list.len() {
             for j in i + 1..list.len() {
                 let pair = [list[i].clone(), list[j].clone()];
@@ -608,7 +611,7 @@ enum Fail {
 enum Memo {
     Todo,
     Busy,
-    Done(Result<BestPath, Fail>),
+    Done(Box<Result<BestPath, Fail>>),
 }
 
 /// The best paths that an assignment of sources gives.
@@ -633,12 +636,12 @@ impl Derive<'_, '_, '_, '_> {
         }
         match &self.memo.borrow()[v] {
             Memo::Busy => return Err(Fail::Invalid),
-            Memo::Done(r) => return r.clone(),
+            Memo::Done(r) => return (**r).clone(),
             Memo::Todo => {}
         }
         self.memo.borrow_mut()[v] = Memo::Busy;
         let r = self.compute(v);
-        self.memo.borrow_mut()[v] = Memo::Done(r.clone());
+        self.memo.borrow_mut()[v] = Memo::Done(Box::new(r.clone()));
         r
     }
 
@@ -822,6 +825,7 @@ fn run_group(
         keys: keys.clone(),
         convergence,
         rounds,
+        fixed_point: matches!(fwd, Forward::Fixed(_)),
     };
     if let Forward::Fixed(state) = &fwd
         && fixed.iter().zip(state).all(|(f, s)| f.as_ref() == Some(s))
@@ -887,7 +891,10 @@ fn run_group(
         result: convergence.kind(),
     });
     let routes = match &convergence {
-        Convergence::Converged { .. } => outcomes.swap_remove(0).routes,
+        Convergence::Converged { .. } => match &fwd {
+            Forward::Fixed(state) => outcome(&g, state).1,
+            Forward::Cycle { .. } => outcomes.swap_remove(0).routes,
+        },
         Convergence::MultipleStableOutcomes { outcomes } => unknown_routes(
             &g,
             &picks,

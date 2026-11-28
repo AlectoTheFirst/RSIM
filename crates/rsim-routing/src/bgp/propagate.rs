@@ -494,7 +494,7 @@ pub(crate) struct Cand {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Choice {
     None,
-    Best(Source, Selection),
+    Best(Source, Box<Selection>),
     /// The decision reaches a tie. Each tied path with its multipath.
     Tie(Vec<(Source, Selection)>),
     Unknown(Unknown),
@@ -515,7 +515,7 @@ impl Choice {
     /// The selection whose best path is `best`.
     pub fn selection_of(&self, best: &BgpPath) -> Option<&Selection> {
         match self {
-            Choice::Best(_, s) if &s.best == best => Some(s),
+            Choice::Best(_, s) if &s.best == best => Some(&**s),
             Choice::Tie(t) => t.iter().map(|(_, s)| s).find(|s| &s.best == best),
             _ => None,
         }
@@ -783,7 +783,7 @@ impl<'n, 'a> Group<'n, 'a> {
             Decision::NoCandidate => Choice::None,
             Decision::Best {
                 best, multipath, ..
-            } => Choice::Best(cands[best].source, sel(best, &multipath)),
+            } => Choice::Best(cands[best].source, Box::new(sel(best, &multipath))),
             Decision::Tie { tied, .. } => {
                 let profile = profile.expect("a tie has a profile");
                 Choice::Tie(
