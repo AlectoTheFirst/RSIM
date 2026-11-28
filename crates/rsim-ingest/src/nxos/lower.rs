@@ -1483,10 +1483,10 @@ impl L<'_> {
         }
         let v6: Prefix = "::/0".parse().expect("a valid prefix");
         t.insert(v6, Route::new(RouteKind::Static, Vec::new(), Vec::new()));
-        if collected && guard {
+        // A scenario pass writes no guard row.
+        let scenario = matches!(vx.pass, crate::scenario::Pass::Scenario(_));
+        if collected && (guard || scenario) {
             self.guard(&mut t, vrf, active, col, names, next, vx.pass);
-        } else if collected && let crate::scenario::Pass::Scenario(s) = vx.pass {
-            t = crate::scenario::fallback(&t, &s.down, &s.spans);
         }
         t
     }
