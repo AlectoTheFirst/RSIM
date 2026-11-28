@@ -5,6 +5,7 @@
 pub mod bgp;
 pub mod bgp_build;
 pub mod bgp_config;
+pub mod bgp_neighbors;
 pub mod bgp_peers;
 pub mod bgp_routes;
 pub mod bgp_table;
