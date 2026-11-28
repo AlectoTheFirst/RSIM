@@ -1218,16 +1218,7 @@ impl Scope<'_, '_> {
             }
             None => return,
         };
-        let Some(id) = router_id else {
-            out.gap(
-                vrf,
-                &UNICAST,
-                "router-id not configured",
-                vec![span(file, lines(sc))],
-            );
-            return;
-        };
-        let mut p = BgpProcess::new("", vrf, Some(Platform::Iosxr), Asn(asn), id);
+        let mut p = BgpProcess::new("", vrf, Some(Platform::Iosxr), Asn(asn), router_id);
         p.cluster_id = cluster_id;
         p.options = options;
         p.networks = networks;
@@ -1410,7 +1401,7 @@ router bgp 64502
     ) -> PolicyResult {
         let peer = Peer {
             address: Some("198.51.100.1".parse::<IpAddr>().unwrap()),
-            router_id: "198.51.100.1".parse().unwrap(),
+            router_id: Some("198.51.100.1".parse().unwrap()),
             asn: Asn(64501),
             kind: SessionKind::Ebgp,
         };
@@ -1468,8 +1459,8 @@ router bgp 64502
     #[test]
     fn the_process_takes_the_options_and_the_group_settings() {
         let (d, _) = lowered();
-        assert_eq!(d.processes.len(), 1);
-        let p = &d.processes[0];
+        assert_eq!(d.processes.len(), 2);
+        let p = d.processes.iter().find(|p| p.vrf == "default").unwrap();
         assert_eq!(p.cluster_id, Some("192.0.2.100".parse().unwrap()));
         assert!(p.options.always_compare_med);
         assert_eq!(p.options.maximum_paths_ibgp, Some(2));
@@ -1489,10 +1480,15 @@ router bgp 64502
             ("default", "redistribute connected"),
             ("default", "as-override"),
             ("RED", "import route-target"),
-            ("RED", "router-id not configured"),
         ] {
             assert!(texts.contains(&want), "{want:?} not in {texts:?}");
         }
+        assert!(
+            !texts.iter().any(|(_, t)| t.contains("router-id")),
+            "{texts:?}"
+        );
+        let red = d.processes.iter().find(|p| p.vrf == "RED").unwrap();
+        assert_eq!(red.router_id, None);
     }
 
     #[test]

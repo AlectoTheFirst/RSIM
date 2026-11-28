@@ -701,15 +701,7 @@ pub fn read(
             }
         };
         let v = r.vrfs.remove(&vrf).unwrap_or_default();
-        let Some(id) = v.router_id.or(router_id) else {
-            out.gap(
-                &vrf,
-                &UNICAST,
-                "router-id not configured",
-                vec![span(file, lines(rb))],
-            );
-            continue;
-        };
+        let id = v.router_id.or(router_id);
         let mut p = BgpProcess::new("", &vrf, Some(Platform::Iosxe), Asn(asn), id);
         p.cluster_id = cluster_id;
         p.options = options.clone();
@@ -859,7 +851,7 @@ vrf definition RED
     fn the_processes_take_the_options_the_originations_and_the_inherited_settings() {
         let (d, _) = lowered();
         let p = d.processes.iter().find(|p| p.vrf == "default").unwrap();
-        assert_eq!(p.router_id, "192.0.2.1".parse::<Ipv4Addr>().unwrap());
+        assert_eq!(p.router_id, Some("192.0.2.1".parse::<Ipv4Addr>().unwrap()));
         assert!(p.options.always_compare_med && p.options.multipath_relax);
         assert_eq!(p.options.maximum_paths_ebgp, Some(2));
         assert_eq!(p.options.default_ipv4_unicast, Some(false));
@@ -883,7 +875,10 @@ vrf definition RED
         assert!(ebgp.send_community && ebgp.send_community_extended);
         assert!(ebgp.activated.contains(&Family::Ipv4Unicast));
         let red = d.processes.iter().find(|p| p.vrf == "RED").unwrap();
-        assert_eq!(red.router_id, "192.0.2.99".parse::<Ipv4Addr>().unwrap());
+        assert_eq!(
+            red.router_id,
+            Some("192.0.2.99".parse::<Ipv4Addr>().unwrap())
+        );
         assert!(red.neighbors.contains_key(&addr("203.0.113.9")));
         assert!(p.policy.community_lists.contains_key("10"));
         assert!(p.policy.as_path_lists.contains_key("5"));

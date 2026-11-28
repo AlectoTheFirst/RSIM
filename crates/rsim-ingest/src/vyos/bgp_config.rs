@@ -895,16 +895,13 @@ fn process(
     for (text, l, fams) in &gaps {
         out.gap(vrf, fams, text.clone(), vec![span(file, *l)]);
     }
-    let Some(id) = params.router_id else {
-        out.gap(
-            vrf,
-            &UNICAST,
-            "router-id not configured",
-            vec![span(file, lines(b))],
-        );
-        return;
-    };
-    let mut p = BgpProcess::new("", vrf, Some(Platform::FrrTraditional), Asn(asn), id);
+    let mut p = BgpProcess::new(
+        "",
+        vrf,
+        Some(Platform::FrrTraditional),
+        Asn(asn),
+        params.router_id,
+    );
     p.cluster_id = params.cluster_id;
     p.options = params.options;
     p.options.maximum_paths_ebgp = ebgp;
@@ -1043,7 +1040,7 @@ mod tests {
     fn run(set: &PolicySet, name: &str, prefix: &str, as_path: &[u32]) -> PolicyResult {
         let peer = Peer {
             address: Some("198.51.100.2".parse::<IpAddr>().unwrap()),
-            router_id: "198.51.100.2".parse().unwrap(),
+            router_id: Some("198.51.100.2".parse().unwrap()),
             asn: Asn(64501),
             kind: SessionKind::Ebgp,
         };

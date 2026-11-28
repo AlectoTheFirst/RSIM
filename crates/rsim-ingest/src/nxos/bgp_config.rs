@@ -953,16 +953,7 @@ impl Scope<'_, '_> {
             }
             None => return,
         };
-        let Some(id) = router_id else {
-            out.gap(
-                vrf,
-                &UNICAST,
-                "router-id not configured",
-                vec![span(file, lines(sc))],
-            );
-            return;
-        };
-        let mut p = BgpProcess::new("", vrf, Some(Platform::Nxos), Asn(asn), id);
+        let mut p = BgpProcess::new("", vrf, Some(Platform::Nxos), Asn(asn), router_id);
         p.cluster_id = cluster_id;
         p.options = options;
         p.networks = networks;
@@ -1091,7 +1082,7 @@ vrf context RED
     fn path(prefix: &str) -> (RouteKey, BgpPath) {
         let peer = Peer {
             address: Some("198.51.100.2".parse::<IpAddr>().unwrap()),
-            router_id: "198.51.100.2".parse().unwrap(),
+            router_id: Some("198.51.100.2".parse().unwrap()),
             asn: Asn(64501),
             kind: SessionKind::Ebgp,
         };
@@ -1147,9 +1138,9 @@ vrf context RED
     #[test]
     fn the_processes_take_the_options_the_originations_and_the_inherited_family_settings() {
         let (d, _) = lowered();
-        let p = &d.processes[0];
+        let p = d.processes.iter().find(|p| p.vrf == "default").unwrap();
         assert_eq!(p.vrf, "default");
-        assert_eq!(p.router_id, "192.0.2.11".parse::<Ipv4Addr>().unwrap());
+        assert_eq!(p.router_id, Some("192.0.2.11".parse::<Ipv4Addr>().unwrap()));
         assert!(p.options.multipath_relax);
         assert_eq!(p.options.deterministic_med, Some(false));
         assert_eq!(p.options.maximum_paths_ebgp, Some(4));
@@ -1179,11 +1170,16 @@ vrf context RED
             ("default", "allowas-in 2"),
             ("RED", "advertise l2vpn evpn"),
             ("RED", "route-target both auto evpn"),
-            ("RED", "router-id not configured"),
         ] {
             assert!(texts.contains(&want), "{want:?} not in {texts:?}");
         }
-        assert_eq!(d.processes.len(), 1);
+        assert!(
+            !texts.iter().any(|(_, t)| t.contains("router-id")),
+            "{texts:?}"
+        );
+        assert_eq!(d.processes.len(), 2);
+        let red = d.processes.iter().find(|p| p.vrf == "RED").unwrap();
+        assert_eq!(red.router_id, None);
     }
 
     #[test]

@@ -38,7 +38,7 @@ pub struct Gap {
 /// The BGP config of one device for the calculation.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DeviceBgp {
-    /// The process of each VRF with a known AS and router ID.
+    /// The process of each VRF with a known AS.
     pub processes: Vec<BgpProcess>,
     pub gaps: Vec<Gap>,
 }
