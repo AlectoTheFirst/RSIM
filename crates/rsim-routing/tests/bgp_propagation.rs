@@ -534,3 +534,101 @@ fn an_export_from_a_process_with_no_profile_is_unknown() {
     let out = export(&r1, n, ip("10.0.0.1"), &key(P), &ibgp("10.9.9.9", &[1]));
     assert!(matches!(out, Offer::Unknown(u) if u.reason == Reason::NoBgpProfile));
 }
+
+fn transfer_back(lab: &Lab, path: &rsim_routing::bgp::BgpPath) -> (Offer, Offer) {
+    let s = Session {
+        a: end("r2", "10.0.0.1"),
+        b: end("r1", "10.0.0.2"),
+    };
+    SessionStage {
+        sender: lab.get("r2"),
+        receiver: lab.get("r1"),
+        session: &s,
+    }
+    .run(&(key(P), path.clone()))
+}
+
+/// The pair with the `local-as` 64999 at r1 towards r2.
+fn local_as(no_prepend: bool, replace_as: bool) -> Lab {
+    let mut lab = pair(65002);
+    lab.neighbor_mut("r1", "10.0.0.2").local_as = Some(rsim_routing::bgp::LocalAs {
+        asn: Asn(64999),
+        no_prepend,
+        replace_as,
+        dual_as: false,
+    });
+    lab.neighbor_mut("r2", "10.0.0.1").remote_as = Asn(64999);
+    lab
+}
+
+#[test]
+fn a_local_as_is_prepended_before_the_as_of_the_process_unless_replace_as() {
+    let p = ibgp("10.9.9.9", &[65010]);
+    let out = transfer(&local_as(false, false), &p).0;
+    assert_eq!(sent(&out).as_path, AsPath::sequence(&[64999, 65001, 65010]));
+    let out = transfer(&local_as(false, true), &p).0;
+    assert_eq!(sent(&out).as_path, AsPath::sequence(&[64999, 65010]));
+}
+
+#[test]
+fn a_received_path_gets_the_local_as_unless_no_prepend_and_a_path_with_it_is_rejected() {
+    let p = ibgp("10.9.9.9", &[65020]);
+    let got = transfer_back(&local_as(false, false), &p).1;
+    assert_eq!(sent(&got).as_path, AsPath::sequence(&[64999, 65002, 65020]));
+    assert_eq!(sent(&got).peer.asn, Asn(65002));
+    let got = transfer_back(&local_as(true, false), &p).1;
+    assert_eq!(sent(&got).as_path, AsPath::sequence(&[65002, 65020]));
+    let looped = ibgp("10.9.9.9", &[65020, 64999]);
+    assert_eq!(
+        transfer_back(&local_as(false, false), &looped).1,
+        Offer::None
+    );
+}
+
+#[test]
+fn a_key_that_holds_a_session_address_joins_the_group_of_each_key() {
+    let mut lab = pair(65002);
+    lab.originate("r1", P);
+    lab.originate("r1", "198.51.100.0/24");
+    assert_eq!(lab.run().groups.len(), 2);
+    lab.originate("r1", "10.0.0.0/24");
+    let r = lab.run();
+    assert_eq!(r.groups.len(), 1);
+    assert_eq!(r.groups[0].keys.len(), 3);
+}
+
+#[test]
+fn a_sole_seed_with_attributes_not_collected_propagates_and_a_contested_one_is_unknown() {
+    let mut lab = pair(65002);
+    lab.seed("r1", "192.0.2.1", 64500, P, &[64500], None);
+    lab.input.seeds[0].path.attributes_collected = false;
+    let r = lab.run();
+    assert!(!best(&r, "r2", P).unwrap().best.attributes_collected);
+    lab.seed("r1", "192.0.2.5", 64501, P, &[64501], None);
+    let r = lab.run();
+    let Some(RouteState::Unknown(u)) = state(&r, "r1", P) else {
+        panic!("{:?}", state(&r, "r1", P));
+    };
+    assert_eq!(u.reason, Reason::PathAttributesNotCollected);
+}
+
+#[test]
+fn an_accepted_seed_skips_the_import_policy_and_a_received_seed_runs_it() {
+    let mut lab = pair(65002);
+    lab.seed("r1", "192.0.2.1", 64500, P, &[64500], None);
+    lab.proc("r1").policy.policies.insert(
+        "deny".to_string(),
+        RoutePolicy {
+            name: "deny".to_string(),
+            body: PolicyBody::RouteMap(Vec::new()),
+            spans: Vec::new(),
+        },
+    );
+    lab.neighbor_mut("r1", "192.0.2.1").import_policy = Some("deny".to_string());
+    assert!(state(&lab.run(), "r1", P).is_none());
+    lab.input.seeds[0].received = false;
+    let r = lab.run();
+    let b = best(&r, "r1", P).unwrap();
+    assert_eq!(b.best.peer.address, Some(ip("192.0.2.1")));
+    assert_eq!(b.best.peer.kind, SessionKind::Ebgp);
+}

@@ -347,7 +347,16 @@ fn a_chain_of_201_routers_converges_after_more_than_200_rounds() {
     lab.originate("r000", SPP_PREFIX);
     let r = lab.run();
     assert_eq!(only_group(&r), &Convergence::Converged { note: None });
-    assert!(r.groups[0].rounds > 200, "{}", r.groups[0].rounds);
+    let last = r
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Round { round, changed, .. } if !changed.is_empty() => Some(*round),
+            _ => None,
+        })
+        .max();
+    assert_eq!(last, Some(201));
+    assert!(r.groups[0].rounds > 201);
     assert_eq!(as_path_of(&r, "r200", SPP_PREFIX).unwrap().len(), 200);
 }
 
@@ -377,6 +386,7 @@ fn simple_paths(u: usize, n: usize) -> Vec<Vec<usize>> {
 fn generated_instances_give_the_stable_assignments_of_the_definition() {
     let mut rng = Rng(0x5eed_0bad_9a4d_9e75);
     let mut kinds = [0usize; 3];
+    let mut searched = 0;
     let mut cases = vec![
         spp(&[
             &[&[1, 3, 0], &[1, 0]],
@@ -396,6 +406,9 @@ fn generated_instances_give_the_stable_assignments_of_the_definition() {
                 let i = rng.below(all.len() as u64) as usize;
                 chosen.push(all.remove(i));
             }
+            if cases.len() % 2 == 1 {
+                chosen.sort_by_key(|p: &Vec<usize>| std::cmp::Reverse(p.len()));
+            }
             perm.push(chosen);
         }
         cases.push(Spp { perm });
@@ -405,6 +418,9 @@ fn generated_instances_give_the_stable_assignments_of_the_definition() {
         let stable = spp_stable(&s);
         let r = spp_lab(&s).run();
         let conv = only_group(&r);
+        if r.events.iter().any(|e| matches!(e, Event::Search { .. })) {
+            searched += 1;
+        }
         match stable.len() {
             0 => {
                 kinds[2] += 1;
@@ -439,6 +455,7 @@ fn generated_instances_give_the_stable_assignments_of_the_definition() {
         }
     }
     assert!(kinds.iter().all(|&k| k > 0), "{kinds:?}");
+    assert!(searched >= 10, "{searched}");
 }
 
 #[test]
@@ -460,4 +477,95 @@ fn the_same_input_in_another_order_gives_the_same_result() {
     assert_eq!(format!("{a:?}"), format!("{:?}", lab.run()));
     assert_eq!(a.groups.len(), 2);
     assert_eq!(a.worst, rsim_routing::bgp::ConvergenceKind::NoConvergence);
+}
+
+#[test]
+fn disagree_inside_one_reflector_cluster_has_2_stable_outcomes() {
+    use rsim_routing::bgp::{Clause, PolicyBody, RoutePolicy, SetAction};
+    let mut lab = Lab::default();
+    for (d, rid) in [
+        ("rr", "10.255.0.1"),
+        ("c1", "10.255.0.11"),
+        ("c2", "10.255.0.12"),
+    ] {
+        lab.router(d, Platform::Iosxe, 65001, rid);
+    }
+    lab.peer("rr", "10.1.11.1", "c1", "10.1.11.11");
+    lab.peer("rr", "10.1.12.1", "c2", "10.1.12.12");
+    lab.neighbor_mut("rr", "10.1.11.11").route_reflector_client = true;
+    lab.neighbor_mut("rr", "10.1.12.12").route_reflector_client = true;
+    lab.seed("c1", "192.0.2.1", 64500, SPP_PREFIX, &[64500], None);
+    lab.seed("c2", "192.0.2.2", 64500, SPP_PREFIX, &[64500], None);
+    for (c, rr) in [("c1", "10.1.11.1"), ("c2", "10.1.12.1")] {
+        let mut cl = Clause::new(10, true);
+        cl.sets.push(SetAction::LocalPref(200));
+        lab.proc(c).policy.policies.insert(
+            "from-rr".to_string(),
+            RoutePolicy {
+                name: "from-rr".to_string(),
+                body: PolicyBody::RouteMap(vec![cl]),
+                spans: Vec::new(),
+            },
+        );
+        lab.neighbor_mut(c, rr).import_policy = Some("from-rr".to_string());
+    }
+    let r = lab.run();
+    assert!(r.groups[0].fixed_point);
+    let Convergence::MultipleStableOutcomes { outcomes } = only_group(&r) else {
+        panic!("{:?}", r.groups[0].convergence);
+    };
+    let exits: BTreeSet<Vec<_>> = outcomes
+        .iter()
+        .map(|o| {
+            o.routes
+                .values()
+                .map(|s| match s {
+                    RouteState::Selected(s) => s.best.next_hop,
+                    RouteState::Unknown(u) => panic!("{u}"),
+                })
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        exits,
+        BTreeSet::from([
+            vec![Some(ip("192.0.2.1")); 3],
+            vec![Some(ip("192.0.2.2")); 3],
+        ])
+    );
+}
+
+/// A route reflector `rrx` with the client `cx` that holds no path of the
+/// instance.
+fn add_reflector_pair(lab: &mut Lab) {
+    lab.router("rrx", Platform::Iosxe, 65100, "10.255.1.1");
+    lab.router("cx", Platform::Iosxe, 65100, "10.255.1.2");
+    lab.peer("rrx", "10.100.0.1", "cx", "10.100.0.2");
+    lab.neighbor_mut("rrx", "10.100.0.2").route_reflector_client = true;
+}
+
+#[test]
+fn a_reflector_with_no_path_of_the_group_keeps_the_uniqueness_check() {
+    let good = spp(&[
+        &[&[1, 3, 0], &[1, 0]],
+        &[&[2, 1, 0], &[2, 0]],
+        &[&[3, 0], &[3, 2, 0]],
+    ]);
+    let mut lab = spp_lab(&good);
+    add_reflector_pair(&mut lab);
+    let r = lab.run();
+    assert_eq!(only_group(&r), &Convergence::Converged { note: None });
+    assert!(!r.events.iter().any(|e| matches!(e, Event::Search { .. })));
+    let wheel = spp(&[
+        &[&[1, 0], &[1, 3, 0]],
+        &[&[2, 3, 0], &[2, 0], &[2, 1, 0]],
+        &[&[3, 2, 1, 0], &[3, 0], &[3, 2, 0]],
+    ]);
+    let mut lab = spp_lab(&wheel);
+    add_reflector_pair(&mut lab);
+    let r = lab.run();
+    let Convergence::Converged { note: Some(note) } = only_group(&r) else {
+        panic!("{:?}", r.groups[0].convergence);
+    };
+    assert_eq!(note.wheel.len(), 2);
 }
