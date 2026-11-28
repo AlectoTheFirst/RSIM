@@ -241,7 +241,7 @@ pub enum PolicyResult {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Outcome {
-    Permit(BgpPath),
+    Permit(Box<BgpPath>),
     Deny,
 }
 
@@ -436,7 +436,7 @@ impl<'a> Run<'a> {
             }
             matched = true;
             match c.continue_to {
-                None => return Ok(Outcome::Permit(out)),
+                None => return Ok(Outcome::Permit(Box::new(out))),
                 Some(Continue::Next) => i += 1,
                 Some(Continue::Seq(s)) => {
                     if s <= c.seq {
@@ -447,7 +447,7 @@ impl<'a> Run<'a> {
             }
         }
         Ok(if matched {
-            Outcome::Permit(out)
+            Outcome::Permit(Box::new(out))
         } else {
             Outcome::Deny
         })
@@ -548,8 +548,8 @@ impl<'a> Run<'a> {
                 let flow = self.rpl(&policy.name, stmts, &mut out, &mut passed)?;
                 Ok(match flow {
                     Flow::Drop => Outcome::Deny,
-                    Flow::Done => Outcome::Permit(out),
-                    Flow::Next if passed => Outcome::Permit(out),
+                    Flow::Done => Outcome::Permit(Box::new(out)),
+                    Flow::Next if passed => Outcome::Permit(Box::new(out)),
                     Flow::Next => Outcome::Deny,
                 })
             }
@@ -608,7 +608,7 @@ pub fn evaluate(
 ) -> PolicyResult {
     let mut details = BTreeSet::new();
     match explore(policy, key, path, ctx, &mut Vec::new(), &mut details) {
-        Some(Outcome::Permit(p)) => PolicyResult::Permit(p),
+        Some(Outcome::Permit(p)) => PolicyResult::Permit(*p),
         Some(Outcome::Deny) => PolicyResult::Deny,
         None => PolicyResult::Unknown(Unknown {
             reason: Reason::PolicyClauseNotEvaluated,
