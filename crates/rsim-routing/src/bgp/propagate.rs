@@ -706,15 +706,42 @@ impl<'n, 'a> Group<'n, 'a> {
         }
     }
 
+    /// True if each path that `w` can select comes from an iBGP neighbour
+    /// that is not a route-reflector client.
+    fn ibgp_only(&self, w: usize) -> bool {
+        let p = self.net.procs[self.vars[w].0];
+        self.network[w].is_none()
+            && !self.has_aggregate[w]
+            && self.seeds[w].is_empty()
+            && self.inlinks[w].iter().all(|&(l, _)| {
+                let n = &p.neighbors[&self.net.links[l].to_neighbor];
+                p.session_kind(n) == SessionKind::Ibgp && !n.route_reflector_client
+            })
+    }
+
     /// The sent path over link `l` for the best path `best` of variable
-    /// `w` at the sender, with no summary-only check.
+    /// `w` at the sender, with no summary-only check. An unknown best path
+    /// gives no path to a neighbour with `shutdown`, and no path to an iBGP
+    /// neighbour that is not a route-reflector client when each path of `w`
+    /// comes from such a neighbour.
     pub fn sent(&self, l: usize, w: usize, best: &BestPath) -> Offer {
         let link = &self.net.links[l];
         let sender = self.net.procs[link.from];
         let key = self.vars[w].1;
         match best {
             BestPath::None => Offer::None,
-            BestPath::Unknown(u) => Offer::Unknown(u.clone()),
+            BestPath::Unknown(u) => {
+                let n = &sender.neighbors[&link.from_neighbor];
+                if n.shutdown
+                    || (sender.session_kind(n) == SessionKind::Ibgp
+                        && !n.route_reflector_client
+                        && self.ibgp_only(w))
+                {
+                    Offer::None
+                } else {
+                    Offer::Unknown(u.clone())
+                }
+            }
             BestPath::Path(p) => export(
                 sender,
                 &sender.neighbors[&link.from_neighbor],
