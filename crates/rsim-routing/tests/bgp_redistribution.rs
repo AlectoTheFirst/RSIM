@@ -142,7 +142,7 @@ fn a_route_map_filters_the_connected_routes_and_a_default_route_needs_default_in
     assert!(state(&r, "r1", "10.20.1.0/24").is_none());
     assert!(state(&r, "r1", "0.0.0.0/0").is_none());
     assert!(
-        install_candidates(&r, &!lab.input.processes)
+        !install_candidates(&r, &lab.input.processes)
             .contains_key(&("r1".to_string(), "default".to_string()))
     );
     lab.proc("r1").default_originate = true;
