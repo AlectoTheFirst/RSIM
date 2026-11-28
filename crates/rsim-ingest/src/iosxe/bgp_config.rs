@@ -73,7 +73,6 @@ const AF_LINES: &[&str] = &[
     "network * route-map *",
     "network * mask *",
     "network * mask * route-map *",
-    "aggregate-address ..",
     "maximum-paths *",
     "maximum-paths ibgp *",
     "bgp router-id *",
@@ -105,6 +104,12 @@ pub fn push_entries(t: &mut Table) {
     for line in AF_LINES.iter().chain(NEIGHBOR_LINES) {
         tree(t, &[p, "address-family ..", line]);
     }
+    t.push_checked(
+        &[p, "address-family ..", "aggregate-address .."],
+        State::Handled,
+        Reach::Subtree,
+        aggregate_options,
+    );
     for line in TEMPLATE_LINES {
         tree(t, &[p, "template peer-policy *", line]);
     }
@@ -120,6 +125,20 @@ pub fn push_entries(t: &mut Table) {
     ] {
         tree(t, &[object]);
     }
+}
+
+/// True for an `aggregate-address` line with a prefix, or an address and
+/// a mask, and only the options `summary-only` and `as-set`.
+fn aggregate_options(key: &str) -> bool {
+    let w: Vec<&str> = key.split_whitespace().collect();
+    let ["aggregate-address", _, rest @ ..] = w.as_slice() else {
+        return false;
+    };
+    let opts = match rest {
+        [m, opts @ ..] if m.parse::<Ipv4Addr>().is_ok() => opts,
+        _ => rest,
+    };
+    opts.iter().all(|o| matches!(*o, "summary-only" | "as-set"))
 }
 
 /// The kind of a line of a neighbour, a peer group or a template.
@@ -784,6 +803,7 @@ router bgp 64500
   network 203.0.113.0 mask 255.255.255.0
   network 10.0.0.0
   aggregate-address 203.0.112.0 255.255.254.0 summary-only
+  aggregate-address 198.51.100.0 255.255.255.0 attribute-map SET
   maximum-paths 2
   redistribute connected
   neighbor GROUP route-map OUT out
@@ -879,6 +899,10 @@ vrf definition RED
             .collect();
         for want in [
             ("default", "redistribute connected"),
+            (
+                "default",
+                "aggregate-address 198.51.100.0 255.255.255.0 attribute-map SET",
+            ),
             ("default", "neighbor 198.51.100.9 allowas-in 2"),
             ("default", "fall-over bfd"),
             ("RED", "route-target import 64500:1"),
