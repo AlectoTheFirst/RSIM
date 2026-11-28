@@ -1,0 +1,120 @@
+{
+  "default": {
+    "203.0.113.2": {
+      "advertised-routes": {
+        "answer": {}
+      },
+      "received-routes": {
+        "answer": {
+          "TABLE_vrf": {
+            "ROW_vrf": [
+              {
+                "TABLE_afi": {
+                  "ROW_afi": [
+                    {
+                      "TABLE_safi": {
+                        "ROW_safi": [
+                          {
+                            "TABLE_prefix": {
+                              "ROW_prefix": [
+                                {
+                                  "TABLE_path": {
+                                    "ROW_path": [
+                                      {
+                                        "aspath": "64499",
+                                        "best": "false",
+                                        "ipnexthop": "203.0.113.2",
+                                        "localpref": "100",
+                                        "metric": "0",
+                                        "origin": "i",
+                                        "pathnr": "0",
+                                        "weight": "0"
+                                      }
+                                    ]
+                                  },
+                                  "ipprefix": "192.0.2.128/25"
+                                },
+                                {
+                                  "TABLE_path": {
+                                    "ROW_path": [
+                                      {
+                                        "aspath": "64499",
+                                        "best": "false",
+                                        "ipnexthop": "203.0.113.2",
+                                        "localpref": "100",
+                                        "metric": "0",
+                                        "origin": "i",
+                                        "pathnr": "0",
+                                        "weight": "0"
+                                      }
+                                    ]
+                                  },
+                                  "ipprefix": "198.51.100.128/25"
+                                }
+                              ]
+                            },
+                            "af-name": "IPv4 Unicast",
+                            "safi": "1"
+                          }
+                        ]
+                      },
+                      "afi": "1"
+                    }
+                  ]
+                },
+                "vrf-name-out": "default"
+              }
+            ]
+          }
+        }
+      },
+      "routes": {
+        "answer": {
+          "TABLE_vrf": {
+            "ROW_vrf": [
+              {
+                "TABLE_afi": {
+                  "ROW_afi": [
+                    {
+                      "TABLE_safi": {
+                        "ROW_safi": [
+                          {
+                            "TABLE_prefix": {
+                              "ROW_prefix": [
+                                {
+                                  "TABLE_path": {
+                                    "ROW_path": [
+                                      {
+                                        "aspath": "64499",
+                                        "best": "true",
+                                        "ipnexthop": "203.0.113.2",
+                                        "localpref": "100",
+                                        "metric": "0",
+                                        "origin": "i",
+                                        "pathnr": "0",
+                                        "weight": "0"
+                                      }
+                                    ]
+                                  },
+                                  "ipprefix": "198.51.100.128/25"
+                                }
+                              ]
+                            },
+                            "af-name": "IPv4 Unicast",
+                            "safi": "1"
+                          }
+                        ]
+                      },
+                      "afi": "1"
+                    }
+                  ]
+                },
+                "vrf-name-out": "default"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

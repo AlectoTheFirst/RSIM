@@ -11,7 +11,9 @@
 //! n1 originates 203.0.113.64/26 and 203.0.113.128/26, and x2 originates
 //! 192.0.2.64/27 and 203.0.113.128/26. The import policy of x1 from n1 sets
 //! the local preference 200 for 203.0.113.128/26. The collected route of
-//! 198.51.100.128/25 of n1 comes from the peer outside the twin.
+//! 198.51.100.128/25 of n1 comes from the peer outside the twin, and the
+//! tables of that peer in `n1-routes.json` hold it and 192.0.2.128/25,
+//! which the import policy of n1 denies.
 
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -19,8 +21,9 @@ use std::net::IpAddr;
 use rsim_core::{Header, PROTO_TCP};
 use rsim_engine::{Answer, Executor, Query, Twin};
 use rsim_guard::Category;
+use rsim_ingest::bgp::Collected as Section;
 use rsim_ingest::collected::{Collected, RouteRow, row_span};
-use rsim_ingest::estate::{Estate, Input, assemble, assemble_scenario};
+use rsim_ingest::estate::{Estate, Input, assemble, assemble_scenario, assemble_with};
 use rsim_ingest::scenario::{Layer, NOT_RECOMPUTED};
 
 fn fixture(name: &str) -> String {
@@ -182,6 +185,33 @@ fn a_route_from_a_peer_outside_the_twin_is_a_seed() {
         row(&e, "x2", "198.51.100.128/25").2,
         ["198.51.100.5@TenGigE0/0/0/0"]
     );
+}
+
+#[test]
+fn the_received_table_of_a_peer_outside_the_twin_goes_through_the_import_policy() {
+    let section = Section::Fresh(
+        fixture("n1-routes.json").into_bytes(),
+        "n1/bgp_routes".into(),
+    );
+    let sessions = BTreeMap::from([(
+        "n1".to_string(),
+        BTreeMap::from([(rsim_ingest::bgp_routes::ROUTES.to_string(), section)]),
+    )]);
+    let e = assemble_with(inputs(), &sessions);
+    let b = e.bgp_routing.as_ref().unwrap();
+    assert_eq!(b.input.seeds.len(), 2);
+    for s in &b.input.seeds {
+        assert!(s.received && s.path.attributes_collected, "{s:?}");
+    }
+    assert_eq!(row(&e, "n1", "198.51.100.128/25").0, Category::Seeded);
+    assert_eq!(row(&e, "x2", "198.51.100.128/25").0, Category::Match);
+    // The import policy of n1 denies 192.0.2.128/25, so no device has it.
+    for rows in e.guard.values() {
+        assert!(
+            rows.iter()
+                .all(|r| r.prefix.to_string() != "192.0.2.128/25")
+        );
+    }
 }
 
 #[test]
