@@ -142,9 +142,8 @@ fn a_route_map_filters_the_connected_routes_and_a_default_route_needs_default_in
     assert!(state(&r, "r1", "10.20.1.0/24").is_none());
     assert!(state(&r, "r1", "0.0.0.0/0").is_none());
     assert!(
-        install_candidates(&r, &lab.input.processes)
-            .get(&("r1".to_string(), "default".to_string()))
-            .is_none()
+        install_candidates(&r, &!lab.input.processes)
+            .contains_key(&("r1".to_string(), "default".to_string()))
     );
     lab.proc("r1").default_originate = true;
     let r = lab.run();
@@ -307,7 +306,7 @@ fn a_vrf_imports_the_evpn_routes_of_its_target_with_the_tunnel_end_of_the_far_le
         own.best.peer.kind,
         SessionKind::Local(LocalOrigin::Redistribute)
     );
-    assert!(r.routes.get(&at("l3", "A", "10.1.1.0/24")).is_none());
+    assert!(!r.routes.contains_key(&at("l3", "A", "10.1.1.0/24")));
     // The VRF installs the imported route through the tunnel end, with the
     // iBGP distance.
     let overlay = overlay_candidates(&r, &input.processes);
@@ -383,7 +382,7 @@ fn a_vrf_leak_by_route_target_copies_the_selection_with_weight_0_and_once() {
             .ext_communities
             .contains(&ExtCommunity::RouteTarget(rt("65000:1")))
     );
-    assert!(r.routes.get(&at("d1", "C", "10.5.0.0/24")).is_none());
+    assert!(!r.routes.contains_key(&at("d1", "C", "10.5.0.0/24")));
     let inst = install_candidates(&r, &input.processes);
     let b = &inst[&("d1".to_string(), "B".to_string())][0];
     assert!(
