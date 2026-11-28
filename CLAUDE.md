@@ -183,6 +183,7 @@ Section 5 of the brief defines the contract. The `NetFunction` trait and the `Br
 
 - A function accepts a `PacketSet` and returns one or more branches. The branches partition the input: no packet is lost and no packet is duplicated, in each alternative of a forwarding choice and in each copy of a flood.
 - A function declares the context attributes that it needs and supplies. The compile step of the twin validates the composition; a violation is a build error for that twin.
+- A function reads no context attribute that it does not require. A function changes no context attribute that it does not provide. A function that enters a device clears each attribute that it does not provide and that is not in `ContextAttr::CROSS_DEVICE`.
 - A function declares the objects that it reads. These declarations control delta recompilation.
 - A function declares the QoS header fields that it reads and writes. The context attribute declarations cover the QoS attributes (section 16).
 - `FlowState` goes into a function and comes out of it as a value. Do not hide session state or NAT state in a function.
