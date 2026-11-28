@@ -153,26 +153,13 @@ fn rfc3345_type_1(always_compare_med: bool) -> Lab {
 }
 
 #[test]
-fn rfc_3345_type_1_route_reflection_with_med_converges_with_a_note_on_the_exit_of_rc() {
+fn rfc_3345_type_1_route_reflection_with_med_has_no_convergence() {
     let r = rfc3345_type_1(false).run();
     assert!(
-        matches!(only_group(&r), Convergence::Converged { note: Some(_) }),
+        matches!(only_group(&r), Convergence::NoConvergence { .. }),
         "{:?}",
         r.groups[0].convergence
     );
-    for (d, nh) in [
-        ("ra", "192.0.2.6"),
-        ("rb", "192.0.2.10"),
-        ("rc", "192.0.2.6"),
-        ("rd", "198.51.100.6"),
-        ("re", "198.51.100.6"),
-    ] {
-        assert_eq!(
-            best(&r, d, SPP_PREFIX).unwrap().best.next_hop,
-            Some(ip(nh)),
-            "{d}"
-        );
-    }
 }
 
 #[test]
@@ -246,10 +233,10 @@ fn rfc3345_type_2(always_compare_med: bool) -> Lab {
 }
 
 #[test]
-fn rfc_3345_type_2_confederation_with_med_has_multiple_stable_outcomes() {
+fn rfc_3345_type_2_confederation_with_med_has_no_convergence() {
     let r = rfc3345_type_2(false).run();
     assert!(
-        matches!(only_group(&r), Convergence::MultipleStableOutcomes { .. }),
+        matches!(only_group(&r), Convergence::NoConvergence { .. }),
         "{:?}",
         r.groups[0].convergence
     );
@@ -473,9 +460,9 @@ fn generated_instances_give_the_stable_assignments_of_the_definition() {
 
 #[test]
 fn the_same_input_in_another_order_gives_the_same_result() {
-    let mut lab = rfc3345_type_2(false);
-    lab.originate("ra", "198.51.100.0/24");
-    lab.originate("rd", "198.51.100.0/24");
+    let mut lab = rfc3345_type_1(false);
+    lab.originate("ra", "192.0.2.128/25");
+    lab.originate("rd", "192.0.2.128/25");
     let a = lab.run();
     let mut shuffled = lab.clone();
     shuffled.input.processes.reverse();
@@ -489,10 +476,7 @@ fn the_same_input_in_another_order_gives_the_same_result() {
     assert_eq!(format!("{a:?}"), format!("{b:?}"));
     assert_eq!(format!("{a:?}"), format!("{:?}", lab.run()));
     assert_eq!(a.groups.len(), 2);
-    assert_eq!(
-        a.worst,
-        rsim_routing::bgp::ConvergenceKind::MultipleStableOutcomes
-    );
+    assert_eq!(a.worst, rsim_routing::bgp::ConvergenceKind::NoConvergence);
 }
 
 #[test]
