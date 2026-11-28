@@ -83,27 +83,33 @@ fn the_coverage_lists_the_unhandled_lines() {
 }
 
 #[test]
-fn without_a_route_table_the_routing_protocols_and_policies_are_unhandled() {
+fn without_a_route_table_the_routing_protocols_are_unhandled_and_the_policies_handled() {
     let got = ranked(false);
     let paths: Vec<&str> = got.iter().map(|r| r.0.as_str()).collect();
     for p in [
         "router bgp */vrf */address-family ../redistribute connected",
-        "router bgp */bgp router-id 203.0.113.1",
         "router static ..",
-        "route-policy ..",
-        "end-policy",
-        "prefix-set ..",
-        "community-set ..",
-        "end-set",
         "vrf */address-family ..",
         "vrf */rd ..",
     ] {
         assert!(paths.contains(&p), "{p} is not in {paths:?}");
     }
+    for p in paths.iter() {
+        for word in [
+            "route-policy",
+            "end-policy",
+            "prefix-set",
+            "community-set",
+            "end-set",
+            "bgp router-id",
+        ] {
+            assert!(
+                !p.starts_with(word) && !p.contains(&format!("/{word}")),
+                "{p}"
+            );
+        }
+    }
     let count = |p: &str| got.iter().find(|r| r.0 == p).map(|r| r.1);
-    assert_eq!(count("end-policy"), Some(2));
-    assert_eq!(count("end-set"), Some(2));
-    assert_eq!(count("route-policy .."), Some(2));
     assert_eq!(count("vrf */address-family .."), Some(3));
 }
 

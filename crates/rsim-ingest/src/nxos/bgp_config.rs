@@ -778,7 +778,8 @@ pub fn read(
 /// family.
 fn route_targets(doc: &Document, file: &str, mask: &dyn Fn(&str) -> String, out: &mut DeviceBgp) {
     for s in doc.root.children() {
-        let ["vrf", "context", vrf] = words(s).as_slice() else {
+        let w = words(s);
+        let ["vrf", "context", vrf] = w.as_slice() else {
             continue;
         };
         for af in s.children() {

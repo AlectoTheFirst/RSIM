@@ -1,0 +1,30 @@
+Tue Nov 17 10:00:02.000 UTC
+
+VRF: default
+
+Codes: C - connected, S - static, R - RIP, B - BGP, (>) - Diversion path
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2, E - EGP
+       i - ISIS, L1 - IS-IS level-1, L2 - IS-IS level-2
+       ia - IS-IS inter area, su - IS-IS summary null, * - candidate default
+       U - per-user static route, o - ODR, L - local, G  - DAGR, l - LISP
+       A - access/subscriber, a - Application route
+       M - mobile route, r - RPL, t - Traffic Engineering, (!) - FRR Backup path
+
+Gateway of last resort is 203.0.113.254 to network 0.0.0.0
+Gateway of last resort is not set
+
+B    192.0.2.64/27 [200/0] via 192.0.2.2, 1d00h
+L    192.0.2.1/32 is directly connected, 1d00h, Loopback0
+O    192.0.2.2/32 [110/11] via 198.51.100.6, 1d00h, TenGigE0/0/0/1
+O    192.0.2.3/32 [110/11] via 198.51.100.10, 1d00h, TenGigE0/0/0/2
+C    198.51.100.0/30 is directly connected, 1d00h, TenGigE0/0/0/0
+L    198.51.100.2/32 is directly connected, 1d00h, TenGigE0/0/0/0
+C    198.51.100.4/30 is directly connected, 1d00h, TenGigE0/0/0/1
+L    198.51.100.5/32 is directly connected, 1d00h, TenGigE0/0/0/1
+C    198.51.100.8/30 is directly connected, 1d00h, TenGigE0/0/0/2
+L    198.51.100.9/32 is directly connected, 1d00h, TenGigE0/0/0/2
+B    198.51.100.128/25 [20/0] via 198.51.100.1, 1d00h
+B    203.0.113.64/26 [20/0] via 198.51.100.1, 1d00h
+B    203.0.113.128/26 [20/0] via 198.51.100.1, 1d00h

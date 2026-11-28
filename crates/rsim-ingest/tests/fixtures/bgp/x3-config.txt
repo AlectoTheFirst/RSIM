@@ -1,0 +1,38 @@
+hostname x3
+interface Loopback0
+ ipv4 address 192.0.2.3 255.255.255.255
+!
+interface TenGigE0/0/0/0
+ description x1
+ ipv4 address 198.51.100.10 255.255.255.252
+!
+route-policy PASS
+  pass
+end-policy
+!
+router ospf CORE
+ router-id 192.0.2.3
+ area 0
+  interface Loopback0
+   cost 1
+   passive enable
+  !
+  interface TenGigE0/0/0/0
+   cost 10
+   network point-to-point
+  !
+ !
+!
+router bgp 64502
+ bgp router-id 192.0.2.3
+ address-family ipv4 unicast
+ !
+ neighbor 192.0.2.1
+  remote-as 64502
+  description x1
+  update-source Loopback0
+  address-family ipv4 unicast
+  !
+ !
+!
+end
