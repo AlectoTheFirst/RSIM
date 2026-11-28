@@ -756,38 +756,47 @@ impl Derive<'_, '_, '_, '_> {
 }
 
 /// True if each variable with an unknown source is unknown from the
-/// other variables: the least set of unknown variables that is closed under
-/// the selection holds each of them. A variable that is not yet in the set
-/// counts as one with no path. `picks` gets the unknown selections with
-/// their reasons.
+/// other variables. The variables with an unknown source that are not yet
+/// unknown run synchronous rounds from no path, each with the selection of
+/// the round before, and a variable whose selection is unknown stays
+/// unknown. The check fails when the rounds repeat a state before each of
+/// them is unknown. `picks` gets the unknown selections with their reasons.
 fn grounded(g: &Group<'_, '_>, assign: &[Option<Assign>], picks: &mut [BestPath]) -> bool {
-    let unknown: Vec<usize> = (0..picks.len())
+    let n = picks.len();
+    let unknown: Vec<usize> = (0..n)
         .filter(|&v| assign[v] == Some(Assign::Unknown))
         .collect();
-    let mut done = vec![false; picks.len()];
+    let mut done = vec![false; n];
+    let mut trial = vec![BestPath::None; n];
+    let mut seen: BTreeSet<(Vec<bool>, Vec<BestPath>)> = BTreeSet::new();
     loop {
-        let mut progress = false;
-        for &v in &unknown {
-            if done[v] {
-                continue;
-            }
-            let get = |w: usize| {
-                Some(if assign[w] == Some(Assign::Unknown) && !done[w] {
-                    BestPath::None
-                } else {
-                    picks[w].clone()
-                })
-            };
-            let cands = g.candidates(v, &get).expect("a full assignment");
-            if let Choice::Unknown(u) = g.choose(v, &cands) {
-                picks[v] = BestPath::Unknown(u);
-                done[v] = true;
-                progress = true;
+        if unknown.iter().all(|&v| done[v]) {
+            return true;
+        }
+        if !seen.insert((done.clone(), trial.clone())) {
+            return false;
+        }
+        let value = |w: usize| {
+            Some(if assign[w] == Some(Assign::Unknown) && !done[w] {
+                trial[w].clone()
+            } else {
+                picks[w].clone()
+            })
+        };
+        let mut next = trial.clone();
+        let mut found = Vec::new();
+        for &v in unknown.iter().filter(|&&v| !done[v]) {
+            let cands = g.candidates(v, &value).expect("a full assignment");
+            match g.choose(v, &cands) {
+                Choice::Unknown(u) => found.push((v, u)),
+                c => next[v] = c.pick(),
             }
         }
-        if !progress {
-            return unknown.iter().all(|&v| done[v]);
+        for (v, u) in found {
+            picks[v] = BestPath::Unknown(u);
+            done[v] = true;
         }
+        trial = next;
     }
 }
 
