@@ -4,7 +4,12 @@
 //!
 //! A variable is one route key at one process. An EVPN IP prefix key has a
 //! variable only at a process of the default VRF with a neighbour that
-//! activates the EVPN family or with a leak. The candidates of a variable
+//! activates the EVPN family or with a leak, in the component over the
+//! sessions of these processes that holds the device of the route
+//! distinguisher of the key. A unicast key has a variable only at a process
+//! of a VRF other than the default VRF, or at a process with a neighbour
+//! whose families are not known or hold a unicast family, an origination, a
+//! redistribution, a seed or a leak into it. The candidates of a variable
 //! are its `network` path, its aggregate path, its redistributed paths, its
 //! seeds, the accepted paths of each session to the process, the seeds and
 //! the sessions by the neighbour address, and the paths of each leak to the
@@ -28,7 +33,7 @@ use super::session::{Offer, Session, export, receive};
 use super::stage::{ObjectRef, RoutingStage};
 use super::{
     AsPath, AsSegment, Asn, BgpOrigin, BgpPath, DEFAULT_VRF, Family, LocalOrigin, Peer, Reason,
-    RouteKey, SegmentKind, SessionKind, Unknown,
+    RouteDistinguisher, RouteKey, SegmentKind, SessionKind, Unknown,
 };
 
 /// The resolution of a next hop in the route table of a process.
@@ -429,8 +434,14 @@ pub(crate) struct Net<'a> {
     pub leaks: Vec<LeakLink>,
     /// The installed route of each process and prefix.
     pub igp_routes: BTreeMap<(usize, rsim_core::Prefix), &'a IgpRoute>,
-    /// True for a process that holds the EVPN IP prefix keys.
-    pub evpn: Vec<bool>,
+    /// The component over the sessions of each process that holds the EVPN
+    /// IP prefix keys, `None` for another process.
+    pub evpn: Vec<Option<usize>>,
+    /// The component of the process of the default VRF of the device of
+    /// each route distinguisher of an EVPN export.
+    pub rd_component: BTreeMap<RouteDistinguisher, usize>,
+    /// True for a process that holds the unicast keys.
+    pub unicast: Vec<bool>,
     pub igp: &'a dyn IgpView,
 }
 
@@ -532,7 +543,7 @@ impl<'a> Net<'a> {
                 igp_routes.insert((i, r.prefix), r);
             }
         }
-        let evpn = procs
+        let holds: Vec<bool> = procs
             .iter()
             .enumerate()
             .map(|(i, p)| {
@@ -544,13 +555,57 @@ impl<'a> Net<'a> {
                         || leaks.iter().any(|l| l.from == i || l.to == i))
             })
             .collect();
+        let links: Vec<Link> = links.into_iter().collect();
+        let mut parent: Vec<usize> = (0..procs.len()).collect();
+        fn root(parent: &mut [usize], mut i: usize) -> usize {
+            while parent[i] != i {
+                parent[i] = parent[parent[i]];
+                i = parent[i];
+            }
+            i
+        }
+        for l in links.iter().filter(|l| holds[l.from] && holds[l.to]) {
+            let (a, b) = (root(&mut parent, l.from), root(&mut parent, l.to));
+            if a != b {
+                parent[a.max(b)] = a.min(b);
+            }
+        }
+        let evpn: Vec<Option<usize>> = (0..procs.len())
+            .map(|i| holds[i].then(|| root(&mut parent, i)))
+            .collect();
+        let mut rd_component = BTreeMap::new();
+        for l in leaks.iter().filter(|l| l.kind == LeakKind::EvpnExport) {
+            if let (Some(rd), Some(c)) = (procs[l.from].targets.rd, evpn[l.to]) {
+                rd_component.insert(rd, c);
+            }
+        }
+        let unicast = procs
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                p.vrf != DEFAULT_VRF
+                    || p.neighbors.values().any(|n| {
+                        p.families(n)
+                            .is_none_or(|f| f.iter().any(|x| *x != Family::EvpnIpPrefix))
+                    })
+                    || !p.networks.is_empty()
+                    || !p.aggregates.is_empty()
+                    || !p.redistributions.is_empty()
+                    || seeds.iter().any(|s| s.device == p.device && s.vrf == p.vrf)
+                    || leaks
+                        .iter()
+                        .any(|l| l.to == i && l.kind != LeakKind::EvpnExport)
+            })
+            .collect();
         Ok(Net {
             procs,
-            links: links.into_iter().collect(),
+            links,
             seeds,
             leaks,
             igp_routes,
             evpn,
+            rd_component,
+            unicast,
             igp,
         })
     }
@@ -563,8 +618,10 @@ impl<'a> Net<'a> {
 
     /// The keys of the originations, the installed routes of the processes
     /// with a `redistribute` statement and the seeds, and the EVPN IP prefix
-    /// key of each unicast key for each VRF that advertises its routes as
-    /// EVPN routes.
+    /// keys of each VRF that advertises its routes as EVPN routes. A VRF
+    /// with a session, a seed or a leak from another VRF advertises a key
+    /// of each unicast key. Another VRF advertises a key of each prefix
+    /// that it originates.
     pub fn keys(&self) -> BTreeSet<RouteKey> {
         let mut out = BTreeSet::new();
         for p in &self.procs {
@@ -583,20 +640,55 @@ impl<'a> Net<'a> {
             .copied()
             .collect();
         for l in self.leaks.iter().filter(|l| l.kind == LeakKind::EvpnExport) {
-            if let Some(rd) = self.procs[l.from].targets.rd {
-                out.extend(
-                    unicast
-                        .iter()
-                        .map(|k| RouteKey::evpn_ip_prefix(rd, k.prefix)),
-                );
-            }
+            let i = l.from;
+            let p = self.procs[i];
+            let Some(rd) = p.targets.rd else {
+                continue;
+            };
+            let open = self.links.iter().any(|x| x.to == i)
+                || self
+                    .seeds
+                    .iter()
+                    .any(|s| s.device == p.device && s.vrf == p.vrf)
+                || self
+                    .leaks
+                    .iter()
+                    .any(|x| x.to == i && x.kind == LeakKind::Vrf);
+            let own: BTreeSet<rsim_core::Prefix> = p
+                .networks
+                .iter()
+                .map(|n| n.key.prefix)
+                .chain(p.aggregates.iter().map(|a| a.key.prefix))
+                .chain(
+                    self.igp_routes
+                        .keys()
+                        .filter(|(x, _)| *x == i && !p.redistributions.is_empty())
+                        .map(|(_, q)| *q),
+                )
+                .collect();
+            out.extend(
+                unicast
+                    .iter()
+                    .filter(|k| open || own.contains(&k.prefix))
+                    .map(|k| RouteKey::evpn_ip_prefix(rd, k.prefix)),
+            );
         }
         out
     }
 
     /// True if process `i` has a variable of `key`.
     pub fn holds(&self, i: usize, key: &RouteKey) -> bool {
-        key.family != Family::EvpnIpPrefix || self.evpn[i]
+        if key.family != Family::EvpnIpPrefix {
+            return self.unicast[i];
+        }
+        match (
+            self.evpn[i],
+            key.rd.and_then(|rd| self.rd_component.get(&rd)),
+        ) {
+            (Some(c), Some(r)) => c == *r,
+            (Some(_), None) => true,
+            (None, _) => false,
+        }
     }
 
     /// The addresses that can be a next hop: the session addresses, the

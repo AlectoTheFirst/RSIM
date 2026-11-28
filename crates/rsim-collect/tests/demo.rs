@@ -153,20 +153,38 @@ async fn the_twin_of_the_newest_snapshot_answers_the_planned_queries() {
         let unread = e.unread.get(device).cloned().unwrap_or_default();
         assert!(unread.is_empty(), "{device}: {unread:?}");
     }
-    // The builder does not evaluate the redistribution of BGP on the WAN
-    // routers, and the database guard shows their AS-external LSAs as not
-    // computed.
+    // The AS-external LSAs of the WAN routers come from their
+    // redistribution of BGP into OSPF, and each one matches.
     let wans = ["10.17.0.1", "10.17.0.2", "10.27.0.1", "10.27.0.2"];
     let mut redistributed = 0;
-    for (device, rows) in &e.ospf_guard {
+    let mut external: BTreeMap<String, usize> = BTreeMap::new();
+    for rows in e.ospf_guard.values() {
         for r in rows.iter().filter(|r| r.area.is_none()) {
+            *external.entry(r.category.name().to_string()).or_default() += 1;
             if wans.iter().any(|w| r.key.ends_with(&format!(" from {w}"))) {
-                assert_eq!(r.category.name(), "not_computed", "{device}: {}", r.key);
                 redistributed += 1;
             }
         }
     }
     assert!(redistributed > 0, "no AS-external LSA of a WAN router");
+    // Each BGP route of the guard matches.
+    let mut bgp: BTreeMap<(String, String), usize> = BTreeMap::new();
+    for rows in e.guard.values() {
+        let is_bgp = |p: &str| p.starts_with("bgp") || p.split_whitespace().next() == Some("B");
+        for r in rows.iter().filter(|r| is_bgp(&r.protocol)) {
+            let reason = r
+                .reason
+                .split(" on ")
+                .next()
+                .unwrap_or_default()
+                .to_string();
+            *bgp.entry((r.category.name().to_string(), reason))
+                .or_default() += 1;
+        }
+    }
+    let summary = format!("external LSAs {external:?}, bgp routes {bgp:?}");
+    assert_eq!(external.keys().collect::<Vec<_>>(), ["match"], "{summary}");
+    assert!(bgp.keys().all(|(c, _)| c == "match"), "{summary}");
     let t = e.builder.build().expect("the twin builds");
     let tcp = PROTO_TCP;
     // A Paris user reaches the web shop in Frankfurt over the WAN and the
