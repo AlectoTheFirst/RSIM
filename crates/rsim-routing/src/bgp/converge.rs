@@ -1036,8 +1036,8 @@ fn unknowable(
     };
     loop {
         let mut changed = false;
-        for v in (0..n).filter(|&v| fixed[v].is_none() && !can[v]) {
-            if reads(v).iter().any(|&w| can[w]) {
+        for v in 0..n {
+            if fixed[v].is_none() && !can[v] && reads(v).iter().any(|&w| can[w]) {
                 can[v] = true;
                 changed = true;
             }
