@@ -186,6 +186,9 @@ pub fn lower(
     };
     let gws = l.gateways(&active, &st, col, &names, super::layer2::vpc_ok(cfg, &st));
     let tunnel = super::vxlan::plan(cfg, &st, &active, &mut l);
+    if let super::vxlan::Plan::Exact(t) = &tunnel {
+        l.out.evpn_next_hop = Some(t.routed_source);
+    }
     let svi_links = l.layer2(&active, &gws, &st, col, &names, ext, &tunnel, &mut sum);
     // The routed ports that can end a link: a physical port or a port
     // channel with a collected MAC.
@@ -1489,7 +1492,7 @@ impl L<'_> {
         // A scenario pass writes no guard row.
         let scenario = matches!(vx.pass, crate::scenario::Pass::Scenario(_));
         if collected && (guard || scenario) {
-            self.guard(&mut t, vrf, active, col, names, next, vx.pass, vx.bgp);
+            self.guard(&mut t, vrf, active, col, names, next, vx);
         }
         t
     }
@@ -1586,7 +1589,10 @@ impl L<'_> {
     /// not kept, as the device forwards on `t`. In a scenario each BGP route
     /// of the computed table of the base is an unknown candidate. A VRF with
     /// no BGP routes from the calculation keeps its collected BGP routes not
-    /// computed.
+    /// computed. An EVPN IP prefix route that the VRF imports goes through
+    /// the NVE interface to each tunnel end of its paths, and is unknown when
+    /// the tunnel end of the switch or the layer 3 VNI of the VRF is not
+    /// lowered.
     #[allow(clippy::too_many_arguments)]
     fn guard(
         &mut self,
@@ -1596,9 +1602,9 @@ impl L<'_> {
         col: &Collected,
         names: &Names,
         next: &str,
-        pass: &crate::scenario::Pass,
-        bgp: &BTreeMap<String, crate::bgp_build::VrfBgp>,
+        vx: &Vx<'_>,
     ) {
+        let (pass, bgp) = (vx.pass, vx.bgp);
         let bgp = match pass {
             crate::scenario::Pass::Scenario(s) => s.base.get(vrf).map(|b| {
                 crate::bgp_build::VrfBgp::scenario(
@@ -1645,6 +1651,31 @@ impl L<'_> {
         cands.extend(ospf.candidates(PLATFORM, false, &hop, &interface_of));
         if let Some(b) = &bgp {
             cands.extend(b.candidates.iter().cloned());
+            let tunnel = match vx.tunnel {
+                super::vxlan::Plan::Exact(x) if x.l3.contains_key(vrf) => Ok(x),
+                super::vxlan::Plan::Exact(_) => {
+                    Err("EVPN route in a VRF with no layer 3 VNI".to_string())
+                }
+                _ => Err("EVPN route, tunnel end not lowered".to_string()),
+            };
+            for o in &b.overlay {
+                let route = match &tunnel {
+                    Ok(x) => Route::new(
+                        RouteKind::Learned(rsim_functions::RouteProtocol::Bgp),
+                        o.tunnel_ends
+                            .iter()
+                            .map(|e| hop(&x.nve, Some(*e)))
+                            .collect(),
+                        o.spans.clone(),
+                    ),
+                    Err(why) => Route::unknown(
+                        RouteKind::Learned(rsim_functions::RouteProtocol::Bgp),
+                        why.clone(),
+                        o.spans.clone(),
+                    ),
+                };
+                cands.push(Candidate::new(o.prefix, o.distance, route));
+            }
         }
         // A VRF with no static route of the config takes its collected static
         // routes as inputs.

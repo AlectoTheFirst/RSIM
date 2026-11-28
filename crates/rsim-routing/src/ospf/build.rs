@@ -23,6 +23,11 @@
 //!   except the default route (RFC 3101 3.2). A left-out border router, a
 //!   border router that a gap hides, or an NSSA with no reached border
 //!   router gives a gap of the AS-external LSAs of the AS.
+//! - `redistribute bgp` gives the external LSAs of the installed BGP routes
+//!   of the VRF of the round before, other than a default route. An iBGP
+//!   route is redistributed only when the BGP profile of the platform
+//!   offers the iBGP routes. An unknown BGP route gives a gap of its prefix.
+//!   With no BGP routes of the VRF, the redistribution is not evaluated.
 //! - The process with an unhandled line, or with an active interface with no
 //!   address of its version, originates no LSA, so the calculation of each
 //!   neighbour sees a gap. Each area of the process has a gap of its
@@ -75,6 +80,9 @@ pub struct RouterInput {
     pub connected: BTreeMap<String, Vec<Prefix>>,
     /// By VRF: the prefixes of the static routes for redistribution.
     pub statics: BTreeMap<String, Vec<Prefix>>,
+    /// By VRF: the installed BGP routes for redistribution. A VRF with no
+    /// entry has BGP routes that are not known.
+    pub bgp: BTreeMap<String, BgpRoutes>,
     /// The VRFs whose route table has a default route that is not from
     /// OSPF.
     pub default_route: BTreeSet<String>,
@@ -92,11 +100,22 @@ impl RouterInput {
             platform,
             connected: BTreeMap::new(),
             statics: BTreeMap::new(),
+            bgp: BTreeMap::new(),
             default_route: BTreeSet::new(),
             addresses: BTreeMap::new(),
             link_local: BTreeMap::new(),
         }
     }
+}
+
+/// The installed BGP routes of a VRF for a redistribution of BGP.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct BgpRoutes {
+    /// The prefix of each installed BGP route, with true for a route from
+    /// an iBGP or a confederation session.
+    pub routes: BTreeMap<Prefix, bool>,
+    /// The prefixes of the unknown BGP routes.
+    pub unknown: BTreeSet<Prefix>,
 }
 
 /// The databases of the twin and the notes of the build.
@@ -1092,10 +1111,25 @@ impl<'a> Builder<'a> {
         let mut out: BTreeMap<Prefix, Ext> = BTreeMap::new();
         let mut notes = Vec::new();
         let mut left = Vec::new();
+        let ibgp = crate::bgp::BgpProfile::of(platform)
+            .redistribute
+            .ibgp_into_igp;
         for r in &p.cfg.redistribute {
+            let bgp = match &r.source {
+                Source::Bgp => p.input.bgp.get(vrf),
+                _ => None,
+            };
+            let bgp_list: Option<Vec<Prefix>> = bgp.map(|b| {
+                b.routes
+                    .iter()
+                    .filter(|(_, internal)| ibgp || !**internal)
+                    .map(|(x, _)| *x)
+                    .collect()
+            });
             let list = match &r.source {
                 Source::Connected => p.input.connected.get(vrf),
                 Source::Static => p.input.statics.get(vrf),
+                Source::Bgp if bgp_list.is_some() => bgp_list.as_ref(),
                 Source::Bgp | Source::Other(_) => {
                     let word = match &r.source {
                         Source::Other(w) => w.as_str(),
@@ -1117,11 +1151,22 @@ impl<'a> Builder<'a> {
             let prefixes: Vec<Prefix> = list
                 .map(|l| l.iter().copied().filter(usable).collect())
                 .unwrap_or_default();
+            if let Some(b) = bgp {
+                let unknown: Vec<Prefix> = b.unknown.iter().copied().filter(usable).collect();
+                if !unknown.is_empty() {
+                    left.push((
+                        GapReach::Prefixes(unknown),
+                        format!(
+                            "the external LSAs of the unknown bgp routes of {rid} are left out"
+                        ),
+                    ));
+                }
+            }
             if let Some(map) = &r.route_map {
-                let word = if r.source == Source::Connected {
-                    "connected"
-                } else {
-                    "static"
+                let word = match r.source {
+                    Source::Connected => "connected",
+                    Source::Bgp => "bgp",
+                    _ => "static",
                 };
                 let text: Vec<String> = prefixes.iter().map(|x| x.to_string()).collect();
                 notes.push((

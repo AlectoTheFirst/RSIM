@@ -89,6 +89,10 @@ pub struct Lowered {
     /// candidate and with the OSPFv3 candidates, for the IGP view of the
     /// BGP calculation.
     pub igp: Vec<(String, crate::guard::IgpRoutes)>,
+    /// The address of the tunnel end that is the next hop of the EVPN IP
+    /// prefix routes of the device. `None` with no tunnel end that the
+    /// lowering makes exact.
+    pub evpn_next_hop: Option<std::net::IpAddr>,
 }
 
 struct L<'a> {
