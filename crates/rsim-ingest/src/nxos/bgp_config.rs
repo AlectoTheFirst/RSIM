@@ -1251,7 +1251,12 @@ vrf context RED
         ] {
             assert!(texts.contains(&want), "{want:?} not in {texts:?}");
         }
-        assert!(texts.iter().all(|(v, _)| *v == "RED"), "{texts:?}");
+        let default: Vec<&str> = texts
+            .iter()
+            .filter(|(v, _)| *v != "RED")
+            .map(|(_, t)| *t)
+            .collect();
+        assert_eq!(default, ["export vrf default map ALL"], "{texts:?}");
     }
 
     #[test]

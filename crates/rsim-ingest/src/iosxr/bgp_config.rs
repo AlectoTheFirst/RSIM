@@ -1556,7 +1556,16 @@ router bgp 64502
         ] {
             assert!(texts.contains(&want), "{want:?} not in {texts:?}");
         }
-        assert!(texts.iter().all(|(v, _)| *v == "RED"), "{texts:?}");
+        let default: Vec<&str> = texts
+            .iter()
+            .filter(|(v, _)| *v != "RED")
+            .map(|(_, t)| *t)
+            .collect();
+        assert_eq!(
+            default,
+            ["export to default-vrf route-policy TO-GLOBAL"],
+            "{texts:?}"
+        );
         assert!(
             d.gaps
                 .iter()
