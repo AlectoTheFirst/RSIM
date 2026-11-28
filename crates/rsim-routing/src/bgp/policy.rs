@@ -241,7 +241,8 @@ pub enum PolicyResult {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Outcome {
-    Permit(Box<BgpPath>),
+    /// The path, and true if a set action sets the next hop.
+    Permit(Box<BgpPath>, bool),
     Deny,
 }
 
@@ -264,6 +265,8 @@ struct Run<'a> {
     choices: &'a [bool],
     used: usize,
     applied: Vec<String>,
+    /// True after a set action that sets the next hop.
+    next_hop_set: bool,
 }
 
 fn any(values: impl IntoIterator<Item = Option<bool>>) -> Option<bool> {
@@ -392,7 +395,10 @@ impl<'a> Run<'a> {
                     (NextHopSet::PeerAddress, Direction::Import) => self.ctx.peer_address,
                 };
                 match addr {
-                    Some(a) => out.next_hop = Some(a),
+                    Some(a) => {
+                        out.next_hop = Some(a);
+                        self.next_hop_set = true;
+                    }
                     None => return Err(unhandled("next hop address of the session not known")),
                 }
             }
@@ -436,7 +442,7 @@ impl<'a> Run<'a> {
             }
             matched = true;
             match c.continue_to {
-                None => return Ok(Outcome::Permit(Box::new(out))),
+                None => return Ok(Outcome::Permit(Box::new(out), self.next_hop_set)),
                 Some(Continue::Next) => i += 1,
                 Some(Continue::Seq(s)) => {
                     if s <= c.seq {
@@ -447,7 +453,7 @@ impl<'a> Run<'a> {
             }
         }
         Ok(if matched {
-            Outcome::Permit(Box::new(out))
+            Outcome::Permit(Box::new(out), self.next_hop_set)
         } else {
             Outcome::Deny
         })
@@ -548,8 +554,8 @@ impl<'a> Run<'a> {
                 let flow = self.rpl(&policy.name, stmts, &mut out, &mut passed)?;
                 Ok(match flow {
                     Flow::Drop => Outcome::Deny,
-                    Flow::Done => Outcome::Permit(Box::new(out)),
-                    Flow::Next if passed => Outcome::Permit(Box::new(out)),
+                    Flow::Done => Outcome::Permit(Box::new(out), self.next_hop_set),
+                    Flow::Next if passed => Outcome::Permit(Box::new(out), self.next_hop_set),
                     Flow::Next => Outcome::Deny,
                 })
             }
@@ -573,6 +579,7 @@ fn explore(
             choices: choices.as_slice(),
             used: 0,
             applied: Vec::new(),
+            next_hop_set: false,
         };
         run.policy(policy)
     };
@@ -606,14 +613,28 @@ pub fn evaluate(
     path: &BgpPath,
     ctx: &PolicyContext<'_>,
 ) -> PolicyResult {
+    evaluate_next_hop(policy, key, path, ctx).0
+}
+
+/// The result of [`evaluate`], and true if a set action of a permit sets
+/// the next hop.
+fn evaluate_next_hop(
+    policy: &RoutePolicy,
+    key: &RouteKey,
+    path: &BgpPath,
+    ctx: &PolicyContext<'_>,
+) -> (PolicyResult, bool) {
     let mut details = BTreeSet::new();
     match explore(policy, key, path, ctx, &mut Vec::new(), &mut details) {
-        Some(Outcome::Permit(p)) => PolicyResult::Permit(*p),
-        Some(Outcome::Deny) => PolicyResult::Deny,
-        None => PolicyResult::Unknown(Unknown {
-            reason: Reason::PolicyClauseNotEvaluated,
-            details,
-        }),
+        Some(Outcome::Permit(p, set)) => (PolicyResult::Permit(*p), set),
+        Some(Outcome::Deny) => (PolicyResult::Deny, false),
+        None => (
+            PolicyResult::Unknown(Unknown {
+                reason: Reason::PolicyClauseNotEvaluated,
+                details,
+            }),
+            false,
+        ),
     }
 }
 
@@ -632,16 +653,33 @@ pub fn neighbor_policy(
     path: &BgpPath,
     profile: Option<&BgpProfile>,
 ) -> PolicyResult {
+    neighbor_policy_next_hop(process, neighbor, direction, key, path, profile).0
+}
+
+/// The result of [`neighbor_policy`], and true if a set action of a permit
+/// sets the next hop.
+pub(crate) fn neighbor_policy_next_hop(
+    process: &BgpProcess,
+    neighbor: &Neighbor,
+    direction: Direction,
+    key: &RouteKey,
+    path: &BgpPath,
+    profile: Option<&BgpProfile>,
+) -> (PolicyResult, bool) {
     let Some(profile) = profile else {
-        return PolicyResult::Unknown(Unknown::new(Reason::NoBgpProfile, "the platform"));
+        return (
+            PolicyResult::Unknown(Unknown::new(Reason::NoBgpProfile, "the platform")),
+            false,
+        );
     };
     let kind = process.session_kind(neighbor);
     let no_policy = || {
-        if profile.no_policy_permits(kind, &process.options) {
+        let r = if profile.no_policy_permits(kind, &process.options) {
             PolicyResult::Permit(path.clone())
         } else {
             PolicyResult::Deny
-        }
+        };
+        (r, false)
     };
     let name = match direction {
         Direction::Import => &neighbor.import_policy,
@@ -652,7 +690,7 @@ pub fn neighbor_policy(
     };
     let Some(policy) = process.policy.policies.get(name) else {
         return match profile.undefined_policy {
-            UndefinedPolicy::Deny => PolicyResult::Deny,
+            UndefinedPolicy::Deny => (PolicyResult::Deny, false),
             UndefinedPolicy::NoPolicy => no_policy(),
         };
     };
@@ -664,7 +702,7 @@ pub fn neighbor_policy(
         default_local_pref: profile.default_local_pref(&process.options),
         match_reads: profile.match_reads,
     };
-    evaluate(policy, key, path, &ctx)
+    evaluate_next_hop(policy, key, path, &ctx)
 }
 
 /// The import or the export policy stage of one neighbour.

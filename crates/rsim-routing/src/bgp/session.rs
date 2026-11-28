@@ -22,11 +22,13 @@
 //!   unless `replace-as` is set. The next hop becomes the local address of
 //!   the session.
 //! - To a confederation eBGP peer, the member AS of the sender is prepended
-//!   in an AS_CONFED_SEQUENCE and the next hop does not change (RFC 5065).
+//!   in an AS_CONFED_SEQUENCE (RFC 5065). The next hop becomes the local
+//!   address of the session for a local path and with `next-hop-self` or
+//!   `next-hop-self all`.
 //! - To an iBGP peer, the next hop becomes the local address of the session
 //!   for a local path, with `next-hop-self all`, and with `next-hop-self`
 //!   for a path that is not reflected.
-//! - A next hop that the export policy sets is kept.
+//! - A next hop that a set action of the export policy sets is kept.
 //! - Without `send_community` the standard and the large communities are
 //!   removed. Without `send_community_extended` the extended communities
 //!   are removed. The fields hold the effective settings of the platform.
@@ -46,7 +48,9 @@
 use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv4Addr};
 
-use super::policy::{Direction, PolicyResult, neighbor_policy, policy_reads};
+use super::policy::{
+    Direction, PolicyResult, neighbor_policy, neighbor_policy_next_hop, policy_reads,
+};
 use super::process::{BgpProcess, Neighbor, NextHopSelf};
 use super::stage::{ObjectRef, RoutingStage};
 use super::{BgpPath, Community, Peer, Reason, RouteKey, SessionKind, Unknown};
@@ -71,7 +75,7 @@ pub struct Session {
 /// The result of a transfer step on a path.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Offer {
-    /// No path: the step does not send it, rejects it or denies it.
+    /// The step does not send the path, rejects it or denies it.
     None,
     Path(BgpPath),
     Unknown(Unknown),
@@ -163,13 +167,13 @@ pub fn export(
         }
         p.cluster_list.insert(0, sender.cluster_id());
     }
-    let mut q = match neighbor_policy(sender, neighbor, Direction::Export, key, &p, Some(&profile))
-    {
+    let (result, next_hop_set) =
+        neighbor_policy_next_hop(sender, neighbor, Direction::Export, key, &p, Some(&profile));
+    let mut q = match result {
         PolicyResult::Permit(q) => q,
         PolicyResult::Deny => return Offer::None,
         PolicyResult::Unknown(u) => return Offer::Unknown(u),
     };
-    let next_hop_set = q.next_hop != p.next_hop;
     match out {
         SessionKind::Ebgp => {
             let own = sender.confederation_id.unwrap_or(sender.asn);
@@ -185,7 +189,8 @@ pub fn export(
         }
         SessionKind::ConfedEbgp => {
             q.as_path = q.as_path.prepend_confed(sender.asn);
-            if q.next_hop.is_none() {
+            let self_hop = q.next_hop.is_none() || neighbor.next_hop_self != NextHopSelf::Off;
+            if self_hop && !next_hop_set {
                 q.next_hop = Some(local_address);
             }
         }

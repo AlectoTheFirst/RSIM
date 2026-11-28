@@ -240,6 +240,52 @@ fn a_confederation_export_prepends_the_member_as_and_keeps_the_med_and_the_next_
     assert_eq!(sent(&out).as_path, AsPath::sequence(&[65000, 64500]));
 }
 
+/// r1 (member AS 65101) and r2 (member AS 65102) of the confederation
+/// 65000 with one session.
+fn confederation_pair() -> Lab {
+    let mut lab = pair(65102);
+    for (d, own, other) in [("r1", 65101, 65102), ("r2", 65102, 65101)] {
+        let p = lab.proc(d);
+        p.asn = Asn(own);
+        p.confederation_id = Some(Asn(65000));
+        p.confederation_peers = [Asn(other)].into();
+    }
+    lab.neighbor_mut("r2", "10.0.0.1").remote_as = Asn(65101);
+    lab
+}
+
+#[test]
+fn next_hop_self_sets_the_next_hop_on_a_confederation_ebgp_session() {
+    let mut lab = confederation_pair();
+    let p = ebgp("192.0.2.1", &[64500]);
+    assert_eq!(sent(&transfer(&lab, &p).0).next_hop, Some(ip("192.0.2.1")));
+    lab.neighbor_mut("r1", "10.0.0.2").next_hop_self = NextHopSelf::On;
+    let out = transfer(&lab, &p).0;
+    assert_eq!(sent(&out).next_hop, Some(ip("10.0.0.1")));
+    assert_eq!(sent(&out).peer.kind, SessionKind::ConfedEbgp);
+}
+
+#[test]
+fn an_export_policy_that_sets_the_present_next_hop_keeps_it_on_an_ebgp_session() {
+    use rsim_routing::bgp::NextHopSet;
+    let mut lab = pair(65002);
+    let mut c = Clause::new(10, true);
+    c.sets
+        .push(SetAction::NextHop(NextHopSet::Address(ip("10.9.9.9"))));
+    lab.proc("r1").policy.policies.insert(
+        "nh".to_string(),
+        RoutePolicy {
+            name: "nh".to_string(),
+            body: PolicyBody::RouteMap(vec![c]),
+            spans: Vec::new(),
+        },
+    );
+    let p = ibgp("10.9.9.9", &[65010]);
+    assert_eq!(sent(&transfer(&lab, &p).0).next_hop, Some(ip("10.0.0.1")));
+    lab.neighbor_mut("r1", "10.0.0.2").export_policy = Some("nh".to_string());
+    assert_eq!(sent(&transfer(&lab, &p).0).next_hop, Some(ip("10.9.9.9")));
+}
+
 #[test]
 fn a_full_mesh_picks_the_exit_with_the_lower_igp_cost() {
     let mut lab = Lab::default();
