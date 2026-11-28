@@ -10,8 +10,8 @@
 //!    best paths of the round before. Brent's algorithm finds the fixed
 //!    point or the cycle by exact comparison of the states.
 //! 2. The uniqueness check builds the possible candidates of each variable
-//!    by a closure over the sessions. It applies when no process of the
-//!    group has a route-reflector client, no candidate is unknown, and no
+//!    by a closure over the sessions. It applies when no process with a
+//!    candidate in the group has a route-reflector client, no candidate is unknown, and no
 //!    pair of candidates of a variable is decided by the MED with no
 //!    always-compare-med, by the IGP cost, or by a tie. The greedy
 //!    construction of Griffin, Shepherd and Wilfong then fixes a variable
@@ -27,8 +27,9 @@
 //! 4. 2 stable assignments are distinct when they differ in the paths that
 //!    a variable installs or in a path that a variable sends. 0 distinct
 //!    outcomes give `NoConvergence` with the cycle of the forward pass. 1
-//!    gives `Converged`, with the note "not safe under all timings" and the
-//!    dispute wheel when the greedy construction stops at one. More give
+//!    gives `Converged`, with the note "not safe under all timings" when
+//!    the greedy construction stops at a dispute wheel or the forward pass
+//!    cycles. More give
 //!    `MultipleStableOutcomes`, and the routes of the group are unknown.
 
 use std::cell::RefCell;
@@ -80,6 +81,10 @@ pub struct WheelSpoke {
     pub prefers: BgpPath,
 }
 
+/// The note of a group with one stable outcome that is not safe under all
+/// timings. `wheel` is the dispute wheel where the greedy construction
+/// stops, and empty for a group with no uniqueness check whose forward pass
+/// cycles.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Note {
     pub text: &'static str,
@@ -126,7 +131,8 @@ impl Convergence {
 pub struct GroupResult {
     pub keys: BTreeSet<RouteKey>,
     pub convergence: Convergence,
-    /// The rounds of the forward pass.
+    /// The rounds that the forward pass runs until Brent's algorithm finds
+    /// the fixed point or the cycle.
     pub rounds: usize,
     /// True if the forward pass reaches a fixed point. The routes of a
     /// converged group are then the routes of the fixed point.
@@ -449,13 +455,6 @@ fn possible(
 /// applies to the group.
 fn strict_domains(g: &Group<'_, '_>) -> Option<Vec<BTreeSet<BestPath>>> {
     let n = g.vars.len();
-    if g.net
-        .procs
-        .iter()
-        .any(|p| p.neighbors.values().any(|nb| nb.route_reflector_client))
-    {
-        return None;
-    }
     let none = vec![None; n];
     let mut dom: Vec<BTreeSet<BestPath>> = vec![BTreeSet::from([BestPath::None]); n];
     let mut cands: Vec<BTreeSet<BgpPath>> = vec![BTreeSet::new(); n];
@@ -482,6 +481,9 @@ fn strict_domains(g: &Group<'_, '_>) -> Option<Vec<BTreeSet<BestPath>>> {
         let (p, _) = g.at(v);
         if held.is_empty() {
             continue;
+        }
+        if p.neighbors.values().any(|nb| nb.route_reflector_client) {
+            return None;
         }
         let profile = p.profile()?;
         let list: Vec<&BgpPath> = held.iter().collect();
@@ -691,6 +693,13 @@ impl Derive<'_, '_, '_, '_> {
 
     /// True if the source of `v` gives its selection.
     fn stable(&self, v: usize) -> Result<bool, Fail> {
+        if let Err(f) = self.best(v) {
+            return if f == Fail::Missing {
+                Err(f)
+            } else {
+                Ok(false)
+            };
+        }
         let fail = RefCell::new(None);
         let get = |w: usize| match self.best(w) {
             Ok(b) => Some(b),
@@ -705,13 +714,6 @@ impl Derive<'_, '_, '_, '_> {
                 _ => Ok(false),
             };
         };
-        if let Err(f) = self.best(v) {
-            return if f == Fail::Missing {
-                Err(f)
-            } else {
-                Ok(false)
-            };
-        }
         let a = self.assign[v].expect("an assigned variable");
         Ok(match (self.g.choose(v, &cands), a) {
             (Choice::None, Assign::Empty) => true,
@@ -914,10 +916,17 @@ fn run_group(
             Convergence::Converged { note: None }
         }
         (1, _) => Convergence::Converged {
-            note: wheel.map(|w| Note {
-                text: NOT_SAFE,
-                wheel: w,
-            }),
+            note: match (wheel, &fwd) {
+                (Some(w), _) => Some(Note {
+                    text: NOT_SAFE,
+                    wheel: w,
+                }),
+                (None, Forward::Cycle { .. }) => Some(Note {
+                    text: NOT_SAFE,
+                    wheel: Vec::new(),
+                }),
+                (None, Forward::Fixed(_)) => None,
+            },
         },
         _ => Convergence::MultipleStableOutcomes {
             outcomes: outcomes.clone(),

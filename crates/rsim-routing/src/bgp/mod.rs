@@ -547,7 +547,8 @@ pub enum Reason {
     /// The IGP view does not know whether the route of a `network`
     /// statement is present.
     OriginationNotKnown,
-    /// The search assigns an unknown selection to a route.
+    /// A selection that a path depends on is not known: an unknown
+    /// selection of the search, or an unknown summary-only aggregate.
     SelectionNotKnown,
     /// The prefix group has more than one stable outcome.
     MultipleStableOutcomes,
