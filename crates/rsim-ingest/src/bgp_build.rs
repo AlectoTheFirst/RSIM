@@ -441,7 +441,7 @@ fn describe(c: &Convergence) -> String {
         Convergence::Converged { note: None } => "converged".to_string(),
         Convergence::Converged { note: Some(n) } => format!("converged, {}", n.text),
         Convergence::MultipleStableOutcomes { outcomes } => {
-            format!("multiple stable outcomes: {}", outcomes.len())
+            format!("2 or more stable outcomes, 2 shown: {}", outcomes.len())
         }
         Convergence::NoConvergence { cycle } => format!(
             "no convergence: a cycle of {} rounds from round {}",
@@ -1091,6 +1091,37 @@ pub fn build(
                 notes.entry(d).or_default().push(format!(
                     "bgp group {g}: {n} rounds with a change, {changed} route changes"
                 ));
+            }
+            // The method that decides each component of each group.
+            for (i, g) in r.groups.iter().enumerate() {
+                let mut by: BTreeMap<&str, usize> = BTreeMap::new();
+                for p in &g.parts {
+                    *by.entry(p.method.text()).or_default() += 1;
+                }
+                let methods: Vec<String> =
+                    by.iter().map(|(m, n)| format!("{n} by the {m}")).collect();
+                let steps: usize = g.parts.iter().map(|p| p.steps).sum();
+                notes.entry("estate".to_string()).or_default().push(format!(
+                    "bgp group {i}: {} components, {}, {steps} search steps",
+                    g.parts.len(),
+                    methods.join(", ")
+                ));
+                for p in g
+                    .parts
+                    .iter()
+                    .filter(|p| p.convergence != rsim_routing::bgp::ConvergenceKind::Converged)
+                {
+                    let prefixes: BTreeSet<String> =
+                        p.keys.iter().map(|k| k.prefix.to_string()).collect();
+                    let list: Vec<String> = prefixes.into_iter().collect();
+                    notes.entry("estate".to_string()).or_default().push(format!(
+                        "bgp group {i}, component of {}: {:?} by the {} with {} search steps",
+                        list.join(" "),
+                        p.convergence,
+                        p.method.text(),
+                        p.steps
+                    ));
+                }
             }
             for (i, g) in r.groups.iter().enumerate() {
                 if !matches!(g.convergence, Convergence::Converged { note: None }) {

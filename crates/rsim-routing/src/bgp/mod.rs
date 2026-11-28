@@ -26,9 +26,9 @@ use std::str::FromStr;
 use rsim_core::{Prefix, SourceSpan};
 
 pub use converge::{
-    BgpResult, Convergence, ConvergenceKind, CycleWitness, Event, GroupResult, Note, Outcome,
-    OverlayCandidate, RouteAt, RouteState, WheelSpoke, compute, install_candidates,
-    overlay_candidates,
+    BgpResult, Convergence, ConvergenceKind, CycleWitness, Event, GroupResult, Method, Note,
+    Outcome, OverlayCandidate, PartResult, RouteAt, RouteState, WheelSpoke, compute,
+    install_candidates, overlay_candidates,
 };
 pub use decision::{Decision, DecisionStage, DecisionStep, decide, order_winners};
 pub use leak::{evpn_export, evpn_import, vrf_leak};
