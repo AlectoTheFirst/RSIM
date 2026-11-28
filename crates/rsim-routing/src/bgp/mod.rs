@@ -1,5 +1,6 @@
-//! BGP: the paths, the processes, the route policies, the vendor profiles
-//! and the decision function.
+//! BGP: the paths, the processes, the route policies, the vendor profiles,
+//! the decision function, the propagation over the sessions and the
+//! convergence detection.
 //!
 //! The order is fixed: communities, route targets and lists are ordered
 //! sets, and the policies and lists are held by name in `BTreeMap`s.
