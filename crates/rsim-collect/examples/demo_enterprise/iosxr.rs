@@ -9,7 +9,7 @@ use super::nxos::system_description;
 use super::route::{Kind, Route, Tables};
 
 /// The time line that IOS-XR prints before each answer.
-const TIME: &str = "Mon Nov  2 08:00:00.000 UTC\n";
+pub const TIME: &str = "Mon Nov  2 08:00:00.000 UTC\n";
 
 /// The short name of an interface.
 fn short(name: &str) -> String {
@@ -82,7 +82,7 @@ fn config(dev: &Dev) -> String {
         s.push_str(" !\n!\n");
         let _ = writeln!(
             s,
-            "router bgp {}\n bgp router-id {}\n address-family ipv4 unicast\n !",
+            "router bgp {}\n bgp router-id {}\n address-family ipv4 unicast\n  redistribute connected\n  redistribute ospf CORE\n !",
             bgp.asn, bgp.router_id
         );
         for n in &bgp.neighbors {
@@ -94,7 +94,7 @@ fn config(dev: &Dev) -> String {
             if let Some(src) = &n.update_source {
                 let _ = writeln!(s, "  update-source {src}");
             }
-            s.push_str("  address-family ipv4 unicast\n");
+            s.push_str("  address-family ipv4 unicast\n   soft-reconfiguration inbound always\n");
             if n.remote_as == bgp.asn {
                 s.push_str("   next-hop-self\n");
             } else {
@@ -339,7 +339,11 @@ fn inventory(dev: &Dev) -> String {
     )
 }
 
-fn bgp_summary(dev: &Dev) -> String {
+/// The session summary. The prefix count of a neighbour is the number of
+/// prefixes of its accepted table.
+fn bgp_summary(e: &Estate, t: &Tables, d: usize) -> String {
+    let dev = &e.devs[d];
+    let owners = super::bgp::owners(e);
     let Some(bgp) = &dev.bgp else {
         return format!("{TIME}% BGP instance 'default' not active\n");
     };
@@ -348,9 +352,10 @@ fn bgp_summary(dev: &Dev) -> String {
         bgp.router_id, bgp.asn
     );
     for n in &bgp.neighbors {
+        let count = super::bgp::tables(e, t, &owners, d, n).accepted.len();
         let _ = writeln!(
             s,
-            "{:<15}   0 {:>5}   58211   58190      214    0    0 5w6d             12",
+            "{:<15}   0 {:>5}   58211   58190      214    0    0 5w6d {count:>14}",
             n.addr.to_string(),
             n.remote_as
         );
@@ -372,7 +377,17 @@ pub fn render(e: &Estate, t: &Tables, d: usize) -> BTreeMap<&'static str, String
     out.insert("arp", arp(dev, t, d));
     out.insert("inventory", inventory(dev));
     out.insert("hsrp", TIME.to_string());
-    out.insert("bgp_sessions", bgp_summary(dev));
+    out.insert("bgp_sessions", bgp_summary(e, t, d));
+    if dev.bgp.is_some() {
+        out.insert(
+            "bgp_neighbors",
+            super::bgp::neighbor_detail(dev, &|v| v == "default", TIME),
+        );
+        out.insert(
+            "bgp_vrf_neighbors",
+            super::bgp::neighbor_detail(dev, &|v| v != "default", TIME),
+        );
+    }
     super::ospf::cisco(e, d, TIME, "CORE", &t.redistributed, &mut out);
     out
 }

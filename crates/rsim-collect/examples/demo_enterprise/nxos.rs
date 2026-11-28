@@ -244,6 +244,9 @@ fn config(e: &Estate, d: usize) -> String {
         "boot nxos bootflash:/nxos64-cs.{}.M.bin",
         dev.version.replace(['(', ')'], ".").trim_end_matches('.')
     );
+    if let Some((vrf, _, _)) = &dev.l3vni {
+        let _ = writeln!(s, "route-map {vrf}-DIRECT permit 10");
+    }
     let rid = dev.bgp.as_ref().map(|b| b.router_id);
     if let Some(rid) = rid {
         let _ = writeln!(s, "router ospf UNDERLAY\n  router-id {rid}");
@@ -274,12 +277,12 @@ fn config(e: &Estate, d: usize) -> String {
         if let Some((vrf, _, _)) = &dev.l3vni {
             let _ = writeln!(
                 s,
-                "  vrf {vrf}\n    address-family ipv4 unicast\n      advertise l2vpn evpn"
+                "  vrf {vrf}\n    address-family ipv4 unicast\n      advertise l2vpn evpn\n      redistribute direct route-map {vrf}-DIRECT"
             );
             for nb in bgp.neighbors.iter().filter(|x| &x.vrf == vrf) {
                 let _ = writeln!(
                     s,
-                    "    neighbor {}\n      remote-as {}\n      description {}\n      address-family ipv4 unicast",
+                    "    neighbor {}\n      remote-as {}\n      description {}\n      address-family ipv4 unicast\n        soft-reconfiguration inbound",
                     nb.addr, nb.remote_as, nb.desc
                 );
             }
@@ -848,6 +851,9 @@ pub fn render(e: &Estate, t: &Tables, d: usize) -> BTreeMap<&'static str, String
         "bgp_sessions",
         bgp_sessions(dev).unwrap_or_else(|| NO_FEATURE.to_string()),
     );
+    if dev.bgp.is_some() {
+        out.insert("bgp_neighbors", super::bgp::nxos_neighbors(dev));
+    }
     super::ospf::nxos(e, d, &t.redistributed, &mut out);
     out
 }

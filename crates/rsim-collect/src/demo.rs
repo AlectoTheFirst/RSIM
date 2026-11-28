@@ -3,7 +3,9 @@
 //! network.
 //!
 //! A demo folder holds `devices.txt`, with one line `<id> <vendor>
-//! <address>` for each device, and one folder `cycle-<n>` for each cycle,
+//! <address> [<capture_bgp>]` for each device, where `<capture_bgp>` is
+//! `off`, `sessions` or `all` and is `sessions` when the line has none,
+//! and one folder `cycle-<n>` for each cycle,
 //! from 1. The folder of a device in a cycle holds `commands.txt`, with one
 //! line `<file><TAB><command>` for each command that the source sends, and
 //! the reply files. A cycle folder holds only the files that differ from the
@@ -66,11 +68,22 @@ pub fn devices(folder: &Path) -> Result<Vec<Device>, String> {
         .filter(|l| !l.trim().is_empty())
         .map(|l| {
             let w: Vec<&str> = l.split_whitespace().collect();
-            let [id, vendor, address] = w.as_slice() else {
-                return Err(format!(
-                    "{}: the line {l:?} is not <id> <vendor> <address>",
-                    path.display()
-                ));
+            let (id, vendor, address, capture) = match w.as_slice() {
+                [id, vendor, address] => (id, vendor, address, CaptureBgp::Sessions),
+                [id, vendor, address, c] => (
+                    id,
+                    vendor,
+                    address,
+                    CaptureBgp::parse(c).ok_or_else(|| {
+                        format!("{}: {c} is not a BGP capture setting", path.display())
+                    })?,
+                ),
+                _ => {
+                    return Err(format!(
+                        "{}: the line {l:?} is not <id> <vendor> <address> [<capture_bgp>]",
+                        path.display()
+                    ));
+                }
             };
             let vendor = Vendor::ALL
                 .into_iter()
@@ -82,7 +95,7 @@ pub fn devices(folder: &Path) -> Result<Vec<Device>, String> {
                 address: (*address).to_string(),
                 credential: "demo".into(),
                 site: None,
-                capture_bgp: CaptureBgp::Sessions,
+                capture_bgp: capture,
                 route: Default::default(),
                 interval: DEFAULT_INTERVAL,
             })

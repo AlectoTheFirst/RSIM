@@ -1,6 +1,7 @@
 //! The generator of the demo estate: the command replies of each device in
 //! each cycle, in the layout that `rsim_collect::demo` reads.
 
+pub mod bgp;
 pub mod build;
 pub mod iosxe;
 pub mod iosxr;
@@ -43,26 +44,33 @@ fn file_name(s: &SectionSpec) -> String {
     format!("{}.{ext}", s.name)
 }
 
+/// The BGP setting of the collector for a device: all BGP tables for a
+/// device with BGP, else the sessions.
+pub fn capture(dev: &model::Dev) -> CaptureBgp {
+    if dev.bgp.is_some() {
+        CaptureBgp::All
+    } else {
+        CaptureBgp::Sessions
+    }
+}
+
 /// The files of a device: a reply for each command that its source sends,
 /// and the list of the commands.
 fn device_files(e: &Estate, t: &route::Tables, d: usize) -> BTreeMap<String, Vec<u8>> {
     let dev = &e.devs[d];
+    let cap = capture(dev);
     let (specs, mut replies, vrfs) = match dev.os {
         Os::Nxos => (
-            rsim_collect::nxos::sections_with(false, CaptureBgp::Sessions),
+            rsim_collect::nxos::sections_with(false, cap),
             nxos::render(e, t, d),
             BTreeMap::new(),
         ),
         Os::Iosxe => {
             let (r, v) = iosxe::render(e, t, d);
-            (
-                rsim_collect::iosxe::sections_with(CaptureBgp::Sessions),
-                r,
-                v,
-            )
+            (rsim_collect::iosxe::sections_with(cap), r, v)
         }
         Os::Iosxr => (
-            rsim_collect::iosxr::sections_with(CaptureBgp::Sessions),
+            rsim_collect::iosxr::sections_with(cap),
             iosxr::render(e, t, d),
             BTreeMap::new(),
         ),
@@ -85,6 +93,40 @@ fn device_files(e: &Estate, t: &route::Tables, d: usize) -> BTreeMap<String, Vec
         ));
         files.insert(f, text.into_bytes());
     }
+    if let Some(b) = &dev.bgp {
+        let owners = bgp::owners(e);
+        for n in &b.neighbors {
+            let tables = bgp::tables(e, t, &owners, d, n);
+            for (i, paths) in tables.all().into_iter().enumerate() {
+                let dir = rsim_collect::bgp::DIRECTIONS[i];
+                let (command, text, ext) = match dev.os {
+                    Os::Nxos => (
+                        rsim_collect::nxos::bgp_route_command(&n.vrf, n.addr, i),
+                        bgp::nxos(&n.vrf, i, paths),
+                        "json",
+                    ),
+                    Os::Iosxe => (
+                        rsim_collect::iosxe::bgp_route_command(&n.vrf, n.addr, i),
+                        bgp::iosxe(dev, i, paths),
+                        "txt",
+                    ),
+                    Os::Iosxr => (
+                        rsim_collect::iosxr::bgp_route_command(&n.vrf, n.addr, i),
+                        bgp::iosxr(dev, i, paths, iosxr::TIME),
+                        "txt",
+                    ),
+                };
+                let f = format!(
+                    "{}.{}.{}.{dir}.{ext}",
+                    rsim_collect::bgp::ROUTES,
+                    n.vrf,
+                    n.addr
+                );
+                commands.push_str(&format!("{f}\t{command}\n"));
+                files.insert(f, text.into_bytes());
+            }
+        }
+    }
     assert!(
         replies.is_empty(),
         "{}: replies with no command: {:?}",
@@ -105,7 +147,13 @@ fn cycle(n: usize) -> (Files, String) {
     order.sort_by(|a, b| e.devs[*a].name.cmp(&e.devs[*b].name));
     for d in order {
         let dev = &e.devs[d];
-        devices.push_str(&format!("{} {} {}\n", dev.name, dev.os.vendor(), dev.mgmt));
+        devices.push_str(&format!(
+            "{} {} {} {}\n",
+            dev.name,
+            dev.os.vendor(),
+            dev.mgmt,
+            capture(dev).name()
+        ));
         files.insert(dev.name.clone(), device_files(&e, &t, d));
     }
     (files, devices)
