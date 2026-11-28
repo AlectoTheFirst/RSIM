@@ -752,7 +752,7 @@ pub(crate) enum Source {
     Seed(usize),
     /// An index into `Net::links`.
     Link(usize),
-    /// An index into `Net::leaks`.
+    /// A position in the leaks into the variable (`Group::inleaks`).
     Leak(usize),
 }
 
@@ -1118,9 +1118,9 @@ impl<'n, 'a> Group<'n, 'a> {
         for (si, offer) in &self.seeds[v] {
             push(Source::Seed(*si), offer);
         }
-        for &(li, w) in &self.inleaks[v] {
+        for (pos, &(li, w)) in self.inleaks[v].iter().enumerate() {
             let best = get(w)?;
-            push(Source::Leak(li), &self.leak(li, &best));
+            push(Source::Leak(pos), &self.leak(li, &best));
         }
         for &(l, w) in &self.inlinks[v] {
             let best = get(w)?;

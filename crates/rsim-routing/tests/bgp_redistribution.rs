@@ -11,11 +11,11 @@ use bgp_common::*;
 use rsim_core::Prefix;
 use rsim_routing::Platform;
 use rsim_routing::bgp::{
-    AdminValue, Asn, BgpInput, BgpOrigin, BgpProcess, BgpResult, Clause, ExtCommunity, Family,
-    IgpRoute, IgpSource, IgpView, Leaked, LocalOrigin, MatchTerm, OspfRouteType, PolicyBody,
-    PrefixList, RedistSource, Redistribution, Resolution, RouteAt, RouteDistinguisher, RouteKey,
-    RoutePolicy, RouteState, Session, SessionEnd, SessionKind, compute, install_candidates,
-    overlay_candidates,
+    AdminValue, Asn, BgpInput, BgpOrigin, BgpProcess, BgpResult, Clause, ConvergenceKind,
+    ExtCommunity, Family, IgpRoute, IgpSource, IgpView, Leaked, LocalOrigin, MatchTerm,
+    OspfRouteType, PolicyBody, PrefixList, RedistSource, Redistribution, Resolution, RouteAt,
+    RouteDistinguisher, RouteKey, RoutePolicy, RouteState, Session, SessionEnd, SessionKind,
+    compute, install_candidates, overlay_candidates,
 };
 use rsim_routing::rounds::{self, Rounds};
 
@@ -342,6 +342,33 @@ fn the_tunnel_end_of_an_imported_route_resolves_in_the_default_vrf() {
         panic!("{:?}", r.routes.get(&at("l2", "A", "10.1.1.0/24")));
     };
     assert!(u.to_string().contains("next hop not resolved"), "{u}");
+}
+
+#[test]
+fn a_vrf_that_imports_one_prefix_from_2_leaves_through_the_reflector_converges() {
+    let mut input = fabric();
+    input
+        .igp_routes
+        .push(route("l2", "A", "10.1.1.0/24", IgpSource::Connected, 0));
+    for p in input.processes.iter_mut().filter(|p| p.device == "l3") {
+        p.targets.evpn_import = BTreeSet::from([rt("65100:50001")]);
+    }
+    let r = compute(&input, &View::default()).unwrap();
+    assert!(
+        r.groups
+            .iter()
+            .all(|g| g.convergence.kind() == ConvergenceKind::Converged),
+        "{:?}",
+        r.groups
+    );
+    let s = selected(&r, "l3", "A", "10.1.1.0/24").expect("the imported route at l3");
+    assert!(s.best.leaked.as_ref().is_some_and(|l| l.evpn));
+    let ends: BTreeSet<IpAddr> = [ip("192.0.2.11"), ip("192.0.2.12")].into();
+    assert!(
+        ends.contains(&s.best.next_hop.unwrap()),
+        "{:?}",
+        s.best.next_hop
+    );
 }
 
 #[test]

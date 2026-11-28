@@ -448,12 +448,12 @@ fn possible(
     for (si, o) in &g.seeds[v] {
         push(None, Source::Seed(*si), o.clone());
     }
-    for &(li, w) in &g.inleaks[v] {
+    for (pos, &(li, w)) in g.inleaks[v].iter().enumerate() {
         match &fixed[w] {
-            Some(x) => push(None, Source::Leak(li), g.leak(li, x)),
+            Some(x) => push(None, Source::Leak(pos), g.leak(li, x)),
             None => {
                 for x in values(w) {
-                    push(Some(w), Source::Leak(li), g.leak(li, &x));
+                    push(Some(w), Source::Leak(pos), g.leak(li, &x));
                 }
             }
         }
@@ -738,11 +738,8 @@ impl Derive<'_, '_, '_, '_> {
                     .ok_or(Fail::Invalid)?;
                 Self::path(o)
             }
-            Assign::From(Source::Leak(li)) => {
-                let &(_, w) = g.inleaks[v]
-                    .iter()
-                    .find(|(x, _)| *x == li)
-                    .ok_or(Fail::Invalid)?;
+            Assign::From(Source::Leak(pos)) => {
+                let &(li, w) = g.inleaks[v].get(pos).ok_or(Fail::Invalid)?;
                 let b = self.best(w)?;
                 Self::path(&g.leak(li, &b))
             }
@@ -1027,11 +1024,7 @@ fn search(
                     .iter()
                     .map(|(s, _)| Assign::From(Source::Seed(*s))),
             );
-            d.extend(
-                g.inleaks[v]
-                    .iter()
-                    .map(|(l, _)| Assign::From(Source::Leak(*l))),
-            );
+            d.extend((0..g.inleaks[v].len()).map(|pos| Assign::From(Source::Leak(pos))));
             d.extend(
                 g.inlinks[v]
                     .iter()
