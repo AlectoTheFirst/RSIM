@@ -11,7 +11,9 @@
 //! which go through the import policy, else the paths of its accepted
 //! table, else the collected BGP routes of its VRF whose next hop is its
 //! address, with attributes that are not collected. A table is a source
-//! only when it is read whole. Each other neighbour is a gap of its VRF.
+//! only when it is read whole and holds each collected BGP route of the VRF
+//! whose next hop is the address of the neighbour. Each other neighbour is
+//! a gap of its VRF.
 //!
 //! A gap covers each process in the component of its VRF over the sessions
 //! and the far ends of the neighbours, for the families of the gap. A
@@ -445,10 +447,24 @@ pub fn build(
             if n.shutdown {
                 continue;
             }
+            // The collected BGP routes through the neighbour, which a table
+            // of the neighbour must hold to be a source.
+            let through: Vec<Prefix> = x
+                .collected
+                .iter()
+                .filter(|c| c.vrf == vrf && c.next_hops.contains(&nh))
+                .map(|c| c.prefix)
+                .collect();
             let table = |dir: crate::bgp_routes::Direction| {
-                x.tables
-                    .iter()
-                    .find(|t| t.vrf == vrf && t.peer == nh && t.direction == dir && t.complete())
+                x.tables.iter().find(|t| {
+                    t.vrf == vrf
+                        && t.peer == nh
+                        && t.direction == dir
+                        && t.complete()
+                        && through
+                            .iter()
+                            .all(|p| t.rows.iter().any(|r| r.prefix == *p))
+                })
             };
             let (t, received) = match (
                 table(crate::bgp_routes::Direction::Received),

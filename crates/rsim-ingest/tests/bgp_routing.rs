@@ -189,15 +189,7 @@ fn a_route_from_a_peer_outside_the_twin_is_a_seed() {
 
 #[test]
 fn the_received_table_of_a_peer_outside_the_twin_goes_through_the_import_policy() {
-    let section = Section::Fresh(
-        fixture("n1-routes.json").into_bytes(),
-        "n1/bgp_routes".into(),
-    );
-    let sessions = BTreeMap::from([(
-        "n1".to_string(),
-        BTreeMap::from([(rsim_ingest::bgp_routes::ROUTES.to_string(), section)]),
-    )]);
-    let e = assemble_with(inputs(), &sessions);
+    let e = assemble_with(inputs(), &n1_tables(&[]));
     let b = e.bgp_routing.as_ref().unwrap();
     assert_eq!(b.input.seeds.len(), 2);
     for s in &b.input.seeds {
@@ -212,6 +204,37 @@ fn the_received_table_of_a_peer_outside_the_twin_goes_through_the_import_policy(
                 .all(|r| r.prefix.to_string() != "192.0.2.128/25")
         );
     }
+}
+
+/// The tables of n1 of `n1-routes.json` with the answer of each direction
+/// of `empty` replaced by an empty table.
+fn n1_tables(empty: &[&str]) -> BTreeMap<String, BTreeMap<String, Section>> {
+    let mut v: serde_json::Value = serde_json::from_str(&fixture("n1-routes.json")).unwrap();
+    for d in empty {
+        v["default"]["203.0.113.2"][*d]["answer"] = serde_json::json!({});
+    }
+    let section = Section::Fresh(v.to_string().into_bytes(), "n1/bgp_routes".into());
+    BTreeMap::from([(
+        "n1".to_string(),
+        BTreeMap::from([(rsim_ingest::bgp_routes::ROUTES.to_string(), section)]),
+    )])
+}
+
+#[test]
+fn a_table_that_lacks_a_collected_route_of_its_peer_is_not_a_source_of_seeds() {
+    // An empty received table, as of a neighbour with no soft
+    // reconfiguration, leaves the accepted table as the source.
+    let e = assemble_with(inputs(), &n1_tables(&["received-routes"]));
+    let seeds = &e.bgp_routing.as_ref().unwrap().input.seeds;
+    assert_eq!(seeds.len(), 1, "{seeds:?}");
+    assert!(!seeds[0].received && seeds[0].path.attributes_collected);
+    assert_eq!(row(&e, "n1", "198.51.100.128/25").0, Category::Seeded);
+    // With both tables empty, the collected route is the seed.
+    let e = assemble_with(inputs(), &n1_tables(&["received-routes", "routes"]));
+    let seeds = &e.bgp_routing.as_ref().unwrap().input.seeds;
+    assert_eq!(seeds.len(), 1, "{seeds:?}");
+    assert!(!seeds[0].received && !seeds[0].path.attributes_collected);
+    assert_eq!(row(&e, "n1", "198.51.100.128/25").0, Category::Seeded);
 }
 
 #[test]
