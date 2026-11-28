@@ -944,6 +944,45 @@ mod tests {
     }
 
     #[test]
+    fn a_collected_ospf_route_that_is_not_computed_inside_a_connected_route_is_unknown() {
+        let lo = pfx("10.0.5.5/32");
+        let mut collected = Fib::new();
+        collected.insert(
+            lo,
+            Route::new(OSPF, vec![hop("eth1", Some("10.0.0.2"))], Vec::new()),
+        );
+        let routes = BTreeMap::from([(
+            lo,
+            rsim_guard::CollectedRoute {
+                protocol: "ospf".to_string(),
+                class: Class::NotComputed("ospfv2 database not read in full".to_string()),
+            },
+        )]);
+        let view = |routes: &BTreeMap<Prefix, rsim_guard::CollectedRoute>| IgpTable {
+            routes: crate::guard::igp(
+                vec![connected("10.0.0.0/16", "eth1")],
+                routes,
+                &collected,
+                rsim_routing::Platform::Iosxr,
+                false,
+            )
+            .entries()
+            .into_iter()
+            .collect(),
+            ospf: BTreeMap::new(),
+            incomplete: BTreeMap::new(),
+        };
+        assert!(matches!(
+            view(&routes).resolve(ip("10.0.5.5")),
+            Resolution::Unknown(_)
+        ));
+        assert_eq!(
+            view(&BTreeMap::new()).resolve(ip("10.0.5.5")),
+            Resolution::Resolved { cost: 0 }
+        );
+    }
+
+    #[test]
     fn a_next_hop_inside_a_longer_bgp_prefix_has_an_unknown_resolution() {
         let t = table(
             vec![

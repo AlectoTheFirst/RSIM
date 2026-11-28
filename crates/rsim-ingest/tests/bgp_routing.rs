@@ -373,3 +373,41 @@ fn the_received_table_of_an_ibgp_peer_outside_the_twin_keeps_the_local_preferenc
         assert_eq!(s.path.local_pref, Some(250), "{s:?}");
     }
 }
+
+/// The inputs with the static route line `line` in the config of x3.
+fn with_x3_static(line: &str) -> Vec<Input> {
+    let mut inputs = inputs();
+    for i in &mut inputs {
+        if let Input::Iosxr { name, config, .. } = i
+            && name == "x3"
+        {
+            *config = String::from_utf8(config.clone())
+                .unwrap()
+                .replace(
+                    "router bgp 64502\n",
+                    &format!("router static\n address-family ipv4 unicast\n  {line}\n !\n!\nrouter bgp 64502\n"),
+                )
+                .into_bytes();
+        }
+    }
+    inputs
+}
+
+#[test]
+fn a_floating_static_route_of_the_config_leaves_the_ospf_cost_of_the_next_hop() {
+    use rsim_routing::bgp::Resolution;
+    let cost = |inputs: Vec<Input>| {
+        let e = assemble(inputs);
+        let b = e.bgp_routing.unwrap();
+        b.igp[&("x3".to_string(), "default".to_string())].resolve(ip("192.0.2.2"))
+    };
+    assert_eq!(cost(inputs()), Resolution::Resolved { cost: 21 });
+    assert_eq!(
+        cost(with_x3_static("192.0.2.2/32 198.51.100.9 250")),
+        Resolution::Resolved { cost: 21 }
+    );
+    assert_eq!(
+        cost(with_x3_static("192.0.2.2/32 198.51.100.9")),
+        Resolution::Resolved { cost: 0 }
+    );
+}

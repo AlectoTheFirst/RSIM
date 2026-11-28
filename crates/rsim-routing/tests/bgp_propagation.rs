@@ -793,6 +793,35 @@ fn two_outside_ibgp_seeds_that_tie_to_the_router_id_step_need_their_router_ids()
     );
 }
 
+#[test]
+fn a_network_with_no_import_check_is_originated_with_no_route_of_its_prefix() {
+    use rsim_routing::bgp::{Network, network_offer};
+    let mut lab = Lab::default();
+    lab.router("r1", Platform::FrrTraditional, 65001, "10.255.0.1");
+    let n = Network {
+        key: key(P),
+        policy: None,
+        spans: Vec::new(),
+    };
+    for (check, originated) in [(Some(false), true), (Some(true), false), (None, false)] {
+        lab.proc("r1").options.network_import_check = check;
+        let out = network_offer(lab.get("r1"), &n, Some(false));
+        assert_eq!(
+            matches!(out, Offer::Path(_)),
+            originated,
+            "{check:?}: {out:?}"
+        );
+        assert!(matches!(
+            network_offer(lab.get("r1"), &n, Some(true)),
+            Offer::Path(_)
+        ));
+    }
+    lab.proc("r1").options.network_import_check = Some(false);
+    lab.proc("r1").networks.push(n);
+    let r = lab.run();
+    assert!(best(&r, "r1", P).is_some());
+}
+
 /// Asserts that `u` is an unknown convergence whose details hold an
 /// unknown route with the reason `cause`.
 fn assert_cause(u: &rsim_routing::bgp::Unknown, cause: Reason) {

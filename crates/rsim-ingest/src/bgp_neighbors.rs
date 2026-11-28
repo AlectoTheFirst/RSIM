@@ -117,4 +117,29 @@ BGP neighbor is 2001:db8::1\n  BGP version 4, remote router ID 198.51.100.6\n";
             ])
         );
     }
+
+    #[test]
+    fn the_router_ids_of_ios_xr_come_from_the_section_of_the_default_vrf_and_of_the_vrfs() {
+        use crate::bgp::Collected;
+        let section = |text: &str| Collected::Fresh(text.as_bytes().to_vec(), "x1/s".to_string());
+        let s = SessionSections::from([
+            (
+                NEIGHBORS.to_string(),
+                section("BGP neighbor is 192.0.2.1\n Remote router ID 198.51.100.1\n"),
+            ),
+            (
+                VRF_NEIGHBORS.to_string(),
+                section("BGP neighbor is 192.0.2.5, vrf RED\n Remote router ID 198.51.100.5\n"),
+            ),
+        ]);
+        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
+        let v4 = |s: &str| s.parse::<Ipv4Addr>().unwrap();
+        let want = RouterIds::from([
+            (("default".to_string(), ip("192.0.2.1")), v4("198.51.100.1")),
+            (("RED".to_string(), ip("192.0.2.5")), v4("198.51.100.5")),
+        ]);
+        assert_eq!(router_ids("iosxr", &s), want);
+        assert_eq!(router_ids("iosxe", &s).len(), 2);
+        assert!(router_ids("nxos", &s).is_empty());
+    }
 }
