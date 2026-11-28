@@ -26,11 +26,14 @@
 //!    has no bound.
 //! 4. 2 stable assignments are distinct when they differ in the paths that
 //!    a variable installs or in a path that a variable sends. 0 distinct
-//!    outcomes give `NoConvergence` with the cycle of the forward pass. 1
-//!    gives `Converged`, with the note "not safe under all timings" when
-//!    the greedy construction stops at a dispute wheel or the forward pass
-//!    cycles. More give
+//!    outcomes give `NoConvergence` with the cycle of the forward pass, and
+//!    each variable with a possible candidate is unknown. 1 gives
+//!    `Converged` with a note: "not safe under all timings" when the greedy
+//!    construction stops at a dispute wheel or the forward pass cycles, and
+//!    "safety under all timings not checked" otherwise. More give
 //!    `MultipleStableOutcomes`, and the routes of the group are unknown.
+//!    0 outcomes with a fixed point of the forward pass give the result
+//!    `Unknown` with the reason "internal error".
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -47,8 +50,13 @@ use super::{BgpPath, Family, LocalOrigin, Reason, RouteKey, SessionKind, Unknown
 use crate::install::Candidate;
 use crate::platform::{Origin, Platform};
 
-/// The note of a group with one stable outcome and a dispute wheel.
+/// The note of a group with one stable outcome and a dispute wheel, or
+/// with one stable outcome and a cycle of the forward pass.
 pub const NOT_SAFE: &str = "not safe under all timings";
+
+/// The note of a group with one stable outcome of the search, a fixed point
+/// of the forward pass and no dispute wheel.
+pub const NOT_CHECKED: &str = "safety under all timings not checked";
 
 /// A route key at a process.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -81,10 +89,9 @@ pub struct WheelSpoke {
     pub prefers: BgpPath,
 }
 
-/// The note of a group with one stable outcome that is not safe under all
-/// timings. `wheel` is the dispute wheel where the greedy construction
-/// stops, and empty for a group with no uniqueness check whose forward pass
-/// cycles.
+/// The note of a group with one stable outcome of the search: [`NOT_SAFE`]
+/// or [`NOT_CHECKED`]. `wheel` is the dispute wheel where the greedy
+/// construction stops, and empty when it finds none.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Note {
     pub text: &'static str,
@@ -103,9 +110,19 @@ pub struct CycleWitness {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Convergence {
-    Converged { note: Option<Note> },
-    MultipleStableOutcomes { outcomes: Vec<Outcome> },
-    NoConvergence { cycle: CycleWitness },
+    Converged {
+        note: Option<Note>,
+    },
+    MultipleStableOutcomes {
+        outcomes: Vec<Outcome>,
+    },
+    NoConvergence {
+        cycle: CycleWitness,
+    },
+    /// The calculation reaches no result.
+    Unknown {
+        reason: Unknown,
+    },
 }
 
 /// The kind of a [`Convergence`], from the best to the worst.
@@ -114,6 +131,7 @@ pub enum ConvergenceKind {
     Converged,
     MultipleStableOutcomes,
     NoConvergence,
+    Unknown,
 }
 
 impl Convergence {
@@ -122,6 +140,7 @@ impl Convergence {
             Convergence::Converged { .. } => ConvergenceKind::Converged,
             Convergence::MultipleStableOutcomes { .. } => ConvergenceKind::MultipleStableOutcomes,
             Convergence::NoConvergence { .. } => ConvergenceKind::NoConvergence,
+            Convergence::Unknown { .. } => ConvergenceKind::Unknown,
         }
     }
 }
@@ -161,15 +180,14 @@ pub enum Event {
 /// The result of the BGP calculation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BgpResult {
-    /// The state of each route with a path. The routes of a group with
-    /// `MultipleStableOutcomes` or `NoConvergence` are unknown.
+    /// The state of each route with a path. The routes of a group with a
+    /// result other than `Converged` are unknown.
     pub routes: BTreeMap<RouteAt, RouteState>,
     pub groups: Vec<GroupResult>,
     pub events: Vec<Event>,
     /// The worst result over the groups. `Converged` with no group.
     pub worst: ConvergenceKind,
-    /// The keys of the groups with `MultipleStableOutcomes` or
-    /// `NoConvergence`.
+    /// The keys of the groups with a result other than `Converged`.
     pub affected: BTreeSet<RouteKey>,
 }
 
@@ -451,59 +469,71 @@ fn possible(
     out
 }
 
-/// The possible best paths of each variable, when the uniqueness check
-/// applies to the group.
-fn strict_domains(g: &Group<'_, '_>) -> Option<Vec<BTreeSet<BestPath>>> {
+/// The possible best paths of each variable: `BestPath::None` and each
+/// possible candidate, from a closure over the possible candidates of the
+/// other variables.
+fn domains(g: &Group<'_, '_>) -> Vec<BTreeSet<BestPath>> {
     let n = g.vars.len();
     let none = vec![None; n];
     let mut dom: Vec<BTreeSet<BestPath>> = vec![BTreeSet::from([BestPath::None]); n];
-    let mut cands: Vec<BTreeSet<BgpPath>> = vec![BTreeSet::new(); n];
     loop {
         let mut changed = false;
         for v in 0..n {
             for (_, c) in possible(g, v, &dom, &none) {
-                match c.offer {
-                    Ok(p) => {
-                        if cands[v].insert(p.clone()) {
-                            dom[v].insert(BestPath::Path(p));
-                            changed = true;
-                        }
-                    }
-                    Err(_) => return None,
-                }
+                let b = match c.offer {
+                    Ok(p) => BestPath::Path(p),
+                    Err(u) => BestPath::Unknown(u),
+                };
+                changed |= dom[v].insert(b);
             }
         }
         if !changed {
-            break;
+            return dom;
         }
     }
-    for (v, held) in cands.iter().enumerate() {
-        let (p, _) = g.at(v);
+}
+
+/// True if the uniqueness check applies to the group with the domains
+/// `dom`.
+fn strict(g: &Group<'_, '_>, dom: &[BTreeSet<BestPath>]) -> bool {
+    for (v, d) in dom.iter().enumerate() {
+        if d.iter().any(|b| matches!(b, BestPath::Unknown(_))) {
+            return false;
+        }
+        let held: Vec<&BgpPath> = d
+            .iter()
+            .filter_map(|b| match b {
+                BestPath::Path(x) => Some(x),
+                _ => None,
+            })
+            .collect();
         if held.is_empty() {
             continue;
         }
+        let (p, _) = g.at(v);
         if p.neighbors.values().any(|nb| nb.route_reflector_client) {
-            return None;
+            return false;
         }
-        let profile = p.profile()?;
-        let list: Vec<&BgpPath> = held.iter().collect();
-        for i in 0..list.len() {
-            for j in i + 1..list.len() {
-                let pair = [list[i].clone(), list[j].clone()];
+        let Some(profile) = p.profile() else {
+            return false;
+        };
+        for i in 0..held.len() {
+            for j in i + 1..held.len() {
+                let pair = [held[i].clone(), held[j].clone()];
                 match decide(&pair, &p.options, Some(&profile)) {
                     Decision::Best { step, .. } => {
                         if step == Some(DecisionStep::IgpCost)
                             || (step == Some(DecisionStep::Med) && !p.options.always_compare_med)
                         {
-                            return None;
+                            return false;
                         }
                     }
-                    _ => return None,
+                    _ => return false,
                 }
             }
         }
     }
-    Some(dom)
+    true
 }
 
 /// The greedy construction: the fixed value of each variable that it
@@ -839,11 +869,11 @@ fn search(g: &Group<'_, '_>, fixed: &[Option<BestPath>]) -> Vec<Vec<BestPath>> {
 
 fn unknown_routes(
     g: &Group<'_, '_>,
-    states: &[Vec<BestPath>],
+    unknown: impl Fn(usize) -> bool,
     u: &Unknown,
 ) -> BTreeMap<RouteAt, RouteState> {
     (0..g.vars.len())
-        .filter(|&v| states.iter().any(|s| s[v] != BestPath::None))
+        .filter(|&v| unknown(v))
         .map(|v| (route_at(g, v), RouteState::Unknown(u.clone())))
         .collect()
 }
@@ -856,10 +886,12 @@ fn run_group(
 ) -> (GroupResult, BTreeMap<RouteAt, RouteState>) {
     let g = Group::new(net, keys);
     let (fwd, rounds) = forward(&g, gi, events);
-    let doms = strict_domains(&g);
-    let (fixed, wheel) = match &doms {
-        Some(d) => greedy(&g, d),
-        None => (vec![None; g.vars.len()], None),
+    let dom = domains(&g);
+    let possible_path = |v: usize| dom[v].iter().any(|b| *b != BestPath::None);
+    let (fixed, wheel) = if strict(&g, &dom) {
+        greedy(&g, &dom)
+    } else {
+        (vec![None; g.vars.len()], None)
     };
     let result = |convergence: Convergence| GroupResult {
         keys: keys.clone(),
@@ -910,23 +942,27 @@ fn run_group(
                 },
             }
         }
-        (0, Forward::Fixed(state)) => {
-            let (_, routes) = outcome(&g, state);
-            outcomes.push(Outcome { routes });
-            Convergence::Converged { note: None }
-        }
+        (0, Forward::Fixed(_)) => Convergence::Unknown {
+            reason: Unknown::new(
+                Reason::Internal,
+                "no stable outcome at the fixed point of the forward pass",
+            ),
+        },
         (1, _) => Convergence::Converged {
-            note: match (wheel, &fwd) {
-                (Some(w), _) => Some(Note {
+            note: Some(match (wheel, &fwd) {
+                (Some(w), _) => Note {
                     text: NOT_SAFE,
                     wheel: w,
-                }),
-                (None, Forward::Cycle { .. }) => Some(Note {
+                },
+                (None, Forward::Cycle { .. }) => Note {
                     text: NOT_SAFE,
                     wheel: Vec::new(),
-                }),
-                (None, Forward::Fixed(_)) => None,
-            },
+                },
+                (None, Forward::Fixed(_)) => Note {
+                    text: NOT_CHECKED,
+                    wheel: Vec::new(),
+                },
+            }),
         },
         _ => Convergence::MultipleStableOutcomes {
             outcomes: outcomes.clone(),
@@ -944,28 +980,24 @@ fn run_group(
         },
         Convergence::MultipleStableOutcomes { outcomes } => unknown_routes(
             &g,
-            &picks,
+            |v| picks.iter().any(|s| s[v] != BestPath::None),
             &Unknown::new(
                 Reason::MultipleStableOutcomes,
                 format!("{} outcomes", outcomes.len()),
             ),
         ),
-        Convergence::NoConvergence { cycle } => {
-            let Forward::Cycle { states, .. } = &fwd else {
-                unreachable!("no convergence comes from a cycle");
-            };
-            unknown_routes(
-                &g,
-                states,
-                &Unknown::new(
-                    Reason::NoConvergence,
-                    format!(
-                        "a cycle of {} rounds from round {}",
-                        cycle.length, cycle.first_round
-                    ),
+        Convergence::NoConvergence { cycle } => unknown_routes(
+            &g,
+            possible_path,
+            &Unknown::new(
+                Reason::NoConvergence,
+                format!(
+                    "a cycle of {} rounds from round {}",
+                    cycle.length, cycle.first_round
                 ),
-            )
-        }
+            ),
+        ),
+        Convergence::Unknown { reason } => unknown_routes(&g, possible_path, reason),
     };
     (result(convergence), routes)
 }

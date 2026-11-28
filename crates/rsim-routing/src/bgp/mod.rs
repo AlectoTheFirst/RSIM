@@ -554,6 +554,8 @@ pub enum Reason {
     MultipleStableOutcomes,
     /// The prefix group has no stable outcome.
     NoConvergence,
+    /// The calculation reaches a state that its invariants exclude.
+    Internal,
 }
 
 impl Reason {
@@ -568,6 +570,7 @@ impl Reason {
             Reason::SelectionNotKnown => "selection not known",
             Reason::MultipleStableOutcomes => "multiple stable outcomes",
             Reason::NoConvergence => "no convergence",
+            Reason::Internal => "internal error",
         }
     }
 }

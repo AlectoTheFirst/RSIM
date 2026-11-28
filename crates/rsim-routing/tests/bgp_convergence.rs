@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use bgp_common::*;
 use rsim_routing::Platform;
-use rsim_routing::bgp::converge::NOT_SAFE;
+use rsim_routing::bgp::converge::{NOT_CHECKED, NOT_SAFE};
 use rsim_routing::bgp::{Asn, BgpResult, Convergence, Event, Reason, RouteState};
 
 fn spp(perm: &[&[&[usize]]]) -> Spp {
@@ -640,15 +640,36 @@ fn a_med_cycle_with_no_deterministic_med_has_one_outcome_for_each_order_winner()
 }
 
 #[test]
-fn a_med_cycle_with_deterministic_med_converges_on_p2() {
+fn a_med_cycle_with_deterministic_med_converges_on_p2_with_the_unchecked_note() {
     let r = med_cycle(Some(true)).run();
-    assert!(
-        matches!(only_group(&r), Convergence::Converged { .. }),
-        "{:?}",
-        r.groups[0].convergence
-    );
+    let Convergence::Converged { note: Some(note) } = only_group(&r) else {
+        panic!("{:?}", r.groups[0].convergence);
+    };
+    assert_eq!(note.text, NOT_CHECKED);
+    assert!(note.wheel.is_empty());
+    assert!(r.groups[0].fixed_point);
     assert_eq!(
         best(&r, "r1", SPP_PREFIX).unwrap().best.next_hop,
         Some(ip("198.51.100.2"))
     );
+}
+
+#[test]
+fn no_convergence_makes_a_route_unknown_that_no_round_of_the_cycle_holds() {
+    let s = spp(&[
+        &[&[1, 3, 0], &[1, 0], &[1, 2, 0]],
+        &[&[2, 1, 0], &[2, 0]],
+        &[&[3, 2, 0], &[3, 0]],
+        &[&[4, 1, 2, 0]],
+    ]);
+    assert!(spp_stable(&s).is_empty());
+    let r = spp_lab(&s).run();
+    let Convergence::NoConvergence { cycle } = only_group(&r) else {
+        panic!("{:?}", r.groups[0].convergence);
+    };
+    assert!(!cycle.changing.keys().any(|at| at.device == "n4"));
+    assert!(matches!(
+        state(&r, "n4", SPP_PREFIX),
+        Some(RouteState::Unknown(u)) if u.reason == Reason::NoConvergence
+    ));
 }

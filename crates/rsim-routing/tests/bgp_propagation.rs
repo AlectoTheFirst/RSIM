@@ -8,13 +8,14 @@ use std::collections::BTreeSet;
 use bgp_common::*;
 use rsim_functions::{RouteKind, RouteProtocol};
 use rsim_routing::Platform;
+use rsim_routing::bgp::converge::NOT_CHECKED;
 use rsim_routing::bgp::{
     AdminValue, Aggregate, AsPath, Asn, Clause, Community, Convergence, Event, ExtCommunity,
     Family, MatchTerm, Network, NextHopSelf, Offer, PolicyBody, Reason, RouteDistinguisher,
     RouteKey, RoutePolicy, RouteState, Session, SessionEnd, SessionKind, SessionStage, SetAction,
     compute, export, install_candidates, receive,
 };
-use rsim_routing::bgp::{RouteAt, RoutingStage};
+use rsim_routing::bgp::{Note, RouteAt, RoutingStage};
 
 const P: &str = "203.0.113.0/24";
 
@@ -261,7 +262,12 @@ fn a_full_mesh_picks_the_exit_with_the_lower_igp_cost() {
     let r = lab.run();
     assert_eq!(
         r.groups[0].convergence,
-        Convergence::Converged { note: None }
+        Convergence::Converged {
+            note: Some(Note {
+                text: NOT_CHECKED,
+                wheel: Vec::new(),
+            })
+        }
     );
     let b = best(&r, "r1", P).unwrap();
     assert_eq!(b.best.next_hop, Some(ip("192.0.2.2")));
@@ -297,7 +303,12 @@ fn a_dual_homed_ebgp_prefix_under_maximum_paths_converges_with_2_paths() {
     let r = lab.run();
     assert_eq!(
         r.groups[0].convergence,
-        Convergence::Converged { note: None }
+        Convergence::Converged {
+            note: Some(Note {
+                text: NOT_CHECKED,
+                wheel: Vec::new(),
+            })
+        }
     );
     let b = best(&r, "r1", P).unwrap();
     assert_eq!(b.multipath.len(), 2);
