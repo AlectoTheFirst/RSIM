@@ -44,8 +44,9 @@ Complete:
 - OSPFv2 and OSPFv3 from the config: the config readers of the 4 vendors, the database builder of the twin and the shortest-path calculation
 - the collection and the readers of the OSPF databases of the 4 vendors, the reference of the database guard
 - the crate `rsim-guard`: the database guard (the table `ospf-guard`) and the route guard (the table `rib-guard`, the claim `rib-fib-agree` and the guard flag of each route lookup step)
+- the BGP calculation in `rsim-routing`: the policy evaluator, the decision function, the propagation and the convergence detection, on hand-built inputs
 
-Not started: BGP and the convergence detection.
+Not started: BGP from the config, the BGP rows of the guard, redistribution and VRF leaking.
 
 ## Step 5
 
