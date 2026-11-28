@@ -88,10 +88,6 @@ const PROCESS_AF_LINES: &[&str] = &[
     "aggregate-address * summary-only as-set",
     "maximum-paths ebgp *",
     "maximum-paths ibgp *",
-    "redistribute connected ..",
-    "redistribute static ..",
-    "redistribute ospf ..",
-    "redistribute ospfv3 ..",
 ];
 
 /// The handled lines of a process.
@@ -103,7 +99,6 @@ const PROCESS_LINES: &[&str] = &[
     "bgp bestpath compare-routerid",
     "bgp bestpath as-path multipath-relax",
     "bgp default local-preference *",
-    "default-information originate",
 ];
 
 const UNICAST_AFS: [&str; 2] = ["address-family ipv4 unicast", "address-family ipv6 unicast"];

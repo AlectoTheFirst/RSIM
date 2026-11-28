@@ -80,11 +80,6 @@ const PROCESS_AF_LINES: &[&str] = &[
     "aggregate-address * summary-only as-set",
     "maximum-paths *",
     "maximum-paths ibgp *",
-    "redistribute direct route-map *",
-    "redistribute static route-map *",
-    "redistribute ospf * route-map *",
-    "default-information originate",
-    "advertise l2vpn evpn",
 ];
 
 /// The handled lines of a process.

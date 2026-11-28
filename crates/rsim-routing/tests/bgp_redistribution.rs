@@ -13,9 +13,9 @@ use rsim_routing::Platform;
 use rsim_routing::bgp::{
     AdminValue, Asn, BgpInput, BgpOrigin, BgpProcess, BgpResult, Clause, ExtCommunity, Family,
     IgpRoute, IgpSource, IgpView, Leaked, LocalOrigin, MatchTerm, OspfRouteType, PolicyBody,
-    PrefixList, Reason, RedistSource, Redistribution, Resolution, RouteAt, RouteDistinguisher,
-    RouteKey, RoutePolicy, RouteState, Session, SessionEnd, SessionKind, compute,
-    install_candidates, overlay_candidates,
+    PrefixList, RedistSource, Redistribution, Resolution, RouteAt, RouteDistinguisher, RouteKey,
+    RoutePolicy, RouteState, Session, SessionEnd, SessionKind, compute, install_candidates,
+    overlay_candidates,
 };
 use rsim_routing::rounds::{self, Rounds};
 
@@ -194,7 +194,10 @@ fn an_unknown_route_of_the_route_table_makes_its_redistributed_route_unknown() {
     let Some(RouteState::Unknown(u)) = state(&out, "r1", "10.3.0.0/24") else {
         panic!("{:?}", out.routes);
     };
-    assert_eq!(u.reason, Reason::RedistributedRouteNotKnown);
+    assert!(
+        u.to_string().contains("redistributed route not known"),
+        "{u}"
+    );
 }
 
 /// A process of a VRF of a leaf with the EVPN targets of the VNI
@@ -338,7 +341,7 @@ fn the_tunnel_end_of_an_imported_route_resolves_in_the_default_vrf() {
     let Some(RouteState::Unknown(u)) = r.routes.get(&at("l2", "A", "10.1.1.0/24")) else {
         panic!("{:?}", r.routes.get(&at("l2", "A", "10.1.1.0/24")));
     };
-    assert_eq!(u.reason, Reason::NextHopNotResolved, "{u}");
+    assert!(u.to_string().contains("next hop not resolved"), "{u}");
 }
 
 #[test]
@@ -351,7 +354,7 @@ fn a_vrf_with_no_tunnel_end_gives_unknown_evpn_routes() {
     let Some(RouteState::Unknown(u)) = r.routes.get(&at("l2", "A", "10.1.1.0/24")) else {
         panic!("{:?}", r.routes.get(&at("l2", "A", "10.1.1.0/24")));
     };
-    assert_eq!(u.reason, Reason::TunnelEndNotKnown, "{u}");
+    assert!(u.to_string().contains("tunnel end not known"), "{u}");
 }
 
 #[test]
