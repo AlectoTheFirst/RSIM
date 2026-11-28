@@ -1657,9 +1657,7 @@ router bgp 64502
             .iter()
             .map(|g| (g.vrf.as_str(), g.text.as_str()))
             .collect();
-        for want in [("default", "as-override")] {
-            assert!(texts.contains(&want), "{want:?} not in {texts:?}");
-        }
+        assert!(texts.contains(&("default", "as-override")), "{texts:?}");
         assert!(
             !texts
                 .iter()

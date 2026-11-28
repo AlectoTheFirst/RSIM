@@ -1231,9 +1231,8 @@ mod tests {
     fn the_nodes_that_are_not_lowered_are_gaps() {
         let (d, _) = lowered();
         let texts: Vec<&str> = d.gaps.iter().map(|g| g.text.as_str()).collect();
-        for want in ["neighbor 198.51.100.2 address-family ipv4-unicast allowas-in number 2"] {
-            assert!(texts.contains(&want), "{want:?} not in {texts:?}");
-        }
+        let want = "neighbor 198.51.100.2 address-family ipv4-unicast allowas-in number 2";
+        assert!(texts.contains(&want), "{want:?} not in {texts:?}");
         assert!(
             !texts.iter().any(|t| t.contains("redistribute")),
             "{texts:?}"

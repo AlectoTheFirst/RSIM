@@ -86,7 +86,7 @@ pub struct IgpTable {
     pub incomplete: BTreeMap<bool, String>,
     /// The process and the route type of each computed OSPF route, or the
     /// reason why the route is unknown.
-    pub ospf_types: BTreeMap<Prefix, Result<(String, OspfRouteType), String>>,
+    pub ospf_types: BTreeMap<Prefix, crate::ospf::routes::RouteType>,
 }
 
 /// The lowest BGP distance of a platform: its eBGP or its iBGP distance.

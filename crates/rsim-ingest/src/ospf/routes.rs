@@ -22,6 +22,10 @@ pub struct OspfRoutes {
 
 const KIND: RouteKind = RouteKind::Learned(RouteProtocol::Ospf);
 
+/// The process and the route type of a computed route, or the reason why
+/// the route is unknown.
+pub type RouteType = Result<(String, OspfRouteType), String>;
+
 impl OspfRoutes {
     /// The calculations of the databases of a VRF. A version whose sections
     /// are not read in full, a version with no database of the VRF, or a
@@ -64,7 +68,7 @@ impl OspfRoutes {
     /// The process and the route type of each computed route, or the reason
     /// why the route is unknown: a route that depends on a gap, or whose
     /// prefix more than one calculation of its version gives.
-    pub fn route_types(&self) -> Vec<(Prefix, Result<(String, OspfRouteType), String>)> {
+    pub fn route_types(&self) -> Vec<(Prefix, RouteType)> {
         let mut out = Vec::new();
         for (v, calcs) in &self.by_version {
             let Ok(calcs) = calcs else {
