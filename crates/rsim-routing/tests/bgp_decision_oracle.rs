@@ -357,6 +357,46 @@ fn the_order_winners_are_the_best_paths_of_each_order_of_the_candidates() {
             Err(u) => panic!("case {case}: {u}"),
         }
     }
+    let mut several = 0;
+    for case in 0..300 {
+        let n = 3 + (case % 4);
+        let lower = 1 + (case % 2);
+        let base: Vec<BgpPath> = (0..n)
+            .map(|i| {
+                let asn = rng.pick(&[64500, 64501]);
+                let as_path = if i < lower {
+                    vec![asn, 64999]
+                } else {
+                    vec![asn]
+                };
+                let mut p = ibgp(&format!("198.51.100.{}", i + 1), &as_path);
+                p.med = Some(rng.pick(&[0, 10, 20]));
+                p.igp_cost = rng.pick(&[0, 10, 20, 30]);
+                p
+            })
+            .collect();
+        let options = BgpOptions::default();
+        let profile = BgpProfile::of(Platform::Iosxe);
+        let mut all: BTreeSet<Option<IpAddr>> = BTreeSet::new();
+        for perm in permutations(n) {
+            let c: Vec<BgpPath> = perm.iter().map(|&i| base[i].clone()).collect();
+            all.extend(identities(
+                &c,
+                &chosen(&decide(&c, &options, Some(&profile))),
+            ));
+        }
+        match order_winners(&base, &options, Some(&profile)) {
+            Ok(Some(w)) => {
+                assert_eq!(identities(&base, &w), all, "cycle case {case}");
+                if w.len() > 1 {
+                    several += 1;
+                }
+            }
+            Ok(None) => assert_eq!(all.len(), 1, "cycle case {case}: {all:?}"),
+            Err(u) => panic!("cycle case {case}: {u}"),
+        }
+    }
+    assert!(several > 10, "{several}");
     let c = med_cycle();
     let profile = BgpProfile::of(Platform::Iosxe);
     assert_eq!(

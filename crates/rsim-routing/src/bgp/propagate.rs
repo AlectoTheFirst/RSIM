@@ -721,9 +721,8 @@ impl<'n, 'a> Group<'n, 'a> {
 
     /// The sent path over link `l` for the best path `best` of variable
     /// `w` at the sender, with no summary-only check. An unknown best path
-    /// gives no path to a neighbour with `shutdown`, and no path to an iBGP
-    /// neighbour that is not a route-reflector client when each path of `w`
-    /// comes from such a neighbour.
+    /// gives no path to an iBGP neighbour that is not a route-reflector
+    /// client when each path of `w` comes from such a neighbour.
     pub fn sent(&self, l: usize, w: usize, best: &BestPath) -> Offer {
         let link = &self.net.links[l];
         let sender = self.net.procs[link.from];
@@ -732,10 +731,9 @@ impl<'n, 'a> Group<'n, 'a> {
             BestPath::None => Offer::None,
             BestPath::Unknown(u) => {
                 let n = &sender.neighbors[&link.from_neighbor];
-                if n.shutdown
-                    || (sender.session_kind(n) == SessionKind::Ibgp
-                        && !n.route_reflector_client
-                        && self.ibgp_only(w))
+                if sender.session_kind(n) == SessionKind::Ibgp
+                    && !n.route_reflector_client
+                    && self.ibgp_only(w)
                 {
                     Offer::None
                 } else {
