@@ -398,7 +398,7 @@ fn what_is_not_lowered_gives_unknown() {
     let notes: Vec<&str> = e.notes["leaf1"]
         .iter()
         .map(String::as_str)
-        .filter(|n| !n.starts_with("ospf-"))
+        .filter(|n| !n.starts_with("ospf-") && !n.starts_with("bgp "))
         .collect();
     assert_eq!(
         notes,
@@ -1448,8 +1448,9 @@ fn a_vrf_with_bgp_and_no_rows_is_unknown_outside_its_connected_routes() {
     let e = estate_of(config.as_bytes(), col);
     let unhandled = &e.coverage["leaf1"].unhandled;
     assert!(
-        unhandled
-            .contains_key("router bgp */vrf */address-family ../redistribute direct route-map RM"),
+        unhandled.contains_key(
+            "router bgp */vrf */address-family ipv4 unicast/redistribute direct route-map RM"
+        ),
         "{unhandled:?}"
     );
     assert!(!unhandled.contains_key("router bgp .."), "{unhandled:?}");

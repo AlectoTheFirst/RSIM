@@ -34,6 +34,12 @@ use crate::bgp_peers::DEFAULT_VRF;
 use crate::links::{BgpFar, BgpPeer, BgpPeerFact, FarSide, PeerSource};
 use crate::scenario::NOT_RECOMPUTED;
 
+/// The device and the VRF of a process.
+type Node = (String, String);
+
+/// An edge between 2 processes of the components of the gaps.
+type Edge = (Node, Node);
+
 /// The kind of a BGP route.
 pub const BGP: RouteKind = RouteKind::Learned(RouteProtocol::Bgp);
 
@@ -234,7 +240,7 @@ struct Components {
 impl Components {
     fn new(
         nodes: impl IntoIterator<Item = (String, String)>,
-        edges: &[((String, String), (String, String))],
+        edges: &[Edge],
         gaps: &[(String, Gap)],
     ) -> Components {
         let mut ids: BTreeMap<(String, String), usize> = BTreeMap::new();
@@ -336,7 +342,7 @@ pub fn build(
             .get(&(d.to_string(), v.to_string()))
             .is_some_and(|&i| processes[i].neighbors.contains_key(&a))
     };
-    let mut edges: Vec<((String, String), (String, String))> = Vec::new();
+    let mut edges: Vec<Edge> = Vec::new();
     let mut sessions: BTreeSet<Session> = BTreeSet::new();
     let mut outside: BTreeSet<(String, String, IpAddr)> = BTreeSet::new();
     for (d, list) in facts {

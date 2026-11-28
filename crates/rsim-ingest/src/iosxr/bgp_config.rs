@@ -1453,7 +1453,7 @@ router bgp 64502
         ));
         match &set.policies["ODD-ACTION"].body {
             PolicyBody::Rpl(s) => {
-                assert!(matches!(s[0], Statement::Set(SetAction::Unhandled(_))));
+                assert!(matches!(s[0], Statement::Unhandled(_)));
             }
             other => panic!("{other:?}"),
         }

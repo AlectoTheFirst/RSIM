@@ -60,8 +60,8 @@ fn the_coverage_shares_of_the_fixture() {
         &doc,
         &iosxr::table(&RouteTables::uniform(true, Default::default())),
     );
-    assert_eq!(cov.lines[&State::Handled], 120);
-    assert_eq!(cov.lines[&State::Irrelevant], 122);
+    assert_eq!(cov.lines[&State::Handled], 141);
+    assert_eq!(cov.lines[&State::Irrelevant], 101);
     assert_eq!(cov.lines[&State::Unhandled], 5);
     assert!(cov.share(State::Unhandled) < 0.05);
 }
@@ -87,7 +87,7 @@ fn without_a_route_table_the_routing_protocols_are_unhandled_and_the_policies_ha
     let got = ranked(false);
     let paths: Vec<&str> = got.iter().map(|r| r.0.as_str()).collect();
     for p in [
-        "router bgp */vrf */address-family ../redistribute connected",
+        "router bgp */vrf */address-family ipv4 unicast/redistribute connected",
         "router static ..",
         "vrf */address-family ..",
         "vrf */rd ..",
@@ -165,10 +165,10 @@ fn the_states_of_key_stanzas() {
         ),
         (&["ipv4 access-list EDGE-IN", "20 permit"], Handled, Handled),
         (&["ipv6 access-list EDGE6-IN"], Irrelevant, Irrelevant),
-        (&["route-policy PASS", "pass"], Irrelevant, Unhandled),
-        (&["end-policy"], Irrelevant, Unhandled),
-        (&["prefix-set PS-CUSTOMER"], Irrelevant, Unhandled),
-        (&["end-set"], Irrelevant, Unhandled),
+        (&["route-policy PASS", "pass"], Handled, Handled),
+        (&["end-policy"], Handled, Handled),
+        (&["prefix-set PS-CUSTOMER"], Handled, Handled),
+        (&["end-set"], Handled, Handled),
         (&["router static"], Irrelevant, Unhandled),
         (&["router bgp 64496", "neighbor x"], Handled, Handled),
         (
