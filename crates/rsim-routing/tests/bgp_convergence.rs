@@ -657,3 +657,121 @@ fn no_convergence_makes_a_route_unknown_that_no_round_of_the_cycle_holds() {
         Some(RouteState::Unknown(u)) if u.reason == Reason::NoConvergence
     ));
 }
+
+#[test]
+fn an_unhandled_term_inside_bad_gadget_gives_an_unknown_convergence() {
+    use rsim_routing::bgp::{ConvergenceKind, MatchTerm, PolicyBody};
+    let s = spp(&[
+        &[&[1, 3, 0], &[1, 0]],
+        &[&[2, 1, 0], &[2, 0]],
+        &[&[3, 2, 0], &[3, 0]],
+    ]);
+    let mut lab = spp_lab(&s);
+    let p = lab.proc("n1").policy.policies.get_mut("from-3").unwrap();
+    let PolicyBody::RouteMap(clauses) = &mut p.body else {
+        panic!("{:?}", p.body);
+    };
+    clauses[0]
+        .matches
+        .push(MatchTerm::Unhandled("match rpki valid".to_string()));
+    let r = lab.run();
+    let Convergence::Unknown { reason } = only_group(&r) else {
+        panic!("{:?}", r.groups[0].convergence);
+    };
+    assert_eq!(reason.reason, Reason::ConvergenceNotDetermined);
+    assert_eq!(r.worst, ConvergenceKind::Unknown);
+    assert!(r.affected.contains(&key(SPP_PREFIX)));
+    for d in ["n1", "n2", "n3"] {
+        assert!(
+            matches!(state(&r, d, SPP_PREFIX), Some(RouteState::Unknown(_))),
+            "{d}: {:?}",
+            state(&r, d, SPP_PREFIX)
+        );
+    }
+}
+
+#[test]
+fn a_med_decision_over_more_candidates_than_the_bound_gives_an_unknown_route() {
+    use rsim_routing::bgp::{ConvergenceKind, ORDER_BOUND};
+    let mut lab = Lab::default();
+    lab.router("r1", Platform::Iosxe, 65001, "10.255.0.1");
+    for i in 0..=ORDER_BOUND {
+        let asn = if i % 2 == 0 { 64500 } else { 64501 };
+        let addr = format!("192.0.2.{}", i + 1);
+        lab.seed("r1", &addr, asn, SPP_PREFIX, &[asn], Some(i as u32));
+    }
+    let r = lab.run();
+    let Some(RouteState::Unknown(u)) = state(&r, "r1", SPP_PREFIX) else {
+        panic!("{:?}", state(&r, "r1", SPP_PREFIX));
+    };
+    assert_eq!(u.reason, Reason::CandidateOrderNotComputed);
+    assert_eq!(r.worst, ConvergenceKind::Unknown, "{:?}", r.groups);
+}
+
+/// An iBGP mesh of x, v and w in AS 65001, with the eBGP peer y of x in AS
+/// 65002. The first path of x meets an unhandled term in the import policy
+/// of v and w, and the later path of x through y does not.
+#[test]
+fn an_unhandled_term_on_a_first_path_only_leaves_the_final_paths_known() {
+    use rsim_routing::bgp::{
+        AsPathLine, AsPathList, Clause, MatchTerm, PolicyBody, RoutePolicy, SetAction,
+    };
+    let mut lab = Lab::default();
+    for (d, asn, rid) in [
+        ("x", 65001, "10.255.0.1"),
+        ("v", 65001, "10.255.0.2"),
+        ("w", 65001, "10.255.0.3"),
+        ("y", 65002, "10.255.0.4"),
+    ] {
+        lab.router(d, Platform::Iosxe, asn, rid);
+    }
+    lab.peer("x", "10.1.2.1", "v", "10.1.2.2");
+    lab.peer("x", "10.1.3.1", "w", "10.1.3.3");
+    lab.peer("v", "10.2.3.2", "w", "10.2.3.3");
+    lab.peer("x", "10.1.4.1", "y", "10.1.4.4");
+    lab.seed(
+        "x",
+        "192.0.2.1",
+        64500,
+        SPP_PREFIX,
+        &[64500, 64501, 64502],
+        None,
+    );
+    lab.seed("y", "198.51.100.1", 64600, SPP_PREFIX, &[64600], None);
+    for (d, x) in [("v", "10.1.2.1"), ("w", "10.1.3.1")] {
+        let p = lab.proc(d);
+        p.policy.as_path_lists.insert(
+            "long".to_string(),
+            AsPathList::new(vec![AsPathLine::regex(1, true, "_64502$")]),
+        );
+        let mut odd = Clause::new(10, true);
+        odd.matches
+            .push(MatchTerm::AsPathList(vec!["long".to_string()]));
+        odd.matches
+            .push(MatchTerm::Unhandled("match rpki valid".to_string()));
+        odd.sets.push(SetAction::LocalPref(200));
+        p.policy.policies.insert(
+            "in".to_string(),
+            RoutePolicy {
+                name: "in".to_string(),
+                body: PolicyBody::RouteMap(vec![odd, Clause::new(20, true)]),
+                spans: Vec::new(),
+            },
+        );
+        lab.neighbor_mut(d, x).import_policy = Some("in".to_string());
+    }
+    let r = lab.run();
+    assert!(
+        matches!(only_group(&r), Convergence::Converged { .. }),
+        "{:?}",
+        r.groups[0].convergence
+    );
+    for d in ["x", "v", "w"] {
+        assert_eq!(
+            as_path_of(&r, d, SPP_PREFIX),
+            Some(vec![65002, 64600]),
+            "{d}: {:?}",
+            state(&r, d, SPP_PREFIX)
+        );
+    }
+}

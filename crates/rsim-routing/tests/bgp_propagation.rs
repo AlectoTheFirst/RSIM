@@ -554,6 +554,16 @@ fn an_unhandled_import_term_makes_the_route_unknown_only_where_it_decides() {
     };
     assert_eq!(u.reason, Reason::PolicyClauseNotEvaluated);
     assert!(state(&r, "r2", "198.51.100.0/24").is_none());
+    let g = r.groups.iter().find(|g| g.keys.contains(&key(P))).unwrap();
+    assert!(
+        matches!(
+            &g.convergence,
+            Convergence::Unknown { reason } if reason.reason == Reason::ConvergenceNotDetermined
+        ),
+        "{:?}",
+        g.convergence
+    );
+    assert!(r.affected.contains(&key(P)));
 }
 
 #[test]
