@@ -9,6 +9,8 @@ arp.txt	show arp vrf all
 inventory.txt	show inventory
 hsrp.txt	show hsrp
 bgp_sessions.txt	show bgp summary
+bgp_neighbors.txt	show bgp neighbors
+bgp_vrf_neighbors.txt	show bgp vrf all neighbors
 ospf.txt	show ospf
 ospf_interfaces.txt	show ospf interface
 ospf_neighbors.txt	show ospf neighbor
@@ -29,3 +31,12 @@ ospfv3_lsdb_external.txt	show ospfv3 database external
 ospfv3_lsdb_nssa.txt	show ospfv3 database nssa-external
 ospfv3_lsdb_link.txt	show ospfv3 database link
 ospfv3_lsdb_intra_area_prefix.txt	show ospfv3 database prefix
+bgp_routes.default.10.17.0.1.received-routes.txt	show bgp neighbors 10.17.0.1 received routes
+bgp_routes.default.10.17.0.1.routes.txt	show bgp neighbors 10.17.0.1 routes
+bgp_routes.default.10.17.0.1.advertised-routes.txt	show bgp neighbors 10.17.0.1 advertised-routes
+bgp_routes.default.10.19.0.3.received-routes.txt	show bgp neighbors 10.19.0.3 received routes
+bgp_routes.default.10.19.0.3.routes.txt	show bgp neighbors 10.19.0.3 routes
+bgp_routes.default.10.19.0.3.advertised-routes.txt	show bgp neighbors 10.19.0.3 advertised-routes
+bgp_routes.default.10.250.0.3.received-routes.txt	show bgp neighbors 10.250.0.3 received routes
+bgp_routes.default.10.250.0.3.routes.txt	show bgp neighbors 10.250.0.3 routes
+bgp_routes.default.10.250.0.3.advertised-routes.txt	show bgp neighbors 10.250.0.3 advertised-routes

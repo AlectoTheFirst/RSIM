@@ -1,0 +1,48 @@
+{
+  "TABLE_neighbor": {
+    "ROW_neighbor": [
+      {
+        "neighbor": "10.20.0.11",
+        "remote-id": "10.20.0.11",
+        "remoteas": "65120",
+        "state": "Established",
+        "vrf": "default"
+      },
+      {
+        "neighbor": "10.20.0.12",
+        "remote-id": "10.20.0.12",
+        "remoteas": "65120",
+        "state": "Established",
+        "vrf": "default"
+      },
+      {
+        "neighbor": "10.20.0.13",
+        "remote-id": "10.20.0.13",
+        "remoteas": "65120",
+        "state": "Established",
+        "vrf": "default"
+      },
+      {
+        "neighbor": "10.20.0.14",
+        "remote-id": "10.20.0.14",
+        "remoteas": "65120",
+        "state": "Established",
+        "vrf": "default"
+      },
+      {
+        "neighbor": "10.20.0.21",
+        "remote-id": "10.20.0.21",
+        "remoteas": "65120",
+        "state": "Established",
+        "vrf": "default"
+      },
+      {
+        "neighbor": "10.20.0.22",
+        "remote-id": "10.20.0.22",
+        "remoteas": "65120",
+        "state": "Established",
+        "vrf": "default"
+      }
+    ]
+  }
+}

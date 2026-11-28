@@ -1,0 +1,606 @@
+{
+  "TABLE_vrf": {
+    "ROW_vrf": [
+      {
+        "TABLE_afi": {
+          "ROW_afi": [
+            {
+              "TABLE_safi": {
+                "ROW_safi": [
+                  {
+                    "TABLE_prefix": {
+                      "ROW_prefix": [
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "0.0.0.0/0"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.12.99.0/24"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.12.110.0/24"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.12.120.0/24"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.12.250.0/29"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.16.0.0/31"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.16.0.2/31"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.16.255.1/32"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.17.0.1/32"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.17.0.2/32"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.17.1.0/31"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.18.0.0/31"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.18.0.2/31"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.18.255.1/32"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.18.255.2/32"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010 65020",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.22.99.0/24"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010 65020",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.22.110.0/24"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010 65020",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.22.120.0/24"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010 65020",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.22.250.0/29"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010 65020",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.26.0.0/31"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.26.0.2/31"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010 65020",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.26.255.1/32"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010 65020",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.27.0.1/32"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.27.0.2/32"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010 65020",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.27.1.0/31"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010 65020",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.28.0.0/31"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.28.0.2/31"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010 65020",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.28.255.1/32"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.28.255.2/32"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.29.0.2/31"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.250.0.0/31"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.250.0.2/31"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010 65020",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "198.51.100.0/31"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65010",
+                                "best": "true",
+                                "ipnexthop": "10.19.0.0",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "203.0.113.0/31"
+                        }
+                      ]
+                    },
+                    "af-name": "IPv4 Unicast",
+                    "safi": "1"
+                  }
+                ]
+              },
+              "afi": "1"
+            }
+          ]
+        },
+        "vrf-name-out": "PROD"
+      }
+    ]
+  }
+}

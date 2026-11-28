@@ -1,0 +1,4 @@
+BGP neighbor is 203.0.113.1, vrf default,  remote AS 64496, external link
+  BGP version 4, remote router ID 203.0.113.1
+  BGP state = Idle
+

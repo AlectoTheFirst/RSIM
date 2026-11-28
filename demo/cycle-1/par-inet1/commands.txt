@@ -17,6 +17,7 @@ vlans.txt	show vlan brief
 hsrp_detail.txt	show standby
 vrrp_detail.txt	show vrrp
 bgp_sessions.txt	show ip bgp summary
+bgp_neighbors.txt	show bgp all neighbors
 ospf.txt	show ip ospf
 ospf_interfaces.txt	show ip ospf interface
 ospf_neighbors.txt	show ip ospf neighbor
@@ -38,3 +39,6 @@ ospfv3_lsdb_nssa.txt	show ipv6 ospf database nssa-external
 ospfv3_lsdb_link.txt	show ipv6 ospf database link
 ospfv3_lsdb_intra_area_prefix.txt	show ipv6 ospf database prefix
 arp_vrfs.Mgmt-intf.txt	show ip arp vrf Mgmt-intf
+bgp_routes.default.198.51.100.1.received-routes.txt	show ip bgp neighbors 198.51.100.1 received-routes
+bgp_routes.default.198.51.100.1.routes.txt	show ip bgp neighbors 198.51.100.1 routes
+bgp_routes.default.198.51.100.1.advertised-routes.txt	show ip bgp neighbors 198.51.100.1 advertised-routes

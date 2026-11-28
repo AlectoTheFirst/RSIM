@@ -1,0 +1,20 @@
+{
+  "TABLE_neighbor": {
+    "ROW_neighbor": [
+      {
+        "neighbor": "10.10.0.1",
+        "remote-id": "10.10.0.1",
+        "remoteas": "65110",
+        "state": "Established",
+        "vrf": "default"
+      },
+      {
+        "neighbor": "10.10.0.2",
+        "remote-id": "10.10.0.2",
+        "remoteas": "65110",
+        "state": "Established",
+        "vrf": "default"
+      }
+    ]
+  }
+}

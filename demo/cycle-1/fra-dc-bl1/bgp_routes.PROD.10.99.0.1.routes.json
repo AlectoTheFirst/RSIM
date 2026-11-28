@@ -1,0 +1,147 @@
+{
+  "TABLE_vrf": {
+    "ROW_vrf": [
+      {
+        "TABLE_afi": {
+          "ROW_afi": [
+            {
+              "TABLE_safi": {
+                "ROW_safi": [
+                  {
+                    "TABLE_prefix": {
+                      "ROW_prefix": [
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65120",
+                                "best": "true",
+                                "ipnexthop": "10.99.0.1",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.21.10.0/24"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65120",
+                                "best": "true",
+                                "ipnexthop": "10.99.0.1",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.21.30.0/24"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65120",
+                                "best": "true",
+                                "ipnexthop": "10.99.0.1",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.21.40.0/24"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65120",
+                                "best": "true",
+                                "ipnexthop": "10.99.0.1",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.21.60.0/24"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65120",
+                                "best": "true",
+                                "ipnexthop": "10.99.0.1",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.21.90.0/24"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65120",
+                                "best": "true",
+                                "ipnexthop": "10.99.0.1",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.29.0.0/31"
+                        },
+                        {
+                          "TABLE_path": {
+                            "ROW_path": [
+                              {
+                                "aspath": "65120",
+                                "best": "true",
+                                "ipnexthop": "10.99.0.1",
+                                "localpref": "100",
+                                "metric": "0",
+                                "origin": "?",
+                                "pathnr": "0",
+                                "weight": "0"
+                              }
+                            ]
+                          },
+                          "ipprefix": "10.29.0.2/31"
+                        }
+                      ]
+                    },
+                    "af-name": "IPv4 Unicast",
+                    "safi": "1"
+                  }
+                ]
+              },
+              "afi": "1"
+            }
+          ]
+        },
+        "vrf-name-out": "PROD"
+      }
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+BGP neighbor is 198.51.100.1, vrf default,  remote AS 64511, external link
+  BGP version 4, remote router ID 198.51.100.1
+  BGP state = Established, up for 5w6d
+
