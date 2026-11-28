@@ -462,7 +462,7 @@ pub fn assemble_scenario(
         return Ok(assemble_with(inputs, sessions));
     }
     let (mut base, _) = assemble_pass(inputs.clone(), sessions, Plan::Base);
-    let downs = layer_downs(&base, layers)?;
+    let (downs, far) = layer_downs(&base, layers)?;
     let spans: Vec<SourceSpan> = layers
         .iter()
         .enumerate()
@@ -479,6 +479,7 @@ pub fn assemble_scenario(
                 DeviceScenario {
                     base: tables.remove(d).unwrap_or_default(),
                     down: downs.get(d).cloned().unwrap_or_default(),
+                    far: far.get(d).cloned().unwrap_or_default(),
                     spans: spans.clone(),
                 },
             )
@@ -496,12 +497,24 @@ pub fn assemble_scenario(
 
 /// The down interfaces of each device of the layers: the named interface,
 /// and the far end of each link of the interface in the base, with the
-/// links that name the interface as their far end.
+/// links that name the interface as their far end. A sub-interface with no
+/// link of its own, for example `eth1.10`, takes down the sub-interface
+/// with the same number of the far end of each link of its interface, for
+/// example `eth3.10`. The second map holds these far sub-interfaces, other
+/// than the interfaces that a layer names.
+#[allow(clippy::type_complexity)]
 fn layer_downs(
     base: &Estate,
     layers: &[Layer],
-) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+) -> Result<
+    (
+        BTreeMap<String, BTreeSet<String>>,
+        BTreeMap<String, BTreeSet<String>>,
+    ),
+    String,
+> {
     let mut downs: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut derived: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let vendor = |l: &Layer, d: &str| -> Result<(), String> {
         match base.vendors.get(d) {
             None => Err(format!("{l}: no device {d} in the twin")),
@@ -511,24 +524,33 @@ fn layer_downs(
             Some(_) => Ok(()),
         }
     };
+    // The far ends of the links of a port. A far port with 2 or more peers
+    // stays up through the other peers.
+    let far_of = |key: &(String, String)| -> BTreeSet<(String, String)> {
+        let mut far: BTreeSet<(String, String)> =
+            base.links.get(key).into_iter().flatten().cloned().collect();
+        for (end, ends) in &base.links {
+            if ends.contains(key) {
+                far.insert(end.clone());
+            }
+        }
+        far.retain(|f| base.links.get(f).is_none_or(|ends| ends.len() <= 1));
+        far
+    };
     for l in layers {
         let Layer::LinkDown { device, interface } = l;
         vendor(l, device)?;
         let key = (device.clone(), interface.clone());
-        let mut far: BTreeSet<(String, String)> = base
-            .links
-            .get(&key)
-            .into_iter()
-            .flatten()
-            .cloned()
-            .collect();
-        for (end, ends) in &base.links {
-            if ends.contains(&key) {
-                far.insert(end.clone());
+        let mut far = far_of(&key);
+        if far.is_empty()
+            && let Some((port, number)) = interface.rsplit_once('.')
+        {
+            for (d, p) in far_of(&(device.clone(), port.to_string())) {
+                let sub = format!("{p}.{number}");
+                derived.entry(d.clone()).or_default().insert(sub.clone());
+                far.insert((d, sub));
             }
         }
-        // A far port with 2 or more peers stays up through the other peers.
-        far.retain(|f| base.links.get(f).is_none_or(|ends| ends.len() <= 1));
         downs
             .entry(device.clone())
             .or_default()
@@ -538,7 +560,15 @@ fn layer_downs(
             downs.entry(d).or_default().insert(port);
         }
     }
-    Ok(downs)
+    for (d, subs) in &mut derived {
+        subs.retain(|s| {
+            !layers.iter().any(|l| {
+                let Layer::LinkDown { device, interface } = l;
+                device == d && interface == s
+            })
+        });
+    }
+    Ok((downs, derived))
 }
 
 /// Builds the twin of the inputs in a pass. Gives the interfaces of the
@@ -905,7 +935,7 @@ fn assemble_pass(
     if let Plan::Scenario { devices, .. } = &plan {
         for (d, s) in devices {
             for i in &s.down {
-                if !found.contains(&(d.clone(), i.clone())) {
+                if !found.contains(&(d.clone(), i.clone())) && !s.far.contains(i) {
                     missing.push(format!("no interface {i} in the config of {d}"));
                 }
             }
@@ -1921,7 +1951,9 @@ mod layer_tests {
     }
 
     fn down(e: &Estate, layer: &str) -> BTreeMap<String, BTreeSet<String>> {
-        layer_downs(e, &[Layer::link_down(layer).unwrap()]).unwrap()
+        layer_downs(e, &[Layer::link_down(layer).unwrap()])
+            .unwrap()
+            .0
     }
 
     fn set(items: &[(&str, &[&str])]) -> BTreeMap<String, BTreeSet<String>> {
@@ -1942,6 +1974,33 @@ mod layer_tests {
         assert_eq!(
             down(&e, "leaf:Po1"),
             set(&[("leaf", &["Po1"]), ("swA", &["Po10"]), ("swB", &["Po10"])])
+        );
+    }
+
+    #[test]
+    fn a_layer_on_a_sub_interface_takes_down_the_sub_interface_of_the_far_end() {
+        let e = estate(&[
+            (("r1", "eth1"), &[("r2", "eth3")]),
+            (("r2", "eth3"), &[("r1", "eth1")]),
+        ]);
+        assert_eq!(
+            down(&e, "r1:eth1.10"),
+            set(&[("r1", &["eth1.10"]), ("r2", &["eth3.10"])])
+        );
+        let (_, far) = layer_downs(&e, &[Layer::link_down("r1:eth1.10").unwrap()]).unwrap();
+        assert_eq!(far, set(&[("r2", &["eth3.10"])]));
+        // A layer on the far sub-interface too makes it a named interface.
+        let both = [
+            Layer::link_down("r1:eth1.10").unwrap(),
+            Layer::link_down("r2:eth3.10").unwrap(),
+        ];
+        let (downs, far) = layer_downs(&e, &both).unwrap();
+        assert_eq!(downs, set(&[("r1", &["eth1.10"]), ("r2", &["eth3.10"])]));
+        assert!(far.values().all(BTreeSet::is_empty), "{far:?}");
+        // A port with a link keeps its own far end.
+        assert_eq!(
+            down(&e, "r1:eth1"),
+            set(&[("r1", &["eth1"]), ("r2", &["eth3"])])
         );
     }
 }

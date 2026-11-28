@@ -97,6 +97,10 @@ pub struct DeviceScenario {
     pub base: BTreeMap<String, BaseVrf>,
     /// The interfaces of the device that a layer takes down.
     pub down: BTreeSet<String>,
+    /// The interfaces of `down` that a layer on a sub-interface of another
+    /// device takes down at the far end of its link. The config of the
+    /// device need not have them.
+    pub far: BTreeSet<String>,
     /// The spans of the layers of the scenario.
     pub spans: Vec<SourceSpan>,
 }
