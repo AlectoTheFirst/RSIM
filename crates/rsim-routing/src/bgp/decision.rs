@@ -5,10 +5,11 @@
 //! result does not depend on their order. With deterministic MED, the
 //! candidates are grouped by their neighbour AS, the best of each group is
 //! selected, and the group winners are compared. This result does not
-//! depend on the order either. With neither, the candidates are compared in their
-//! input order, each with the best so far, as a device compares them in its
-//! list order. MED then makes the comparison non-transitive, and the result
-//! can depend on the input order.
+//! depend on the order either. With neither, `decide` compares the
+//! candidates in their input order, each with the best so far, as a device
+//! compares them in its list order. MED then makes the comparison
+//! non-transitive, and the result can depend on the input order.
+//! `order_winners` gives each candidate that is the best path in some order.
 //!
 //! The oldest-path step is not modelled. Two eBGP paths that are equal
 //! through the IGP cost give a tie, unless compare-routerid is set.
@@ -212,6 +213,68 @@ pub(crate) fn multipath_for(
     let cmp = comparator(profile, options);
     let limit = profile.maximum_paths(candidates[base].peer.kind, options);
     multipath(candidates, base, &cmp, options, limit)
+}
+
+/// The candidates that are a best path of [`decide`] in some order of
+/// `candidates`, in ascending index order. `None` when the result does not
+/// depend on the order: with always-compare-med, with deterministic MED, with
+/// no profile, and when no pair of candidates is decided by the MED.
+///
+/// The set is exact. Each state of the calculation is a set of compared
+/// candidates with the tied paths of one order of them, so its size grows
+/// with the number of subsets of the candidates.
+pub(crate) fn order_winners(
+    candidates: &[BgpPath],
+    options: &BgpOptions,
+    profile: Option<&BgpProfile>,
+) -> Option<Vec<usize>> {
+    let profile = profile?;
+    let cmp = comparator(profile, options);
+    if cmp.always_med || profile.deterministic_med(options) {
+        return None;
+    }
+    let n = candidates.len();
+    let med_pair = (0..n).any(|i| {
+        (i + 1..n).any(|j| {
+            matches!(
+                cmp.compare(&candidates[i], &candidates[j]),
+                Rank::Better(DecisionStep::Med) | Rank::Worse(DecisionStep::Med)
+            )
+        })
+    });
+    if !med_pair {
+        return None;
+    }
+    let mut layer: BTreeMap<BTreeSet<usize>, BTreeSet<Vec<usize>>> =
+        BTreeMap::from([(BTreeSet::new(), BTreeSet::from([Vec::new()]))]);
+    for _ in 0..n {
+        let mut next: BTreeMap<BTreeSet<usize>, BTreeSet<Vec<usize>>> = BTreeMap::new();
+        for (done, wins) in &layer {
+            for x in (0..n).filter(|x| !done.contains(x)) {
+                let mut key = done.clone();
+                key.insert(x);
+                let entry = next.entry(key).or_default();
+                for win in wins {
+                    let w = match win.first() {
+                        None => vec![x],
+                        Some(&first) => match cmp.compare(&candidates[x], &candidates[first]) {
+                            Rank::Better(_) => vec![x],
+                            Rank::Same(_) => {
+                                let mut w = win.clone();
+                                w.push(x);
+                                w
+                            }
+                            Rank::Worse(_) => win.clone(),
+                        },
+                    };
+                    entry.insert(w);
+                }
+            }
+        }
+        layer = next;
+    }
+    let winners: BTreeSet<usize> = layer.into_values().flatten().flatten().collect();
+    Some(winners.into_iter().collect())
 }
 
 /// The best path of a route from its candidates under the options of the

@@ -153,13 +153,26 @@ fn rfc3345_type_1(always_compare_med: bool) -> Lab {
 }
 
 #[test]
-fn rfc_3345_type_1_route_reflection_with_med_has_no_convergence() {
+fn rfc_3345_type_1_route_reflection_with_med_converges_with_a_note_on_the_exit_of_rc() {
     let r = rfc3345_type_1(false).run();
     assert!(
-        matches!(only_group(&r), Convergence::NoConvergence { .. }),
+        matches!(only_group(&r), Convergence::Converged { note: Some(_) }),
         "{:?}",
         r.groups[0].convergence
     );
+    for (d, nh) in [
+        ("ra", "192.0.2.6"),
+        ("rb", "192.0.2.10"),
+        ("rc", "192.0.2.6"),
+        ("rd", "198.51.100.6"),
+        ("re", "198.51.100.6"),
+    ] {
+        assert_eq!(
+            best(&r, d, SPP_PREFIX).unwrap().best.next_hop,
+            Some(ip(nh)),
+            "{d}"
+        );
+    }
 }
 
 #[test]
@@ -233,10 +246,10 @@ fn rfc3345_type_2(always_compare_med: bool) -> Lab {
 }
 
 #[test]
-fn rfc_3345_type_2_confederation_with_med_has_no_convergence() {
+fn rfc_3345_type_2_confederation_with_med_has_multiple_stable_outcomes() {
     let r = rfc3345_type_2(false).run();
     assert!(
-        matches!(only_group(&r), Convergence::NoConvergence { .. }),
+        matches!(only_group(&r), Convergence::MultipleStableOutcomes { .. }),
         "{:?}",
         r.groups[0].convergence
     );
@@ -460,9 +473,9 @@ fn generated_instances_give_the_stable_assignments_of_the_definition() {
 
 #[test]
 fn the_same_input_in_another_order_gives_the_same_result() {
-    let mut lab = rfc3345_type_1(false);
-    lab.originate("ra", "192.0.2.128/25");
-    lab.originate("rd", "192.0.2.128/25");
+    let mut lab = rfc3345_type_2(false);
+    lab.originate("ra", "198.51.100.0/24");
+    lab.originate("rd", "198.51.100.0/24");
     let a = lab.run();
     let mut shuffled = lab.clone();
     shuffled.input.processes.reverse();
@@ -476,7 +489,10 @@ fn the_same_input_in_another_order_gives_the_same_result() {
     assert_eq!(format!("{a:?}"), format!("{b:?}"));
     assert_eq!(format!("{a:?}"), format!("{:?}", lab.run()));
     assert_eq!(a.groups.len(), 2);
-    assert_eq!(a.worst, rsim_routing::bgp::ConvergenceKind::NoConvergence);
+    assert_eq!(
+        a.worst,
+        rsim_routing::bgp::ConvergenceKind::MultipleStableOutcomes
+    );
 }
 
 #[test]
@@ -568,4 +584,71 @@ fn a_reflector_with_no_path_of_the_group_keeps_the_uniqueness_check() {
         panic!("{:?}", r.groups[0].convergence);
     };
     assert_eq!(note.wheel.len(), 2);
+}
+
+/// The router `r1` on IOS-XE with the 3 iBGP paths of a MED cycle: P1 from
+/// 198.51.100.1 (AS 64500, MED 10, IGP cost 10), P2 from 198.51.100.2 (AS
+/// 64501, IGP cost 20) and P3 from 198.51.100.3 (AS 64500, MED 5, IGP cost
+/// 30).
+fn med_cycle(deterministic_med: Option<bool>) -> Lab {
+    let mut lab = Lab::default();
+    lab.router("r1", Platform::Iosxe, 65001, "10.255.0.1")
+        .options
+        .deterministic_med = deterministic_med;
+    for (addr, as_path, med, cost) in [
+        ("198.51.100.1", 64500, Some(10), 10),
+        ("198.51.100.2", 64501, None, 20),
+        ("198.51.100.3", 64500, Some(5), 30),
+    ] {
+        lab.seed("r1", addr, 65001, SPP_PREFIX, &[as_path], med);
+        lab.cost("r1", addr, cost);
+    }
+    lab
+}
+
+#[test]
+fn a_med_cycle_with_no_deterministic_med_has_one_outcome_for_each_order_winner() {
+    let r = med_cycle(None).run();
+    let Convergence::MultipleStableOutcomes { outcomes } = only_group(&r) else {
+        panic!("{:?}", r.groups[0].convergence);
+    };
+    let at = rsim_routing::bgp::RouteAt {
+        device: "r1".to_string(),
+        vrf: "default".to_string(),
+        key: key(SPP_PREFIX),
+    };
+    let hops: BTreeSet<_> = outcomes
+        .iter()
+        .map(|o| match &o.routes[&at] {
+            RouteState::Selected(s) => s.best.next_hop,
+            RouteState::Unknown(u) => panic!("{u}"),
+        })
+        .collect();
+    assert_eq!(
+        hops,
+        BTreeSet::from([
+            Some(ip("198.51.100.1")),
+            Some(ip("198.51.100.2")),
+            Some(ip("198.51.100.3")),
+        ])
+    );
+    assert!(matches!(
+        state(&r, "r1", SPP_PREFIX),
+        Some(RouteState::Unknown(u)) if u.reason == Reason::MultipleStableOutcomes
+    ));
+    assert!(r.affected.contains(&key(SPP_PREFIX)));
+}
+
+#[test]
+fn a_med_cycle_with_deterministic_med_converges_on_p2() {
+    let r = med_cycle(Some(true)).run();
+    assert!(
+        matches!(only_group(&r), Convergence::Converged { .. }),
+        "{:?}",
+        r.groups[0].convergence
+    );
+    assert_eq!(
+        best(&r, "r1", SPP_PREFIX).unwrap().best.next_hop,
+        Some(ip("198.51.100.2"))
+    );
 }

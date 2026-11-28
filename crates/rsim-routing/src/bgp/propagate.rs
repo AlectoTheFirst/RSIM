@@ -4,9 +4,10 @@
 //!
 //! A variable is one route key at one process. The candidates of a
 //! variable are its `network` path, its aggregate path, its seeds and the
-//! accepted paths of each session to the process. The decision takes them
-//! in this order, the seeds and the sessions by the neighbour address. The
-//! order of receipt is not modelled.
+//! accepted paths of each session to the process, the seeds and the
+//! sessions by the neighbour address. When the best path depends on the
+//! order of receipt, each path that is the best path in some order is a
+//! tied path of the selection.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -14,7 +15,7 @@ use std::net::IpAddr;
 
 use rsim_core::{Prefix, SourceSpan};
 
-use super::decision::{Decision, decide, multipath_for};
+use super::decision::{Decision, decide, multipath_for, order_winners};
 use super::policy::{Direction, PolicyContext, PolicyResult, evaluate, policy_reads};
 use super::process::{Aggregate, BgpProcess, Network};
 use super::profile::UndefinedPolicy;
@@ -495,7 +496,8 @@ pub(crate) struct Cand {
 pub(crate) enum Choice {
     None,
     Best(Source, Box<Selection>),
-    /// The decision reaches a tie. Each tied path with its multipath.
+    /// The decision reaches a tie, or more than 1 path is the best path in
+    /// some order of receipt. Each tied path with its multipath.
     Tie(Vec<(Source, Selection)>),
     Unknown(Unknown),
 }
@@ -779,7 +781,23 @@ impl<'n, 'a> Group<'n, 'a> {
             best: paths[base].clone(),
             multipath: mp.iter().map(|&j| paths[j].clone()).collect(),
         };
-        match decide(&paths, &p.options, profile.as_ref()) {
+        let decision = decide(&paths, &p.options, profile.as_ref());
+        if matches!(decision, Decision::Best { .. } | Decision::Tie { .. })
+            && let Some(winners) = order_winners(&paths, &p.options, profile.as_ref())
+            && winners.len() > 1
+        {
+            let profile = profile.expect("order winners have a profile");
+            return Choice::Tie(
+                winners
+                    .iter()
+                    .map(|&t| {
+                        let mp = multipath_for(&paths, t, &p.options, &profile);
+                        (cands[t].source, sel(t, &mp))
+                    })
+                    .collect(),
+            );
+        }
+        match decision {
             Decision::NoCandidate => Choice::None,
             Decision::Best {
                 best, multipath, ..
