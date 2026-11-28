@@ -44,6 +44,8 @@ pub(super) struct Vx<'a> {
     /// with no interface.
     pub resolver: &'a Resolver,
     pub pass: &'a crate::scenario::Pass,
+    /// The BGP routes of each VRF from the BGP calculation.
+    pub bgp: &'a BTreeMap<String, crate::bgp_build::VrfBgp>,
 }
 
 /// The lowering of one device: its name, the file of its config, its
@@ -308,6 +310,7 @@ pub fn lower(
         encap: encap_l3.as_ref(),
         resolver: &resolver,
         pass: &ext.pass,
+        bgp: &ext.bgp,
     };
     let mut tables = BTreeMap::new();
     for v in &vrfs {
@@ -1486,7 +1489,7 @@ impl L<'_> {
         // A scenario pass writes no guard row.
         let scenario = matches!(vx.pass, crate::scenario::Pass::Scenario(_));
         if collected && (guard || scenario) {
-            self.guard(&mut t, vrf, active, col, names, next, vx.pass);
+            self.guard(&mut t, vrf, active, col, names, next, vx.pass, vx.bgp);
         }
         t
     }
@@ -1578,9 +1581,12 @@ impl L<'_> {
     }
 
     /// The RIB guard of a VRF: the computed route table of the connected,
-    /// static, local and OSPFv2 routes against the collected route table
-    /// `t`, whose routes it marks. The notes of the static routes are not
-    /// kept, as the device forwards on `t`.
+    /// static, local, OSPFv2 and BGP routes against the collected route
+    /// table `t`, whose routes it marks. The notes of the static routes are
+    /// not kept, as the device forwards on `t`. In a scenario each BGP route
+    /// of the computed table of the base is an unknown candidate. A VRF with
+    /// no BGP routes from the calculation keeps its collected BGP routes not
+    /// computed.
     #[allow(clippy::too_many_arguments)]
     fn guard(
         &mut self,
@@ -1591,7 +1597,17 @@ impl L<'_> {
         names: &Names,
         next: &str,
         pass: &crate::scenario::Pass,
+        bgp: &BTreeMap<String, crate::bgp_build::VrfBgp>,
     ) {
+        let bgp = match pass {
+            crate::scenario::Pass::Scenario(s) => s.base.get(vrf).map(|b| {
+                crate::bgp_build::VrfBgp::scenario(
+                    &b.computed,
+                    crate::bgp_build::unknown_distance(PLATFORM),
+                )
+            }),
+            _ => bgp.get(vrf).cloned(),
+        };
         let notes = self.out.notes.len();
         let mut cands = self.config_candidates(vrf, active, names, next);
         self.out.notes.truncate(notes);
@@ -1625,6 +1641,9 @@ impl L<'_> {
             next: self.id(next),
         };
         cands.extend(ospf.candidates(PLATFORM, false, &hop, &interface_of));
+        if let Some(b) = &bgp {
+            cands.extend(b.candidates.iter().cloned());
+        }
         // A VRF with no static route of the config takes its collected static
         // routes as inputs.
         let no_statics = !self.cfg.static_routes.iter().any(|r| r.vrf == vrf);
@@ -1643,6 +1662,13 @@ impl L<'_> {
                     rsim_guard::CollectedRoute {
                         protocol: r.protocol.clone(),
                         class: rsim_guard::Class::Seeded,
+                    }
+                } else if super::profile::protocol_word(&r.protocol) == "bgp"
+                    && let Some(b) = &bgp
+                {
+                    rsim_guard::CollectedRoute {
+                        protocol: r.protocol.clone(),
+                        class: b.class(p),
                     }
                 } else {
                     guard_route(&r.protocol)

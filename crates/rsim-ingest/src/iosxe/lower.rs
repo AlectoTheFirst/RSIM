@@ -335,6 +335,7 @@ pub fn lower(
             ospf: ext.ospf.as_ref(),
             platform: Platform::Iosxe,
             pass: &ext.pass,
+            bgp: &ext.bgp,
         };
         let t = fib(&mut l, v, &active, rib, &vips, &hops);
         let has_hops = t.groups().iter().any(|g| !g.next_hops.is_empty());

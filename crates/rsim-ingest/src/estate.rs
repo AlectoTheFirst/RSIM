@@ -56,6 +56,11 @@ pub struct Estate {
     /// The tables of each VRF with a guard of each device, in the base of a
     /// scenario; empty for a snapshot twin.
     pub base: BTreeMap<String, BTreeMap<String, BaseVrf>>,
+    /// The BGP calculation of the NX-OS switches and the IOS-XR routers
+    /// with its input and the convergence result of each prefix group.
+    /// `None` for a twin with no such device; a scenario holds the one of
+    /// its base.
+    pub bgp_routing: Option<crate::bgp_build::BgpBuild>,
 }
 
 /// An error of the build of a scenario: the store cannot be read, or a
@@ -485,6 +490,7 @@ pub fn assemble_scenario(
     }
     e.guard = base.guard;
     e.ospf_guard = base.ospf_guard;
+    e.bgp_routing = base.bgp_routing;
     Ok(e)
 }
 
@@ -562,6 +568,7 @@ fn assemble_pass(
         links: BTreeMap::new(),
         vendors: BTreeMap::new(),
         base: BTreeMap::new(),
+        bgp_routing: None,
     };
     let mut routers: BTreeMap<String, Router> = BTreeMap::new();
     #[allow(clippy::type_complexity)]
@@ -584,6 +591,17 @@ fn assemble_pass(
     let mut bgp_hidden: BTreeMap<String, bool> = BTreeMap::new();
     // The input of the OSPF database builder of each router.
     let mut ospf_in: BTreeMap<String, rsim_routing::ospf::build::RouterInput> = BTreeMap::new();
+    // The BGP config and the collected BGP routes of each NX-OS switch and
+    // IOS-XR router.
+    #[allow(clippy::type_complexity)]
+    let mut bgp_in: BTreeMap<
+        String,
+        (
+            rsim_routing::Platform,
+            crate::bgp_config::DeviceBgp,
+            Vec<crate::bgp_build::CollectedBgp>,
+        ),
+    > = BTreeMap::new();
     for input in inputs {
         match input {
             Input::Vyos {
@@ -721,6 +739,21 @@ fn assemble_pass(
                         collected_defaults(&col),
                     ),
                 );
+                let bgp_dev = nxos::bgp_config::read(
+                    &doc,
+                    &cfg.bgp,
+                    &file,
+                    &|k| table.report_key(k),
+                    &mut BTreeSet::new(),
+                );
+                bgp_in.insert(
+                    name.clone(),
+                    (
+                        rsim_routing::Platform::Nxos,
+                        bgp_dev,
+                        nxos::bgp_config::collected(&col),
+                    ),
+                );
                 e.coverage.insert(name.clone(), classify(&doc, &table));
                 e.unread
                     .insert(name.clone(), nxos::unread(&doc, &table, &cfg.read));
@@ -775,6 +808,21 @@ fn assemble_pass(
                         })),
                         &cisco_statics(&cfg.static_routes),
                         BTreeSet::new(),
+                    ),
+                );
+                let bgp_dev = iosxr::bgp_config::read(
+                    &doc,
+                    &cfg.bgp,
+                    &file,
+                    &|k| table.report_key(k),
+                    &mut BTreeSet::new(),
+                );
+                bgp_in.insert(
+                    name.clone(),
+                    (
+                        rsim_routing::Platform::Iosxr,
+                        bgp_dev,
+                        iosxr::bgp_config::collected(&cfg, &sections),
                     ),
                 );
                 e.coverage.insert(name.clone(), classify(&doc, &table));
@@ -904,6 +952,27 @@ fn assemble_pass(
         }
     }
     e.ospf_guard = ospf_rows;
+
+    // The computed connected, static and OSPF routes of each VRF of the
+    // NX-OS switches and the IOS-XR routers, for the IGP view of the BGP
+    // calculation.
+    let mut bgp_devices: BTreeMap<String, crate::bgp_build::DeviceInput> = BTreeMap::new();
+    for (device, (platform, bgp, collected)) in bgp_in {
+        let ospf = match platform {
+            rsim_routing::Platform::Nxos => switches.get(&device).and_then(|s| s.1.ospf.as_ref()),
+            _ => ios_ospf.get(&device),
+        };
+        let igp = igp_tables(ospf_in.get(&device), ospf, platform);
+        bgp_devices.insert(
+            device,
+            crate::bgp_build::DeviceInput {
+                platform,
+                bgp,
+                igp,
+                collected,
+            },
+        );
+    }
 
     // The next hops of the routes of the routers: the collected route table
     // and the static routes.
@@ -1205,6 +1274,22 @@ fn assemble_pass(
     // router, not an endpoint.
     e.bgp = std::mem::take(&mut joined.bgp);
     e.seen = std::mem::take(&mut joined.seen);
+    // The BGP calculation over the sessions of the join. A scenario keeps
+    // each BGP route unknown and runs no calculation.
+    let mut bgp_build = match &plan {
+        Plan::Scenario { .. } => None,
+        _ => Some(crate::bgp_build::build(&bgp_devices, &e.bgp)),
+    };
+    let mut bgp_vrfs = BTreeMap::new();
+    if let Some(b) = &mut bgp_build {
+        for (d, n) in b.notes.iter().chain(&b.gaps) {
+            e.notes
+                .entry(d.clone())
+                .or_default()
+                .extend(n.iter().cloned());
+        }
+        bgp_vrfs = std::mem::take(&mut b.vrfs);
+    }
     next_hops.extend(joined.bgp_outside.iter().copied());
 
     let mut l2: BTreeMap<String, vyos::Layer2Links> = BTreeMap::new();
@@ -1353,6 +1438,7 @@ fn assemble_pass(
     for (device, (cfg, col, file, sections)) in &switches {
         let mut ext = joined.devices.remove(device).unwrap_or_default();
         ext.pass = plan.pass(device);
+        ext.bgp = bgp_vrfs.remove(device).unwrap_or_default();
         let (low, _) = nxos::lower(device, file, &nx_profile, cfg, col, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         if !low.guard.is_empty() {
@@ -1381,6 +1467,7 @@ fn assemble_pass(
         let mut ext = joined.devices.remove(device).unwrap_or_default();
         ext.ospf = ios_ospf.remove(device);
         ext.pass = plan.pass(device);
+        ext.bgp = bgp_vrfs.remove(device).unwrap_or_default();
         let (low, _) = iosxr::lower(device, file, &xr_profile, cfg, sections, &ext);
         e.notes.entry(device.clone()).or_default().extend(low.notes);
         if !low.guard.is_empty() {
@@ -1464,7 +1551,47 @@ fn assemble_pass(
             e.builder.edge_interface(x);
         }
     }
+    e.bgp_routing = bgp_build;
     (e, missing)
+}
+
+/// The computed connected, static and OSPF routes of each VRF of a device:
+/// the networks and the static routes of the input of the OSPF builder and
+/// the routes of the OSPF calculation, each with the distance of the
+/// platform.
+fn igp_tables(
+    input: Option<&rsim_routing::ospf::build::RouterInput>,
+    ospf: Option<&crate::ospf::DeviceOspf>,
+    platform: rsim_routing::Platform,
+) -> BTreeMap<String, crate::bgp_build::IgpTable> {
+    use rsim_routing::Origin;
+    let mut vrfs: BTreeSet<String> = BTreeSet::new();
+    if let Some(i) = input {
+        vrfs.extend(i.connected.keys().cloned());
+        vrfs.extend(i.statics.keys().cloned());
+    }
+    if let Some(o) = ospf {
+        vrfs.extend(o.databases.iter().map(|d| d.vrf.clone()));
+    }
+    let ospf_distance = rsim_routing::ospf::OspfProfile::of(platform).distance();
+    vrfs.into_iter()
+        .map(|vrf| {
+            let mut t = crate::bgp_build::IgpTable::default();
+            if let Some(i) = input {
+                for p in i.connected.get(&vrf).into_iter().flatten() {
+                    t.add(*p, platform.distance(Origin::Connected), Ok(0));
+                }
+                for p in i.statics.get(&vrf).into_iter().flatten() {
+                    t.add(*p, platform.distance(Origin::Static), Ok(0));
+                }
+            }
+            let routes = crate::ospf::routes::OspfRoutes::of(ospf, &vrf, platform);
+            for (p, m) in routes.metrics() {
+                t.add(p, ospf_distance, m);
+            }
+            (vrf, t)
+        })
+        .collect()
 }
 
 /// The addresses of each interface with its VRF, `default` for an

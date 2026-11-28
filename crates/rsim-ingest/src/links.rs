@@ -541,6 +541,9 @@ pub struct External {
     pub ospf: Option<crate::ospf::DeviceOspf>,
     /// The pass of the lowering of a router or a switch.
     pub pass: crate::scenario::Pass,
+    /// The BGP routes of each VRF of an NX-OS switch or an IOS-XR router
+    /// from the BGP calculation.
+    pub bgp: BTreeMap<String, crate::bgp_build::VrfBgp>,
 }
 
 /// One end of a link: a device and a port.
