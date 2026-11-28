@@ -198,10 +198,11 @@ impl BgpProcess {
         self.cluster_id.unwrap_or(self.router_id)
     }
 
-    /// The kind of the session to `n`: iBGP when the remote AS is the AS of
-    /// the process, or the `local-as` of the neighbour; confederation eBGP
-    /// when the remote AS is another member AS of the confederation;
-    /// eBGP otherwise.
+    /// The kind of the session to `n`. The session is iBGP when the remote
+    /// AS is the `local-as` of the neighbour, or the AS of the process with
+    /// no `local-as` or with `dual-as`. It is
+    /// confederation eBGP when the remote AS is another member AS of the
+    /// confederation, and eBGP otherwise.
     pub fn session_kind(&self, n: &Neighbor) -> SessionKind {
         let local = n.local_as.map_or(self.asn, |l| l.asn);
         if n.remote_as == local

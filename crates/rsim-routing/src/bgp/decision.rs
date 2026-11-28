@@ -4,8 +4,8 @@
 //! With always-compare-med, the candidates form a total preorder and the
 //! result does not depend on their order. With deterministic MED, the
 //! candidates are grouped by their neighbour AS, the best of each group is
-//! selected, and the group winners are compared; the result does not depend
-//! on the order either. With neither, the candidates are compared in their
+//! selected, and the group winners are compared. This result does not
+//! depend on the order either. With neither, the candidates are compared in their
 //! input order, each with the best so far, as a device compares them in its
 //! list order. MED then makes the comparison non-transitive, and the result
 //! can depend on the input order.

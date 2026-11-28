@@ -3,12 +3,12 @@
 //! `apply`.
 //!
 //! A route-map walks its clauses in ascending sequence number. A clause
-//! matches when each of its match terms matches; a term with more than one
+//! matches when each of its match terms matches. A term with more than one
 //! name matches when one of the names matches. The first matching deny
 //! clause denies the route. A matching permit clause applies its set
 //! actions and permits the route, or with `continue` goes on to the target
 //! clause, or to the next clause with no target. A route that no clause
-//! matches is denied; a route that a permit clause with `continue` matched
+//! matches is denied. A route that a permit clause with `continue` matched
 //! is permitted when no later clause matches.
 //!
 //! An RPL policy runs its statements in order. A set action or `pass`

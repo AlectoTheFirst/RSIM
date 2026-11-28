@@ -94,8 +94,8 @@ impl fmt::Display for PatternError {
 impl std::error::Error for PatternError {}
 
 impl Pattern {
-    /// Parses a pattern. A pattern in single or double quotes loses the
-    /// quotes.
+    /// Parses a pattern. The pattern loses the white space at its ends, and
+    /// then the single or double quotes around it.
     pub fn parse(text: &str) -> Result<Pattern, PatternError> {
         let trimmed = text.trim();
         let bytes = trimmed.as_bytes();
