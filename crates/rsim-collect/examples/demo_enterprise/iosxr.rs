@@ -82,7 +82,7 @@ fn config(dev: &Dev) -> String {
         s.push_str(" !\n!\n");
         let _ = writeln!(
             s,
-            "router bgp {}\n bgp router-id {}\n address-family ipv4 unicast\n  redistribute connected\n  redistribute ospf CORE\n !",
+            "router bgp {}\n bgp router-id {}\n default-information originate\n address-family ipv4 unicast\n  redistribute connected\n  redistribute ospf CORE\n !",
             bgp.asn, bgp.router_id
         );
         for n in &bgp.neighbors {
