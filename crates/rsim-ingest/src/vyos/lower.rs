@@ -86,8 +86,9 @@ pub struct Lowered {
     /// The tables of each VRF with a guard, in the base pass of a scenario.
     pub base: Vec<(String, crate::scenario::BaseVrf)>,
     /// The computed route table of each VRF with a guard with no BGP
-    /// candidate, for the IGP view of the BGP calculation.
-    pub igp: Vec<(String, Fib)>,
+    /// candidate and with the OSPFv3 candidates, for the IGP view of the
+    /// BGP calculation.
+    pub igp: Vec<(String, crate::guard::IgpRoutes)>,
 }
 
 struct L<'a> {
@@ -190,7 +191,7 @@ pub fn igp_tables(
     profile: &VendorProfile,
     cfg: &Config,
     col: &Collected,
-) -> Vec<(String, Fib)> {
+) -> Vec<(String, crate::guard::IgpRoutes)> {
     let pass = crate::scenario::Pass::Snapshot;
     let bgp = BTreeMap::new();
     let mut l = L {

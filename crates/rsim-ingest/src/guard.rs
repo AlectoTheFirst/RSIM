@@ -2,6 +2,7 @@
 //! the collected route table.
 
 use std::collections::BTreeMap;
+use std::net::IpAddr;
 
 use rsim_core::Prefix;
 use rsim_functions::{Fib, Route, RouteKind, RouteProtocol};
@@ -38,24 +39,96 @@ pub fn outside(
 }
 
 /// The computed route table of a VRF for the IGP view of the BGP
+/// calculation, with the distance of each installed route and the gateways
+/// of the static candidates.
+#[derive(Clone, Debug, Default)]
+pub struct IgpRoutes {
+    pub fib: Fib,
+    /// The distance of the installed route of each prefix: the lowest
+    /// distance of the candidates of the prefix of the installed kind.
+    pub distance: BTreeMap<Prefix, u8>,
+    /// The gateways of the static candidates of each prefix, which the
+    /// install stage resolves over the installed routes.
+    pub gateways: BTreeMap<Prefix, Vec<IpAddr>>,
+}
+
+/// The lowest distance of a route of `platform` other than a connected or a
+/// local route.
+pub fn lowest_distance(platform: Platform) -> u8 {
+    [
+        Origin::Static,
+        Origin::Ebgp,
+        Origin::Ibgp,
+        Origin::Ospf,
+        Origin::LocalBgp,
+    ]
+    .into_iter()
+    .map(|o| platform.distance(o))
+    .min()
+    .unwrap_or(UNKNOWN_DISTANCE)
+}
+
+/// The computed route table of a VRF for the IGP view of the BGP
 /// calculation: the install stage of `cands`, the candidates other than
-/// BGP, with the candidates of [`outside`] of the collected routes that are
-/// not BGP routes.
+/// BGP, with the collected routes of `routes` that are not BGP routes. A
+/// seeded route is a candidate with the default distance of its kind. A
+/// route that is not computed is an unknown candidate with
+/// [`lowest_distance`].
 pub fn igp(
     mut cands: Vec<Candidate>,
     routes: &BTreeMap<Prefix, CollectedRoute>,
     collected: &Fib,
     platform: Platform,
     through_default: bool,
-) -> Fib {
+) -> IgpRoutes {
     let bgp = RouteKind::Learned(RouteProtocol::Bgp);
-    let other: BTreeMap<Prefix, CollectedRoute> = routes
-        .iter()
-        .filter(|(p, _)| collected.get(p).is_some_and(|r| r.kind != bgp))
-        .map(|(p, c)| (*p, c.clone()))
-        .collect();
-    cands.extend(outside(&other, collected, platform));
-    rsim_routing::install(cands, through_default)
+    for (p, c) in routes {
+        let Some(r) = collected.get(p).filter(|r| r.kind != bgp) else {
+            continue;
+        };
+        match &c.class {
+            Class::Compared => {}
+            Class::Seeded => cands.push(Candidate::new(*p, distance(platform, r.kind), r)),
+            Class::NotComputed(why) => cands.push(Candidate::new(
+                *p,
+                lowest_distance(platform),
+                Route::unknown(r.kind, why.clone(), r.spans.clone()),
+            )),
+        }
+    }
+    let mut gateways: BTreeMap<Prefix, Vec<IpAddr>> = BTreeMap::new();
+    for c in cands.iter().filter(|c| c.route.kind == RouteKind::Static) {
+        gateways
+            .entry(c.prefix)
+            .or_default()
+            .extend(c.gateways.iter().copied());
+    }
+    gateways.retain(|_, g| !g.is_empty());
+    let mut by_prefix: BTreeMap<Prefix, Vec<(RouteKind, u8)>> = BTreeMap::new();
+    for c in &cands {
+        by_prefix
+            .entry(c.prefix)
+            .or_default()
+            .push((c.route.kind, c.distance));
+    }
+    let fib = rsim_routing::install(cands, through_default);
+    let mut distances = BTreeMap::new();
+    for (p, r) in fib.entries() {
+        let d = by_prefix
+            .get(&p)
+            .into_iter()
+            .flatten()
+            .filter(|(k, _)| *k == r.kind)
+            .map(|(_, d)| *d)
+            .min()
+            .unwrap_or(UNKNOWN_DISTANCE);
+        distances.insert(p, d);
+    }
+    IgpRoutes {
+        fib,
+        distance: distances,
+        gateways,
+    }
 }
 
 /// The default administrative distance of a kind of route.

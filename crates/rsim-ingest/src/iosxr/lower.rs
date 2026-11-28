@@ -1454,8 +1454,9 @@ fn guard(l: &mut L, t: &mut Fib, vrf: &str, active: &[Port], rib: &Rib, hops: &H
             })
             .map(|p| p.i.name.clone())
     };
+    let mut igp = cands.clone();
+    igp.extend(ospf.candidates(hops.platform, true, &|i, gw| hop(l, i, gw), &interface_of));
     cands.extend(ospf.candidates(hops.platform, false, &|i, gw| hop(l, i, gw), &interface_of));
-    let igp = cands.clone();
     // In a scenario each BGP route of the computed table of the base is an
     // unknown candidate.
     let bgp = match hops.pass {

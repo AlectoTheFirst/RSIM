@@ -1640,8 +1640,9 @@ impl L<'_> {
             gateway: gw,
             next: self.id(next),
         };
+        let mut igp = cands.clone();
+        igp.extend(ospf.candidates(PLATFORM, true, &hop, &interface_of));
         cands.extend(ospf.candidates(PLATFORM, false, &hop, &interface_of));
-        let igp = cands.clone();
         if let Some(b) = &bgp {
             cands.extend(b.candidates.iter().cloned());
         }

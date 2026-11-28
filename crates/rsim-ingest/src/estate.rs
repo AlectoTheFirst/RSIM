@@ -1013,7 +1013,7 @@ fn assemble_pass(
     // of each VyOS router comes from its main route table here, and the one
     // of the other devices from their first lowering.
     let mut bgp_devices: BTreeMap<String, crate::bgp_build::DeviceInput> = BTreeMap::new();
-    let mut igp_fibs: BTreeMap<String, Vec<(String, rsim_functions::Fib)>> = BTreeMap::new();
+    let mut igp_fibs: BTreeMap<String, Vec<(String, crate::guard::IgpRoutes)>> = BTreeMap::new();
     for (device, (platform, bgp, collected)) in bgp_in {
         let vendor = e.vendors.get(&device).map_or("", String::as_str);
         let none = SessionSections::new();
@@ -1640,11 +1640,12 @@ fn assemble_pass(
 }
 
 /// The IGP view of each VRF of a device with BGP: the computed route table
-/// `fibs` of each VRF with no BGP candidate, the metric of each computed
+/// `fibs` of each VRF with no BGP candidate with its distances and static
+/// gateways, the metric of each computed
 /// OSPF route, and the reason of each family whose OSPF version has a
 /// process of the VRF in the config and is not computed in full.
 fn igp_tables(
-    fibs: Vec<(String, rsim_functions::Fib)>,
+    fibs: Vec<(String, crate::guard::IgpRoutes)>,
     input: Option<&rsim_routing::ospf::build::RouterInput>,
     ospf: Option<&crate::ospf::DeviceOspf>,
     platform: rsim_routing::Platform,
@@ -1666,9 +1667,12 @@ fn igp_tables(
                 }
             }
             let t = crate::bgp_build::IgpTable {
-                routes: fib.entries().into_iter().collect(),
+                routes: fib.fib.entries().into_iter().collect(),
+                distance: fib.distance,
+                gateways: fib.gateways,
                 ospf: routes.metrics().into_iter().collect(),
                 incomplete,
+                bgp_distance: crate::bgp_build::bgp_distance(platform),
             };
             (vrf, t)
         })

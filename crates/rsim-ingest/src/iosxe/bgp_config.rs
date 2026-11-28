@@ -15,8 +15,10 @@
 //! not lower, other than a line with no effect on the routes, is a gap.
 //!
 //! The lines that import or export routes between VRFs or between EVPN and
-//! a VRF are gaps of their VRF: each `route-target`, `import` and `export`
-//! line and the `vnid` line of a `vrf definition` or an `ip vrf`, an
+//! a VRF are gaps of their VRF: each `route-target`, `import`, `export` and
+//! `route-replicate` line and the `vnid` line of a `vrf definition` or an
+//! `ip vrf`, each `route-replicate` line of a `global-address-family` as a
+//! gap of the default VRF, an
 //! `address-family l2vpn` stanza of `router bgp` with a VRF, and
 //! `advertise l2vpn evpn` of a unicast family of a VRF.
 
@@ -494,11 +496,24 @@ pub fn collected(
     }
 }
 
-/// Each `route-target`, `import`, `export` and `vnid` line of a VRF is a
-/// gap of its VRF.
+/// Each `route-target`, `import`, `export`, `route-replicate` and `vnid`
+/// line of a VRF is a gap of its VRF, and each `route-replicate` line of a
+/// `global-address-family` stanza is a gap of the default VRF.
 fn vrf_imports(doc: &Document, file: &str, mask: &dyn Fn(&str) -> String, out: &mut DeviceBgp) {
     for s in doc.root.children() {
         let w = words(s);
+        if let ["global-address-family", fam @ ..] = w.as_slice() {
+            let fams: Vec<Family> = match family(fam).and_then(|x| unicast_of(&x)) {
+                Some(f) => vec![f],
+                None => UNICAST.to_vec(),
+            };
+            for c in s.children() {
+                if words(c).first() == Some(&"route-replicate") {
+                    out.gap(DEFAULT_VRF, &fams, mask(&c.key), vec![span(file, lines(c))]);
+                }
+            }
+            continue;
+        }
         let vrf = match w.as_slice() {
             ["vrf", "definition", v] | ["ip", "vrf", v] => *v,
             _ => continue,
@@ -507,7 +522,7 @@ fn vrf_imports(doc: &Document, file: &str, mask: &dyn Fn(&str) -> String, out: &
             if matches!(
                 words(c).as_slice(),
                 ["route-target", "import" | "export" | "both", ..]
-                    | ["import" | "export" | "vnid", ..]
+                    | ["import" | "export" | "vnid" | "route-replicate", ..]
             ) {
                 out.gap(vrf, fams, mask(&c.key), vec![span(file, lines(c))]);
             }
@@ -939,7 +954,11 @@ vrf definition RED
   route-target both 64500:11
   import ipv4 unicast map FROM-GLOBAL
   export ipv4 unicast map TO-GLOBAL
+  route-replicate from vrf BLUE unicast all
  exit-address-family
+!
+global-address-family ipv4
+ route-replicate from vrf RED unicast all
 !
 ip vrf BLUE
  route-target export 64500:20
@@ -970,6 +989,8 @@ ip vrf BLUE
             ("RED", "advertise l2vpn evpn"),
             ("RED", "address-family l2vpn evpn vrf RED"),
             ("BLUE", "route-target export 64500:20"),
+            ("RED", "route-replicate from vrf BLUE unicast all"),
+            ("default", "route-replicate from vrf RED unicast all"),
         ] {
             assert!(texts.contains(&want), "{want:?} not in {texts:?}");
         }
@@ -978,7 +999,14 @@ ip vrf BLUE
             .filter(|(v, _)| *v == "default")
             .map(|(_, t)| *t)
             .collect();
-        assert_eq!(default, ["export ipv4 unicast map TO-GLOBAL"], "{texts:?}");
+        assert_eq!(
+            default,
+            [
+                "export ipv4 unicast map TO-GLOBAL",
+                "route-replicate from vrf RED unicast all"
+            ],
+            "{texts:?}"
+        );
     }
 
     #[test]
