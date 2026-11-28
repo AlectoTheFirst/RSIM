@@ -308,19 +308,17 @@ pub fn receive(
         asn: neighbor.remote_as,
         kind,
     };
-    match policy_offer(neighbor_policy(
+    let offer = policy_offer(neighbor_policy(
         receiver,
         neighbor,
         Direction::Import,
         key,
         &p,
         Some(&profile),
-    )) {
-        Offer::Path(_) if id_unknown.is_some() => Offer::Unknown(Unknown::new(
-            Reason::RouterIdNotKnown,
-            id_unknown.unwrap_or_default(),
-        )),
-        other => other,
+    ));
+    match (offer, id_unknown) {
+        (Offer::Path(_), Some(why)) => Offer::Unknown(Unknown::new(Reason::RouterIdNotKnown, why)),
+        (offer, _) => offer,
     }
 }
 
