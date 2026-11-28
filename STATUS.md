@@ -45,8 +45,9 @@ Complete:
 - the collection and the readers of the OSPF databases of the 4 vendors, the reference of the database guard
 - the crate `rsim-guard`: the database guard (the table `ospf-guard`) and the route guard (the table `rib-guard`, the claim `rib-fib-agree` and the guard flag of each route lookup step)
 - the BGP calculation in `rsim-routing`: the policy evaluator, the decision function, the propagation and the convergence detection, on hand-built inputs
+- BGP from the config of VyOS, NX-OS, IOS-XR and IOS-XE, the section `bgp_routes` and the BGP rows of the guard
 
-Not started: BGP from the config, the BGP rows of the guard, redistribution and VRF leaking.
+Not started: redistribution, VRF leaking and the EVPN import, which are gaps of the BGP rows, and the benchmark.
 
 ## Step 5
 
