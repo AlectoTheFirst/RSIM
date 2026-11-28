@@ -2,6 +2,7 @@
 //! text sections through the TextFSM templates.
 
 pub mod bgp;
+pub mod bgp_config;
 pub mod config;
 pub mod lower;
 mod mask;

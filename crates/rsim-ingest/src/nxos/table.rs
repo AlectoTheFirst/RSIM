@@ -245,6 +245,7 @@ pub fn table(tables: &RouteTables) -> Table {
     let mut t = Table::new(ENTRIES).with_mask(super::mask);
     let default = tables.routing(DEFAULT_VRF);
     let shared = tables.shared();
+    super::bgp_config::push_entries(&mut t);
     super::bgp::push_entries(&mut t, tables);
     super::ospf_config::push_entries(&mut t, tables);
     for p in PROCESSES {

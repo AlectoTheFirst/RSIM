@@ -107,6 +107,9 @@ pub struct Config {
     pub dynamic_vrfs: BTreeMap<String, Vec<(u32, u32)>>,
     /// The BGP processes, neighbours and listen ranges.
     pub bgp: crate::bgp_peers::BgpConfig,
+    /// The BGP processes and the gaps for the BGP calculation, with no file
+    /// in the spans.
+    pub bgp_routing: crate::bgp_config::DeviceBgp,
     /// The IPv4 static routes of `router static`, for the computed route
     /// table.
     pub static_routes: Vec<crate::nxos::config::StaticRoute>,
@@ -188,6 +191,8 @@ pub fn read(doc: &Document, table: &Table) -> Config {
             _ => {}
         }
     }
+    cfg.bgp_routing =
+        super::bgp_config::read(doc, &cfg.bgp, "", &|k| table.report_key(k), &mut r.read);
     cfg.read = r.read;
     cfg.dynamic_vrfs = super::table::dynamic_vrfs(doc);
     cfg
