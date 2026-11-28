@@ -955,9 +955,15 @@ pub fn collected(
     sections: &BTreeMap<String, (Vec<u8>, String)>,
 ) -> Vec<CollectedBgp> {
     let st = super::state::read(sections, &super::names(cfg));
-    let Some(Ok(rib)) = &st.rib else {
-        return Vec::new();
-    };
+    match &st.rib {
+        Some(Ok(rib)) => collected_of(rib),
+        _ => Vec::new(),
+    }
+}
+
+/// The selected BGP routes of a collected IOS route table, the paths with a
+/// code `B`, by VRF and prefix, with the next hops of their paths.
+pub fn collected_of(rib: &super::state::Rib) -> Vec<CollectedBgp> {
     let mut by: BTreeMap<(String, Prefix), (Vec<IpAddr>, Vec<SourceSpan>)> = BTreeMap::new();
     for p in rib.paths.iter().filter(|p| !p.backup) {
         let first = p.protocol.split_whitespace().next().unwrap_or_default();

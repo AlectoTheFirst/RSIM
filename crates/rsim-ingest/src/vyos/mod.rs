@@ -1,6 +1,7 @@
 //! VyOS 1.4 and 1.5.
 
 pub mod bgp;
+pub mod bgp_config;
 pub mod config;
 pub mod lower;
 pub mod mask;

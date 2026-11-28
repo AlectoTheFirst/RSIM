@@ -253,6 +253,9 @@ pub struct Config {
     pub routing_protocols: Vec<(String, Lines)>,
     /// The BGP processes, neighbours and listen ranges.
     pub bgp: crate::bgp_peers::BgpConfig,
+    /// The BGP processes and the gaps for the BGP calculation, with no file
+    /// in the spans.
+    pub bgp_routing: crate::bgp_config::DeviceBgp,
     /// The first lines of the stanzas that the handlers read.
     pub read: BTreeSet<u32>,
 }
@@ -424,6 +427,7 @@ pub fn read(doc: &Document) -> Config {
         }
     }
     c.bgp = super::bgp::read(root, &mut r.read);
+    c.bgp_routing = super::bgp_config::read(root, &c.bgp, "", &mut r.read);
     super::ospf_config::mark(root, &mut r.read);
     c.read = r.read;
     c

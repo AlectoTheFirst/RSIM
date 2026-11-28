@@ -190,8 +190,8 @@ const ENTRIES: &[Entry] = &[
     e("policy/route/*/rule/*/set", Handled, Node),
     e("policy/route/*/rule/*/set/table", Handled, Subtree),
     e("policy/route6", Unhandled, Subtree),
-    e("policy/prefix-list", Irrelevant, Subtree),
-    e("policy/prefix-list6", Irrelevant, Subtree),
+    e("policy/prefix-list", Handled, Subtree),
+    e("policy/prefix-list6", Handled, Subtree),
     e("protocols", Handled, Node),
     e("protocols/static", Handled, Node),
     e("protocols/static/route", Handled, Subtree),
@@ -214,6 +214,7 @@ const ENTRIES: &[Entry] = &[
 /// table; the BGP configuration of a VRF without rows is unhandled.
 pub fn table(tables: &RouteTables) -> Table {
     let mut t = Table::new(ENTRIES);
+    super::bgp_config::push_entries(&mut t);
     super::bgp::push_entries(&mut t, tables);
     super::ospf_config::push_entries(&mut t);
     t.push("protocols/bgp", tables.routing(DEFAULT_VRF), Subtree);

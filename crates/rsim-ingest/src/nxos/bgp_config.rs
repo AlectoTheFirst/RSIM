@@ -135,8 +135,10 @@ pub fn push_entries(t: &mut Table) {
     }
 }
 
-/// The route policies and the lists of the config. The prefix lists are
-/// held as `ip <name>` and `ipv6 <name>`. A prefix list with a line that is
+/// The route policies and the lists of the config, also of an IOS-XE
+/// config. The prefix lists are held as `ip <name>` and `ipv6 <name>`. A
+/// community list with a number from 1 to 99 is a standard list, and from
+/// 100 an expanded list. A prefix list with a line that is
 /// not read is left out, so each match on it is unknown. A route map line
 /// that is not read is an unknown match term after `match` and an unknown
 /// action otherwise. Each line goes into `read`.
@@ -201,6 +203,13 @@ pub fn policies(
                     *kind == "expanded",
                     &mask(&s.key),
                 ));
+            }
+            ["ip", "community-list", number, rest @ ..] if number.parse::<u16>().is_ok() => {
+                read.insert(s.first_line);
+                let expanded = number.parse::<u16>().is_ok_and(|n| n >= 100);
+                let list = communities.entry((*number).to_string()).or_default();
+                let next = list.last().map_or(5, |x| x.seq + 5);
+                list.push(community_line(rest, next, expanded, &mask(&s.key)));
             }
             ["ip", "as-path", "access-list", name, rest @ ..] => {
                 read.insert(s.first_line);
