@@ -405,7 +405,7 @@ fn a_route_of_an_outside_reflector_with_a_next_hop_inside_the_twin_is_seeded() {
 }
 
 #[test]
-fn a_collected_route_through_an_outside_peer_with_a_best_path_from_inside_is_a_differ() {
+fn a_collected_route_through_an_outside_peer_with_a_best_path_from_inside_has_a_differ_row() {
     // The received table of the peer outside the twin holds 192.0.2.64/27,
     // which the import policy of n1 denies, and the collected route goes
     // through that peer. The computed best path comes from x1.

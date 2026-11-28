@@ -22,7 +22,7 @@
 //! and a collected BGP route under a gap is not computed, unless it is
 //! seeded. A collected BGP route is seeded when the computed best path and
 //! each multipath path of its device and VRF come from a peer outside the
-//! twin. A collected BGP route of a key of a group whose
+//! twin and their next hops are the collected next hops. A collected BGP route of a key of a group whose
 //! convergence is unknown is not computed with the reason of the group.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -52,24 +52,29 @@ type Edge = (Node, Node);
 /// The kind of a BGP route.
 pub const BGP: RouteKind = RouteKind::Learned(RouteProtocol::Bgp);
 
-/// The IGP view of a VRF: the computed route table of the install stage
-/// with no BGP candidate, the metric of each computed OSPF route, and the
-/// reason why the OSPF of a family is not computed in full.
+/// The IGP view of a VRF: the install stage of the candidates other than BGP
+/// with an unknown candidate of each BGP prefix of the VRF at the lowest BGP
+/// distance of the platform, the metric of each computed OSPF route, and
+/// the reason why the OSPF of a family is not computed in full.
 #[derive(Clone, Debug, Default)]
 pub struct IgpTable {
+    /// The candidates other than BGP.
+    pub cands: Vec<Candidate>,
+    /// The flag `COMPUTED_THROUGH_DEFAULT` of the vendor profile.
+    pub through_default: bool,
+    /// The lowest BGP distance of the platform.
+    pub bgp_distance: u8,
+    /// The installed routes of `cands` and of the BGP prefixes, after
+    /// [`IgpTable::install`].
     pub routes: BTreeMap<Prefix, Route>,
+    /// The installed routes of `cands` alone, after [`IgpTable::install`].
+    pub plain: BTreeMap<Prefix, Route>,
     /// The metric of each computed OSPF route, or the reason why the route
     /// is unknown.
     pub ospf: BTreeMap<Prefix, Result<u32, String>>,
     /// The reason of each family, `true` for IPv4, whose OSPF version runs
     /// in the VRF and is not computed in full.
     pub incomplete: BTreeMap<bool, String>,
-    /// The distance of the route of each prefix of `routes`.
-    pub distance: BTreeMap<Prefix, u8>,
-    /// The gateways of the static candidates of each prefix.
-    pub gateways: BTreeMap<Prefix, Vec<IpAddr>>,
-    /// The lowest BGP distance of the platform.
-    pub bgp_distance: u8,
 }
 
 /// The lowest BGP distance of a platform: its eBGP or its iBGP distance.
@@ -86,8 +91,40 @@ fn unknown_route(r: &Route) -> bool {
 }
 
 impl IgpTable {
-    /// The longest route that holds `addr`. A default route resolves no
-    /// next hop.
+    /// A table of the candidates `cands`, with no route before
+    /// [`IgpTable::install`].
+    pub fn new(cands: Vec<Candidate>, through_default: bool, bgp_distance: u8) -> IgpTable {
+        IgpTable {
+            cands,
+            through_default,
+            bgp_distance,
+            ..IgpTable::default()
+        }
+    }
+
+    /// Installs the candidates with an unknown BGP candidate of each prefix
+    /// of `bgp` into `routes`, and the candidates alone into `plain`.
+    pub fn install(&mut self, bgp: &BTreeSet<Prefix>) {
+        self.plain = rsim_routing::install(self.cands.clone(), self.through_default)
+            .entries()
+            .into_iter()
+            .collect();
+        let mut all = self.cands.clone();
+        all.extend(bgp.iter().map(|q| {
+            Candidate::new(
+                *q,
+                self.bgp_distance,
+                Route::unknown(BGP, format!("bgp route {q}"), Vec::new()),
+            )
+        }));
+        self.routes = rsim_routing::install(all, self.through_default)
+            .entries()
+            .into_iter()
+            .collect();
+    }
+
+    /// The longest route of `routes` that holds `addr`. A default route
+    /// resolves no next hop.
     pub fn lookup(&self, addr: IpAddr) -> Option<(Prefix, &Route)> {
         let max = if addr.is_ipv4() { 32 } else { 128 };
         (1..=max).rev().find_map(|len| {
@@ -131,11 +168,11 @@ impl IgpTable {
         }
     }
 
-    /// Whether the computed table holds a route of `prefix`. With the OSPF
-    /// of the family not computed in full, only a connected or a local route
-    /// gives an answer.
+    /// Whether the routes of the candidates alone hold a route of `prefix`.
+    /// With the OSPF of the family not computed in full, only a connected or
+    /// a local route gives an answer.
     pub fn has_route(&self, prefix: Prefix) -> Option<bool> {
-        let r = self.routes.get(&prefix);
+        let r = self.plain.get(&prefix);
         if let Some(r) = r
             && matches!(r.kind, RouteKind::Connected | RouteKind::Local)
             && !unknown_route(r)
@@ -153,63 +190,18 @@ impl IgpTable {
     }
 }
 
-/// The IGP view of the BGP calculation over the computed tables of each
-/// device and VRF. A next hop inside a BGP prefix of `bgp` that is longer
-/// than the route of the computed table has an unknown resolution.
+/// The IGP view of the BGP calculation over the installed tables of each
+/// device and VRF.
 pub struct Igp<'a> {
     pub tables: &'a BTreeMap<(String, String), IgpTable>,
-    /// The prefixes of the collected BGP routes of each device and VRF and
-    /// the keys of the BGP calculation of its component.
-    pub bgp: &'a BTreeMap<(String, String), BTreeSet<Prefix>>,
-}
-
-impl Igp<'_> {
-    /// The longest BGP prefix of `at` that holds `addr` and that a device
-    /// can prefer over the route of the table: a longer prefix than the
-    /// route, or a prefix of the same length when the lowest BGP distance
-    /// is not more than the distance of the route.
-    fn bgp_over(&self, at: &(String, String), t: &IgpTable, addr: IpAddr) -> Option<Prefix> {
-        let found = t.lookup(addr);
-        let len = found.map_or(0, |(p, _)| p.len());
-        let distance = found.map_or(u8::MAX, |(p, _)| {
-            t.distance.get(&p).copied().unwrap_or(u8::MAX)
-        });
-        self.bgp
-            .get(at)?
-            .iter()
-            .copied()
-            .filter(|q| q.contains(addr))
-            .filter(|q| q.len() > len || (q.len() == len && len > 0 && t.bgp_distance <= distance))
-            .max_by_key(|q| q.len())
-    }
 }
 
 impl IgpView for Igp<'_> {
-    /// A next hop under a BGP prefix of [`Igp::bgp_over`] has an unknown
-    /// resolution, and so has a next hop under a static route of the table
-    /// at least as long as its route whose gateway is under such a prefix.
     fn resolve(&self, device: &str, vrf: &str, next_hop: IpAddr) -> Resolution {
-        let at = (device.to_string(), vrf.to_string());
-        let Some(t) = self.tables.get(&at) else {
-            return Resolution::Unknown("no computed route table of the VRF".to_string());
-        };
-        if let Some(q) = self.bgp_over(&at, t, next_hop) {
-            return Resolution::Unknown(format!("next hop inside the bgp prefix {q}"));
+        match self.tables.get(&(device.to_string(), vrf.to_string())) {
+            Some(t) => t.resolve(next_hop),
+            None => Resolution::Unknown("no computed route table of the VRF".to_string()),
         }
-        let len = t.lookup(next_hop).map_or(0, |(p, _)| p.len());
-        for (s, gws) in &t.gateways {
-            if s.len() < len || !s.contains(next_hop) {
-                continue;
-            }
-            for g in gws {
-                if let Some(q) = self.bgp_over(&at, t, *g) {
-                    return Resolution::Unknown(format!(
-                        "static route {s} with the gateway {g} inside the bgp prefix {q}"
-                    ));
-                }
-            }
-        }
-        t.resolve(next_hop)
     }
 
     fn has_route(&self, device: &str, vrf: &str, prefix: Prefix) -> Option<bool> {
@@ -290,8 +282,6 @@ pub struct BgpBuild {
     pub input: BgpInput,
     /// The computed IGP table of each device and VRF.
     pub igp: BTreeMap<(String, String), IgpTable>,
-    /// The BGP prefixes of each device and VRF of the IGP view.
-    pub bgp_prefixes: BTreeMap<(String, String), BTreeSet<Prefix>>,
     /// The result, or the reason why the calculation did not run. `None`
     /// with no process.
     pub result: Option<Result<BgpResult, String>>,
@@ -679,8 +669,10 @@ pub fn build(
             comp_keys.entry(r).or_default().insert(s.key.prefix);
         }
     }
-    let mut bgp_prefixes: BTreeMap<(String, String), BTreeSet<Prefix>> = BTreeMap::new();
-    for (d, v) in index.keys() {
+    // The install of each IGP view with an unknown candidate of each BGP
+    // prefix of its VRF: the keys of its component, its collected BGP
+    // prefixes and the default routes.
+    for ((d, v), t) in igp.iter_mut() {
         let mut set: BTreeSet<Prefix> = comps
             .of(d, v)
             .and_then(|r| comp_keys.get(&r))
@@ -689,7 +681,9 @@ pub fn build(
         if let Some(x) = devices.get(d) {
             set.extend(x.collected.iter().filter(|c| &c.vrf == v).map(|c| c.prefix));
         }
-        bgp_prefixes.insert((d.clone(), v.clone()), set);
+        set.insert(Prefix::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0));
+        set.insert(Prefix::new(IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 0));
+        t.install(&set);
     }
     let input = BgpInput {
         processes,
@@ -697,14 +691,7 @@ pub fn build(
         seeds,
     };
     let result = (!input.processes.is_empty()).then(|| {
-        rsim_routing::bgp::compute(
-            &input,
-            &Igp {
-                tables: &igp,
-                bgp: &bgp_prefixes,
-            },
-        )
-        .map_err(|e| e.to_string())
+        rsim_routing::bgp::compute(&input, &Igp { tables: &igp }).map_err(|e| e.to_string())
     });
     // The reason of each key of a group whose convergence is unknown.
     let mut unknown_keys: BTreeMap<RouteKey, String> = BTreeMap::new();
@@ -745,11 +732,19 @@ pub fn build(
                 .entry(c.vrf.clone())
                 .or_default();
             // The computed best path and each multipath path come from a
-            // peer outside the twin.
+            // peer outside the twin, and their next hops are the collected
+            // next hops.
             let from_seed = |b: &BgpPath| {
                 b.peer
                     .address
                     .is_some_and(|a| outside.contains(&(d.clone(), c.vrf.clone(), a)))
+            };
+            let same_hops = |sel: &rsim_routing::bgp::Selection| {
+                let computed: BTreeSet<IpAddr> = std::iter::once(&sel.best)
+                    .chain(&sel.multipath)
+                    .filter_map(|b| b.next_hop)
+                    .collect();
+                computed == c.next_hops.iter().copied().collect::<BTreeSet<IpAddr>>()
             };
             let at = RouteAt {
                 device: d.clone(),
@@ -759,7 +754,9 @@ pub fn build(
             let seeded = matches!(&result, Some(Ok(r)) if matches!(
                 r.routes.get(&at),
                 Some(RouteState::Selected(sel))
-                    if from_seed(&sel.best) && sel.multipath.iter().all(from_seed)
+                    if from_seed(&sel.best)
+                        && sel.multipath.iter().all(from_seed)
+                        && same_hops(sel)
             ));
             let class = if seeded {
                 Class::Seeded
@@ -857,7 +854,6 @@ pub fn build(
     BgpBuild {
         input,
         igp,
-        bgp_prefixes,
         result,
         vrfs,
         gaps: gap_texts,
@@ -867,7 +863,7 @@ pub fn build(
 
 /// The router ID of a seed from a neighbour of the session kind `kind`
 /// with the router ID `collected` of the neighbour detail. An iBGP seed has
-/// no router ID, as the tables hold no ORIGINATOR_ID and no cluster list.
+/// no router ID.
 fn seed_router_id(kind: SessionKind, collected: Option<Ipv4Addr>) -> Option<Ipv4Addr> {
     if kind == SessionKind::Ibgp {
         None
@@ -922,91 +918,146 @@ mod tests {
         )
     }
 
-    /// The IGP view of the install stage of `cands`, with the OSPF metrics
-    /// `metrics`.
-    fn table(cands: Vec<Candidate>, metrics: &[(&str, u32)]) -> IgpTable {
-        with_collected(cands, &BTreeMap::new(), &Fib::new(), metrics)
+    fn static_via(p: &str, distance: u8, gw: &str) -> Candidate {
+        Candidate::via(
+            pfx(p),
+            distance,
+            RouteKind::Static,
+            vec![ip(gw)],
+            Vec::new(),
+        )
     }
 
-    /// The IGP view of `cands` with the collected routes `routes` of the
-    /// collected table `collected`, on IOS-XR.
-    fn with_collected(
+    fn static_on(p: &str, distance: u8, i: &str) -> Candidate {
+        Candidate::new(
+            pfx(p),
+            distance,
+            Route::new(RouteKind::Static, vec![hop(i, None)], Vec::new()),
+        )
+    }
+
+    /// The IGP view of `cands` on IOS-XR with the OSPF metrics `metrics`,
+    /// installed with the BGP prefixes `bgp` and the default routes.
+    fn view(cands: Vec<Candidate>, metrics: &[(&str, u32)], bgp: &[&str]) -> IgpTable {
+        view_with(cands, metrics, bgp, false)
+    }
+
+    fn view_with(
         cands: Vec<Candidate>,
-        routes: &BTreeMap<Prefix, rsim_guard::CollectedRoute>,
-        collected: &Fib,
         metrics: &[(&str, u32)],
+        bgp: &[&str],
+        through_default: bool,
     ) -> IgpTable {
-        let r = crate::guard::igp(cands, routes, collected, Platform::Iosxr, false);
-        IgpTable {
-            routes: r.fib.entries().into_iter().collect(),
-            ospf: metrics.iter().map(|(p, m)| (pfx(p), Ok(*m))).collect(),
-            incomplete: BTreeMap::new(),
-            distance: r.distance,
-            gateways: r.gateways,
-            bgp_distance: bgp_distance(Platform::Iosxr),
-        }
+        let mut t = IgpTable::new(cands, through_default, bgp_distance(Platform::Iosxr));
+        t.ospf = metrics.iter().map(|(p, m)| (pfx(p), Ok(*m))).collect();
+        let mut set: BTreeSet<Prefix> = bgp.iter().map(|p| pfx(p)).collect();
+        set.insert(pfx("0.0.0.0/0"));
+        set.insert(pfx("::/0"));
+        t.install(&set);
+        t
+    }
+
+    fn unknown(r: Resolution) -> bool {
+        matches!(r, Resolution::Unknown(_))
+    }
+
+    #[test]
+    fn a_bgp_prefix_over_a_floating_static_and_a_static_that_does_not_resolve_is_unknown() {
+        let cands = vec![
+            connected("192.0.2.0/30", "eth1"),
+            static_on("10.1.0.0/16", 250, "eth1"),
+            static_via("10.1.0.0/16", 1, "198.51.100.99"),
+        ];
+        let t = view(cands.clone(), &[], &["10.1.0.0/16"]);
+        assert!(unknown(t.resolve(ip("10.1.2.3"))));
+        // With no BGP prefix, the floating static route installs.
+        let t = view(cands, &[], &[]);
+        assert_eq!(t.resolve(ip("10.1.2.3")), Resolution::Resolved { cost: 0 });
+    }
+
+    #[test]
+    fn a_recursive_static_route_through_a_bgp_prefix_is_unknown() {
+        let cands = vec![
+            connected("192.0.2.0/30", "eth1"),
+            ospf("10.2.0.0/15", "192.0.2.2"),
+            static_via("10.3.0.0/16", 1, "10.9.0.1"),
+            static_via("10.9.0.0/16", 1, "198.51.100.1"),
+        ];
+        let t = view(cands, &[("10.2.0.0/15", 50)], &["198.51.100.0/24"]);
+        assert!(unknown(t.resolve(ip("10.3.0.1"))));
+        assert_eq!(t.resolve(ip("10.2.0.1")), Resolution::Resolved { cost: 50 });
+    }
+
+    #[test]
+    fn a_static_route_whose_gateway_is_only_under_a_bgp_default_route_is_unknown() {
+        let cands = vec![
+            connected("192.0.2.0/30", "eth1"),
+            static_via("10.5.0.0/16", 1, "198.51.100.7"),
+        ];
+        let t = view_with(cands.clone(), &[], &[], true);
+        assert!(unknown(t.resolve(ip("10.5.0.1"))));
+        assert!(t.routes.contains_key(&pfx("10.5.0.0/16")));
+        // With no resolution through a default route, the static route is
+        // not installed.
+        let t = view_with(cands, &[], &[], false);
+        assert!(!t.routes.contains_key(&pfx("10.5.0.0/16")));
+    }
+
+    #[test]
+    fn a_connected_route_and_an_ospf_route_longer_than_the_bgp_prefixes_resolve() {
+        let cands = vec![
+            connected("192.0.2.0/30", "eth1"),
+            ospf("10.6.0.1/32", "192.0.2.2"),
+        ];
+        let t = view(
+            cands,
+            &[("10.6.0.1/32", 30)],
+            &["192.0.2.0/30", "10.6.0.0/16"],
+        );
+        assert_eq!(t.resolve(ip("192.0.2.2")), Resolution::Resolved { cost: 0 });
+        assert_eq!(t.resolve(ip("10.6.0.1")), Resolution::Resolved { cost: 30 });
+        assert!(unknown(t.resolve(ip("10.6.0.2"))));
     }
 
     #[test]
     fn a_floating_static_route_leaves_the_ospf_route_and_its_metric() {
-        let floating = Candidate::new(
-            pfx("10.1.0.0/16"),
-            250,
-            Route::new(RouteKind::Static, vec![hop("eth0", None)], Vec::new()),
-        );
         let cands = vec![
             connected("192.0.2.0/30", "eth1"),
-            floating.clone(),
+            static_on("10.1.0.0/16", 250, "eth0"),
             ospf("10.1.0.0/16", "192.0.2.2"),
         ];
-        let t = table(cands, &[("10.1.0.0/16", 30)]);
+        let t = view(cands, &[("10.1.0.0/16", 30)], &[]);
         assert_eq!(t.resolve(ip("10.1.2.3")), Resolution::Resolved { cost: 30 });
-        let t = table(vec![connected("192.0.2.0/30", "eth1"), floating], &[]);
-        assert_eq!(t.resolve(ip("10.1.2.3")), Resolution::Resolved { cost: 0 });
     }
 
     #[test]
     fn a_static_route_whose_next_hop_does_not_resolve_is_not_in_the_view() {
         let cands = vec![
             connected("192.0.2.0/30", "eth1"),
-            Candidate::via(
-                pfx("10.2.0.0/16"),
-                1,
-                RouteKind::Static,
-                vec![ip("198.51.100.99")],
-                Vec::new(),
-            ),
+            static_via("10.2.0.0/16", 1, "198.51.100.99"),
             ospf("10.2.0.0/16", "192.0.2.2"),
         ];
-        let t = table(cands, &[("10.2.0.0/16", 20)]);
+        let t = view(cands, &[("10.2.0.0/16", 20)], &[]);
         assert_eq!(t.resolve(ip("10.2.0.1")), Resolution::Resolved { cost: 20 });
-        let cands = vec![
-            connected("192.0.2.0/30", "eth1"),
-            Candidate::via(
-                pfx("10.2.0.0/16"),
-                1,
-                RouteKind::Static,
-                vec![ip("198.51.100.99")],
-                Vec::new(),
-            ),
-        ];
-        let t = table(cands, &[]);
-        assert!(matches!(t.resolve(ip("10.2.0.1")), Resolution::Unknown(_)));
+        let t = view(
+            vec![
+                connected("192.0.2.0/30", "eth1"),
+                static_via("10.2.0.0/16", 1, "198.51.100.99"),
+            ],
+            &[],
+            &[],
+        );
+        assert!(unknown(t.resolve(ip("10.2.0.1"))));
         assert_eq!(t.has_route(pfx("10.2.0.0/16")), Some(false));
     }
 
     #[test]
     fn an_ospf_version_not_computed_in_full_leaves_only_the_connected_and_local_routes() {
-        let covering = Candidate::new(
-            pfx("10.0.0.0/16"),
-            1,
-            Route::new(
-                RouteKind::Static,
-                vec![hop("eth1", Some("192.0.2.2"))],
-                Vec::new(),
-            ),
-        );
-        let mut t = table(vec![connected("192.0.2.0/30", "eth1"), covering], &[]);
+        let cands = vec![
+            connected("192.0.2.0/30", "eth1"),
+            static_on("10.0.0.0/16", 1, "eth1"),
+        ];
+        let mut t = view(cands, &[], &[]);
         assert_eq!(t.resolve(ip("10.0.1.1")), Resolution::Resolved { cost: 0 });
         assert_eq!(t.has_route(pfx("10.0.0.0/16")), Some(true));
         t.incomplete
@@ -1019,6 +1070,29 @@ mod tests {
         assert_eq!(t.has_route(pfx("10.0.0.0/16")), None);
         assert_eq!(t.has_route(pfx("10.9.0.0/16")), None);
         assert_eq!(t.has_route(pfx("192.0.2.0/30")), Some(true));
+    }
+
+    #[test]
+    fn a_bgp_prefix_does_not_count_for_the_route_of_a_network_statement() {
+        let t = view(
+            vec![connected("192.0.2.0/30", "eth1")],
+            &[],
+            &["10.7.0.0/16"],
+        );
+        assert_eq!(t.has_route(pfx("10.7.0.0/16")), Some(false));
+    }
+
+    /// The candidates of the collected routes `routes` of the table
+    /// `collected` with `cands`, on IOS-XR.
+    fn with_collected(
+        cands: Vec<Candidate>,
+        routes: &BTreeMap<Prefix, rsim_guard::CollectedRoute>,
+        collected: &Fib,
+    ) -> IgpTable {
+        let r = crate::guard::igp(cands, routes, collected, Platform::Iosxr, false);
+        let mut t = IgpTable::new(r.cands, r.through_default, bgp_distance(Platform::Iosxr));
+        t.install(&BTreeSet::new());
+        t
     }
 
     #[test]
@@ -1036,112 +1110,12 @@ mod tests {
                 class: Class::NotComputed("ospfv2 database not read in full".to_string()),
             },
         )]);
-        let view = |routes: &BTreeMap<Prefix, rsim_guard::CollectedRoute>| {
-            with_collected(
-                vec![connected("10.0.0.0/16", "eth1")],
-                routes,
-                &collected,
-                &[],
-            )
-        };
-        assert!(matches!(
-            view(&routes).resolve(ip("10.0.5.5")),
-            Resolution::Unknown(_)
+        let cands = || vec![connected("10.0.0.0/16", "eth1")];
+        assert!(unknown(
+            with_collected(cands(), &routes, &collected).resolve(ip("10.0.5.5"))
         ));
         assert_eq!(
-            view(&BTreeMap::new()).resolve(ip("10.0.5.5")),
-            Resolution::Resolved { cost: 0 }
-        );
-    }
-
-    #[test]
-    fn a_next_hop_inside_a_longer_bgp_prefix_has_an_unknown_resolution() {
-        let t = table(
-            vec![
-                connected("192.0.2.0/30", "eth1"),
-                ospf("10.0.0.0/8", "192.0.2.2"),
-            ],
-            &[("10.0.0.0/8", 40)],
-        );
-        let at = ("r1".to_string(), "default".to_string());
-        let tables = BTreeMap::from([(at.clone(), t)]);
-        let bgp = BTreeMap::from([(at.clone(), BTreeSet::from([pfx("10.1.1.0/24")]))]);
-        let view = Igp {
-            tables: &tables,
-            bgp: &bgp,
-        };
-        assert_eq!(
-            view.resolve("r1", "default", ip("10.1.1.1")),
-            Resolution::Unknown("next hop inside the bgp prefix 10.1.1.0/24".to_string())
-        );
-        assert_eq!(
-            view.resolve("r1", "default", ip("10.2.0.1")),
-            Resolution::Resolved { cost: 40 }
-        );
-        // A BGP prefix of the same length as the OSPF route wins on the
-        // distance.
-        let bgp = BTreeMap::from([(at.clone(), BTreeSet::from([pfx("10.0.0.0/8")]))]);
-        let view = Igp {
-            tables: &tables,
-            bgp: &bgp,
-        };
-        assert_eq!(
-            view.resolve("r1", "default", ip("10.1.1.1")),
-            Resolution::Unknown("next hop inside the bgp prefix 10.0.0.0/8".to_string())
-        );
-        // A BGP prefix of the same length as a connected route does not.
-        let bgp = BTreeMap::from([(at, BTreeSet::from([pfx("192.0.2.0/30")]))]);
-        let view = Igp {
-            tables: &tables,
-            bgp: &bgp,
-        };
-        assert_eq!(
-            view.resolve("r1", "default", ip("192.0.2.2")),
-            Resolution::Resolved { cost: 0 }
-        );
-    }
-
-    #[test]
-    fn a_static_route_whose_gateway_is_inside_a_bgp_prefix_is_unknown() {
-        let recursive = |gw: &str| {
-            Candidate::via(
-                pfx("10.3.0.0/16"),
-                1,
-                RouteKind::Static,
-                vec![ip(gw)],
-                Vec::new(),
-            )
-        };
-        let at = ("r1".to_string(), "default".to_string());
-        let bgp = BTreeMap::from([(at.clone(), BTreeSet::from([pfx("198.51.100.0/24")]))]);
-        // The gateway resolves through the connected route of the BGP prefix
-        // only. The static route is not in the table, and the BGP prefix
-        // gives the device a route to the gateway.
-        let t = table(
-            vec![connected("192.0.2.0/30", "eth1"), recursive("198.51.100.1")],
-            &[],
-        );
-        let tables = BTreeMap::from([(at.clone(), t)]);
-        let view = Igp {
-            tables: &tables,
-            bgp: &bgp,
-        };
-        assert!(matches!(
-            view.resolve("r1", "default", ip("10.3.0.1")),
-            Resolution::Unknown(why) if why.contains("static route 10.3.0.0/16")
-        ));
-        // A gateway on the connected network resolves.
-        let t = table(
-            vec![connected("192.0.2.0/30", "eth1"), recursive("192.0.2.2")],
-            &[],
-        );
-        let tables = BTreeMap::from([(at, t)]);
-        let view = Igp {
-            tables: &tables,
-            bgp: &bgp,
-        };
-        assert_eq!(
-            view.resolve("r1", "default", ip("10.3.0.1")),
+            with_collected(cands(), &BTreeMap::new(), &collected).resolve(ip("10.0.5.5")),
             Resolution::Resolved { cost: 0 }
         );
     }
@@ -1165,16 +1139,16 @@ mod tests {
                 class: Class::NotComputed("isis not computed".to_string()),
             },
         )]);
-        let t = with_collected(
+        let mut t = with_collected(
             vec![
                 connected("192.0.2.0/30", "eth1"),
                 ospf("10.4.0.0/16", "192.0.2.2"),
             ],
             &routes,
             &collected,
-            &[("10.4.0.0/16", 30)],
         );
-        assert!(matches!(t.resolve(ip("10.4.0.1")), Resolution::Unknown(_)));
+        t.ospf.insert(p, Ok(30));
+        assert!(unknown(t.resolve(ip("10.4.0.1"))));
     }
 
     #[test]

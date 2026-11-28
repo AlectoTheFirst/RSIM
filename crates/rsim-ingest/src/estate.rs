@@ -1639,9 +1639,8 @@ fn assemble_pass(
     (e, missing)
 }
 
-/// The IGP view of each VRF of a device with BGP: the computed route table
-/// `fibs` of each VRF with no BGP candidate with its distances and static
-/// gateways, the metric of each computed
+/// The IGP view of each VRF of a device with BGP before the install: the
+/// candidates `fibs` of each VRF other than BGP, the metric of each computed
 /// OSPF route, and the reason of each family whose OSPF version has a
 /// process of the VRF in the config and is not computed in full.
 fn igp_tables(
@@ -1666,14 +1665,13 @@ fn igp_tables(
                     incomplete.insert(v4, why);
                 }
             }
-            let t = crate::bgp_build::IgpTable {
-                routes: fib.fib.entries().into_iter().collect(),
-                distance: fib.distance,
-                gateways: fib.gateways,
-                ospf: routes.metrics().into_iter().collect(),
-                incomplete,
-                bgp_distance: crate::bgp_build::bgp_distance(platform),
-            };
+            let mut t = crate::bgp_build::IgpTable::new(
+                fib.cands,
+                fib.through_default,
+                crate::bgp_build::bgp_distance(platform),
+            );
+            t.ospf = routes.metrics().into_iter().collect();
+            t.incomplete = incomplete;
             (vrf, t)
         })
         .collect()

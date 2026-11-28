@@ -36,13 +36,7 @@ fn main() {
         return;
     };
     let started = Instant::now();
-    let result = compute(
-        &b.input,
-        &Igp {
-            tables: &b.igp,
-            bgp: &b.bgp_prefixes,
-        },
-    );
+    let result = compute(&b.input, &Igp { tables: &b.igp });
     let ms = started.elapsed().as_millis();
     println!("estate build ms {estate_ms}");
     println!("processes {}", b.input.processes.len());
