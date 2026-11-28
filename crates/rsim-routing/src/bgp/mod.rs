@@ -44,7 +44,7 @@ pub use process::{
 pub use profile::{BgpProfile, DECISION_ORDER, MatchReads, UndefinedPolicy};
 pub use propagate::{
     BestPath, BgpInput, IgpView, InputError, OriginateInput, OriginateStage, Resolution, Seed,
-    Selection, aggregate_offer, network_offer,
+    Selection, aggregate_as_path, aggregate_offer, network_offer,
 };
 pub use session::{Offer, Session, SessionEnd, SessionStage, export, receive};
 pub use stage::{ObjectRef, RoutingStage};

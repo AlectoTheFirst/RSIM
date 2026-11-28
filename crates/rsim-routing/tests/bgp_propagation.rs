@@ -361,6 +361,39 @@ fn an_as_set_aggregate_holds_the_ases_and_the_worst_origin_of_its_contributors()
 }
 
 #[test]
+fn an_as_set_aggregate_keeps_the_common_leading_sequence_and_sets_the_other_ases() {
+    use rsim_routing::bgp::{AsSegment, SegmentKind, aggregate_as_path};
+    let text = |paths: &[AsPath]| {
+        let refs: Vec<&AsPath> = paths.iter().collect();
+        aggregate_as_path(&refs).to_string()
+    };
+    let a = AsPath::sequence(&[100, 200]);
+    let b = AsPath::sequence(&[100, 300]);
+    assert_eq!(text(&[a.clone(), b.clone()]), "100 {200,300}");
+    assert_eq!(aggregate_as_path(&[&a, &b]).len(), 2);
+    assert_eq!(text(std::slice::from_ref(&a)), "100 200");
+    assert_eq!(
+        text(&[a.clone(), AsPath::sequence(&[200, 100])]),
+        "{100,200}"
+    );
+    assert_eq!(
+        text(&[a.clone(), AsPath::sequence(&[100, 200, 300])]),
+        "100 200 {300}"
+    );
+    assert_eq!(
+        text(&[AsPath::sequence(&[64500]), AsPath::default()]),
+        "{64500}"
+    );
+    let confed = AsPath::sequence(&[100, 200]).prepend_confed(Asn(65101));
+    let mut with_set = AsPath::sequence(&[100]);
+    with_set.segments.push(AsSegment {
+        kind: SegmentKind::Set,
+        asns: vec![Asn(400), Asn(100)],
+    });
+    assert_eq!(text(&[confed, with_set]), "[65101] 100 {200,400}");
+}
+
+#[test]
 fn an_evpn_ip_prefix_route_carries_its_route_target_over_an_evpn_session_only() {
     let mut lab = pair(65002);
     lab.router("r3", Platform::Iosxe, 65003, "10.255.0.3");

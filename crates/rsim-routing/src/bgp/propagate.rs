@@ -22,7 +22,7 @@ use super::profile::UndefinedPolicy;
 use super::session::{Offer, Session, export, receive};
 use super::stage::{ObjectRef, RoutingStage};
 use super::{
-    AsPath, AsSegment, BgpOrigin, BgpPath, LocalOrigin, Peer, Reason, RouteKey, SegmentKind,
+    AsPath, AsSegment, Asn, BgpOrigin, BgpPath, LocalOrigin, Peer, Reason, RouteKey, SegmentKind,
     SessionKind, Unknown,
 };
 
@@ -199,9 +199,8 @@ fn origin_rank(o: BgpOrigin) -> u8 {
 /// The path of the aggregate `a` of `process` from the best paths of the
 /// routes inside it at the process. The aggregate is active when one of
 /// them has a path. Without `as_set` the path has the empty AS path and the
-/// origin IGP. With `as_set` it has one AS_SET of the ASs of these paths,
-/// the worst origin of them and the union of their communities
-/// (RFC 4271 9.2.2.2).
+/// origin IGP. With `as_set` it has the worst origin and the union of the
+/// communities of these paths, and the AS path of [`aggregate_as_path`].
 pub fn aggregate_offer(process: &BgpProcess, a: &Aggregate, contributors: &[BestPath]) -> Offer {
     let paths: Vec<&BgpPath> = contributors
         .iter()
@@ -224,15 +223,8 @@ pub fn aggregate_offer(process: &BgpProcess, a: &Aggregate, contributors: &[Best
     }
     let mut path = local_path(process, LocalOrigin::Aggregate, &a.spans);
     if a.as_set {
-        let asns: BTreeSet<_> = paths.iter().flat_map(|p| p.as_path.flat()).collect();
-        if !asns.is_empty() {
-            path.as_path = AsPath {
-                segments: vec![AsSegment {
-                    kind: SegmentKind::Set,
-                    asns: asns.into_iter().collect(),
-                }],
-            };
-        }
+        let as_paths: Vec<&AsPath> = paths.iter().map(|p| &p.as_path).collect();
+        path.as_path = aggregate_as_path(&as_paths);
         path.origin = paths
             .iter()
             .map(|p| p.origin)
@@ -243,6 +235,66 @@ pub fn aggregate_offer(process: &BgpProcess, a: &Aggregate, contributors: &[Best
         }
     }
     Offer::Path(path)
+}
+
+/// The AS path of an as-set aggregate of the paths `as_paths`
+/// (RFC 4271 9.2.2.2 and appendix F.6): an AS_CONFED_SET of the ASs of
+/// the confederation segments, the longest leading AS_SEQUENCE that each
+/// path starts with after its confederation segments, and an AS_SET of
+/// the other ASs that the sequence does not hold. An empty segment is left
+/// out.
+pub fn aggregate_as_path(as_paths: &[&AsPath]) -> AsPath {
+    let confed =
+        |s: &AsSegment| matches!(s.kind, SegmentKind::ConfedSequence | SegmentKind::ConfedSet);
+    let leading = |p: &AsPath| -> Vec<Asn> {
+        match p.segments.iter().find(|s| !confed(s)) {
+            Some(s) if s.kind == SegmentKind::Sequence => s.asns.clone(),
+            _ => Vec::new(),
+        }
+    };
+    let mut common: Vec<Asn> = match as_paths.first() {
+        Some(p) => leading(p),
+        None => Vec::new(),
+    };
+    for p in as_paths.iter().skip(1) {
+        let l = leading(p);
+        let n = common.iter().zip(&l).take_while(|(a, b)| a == b).count();
+        common.truncate(n);
+    }
+    let mut confed_asns = BTreeSet::new();
+    let mut rest = BTreeSet::new();
+    for p in as_paths {
+        let mut skip = common.len();
+        let mut first = true;
+        for s in &p.segments {
+            if confed(s) {
+                confed_asns.extend(s.asns.iter().copied());
+                continue;
+            }
+            let from = if first && s.kind == SegmentKind::Sequence {
+                skip.min(s.asns.len())
+            } else {
+                0
+            };
+            first = false;
+            skip = 0;
+            rest.extend(s.asns[from..].iter().copied());
+        }
+    }
+    for a in &common {
+        rest.remove(a);
+    }
+    let mut segments = Vec::new();
+    for (kind, asns) in [
+        (SegmentKind::ConfedSet, confed_asns.into_iter().collect()),
+        (SegmentKind::Sequence, common),
+        (SegmentKind::Set, rest.into_iter().collect()),
+    ] {
+        if !asns.is_empty() {
+            segments.push(AsSegment { kind, asns });
+        }
+    }
+    AsPath { segments }
 }
 
 /// True if `inner` is a more specific route of `outer`: the same family and
