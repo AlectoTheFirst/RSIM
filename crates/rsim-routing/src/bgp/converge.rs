@@ -841,14 +841,130 @@ fn grounded(g: &Group<'_, '_>, assign: &[Option<Assign>], picks: &mut [BestPath]
     }
 }
 
+/// The variables that the candidates of `v` read.
+fn dependencies(g: &Group<'_, '_>, v: usize) -> Vec<usize> {
+    let mut out = g.contributors[v].clone();
+    for &(_, w) in &g.inlinks[v] {
+        out.push(w);
+        out.extend(g.suppressors[w].iter().copied());
+    }
+    out.extend(g.inleaks[v].iter().map(|(_, w)| *w));
+    out
+}
+
+/// The free variables of `fixed` in the components over the dependencies
+/// of their candidates, each in the order of the variables.
+fn components(g: &Group<'_, '_>, fixed: &[Option<BestPath>]) -> Vec<Vec<usize>> {
+    let n = g.vars.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    for v in (0..n).filter(|&v| fixed[v].is_none()) {
+        for w in dependencies(g, v) {
+            if fixed[w].is_none() {
+                let (a, b) = (root(&mut parent, v), root(&mut parent, w));
+                if a != b {
+                    parent[a.max(b)] = a.min(b);
+                }
+            }
+        }
+    }
+    let mut by: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for v in (0..n).filter(|&v| fixed[v].is_none()) {
+        let r = root(&mut parent, v);
+        by.entry(r).or_default().push(v);
+    }
+    by.into_values().collect()
+}
+
+/// The best paths of each stable assignment: the search of each component
+/// of [`components`] alone, with the free variables of the other components
+/// at no path, and each combination of the outcomes of the components. The
+/// candidates of a variable read only the variables of its component, so
+/// the stable assignments are the combinations.
+fn search_parts(
+    g: &Group<'_, '_>,
+    fixed: &[Option<BestPath>],
+    dom: &[BTreeSet<BestPath>],
+) -> Vec<Vec<BestPath>> {
+    let parts = components(g, fixed);
+    let mut found: Vec<Vec<Vec<BestPath>>> = Vec::with_capacity(parts.len());
+    for part in &parts {
+        let mut inside = vec![false; fixed.len()];
+        for &v in part {
+            inside[v] = true;
+        }
+        let local: Vec<Option<BestPath>> = fixed
+            .iter()
+            .enumerate()
+            .map(|(v, f)| match f {
+                None if !inside[v] => Some(BestPath::None),
+                f => f.clone(),
+            })
+            .collect();
+        let stable = search(g, &local, dom);
+        if stable.is_empty() {
+            return Vec::new();
+        }
+        found.push(
+            stable
+                .iter()
+                .map(|s| part.iter().map(|&v| s[v].clone()).collect())
+                .collect(),
+        );
+    }
+    let base: Vec<BestPath> = fixed
+        .iter()
+        .map(|f| f.clone().unwrap_or(BestPath::None))
+        .collect();
+    let mut out = vec![base];
+    for (part, options) in parts.iter().zip(found) {
+        let mut next = Vec::with_capacity(out.len() * options.len());
+        for o in &out {
+            for values in &options {
+                let mut x = o.clone();
+                for (&v, b) in part.iter().zip(values) {
+                    x[v] = b.clone();
+                }
+                next.push(x);
+            }
+        }
+        out = next;
+    }
+    out
+}
+
 /// The best paths of each stable assignment, in the order of the search.
-fn search(g: &Group<'_, '_>, fixed: &[Option<BestPath>]) -> Vec<Vec<BestPath>> {
+/// The options of a variable are no path, an unknown selection when a
+/// possible candidate of the domains `dom` is unknown or its domain holds
+/// an unknown path, and each source with a possible candidate.
+fn search(
+    g: &Group<'_, '_>,
+    fixed: &[Option<BestPath>],
+    dom: &[BTreeSet<BestPath>],
+) -> Vec<Vec<BestPath>> {
     let n = g.vars.len();
     let free: Vec<usize> = (0..n).filter(|&v| fixed[v].is_none()).collect();
     let domains: Vec<Vec<Assign>> = free
         .iter()
         .map(|&v| {
-            let mut d = vec![Assign::Empty, Assign::Unknown];
+            let cands = possible(g, v, dom, fixed);
+            let sources: BTreeSet<Source> = cands
+                .iter()
+                .filter(|(_, c)| c.offer.is_ok())
+                .map(|(_, c)| c.source)
+                .collect();
+            let mut d = vec![Assign::Empty];
+            if cands.iter().any(|(_, c)| c.offer.is_err())
+                || dom[v].iter().any(|b| matches!(b, BestPath::Unknown(_)))
+            {
+                d.push(Assign::Unknown);
+            }
             if g.network[v].is_some() {
                 d.push(Assign::From(Source::Network));
             }
@@ -875,6 +991,10 @@ fn search(g: &Group<'_, '_>, fixed: &[Option<BestPath>]) -> Vec<Vec<BestPath>> {
                     .iter()
                     .map(|(l, _)| Assign::From(Source::Link(*l))),
             );
+            d.retain(|a| match a {
+                Assign::From(s) => sources.contains(s),
+                _ => true,
+            });
             d
         })
         .collect();
@@ -965,7 +1085,15 @@ fn run_group(
         let (_, routes) = outcome(&g, state);
         return (result(Convergence::Converged { note: None }), routes);
     }
-    let stable = search(&g, &fixed);
+    // A variable with one possible best path holds it in each stable
+    // assignment.
+    let mut fixed = fixed;
+    for (v, f) in fixed.iter_mut().enumerate() {
+        if f.is_none() && dom[v].len() == 1 {
+            *f = dom[v].iter().next().cloned();
+        }
+    }
+    let stable = search_parts(&g, &fixed, &dom);
     let mut keys_seen: Vec<OutcomeKey> = Vec::new();
     let mut picks: Vec<Vec<BestPath>> = Vec::new();
     let mut outcomes: Vec<Outcome> = Vec::new();
