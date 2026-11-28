@@ -8,7 +8,7 @@ use rsim_core::SourceSpan;
 use super::lists::{AsPathList, CommunityList, PrefixList};
 use super::policy::RoutePolicy;
 use super::profile::BgpProfile;
-use super::{Asn, Family, RouteKey, SessionKind};
+use super::{AdminValue, Asn, Family, RouteDistinguisher, RouteKey, SessionKind};
 use crate::platform::Platform;
 
 /// The options of a process that change the decision and the policy
@@ -131,6 +131,66 @@ pub struct Aggregate {
     pub spans: Vec<SourceSpan>,
 }
 
+/// The source protocol of a `redistribute` statement into BGP.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RedistSource {
+    Connected,
+    Static,
+    /// The OSPF process of the name, or each OSPF process of the VRF for
+    /// `None`.
+    Ospf(Option<String>),
+}
+
+/// The type of an OSPF route for a redistribution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum OspfRouteType {
+    /// An intra-area or an inter-area route.
+    Internal,
+    External1,
+    External2,
+    NssaExternal1,
+    NssaExternal2,
+}
+
+/// A `redistribute` statement of a process.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Redistribution {
+    pub source: RedistSource,
+    /// The OSPF route types of a `match` clause. `None` takes the default
+    /// of the profile.
+    pub ospf_match: Option<BTreeSet<OspfRouteType>>,
+    /// The route-map or the route policy of the statement.
+    pub policy: Option<String>,
+    /// The metric of the statement. The redistributed path has it as its
+    /// MED. With none, the MED is the metric of the route.
+    pub metric: Option<u32>,
+    pub spans: Vec<SourceSpan>,
+}
+
+/// The route distinguisher and the route targets of the VRF of a process.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VrfTargets {
+    /// The route distinguisher of the EVPN IP prefix routes of the VRF.
+    pub rd: Option<RouteDistinguisher>,
+    /// The route targets that the VRF imports from the other VRFs of the
+    /// device.
+    pub import: BTreeSet<AdminValue>,
+    /// The route targets of the unicast routes that the VRF exports to the
+    /// other VRFs of the device.
+    pub export: BTreeSet<AdminValue>,
+    /// The route targets of the EVPN IP prefix routes that the VRF imports.
+    pub evpn_import: BTreeSet<AdminValue>,
+    /// The route targets of the EVPN IP prefix routes that the VRF exports.
+    pub evpn_export: BTreeSet<AdminValue>,
+    /// `advertise l2vpn evpn`: the unicast selections of the VRF are EVPN
+    /// IP prefix routes of the process of the default VRF of the device.
+    pub advertise_evpn: bool,
+    /// The next hop of the EVPN IP prefix routes of the VRF: the address
+    /// of the tunnel end of the device. `None` when it is not known.
+    pub evpn_next_hop: Option<IpAddr>,
+    pub spans: Vec<SourceSpan>,
+}
+
 /// The policies and lists of a process by name.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PolicySet {
@@ -162,6 +222,11 @@ pub struct BgpProcess {
     pub neighbors: BTreeMap<IpAddr, Neighbor>,
     pub networks: Vec<Network>,
     pub aggregates: Vec<Aggregate>,
+    pub redistributions: Vec<Redistribution>,
+    /// `default-information originate`: a redistribution can offer a
+    /// default route.
+    pub default_originate: bool,
+    pub targets: VrfTargets,
     pub policy: PolicySet,
     pub spans: Vec<SourceSpan>,
 }
@@ -188,6 +253,9 @@ impl BgpProcess {
             neighbors: BTreeMap::new(),
             networks: Vec::new(),
             aggregates: Vec::new(),
+            redistributions: Vec::new(),
+            default_originate: false,
+            targets: VrfTargets::default(),
             policy: PolicySet::default(),
             spans: Vec::new(),
         }

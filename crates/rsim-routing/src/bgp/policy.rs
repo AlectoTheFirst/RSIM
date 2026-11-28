@@ -37,11 +37,15 @@ use super::{
     Unknown,
 };
 
-/// The direction of a neighbour policy.
+/// The direction of a policy: a neighbour policy, or the route-map of a
+/// redistribution between protocols.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Direction {
     Import,
     Export,
+    /// A route-map of a redistribution. A `match route-type` term is
+    /// unknown under it.
+    Redistribute,
 }
 
 /// A next-hop match term.
@@ -328,6 +332,7 @@ impl<'a> Run<'a> {
             MatchTerm::NextHop(NextHopMatch::Address(addrs)) => {
                 Some(path.next_hop.is_some_and(|nh| addrs.contains(&nh)))
             }
+            MatchTerm::RouteType(_) if self.ctx.direction == Direction::Redistribute => None,
             MatchTerm::RouteType(rt) => Some(match rt {
                 RouteTypeMatch::Local => matches!(path.peer.kind, SessionKind::Local(_)),
                 RouteTypeMatch::Internal => path.peer.kind.is_internal(),
@@ -392,7 +397,9 @@ impl<'a> Run<'a> {
                     (NextHopSet::SelfAddress, _) | (NextHopSet::PeerAddress, Direction::Export) => {
                         self.ctx.local_address
                     }
-                    (NextHopSet::PeerAddress, Direction::Import) => self.ctx.peer_address,
+                    (NextHopSet::PeerAddress, Direction::Import | Direction::Redistribute) => {
+                        self.ctx.peer_address
+                    }
                 };
                 match addr {
                     Some(a) => {
@@ -684,6 +691,7 @@ pub(crate) fn neighbor_policy_next_hop(
     let name = match direction {
         Direction::Import => &neighbor.import_policy,
         Direction::Export => &neighbor.export_policy,
+        Direction::Redistribute => return no_policy(),
     };
     let Some(name) = name else {
         return no_policy();
@@ -824,6 +832,7 @@ impl RoutingStage for PolicyStage<'_> {
         match self.direction {
             Direction::Import => "bgp import policy",
             Direction::Export => "bgp export policy",
+            Direction::Redistribute => "redistribution policy",
         }
     }
 
@@ -847,6 +856,7 @@ impl RoutingStage for PolicyStage<'_> {
             .and_then(|n| match self.direction {
                 Direction::Import => n.import_policy.as_ref(),
                 Direction::Export => n.export_policy.as_ref(),
+                Direction::Redistribute => None,
             });
         if let Some(name) = name {
             policy_reads(&p.policy, name, &p.device, &p.vrf, &mut out);

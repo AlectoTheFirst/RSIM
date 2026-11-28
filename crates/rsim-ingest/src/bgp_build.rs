@@ -689,6 +689,7 @@ pub fn build(
         processes,
         sessions: sessions.into_iter().collect(),
         seeds,
+        igp_routes: Vec::new(),
     };
     let result = (!input.processes.is_empty()).then(|| {
         rsim_routing::bgp::compute(&input, &Igp { tables: &igp }).map_err(|e| e.to_string())

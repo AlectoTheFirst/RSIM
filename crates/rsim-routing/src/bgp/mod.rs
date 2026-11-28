@@ -7,12 +7,14 @@
 
 pub mod converge;
 pub mod decision;
+pub mod leak;
 pub mod lists;
 pub mod pattern;
 pub mod policy;
 pub mod process;
 pub mod profile;
 pub mod propagate;
+pub mod redistribute;
 pub mod session;
 pub mod stage;
 
@@ -25,9 +27,11 @@ use rsim_core::{Prefix, SourceSpan};
 
 pub use converge::{
     BgpResult, Convergence, ConvergenceKind, CycleWitness, Event, GroupResult, Note, Outcome,
-    RouteAt, RouteState, WheelSpoke, compute, install_candidates,
+    OverlayCandidate, RouteAt, RouteState, WheelSpoke, compute, install_candidates,
+    overlay_candidates,
 };
 pub use decision::{Decision, DecisionStage, DecisionStep, decide, order_winners};
+pub use leak::{evpn_export, evpn_import, vrf_leak};
 pub use lists::{
     AsPathLine, AsPathList, AsPathTerm, Cmp, CommunityLine, CommunityList, CommunityTerm, Half,
     PrefixList, PrefixListEntry,
@@ -39,15 +43,31 @@ pub use policy::{
     evaluate, neighbor_policy,
 };
 pub use process::{
-    Aggregate, BgpOptions, BgpProcess, LocalAs, Neighbor, Network, NextHopSelf, PolicySet,
+    Aggregate, BgpOptions, BgpProcess, LocalAs, Neighbor, Network, NextHopSelf, OspfRouteType,
+    PolicySet, RedistSource, Redistribution, VrfTargets,
 };
-pub use profile::{BgpProfile, DECISION_ORDER, MatchReads, UndefinedPolicy};
+pub use profile::{BgpProfile, DECISION_ORDER, MatchReads, RedistributeDefaults, UndefinedPolicy};
 pub use propagate::{
     BestPath, BgpInput, IgpView, InputError, OriginateInput, OriginateStage, Resolution, Seed,
     Selection, aggregate_as_path, aggregate_offer, network_offer,
 };
+pub use redistribute::{IgpRoute, IgpSource, RedistributeStage, redistribute_offer};
 pub use session::{Offer, Session, SessionEnd, SessionStage, export, receive};
 pub use stage::{ObjectRef, RoutingStage};
+
+/// The name of the default VRF of a device. The EVPN IP prefix routes are
+/// routes of its process.
+pub const DEFAULT_VRF: &str = "default";
+
+/// The VRF where the next hop of a path from a VRF leak or an EVPN import
+/// resolves.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Leaked {
+    pub vrf: String,
+    /// True for an EVPN IP prefix route imported into the VRF. Its next
+    /// hop is a tunnel end.
+    pub evpn: bool,
+}
 
 /// An AS number in the asplain form.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -498,6 +518,9 @@ pub struct BgpPath {
     /// False for a seed path whose attributes other than the prefix, the
     /// next hop and the peer are not collected.
     pub attributes_collected: bool,
+    /// The VRF of the next hop of a path from a VRF leak or an EVPN import.
+    /// `None` for the VRF of the process.
+    pub leaked: Option<Leaked>,
     pub spans: Vec<SourceSpan>,
 }
 
@@ -521,6 +544,7 @@ impl BgpPath {
             igp_cost: 0,
             tag: None,
             attributes_collected: true,
+            leaked: None,
             spans: Vec::new(),
         }
     }
@@ -563,6 +587,10 @@ pub enum Reason {
     NoConvergence,
     /// The stable outcome of the prefix group holds an unknown route.
     ConvergenceNotDetermined,
+    /// The route of a redistribution or its route type is not known.
+    RedistributedRouteNotKnown,
+    /// The tunnel end of an EVPN IP prefix route is not known.
+    TunnelEndNotKnown,
     /// The calculation reaches a state that its invariants exclude.
     Internal,
 }
@@ -581,6 +609,8 @@ impl Reason {
             Reason::MultipleStableOutcomes => "multiple stable outcomes",
             Reason::NoConvergence => "no convergence",
             Reason::ConvergenceNotDetermined => "convergence not determined",
+            Reason::RedistributedRouteNotKnown => "redistributed route not known",
+            Reason::TunnelEndNotKnown => "tunnel end not known",
             Reason::Internal => "internal error",
         }
     }

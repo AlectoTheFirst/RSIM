@@ -41,7 +41,9 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::net::IpAddr;
 
+use rsim_core::{Prefix, SourceSpan};
 use rsim_functions::{Route, RouteKind, RouteProtocol};
 
 use super::decision::{Decision, DecisionStep, decide};
@@ -222,6 +224,13 @@ pub(crate) fn key_groups(net: &Net<'_>) -> Vec<BTreeSet<RouteKey>> {
                     union(&mut parent, ai, j);
                 }
             }
+        }
+    }
+    for (j, k) in keys.iter().enumerate() {
+        if k.family == Family::EvpnIpPrefix
+            && let Ok(u) = keys.binary_search(&RouteKey::unicast(k.prefix))
+        {
+            union(&mut parent, u, j);
         }
     }
     let hops = net.next_hop_addresses();
@@ -433,8 +442,21 @@ fn possible(
     if let Some(n) = &g.network[v] {
         push(None, Source::Network, n.clone());
     }
+    for (ri, o) in &g.redistributed[v] {
+        push(None, Source::Redistribute(*ri), o.clone());
+    }
     for (si, o) in &g.seeds[v] {
         push(None, Source::Seed(*si), o.clone());
+    }
+    for &(li, w) in &g.inleaks[v] {
+        match &fixed[w] {
+            Some(x) => push(None, Source::Leak(li), g.leak(li, x)),
+            None => {
+                for x in values(w) {
+                    push(Some(w), Source::Leak(li), g.leak(li, &x));
+                }
+            }
+        }
     }
     if g.has_aggregate[v] {
         let cs = &g.contributors[v];
@@ -702,12 +724,27 @@ impl Derive<'_, '_, '_, '_> {
                     .collect::<Result<_, _>>()?;
                 Self::path(&g.aggregate(v, &cs))
             }
+            Assign::From(Source::Redistribute(ri)) => {
+                let (_, o) = g.redistributed[v]
+                    .iter()
+                    .find(|(r, _)| *r == ri)
+                    .ok_or(Fail::Invalid)?;
+                Self::path(o)
+            }
             Assign::From(Source::Seed(si)) => {
                 let (_, o) = g.seeds[v]
                     .iter()
                     .find(|(s, _)| *s == si)
                     .ok_or(Fail::Invalid)?;
                 Self::path(o)
+            }
+            Assign::From(Source::Leak(li)) => {
+                let &(_, w) = g.inleaks[v]
+                    .iter()
+                    .find(|(x, _)| *x == li)
+                    .ok_or(Fail::Invalid)?;
+                let b = self.best(w)?;
+                Self::path(&g.leak(li, &b))
             }
             Assign::From(Source::Link(l)) => {
                 let &(_, w) = g.inlinks[v]
@@ -819,9 +856,19 @@ fn search(g: &Group<'_, '_>, fixed: &[Option<BestPath>]) -> Vec<Vec<BestPath>> {
                 d.push(Assign::From(Source::Aggregate));
             }
             d.extend(
+                g.redistributed[v]
+                    .iter()
+                    .map(|(r, _)| Assign::From(Source::Redistribute(*r))),
+            );
+            d.extend(
                 g.seeds[v]
                     .iter()
                     .map(|(s, _)| Assign::From(Source::Seed(*s))),
+            );
+            d.extend(
+                g.inleaks[v]
+                    .iter()
+                    .map(|(l, _)| Assign::From(Source::Leak(*l))),
             );
             d.extend(
                 g.inlinks[v]
@@ -1068,22 +1115,83 @@ const PLATFORMS: [Platform; 5] = [
     Platform::FrrDatacenter,
 ];
 
+/// An EVPN IP prefix route that a VRF imports, for the install: the next
+/// hops are tunnel ends, and the route enters the tunnel of the VRF.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OverlayCandidate {
+    pub prefix: Prefix,
+    pub distance: u8,
+    /// The tunnel ends of the best path and its multipath.
+    pub tunnel_ends: Vec<IpAddr>,
+    pub spans: Vec<SourceSpan>,
+}
+
+/// The install candidates of the EVPN IP prefix routes that the VRFs of
+/// `result` import, by device and VRF, with the distance of the session of
+/// the best path.
+pub fn overlay_candidates(
+    result: &BgpResult,
+    processes: &[BgpProcess],
+) -> BTreeMap<(String, String), Vec<OverlayCandidate>> {
+    let mut out: BTreeMap<(String, String), Vec<OverlayCandidate>> = BTreeMap::new();
+    for (at, state) in &result.routes {
+        let RouteState::Selected(sel) = state else {
+            continue;
+        };
+        if at.key.family == Family::EvpnIpPrefix
+            || !sel.best.leaked.as_ref().is_some_and(|l| l.evpn)
+        {
+            continue;
+        }
+        let profile = processes
+            .iter()
+            .find(|p| p.device == at.device && p.vrf == at.vrf)
+            .and_then(|p| p.profile());
+        let lowest = lowest_ebgp();
+        let mut tunnel_ends: Vec<IpAddr> =
+            sel.multipath.iter().filter_map(|p| p.next_hop).collect();
+        tunnel_ends.sort();
+        tunnel_ends.dedup();
+        out.entry((at.device.clone(), at.vrf.clone()))
+            .or_default()
+            .push(OverlayCandidate {
+                prefix: at.key.prefix,
+                distance: profile.map_or(lowest, |p| p.distance(sel.best.peer.kind)),
+                tunnel_ends,
+                spans: sel
+                    .multipath
+                    .iter()
+                    .flat_map(|p| p.spans.iter().cloned())
+                    .collect(),
+            });
+    }
+    out
+}
+
+/// The lowest eBGP distance of any platform.
+fn lowest_ebgp() -> u8 {
+    PLATFORMS
+        .iter()
+        .map(|p| p.distance(Origin::Ebgp))
+        .min()
+        .unwrap_or(0)
+}
+
 /// The install candidates of the unicast routes of `result`, by device and
 /// VRF. A best path from a session gives a BGP route through the next hops
 /// of its multipath with the distance of the profile. An aggregate gives a
 /// discard route with the distance of a local path. A `network` or a
-/// redistributed path gives no candidate. An unknown route gives an unknown
-/// BGP route with the lowest eBGP distance of any platform.
+/// redistributed path gives no candidate. An EVPN IP prefix route that a
+/// VRF imports gives no candidate here, and [`overlay_candidates`] gives
+/// it. A path that a VRF leaks from another VRF gives an unknown BGP route
+/// with the distance of the profile. An unknown route gives an unknown BGP
+/// route with the lowest eBGP distance of any platform.
 pub fn install_candidates(
     result: &BgpResult,
     processes: &[BgpProcess],
 ) -> BTreeMap<(String, String), Vec<Candidate>> {
     let mut out: BTreeMap<(String, String), Vec<Candidate>> = BTreeMap::new();
-    let lowest = PLATFORMS
-        .iter()
-        .map(|p| p.distance(Origin::Ebgp))
-        .min()
-        .unwrap_or(0);
+    let lowest = lowest_ebgp();
     for (at, state) in &result.routes {
         if at.key.family == Family::EvpnIpPrefix {
             continue;
@@ -1102,13 +1210,23 @@ pub fn install_candidates(
                     .iter()
                     .flat_map(|p| p.spans.iter().cloned())
                     .collect();
-                match kind {
-                    SessionKind::Local(LocalOrigin::Aggregate) => Candidate::new(
+                match (kind, &sel.best.leaked) {
+                    (_, Some(l)) if l.evpn => continue,
+                    (_, Some(l)) => Candidate::new(
+                        prefix,
+                        distance,
+                        Route::unknown(
+                            RouteKind::Learned(RouteProtocol::Bgp),
+                            format!("next hop in vrf {} not installed", l.vrf),
+                            spans,
+                        ),
+                    ),
+                    (SessionKind::Local(LocalOrigin::Aggregate), _) => Candidate::new(
                         prefix,
                         distance,
                         Route::new(RouteKind::Null, Vec::new(), spans),
                     ),
-                    SessionKind::Local(_) => continue,
+                    (SessionKind::Local(_), _) => continue,
                     _ => {
                         let mut gateways: Vec<_> =
                             sel.multipath.iter().filter_map(|p| p.next_hop).collect();

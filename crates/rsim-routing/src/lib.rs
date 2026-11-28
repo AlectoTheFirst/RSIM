@@ -4,6 +4,7 @@ pub mod bgp;
 pub mod install;
 pub mod ospf;
 pub mod platform;
+pub mod rounds;
 
 pub use install::{Candidate, install};
 pub use platform::{Origin, Platform, UNKNOWN_DISTANCE};
