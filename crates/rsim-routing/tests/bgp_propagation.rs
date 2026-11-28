@@ -769,6 +769,30 @@ fn an_accepted_seed_skips_the_import_policy_and_a_received_seed_runs_it() {
     assert_eq!(b.best.peer.kind, SessionKind::Ebgp);
 }
 
+#[test]
+fn two_outside_ibgp_seeds_that_tie_to_the_router_id_step_need_their_router_ids() {
+    let run = |ids: [Option<&str>; 2]| {
+        let mut lab = Lab::default();
+        lab.router("r1", Platform::Iosxe, 65001, "10.255.0.1");
+        lab.seed("r1", "192.0.2.1", 65001, P, &[64500], None);
+        lab.seed("r1", "192.0.2.5", 65001, P, &[64500], None);
+        for (s, id) in lab.input.seeds.iter_mut().zip(ids) {
+            s.path.peer.router_id = id.map(v4);
+        }
+        lab.run()
+    };
+    let r = run([None, None]);
+    let Some(RouteState::Unknown(u)) = state(&r, "r1", P) else {
+        panic!("{:?}", state(&r, "r1", P));
+    };
+    assert_cause(&u, Reason::RouterIdNotKnown);
+    let r = run([Some("198.51.100.9"), Some("198.51.100.2")]);
+    assert_eq!(
+        best(&r, "r1", P).unwrap().best.next_hop,
+        Some(ip("192.0.2.5"))
+    );
+}
+
 /// Asserts that `u` is an unknown convergence whose details hold an
 /// unknown route with the reason `cause`.
 fn assert_cause(u: &rsim_routing::bgp::Unknown, cause: Reason) {
