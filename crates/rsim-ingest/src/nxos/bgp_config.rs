@@ -9,8 +9,13 @@
 //! the family inherits in the order of their sequence numbers, then from
 //! the `template peer` stanzas that the neighbour inherits. A line of a
 //! process, a neighbour or a template that the reader does not lower, other
-//! than a line with no effect on the routes, is a gap, and so is an import
-//! route target of a `vrf context`.
+//! than a line with no effect on the routes, is a gap.
+//!
+//! The lines that import or export routes between VRFs or between EVPN and
+//! a VRF are gaps of their VRF: the `vni` of a `vrf context`, each
+//! `route-target`, `import` and `export` line of a unicast family of a `vrf
+//! context`, the `address-family l2vpn evpn` stanza of a `vrf` of `router
+//! bgp`, and `advertise l2vpn evpn` of a unicast family of a `vrf`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr};
@@ -783,8 +788,9 @@ pub fn read(
     out
 }
 
-/// Each import route target of a `vrf context` is a gap of its VRF and
-/// family.
+/// The `vni` line of a `vrf context` is a gap of its VRF. Each
+/// `route-target`, `import` and `export` line of a unicast family of a `vrf
+/// context` is a gap of its VRF and family.
 fn route_targets(doc: &Document, file: &str, mask: &dyn Fn(&str) -> String, out: &mut DeviceBgp) {
     for s in doc.root.children() {
         let w = words(s);
@@ -793,6 +799,10 @@ fn route_targets(doc: &Document, file: &str, mask: &dyn Fn(&str) -> String, out:
         };
         for af in s.children() {
             let w = words(af);
+            if let ["vni", ..] = w.as_slice() {
+                out.gap(vrf, &UNICAST, mask(&af.key), vec![span(file, lines(af))]);
+                continue;
+            }
             let ["address-family", fam @ ..] = w.as_slice() else {
                 continue;
             };
@@ -800,8 +810,15 @@ fn route_targets(doc: &Document, file: &str, mask: &dyn Fn(&str) -> String, out:
                 continue;
             };
             for c in af.children() {
-                if let ["route-target", "import" | "both", ..] = words(c).as_slice() {
+                if let ["route-target", "import" | "export" | "both", ..]
+                | ["import" | "export", ..] = words(c).as_slice()
+                {
                     out.gap(vrf, &[f], mask(&c.key), vec![span(file, lines(c))]);
+                    // An export into the default VRF is a gap of the default
+                    // VRF too.
+                    if let ["export", "vrf", "default", ..] = words(c).as_slice() {
+                        out.gap(DEFAULT_VRF, &[f], mask(&c.key), vec![span(file, lines(c))]);
+                    }
                 }
             }
         }
@@ -877,6 +894,9 @@ impl Scope<'_, '_> {
                 }
                 ["address-family", fam @ ..] => {
                     let Some(f) = unicast_words(fam) else {
+                        if !top && matches!(fam, ["l2vpn", "evpn"]) {
+                            gap(out, &UNICAST);
+                        }
                         continue;
                     };
                     for a in c.children() {
@@ -1180,6 +1200,58 @@ vrf context RED
         assert_eq!(d.processes.len(), 2);
         let red = d.processes.iter().find(|p| p.vrf == "RED").unwrap();
         assert_eq!(red.router_id, None);
+    }
+
+    #[test]
+    fn the_lines_that_import_routes_into_a_vrf_are_gaps_of_the_vrf() {
+        let doc = crate::stanza::read_indented(
+            "\
+router bgp 64500
+  router-id 192.0.2.11
+  vrf RED
+    address-family ipv4 unicast
+      advertise l2vpn evpn
+    address-family l2vpn evpn
+vrf context RED
+  vni 10010
+  address-family ipv4 unicast
+    route-target import 64500:10
+    route-target export 64500:10 evpn
+    route-target both auto evpn
+    import vrf default map ALL
+    export vrf default map ALL
+",
+        );
+        let mut read = BTreeSet::new();
+        let bgp = crate::nxos::bgp::read(
+            doc.root
+                .children()
+                .iter()
+                .find(|s| s.key.starts_with("router bgp"))
+                .unwrap(),
+            &mut read,
+            &|k| k.to_string(),
+        );
+        let d = super::read(&doc, &bgp, "n1/config", &|k| k.to_string(), &mut read);
+        let texts: Vec<(&str, &str)> = d
+            .gaps
+            .iter()
+            .map(|g| (g.vrf.as_str(), g.text.as_str()))
+            .collect();
+        for want in [
+            ("RED", "vni 10010"),
+            ("RED", "route-target import 64500:10"),
+            ("RED", "route-target export 64500:10 evpn"),
+            ("RED", "route-target both auto evpn"),
+            ("RED", "import vrf default map ALL"),
+            ("RED", "export vrf default map ALL"),
+            ("default", "export vrf default map ALL"),
+            ("RED", "advertise l2vpn evpn"),
+            ("RED", "address-family l2vpn evpn"),
+        ] {
+            assert!(texts.contains(&want), "{want:?} not in {texts:?}");
+        }
+        assert!(texts.iter().all(|(v, _)| *v == "RED"), "{texts:?}");
     }
 
     #[test]

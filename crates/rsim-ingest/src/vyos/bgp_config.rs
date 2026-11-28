@@ -10,10 +10,18 @@
 //! otherwise. `parameters ebgp-requires-policy` sets the FRR rule of an
 //! eBGP neighbour with no policy, and its absence clears it. A neighbour is
 //! active only in the families of its `address-family` nodes. A `network`
-//! is a gap unless `parameters network-import-check` is set, because the
-//! calculation advertises a network only with its route. A node of a
-//! process, a neighbour or a peer group that the reader does not lower,
-//! other than a node with no effect on the routes, is a gap.
+//! needs the route of its prefix only with `parameters
+//! network-import-check`. A node of a process, a neighbour or a peer group
+//! that the reader does not lower, other than a node with no effect on the
+//! routes, is a gap.
+//!
+//! The nodes that import or export routes between VRFs or between EVPN and
+//! a VRF are gaps of their VRF: the `vni` of a `vrf name`, each node of the
+//! `l2vpn-evpn` family of a VRF process, `advertise` and `route-target` of
+//! the `l2vpn-evpn` family of the main process, and the nodes of a unicast
+//! family that the reader does not lower, for example `import vrf` and
+//! `route-target vpn`. `advertise-all-vni` of the main process is a gap of
+//! each VRF with a `vni`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
@@ -613,6 +621,7 @@ pub fn collected(col: &crate::collected::Collected) -> Vec<CollectedBgp> {
 pub fn read(root: &Stanza, bgp: &BgpConfig, file: &str, read: &mut BTreeSet<u32>) -> DeviceBgp {
     let mut out = DeviceBgp::default();
     let policy = policies(root, file, read);
+    vni_gaps(root, file, &mut out);
     if let Some(b) = root.at(&["protocols", "bgp"]) {
         process(b, DEFAULT_VRF, bgp, &policy, file, read, &mut out);
     }
@@ -633,7 +642,6 @@ struct Parameters {
     options: BgpOptions,
     router_id: Option<Ipv4Addr>,
     cluster_id: Option<Ipv4Addr>,
-    import_check: bool,
 }
 
 /// Reads `parameters`. A node that is not read and has an effect on the
@@ -643,11 +651,11 @@ fn parameters(p: Option<&Stanza>, read: &mut BTreeSet<u32>, gaps: &mut Vec<GapLi
         options: BgpOptions {
             ebgp_requires_policy: Some(false),
             default_ipv4_unicast: Some(false),
+            network_import_check: Some(false),
             ..BgpOptions::default()
         },
         router_id: None,
         cluster_id: None,
-        import_check: false,
     };
     let Some(p) = p else {
         return out;
@@ -684,7 +692,7 @@ fn parameters(p: Option<&Stanza>, read: &mut BTreeSet<u32>, gaps: &mut Vec<GapLi
                 true
             }
             "network-import-check" => {
-                out.import_check = true;
+                out.options.network_import_check = Some(true);
                 true
             }
             "bestpath" => {
@@ -742,6 +750,70 @@ fn parameters(p: Option<&Stanza>, read: &mut BTreeSet<u32>, gaps: &mut Vec<GapLi
     out
 }
 
+/// The gaps of the `l2vpn-evpn` family `f` of a process. In the main
+/// process, `main` is true, and only `advertise` and `route-target` are
+/// gaps. In a VRF process, each node is a gap, and so is an empty family.
+fn evpn_gaps(f: &Stanza, main: bool, gaps: &mut Vec<GapLine>) {
+    if !main && f.children().is_empty() {
+        gaps.push((
+            "address-family l2vpn-evpn".to_string(),
+            lines(f),
+            UNICAST.to_vec(),
+        ));
+    }
+    let mut push = |s: &Stanza, text: String| {
+        let fams = match text.as_str() {
+            "advertise ipv4 unicast" => vec![Family::Ipv4Unicast],
+            "advertise ipv6 unicast" => vec![Family::Ipv6Unicast],
+            _ => UNICAST.to_vec(),
+        };
+        gaps.push((format!("address-family l2vpn-evpn {text}"), lines(s), fams));
+    };
+    for n in f.children() {
+        if main && !matches!(n.key.as_str(), "advertise" | "route-target") {
+            continue;
+        }
+        match &n.body {
+            Body::Object(c) if c.len() > 1 => {
+                for x in c {
+                    push(x, format!("{} {}", n.key, text_of(x)));
+                }
+            }
+            _ => push(n, text_of(n)),
+        }
+    }
+}
+
+/// The gaps of the VRFs of `vrf name` with a `vni`: the `vni` node, and
+/// `advertise-all-vni` of the `l2vpn-evpn` family of the main process.
+fn vni_gaps(root: &Stanza, file: &str, out: &mut DeviceBgp) {
+    let all_vni = root.at(&[
+        "protocols",
+        "bgp",
+        "address-family",
+        "l2vpn-evpn",
+        "advertise-all-vni",
+    ]);
+    for v in root
+        .at(&["vrf", "name"])
+        .map(Stanza::children)
+        .unwrap_or_default()
+    {
+        let Some(vni) = v.get("vni") else {
+            continue;
+        };
+        out.gap(&v.key, &UNICAST, text_of(vni), vec![span(file, lines(vni))]);
+        if let Some(a) = all_vni {
+            out.gap(
+                &v.key,
+                &UNICAST,
+                "address-family l2vpn-evpn advertise-all-vni",
+                vec![span(file, lines(a))],
+            );
+        }
+    }
+}
+
 /// The prefix of a key of `network` or `aggregate-address` in the family.
 fn key_of(text: &str, f: Family) -> Option<RouteKey> {
     let p: Prefix = text.parse().ok()?;
@@ -770,6 +842,9 @@ fn process(
             "address-family" => {
                 for f in c.children() {
                     let Some(fam) = unicast_of(&f.key) else {
+                        if f.key == "l2vpn-evpn" {
+                            evpn_gaps(f, vrf == DEFAULT_VRF, &mut gaps);
+                        }
                         continue;
                     };
                     for n in f.children() {
@@ -780,7 +855,7 @@ fn process(
                                     let policy = x.get("route-map").and_then(Stanza::text);
                                     let known = x.children().iter().all(|y| y.key == "route-map");
                                     match key_of(&x.key, fam) {
-                                        Some(k) if known && params.import_check => {
+                                        Some(k) if known => {
                                             networks.push(Network {
                                                 key: k,
                                                 policy: policy.map(str::to_string),
@@ -1087,7 +1162,8 @@ mod tests {
         assert!(p.options.always_compare_med && p.options.multipath_relax);
         assert_eq!(p.options.maximum_paths_ebgp, Some(4));
         assert_eq!(p.options.default_ipv4_unicast, Some(false));
-        assert!(p.networks.is_empty());
+        assert_eq!(p.networks.len(), 1);
+        assert_eq!(p.options.network_import_check, Some(false));
         assert!(p.aggregates[0].summary_only);
         let ibgp = &p.neighbors[&"192.0.2.2".parse::<IpAddr>().unwrap()];
         assert!(ibgp.route_reflector_client);
@@ -1105,11 +1181,99 @@ mod tests {
         let texts: Vec<&str> = d.gaps.iter().map(|g| g.text.as_str()).collect();
         for want in [
             "address-family ipv4-unicast redistribute connected",
-            "address-family ipv4-unicast network 203.0.113.0/26",
             "neighbor 198.51.100.2 address-family ipv4-unicast allowas-in number 2",
         ] {
             assert!(texts.contains(&want), "{want:?} not in {texts:?}");
         }
+    }
+
+    fn lowered_from(config: &str) -> DeviceBgp {
+        let doc = crate::stanza::read_json(config.as_bytes()).unwrap();
+        let mut read = BTreeSet::new();
+        let bgp = super::super::bgp::read(&doc.root, &mut read);
+        super::read(&doc.root, &bgp, "v1/config", &mut read)
+    }
+
+    #[test]
+    fn a_network_with_no_import_check_is_lowered_with_no_gap() {
+        let d = lowered_from(
+            r#"{"protocols": {"bgp": {"system-as": "64500",
+              "address-family": {"ipv4-unicast": {"network": {"203.0.113.0/26": {}}}}}}}"#,
+        );
+        let p = &d.processes[0];
+        assert_eq!(p.options.network_import_check, Some(false));
+        assert_eq!(p.networks[0].key.prefix.to_string(), "203.0.113.0/26");
+        assert!(d.gaps.is_empty(), "{:?}", d.gaps);
+    }
+
+    #[test]
+    fn a_network_with_the_import_check_is_lowered_with_the_option() {
+        let d = lowered_from(
+            r#"{"protocols": {"bgp": {"system-as": "64500",
+              "parameters": {"network-import-check": {}},
+              "address-family": {"ipv4-unicast": {"network": {"203.0.113.0/26": {}}}}}}}"#,
+        );
+        let p = &d.processes[0];
+        assert_eq!(p.options.network_import_check, Some(true));
+        assert_eq!(p.networks.len(), 1);
+        assert!(d.gaps.is_empty(), "{:?}", d.gaps);
+    }
+
+    #[test]
+    fn the_nodes_that_import_routes_into_a_vrf_are_gaps_of_the_vrf() {
+        let d = lowered_from(
+            r#"{
+  "protocols": {"bgp": {
+    "system-as": "64500",
+    "address-family": {"l2vpn-evpn": {"advertise-all-vni": {}, "advertise-svi-ip": {}}}
+  }},
+  "vrf": {"name": {
+    "RED": {
+      "table": "100",
+      "vni": "10010",
+      "protocols": {"bgp": {
+        "system-as": "64500",
+        "address-family": {
+          "ipv4-unicast": {"import": {"vrf": "BLUE"}},
+          "l2vpn-evpn": {
+            "advertise": {"ipv4": {"unicast": {}}},
+            "route-target": {"import": "64500:10", "export": "64500:11"}
+          }
+        }
+      }}
+    },
+    "BLUE": {"table": "101"}
+  }}
+}"#,
+        );
+        let texts: Vec<(&str, &str)> = d
+            .gaps
+            .iter()
+            .map(|g| (g.vrf.as_str(), g.text.as_str()))
+            .collect();
+        for want in [
+            ("RED", "vni 10010"),
+            ("RED", "address-family l2vpn-evpn advertise-all-vni"),
+            ("RED", "address-family l2vpn-evpn advertise ipv4 unicast"),
+            (
+                "RED",
+                "address-family l2vpn-evpn route-target import 64500:10",
+            ),
+            (
+                "RED",
+                "address-family l2vpn-evpn route-target export 64500:11",
+            ),
+            ("RED", "address-family ipv4-unicast import vrf BLUE"),
+        ] {
+            assert!(texts.contains(&want), "{want:?} not in {texts:?}");
+        }
+        assert!(texts.iter().all(|(v, _)| *v == "RED"), "{texts:?}");
+        let advertise = d
+            .gaps
+            .iter()
+            .find(|g| g.text.ends_with("advertise ipv4 unicast"))
+            .unwrap();
+        assert_eq!(advertise.families, BTreeSet::from([Family::Ipv4Unicast]));
     }
 
     #[test]

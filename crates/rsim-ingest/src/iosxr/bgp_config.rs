@@ -9,7 +9,7 @@
 //! from the address family of its neighbor-group and the af-group of that
 //! family. A line of a process, a neighbour or a group that the reader does
 //! not lower, other than a line with no effect on the routes, is a gap, and
-//! so is an `import` line of a VRF. A session to an iBGP or a
+//! so are the `import` and the `export` lines of a VRF. A session to an iBGP or a
 //! confederation peer sends the standard and the extended communities, and
 //! a session to an eBGP peer sends them with `send-community-ebgp` and
 //! `send-extended-community-ebgp`.
@@ -1051,8 +1051,8 @@ pub fn read(
     out
 }
 
-/// Each `import` line of a unicast family of a VRF is a gap of its VRF and
-/// family.
+/// Each `import` and `export` line of a unicast family of a VRF is a gap of
+/// its VRF and family.
 fn vrf_imports(doc: &Document, file: &str, mask: &dyn Fn(&str) -> String, out: &mut DeviceBgp) {
     for s in doc.root.children() {
         let w = words(s);
@@ -1068,8 +1068,13 @@ fn vrf_imports(doc: &Document, file: &str, mask: &dyn Fn(&str) -> String, out: &
                 continue;
             };
             for c in af.children() {
-                if words(c).first() == Some(&"import") {
+                if matches!(words(c).first(), Some(&("import" | "export"))) {
                     out.gap(vrf, &[f], mask(&c.key), vec![span(file, lines(c))]);
+                }
+                // An export into the default VRF is a gap of the default VRF
+                // too.
+                if let ["export", "to", "default-vrf", ..] = words(c).as_slice() {
+                    out.gap(DEFAULT_VRF, &[f], mask(&c.key), vec![span(file, lines(c))]);
                 }
             }
         }
@@ -1489,6 +1494,76 @@ router bgp 64502
         );
         let red = d.processes.iter().find(|p| p.vrf == "RED").unwrap();
         assert_eq!(red.router_id, None);
+    }
+
+    #[test]
+    fn the_lines_that_import_routes_into_a_vrf_are_gaps_of_the_vrf() {
+        let doc = crate::stanza::read_indented(
+            "\
+vrf RED
+ address-family ipv4 unicast
+  import route-target
+   64496:100
+  !
+  export route-target
+   64496:100
+  !
+  import route-policy RED-IN
+  export route-policy RED-OUT
+  import from default-vrf route-policy FROM-GLOBAL
+  export to default-vrf route-policy TO-GLOBAL
+ !
+ address-family ipv6 unicast
+  import route-target
+   64496:100 stitching
+  !
+ !
+!
+router bgp 64502
+ bgp router-id 192.0.2.1
+ vrf RED
+  rd 64502:1
+  address-family ipv4 unicast
+  !
+ !
+!
+",
+        );
+        let mut read = BTreeSet::new();
+        let bgp = crate::iosxr::bgp::read(
+            doc.root
+                .children()
+                .iter()
+                .find(|s| s.key.starts_with("router bgp"))
+                .unwrap(),
+            &mut read,
+            &|k| k.to_string(),
+        );
+        let d = super::read(&doc, &bgp, "x1/config", &|k| k.to_string(), &mut read);
+        let texts: Vec<(&str, &str)> = d
+            .gaps
+            .iter()
+            .map(|g| (g.vrf.as_str(), g.text.as_str()))
+            .collect();
+        for want in [
+            ("RED", "import route-target"),
+            ("RED", "export route-target"),
+            ("RED", "import route-policy RED-IN"),
+            ("RED", "export route-policy RED-OUT"),
+            ("RED", "import from default-vrf route-policy FROM-GLOBAL"),
+            ("RED", "export to default-vrf route-policy TO-GLOBAL"),
+            ("default", "export to default-vrf route-policy TO-GLOBAL"),
+        ] {
+            assert!(texts.contains(&want), "{want:?} not in {texts:?}");
+        }
+        assert!(texts.iter().all(|(v, _)| *v == "RED"), "{texts:?}");
+        assert!(
+            d.gaps
+                .iter()
+                .any(|g| g.families == BTreeSet::from([Family::Ipv6Unicast])),
+            "{:?}",
+            d.gaps
+        );
     }
 
     #[test]
